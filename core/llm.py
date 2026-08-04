@@ -56,12 +56,23 @@ class FreeLLM:
             return LLMResponse(f"Ollama error: {e}")
 
     def _call_groq_free(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
-        """Groq free tier - fast cloud, free key from console.groq.com"""
+        """Groq free tier - fast cloud, free key from console.groq.com + multi-key support"""
         try:
             from groq import Groq
-            if not config.groq_api_key:
-                return LLMResponse("Groq API key not set. Set GROQ_API_KEY env or use ollama/ model for free offline.")
-            client = Groq(api_key=config.groq_api_key)
+            # Try multi-key manager first for multiple keys at once
+            try:
+                from .multi_key import multi_key_manager
+                api_key = multi_key_manager.get_key("groq")
+                if not api_key:
+                    api_key = config.groq_api_key
+            except:
+                api_key = config.groq_api_key
+
+            if not api_key:
+                return LLMResponse("Groq API key not set. Set GROQ_API_KEY env or use hermus multikey add --provider groq --key gsk_... for multi-key or use ollama/ model for free offline.")
+            client = Groq(api_key=api_key)
+            # Track key for success/failure
+            current_key = api_key
             # Convert tools to Groq format if needed
             kwargs = {"model": self.model_name, "messages": messages}
             if tools:
@@ -85,22 +96,51 @@ class FreeLLM:
                         "arguments": args,
                         "id": tc.id
                     })
+            # Mark key success for multi-key load balancing
+            try:
+                from .multi_key import multi_key_manager
+                multi_key_manager.mark_key_success("groq", current_key)
+            except:
+                pass
             return LLMResponse(content, tool_calls)
         except ImportError:
             return LLMResponse("Groq package not installed. pip install groq or use ollama/ for free offline.")
         except Exception as e:
+            # Mark key failed for multi-key fallback
+            try:
+                from .multi_key import multi_key_manager
+                multi_key_manager.mark_key_failed("groq", current_key, str(e))
+            except:
+                pass
+            # Try next key if available
+            try:
+                from .multi_key import multi_key_manager
+                next_key = multi_key_manager.get_key("groq")
+                if next_key and next_key != current_key:
+                    return LLMResponse(f"Groq key failed, trying next key. Error: {e} - Retrying with another key...", tool_calls=[])
+            except:
+                pass
             return LLMResponse(f"Groq error: {e}")
 
     def _call_hf_free(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
-        """HuggingFace free inference - slow but free"""
+        """HuggingFace free inference - slow but free + multi-key support"""
         try:
+            # Use multi-key manager for HF tokens
+            try:
+                from .multi_key import multi_key_manager
+                token = multi_key_manager.get_key("hf")
+                if not token:
+                    token = config.hf_token or os.getenv("HF_TOKEN")
+            except:
+                token = config.hf_token or os.getenv("HF_TOKEN")
+
             # Use HF Inference API via requests
             # Convert messages to prompt
             prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
             # Use huggingface_hub InferenceClient
             from huggingface_hub import InferenceClient
-            token = config.hf_token or os.getenv("HF_TOKEN")
             client = InferenceClient(token=token)
+            current_token = token
             # For free tier, we use text generation
             response = client.text_generation(
                 prompt=prompt,
@@ -116,10 +156,20 @@ class FreeLLM:
             # Remove prompt echo if model echoes
             if content.startswith(prompt):
                 content = content[len(prompt):].strip()
+            try:
+                from .multi_key import multi_key_manager
+                multi_key_manager.mark_key_success("hf", current_token)
+            except:
+                pass
             return LLMResponse(content)
         except ImportError:
             return LLMResponse("huggingface_hub not installed. pip install huggingface_hub or use ollama/")
         except Exception as e:
+            try:
+                from .multi_key import multi_key_manager
+                multi_key_manager.mark_key_failed("hf", current_token, str(e))
+            except:
+                pass
             return LLMResponse(f"HF error: {e} - Try ollama/ for free offline")
 
     def _call_mock(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:

@@ -58,6 +58,38 @@ def main():
     skill_parser.add_argument("action", choices=["list", "improve"], help="list or improve")
     skill_parser.add_argument("--name", help="Skill name for improve")
 
+    # multi-key subcommand - multiple API keys at once
+    multikey_parser = subparsers.add_parser("multikey", help="Multi-API Keys - use multiple keys at once to complete quickly")
+    multikey_sub = multikey_parser.add_subparsers(dest="multikey_action")
+    multikey_add = multikey_sub.add_parser("add", help="Add API key for provider")
+    multikey_add.add_argument("--provider", required=True, choices=["groq", "hf", "openai", "custom"], help="Provider")
+    multikey_add.add_argument("--key", required=True, help="API key")
+    multikey_add.add_argument("--name", help="Key name")
+    multikey_list = multikey_sub.add_parser("list", help="List keys per provider")
+    multikey_list.add_argument("--provider", help="Provider filter")
+    multikey_remove = multikey_sub.add_parser("remove", help="Remove key")
+    multikey_remove.add_argument("--provider", required=True)
+    multikey_remove.add_argument("--key", required=True, help="Key or name to remove")
+    multikey_parallel = multikey_sub.add_parser("parallel", help="Test parallel execution with multiple keys")
+    multikey_parallel.add_argument("--provider", default="groq")
+    multikey_parallel.add_argument("--tasks", nargs="+", help="Tasks to run in parallel with different keys")
+
+    # multi-ai subcommand - multiple AIs talk to each other
+    multiai_parser = subparsers.add_parser("multiai", help="Multi-AI - multiple AIs talk to each other for anything")
+    multiai_sub = multiai_parser.add_subparsers(dest="multiai_action")
+    multiai_debate = multiai_sub.add_parser("debate", help="Multi-AI debate on topic")
+    multiai_debate.add_argument("topic", help="Topic for debate")
+    multiai_debate.add_argument("--rounds", type=int, default=2, help="Rounds")
+    multiai_debate.add_argument("--model", default=None, help="Model for all agents")
+    multiai_debate.add_argument("--agents", nargs="+", default=None, help="Agent personas: researcher coder reviewer writer planner debater optimist pessimist")
+
+    multiai_chat = multiai_sub.add_parser("chat", help="Multi-AI collaborative chat")
+    multiai_chat.add_argument("task", help="Task for collaborative chat")
+    multiai_chat.add_argument("--rounds", type=int, default=3)
+    multiai_chat.add_argument("--model", default=None)
+
+    multiai_personas = multiai_sub.add_parser("personas", help="List persona presets")
+
     # api subcommand - custom API feature free
     api_parser = subparsers.add_parser("api", help="Custom API - add any API as tool (free)")
     api_sub = api_parser.add_subparsers(dest="api_action")
@@ -127,6 +159,80 @@ def main():
             else:
                 result = skill_manager.improve_skill(args.name)
                 print(f"Improve result: {result}")
+
+    elif args.command == "multikey":
+        from core.multi_key import multi_key_manager
+        import json as json_lib
+        if args.multikey_action == "add":
+            result = multi_key_manager.add_key(args.provider, args.key, name=args.name)
+            print(f"Add key result: {result}")
+            if result.get("success"):
+                print(f"✅ Added key for {args.provider}, now total {result['total_keys']} keys - will use round-robin + fallback, completing quickly")
+        elif args.multikey_action == "list":
+            apis = multi_key_manager.list_keys(args.provider)
+            print(f"Multi-API Keys:")
+            for provider, keys in apis.items():
+                print(f" {provider}: {len(keys)} keys")
+                for k in keys:
+                    if isinstance(k, dict):
+                        print(f"   - {k.get('name')}: {k.get('key','')[:10]}... usage={k.get('usage_count',0)} added={k.get('added','')[:10]}")
+                    else:
+                        print(f"   - {k[:10]}...")
+        elif args.multikey_action == "remove":
+            result = multi_key_manager.remove_key(args.provider, args.key)
+            print(f"Remove result: {result}")
+        elif args.multikey_action == "parallel":
+            # Example parallel tasks with different keys
+            tasks = []
+            if args.tasks:
+                for t in args.tasks:
+                    tasks.append({"prompt": t, "messages": [{"role": "user", "content": t}]})
+            else:
+                tasks = [
+                    {"prompt": "What is Python async?", "messages": [{"role": "user", "content": "What is Python async?"}]},
+                    {"prompt": "What is Rust async?", "messages": [{"role": "user", "content": "What is Rust async?"}]},
+                    {"prompt": "What is Go concurrency?", "messages": [{"role": "user", "content": "What is Go concurrency?"}]},
+                ]
+            results = multi_key_manager.execute_parallel_with_keys(args.provider, tasks)
+            print(f"Parallel results with {args.provider} multiple keys ({len(results)} tasks):")
+            for r in results:
+                print(f" - Task {r.get('task_id')}: success={r.get('success')} key={r.get('api_key')} response={str(r.get('response',''))[:150]}")
+        else:
+            parser.parse_args(["multikey", "--help"])
+
+    elif args.command == "multiai":
+        from core.multi_ai import multi_ai_manager, PERSONA_PRESETS
+        if args.multiai_action == "debate":
+            from core.multi_ai import MultiAIChat
+            chat = MultiAIChat()
+            # Add agents based on personas or default team
+            if args.agents:
+                for persona_name in args.agents:
+                    persona_desc = PERSONA_PRESETS.get(persona_name, f"You are a {persona_name}")
+                    chat.add_agent(persona_name, persona_desc, model=args.model)
+            else:
+                chat.add_default_team(model=args.model)
+            result = chat.debate(args.topic, rounds=args.rounds, model=args.model)
+            print(f"\n=== Multi-AI Debate: {result['topic']} ===")
+            print(f"Agents: {', '.join(result['agents'])} | Rounds: {result['rounds']}")
+            for turn in result['history']:
+                print(f"\n[{turn['agent']} - Round {turn['round']}]: {turn['content'][:500]}")
+            print(f"\n=== Final Answer ===\n{result['final_answer']}")
+        elif args.multiai_action == "chat":
+            from core.multi_ai import MultiAIChat
+            chat = MultiAIChat()
+            chat.add_default_team(model=args.model)
+            result = chat.collaborate_on_task(args.task, rounds=args.rounds)
+            print(f"\n=== Multi-AI Collaborative Chat: {result['task']} ===")
+            for turn in result['history']:
+                print(f"\n[{turn['agent']} - R{turn['round']}]: {turn['content'][:500]}")
+            print(f"\n=== Final ===\n{result['final']}")
+        elif args.multiai_action == "personas":
+            print("Persona presets free:")
+            for name, desc in PERSONA_PRESETS.items():
+                print(f" - {name}: {desc}")
+        else:
+            parser.parse_args(["multiai", "--help"])
 
     elif args.command == "api":
         from core.custom_api import custom_api_manager
