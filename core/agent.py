@@ -14,6 +14,7 @@ from .skill_manager import skill_manager
 from tools.web_search import web_search, TOOL_DEFINITION as WEB_SEARCH_TOOL
 from tools.file_tools import file_read, file_write, file_edit, file_search, TOOLS as FILE_TOOLS
 from tools.shell import shell_execute, TOOL_DEFINITION as SHELL_TOOL
+from core.custom_api import custom_api_manager
 
 class HermusAgent:
     """Free Hermes-like agent - self-improving with memory and skills"""
@@ -28,11 +29,17 @@ class HermusAgent:
         print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Free stack (no paywall)")
 
     def _get_tools(self) -> List[Dict]:
-        """40+ free tools - we implement core free ones"""
+        """40+ free tools - we implement core free ones + custom APIs"""
         tools = []
         tools.append(WEB_SEARCH_TOOL)
         tools.extend(FILE_TOOLS)
         tools.append(SHELL_TOOL)
+        # Add custom APIs as tools - free custom API feature
+        try:
+            custom_tools = custom_api_manager.get_tool_definitions()
+            tools.extend(custom_tools)
+        except Exception as e:
+            print(f"[Custom API] Failed to load custom tools: {e}")
         # Memory tools
         tools.append({
             "type": "function",
@@ -133,6 +140,16 @@ class HermusAgent:
                 except Exception as e:
                     return {"error": f"Subagent spawn failed: {e}, task: {args.get('task')}"}
             else:
+                # Check if it's a custom API - free custom API feature
+                try:
+                    # If tool name matches a custom API, execute it
+                    custom_apis = custom_api_manager.list_apis()
+                    custom_names = [api["name"] for api in custom_apis]
+                    if name in custom_names:
+                        return custom_api_manager.execute_api(name, args)
+                except Exception as e:
+                    print(f"[Custom API] Execution check failed: {e}")
+
                 return {"error": f"Unknown tool {name}"}
         except Exception as e:
             return {"error": f"Tool {name} execution failed: {e}"}

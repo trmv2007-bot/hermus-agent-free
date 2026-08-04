@@ -58,6 +58,28 @@ def main():
     skill_parser.add_argument("action", choices=["list", "improve"], help="list or improve")
     skill_parser.add_argument("--name", help="Skill name for improve")
 
+    # api subcommand - custom API feature free
+    api_parser = subparsers.add_parser("api", help="Custom API - add any API as tool (free)")
+    api_sub = api_parser.add_subparsers(dest="api_action")
+    api_add = api_sub.add_parser("add", help="Add custom API")
+    api_add.add_argument("--name", required=True, help="API tool name, e.g., weather_api")
+    api_add.add_argument("--description", required=True, help="Description for LLM")
+    api_add.add_argument("--url", required=True, help="URL with optional {param} placeholders, e.g., https://api.example.com/weather/{city}")
+    api_add.add_argument("--method", default="GET", choices=["GET", "POST", "PUT", "DELETE"], help="HTTP method")
+    api_add.add_argument("--header", action="append", help="Headers as Key:Value, can repeat")
+    api_add.add_argument("--param", action="append", help="Parameters as name:description, e.g., city:City name, can repeat")
+    api_add.add_argument("--auth-type", choices=["none", "bearer", "apikey", "basic"], default="none")
+    api_add.add_argument("--auth-token", help="Bearer token or API key value")
+    api_add.add_argument("--auth-key", help="API key header name (for apikey type) or username (for basic)")
+    api_add.add_argument("--auth-password", help="Password for basic auth")
+
+    api_list = api_sub.add_parser("list", help="List custom APIs")
+    api_remove = api_sub.add_parser("remove", help="Remove custom API")
+    api_remove.add_argument("name", help="API name or id")
+    api_test = api_sub.add_parser("test", help="Test custom API")
+    api_test.add_argument("name", help="API name")
+    api_test.add_argument("--args", help="JSON args for test, e.g., '{\"city\": \"London\"}'")
+
     args = parser.parse_args()
 
     if args.command == "gateway":
@@ -105,6 +127,79 @@ def main():
             else:
                 result = skill_manager.improve_skill(args.name)
                 print(f"Improve result: {result}")
+
+    elif args.command == "api":
+        from core.custom_api import custom_api_manager
+        import json
+        if args.api_action == "add":
+            # Parse headers
+            headers = {}
+            if args.header:
+                for h in args.header:
+                    if ":" in h:
+                        k, v = h.split(":", 1)
+                        headers[k.strip()] = v.strip()
+            # Parse params
+            params = {}
+            if args.param:
+                for p in args.param:
+                    if ":" in p:
+                        k, v = p.split(":", 1)
+                        params[k.strip()] = {"type": "string", "description": v.strip()}
+                    else:
+                        params[p.strip()] = {"type": "string", "description": f"Parameter {p}"}
+            # Auth
+            auth = {"type": args.auth_type}
+            if args.auth_type == "bearer":
+                auth["token"] = args.auth_token
+            elif args.auth_type == "apikey":
+                auth["key"] = args.auth_key or "X-API-Key"
+                auth["value"] = args.auth_token
+            elif args.auth_type == "basic":
+                auth["username"] = args.auth_key
+                auth["password"] = args.auth_password
+
+            api_def = {
+                "name": args.name,
+                "description": args.description,
+                "url": args.url,
+                "method": args.method,
+                "headers": headers,
+                "parameters": params,
+                "auth": auth
+            }
+            result = custom_api_manager.add_api(api_def)
+            print(f"Add custom API result: {result}")
+            if result.get("success"):
+                print(f"✅ Custom API '{args.name}' added! Agent can now use it as tool.")
+                print(f"   Try: hermus --model mock/mock and say 'Use {args.name} with ...'")
+
+        elif args.api_action == "list":
+            apis = custom_api_manager.list_apis()
+            print(f"Custom APIs ({len(apis)}):")
+            for api in apis:
+                print(f" - {api['name']}: {api['description']} | {api['method']} {api['url']} | enabled={api.get('enabled',True)}")
+                if api.get("parameters"):
+                    print(f"    Params: {list(api['parameters'].keys())}")
+
+        elif args.api_action == "remove":
+            result = custom_api_manager.remove_api(args.name)
+            print(f"Remove result: {result}")
+
+        elif args.api_action == "test":
+            import json as json_lib
+            test_args = {}
+            if args.args:
+                try:
+                    test_args = json_lib.loads(args.args)
+                except:
+                    print(f"Failed to parse --args JSON: {args.args}, using empty")
+            result = custom_api_manager.execute_api(args.name, test_args)
+            print(f"Test {args.name} with {test_args}:")
+            print(json_lib.dumps(result, indent=2)[:2000])
+
+        else:
+            parser.parse_args(["api", "--help"])
 
     else:
         # Default: start TUI
