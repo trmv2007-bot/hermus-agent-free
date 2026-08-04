@@ -130,7 +130,7 @@ Type your message, or /help for help. Ctrl+D or /exit to quit. Ctrl+C to interru
             return True
 
         if cmd in ("/compress", "/usage", "/insights"):
-            # Compress context / check usage
+            # Compress context / check usage + token counting free
             from core.memory import memory
             curated = memory.get_curated_memory(limit=5)
             print(f"Curated memory ({len(curated)} items):")
@@ -138,6 +138,37 @@ Type your message, or /help for help. Ctrl+D or /exit to quit. Ctrl+C to interru
                 print(f"  - {m['key']}: {m['value'][:60]}")
             print(f"Trajectory length: {len(self.agent.trajectory)} turns")
             print(f"Session: {self.agent.session_id}")
+
+            # Token usage free tracking
+            try:
+                usage_data = memory.get_token_usage(session_id=self.agent.session_id, limit=20)
+                totals = usage_data.get("totals", {})
+                recent = usage_data.get("recent", [])
+                print(f"\n--- Token Usage (Free Tracking) ---")
+                print(f"Session {self.agent.session_id}:")
+                print(f"  Prompt tokens: {totals.get('prompt_tokens',0)}")
+                print(f"  Completion tokens: {totals.get('completion_tokens',0)}")
+                print(f"  Total tokens: {totals.get('total_tokens',0)}")
+                print(f"  Total cost: ${totals.get('total_cost',0.0):.6f} (0.0 = free Ollama/mock/HF free)")
+                print(f"  Recent calls: {len(recent)}")
+                for r in recent[:5]:
+                    print(f"    - {r.get('timestamp','')[:19]} {r.get('model','')} : {r.get('prompt_tokens',0)}+{r.get('completion_tokens',0)}={r.get('total_tokens',0)} tokens cost=${r.get('cost',0):.6f} free={r.get('is_free')}")
+
+                # Global totals
+                global_usage = memory.get_token_usage(limit=100)
+                g_totals = global_usage.get("totals", {})
+                print(f"\nGlobal totals (all sessions):")
+                print(f"  Prompt: {g_totals.get('prompt_tokens',0)}, Completion: {g_totals.get('completion_tokens',0)}, Total: {g_totals.get('total_tokens',0)}, Cost: ${g_totals.get('total_cost',0.0):.6f}")
+
+                if cmd == "/compress":
+                    # Compress context - show trajectory tokens
+                    from core.token_counter import token_counter
+                    traj_text = str(self.agent.trajectory)
+                    traj_tokens = token_counter.count_text(traj_text)
+                    print(f"\nTrajectory tokens: {traj_tokens} - Use /new to reset if too large for context window")
+            except Exception as e:
+                print(f"Token usage tracking error: {e}")
+
             return True
 
         if cmd in ("/help", "/?"):

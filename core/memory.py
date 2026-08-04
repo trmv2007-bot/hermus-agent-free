@@ -66,6 +66,20 @@ class Memory:
                 timestamp TEXT
             )
         """)
+        # Token usage tracking - free
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                timestamp TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_tokens INTEGER,
+                cost REAL,
+                is_free BOOLEAN
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -219,14 +233,12 @@ class Memory:
 
     def dialectic_question(self) -> str:
         """Free Honcho alternative - asks dialectic questions to build user model"""
-        # Questions that help model user
         questions = [
             "What kind of projects do you work on most?",
             "What’s your preferred coding style or stack?",
             "What matters to you in how I help?",
             "Any workflows you repeat often that I should learn?",
         ]
-        # Pick based on what's missing in user model
         model = self.load_user_model()
         if not model.get("projects"):
             return questions[0]
@@ -235,6 +247,60 @@ class Memory:
         if len(model.get("workflows", [])) < 2:
             return questions[3]
         return questions[2]
+
+    # Token usage tracking free
+
+    def add_token_usage(self, session_id: str, usage: Dict):
+        """Add token usage - free tracking"""
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO token_usage (session_id, timestamp, model, prompt_tokens, completion_tokens, total_tokens, cost, is_free)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                datetime.now().isoformat(),
+                usage.get("model",""),
+                usage.get("prompt_tokens",0),
+                usage.get("completion_tokens",0),
+                usage.get("total_tokens",0),
+                usage.get("total_cost",0.0),
+                usage.get("is_free",True)
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Token usage tracking failed: {e}")
+
+    def get_token_usage(self, session_id: str = None, limit: int = 100) -> Dict:
+        """Get token usage stats - free"""
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        try:
+            if session_id:
+                cur.execute("SELECT * FROM token_usage WHERE session_id=? ORDER BY id DESC LIMIT ?", (session_id, limit))
+            else:
+                cur.execute("SELECT * FROM token_usage ORDER BY id DESC LIMIT ?", (limit,))
+            rows = cur.fetchall()
+            # Sum totals
+            cur.execute("SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t, SUM(cost) as cost FROM token_usage" + (" WHERE session_id=?" if session_id else ""), (session_id,) if session_id else ())
+            totals = cur.fetchone()
+            conn.close()
+            return {
+                "recent": [dict(r) for r in rows],
+                "totals": {
+                    "prompt_tokens": totals["p"] or 0,
+                    "completion_tokens": totals["c"] or 0,
+                    "total_tokens": totals["t"] or 0,
+                    "total_cost": totals["cost"] or 0.0
+                },
+                "count": len(rows)
+            }
+        except Exception as e:
+            conn.close()
+            return {"error": str(e), "recent": [], "totals": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"total_cost":0.0}}
 
 # Global memory instance
 memory = Memory()
