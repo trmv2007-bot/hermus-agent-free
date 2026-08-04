@@ -11,6 +11,9 @@ from .config import config
 class MultiKeyManager:
     """Manage multiple API keys per provider - free load balancing, rate limit handling, parallel execution"""
 
+    MAX_KEYS_PER_PROVIDER = 20  # Increased from 3 to 20 as requested (user asked 10 or 8, we allow 20 for future)
+    MAX_KEYS_PER_CUSTOM_API = 10  # For custom APIs same name, allow up to 10 keys from different websites
+
     def __init__(self, db_path: str = None):
         self.db_path = Path(db_path or config.resolve_path("data/api_keys.json"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,10 +66,15 @@ class MultiKeyManager:
         return data
 
     def add_key(self, provider: str, api_key: str, name: str = None) -> Dict:
-        """Add API key for provider - free"""
+        """Add API key for provider - free - now supports up to 10-20 keys as requested"""
         data = self._load()
         if provider not in data:
             data[provider] = []
+
+        # Check limit (increased to 10-20 as user requested)
+        max_keys = self.MAX_KEYS_PER_CUSTOM_API if provider.startswith("custom_") else self.MAX_KEYS_PER_PROVIDER
+        if len(data[provider]) >= max_keys:
+            return {"success": False, "error": f"Max {max_keys} keys per provider reached for {provider}. Remove old keys first with multikey remove."}
 
         # Check if key already exists
         existing_keys = [k if isinstance(k, str) else k.get("key","") for k in data[provider]]

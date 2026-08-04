@@ -29,8 +29,10 @@ class CustomAPIManager:
     def list_apis(self) -> List[Dict]:
         return self._load()
 
+    MAX_KEYS_PER_API_NAME = 10  # Increased to 10 as user requested (was 3 example)
+
     def add_api(self, api_def: Dict) -> Dict:
-        """Add custom API - free - now supports multiple keys for same API name for load balancing"""
+        """Add custom API - free - now supports up to 10 keys for same API name from different websites as requested"""
         apis = self._load()
 
         # Validate required fields
@@ -52,10 +54,11 @@ class CustomAPIManager:
         api_def.setdefault("parameters", {})  # JSON schema for params
         api_def.setdefault("enabled", True)
 
-        # Check if same name and same auth token already exists - then replace (update)
-        # If same name but DIFFERENT auth token, allow multiple keys for same API (multi-key for custom APIs)
-        # This enables: user adds keys from different websites they know for same API for load balancing / completing quickly
+        # Check limit for same API name - allow up to 10 keys as requested
         existing_same_name = [a for a in apis if a["name"] == name]
+        if len(existing_same_name) >= self.MAX_KEYS_PER_API_NAME:
+            return {"success": False, "error": f"Max {self.MAX_KEYS_PER_API_NAME} keys per custom API name reached for '{name}'. You have {len(existing_same_name)} keys from different websites already. Remove old with 'api remove {name}' or 'api remove <id>'."}
+
         new_token = api_def.get("auth", {}).get("token") or api_def.get("auth", {}).get("value") or ""
 
         # If exact same name and same token exists, replace it (update)
@@ -65,11 +68,8 @@ class CustomAPIManager:
             if a["name"] == name:
                 existing_token = a.get("auth", {}).get("token") or a.get("auth", {}).get("value") or ""
                 if existing_token == new_token and new_token != "":
-                    # Same name + same token -> replace (update description etc)
                     replaced = True
-                    continue  # Skip old, will add new below
-                # Same name but different token -> keep both for multi-key support
-                # So we keep it
+                    continue
                 apis_filtered.append(a)
             else:
                 apis_filtered.append(a)
