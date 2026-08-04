@@ -12,10 +12,31 @@ def subagent_task_wrapper(task: str, result_queue, subagent_id: str):
     """Wrapper that runs in separate process - isolated subagent"""
     try:
         from core.agent import HermusAgent
+        from core.task_tracker import task_tracker
+        # Track subagent in task tracker
+        try:
+            task_tracker.add_agent(subagent_id, f"subagent_{subagent_id[:4]}", "subagent", persona="subagent", task=task[:100])
+            task_tracker.add_task(subagent_id, "subagent", task, model="subagent", agent=subagent_id)
+        except:
+            pass
+
         agent = HermusAgent(session_id=f"subagent_{subagent_id}")
         result = agent.chat(task)
+
+        try:
+            task_tracker.complete_task(subagent_id, status="done", result=result.get("response","")[:200])
+            task_tracker.remove_agent(subagent_id, final_status="done")
+        except:
+            pass
+
         result_queue.put({"subagent_id": subagent_id, "task": task, "result": result, "success": True})
     except Exception as e:
+        try:
+            from core.task_tracker import task_tracker
+            task_tracker.complete_task(subagent_id, status="failed", result=str(e)[:200])
+            task_tracker.remove_agent(subagent_id, final_status="failed")
+        except:
+            pass
         result_queue.put({"subagent_id": subagent_id, "task": task, "error": str(e), "success": False})
 
 def spawn_subagent(task: str) -> Dict:

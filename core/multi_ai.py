@@ -64,11 +64,27 @@ class MultiAIChat:
         """Run multi-AI chat rounds - each agent talks in turn per round"""
         print(f"\n[MultiAI] Starting collaboration on: {topic}\nAgents: {[a.name for a in self.agents]} | Rounds: {max_rounds}")
 
+        # Track multi-AI session in task tracker
+        try:
+            from .task_tracker import task_tracker
+            multi_task_id = task_tracker.add_task(f"multi_ai_{self.session_id}", "multi-ai", topic, model=",".join(set([a.model for a in self.agents])), agent=",".join([a.name for a in self.agents]))
+            for ag in self.agents:
+                task_tracker.add_agent(ag.agent_id, ag.name, ag.model, persona=ag.persona[:60], task=topic[:100])
+        except:
+            multi_task_id = None
+
         for round_num in range(1, max_rounds + 1):
             print(f"\n--- Round {round_num} ---")
             for agent in self.agents:
                 messages = self._build_agent_prompt(agent, topic, include_history=True)
                 try:
+                    # Update tracker
+                    try:
+                        from .task_tracker import task_tracker
+                        task_tracker.update_agent(agent.agent_id, status="thinking", progress=f"Round {round_num} thinking")
+                    except:
+                        pass
+
                     response = agent.llm.chat(messages, tools=tools or [])
                     content = response.content
 
@@ -82,6 +98,13 @@ class MultiAIChat:
                         "tool_calls": response.tool_calls
                     }
                     self.conversation_history.append(turn)
+
+                    # Update tracker
+                    try:
+                        from .task_tracker import task_tracker
+                        task_tracker.update_agent(agent.agent_id, status="done", progress=f"Round {round_num} done: {content[:40]}")
+                    except:
+                        pass
 
                     # Print with color if rich available
                     print(f"\n[{agent.name} - Round {round_num}]: {content[:500]}...")
@@ -99,6 +122,16 @@ class MultiAIChat:
                         "content": f"Error: {e}",
                         "timestamp": datetime.now().isoformat()
                     })
+
+        # Complete tracking
+        try:
+            from .task_tracker import task_tracker
+            if multi_task_id:
+                task_tracker.complete_task(multi_task_id, status="done", result=f"Completed {len(self.conversation_history)} turns")
+            for ag in self.agents:
+                task_tracker.remove_agent(ag.agent_id, final_status="done")
+        except:
+            pass
 
         return self.conversation_history
 

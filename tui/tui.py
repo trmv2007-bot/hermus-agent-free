@@ -32,7 +32,7 @@ class HermusTUI:
     SLASH_COMMANDS = [
         "/new", "/reset", "/model", "/personality", "/retry", "/undo",
         "/compress", "/usage", "/insights", "/skills", "/platforms",
-        "/status", "/help", "/exit", "/clear"
+        "/status", "/help", "/exit", "/clear", "/panel", "/agents"
     ]
 
     def __init__(self, model: str = None):
@@ -45,6 +45,11 @@ class HermusTUI:
         history_path.parent.mkdir(parents=True, exist_ok=True)
 
         if PROMPT_TOOLKIT_AVAILABLE:
+            from prompt_toolkit.formatted_text import HTML
+
+            def get_toolbar():
+                return HTML(f'<b>{self._get_bottom_toolbar()}</b>')
+
             completer = WordCompleter(self.SLASH_COMMANDS + ["/"], ignore_case=True)
             self.session = PromptSession(
                 history=FileHistory(str(history_path)),
@@ -52,12 +57,23 @@ class HermusTUI:
                 completer=completer,
                 multiline=True,
                 prompt_continuation="... ",
-                enable_history_search=True
+                enable_history_search=True,
+                bottom_toolbar=get_toolbar,
+                refresh_interval=2  # Refresh toolbar every 2 sec to show live agents
             )
         else:
             self.session = None
 
         self._print_banner()
+
+    def _get_bottom_toolbar(self):
+        """Bottom toolbar showing active agents/models for slide panel hint - free"""
+        try:
+            from core.task_tracker import task_tracker
+            status = task_tracker.get_status()
+            return f" Agents: {status['active_agents_count']} | Tasks: {status['active_tasks_count']} | Models: {','.join(status['models_in_use'][:2]) or 'none'} | Press /panel to slide open agents view | /help "
+        except:
+            return " /panel to see running agents/models | /help "
 
     def _print_banner(self):
         banner = f"""
@@ -73,6 +89,7 @@ Free stack: Ollama local (no API key) + DuckDuckGo search + SQLite FTS5 memory +
 Slash commands: {', '.join(self.SLASH_COMMANDS)}
 
 Type your message, or /help for help. Ctrl+D or /exit to quit. Ctrl+C to interrupt.
+Tip: Type /panel to slide open panel showing what agents/models are running
         """
         if self.console:
             self.console.print(banner)
@@ -127,6 +144,33 @@ Type your message, or /help for help. Ctrl+D or /exit to quit. Ctrl+C to interru
             print("Platforms (free): Telegram (Bot API free), Discord (free), CLI, Slack webhook free")
             print("Setup: hermus gateway setup --platform telegram")
             print("Start: hermus gateway start")
+            # Also show task tracker for slide panel
+            try:
+                from core.task_tracker import task_tracker
+                print("\n" + task_tracker.get_for_tui())
+            except Exception as e:
+                print(f"Task tracker error: {e}")
+            return True
+
+        if cmd in ("/panel", "/agents"):
+            # Slide open panel to see what agents/models are running or doing the task
+            print("\n" + "="*70)
+            print("🔍 SLIDE PANEL - What agents/models are running or doing the task")
+            print("="*70)
+            try:
+                from core.task_tracker import task_tracker
+                status_text = task_tracker.get_for_tui()
+                if self.console:
+                    from rich.panel import Panel
+                    self.console.print(Panel(status_text, title="Agents Panel - Slide Open", border_style="cyan"))
+                else:
+                    print(status_text)
+                print("\n" + "="*70)
+                print("Panel auto-refreshes every 2 sec in bottom toolbar")
+                print("Gateway dashboard with slide panel: http://localhost:8000/dashboard -> Click 'Agents Panel' button to slide open")
+                print("API: GET /agents/status for JSON")
+            except Exception as e:
+                print(f"Panel error: {e} - No active agents, idle")
             return True
 
         if cmd in ("/compress", "/usage", "/insights"):

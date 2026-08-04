@@ -9,6 +9,7 @@ from .config import config
 from .llm import free_llm, FreeLLM
 from .memory import memory
 from .skill_manager import skill_manager
+from .task_tracker import task_tracker
 
 # Import tools
 from tools.web_search import web_search, TOOL_DEFINITION as WEB_SEARCH_TOOL
@@ -25,8 +26,20 @@ class HermusAgent:
         self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         self.trajectory: List[Dict] = []  # For skill creation + research-ready batch
         self.tools = self._get_tools()
+        self.agent_tracker_id = None
 
         print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Free stack (no paywall)")
+        # Track agent in task tracker for slide panel
+        try:
+            self.agent_tracker_id = task_tracker.add_agent(
+                agent_id=self.session_id,
+                name=f"agent_{self.session_id[:6]}",
+                model=self.model_name,
+                persona="main",
+                task="idle"
+            )
+        except:
+            pass
 
     def _get_tools(self) -> List[Dict]:
         """40+ free tools - we implement core free ones + custom APIs"""
@@ -199,6 +212,20 @@ Rules:
 
     def chat(self, user_message: str) -> Dict[str, Any]:
         """Main chat loop - free version of Hermes agent loop"""
+        # Track task in slide panel
+        task_id = None
+        try:
+            task_id = task_tracker.add_task(
+                task_id=f"chat_{self.session_id[:6]}_{datetime.now().strftime('%H%M%S')}",
+                task_type="chat",
+                description=user_message[:100],
+                model=self.model_name,
+                agent=self.session_id
+            )
+            task_tracker.update_agent(self.agent_tracker_id, task=user_message[:100], status="running", progress="Thinking...")
+        except:
+            pass
+
         # Add user message to memory + trajectory
         memory.add_session_message(self.session_id, "user", user_message)
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
@@ -272,6 +299,14 @@ Rules:
                 final_usage = getattr(final_resp, 'usage', None)
                 if final_usage:
                     memory.add_token_usage(self.session_id, final_usage)
+        except:
+            pass
+
+        # Complete task tracking for slide panel
+        try:
+            if task_id:
+                task_tracker.complete_task(task_id, status="done", result=final_content[:200])
+            task_tracker.update_agent(self.agent_tracker_id, status="idle", progress="Done", task="idle")
         except:
             pass
 

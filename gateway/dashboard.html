@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Hermus Dashboard - Free - Slide Panel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial;background:#0a0e1a;color:#e0e0e0;line-height:1.6}
+.header{background:linear-gradient(135deg,#1a237e,#4527a0);padding:15px 20px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 10px rgba(0,0,0,0.3)}
+.header h2{color:white}
+.badge{background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:0.9em}
+.container{display:flex;height:calc(100vh - 60px);position:relative}
+.main{flex:1;padding:20px;overflow:auto;transition:margin-right 0.3s}
+.main.shifted{margin-right:400px}
+.sidebar{width:0;overflow:hidden;background:#151a2d;border-left:1px solid #2a2f4a;transition:width 0.3s ease, padding 0.3s ease;position:relative;box-shadow:-2px 0 20px rgba(0,0,0,0.5)}
+.sidebar.open{width:420px;padding:20px;overflow:auto}
+.toggle{position:fixed;right:20px;top:80px;background:#7c4dff;color:white;border:none;padding:12px 18px;border-radius:25px;cursor:pointer;z-index:1000;box-shadow:0 4px 15px rgba(124,77,255,0.4);transition:all 0.2s;font-weight:bold}
+.toggle:hover{background:#651fff;transform:scale(1.05)}
+.card{background:#1e2440;border:1px solid #2a2f4a;border-radius:10px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:transform 0.2s}
+.card:hover{transform:translateY(-2px);border-color:#7c4dff}
+.badge-model{background:#7c4dff;padding:3px 10px;border-radius:12px;font-size:0.75em;color:white;margin-left:6px}
+.status-running{color:#4caf50;font-weight:bold}
+.status-idle{color:#888}
+.status-done{color:#2196f3}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:15px;margin-top:20px}
+.stat{background:#151a2d;border:1px solid #2a2f4a;border-radius:10px;padding:15px;text-align:center}
+.stat h3{color:#7c4dff;font-size:2em;margin-bottom:5px}
+.input-group{display:flex;gap:10px;margin:20px 0}
+.input-group input{flex:1;padding:12px;background:#0a0e1a;border:1px solid #3a3f5a;color:white;border-radius:6px}
+.input-group button{padding:12px 20px;background:#7c4dff;color:white;border:none;border-radius:6px;cursor:pointer}
+.input-group button:hover{background:#651fff}
+pre{background:#0a0e1a;border:1px solid #2a2f4a;border-radius:6px;padding:12px;overflow:auto;max-height:300px;white-space:pre-wrap;font-size:0.85em}
+h3{color:#7c4dff;margin:15px 0 10px;border-bottom:2px solid #2a2f4a;padding-bottom:6px}
+h4{color:#b39ddb;margin:12px 0 8px}
+ul{margin-left:20px;margin-bottom:10px}
+li{margin-bottom:6px}
+a{color:#7c4dff}
+@media(max-width:768px){.sidebar.open{width:100%;position:fixed;right:0;top:60px;height:calc(100vh - 60px);z-index:900}.main.shifted{margin-right:0}}
+</style>
+</head>
+<body>
+<div class="header">
+<h2>☤ Hermus Agent Free Dashboard</h2>
+<div><span class="badge" id="modelBadge">No models</span> <span class="badge" id="agentBadge">0 agents</span></div>
+</div>
+
+<button class="toggle" id="toggleBtn" onclick="togglePanel()">👁️ Slide Open Agents Panel</button>
+
+<div class="container">
+<div class="main" id="main">
+<div class="grid">
+<div class="stat"><h3 id="agentCount">0</h3><p>Active Agents</p></div>
+<div class="stat"><h3 id="taskCount">0</h3><p>Active Tasks</p></div>
+<div class="stat"><h3 id="completedCount">0</h3><p>Completed</p></div>
+<div class="stat"><h3 id="modelCount">0</h3><p>Models In Use</p></div>
+</div>
+
+<h3>💬 Chat with Free Agent</h3>
+<div class="input-group">
+<input type="text" id="chatInput" placeholder="Type task: e.g., Research Python async and write file watcher">
+<button onclick="sendChat()">Send to Agent</button>
+</div>
+<pre id="chatResult">Chat results will appear here...</pre>
+
+<h3>🌐 Gateway</h3>
+<ul>
+<li>POST <code>/command</code> - Chat: {"platform":"cli","user_id":"test","text":"Hello"}
+<li>GET <code>/agents/status</code> - JSON for slide panel - what agents/models running
+<li>GET <code>/platforms</code> - Active platforms
+<li>POST <code>/webhook/telegram</code> - Telegram webhook free
+<li>GET <code>/dashboard</code> - This dashboard with slide panel
+</ul>
+
+<h3>📊 Token Usage & Memory (Free Tracking)</h3>
+<button onclick="loadUsage()">Load /usage</button>
+<pre id="usageResult">Click to load token usage free tracking</pre>
+
+<h3>🔧 How Slide Panel Works</h3>
+<p>This dashboard has a <b>slide panel on the right</b> that you can open to see:</p>
+<ul>
+<li>🤖 What agents are running (name, model, persona, task, status, started time)
+<li>📋 What tasks are doing (subagent, cron, multi-ai, custom_api, etc.)
+<li>🧠 What AI models are in use (ollama/llama3.1:8b, groq/llama-3.1, etc.)
+<li>✅ Recently completed
+</ul>
+<p>Panel auto-refreshes every 2 seconds when open. Bottom toolbar in TUI also shows live counts.</p>
+<p>TUI: Type <code>/panel</code> or <code>/agents</code> to slide open panel in terminal + bottom toolbar shows live Agents: X | Tasks: Y</p>
+</div>
+
+<div class="sidebar" id="sidebar">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+<h3>🔍 Agents Panel - Slide Open</h3>
+<button onclick="togglePanel()" style="background:#37474f;color:white;border:none;padding:6px 12px;border-radius:6px;cursor:pointer">Close ✕</button>
+</div>
+<div style="background:#1e2440;padding:10px;border-radius:6px;margin-bottom:15px;font-size:0.85em">
+<p>⏱️ Auto-refresh every 2 sec when open</p>
+<p>Shows: Active Agents + Tasks + Models + Completed</p>
+<p>TUI: <code>/panel</code> | API: <code>GET /agents/status</code></p>
+</div>
+<div id="panelContent">Loading...</div>
+</div>
+</div>
+</div>
+
+<script>
+let panelOpen = false;
+function togglePanel(){
+  const sb = document.getElementById('sidebar');
+  const main = document.getElementById('main');
+  const btn = document.getElementById('toggleBtn');
+  panelOpen = !panelOpen;
+  if(panelOpen){
+    sb.classList.add('open');
+    main.classList.add('shifted');
+    btn.textContent = '✕ Close Panel';
+    loadPanel();
+  } else {
+    sb.classList.remove('open');
+    main.classList.remove('shifted');
+    btn.textContent = '👁️ Slide Open Agents Panel';
+  }
+}
+
+async function loadPanel(){
+  try{
+    const res = await fetch('/agents/status');
+    const data = await res.json();
+    document.getElementById('agentCount').textContent = data.active_agents_count;
+    document.getElementById('taskCount').textContent = data.active_tasks_count;
+    document.getElementById('completedCount').textContent = data.completed_count;
+    document.getElementById('modelCount').textContent = data.models_in_use.length;
+    document.getElementById('agentBadge').textContent = data.active_agents_count + ' agents';
+    document.getElementById('modelBadge').textContent = (data.models_in_use.join(', ') || 'No models').slice(0,60);
+
+    let html = `<p>⏱️ ${data.timestamp.slice(0,19)} | Models: ${data.models_in_use.join(', ')||'none'}</p>`;
+
+    if(data.active_agents.length){
+      html += '<h4>🤖 Active Agents - What AI models are running</h4>';
+      data.active_agents.forEach(a=>{
+        html += `<div class="card"><b>${a.name}</b> <span class="badge-model">${a.model}</span><br><small>Persona: ${a.persona}</small><br>Task: ${a.task.slice(0,100)}<br><span class="status-${a.status}">${a.status}</span> | Started: ${a.started.slice(11,19)} | ${a.progress||''} | ${a.last_update.slice(11,19)}</div>`;
+      });
+    }
+    if(data.active_tasks.length){
+      html += '<h4>📋 Active Tasks - What they are doing</h4>';
+      data.active_tasks.forEach(t=>{
+        html += `<div class="card">[${t.type}] ${t.description.slice(0,100)}<br>Model: ${t.model} | Agent: ${t.agent}<br><span class="status-${t.status}">${t.status}</span> | ${t.progress||''} | Started ${t.started.slice(11,19)}</div>`;
+      });
+    }
+    if(!data.active_agents.length && !data.active_tasks.length){
+      html += '<div class="card">💤 No active agents or tasks - idle<br><br>Try:<br>• POST /command with task<br>• CLI: Research Python async<br>• Subagent: hermus subagent spawn "task"<br>• Multi-AI: hermus multiai debate "topic"</div>';
+    }
+    if(data.completed_tasks.length){
+      html += '<h4>✅ Recently Completed</h4>';
+      data.completed_tasks.slice(-5).reverse().forEach(t=>{
+        const name = t.name || t.task_id || t.description?.slice(0,40);
+        html += `<div class="card">${name}<br><span class="status-done">${t.status}</span> at ${t.ended?.slice(11,19)}<br><small>${(t.result||'').slice(0,80)}</small></div>`;
+      });
+    }
+    document.getElementById('panelContent').innerHTML = html;
+  }catch(e){
+    document.getElementById('panelContent').innerHTML = 'Error: '+e;
+  }
+}
+
+async function sendChat(){
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if(!text) return;
+  document.getElementById('chatResult').textContent = '⏳ Sending to agent...';
+  try{
+    const res = await fetch('/command', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({platform:'dashboard', user_id:'dashboard_user', text: text})
+    });
+    const data = await res.json();
+    document.getElementById('chatResult').textContent = `Response: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2)}\n\nSession: ${data.session_id}`;
+    if(panelOpen) loadPanel();
+  }catch(e){
+    document.getElementById('chatResult').textContent = 'Error: '+e;
+  }
+}
+
+async function loadUsage(){
+  try{
+    const res = await fetch('/platforms');
+    const data = await res.json();
+    document.getElementById('usageResult').textContent = JSON.stringify(data, null, 2);
+  }catch(e){
+    document.getElementById('usageResult').textContent = 'Error: '+e;
+  }
+}
+
+setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
+document.getElementById('chatInput').addEventListener('keypress', (e)=>{if(e.key==='Enter') sendChat();});
+</script>
+</body>
+</html>
