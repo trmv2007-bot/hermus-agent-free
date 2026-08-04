@@ -257,9 +257,23 @@ Rules:
             final_content = response.content
             tool_results = []
 
-        # Save assistant response to memory
+        # Save assistant response to memory + token usage free tracking
         memory.add_session_message(self.session_id, "assistant", final_content)
         self.trajectory.append({"role": "assistant", "content": final_content, "tool_calls": response.tool_calls})
+
+        # Track token usage free
+        try:
+            # response.usage from LLM, plus final response usage
+            usage = getattr(response, 'usage', None) or {}
+            if usage:
+                memory.add_token_usage(self.session_id, usage)
+            # Also track final response if different
+            if 'final_resp' in locals():
+                final_usage = getattr(final_resp, 'usage', None)
+                if final_usage:
+                    memory.add_token_usage(self.session_id, final_usage)
+        except:
+            pass
 
         # Post-execution: Check if should create skill (autonomous skill creation)
         skill_created = None
