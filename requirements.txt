@@ -1,0 +1,50 @@
+# Hermus Agent Free - 100% Free Stack, No Paid APIs
+# Core
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# LLM Free Providers
+# Ollama - local free LLMs, no API key, runs on laptop/$5 VPS
+requests>=2.31.0
+# Groq free tier (optional, free key) - fast cloud
+groq>=0.4.0
+# HuggingFace free inference (optional, free token)
+huggingface_hub>=0.23.0
+
+# Memory - SQLite FTS5 built-in, no vector DB cost
+# sqlite3 is builtin Python
+
+# Tools - Free, no API keys
+duckduckgo-search>=5.0.0
+# File tools builtin
+# Shell builtin subprocess
+
+# Gateway - Free Bot APIs
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-telegram-bot>=20.0
+discord.py>=2.3.0
+# Slack webhook via requests (free)
+# WhatsApp/Signal via free bridges (optional)
+
+# Scheduler - Free
+APScheduler>=3.10.0
+# Natural language cron parsing - free via LLM, no paid parser
+
+# TUI - Free
+prompt_toolkit>=3.0.41
+rich>=13.0.0
+
+# Subagents - Free (multiprocessing builtin)
+# No extra deps
+
+# Optional Free Tools (not required for core)
+# Browser automation free
+playwright>=1.40.0
+# Voice memo transcription free local Whisper
+# faster-whisper>=0.9.0
+# Vision free via Ollama LLaVA
+# No extra dep, uses Ollama
+
+# Dev
+pytest>=8.0.0
