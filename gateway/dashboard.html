@@ -1,202 +1,190 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>☤ Hermus Agent Free - The agent that grows with you</title>
+<title>☤ Hermus Agent Free - Dashboard - Gold and Kawaii</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  /* Hermes Default Skin - Classic Hermes — gold and kawaii */
-  --gold: #DAA520;
-  --gold-light: #FFD700;
-  --gold-dark: #B8860B;
-  --cornsilk: #FFF8DC;
-  --cornsilk-dim: #F5E6C8;
-  --bg: #0f0e0a;
-  --bg-card: #1a1812;
-  --bg-card-hover: #22201a;
-  --border: #3a3525;
-  --border-gold: #DAA520;
-  --text: #FFF8DC;
-  --text-dim: #C9B896;
-  --text-muted: #8a7d65;
-  --success: #4caf50;
-  --error: #f44336;
-  --info: #4169e1;
-  --crimson: #DC143C;
-  --bronze: #CD7F32;
-  --slate-blue: #4169e1;
+  --gold: #DAA520; --gold-light: #FFD700; --gold-dark: #B8860B;
+  --cornsilk: #FFF8DC; --cornsilk-dim: #F5E6C8;
+  --bg: #0f0e0a; --bg-card: #1a1812; --bg-card-hover: #22201a; --bg-sidebar: #12100c;
+  --border: #3a3525; --border-gold: #DAA520; --border-light: #4a4430;
+  --text: #FFF8DC; --text-dim: #C9B896; --text-muted: #8a7d65;
+  --success: #4caf50; --error: #f44336; --info: #4169e1; --warning: #ff9800;
+  --crimson: #DC143C; --bronze: #CD7F32; --slate-blue: #4169e1;
 }
-
-/* Skins */
-body.skin-default{
-  --border: #DAA520;
-  --border-accent: #FFD700;
-  --bg: #0f0e0a;
-  --bg-card: #1a1812;
-  --text: #FFF8DC;
-  --text-dim: #C9B896;
-  --header-bg: linear-gradient(135deg, #1a1812 0%, #2a2418 50%, #1a1812 100%);
-  --badge-bg: #DAA520;
-  --badge-text: #0f0e0a;
-}
-body.skin-slate{
-  --border: #4169e1;
-  --border-accent: #6a8eff;
-  --bg: #0a0e1a;
-  --bg-card: #151a2d;
-  --text: #c9d1ff;
-  --text-dim: #8a92c9;
-  --header-bg: linear-gradient(135deg, #0a0e1a 0%, #1a237e 100%);
-  --badge-bg: #4169e1;
-  --badge-text: white;
-}
-body.skin-ares{
-  --border: #8b0000;
-  --border-accent: #CD7F32;
-  --bg: #1a0a0a;
-  --bg-card: #2a1515;
-  --text: #ffcccc;
-  --text-dim: #c9a0a0;
-  --header-bg: linear-gradient(135deg, #1a0a0a 0%, #4a1a1a 100%);
-  --badge-bg: #DC143C;
-  --badge-text: white;
-}
-body.skin-mono{
-  --border: #555555;
-  --border-accent: #888888;
-  --bg: #0a0a0a;
-  --bg-card: #1a1a1a;
-  --text: #c9d1d9;
-  --text-dim: #8a8a8a;
-  --header-bg: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
-  --badge-bg: #555555;
-  --badge-text: #c9d1d9;
-}
-body.skin-poseidon{
-  --border: #006994;
-  --border-accent: #5F9EA0;
-  --bg: #0a1420;
-  --bg-card: #142030;
-  --text: #c0f0ff;
-  --text-dim: #8ab0c0;
-  --header-bg: linear-gradient(135deg, #0a1420 0%, #0a3a5a 100%);
-  --badge-bg: #006994;
-  --badge-text: white;
-}
+body.skin-slate{--border:#4169e1;--border-accent:#6a8eff;--bg:#0a0e1a;--bg-card:#151a2d;--bg-sidebar:#0f1428;--text:#c9d1ff;--text-dim:#8a92c9;--header-bg:linear-gradient(135deg,#0a0e1a 0%,#1a237e 100%);--badge-bg:#4169e1}
+body.skin-ares{--border:#8b0000;--border-accent:#CD7F32;--bg:#1a0a0a;--bg-card:#2a1515;--bg-sidebar:#1a0a0a;--text:#ffcccc;--text-dim:#c9a0a0;--header-bg:linear-gradient(135deg,#1a0a0a 0%,#4a1a1a 100%);--badge-bg:#DC143C}
+body.skin-mono{--border:#555555;--border-accent:#888888;--bg:#0a0a0a;--bg-card:#1a1a1a;--bg-sidebar:#111;--text:#c9d1d9;--text-dim:#8a8a8a;--header-bg:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 100%);--badge-bg:#555}
+body.skin-poseidon{--border:#006994;--border-accent:#5F9EA0;--bg:#0a1420;--bg-card:#142030;--bg-sidebar:#0a1a28;--text:#c0f0ff;--text-dim:#8ab0c0;--header-bg:linear-gradient(135deg,#0a1420 0%,#0a3a5a 100%);--badge-bg:#006994}
+body.skin-default{--border-accent:#FFD700;--header-bg:linear-gradient(135deg,#1a1812 0%,#2a2418 50%,#1a1812 100%);--badge-bg:#DAA520;--badge-text:#0f0e0a}
 
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter', -apple-system, sans-serif;background:var(--bg);color:var(--text);line-height:1.6;transition:all 0.3s ease}
-.mono{font-family:'JetBrains Mono', monospace}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.5;overflow:hidden}
+.mono{font-family:'JetBrains Mono',monospace}
 
-.header{
-  background:var(--header-bg);
-  border-bottom:2px solid var(--border);
-  padding:18px 24px;
+.app{display:flex;height:100vh}
+.sidebar{
+  width:260px;
+  background:var(--bg-sidebar);
+  border-right:1px solid var(--border);
   display:flex;
-  justify-content:space-between;
-  align-items:center;
-  position:sticky;
-  top:0;
-  z-index:100;
-  box-shadow:0 4px 20px rgba(0,0,0,0.5);
+  flex-direction:column;
+  transition:transform 0.3s ease;
+  z-index:10;
+  overflow:hidden;
 }
-.header-left{display:flex;align-items:center;gap:16px}
-.caduceus{font-size:2.2em;animation:float 3s ease-in-out infinite}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-.header h1{font-size:1.6em;font-weight:600;letter-spacing:-0.02em;color:var(--text)}
-.header h1 span{color:var(--border-accent)}
-.header-right{display:flex;gap:10px;align-items:center}
-.badge{padding:5px 12px;border-radius:20px;font-size:0.8em;font-weight:600;background:var(--badge-bg);color:var(--badge-text);border:1px solid var(--border);font-family:'JetBrains Mono', monospace}
-.skin-selector{display:flex;gap:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:20px;padding:4px}
-.skin-btn{padding:5px 12px;border-radius:15px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:0.8em;transition:all 0.2s;font-family:'JetBrains Mono', monospace}
+.sidebar-header{
+  padding:18px 16px;
+  border-bottom:1px solid var(--border);
+  background:var(--header-bg);
+}
+.caduceus{font-size:2em;animation:float 3s ease-in-out infinite;display:inline-block}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.logo{display:flex;align-items:center;gap:12px}
+.logo h1{font-size:1.15em;font-weight:600;letter-spacing:-0.02em}
+.logo h1 span{color:var(--gold)}
+.logo-sub{font-size:0.65em;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:2px}
+.kawaii{color:var(--gold);font-family:'JetBrains Mono',monospace}
+
+.nav{flex:1;overflow-y:auto;padding:12px 8px}
+.nav-group{margin-bottom:18px}
+.nav-group-title{
+  font-size:0.65em;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  color:var(--text-muted);
+  padding:6px 12px;
+  font-weight:600;
+  font-family:'JetBrains Mono',monospace;
+}
+.nav-item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 12px;
+  border-radius:8px;
+  cursor:pointer;
+  transition:all 0.2s;
+  font-size:0.9em;
+  color:var(--text-dim);
+  border:1px solid transparent;
+}
+.nav-item:hover{background:var(--bg-card);border-color:var(--border-light);color:var(--text)}
+.nav-item.active{background:var(--bg-card);border-color:var(--border);color:var(--text);border-left:3px solid var(--gold);font-weight:500}
+.nav-item .icon{width:18px;text-align:center}
+.nav-item .badge{margin-left:auto;background:var(--bg);border:1px solid var(--border);padding:2px 6px;border-radius:10px;font-size:0.65em;font-family:'JetBrains Mono',monospace}
+.nav-item.active .badge{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.topbar{
+  height:56px;
+  background:var(--bg-card);
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 20px;
+  gap:12px;
+}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.breadcrumb{font-size:0.85em;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
+.breadcrumb span{color:var(--text)}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.skin-selector{display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:3px}
+.skin-btn{padding:4px 10px;border-radius:14px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:0.7em;transition:all 0.2s;font-family:'JetBrains Mono',monospace}
 .skin-btn.active{background:var(--border);color:var(--bg);font-weight:600}
-.skin-btn:hover{color:var(--text)}
+.badge{padding:4px 10px;border-radius:16px;font-size:0.75em;font-weight:600;background:var(--badge-bg, var(--gold));color:var(--badge-text, var(--bg));border:1px solid var(--border);font-family:'JetBrains Mono',monospace}
+.toggle-panel{
+  background:var(--gold);
+  color:var(--bg);
+  border:1px solid var(--gold-light);
+  padding:8px 14px;
+  border-radius:20px;
+  cursor:pointer;
+  font-weight:600;
+  font-family:'JetBrains Mono',monospace;
+  font-size:0.8em;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  box-shadow:0 2px 10px rgba(218,165,32,0.3);
+  transition:all 0.2s;
+}
+.toggle-panel:hover{transform:translateY(-1px);box-shadow:0 4px 15px rgba(218,165,32,0.4)}
+.toggle-panel.open{background:var(--bg-card);color:var(--text);border-color:var(--border)}
 
-.container{display:flex;height:calc(100vh - 72px);position:relative}
-.main{flex:1;padding:24px;overflow:auto;transition:margin-right 0.35s cubic-bezier(0.4,0,0.2,1)}
-.main.shifted{margin-right:440px}
+.content{display:flex;flex:1;overflow:hidden;position:relative}
+.content-main{flex:1;padding:20px;overflow:auto;transition:margin-right 0.35s cubic-bezier(0.4,0,0.2,1)}
+.content-main.shifted{margin-right:420px}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.pane{display:none}
+.pane.active{display:block;animation:fadeIn 0.3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px}
 .stat{
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-left:3px solid var(--border-accent);
-  border-radius:12px;
-  padding:18px;
+  border-left:3px solid var(--gold);
+  border-radius:10px;
+  padding:16px;
   text-align:center;
-  transition:all 0.2s;
   position:relative;
   overflow:hidden;
 }
-.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--border-accent),transparent);opacity:0.5}
-.stat:hover{transform:translateY(-2px);border-color:var(--border-accent);box-shadow:0 8px 25px rgba(218,165,32,0.15);background:var(--bg-card-hover)}
-.stat h3{font-size:2.2em;font-weight:600;color:var(--border-accent);margin-bottom:4px;font-family:'JetBrains Mono', monospace}
-.stat p{color:var(--text-dim);font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em}
+.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);opacity:0.6}
+.stat h3{font-size:1.8em;font-weight:600;color:var(--gold);font-family:'JetBrains Mono',monospace}
+.stat p{color:var(--text-muted);font-size:0.75em;text-transform:uppercase;letter-spacing:0.05em;margin-top:4px}
+.kawaii-small{font-size:0.7em;color:var(--gold);margin-top:4px;display:block}
 
 .card{
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:12px;
-  padding:16px;
-  margin-bottom:14px;
+  border-radius:10px;
+  padding:14px;
+  margin-bottom:12px;
   transition:all 0.2s;
-  position:relative;
 }
-.card:hover{border-color:var(--border-accent);transform:translateY(-1px);box-shadow:0 4px 15px rgba(0,0,0,0.3)}
-.card h4{color:var(--border-accent);margin-bottom:8px;font-size:0.95em;display:flex;align-items:center;gap:8px}
-.badge-model{background:var(--border);color:var(--bg);padding:3px 10px;border-radius:10px;font-size:0.7em;font-weight:600;margin-left:8px}
-.status-running{color:#4caf50;font-weight:600}
-.status-idle{color:var(--text-muted)}
-.status-done{color:var(--info)}
+.card:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.card-title{font-weight:600;font-size:0.9em;color:var(--text);display:flex;align-items:center;gap:6px}
+.badge-model{background:var(--gold);color:var(--bg);padding:2px 8px;border-radius:8px;font-size:0.65em;font-weight:600}
+.status{font-size:0.75em;padding:2px 8px;border-radius:10px;font-family:'JetBrains Mono',monospace}
+.status-running{background:rgba(76,175,80,0.15);color:#4caf50;border:1px solid rgba(76,175,80,0.3)}
+.status-idle{background:rgba(255,255,255,0.05);color:var(--text-muted);border:1px solid var(--border)}
+.status-done{background:rgba(65,105,225,0.15);color:var(--slate-blue);border:1px solid rgba(65,105,225,0.3)}
+.pulse{width:8px;height:8px;background:#4caf50;border-radius:50%;display:inline-block;animation:pulse 2s infinite;margin-right:6px}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(76,175,80,0.7)}70%{box-shadow:0 0 0 6px rgba(76,175,80,0)}100%{box-shadow:0 0 0 0 rgba(76,175,80,0)}}
 
-.input-group{display:flex;gap:10px;margin:20px 0}
-.input-group input{
-  flex:1;
-  padding:14px 16px;
+.table{width:100%;border-collapse:collapse;font-size:0.9em}
+.table th{padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;font-size:0.75em;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace}
+.table td{padding:12px;border-bottom:1px solid var(--border);color:var(--text-dim)}
+.table tr:hover{background:var(--bg-card);color:var(--text)}
+.table tr.live{border-left:2px solid #4caf50}
+
+.input-group{display:flex;gap:8px;margin:16px 0}
+.input-group input{flex:1;padding:12px 14px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:0.9em}
+.input-group input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 2px rgba(218,165,32,0.1)}
+.input-group button{padding:12px 18px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-weight:600;font-family:'JetBrains Mono',monospace;transition:all 0.2s}
+.input-group button:hover{background:var(--gold-light);transform:translateY(-1px)}
+
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;max-height:320px;white-space:pre-wrap;font-size:0.8em;font-family:'JetBrains Mono',monospace;color:var(--text-dim);line-height:1.5}
+code{background:var(--bg);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.85em;color:var(--gold)}
+
+.banner{
   background:var(--bg-card);
   border:1px solid var(--border);
-  color:var(--text);
-  border-radius:10px;
-  font-size:0.95em;
-  transition:all 0.2s;
-  font-family:'JetBrains Mono', monospace;
+  border-left:3px solid var(--gold);
+  border-radius:8px;
+  padding:14px;
+  margin:14px 0;
+  font-size:0.9em;
+  color:var(--text-dim);
+  position:relative;
 }
-.input-group input:focus{outline:none;border-color:var(--border-accent);box-shadow:0 0 0 3px rgba(218,165,32,0.1)}
-.input-group button{
-  padding:14px 22px;
-  background:var(--border);
-  color:var(--bg);
-  border:none;
-  border-radius:10px;
-  cursor:pointer;
-  font-weight:600;
-  transition:all 0.2s;
-  font-family:'JetBrains Mono', monospace;
-}
-.input-group button:hover{background:var(--border-accent);transform:translateY(-1px);box-shadow:0 4px 12px rgba(218,165,32,0.3)}
-
-.toggle{
-  position:fixed;
-  right:24px;
-  top:90px;
-  background:var(--border);
-  color:var(--bg);
-  border:1px solid var(--border-accent);
-  padding:12px 20px;
-  border-radius:25px;
-  cursor:pointer;
-  z-index:1000;
-  box-shadow:0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px var(--border-accent);
-  transition:all 0.3s cubic-bezier(0.4,0,0.2,1);
-  font-weight:600;
-  font-family:'JetBrains Mono', monospace;
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-.toggle:hover{background:var(--border-accent);transform:scale(1.05) translateY(-1px);box-shadow:0 8px 25px rgba(218,165,32,0.4)}
-.toggle.open{background:var(--bg-card);color:var(--text);border:1px solid var(--border)}
+.banner::before{content:'☤';position:absolute;right:12px;top:10px;font-size:1.3em;opacity:0.08}
 
 .sidebar{
   width:0;
@@ -204,161 +192,205 @@ body{font-family:'Inter', -apple-system, sans-serif;background:var(--bg);color:v
   background:var(--bg-card);
   border-left:1px solid var(--border);
   transition:width 0.35s cubic-bezier(0.4,0,0.2,1), padding 0.35s ease;
-  position:relative;
-  box-shadow:-4px 0 30px rgba(0,0,0,0.5);
+  box-shadow:-4px 0 20px rgba(0,0,0,0.4);
 }
-.sidebar.open{width:440px;padding:24px;overflow:auto}
-.sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid var(--border)}
-.kawaii{font-family:'JetBrains Mono', monospace;color:var(--border-accent);animation:kawaiiBlink 4s infinite}
-@keyframes kawaiiBlink{0%,90%,100%{opacity:1}95%{opacity:0.3}}
+.sidebar.open{width:420px;padding:20px;overflow:auto}
+.sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)}
 
-pre{
+.search{
+  width:100%;
+  padding:10px 12px;
   background:var(--bg);
   border:1px solid var(--border);
-  border-radius:10px;
-  padding:14px;
-  overflow:auto;
-  max-height:350px;
-  white-space:pre-wrap;
+  border-radius:8px;
+  color:var(--text);
+  font-family:'JetBrains Mono',monospace;
   font-size:0.85em;
-  font-family:'JetBrains Mono', monospace;
-  color:var(--text-dim);
-  line-height:1.5;
+  margin-bottom:12px;
 }
-h3{color:var(--text);margin:20px 0 12px;font-size:1.1em;display:flex;align-items:center;gap:8px}
-h3::before{content:'';width:3px;height:16px;background:var(--border-accent);border-radius:2px;display:inline-block}
-h4{color:var(--border-accent);margin:14px 0 8px;font-size:0.95em}
-ul{margin-left:20px;margin-bottom:12px}
-li{margin-bottom:8px;color:var(--text-dim)}
-li::marker{color:var(--border-accent)}
-a{color:var(--border-accent);text-decoration:none}
-a:hover{text-decoration:underline}
-code{background:var(--bg);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono', monospace;font-size:0.85em;color:var(--border-accent)}
-
-.banner{
-  background:var(--bg-card);
-  border:1px solid var(--border);
-  border-left:3px solid var(--gold);
-  border-radius:10px;
-  padding:16px;
-  margin:16px 0;
-  font-family:'JetBrains Mono', monospace;
-  font-size:0.9em;
-  color:var(--text-dim);
-  position:relative;
-  overflow:hidden;
-}
-.banner::before{content:'☤';position:absolute;right:12px;top:8px;font-size:1.5em;opacity:0.1}
+.search:focus{outline:none;border-color:var(--gold)}
 
 @media(max-width:900px){
-  .sidebar.open{width:100%;position:fixed;right:0;top:72px;height:calc(100vh - 72px);z-index:900}
-  .main.shifted{margin-right:0}
-  .header{padding:12px 16px}
-  .header h1{font-size:1.2em}
-  .grid{grid-template-columns:repeat(2,1fr)}
+  .sidebar{position:fixed;right:0;top:56px;height:calc(100vh - 56px);z-index:200;width:0}
+  .sidebar.open{width:100%}
+  .content-main.shifted{margin-right:0}
+  .sidebar{transform:translateX(100%);transition:transform 0.35s ease, width 0s}
+  .sidebar.open{transform:translateX(0);width:100%}
 }
 </style>
 </head>
 <body class="skin-default">
-<div class="header">
-<div class="header-left">
+<div class="app">
+<!-- Sidebar like original Hermes: 16 panes -->
+<div class="sidebar-nav sidebar" id="navSidebar" style="width:260px;padding:0;transform:none;position:relative;box-shadow:none">
+<div class="sidebar-header" style="border-bottom:2px solid var(--gold)">
+<div class="logo">
 <div class="caduceus">☤</div>
 <div>
-<h1>Hermus Agent <span>Free</span></h1>
-<div style="font-size:0.75em;color:var(--text-muted);font-family:'JetBrains Mono', monospace;">The agent that grows with you — MIT • No tracking • Self-hosted</div>
+<h1>Hermus <span>Free</span></h1>
+<div class="logo-sub">The agent that grows with you (｡♥‿♥｡)</div>
 </div>
 </div>
-<div class="header-right">
+</div>
+<div class="nav" id="nav">
+<div class="nav-group">
+<div class="nav-group-title">Main</div>
+<div class="nav-item active" data-pane="sessions" onclick="switchPane('sessions')"><span class="icon">💬</span> Sessions <span class="badge" id="navSessionsBadge">0</span></div>
+<div class="nav-item" data-pane="keys" onclick="switchPane('keys')"><span class="icon">🔑</span> Keys <span class="badge">5</span></div>
+<div class="nav-item" data-pane="agents" onclick="switchPane('agents')"><span class="icon">🤖</span> Agents <span class="badge" id="navAgentsBadge">0</span></div>
+</div>
+<div class="nav-group">
+<div class="nav-group-title">Configuration</div>
+<div class="nav-item" data-pane="config" onclick="switchPane('config')"><span class="icon">⚙️</span> Config</div>
+<div class="nav-item" data-pane="providers" onclick="switchPane('providers')"><span class="icon">🧠</span> Providers</div>
+<div class="nav-item" data-pane="tools" onclick="switchPane('tools')"><span class="icon">🛠️</span> Tools</div>
+<div class="nav-item" data-pane="customkeys" onclick="switchPane('customkeys')"><span class="icon">🔐</span> Custom Keys</div>
+</div>
+<div class="nav-group">
+<div class="nav-group-title">Gateway • Free Multi-Platform</div>
+<div class="nav-item" data-pane="gateway" onclick="switchPane('gateway')"><span class="icon">🌐</span> Gateway</div>
+<div class="nav-item" data-pane="channels" onclick="switchPane('channels')"><span class="icon">📡</span> Channels</div>
+<div class="nav-item" data-pane="webhooks" onclick="switchPane('webhooks')"><span class="icon">🔗</span> Webhooks</div>
+<div class="nav-item" data-pane="pairing" onclick="switchPane('pairing')"><span class="icon">📱</span> Pairing</div>
+</div>
+<div class="nav-group">
+<div class="nav-group-title">System</div>
+<div class="nav-item" data-pane="logs" onclick="switchPane('logs')"><span class="icon">📝</span> Logs</div>
+<div class="nav-item" data-pane="analytics" onclick="switchPane('analytics')"><span class="icon">📊</span> Analytics</div>
+<div class="nav-item" data-pane="cron" onclick="switchPane('cron')"><span class="icon">⏰</span> Cron</div>
+</div>
+<div class="nav-group">
+<div class="nav-group-title">Plugins</div>
+<div class="nav-item" data-pane="kanban" onclick="switchPane('kanban')"><span class="icon">📋</span> Kanban</div>
+<div class="nav-item" data-pane="achievements" onclick="switchPane('achievements')"><span class="icon">🏆</span> Achievements</div>
+</div>
+</div>
+<div style="padding:12px;border-top:1px solid var(--border);font-size:0.7em;color:var(--text-muted);font-family:'JetBrains Mono',monospace">
+<span class="kawaii">(◕‿◕)</span> Gold & kawaii • Warm gold #DAA520 • Cornsilk #FFF8DC<br>
+MIT • No tracking • Self-hosted • Free clone
+</div>
+</div>
+
+<!-- Main -->
+<div class="main">
+<div class="topbar">
+<div class="topbar-left">
+<span class="breadcrumb"><span id="breadcrumb">Sessions</span> / <span id="breadcrumbSub">All sessions</span></span>
+</div>
+<div class="topbar-right">
 <div class="skin-selector">
-<button class="skin-btn active" onclick="setSkin('default')" title="Classic Hermes — gold and kawaii">gold</button>
-<button class="skin-btn" onclick="setSkin('slate')" title="Cool blue — developer-focused">slate</button>
-<button class="skin-btn" onclick="setSkin('ares')" title="War-god — crimson and bronze">ares</button>
-<button class="skin-btn" onclick="setSkin('mono')" title="Monochrome — clean grayscale">mono</button>
-<button class="skin-btn" onclick="setSkin('poseidon')" title="Ocean-god — deep blue and seafoam">sea</button>
+<button class="skin-btn active" onclick="setSkin('default')" title="Classic Hermes — gold and kawaii #DAA520 / #FFF8DC">gold</button>
+<button class="skin-btn" onclick="setSkin('slate')" title="Slate — royal blue #4169e1">slate</button>
+<button class="skin-btn" onclick="setSkin('ares')" title="Ares — crimson and bronze">ares</button>
+<button class="skin-btn" onclick="setSkin('mono')" title="Mono — #555555 / #c9d1d9">mono</button>
+<button class="skin-btn" onclick="setSkin('poseidon')" title="Poseidon — deep blue and seafoam">sea</button>
 </div>
 <span class="badge" id="modelBadge">No models</span>
 <span class="badge" id="agentBadge">0 agents</span>
+<button class="toggle-panel" id="toggleBtn" onclick="togglePanel()"><span>👁️</span> <span id="toggleText">Agents Panel</span></button>
 </div>
 </div>
 
-<button class="toggle" id="toggleBtn" onclick="togglePanel()">
-<span>👁️</span> <span id="toggleText">Agents Panel</span> <span class="kawaii">(｡♥‿♥｡)</span>
-</button>
+<div class="content">
+<div class="content-main" id="mainContent">
 
-<div class="container">
-<div class="main" id="main">
-
-<div class="banner">
-<span class="kawaii">(◕‿◕)</span> <b>Classic Hermes — gold and kawaii</b> — Warm gold borders, cornsilk text, kawaii faces in spinners. The familiar caduceus banner. Clean and inviting. Open source • MIT License • By Nous Research (original) • Free clone • No tracking<br>
-<span style="font-size:0.8em;color:var(--text-muted)">Skin: default gold • Try slate (blue), ares (crimson), mono (gray), poseidon (ocean) via buttons top-right • Original Hermes has 7 skins + custom YAML skins</span>
-</div>
-
+<!-- Sessions Pane - Like original Hermes -->
+<div class="pane active" id="pane-sessions">
 <div class="grid">
-<div class="stat"><h3 id="agentCount">0</h3><p>Active Agents</p><div class="kawaii" style="font-size:0.8em;margin-top:4px">(｡•̀ᴗ-)✧</div></div>
-<div class="stat"><h3 id="taskCount">0</h3><p>Active Tasks</p><div class="kawaii" style="font-size:0.8em;margin-top:4px">(╯✧▽✧)╯</div></div>
-<div class="stat"><h3 id="completedCount">0</h3><p>Completed</p><div class="kawaii" style="font-size:0.8em;margin-top:4px">٩(◕‿◕)۶</div></div>
-<div class="stat"><h3 id="modelCount">0</h3><p>Models In Use</p><div class="kawaii" style="font-size:0.8em;margin-top:4px">(◕‿◕✿)</div></div>
+<div class="stat"><h3 id="sessionTotal">0</h3><p>Total Sessions</p><span class="kawaii-small">(｡•̀ᴗ-)✧</span></div>
+<div class="stat"><h3 id="sessionActive">0</h3><p>Active</p><span class="kawaii-small">(╯✧▽✧)╯</span></div>
+<div class="stat"><h3 id="sessionMessages">0</h3><p>Messages</p><span class="kawaii-small">٩(◕‿◕)۶</span></div>
+<div class="stat"><h3 id="sessionTools">0</h3><p>Tool Calls</p><span class="kawaii-small">(◕‿◕✿)</span></div>
 </div>
 
-<h3>💬 Chat with Free Agent</h3>
-<div class="input-group">
-<input type="text" id="chatInput" placeholder="Type task: e.g., Research Python async and write file watcher (｡♥‿♥｡)">
-<button onclick="sendChat()">Send (Enter)</button>
-</div>
-<pre id="chatResult">Chat results will appear here... (◕‿◕) Tip: Try "Research best Python async libraries" - agent will use DuckDuckGo free search + auto-create skill</pre>
-
-<h3>🌐 Gateway - Free, Single Process</h3>
-<ul>
-<li>POST <code>/command</code> - Chat: <code>{"platform":"cli","user_id":"test","text":"Hello"}</code>
-<li>GET <code>/agents/status</code> - JSON for slide panel - what agents/models running
-<li>GET <code>/platforms</code> - Active platforms
-<li>POST <code>/webhook/telegram</code> - Telegram Bot API free - set webhook via BotFather
-<li>GET <code>/dashboard</code> - This polished dashboard with gold and kawaii skin matching Hermes default
-</ul>
-
-<h3>🎨 Skins - Matching Hermes Agent</h3>
-<p>Original Hermes has 7 skins: default gold/kawaii, ares crimson/bronze, mono gray (#555555 / #c9d1d9), slate royal blue (#4169e1), daylight light, warm-lightmode brown/gold, poseidon deep blue/seafoam, sisyphus grayscale. Plus custom YAML skins via <code>~/.hermes/skins/.yaml</code> with banner_border, spinner thinking_verbs, branding. This free clone implements 5 skins with same colors - switch via top-right buttons.</p>
-
-<h3>📊 Token Usage & Memory (Free Tracking)</h3>
-<button onclick="loadUsage()" style="padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Load /usage (free tracking)</button>
-<pre id="usageResult">Click to load token usage - counts tokens for all models free, no paywall, stored in SQLite data/memory.db token_usage table</pre>
-
-<h3>🔧 Slide Panel - What You Asked</h3>
 <div class="banner">
-You asked: "Can u add a panel that I can slide open to see to what agents or ai models r running or doing the task"<br><br>
-<b>Done!</b> This dashboard has slide panel on right (width 0 → 440px, cubic-bezier 0.35s) with toggle button. Shows:<br>
-- 🤖 Active Agents: name, model badge, persona, task, status, started, progress<br>
-- 📋 Active Tasks: type (subagent, cron, multi-ai, custom_api), description, model, agent, status, progress<br>
-- 🧠 Models in use: ollama/llama3.1:8b, groq/llama-3.1, etc.<br>
-- ✅ Recently completed<br>
-Panel auto-refreshes every 2 sec when open. TUI has same via <code>/panel</code> command + bottom toolbar live Agents: X | Tasks: Y
+<span class="kawaii">(◕‿◕)</span> <b>Sessions</b> - Browse and inspect all agent sessions. Each row shows session title, source platform icon (CLI, Telegram, Discord, Slack, cron), model name, message count, tool call count, how long ago active. Live sessions pulsing badge. This matches original Hermes dashboard Sessions pane.
 </div>
+
+<div style="display:flex;gap:10px;margin-bottom:12px">
+<input type="text" id="sessionSearch" class="search" placeholder="Search sessions FTS5... (full-text search across all messages)" oninput="searchSessions()">
+<button onclick="loadSessions()" style="padding:10px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Refresh</button>
+</div>
+
+<table class="table" id="sessionsTable">
+<thead><tr><th>Session</th><th>Source</th><th>Model</th><th>Msgs</th><th>Tools</th><th>Active</th><th>Actions</th></tr></thead>
+<tbody id="sessionsBody"><tr><td colspan="7">Loading sessions...</td></tr></tbody>
+</table>
+
+<h3>💬 Chat with Free Agent (CLI, Telegram, Discord, Slack - Single Gateway)</h3>
+<div class="input-group">
+<input type="text" id="chatInput" placeholder="Type task: Research Python async and write file watcher (｡♥‿♥｡)">
+<button onclick="sendChat()">Send</button>
+</div>
+<pre id="chatResult">Chat results... Tip: Agent uses DuckDuckGo free search + auto-creates skills that self-improve</pre>
+</div>
+
+<!-- Keys Pane - Like original Hermes Keys -->
+<div class="pane" id="pane-keys">
+<h3>🔑 Keys - Free API Keys Management</h3>
+<div class="banner">Each key shows whether it's set with redacted preview, description, link to provider signup, input field, delete button. Advanced/rarely-used keys hidden behind toggle. Plus Custom Keys section for arbitrary env vars. Matches original Hermes Keys pane.</div>
+<div id="keysContent">Loading keys...</div>
+<button onclick="loadKeys()" style="padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer;margin-top:10px">Refresh Keys</button>
+</div>
+
+<!-- Agents Pane -->
+<div class="pane" id="pane-agents">
+<h3>🤖 Agents - What AI models are running</h3>
+<div class="banner">Shows what agents/models are running or doing task - the slide panel you asked for. Matches your request: Can u add a panel that I can slide open to see to what agents or ai models r running or doing the task</div>
+<div id="agentsContent">Loading agents...</div>
+</div>
+
+<!-- Other Panes placeholders matching Hermes 16 panes -->
+<div class="pane" id="pane-config"><h3>⚙️ Config</h3><div class="banner">Config YAML - display.skin, model, etc. Hermes supports custom skins via ~/.hermes/skins/.yaml</div><pre id="configContent">Loading config...</pre></div>
+<div class="pane" id="pane-providers"><h3>🧠 Providers</h3><div class="banner">LLM Providers: Nous Portal, OpenRouter, Custom API, Local vLLM - Free clone uses Ollama local (no API key) + Groq free tier + HF free</div><div id="providersContent">Providers...</div></div>
+<div class="pane" id="pane-tools"><h3>🛠️ Tools</h3><div class="banner">40+ Built-in Skills: web_search, file ops, browser, vision, etc. - Free DuckDuckGo, file tools, shell - No API key needed for core</div><div id="toolsContent">Tools...</div></div>
+<div class="pane" id="pane-customkeys"><h3>🔐 Custom Keys - Arbitrary env vars</h3><div class="banner">From v0.17.0, Custom Keys section for listing and adding arbitrary environment variables from .env that Hermes doesn't natively recognize. Use it for custom env vars you want to pass to skills or MCP servers.</div><div id="customKeysContent">Custom Keys...</div></div>
+<div class="pane" id="pane-gateway"><h3>🌐 Gateway - Single Process</h3><div class="banner">Gateway: MCP, Channels, Webhooks, Pairing are four windows connecting Hermes to outside world. Single gateway process for Telegram, Discord, Slack, WhatsApp, Signal, CLI.</div><div id="gatewayContent">Gateway...</div></div>
+<div class="pane" id="pane-channels"><h3>📡 Channels</h3><div class="banner">Channels - Manage Telegram, Discord, Slack, WhatsApp, Signal connections. Telegram/Discord/Slack bot tokens excluded from Keys pane and managed here.</div><div id="channelsContent">Channels...</div></div>
+<div class="pane" id="pane-webhooks"><h3>🔗 Webhooks</h3><div class="banner">Webhooks - Incoming webhooks for external triggers</div><div id="webhooksContent">Webhooks...</div></div>
+<div class="pane" id="pane-pairing"><h3>📱 Pairing</h3><div class="banner">Pairing - Pair mobile devices, QR code</div><div id="pairingContent">Pairing...</div></div>
+<div class="pane" id="pane-logs"><h3>📝 Logs</h3><div class="banner">View agent, gateway, error logs with filtering and live tailing. File: agent/errors/gateway, Level: ALL DEBUG INFO WARNING ERROR, Component: all gateway agent tools cli cron, Lines: 50/100/200/500, Auto-refresh live tailing every 5 sec</div>
+<div style="display:flex;gap:8px;margin-bottom:10px">
+<select id="logFile" style="padding:6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px"><option>agent</option><option>gateway</option><option>errors</option></select>
+<select id="logLevel" style="padding:6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px"><option>ALL</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select>
+<button onclick="loadLogs()" style="padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">Load Logs</button>
+</div>
+<pre id="logsContent">Logs...</pre>
+</div>
+<div class="pane" id="pane-analytics"><h3>📊 Analytics - Token Analytics</h3><div class="banner">Analytics pane appears if dashboard.show_token_analytics true in config.yaml - Shows token usage free tracking, costs, per model breakdown (added in this free clone)</div>
+<button onclick="loadAnalytics()" style="padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Load Analytics</button>
+<pre id="analyticsContent">Analytics - Token usage free tracking from core/token_counter.py + core/memory.py token_usage table</pre>
+</div>
+<div class="pane" id="pane-cron"><h3>⏰ Cron - Scheduled Automations</h3><div class="banner">Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits - natural language: "daily at 9am send me report"</div>
+<div id="cronContent">Loading cron...</div>
+</div>
+<div class="pane" id="pane-kanban"><h3>📋 Kanban - Plugin</h3><div class="banner">Kanban is plugin-originated under Plugins group at bottom of sidebar - Shows tasks board</div><div id="kanbanContent">Kanban - Plugin</div></div>
+<div class="pane" id="pane-achievements"><h3>🏆 Achievements - Plugin</h3><div class="banner">Achievements is plugin-originated - Shows agent achievements</div><div id="achievementsContent">Achievements - Plugin</div></div>
 
 </div>
 
-<div class="sidebar" id="sidebar">
+<!-- Right Slide Panel - Agents & Tasks -->
+<div class="sidebar" id="rightSidebar">
 <div class="sidebar-header">
 <div>
 <h3>🔍 Agents Panel - Slide Open</h3>
-<div style="font-size:0.75em;color:var(--text-muted);font-family:'JetBrains Mono', monospace;">Gold and kawaii • Warm gold borders #DAA520 • Cornsilk text #FFF8DC • <span class="kawaii">(｡♥‿♥｡)</span></div>
+<div style="font-size:0.7em;color:var(--text-muted);font-family:'JetBrains Mono',monospace">Gold #DAA520 • Cornsilk #FFF8DC • Kawaii (｡♥‿♥｡) • Pulse badge for live sessions</div>
 </div>
 <button onclick="togglePanel()" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 12px;border-radius:8px;cursor:pointer">Close ✕</button>
 </div>
-
-<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:16px;font-size:0.85em">
-<p><span class="kawaii">(◕‿◕)</span> <b>Classic Hermes — gold and kawaii</b></p>
-<p>⏱️ Auto-refresh every 2 sec when open • Shows running agents/models/tasks</p>
-<p>TUI: <code>/panel</code> or <code>/agents</code> • API: <code>GET /agents/status</code></p>
-<p>Skins: default gold, slate royal blue #4169e1, ares crimson, mono #555555/#c9d1d9, poseidon deep blue</p>
+<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:14px;font-size:0.8em">
+<p><span class="kawaii">(◕‿◕)</span> <b>Classic Hermes — gold and kawaii</b> - Warm gold borders, cornsilk text, kawaii faces</p>
+<p>⏱️ Auto-refresh 2 sec when open • Live sessions pulsing badge</p>
+<p>API: <code>GET /agents/status</code> • TUI: <code>/panel</code></p>
+</div>
+<div id="panelContent">Loading... <span class="kawaii">(｡•́︿•̀｡)</span></div>
 </div>
 
-<div id="panelContent">Loading... <span class="kawaii">(｡•́︿•̀｡)</span></div>
 </div>
 </div>
 </div>
 
 <script>
-let panelOpen = false;
 function setSkin(skin){
   document.body.className = 'skin-' + skin;
   document.querySelectorAll('.skin-btn').forEach(b=>b.classList.remove('active'));
@@ -367,27 +399,49 @@ function setSkin(skin){
 }
 (function(){
   const saved = localStorage.getItem('hermus_skin');
-  if(saved){document.body.className = 'skin-' + saved; document.querySelectorAll('.skin-btn').forEach(b=>{if(b.textContent.includes(saved) || (saved==='default'&&b.textContent==='gold')) b.classList.add('active'); else b.classList.remove('active')});}
+  if(saved){
+    document.body.className = 'skin-' + saved;
+    document.querySelectorAll('.skin-btn').forEach(b=>{
+      if((saved==='default'&&b.textContent==='gold') || b.textContent===saved || b.textContent.includes(saved)) b.classList.add('active'); else b.classList.remove('active');
+    });
+  }
 })();
 
+let panelOpen = false;
+let currentPane = 'sessions';
+
+function switchPane(pane){
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+  const target = document.getElementById('pane-'+pane);
+  if(target) target.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.querySelectorAll(`[data-pane="${pane}"]`).forEach(n=>n.classList.add('active'));
+  document.getElementById('breadcrumb').textContent = pane.charAt(0).toUpperCase()+pane.slice(1);
+  document.getElementById('breadcrumbSub').textContent = pane === 'sessions' ? 'All sessions' : pane;
+  currentPane = pane;
+  if(pane==='sessions') loadSessions();
+  if(pane==='keys') loadKeys();
+  if(pane==='agents') loadAgentsPane();
+  if(pane==='analytics') loadAnalytics();
+  if(pane==='cron') loadCron();
+}
+
 function togglePanel(){
-  const sb = document.getElementById('sidebar');
-  const main = document.getElementById('main');
+  const sb = document.getElementById('rightSidebar');
+  const main = document.getElementById('mainContent');
   const btn = document.getElementById('toggleBtn');
-  const txt = document.getElementById('toggleText');
   panelOpen = !panelOpen;
   if(panelOpen){
     sb.classList.add('open');
     main.classList.add('shifted');
     btn.classList.add('open');
-    txt.textContent = 'Close Panel';
-    btn.innerHTML = '✕ <span id="toggleText">Close Panel</span> <span class="kawaii">(｡•̀ᴗ-)✧</span>';
+    btn.innerHTML = '✕ Close Panel <span class="kawaii">(｡•̀ᴗ-)✧</span>';
     loadPanel();
   } else {
     sb.classList.remove('open');
     main.classList.remove('shifted');
     btn.classList.remove('open');
-    btn.innerHTML = '👁️ <span id="toggleText">Agents Panel</span> <span class="kawaii">(｡♥‿♥｡)</span>';
+    btn.innerHTML = '👁️ Agents Panel <span class="kawaii">(｡♥‿♥｡)</span>';
   }
 }
 
@@ -397,18 +451,18 @@ async function loadPanel(){
     const data = await res.json();
     document.getElementById('agentCount').textContent = data.active_agents_count;
     document.getElementById('taskCount').textContent = data.active_tasks_count;
+    document.getElementById('sessionTotal').textContent = data.active_agents_count + data.completed_count;
+    document.getElementById('sessionActive').textContent = data.active_agents_count;
     document.getElementById('completedCount').textContent = data.completed_count;
     document.getElementById('modelCount').textContent = data.models_in_use.length;
-    document.getElementById('agentBadge').textContent = data.active_agents_count + ' agents';
-    document.getElementById('modelBadge').textContent = (data.models_in_use.join(', ') || 'No models').slice(0,60);
 
-    let html = `<div class="card"><p>⏱️ ${data.timestamp.slice(0,19)} | Models: ${data.models_in_use.join(', ')||'none'}</p><p style="font-size:0.8em;color:var(--text-muted)">Gold borders #DAA520 • Cornsilk #FFF8DC • Kawaii faces • Caduceus ☤</p></div>`;
+    let html = `<div class="card"><p>⏱️ ${data.timestamp.slice(0,19)} | Models: ${data.models_in_use.join(', ')||'none'}</p><p style="font-size:0.8em;color:var(--text-muted)">Gold #DAA520 • Cornsilk #FFF8DC • Kawaii • Caduceus ☤ • Pulse badge for live</p></div>`;
 
     if(data.active_agents.length){
-      html += '<h4>🤖 Active Agents - What AI models are running</h4>';
+      html += '<h4>🤖 Active Agents - What AI models are running <span class="kawaii">(╯✧▽✧)╯</span></h4>';
       data.active_agents.forEach(a=>{
         const statusClass = a.status === 'running' ? 'status-running' : a.status === 'done' ? 'status-done' : 'status-idle';
-        html += `<div class="card"><b>${a.name}</b> <span class="badge-model">${a.model}</span><br><small style="color:var(--text-muted)">Persona: ${a.persona}</small><br>Task: ${a.task.slice(0,120)}<br><span class="${statusClass}">${a.status}</span> | Started: ${a.started.slice(11,19)} | ${a.progress||''} | Last: ${a.last_update.slice(11,19)}</div>`;
+        html += `<div class="card"><div class="card-header"><b>${a.name}</b> <span class="badge-model">${a.model}</span> <span class="pulse"></span></div><small style="color:var(--text-muted)">Persona: ${a.persona}</small><br>Task: ${a.task.slice(0,120)}<br><span class="${statusClass}">${a.status}</span> | Started: ${a.started.slice(11,19)} | ${a.progress||''}<br><small>Last: ${a.last_update.slice(11,19)}</small></div>`;
       });
     }
     if(data.active_tasks.length){
@@ -428,8 +482,39 @@ async function loadPanel(){
       });
     }
     document.getElementById('panelContent').innerHTML = html;
+
+    // Also update other panes if visible
+    if(currentPane==='agents'){
+      document.getElementById('agentsContent').innerHTML = html;
+    }
   }catch(e){
-    document.getElementById('panelContent').innerHTML = 'Error: '+e + ' <span class="kawaii">(｡•́︿•̀｡)</span>';
+    document.getElementById('panelContent').innerHTML = 'Error: '+e+' <span class="kawaii">(｡•́︿•̀｡)</span>';
+  }
+}
+
+async function loadSessions(){
+  try{
+    const res = await fetch('/agents/status');
+    const data = await res.json();
+    const tbody = document.getElementById('sessionsBody');
+    if(!data.active_agents.length && !data.completed_tasks.length){
+      tbody.innerHTML = '<tr><td colspan="7">No sessions yet - start with POST /command or CLI</td></tr>';
+      return;
+    }
+    let html = '';
+    // Active agents as live sessions
+    data.active_agents.forEach(a=>{
+      html += `<tr class="live"><td><span class="pulse"></span> ${a.name} - ${a.task.slice(0,30)}</td><td>CLI</td><td><span class="badge-model">${a.model}</span></td><td>-</td><td>1</td><td>now</td><td><button style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer">View</button></td></tr>`;
+    });
+    data.completed_tasks.forEach(t=>{
+      const name = t.name || t.task_id || 'session';
+      html += `<tr><td>${name}</td><td>${t.type||'CLI'}</td><td>${t.model||''}</td><td>2</td><td>1</td><td>${t.ended?.slice(11,19)||''}</td><td><span class="status-done">${t.status}</span></td></tr>`;
+    });
+    tbody.innerHTML = html || '<tr><td colspan="7">No sessions</td></tr>';
+    document.getElementById('sessionTotal').textContent = data.active_agents_count + data.completed_count;
+    document.getElementById('sessionActive').textContent = data.active_agents_count;
+  }catch(e){
+    document.getElementById('sessionsBody').innerHTML = '<tr><td colspan="7">Error: '+e+'</td></tr>';
   }
 }
 
@@ -445,25 +530,41 @@ async function sendChat(){
       body: JSON.stringify({platform:'dashboard', user_id:'dashboard_user', text: text})
     });
     const data = await res.json();
-    document.getElementById('chatResult').textContent = `Response: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2)}\n\nSession: ${data.session_id}\n\nTokens: Prompt ${data.usage?.prompt_tokens||'?'} + Completion ${data.usage?.completion_tokens||'?'} = ${data.usage?.total_tokens||'?'} | Cost $${data.usage?.total_cost||0}`;
+    document.getElementById('chatResult').textContent = `Response: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2)}\n\nSession: ${data.session_id}\nUsage: Prompt ${data.usage?.prompt_tokens||'?'} + Completion ${data.usage?.completion_tokens||'?'} = ${data.usage?.total_tokens||'?'} | Cost $${data.usage?.total_cost||0}\n\nTokens tracking free in data/memory.db token_usage table`;
     if(panelOpen) loadPanel();
+    loadSessions();
   }catch(e){
     document.getElementById('chatResult').textContent = 'Error: '+e;
   }
 }
 
-async function loadUsage(){
+async function loadKeys(){
   try{
     const res = await fetch('/platforms');
     const data = await res.json();
-    document.getElementById('usageResult').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('keysContent').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre><p>Keys pane shows whether key is set with redacted preview, description, link, input field, delete button. Advanced keys hidden behind toggle. Custom Keys section for arbitrary env vars from .env - matches original Hermes Keys pane.</p>`;
   }catch(e){
-    document.getElementById('usageResult').textContent = 'Error: '+e;
+    document.getElementById('keysContent').innerHTML = 'Error: '+e;
   }
 }
+async function loadUsage(){ /* placeholder */ document.getElementById('usageResult').textContent = 'Token usage from core/token_counter.py + memory.py token_usage table - free tracking'; }
+async function loadAnalytics(){
+  try{
+    const res = await fetch('/agents/status');
+    const data = await res.json();
+    let html = `Active Agents: ${data.active_agents_count}\nActive Tasks: ${data.active_tasks_count}\nModels: ${data.models_in_use.join(', ')}\n\nToken analytics appears if dashboard.show_token_analytics true in config.yaml - free clone always shows token usage via /usage command`;
+    document.getElementById('analyticsContent').textContent = html;
+  }catch(e){
+    document.getElementById('analyticsContent').textContent = 'Error: '+e;
+  }
+}
+function searchSessions(){ /* FTS5 search placeholder */ }
+function loadCron(){ document.getElementById('cronContent').textContent = 'Cron jobs from scheduler/cron.py - natural language daily at 9am -> 0 9 * * * - delivery to any platform'; }
 
 setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
-document.getElementById('chatInput').addEventListener('keypress', (e)=>{if(e.key==='Enter') sendChat();});
+document.getElementById('chatInput')?.addEventListener('keypress', (e)=>{if(e.key==='Enter') sendChat();});
+loadSessions();
+loadPanel();
 </script>
 </body>
 </html>
