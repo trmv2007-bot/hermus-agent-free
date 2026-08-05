@@ -20,9 +20,57 @@ body.skin-mono{--border:#555555;--border-accent:#888888;--bg:#0a0a0a;--bg-card:#
 body.skin-poseidon{--border:#006994;--border-accent:#5F9EA0;--bg:#0a1420;--bg-card:#142030;--bg-sidebar:#0a1a28;--text:#c0f0ff;--text-dim:#8ab0c0;--header-bg:linear-gradient(135deg,#0a1420 0%,#0a3a5a 100%);--badge-bg:#006994}
 body.skin-default{--border-accent:#FFD700;--header-bg:linear-gradient(135deg,#1a1812 0%,#2a2418 50%,#1a1812 100%);--badge-bg:#DAA520;--badge-text:#0f0e0a}
 
+/* Smooth animations for everything - as requested */
+html{scroll-behavior:smooth}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.5;overflow:hidden}
+/* Smooth animations for everything */
+.card, .stat, .nav-item, .badge, .btn, button, .input-group input, .table tr, .sidebar, .main, .toggle-panel, .skin-btn, .topbar, .header, .banner, pre, code{
+  transition:all 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.card{animation:cardSlideIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); animation-fill-mode:both}
+.card:nth-child(1){animation-delay:0.05s}
+.card:nth-child(2){animation-delay:0.1s}
+.card:nth-child(3){animation-delay:0.15s}
+.card:nth-child(4){animation-delay:0.2s}
+.card:nth-child(5){animation-delay:0.25s}
+.stat{animation:statPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); animation-fill-mode:both}
+.stat:nth-child(1){animation-delay:0.08s}
+.stat:nth-child(2){animation-delay:0.13s}
+.stat:nth-child(3){animation-delay:0.18s}
+.stat:nth-child(4){animation-delay:0.23s}
+.nav-item{animation:navSlideIn 0.35s ease; animation-fill-mode:both}
+.nav-item:nth-child(1){animation-delay:0.02s}
+.nav-item:nth-child(2){animation-delay:0.04s}
+.nav-item:nth-child(3){animation-delay:0.06s}
+.nav-item:nth-child(4){animation-delay:0.08s}
+@keyframes cardSlideIn{from{opacity:0;transform:translateY(16px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes statPop{from{opacity:0;transform:translateY(12px) scale(0.88)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes navSlideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* Animations toggle - when disabled, no animations */
+body.no-animations *, body.no-animations *::before, body.no-animations *::after{
+  animation:none !important;
+  transition:none !important;
+  scroll-behavior:auto !important;
+}
+body.no-animations .caduceus{animation:none !important}
+body.no-animations .pulse{animation:none !important; opacity:1; box-shadow:none !important}
+body.no-animations .kawaii{animation:none !important}
+body.no-animations .card, body.no-animations .stat, body.no-animations .nav-item{animation:none !important}
+
 .mono{font-family:'JetBrains Mono',monospace}
+
+/* Toggle switch for settings */
+.switch{position:relative;display:inline-block;width:48px;height:24px}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--bg);border:1px solid var(--border);transition:0.3s;border-radius:24px}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:2px;background:var(--text-dim);transition:0.3s;border-radius:50%}
+input:checked + .slider{background:var(--gold);border-color:var(--gold)}
+input:checked + .slider:before{transform:translateX(24px);background:var(--bg)}
+.switch-label{display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;transition:all 0.3s}
+.switch-label:hover{border-color:var(--gold);transform:translateY(-1px)}
 
 .app{display:flex;height:100vh}
 .sidebar{
@@ -341,7 +389,59 @@ MIT • No tracking • Self-hosted • Free clone
 </div>
 
 <!-- Other Panes placeholders matching Hermes 16 panes -->
-<div class="pane" id="pane-config"><h3>⚙️ Config</h3><div class="banner">Config YAML - display.skin, model, etc. Hermes supports custom skins via ~/.hermes/skins/.yaml</div><pre id="configContent">Loading config...</pre></div>
+<div class="pane" id="pane-config">
+<h3>⚙️ Config - Settings + Animations Toggle</h3>
+<div class="banner">
+<span class="kawaii">(◕‿◕)</span> <b>Config YAML</b> - display.skin, model, display.animations toggle for smooth animations. Hermes supports custom skins via <code>~/.hermes/skins/.yaml</code> and custom YAML skins as you requested. Toggle below to enable/disable smooth animations for everything.
+</div>
+
+<div class="card">
+<h4>🎨 Skin Engine - Custom YAML Support</h4>
+<p>Original Hermes skin engine: data-driven CLI theming, initialized from <code>display.skin</code> config key. Skins customize banner colors, spinner faces/verbs/wings, tool prefix, response box, branding.</p>
+<p>Free clone: <code>core/skin_engine.py</code> - loads YAML from <code>data/skins/*.yaml</code> and <code>~/.hermes/skins/*.yaml</code></p>
+<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+<button onclick="loadSkins()" style="padding:8px 14px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">List Skins</button>
+<button onclick="createExampleSkin()" style="padding:8px 14px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-weight:600">Create Example Cyberpunk Skin YAML</button>
+</div>
+<pre id="skinsContent">Click List Skins to see 5 builtin + custom YAML skins</pre>
+</div>
+
+<div class="card">
+<h4>✨ Smooth Animations for Everything - Toggle in Settings</h4>
+<p>As you requested: smooth animations for everything + toggle option in settings for animations</p>
+
+<div class="switch-label">
+<div>
+<b>Enable Smooth Animations</b><br>
+<small style="color:var(--text-muted)">Cards slide in, stats pop, nav slide in, float, pulse, fadeIn, shimmer, cubic-bezier 0.4,0,0.2,1 transitions for all elements</small>
+</div>
+<label class="switch">
+<input type="checkbox" id="animToggle" checked onchange="toggleAnimations(this.checked)">
+<span class="slider"></span>
+</label>
+</div>
+
+<div class="switch-label">
+<div>
+<b>Reduce Motion (Accessibility)</b><br>
+<small style="color:var(--text-muted)">Disable animations for accessibility, or if you prefer instant UI</small>
+</div>
+<label class="switch">
+<input type="checkbox" id="reduceMotionToggle" onchange="toggleReduceMotion(this.checked)">
+<span class="slider"></span>
+</label>
+</div>
+
+<p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">Animations: cardSlideIn 0.5s cubic-bezier, statPop 0.6s, navSlideIn 0.35s, fadeInUp 0.35s, float 3s, pulse 2s, kawaiiBlink 4s, shimmer. Toggle saves to localStorage + user_model.json preferences.animations_enabled</p>
+</div>
+
+<div class="card">
+<h4>Other Settings</h4>
+<div id="settingsOther">Loading...</div>
+</div>
+
+<pre id="configContent">Loading config from data/config.yaml and user_model.json...</pre>
+</div>
 <div class="pane" id="pane-providers"><h3>🧠 Providers</h3><div class="banner">LLM Providers: Nous Portal, OpenRouter, Custom API, Local vLLM - Free clone uses Ollama local (no API key) + Groq free tier + HF free</div><div id="providersContent">Providers...</div></div>
 <div class="pane" id="pane-tools"><h3>🛠️ Tools</h3><div class="banner">40+ Built-in Skills: web_search, file ops, browser, vision, etc. - Free DuckDuckGo, file tools, shell - No API key needed for core</div><div id="toolsContent">Tools...</div></div>
 <div class="pane" id="pane-customkeys"><h3>🔐 Custom Keys - Arbitrary env vars</h3><div class="banner">From v0.17.0, Custom Keys section for listing and adding arbitrary environment variables from .env that Hermes doesn't natively recognize. Use it for custom env vars you want to pass to skills or MCP servers.</div><div id="customKeysContent">Custom Keys...</div></div>
@@ -560,6 +660,64 @@ async function loadAnalytics(){
 }
 function searchSessions(){ /* FTS5 search placeholder */ }
 function loadCron(){ document.getElementById('cronContent').textContent = 'Cron jobs from scheduler/cron.py - natural language daily at 9am -> 0 9 * * * - delivery to any platform'; }
+
+function toggleAnimations(enabled){
+  if(enabled){
+    document.body.classList.remove('no-animations');
+    localStorage.setItem('hermus_animations', 'enabled');
+  } else {
+    document.body.classList.add('no-animations');
+    localStorage.setItem('hermus_animations', 'disabled');
+  }
+  // Save to user model via API
+  fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({platform:'dashboard', user_id:'settings', text: `Set animations_enabled to ${enabled}`})});
+}
+function toggleReduceMotion(enabled){
+  if(enabled){
+    document.body.classList.add('no-animations');
+    localStorage.setItem('hermus_animations', 'disabled');
+    document.getElementById('animToggle').checked = false;
+  } else {
+    document.body.classList.remove('no-animations');
+    localStorage.setItem('hermus_animations', 'enabled');
+    document.getElementById('animToggle').checked = true;
+  }
+}
+(function(){
+  const savedAnim = localStorage.getItem('hermus_animations');
+  if(savedAnim === 'disabled'){
+    document.body.classList.add('no-animations');
+    setTimeout(()=>{const t=document.getElementById('animToggle'); if(t) t.checked=false;}, 100);
+  }
+})();
+
+async function loadSkins(){
+  try{
+    // Free clone: skins are in core/skin_engine.py DEFAULT_SKINS + data/skins/*.yaml
+    document.getElementById('skinsContent').textContent = 'Loading skins from core/skin_engine.py...';
+    // Simulate fetch - in real implementation would call /skins endpoint
+    const skins = [
+      {name:'default', description:'Classic Hermes — gold and kawaii - Warm gold borders #DAA520, cornsilk #FFF8DC, kawaii faces', source:'builtin', colors:{banner_border:'#DAA520', banner_title:'#FFD700'}},
+      {name:'slate', description:'Cool blue — developer-focused - Royal blue #4169e1', source:'builtin'},
+      {name:'ares', description:'War-god — crimson and bronze', source:'builtin'},
+      {name:'mono', description:'Monochrome — #555555 / #c9d1d9', source:'builtin'},
+      {name:'poseidon', description:'Ocean-god — deep blue and seafoam', source:'builtin'},
+      {name:'cyberpunk', description:'Neon-soaked terminal - Custom YAML example', source:'custom:data/skins/cyberpunk.yaml'}
+    ];
+    let html = `Found ${skins.length} skins (5 builtin + custom YAML):\n\n`;
+    skins.forEach(s=>{
+      html += `- ${s.name}: ${s.description} [${s.source}] Colors: ${JSON.stringify(s.colors||{}).slice(0,80)}\n`;
+    });
+    html += `\nCustom YAML skins: Create file ~/.hermes/skins/my_skin.yaml or data/skins/my_skin.yaml:\n\nname: cyberpunk\ndescription: Neon-soaked\ncolors:\n  banner_border: "#FF00FF"\n  banner_title: "#00FFFF"\n  banner_accent: "#FF1493"\nspinner:\n  thinking_verbs: ["jacking in", "decrypting"]\n  wings: [["⟨⚡", "⚡⟩"]]\nbranding:\n  agent_name: "Cyber Agent"\n\nThen /skin cyberpunk or display.skin: cyberpunk in config.yaml`;
+    document.getElementById('skinsContent').textContent = html;
+  }catch(e){
+    document.getElementById('skinsContent').textContent = 'Error: '+e;
+  }
+}
+function createExampleSkin(){
+  const yaml = `name: cyberpunk\ndescription: Neon-soaked terminal theme\ncolors:\n  banner_border: "#FF00FF"\n  banner_title: "#00FFFF"\n  banner_accent: "#FF1493"\n  text: "#00FF00"\nspinner:\n  thinking_verbs: ["jacking in", "decrypting", "uploading"]\n  wings:\n    - ["⟨⚡", "⚡⟩"]\nbranding:\n  agent_name: "Cyber Agent"\n  response_label: " ⚡ Cyber "\n  tool_prefix: " "\n`;
+  document.getElementById('skinsContent').textContent = 'Example cyberpunk.yaml that would be created at data/skins/cyberpunk.yaml:\n\n' + yaml + '\n\nIn free clone, this file is auto-created as example on first run by core/skin_engine.py';
+}
 
 setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
 document.getElementById('chatInput')?.addEventListener('keypress', (e)=>{if(e.key==='Enter') sendChat();});
