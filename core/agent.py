@@ -42,11 +42,56 @@ class HermusAgent:
             pass
 
     def _get_tools(self) -> List[Dict]:
-        """40+ free tools - we implement core free ones + custom APIs"""
+        """40+ free tools - we implement core free ones + custom APIs + browser, vision, voice, backends, trajectory"""
         tools = []
         tools.append(WEB_SEARCH_TOOL)
         tools.extend(FILE_TOOLS)
         tools.append(SHELL_TOOL)
+
+        # Browser automation Playwright free
+        try:
+            from tools.browser import TOOLS as BROWSER_TOOLS
+            tools.extend(BROWSER_TOOLS)
+        except:
+            pass
+
+        # Vision LLaVA via Ollama free
+        try:
+            from tools.vision import TOOLS as VISION_TOOLS
+            tools.extend(VISION_TOOLS)
+        except:
+            pass
+
+        # Voice memo transcription faster-whisper free
+        try:
+            from tools.voice import TOOLS as VOICE_TOOLS
+            tools.extend(VOICE_TOOLS)
+        except:
+            pass
+
+        # Backends: Docker, SSH, Modal free tier, Daytona, Vercel Sandbox
+        try:
+            from backends.backend_manager import TOOL_DEFINITION as BACKEND_TOOL
+            from backends.backend_manager import list_backends as list_backends_tool
+            tools.append(BACKEND_TOOL)
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "list_backends",
+                    "description": "List seven terminal backends: local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox - free, with availability and descriptions",
+                    "parameters": {"type": "object", "properties": {}, "required": []}
+                }
+            })
+        except:
+            pass
+
+        # Trajectory batch generation + compression
+        try:
+            from core.trajectory import TOOLS as TRAJECTORY_TOOLS
+            tools.extend(TRAJECTORY_TOOLS)
+        except:
+            pass
+
         # Add custom APIs as tools - free custom API feature
         try:
             custom_tools = custom_api_manager.get_tool_definitions()
@@ -152,6 +197,59 @@ class HermusAgent:
                     return result
                 except Exception as e:
                     return {"error": f"Subagent spawn failed: {e}, task: {args.get('task')}"}
+            # Browser automation free
+            elif name in ("browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_extract", "browser_close"):
+                try:
+                    from tools.browser import TOOL_MAP as BROWSER_MAP
+                    func = BROWSER_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Browser tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Browser tool {name} failed: {e}"}
+            # Vision free
+            elif name in ("vision_analyze", "vision_available_models"):
+                try:
+                    from tools.vision import TOOL_MAP as VISION_MAP
+                    func = VISION_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Vision tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Vision tool {name} failed: {e}"}
+            # Voice memo transcription free
+            elif name in ("transcribe_audio", "transcribe_voice_memo", "voice_available_models"):
+                try:
+                    from tools.voice import TOOL_MAP as VOICE_MAP
+                    func = VOICE_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Voice tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Voice tool {name} failed: {e}"}
+            # Backends free
+            elif name == "backend_execute":
+                try:
+                    from backends.backend_manager import backend_execute
+                    return backend_execute(**args)
+                except Exception as e:
+                    return {"error": f"Backend execute failed: {e}"}
+            elif name == "list_backends":
+                try:
+                    from backends.backend_manager import list_backends
+                    return list_backends()
+                except Exception as e:
+                    return {"error": f"List backends failed: {e}"}
+            # Trajectory batch generation + compression free
+            elif name in ("trajectory_batch_generate", "trajectory_compress", "trajectory_stats"):
+                try:
+                    from core.trajectory import TOOL_MAP as TRAJECTORY_MAP
+                    func = TRAJECTORY_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Trajectory tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Trajectory tool {name} failed: {e}"}
             else:
                 # Check if it's a custom API - free custom API feature
                 try:

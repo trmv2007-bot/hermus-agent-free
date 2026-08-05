@@ -1,4 +1,5 @@
-# Hermus Agent Free - 100% Free Stack, No Paid APIs
+# Hermus Agent Free - 100% Free Stack, No Paid APIs - Now with Browser, Vision, Voice, Backends, Trajectory
+
 # Core
 pydantic>=2.0.0
 python-dotenv>=1.0.0
@@ -11,13 +12,36 @@ groq>=0.4.0
 # HuggingFace free inference (optional, free token)
 huggingface_hub>=0.23.0
 
-# Memory - SQLite FTS5 built-in, no vector DB cost
+# Memory + Token Counting - SQLite FTS5 built-in + tiktoken free
 # sqlite3 is builtin Python
+tiktoken>=0.5.0
 
 # Tools - Free, no API keys
 duckduckgo-search>=5.0.0
 # File tools builtin
 # Shell builtin subprocess
+
+# Browser Automation Playwright Free - No API key
+playwright>=1.40.0
+
+# Vision LLaVA via Ollama Free - No API key, local vision
+# Uses Ollama LLaVA via requests, no extra pip dep, but for image handling:
+Pillow>=10.0.0
+# Ollama already required, llava model pulled via ollama pull llava:7b (free)
+
+# Voice Memo Transcription faster-whisper Free - Local Whisper, no API key
+faster-whisper>=0.9.0
+
+# Backends - Seven terminal backends free
+# local always available
+# docker - requires docker binary free
+# ssh - requires ssh binary free, paramiko optional free
+paramiko>=3.0.0
+# singularity - HPC free
+# modal - serverless persistence free tier
+modal>=0.60.0
+# daytona - serverless free tier
+# vercel - vercel sandbox free tier
 
 # Gateway - Free Bot APIs
 fastapi>=0.104.0
@@ -35,17 +59,16 @@ APScheduler>=3.10.0
 prompt_toolkit>=3.0.41
 rich>=13.0.0
 
-# Subagents - Free (multiprocessing builtin)
+# Subagents + Multi-Key + Multi-AI - Free (multiprocessing builtin)
 # No extra deps
 
-# Optional Free Tools (not required for core)
-# Browser automation free
-playwright>=1.40.0
-# Voice memo transcription free local Whisper
-# faster-whisper>=0.9.0
-# Vision free via Ollama LLaVA
-# No extra dep, uses Ollama
+# Trajectory Batch Generation + Compression - Free
+# No extra dep, uses core modules
+
+# Custom API - Free
+# Uses requests already required
 
 # Dev
 pytest>=8.0.0
+
 tiktoken>=0.5.0
