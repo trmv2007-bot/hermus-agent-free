@@ -32,7 +32,8 @@ class HermusTUI:
     SLASH_COMMANDS = [
         "/new", "/reset", "/model", "/personality", "/retry", "/undo",
         "/compress", "/usage", "/insights", "/skills", "/platforms",
-        "/status", "/help", "/exit", "/clear", "/panel", "/agents"
+        "/status", "/help", "/exit", "/clear", "/panel", "/agents",
+        "/update", "/check-update"
     ]
 
     def __init__(self, model: str = None):
@@ -144,7 +145,6 @@ Tip: Type /panel to slide open panel showing what agents/models are running
             print("Platforms (free): Telegram (Bot API free), Discord (free), CLI, Slack webhook free")
             print("Setup: hermus gateway setup --platform telegram")
             print("Start: hermus gateway start")
-            # Also show task tracker for slide panel
             try:
                 from core.task_tracker import task_tracker
                 print("\n" + task_tracker.get_for_tui())
@@ -153,7 +153,6 @@ Tip: Type /panel to slide open panel showing what agents/models are running
             return True
 
         if cmd in ("/panel", "/agents"):
-            # Slide open panel to see what agents/models are running or doing the task
             print("\n" + "="*70)
             print("🔍 SLIDE PANEL - What agents/models are running or doing the task")
             print("="*70)
@@ -167,10 +166,35 @@ Tip: Type /panel to slide open panel showing what agents/models are running
                     print(status_text)
                 print("\n" + "="*70)
                 print("Panel auto-refreshes every 2 sec in bottom toolbar")
-                print("Gateway dashboard with slide panel: http://localhost:8000/dashboard -> Click 'Agents Panel' button to slide open")
+                print("Gateway dashboard with slide panel: http://localhost:8000/dashboard -> Click 'Agents Panel' button")
                 print("API: GET /agents/status for JSON")
             except Exception as e:
                 print(f"Panel error: {e} - No active agents, idle")
+            return True
+
+        if cmd in ("/update", "/check-update"):
+            # Check for GitHub updates and show in CLI
+            print("\n🔄 Checking for updates from GitHub...")
+            try:
+                from core.updater import get_updater_for_current_repo
+                updater = get_updater_for_current_repo()
+                result = updater.check_for_updates()
+                if result.get("update_available"):
+                    print(f"\n🚀 Update available! {result.get('message')}")
+                    print(f"Local: {result.get('local',{}).get('short')} - {result.get('local',{}).get('message','')[:60]}")
+                    print(f"Remote: {result.get('remote',{}).get('short')} - {result.get('remote',{}).get('message','')[:60]} by {result.get('remote',{}).get('author','')} on {result.get('remote',{}).get('date','')[:10]}")
+                    print(f"Behind by: {result.get('behind_by',1)} commit(s)")
+                    print(f"Remote URL: {result.get('remote_url','')}")
+                    print("\nTo update: Run 'hermus update' or 'git pull' or dashboard Update button")
+                    # Also check if in dashboard, it will show banner
+                elif result.get("up_to_date"):
+                    print(f"\n✅ Up to date! {result.get('message')}")
+                    print(f"Local: {result.get('local',{}).get('short')} == Remote: {result.get('remote',{}).get('short')}")
+                else:
+                    print(f"\nUpdate check result: {result}")
+            except Exception as e:
+                print(f"Update check error: {e}")
+                print("Try: git fetch origin main && git log --oneline HEAD..origin/main")
             return True
 
         if cmd in ("/compress", "/usage", "/insights"):

@@ -120,6 +120,13 @@ class HermusAgent:
         except:
             pass
 
+        # Updater - check for GitHub updates and show in dashboard and CLI too - free
+        try:
+            from tools.updater import TOOLS as UPDATER_TOOLS
+            tools.extend(UPDATER_TOOLS)
+        except:
+            pass
+
         # Pentest tools - Strix features - Open-source AI penetration testing tool
         try:
             from tools.pentest import TOOLS as PENTEST_TOOLS
@@ -295,6 +302,16 @@ class HermusAgent:
                     return {"error": f"Response tester tool {name} not found"}
                 except Exception as e:
                     return {"error": f"Response tester tool {name} failed: {e}"}
+            # Updater - check for GitHub updates and show in dashboard and CLI too - free
+            elif name in ("check_update", "do_update", "get_local_commit", "get_remote_commit"):
+                try:
+                    from tools.updater import TOOL_MAP as UPDATER_MAP
+                    func = UPDATER_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Updater tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Updater tool {name} failed: {e}"}
             # Pentest tools - Strix features - free
             elif name in ("subdomain_enum", "fingerprinting", "attack_surface_mapping", "browser_xss_test", "shell_exploit", "custom_exploit_runtime", "http_proxy_intercept", "search_vuln_kb", "get_owasp_categories", "comprehensive_scan", "scan_api_spec", "pentest_distribute_task", "pentest_chain_vulns", "pentest_scalable_scan", "pentest_create_run", "pentest_add_finding", "pentest_generate_patch", "pentest_generate_report", "pentest_view_run"):
                 try:

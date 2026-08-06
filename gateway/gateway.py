@@ -356,6 +356,48 @@ async def response_times_test(payload: Dict):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/update/check")
+async def update_check():
+    """Check if update available from GitHub - shows update in dashboard and CLI too - free"""
+    try:
+        from core.updater import get_updater_for_current_repo
+        updater = get_updater_for_current_repo()
+        result = updater.check_for_updates()
+        return result
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/update/pull")
+async def update_pull():
+    """Update from GitHub via git pull + pip install - like hermes update - free - shows update in dashboard and CLI"""
+    try:
+        from core.updater import get_updater_for_current_repo
+        updater = get_updater_for_current_repo()
+        result = updater.update()
+        return result
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/update/local")
+async def update_local():
+    """Get local commit info"""
+    try:
+        from core.updater import get_updater_for_current_repo
+        updater = get_updater_for_current_repo()
+        return updater.get_local_commit()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/update/remote")
+async def update_remote():
+    """Get remote commit info from GitHub API free"""
+    try:
+        from core.updater import get_updater_for_current_repo
+        updater = get_updater_for_current_repo()
+        return updater.get_remote_commit()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 # CLI for gateway setup/start - free
 def setup(platform: str):
     print(f"[Gateway] Setup for {platform} - Free")

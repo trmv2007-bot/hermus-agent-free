@@ -335,8 +335,14 @@ MIT • No tracking • Self-hosted • Free clone
 </div>
 <span class="badge" id="modelBadge">No models</span>
 <span class="badge" id="agentBadge">0 agents</span>
+<span class="badge" id="updateBadge" style="display:none;background:#ff9800;color:black;cursor:pointer" onclick="checkUpdate()" title="Update available from GitHub">Update available!</span>
 <button class="toggle-panel" id="toggleBtn" onclick="togglePanel()"><span>👁️</span> <span id="toggleText">Agents Panel</span></button>
 </div>
+</div>
+
+<!-- Update banner - shows if GitHub has new commits - as requested -->
+<div id="updateBanner" style="display:none;background:linear-gradient(90deg,#ff9800,#ff5722);color:black;padding:10px 20px;text-align:center;font-family:'JetBrains Mono',monospace;font-weight:600;cursor:pointer" onclick="checkUpdate()">
+<span class="kawaii">🚀</span> <span id="updateBannerText">Update available from GitHub! Click to see details and update</span> <span class="kawaii">✨</span> <button onclick="doUpdate(event)" style="margin-left:12px;padding:4px 12px;background:black;color:#ff9800;border:none;border-radius:12px;cursor:pointer;font-weight:600">Update Now</button>
 </div>
 
 <div class="content">
@@ -1010,10 +1016,54 @@ function createExampleSkin(){
   document.getElementById('skinsContent').textContent = 'Example cyberpunk.yaml that would be created at data/skins/cyberpunk.yaml:\n\n' + yaml + '\n\nIn free clone, this file is auto-created as example on first run by core/skin_engine.py';
 }
 
+async function checkUpdate(){
+  try{
+    const res = await fetch('/update/check');
+    const data = await res.json();
+    const banner = document.getElementById('updateBanner');
+    const badge = document.getElementById('updateBadge');
+    if(data.update_available){
+      banner.style.display = 'block';
+      badge.style.display = 'inline-block';
+      badge.textContent = `Update! ${data.behind_by||1} behind`;
+      document.getElementById('updateBannerText').textContent = `🚀 Update available! Local ${data.local?.short||'?'} behind remote ${data.remote?.short||'?'} by ${data.behind_by||1} commit(s): ${data.remote?.message?.slice(0,80)||''} - Click to update`;
+      // Also show in sessions pane banner
+    } else if(data.up_to_date){
+      banner.style.display = 'none';
+      badge.style.display = 'none';
+    }
+    return data;
+  }catch(e){
+    console.log('Update check failed', e);
+  }
+}
+
+async function doUpdate(event){
+  if(event) event.stopPropagation();
+  if(!confirm('Update from GitHub via git pull origin main + pip install? This will pull latest code.')) return;
+  document.getElementById('updateBannerText').textContent = '⏳ Updating via git pull + pip install...';
+  try{
+    const res = await fetch('/update/pull', {method:'POST'});
+    const data = await res.json();
+    if(data.success){
+      alert(`✅ Update success! New commit ${data.new_commit?.short||''}: ${data.new_commit?.message||''}\n\n${data.message}\n\nRefresh page to see new version. Dashboard and CLI will now show up to date.`);
+      document.getElementById('updateBanner').style.display = 'none';
+      document.getElementById('updateBadge').style.display = 'none';
+    } else {
+      alert(`❌ Update failed: ${data.error||data.pull_stderr||'Unknown'}\n\nTry manual: git pull origin main`);
+    }
+  }catch(e){
+    alert('Update error: '+e);
+  }
+}
+
 setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
+setInterval(checkUpdate, 30000); // Check for updates every 30 sec - shows in dashboard and CLI
 document.getElementById('chatInput')?.addEventListener('keypress', (e)=>{if(e.key==='Enter') sendChat();});
 loadSessions();
 loadPanel();
+checkUpdate(); // Initial check on load - shows update in dashboard
+
 </script>
 </body>
 </html>
