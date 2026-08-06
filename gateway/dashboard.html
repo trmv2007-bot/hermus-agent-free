@@ -690,7 +690,7 @@ async function loadKeys(){
   try{
     const res = await fetch('/keys/list');
     const data = await res.json();
-    let html = `<div class="card"><h4>LLM Provider Keys (Multi-Key up to 20 per provider, round-robin)</h4>`;
+    let html = `<div class="card"><h4>LLM Provider Keys (Multi-Key up to 20 per provider, round-robin) + Response Time Test</h4>`;
     const llmKeys = data.llm_keys || {};
     let total = 0;
     for(const provider in llmKeys){
@@ -698,15 +698,18 @@ async function loadKeys(){
       total += keys.length;
       html += `<div style="margin-bottom:12px"><b>${provider}</b> - ${keys.length} keys`;
       if(keys.length) html += ` <span style="font-size:0.8em;color:var(--text-muted)">(round-robin + fallback, ${keys.length} keys = ${keys.length*30} req/min if Groq)</span>`;
+      html += ` <button onclick="testAllKeysForProvider('${provider}')" style="padding:2px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em;margin-left:8px">Test All Response Time ⏱️</button>`;
       html += `<div style="margin-top:6px">`;
       keys.forEach(k=>{
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:4px"><span><code>${k.preview}</code> ${k.name||''} usage=${k.usage_count||0}</span><button onclick="removeKey('${provider}','${k.name||k.preview}')" style="padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--error);border-radius:4px;cursor:pointer;font-size:0.75em">Delete</button></div>`;
+        const avgTime = k.avg_response_time ? `${k.avg_response_time.toFixed(3)}s avg` : 'not tested';
+        const lastTime = k.last_response_time ? `${k.last_response_time.toFixed(3)}s last` : '';
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:6px"><div><code>${k.preview}</code> ${k.name||''}<br><small>usage=${k.usage_count||0} | ${avgTime} ${lastTime} | added ${k.added?.slice(0,10)||''}</small></div><div style="display:flex;gap:4px"><button onclick="testSingleKey('${provider}','${k.name||''}','${k.preview}')" style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em">Test ⏱️</button><button onclick="removeKey('${provider}','${k.name||k.preview}')" style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--error);border-radius:4px;cursor:pointer;font-size:0.7em">Delete</button></div></div>`;
       });
       html += `</div></div>`;
     }
     html += `<p>Total LLM keys: ${data.total_llm_keys||total} (max 20 per provider)</p></div>`;
 
-    html += `<div class="card"><h4>Custom APIs (Multi-Key up to 10 same name from different websites)</h4><p style="font-size:0.8em;color:var(--text-muted)">You can add 10 keys for same API name from different websites - round-robin + fallback + completes quickly as you requested</p>`;
+    html += `<div class="card"><h4>Custom APIs (Multi-Key up to 10 same name from different websites) + Response Time</h4><p style="font-size:0.8em;color:var(--text-muted)">You can add 10 keys for same API name from different websites - round-robin + fallback + completes quickly as you requested</p>`;
     const customApis = data.custom_apis || [];
     const grouped = {};
     customApis.forEach(api=>{
@@ -715,13 +718,15 @@ async function loadKeys(){
     });
     for(const name in grouped){
       const apis = grouped[name];
-      html += `<div style="margin-bottom:12px"><b>${name}</b> - ${apis.length} keys from different websites ${apis.length>1?'<span style="background:var(--gold);color:var(--bg);padding:2px 6px;border-radius:10px;font-size:0.7em">Multi-key ${apis.length}/10 round-robin</span>':''}<div style="margin-top:6px">`;
+      html += `<div style="margin-bottom:12px"><b>${name}</b> - ${apis.length} keys from different websites ${apis.length>1?'<span style="background:var(--gold);color:var(--bg);padding:2px 6px;border-radius:10px;font-size:0.7em">Multi-key ${apis.length}/10 round-robin</span>':''} <button onclick="testAllKeysForCustomApi('${name}')" style="padding:2px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em;margin-left:8px">Test All ⏱️</button><div style="margin-top:6px">`;
       apis.forEach(api=>{
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:4px"><span><code>${api.method} ${api.url.slice(0,50)}</code><br><small>${api.description.slice(0,60)} | ${api.preview} | ${api.id.slice(0,20)}</small></span><button onclick="removeCustomApi('${api.name}','${api.id}')" style="padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--error);border-radius:4px;cursor:pointer;font-size:0.75em">Delete</button></div>`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:4px"><span><code>${api.method} ${api.url.slice(0,50)}</code><br><small>${api.description.slice(0,60)} | ${api.preview} | ${api.id.slice(0,20)}</small></span><div style="display:flex;gap:4px"><button onclick="testSingleCustomApi('${api.name}','${api.id}')" style="padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em">Test ⏱️</button><button onclick="removeCustomApi('${api.name}','${api.id}')" style="padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--error);border-radius:4px;cursor:pointer;font-size:0.7em">Delete</button></div></div>`;
       });
       html += `</div></div>`;
     }
     html += `<p>Total custom APIs (unique keys): ${data.total_custom_apis||customApis.length}</p></div>`;
+
+    html += `<div class="card"><h4>⏱️ Response Time Test - How much time API key takes to get response from AI model</h4><p style="font-size:0.85em">As you requested: Can u add response test for api key like how much time does it take for api key to get response from that ai model<br><br>• Test single key: Measures time from request to response in seconds/ms, success/fail, tokens, model<br>• Test all keys for provider: Ranks keys by response time fastest first, shows average, fastest, slowest<br>• For custom APIs same name from different websites: Tests all 10 keys round-robin and ranks fastest<br>• Stored in data/response_times.json history last 50, avg response time per key in data/api_keys.json<br>• Use: Click Test ⏱️ buttons above or use CLI: hermus api test, hermus multikey parallel, or new: POST /response-times/test</p><button onclick="loadResponseTimes()" style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;margin-top:8px">Load Response Time History 📊</button><div id="responseTimeHistory" style="margin-top:10px"></div></div>`;
 
     html += `<div class="card"><h4>How Multi-Key Works (Free)</h4><p style="font-size:0.85em">• Add multiple keys for same provider (Groq) or same custom API name (weather_api) from different websites you know<br>• Agent uses round-robin: Call1 -> key1 from siteA, Call2 -> key2 from siteB, Call3 -> key3 from siteC, Call4 -> key1 again<br>• If key fails 429 rate limit, auto skip 5 min cooldown and fallback to next key<br>• Parallel execution: 3 tasks with 3 different keys in parallel via multiprocessing = 3x faster<br>• Up to 10 keys per custom API same name, 20 per provider (Groq/HF/OpenAI)</p></div>`;
 
@@ -729,6 +734,96 @@ async function loadKeys(){
   }catch(e){
     document.getElementById('keysContent').innerHTML = 'Error: '+e+'<br>Try refreshing. API: GET /keys/list';
   }
+}
+
+async function loadResponseTimes(){
+  try{
+    const res = await fetch('/response-times');
+    const data = await res.json();
+    const stats = data.stats || {};
+    const history = data.history || [];
+    let html = `<p>Total tests: ${stats.total_tests||0}, Successful: ${stats.successful||0}, Failed: ${stats.failed||0}, Avg: ${stats.avg_response_time_seconds||0}s</p>`;
+    if(stats.fastest){
+      html += `<p>Fastest: ${stats.fastest.api_key_preview||stats.fastest.provider} ${stats.fastest.response_time_seconds}s | Slowest: ${stats.slowest?.response_time_seconds||'?'}s</p>`;
+    }
+    html += '<div style="max-height:200px;overflow:auto">';
+    history.slice(0,10).forEach(h=>{
+      html += `<div style="padding:4px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:4px;font-size:0.8em"><b>${h.provider||h.api_name}</b> ${h.api_key_preview||''} - ${h.response_time_seconds}s ${h.success?'✅':'❌'} ${h.model||''} ${h.timestamp?.slice(11,19)||''}</div>`;
+    });
+    html += '</div>';
+    document.getElementById('responseTimeHistory').innerHTML = html;
+  }catch(e){
+    document.getElementById('responseTimeHistory').innerHTML = 'Error: '+e;
+  }
+}
+
+async function testSingleKey(provider, name, preview){
+  const key = prompt(`Enter full API key for ${provider} ${name} (${preview}) to test response time:`);
+  if(!key) return;
+  if(!confirm(`Test response time for ${provider} key ${name}? This will make a real API call and measure how much time it takes.`)) return;
+  try{
+    const res = await fetch('/response-times/test', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({provider: provider, api_key: key, prompt: 'Hello, what is Python async?'})
+    });
+    const data = await res.json();
+    alert(`Response time for ${provider} ${name}:\n${data.response_time_seconds}s (${data.response_time_ms}ms)\nSuccess: ${data.success}\nModel: ${data.model}\nTokens: ${data.tokens}\nPreview: ${data.response_preview?.slice(0,100)}`);
+    loadKeys();
+    loadResponseTimes();
+  }catch(e){alert('Error: '+e)}
+}
+
+async function testAllKeysForProvider(provider){
+  if(!confirm(`Test ALL keys for provider ${provider}? This will test each key and rank by response time fastest first.`)) return;
+  try{
+    const res = await fetch('/response-times/test', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({provider: provider, prompt: 'Hello, what is Python async?'})
+    });
+    const data = await res.json();
+    let msg = `Tested ${data.count} keys for ${provider}:\n\n`;
+    (data.results||[]).forEach((r,i)=>{
+      msg += `${i+1}. ${r.api_key_preview||r.provider} - ${r.response_time_seconds}s ${r.success?'✅':'❌'} ${r.model||''}\n`;
+    });
+    alert(msg);
+    loadKeys();
+  }catch(e){alert('Error: '+e)}
+}
+
+async function testSingleCustomApi(apiName, apiId){
+  const testArgs = prompt(`Enter test args JSON for ${apiName} (e.g., {"id": "1"} or {"q": "London"}):`, '{"id": "1"}');
+  let args = {};
+  try{ args = JSON.parse(testArgs); }catch{}
+  try{
+    const res = await fetch('/response-times/test', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({api_name: apiName, test_args: args})
+    });
+    const data = await res.json();
+    alert(`Response time for ${apiName} id ${apiId.slice(0,20)}:\n${data.response_time_seconds}s\nSuccess: ${data.success}\nStatus: ${data.status_code}\nPreview: ${data.response_preview?.slice(0,150)}`);
+    loadKeys();
+  }catch(e){alert('Error: '+e)}
+}
+
+async function testAllKeysForCustomApi(apiName){
+  if(!confirm(`Test ALL ${apiName} keys from different websites? Will rank by response time fastest first.`)) return;
+  try{
+    const res = await fetch('/response-times/test', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({api_name: apiName, test_args: {id: "1"}})
+    });
+    const data = await res.json();
+    let msg = `Tested ${data.count} keys for ${apiName}:\n\n`;
+    (data.results||[]).forEach((r,i)=>{
+      msg += `${i+1}. ${r.api_key_preview||''} - ${r.response_time_seconds}s ${r.success?'✅':'❌'} Status ${r.status_code||''}\n`;
+    });
+    alert(msg);
+    loadKeys();
+  }catch(e){alert('Error: '+e)}
 }
 
 async function loadCustomApis(){

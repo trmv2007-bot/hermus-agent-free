@@ -113,6 +113,13 @@ class HermusAgent:
         except:
             pass
 
+        # Response time tester - how much time API key takes to get response from AI model - free
+        try:
+            from core.response_tester import TOOLS as RESPONSE_TESTER_TOOLS
+            tools.extend(RESPONSE_TESTER_TOOLS)
+        except:
+            pass
+
         # Add custom APIs as tools - free custom API feature
         try:
             custom_tools = custom_api_manager.get_tool_definitions()
@@ -271,6 +278,16 @@ class HermusAgent:
                     return {"error": f"Trajectory tool {name} not found"}
                 except Exception as e:
                     return {"error": f"Trajectory tool {name} failed: {e}"}
+            # Response time tester - how much time API key takes
+            elif name in ("test_api_key_response_time", "test_custom_api_response_time", "get_response_time_stats"):
+                try:
+                    from core.response_tester import TOOL_MAP as RESPONSE_MAP
+                    func = RESPONSE_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Response tester tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Response tester tool {name} failed: {e}"}
             # Internet Eyes - Agent Reach features - free, zero API fees
             elif name in ("web_read", "rss_read", "youtube_transcript", "youtube_search", "github_read", "github_search", "twitter_read", "twitter_search", "bilibili_search", "reddit_read", "reddit_search", "v2ex_hot", "xueqiu_stock_search"):
                 try:

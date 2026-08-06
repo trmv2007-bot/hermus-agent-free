@@ -281,6 +281,56 @@ async def custom_apis_remove(payload: Dict):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/response-times")
+async def response_times_list():
+    """Get response time history - for Settings panel response test"""
+    try:
+        from core.response_tester import response_tester
+        history = response_tester.get_history(limit=50)
+        stats = response_tester.get_stats()
+        return {"history": history, "stats": stats}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/response-times/test")
+async def response_times_test(payload: Dict):
+    """Test response time for API key - how much time does API key take to get response from AI model - free"""
+    try:
+        from core.response_tester import response_tester
+        provider = payload.get("provider", "groq")
+        api_key = payload.get("api_key") or payload.get("key")
+        model = payload.get("model")
+        prompt = payload.get("prompt", "Hello, what is Python async?")
+        api_name = payload.get("api_name")
+
+        if api_name:
+            # Test custom API response time
+            test_args = payload.get("test_args") or {}
+            if isinstance(test_args, str):
+                try:
+                    import json
+                    test_args = json.loads(test_args)
+                except:
+                    test_args = {}
+            if api_key:
+                result = response_tester.test_custom_api_key(api_name, api_key=api_key, test_args=test_args)
+            else:
+                # Test all keys for same custom API name
+                results = response_tester.test_all_keys_for_custom_api(api_name, test_args=test_args)
+                return {"results": results, "count": len(results), "api_name": api_name}
+        else:
+            # Test LLM provider key
+            if api_key:
+                result = response_tester.test_llm_key(provider, api_key, model=model, prompt=prompt)
+                return result
+            else:
+                # Test all keys for provider
+                results = response_tester.test_all_keys_for_provider(provider, prompt=prompt, model=model)
+                return {"results": results, "count": len(results), "provider": provider}
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 # CLI for gateway setup/start - free
 def setup(platform: str):
     print(f"[Gateway] Setup for {platform} - Free")
