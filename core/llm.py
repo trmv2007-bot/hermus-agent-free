@@ -1,10 +1,11 @@
-"""Free LLM Abstraction - Ollama (offline free) + Groq free tier + HF free inference + mock"""
+"""Free LLM Abstraction - Ollama (offline free) + Groq free tier + HF free inference + mock + Optimized with caching"""
 import os
 import json
 import requests
 from typing import List, Dict, Any, Optional, Generator
 from .config import config
 from .token_counter import token_counter
+from .cache import llm_cache
 
 class LLMResponse:
     def __init__(self, content: str, tool_calls: Optional[List[Dict]] = None, usage: Optional[Dict] = None):
@@ -26,9 +27,17 @@ class FreeLLM:
         return "ollama", model_str
 
     def _call_ollama(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
-        """Ollama local free - http://localhost:11434 - no API key"""
+        """Ollama local free - http://localhost:11434 - no API key - Optimized with caching"""
         # Count prompt tokens free
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
+
+        # Check cache - optimize: same prompt + tools = cached response
+        cache_key = llm_cache.make_key("ollama", self.model_name, messages[-1].get("content","")[:200] if messages else "", len(messages))
+        cached = llm_cache.get(cache_key)
+        if cached:
+            # Return cached with updated usage (cache hit)
+            cached.usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(cached.content), model=f"ollama/{self.model_name}")
+            return cached
 
         url = f"{config.ollama_base_url}/api/chat"
         payload = {
@@ -54,7 +63,10 @@ class FreeLLM:
                     })
             completion_tokens = token_counter.count_text(content)
             usage = token_counter.estimate_cost(prompt_tokens, completion_tokens, model=f"ollama/{self.model_name}")
-            return LLMResponse(content, tool_calls, usage=usage)
+            response = LLMResponse(content, tool_calls, usage=usage)
+            # Cache successful response - optimize
+            llm_cache.set(cache_key, response)
+            return response
         except requests.exceptions.ConnectionError:
             # Mock with token counting
             mock_content = f"⚠️ Ollama not running at {config.ollama_base_url}. Start with: ollama serve && ollama pull {self.model_name}\n\nFallback mock response for: {messages[-1].get('content','')[:100]}"

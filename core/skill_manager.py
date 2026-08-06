@@ -1,20 +1,26 @@
-"""Skill Manager - Autonomous skill creation + self-improvement, agentskills.io compatible, free"""
+"""Skill Manager - Autonomous skill creation + self-improvement, agentskills.io compatible, free - Optimized with caching"""
 import json
 import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
 from .config import config
+from .cache import skill_cache
 
 class SkillManager:
-    """Free skill system: creates reusable skills from trajectories, self-improves on use"""
+    """Free skill system: creates reusable skills from trajectories, self-improves on use - Optimized"""
 
     def __init__(self, skills_dir: str = None):
         self.skills_dir = Path(skills_dir or config.resolve_path(config.skills_dir))
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
     def list_skills(self) -> List[Dict]:
-        """List all skills - compatible with /skills command"""
+        """List all skills - compatible with /skills command - Optimized with caching"""
+        cache_key = skill_cache.make_key("list_skills")
+        cached = skill_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         skills = []
         for skill_dir in self.skills_dir.iterdir():
             if skill_dir.is_dir():
@@ -23,7 +29,6 @@ class SkillManager:
                 if md_path.exists():
                     try:
                         content = md_path.read_text()
-                        # Parse simple frontmatter
                         skills.append({
                             "name": skill_dir.name,
                             "path": str(skill_dir),
@@ -32,10 +37,16 @@ class SkillManager:
                         })
                     except:
                         pass
+        skill_cache.set(cache_key, skills)
         return skills
 
     def get_skill(self, name: str) -> Dict:
-        """Get skill by name"""
+        """Get skill by name - Optimized with caching"""
+        cache_key = skill_cache.make_key("get_skill", name)
+        cached = skill_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         skill_dir = self.skills_dir / name
         if not skill_dir.exists():
             return {}
@@ -46,6 +57,8 @@ class SkillManager:
             result["doc"] = md_path.read_text()
         if py_path.exists():
             result["code"] = py_path.read_text()
+        
+        skill_cache.set(cache_key, result)
         return result
 
     def should_create_skill(self, trajectory: List[Dict]) -> bool:
@@ -61,10 +74,9 @@ class SkillManager:
         # Build trajectory summary for LLM
         traj_text = "\n".join([
             f"{turn.get('role')}: {turn.get('content','')[:300]} | Tools: {turn.get('tool_calls')}"
-            for turn in trajectory[-10:]  # last 10 turns
+            for turn in trajectory[-10:]
         ])
 
-        # Use free LLM to create skill
         try:
             from .llm import free_llm
             messages = [
@@ -72,15 +84,12 @@ class SkillManager:
                 {"role": "user", "content": f"Trajectory:\n{traj_text}\n\nCreate a skill. Return JSON: {{\"name\": \"skill_name_snake_case\", \"description\": \"...\", \"code\": \"def ...\"}}"}
             ]
             resp = free_llm.chat(messages)
-            # Try parse JSON from response
             content = resp.content
-            # Extract JSON if wrapped in markdown
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 try:
                     skill_data = json.loads(json_match.group(0))
                 except:
-                    # Fallback simple
                     skill_data = {
                         "name": f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                         "description": f"Auto-created from session {session_id}: {traj_text[:200]}",
@@ -99,7 +108,6 @@ class SkillManager:
                 "code": f"# Fallback skill\n# Original trajectory: {traj_text[:500]}\n\ndef run():\n    pass\n"
             }
 
-        # Sanitize name
         name = re.sub(r'[^a-zA-Z0-9_]', '_', skill_data.get("name", "auto_skill")).lower()
         if not name:
             name = f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -107,7 +115,6 @@ class SkillManager:
         skill_dir = self.skills_dir / name
         skill_dir.mkdir(exist_ok=True)
 
-        # Write SKILL.md - agentskills.io compatible
         md_content = f"""# {name}
 
 {skill_data.get('description','Auto-created skill')}
@@ -132,13 +139,12 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
 ```
 """
         (skill_dir / "SKILL.md").write_text(md_content)
-
-        # Write skill.py
         code = skill_data.get("code", "# No code")
-        # Ensure it has a run function
         if "def " not in code:
             code = f"def run():\n    {code}\n"
         (skill_dir / "skill.py").write_text(code)
+        # Clear cache after creation
+        skill_cache.clear()
 
         return {"created": True, "name": name, "path": str(skill_dir), "description": skill_data.get("description","")}
 
@@ -146,7 +152,6 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
         """Log usage for self-improvement - free SQLite"""
         try:
             from .memory import memory
-            # Use memory's skill_usage table via its DB
             import sqlite3
             db_path = memory.db_path
             conn = sqlite3.connect(str(db_path))
@@ -166,7 +171,6 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
         if not skill:
             return {"improved": False, "reason": "Skill not found"}
 
-        # Get usage history
         try:
             from .memory import memory
             import sqlite3
@@ -182,7 +186,6 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
             if len(usages) < 2:
                 return {"improved": False, "reason": "Not enough usage to improve"}
 
-            # Use free LLM to improve code based on feedback
             from .llm import free_llm
             usage_text = "\n".join([f"{'SUCCESS' if u[3] else 'FAIL'}: {u[4]}" for u in usages])
             messages = [
@@ -191,21 +194,19 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
             ]
             resp = free_llm.chat(messages)
             improved_code = resp.content
-            # Extract code block if markdown
             code_match = re.search(r'```python\n(.*?)\n```', improved_code, re.DOTALL)
             if code_match:
                 improved_code = code_match.group(1)
             else:
-                # Try generic code block
                 code_match = re.search(r'```\n(.*?)\n```', improved_code, re.DOTALL)
                 if code_match:
                     improved_code = code_match.group(1)
 
-            # Save improved version with backup
             skill_dir = Path(skill["path"])
             old_code = (skill_dir / "skill.py").read_text()
             (skill_dir / f"skill.py.bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}").write_text(old_code)
             (skill_dir / "skill.py").write_text(improved_code)
+            skill_cache.clear()
 
             return {"improved": True, "name": skill_name, "old_success": success_count, "new_code": improved_code[:500]}
 

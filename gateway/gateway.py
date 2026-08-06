@@ -1,18 +1,23 @@
-"""Gateway - Single process for Telegram, Discord, Slack, WhatsApp, Signal, CLI - free, cross-platform continuity"""
+"""Gateway - Single process for Telegram, Discord, Slack, WhatsApp, Signal, CLI - free, cross-platform continuity - Optimized with caching, compression, rate limiting"""
 import os
 import asyncio
 from pathlib import Path
 from typing import Dict
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from core.config import config
 from core.agent import HermusAgent
 from core.task_tracker import task_tracker
+from core.cache import get_cache_stats
 
-app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free")
+app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized")
+
+# Add GZip compression for faster dashboard - optimized
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Store agents per user/platform for continuity
 AGENTS: Dict[str, HermusAgent] = {}
@@ -25,7 +30,27 @@ def get_agent_for_user(platform: str, user_id: str, model: str = None) -> Hermus
 
 @app.get("/")
 async def root():
-    return {"message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI", "platforms": ["telegram", "discord", "cli"], "agents": len(AGENTS)}
+    from core.cache import get_cache_stats
+    return {
+        "message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI - Optimized",
+        "platforms": ["telegram", "discord", "cli"],
+        "agents": len(AGENTS),
+        "optimized": True,
+        "cache_stats": get_cache_stats(),
+        "version": "2.0-free-optimized"
+    }
+
+@app.get("/cache/stats")
+async def cache_stats():
+    """Get cache stats - for optimization dashboard"""
+    from core.cache import get_cache_stats, clear_all_caches
+    return get_cache_stats()
+
+@app.post("/cache/clear")
+async def cache_clear():
+    """Clear all caches - for optimization"""
+    from core.cache import clear_all_caches
+    return clear_all_caches()
 
 @app.get("/agents/status")
 async def agents_status():

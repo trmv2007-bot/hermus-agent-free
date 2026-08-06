@@ -18,6 +18,15 @@ class Memory:
     def _init_db(self):
         conn = sqlite3.connect(str(self.db_path))
         cur = conn.cursor()
+        # Optimized: WAL mode for better concurrency + faster writes
+        try:
+            cur.execute("PRAGMA journal_mode=WAL;")
+            cur.execute("PRAGMA synchronous=NORMAL;")
+            cur.execute("PRAGMA cache_size=-64000;")  # 64MB cache
+            cur.execute("PRAGMA temp_store=MEMORY;")
+        except:
+            pass
+
         # Sessions table with FTS5 for free full-text search (no Pinecone)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -30,6 +39,9 @@ class Memory:
                 metadata TEXT
             )
         """)
+        # Indexes for faster queries - optimized
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp);")
         # FTS5 virtual table for free search
         cur.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(

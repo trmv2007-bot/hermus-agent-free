@@ -1,5 +1,7 @@
-"""Free Web Search - DuckDuckGo, no API key"""
+"""Free Web Search - DuckDuckGo, no API key - Optimized with caching"""
 from typing import List, Dict
+from core.cache import web_search_cache
+
 try:
     from duckduckgo_search import DDGS
     DDG_AVAILABLE = True
@@ -7,15 +9,21 @@ except ImportError:
     DDG_AVAILABLE = False
 
 def web_search(query: str, max_results: int = 5) -> List[Dict]:
-    """Free web search via DuckDuckGo - no API key"""
+    """Free web search via DuckDuckGo - no API key - Optimized with caching"""
+    # Check cache first - optimize
+    cache_key = web_search_cache.make_key(query, max_results)
+    cached = web_search_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     if not DDG_AVAILABLE:
-        # Fallback mock
-        return [{"title": f"Mock result for {query}", "href": "https://example.com", "body": f"This is mock search result for {query} - install duckduckgo-search for real free search: pip install duckduckgo-search"}]
+        result = [{"title": f"Mock result for {query}", "href": "https://example.com", "body": f"This is mock search result for {query} - install duckduckgo-search for real free search: pip install duckduckgo-search"}]
+        web_search_cache.set(cache_key, result)
+        return result
 
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
-            # Normalize to expected format
             normalized = []
             for r in results:
                 normalized.append({
@@ -23,9 +31,12 @@ def web_search(query: str, max_results: int = 5) -> List[Dict]:
                     "href": r.get("href",""),
                     "body": r.get("body","")
                 })
+            web_search_cache.set(cache_key, normalized)
             return normalized
     except Exception as e:
-        return [{"title": "Search error", "href": "", "body": f"Search failed: {e}. Mock fallback for {query}"}]
+        result = [{"title": "Search error", "href": "", "body": f"Search failed: {e}. Mock fallback for {query}"}]
+        web_search_cache.set(cache_key, result)
+        return result
 
 # Tool definition for LLM
 TOOL_DEFINITION = {
