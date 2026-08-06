@@ -162,6 +162,125 @@ async def command_endpoint(payload: Dict):
 async def platforms():
     return {"platforms": list(set([k.split(':')[0] for k in AGENTS.keys()])), "active_agents": len(AGENTS), "task_tracker": task_tracker.get_status()}
 
+@app.get("/keys/list")
+async def keys_list():
+    """List API keys - free, with redacted preview - for Settings panel to add API key"""
+    try:
+        from core.multi_key import multi_key_manager
+        from core.custom_api import custom_api_manager
+        # LLM provider keys
+        llm_keys = multi_key_manager.list_keys()
+        # Redact preview
+        redacted = {}
+        for provider, keys in llm_keys.items():
+            redacted[provider] = []
+            for k in keys:
+                if isinstance(k, dict):
+                    key_val = k.get("key","")
+                    redacted.append({
+                        "name": k.get("name",""),
+                        "preview": f"{key_val[:6]}...{key_val[-4:]}" if len(key_val) > 10 else "****",
+                        "added": k.get("added",""),
+                        "usage_count": k.get("usage_count",0),
+                        "provider": provider
+                    })
+                else:
+                    redacted[provider].append({"preview": f"{k[:6]}...{k[-4:]}" if len(k)>10 else "****", "provider": provider})
+
+        # Custom APIs
+        custom_apis = custom_api_manager.list_apis()
+        custom_redacted = []
+        for api in custom_apis:
+            token = api.get("auth",{}).get("token") or api.get("auth",{}).get("value") or ""
+            custom_redacted.append({
+                "name": api["name"],
+                "description": api.get("description",""),
+                "url": api.get("url",""),
+                "method": api.get("method","GET"),
+                "preview": f"{token[:6]}...{token[-4:]}" if token and len(token)>10 else "no-token" if not token else "****",
+                "id": api.get("id",""),
+                "created": api.get("created","")
+            })
+
+        return {
+            "llm_keys": redacted,
+            "custom_apis": custom_redacted,
+            "total_llm_keys": sum(len(v) for v in llm_keys.values()),
+            "total_custom_apis": len(custom_apis),
+            "note": "Free API Keys Management - Add API key in Settings via /keys/add endpoint or dashboard. Keys stored in data/api_keys.json and data/custom_apis.json, local only, not uploaded."
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/keys/add")
+async def keys_add(payload: Dict):
+    """Add API key via Settings panel - free"""
+    try:
+        from core.multi_key import multi_key_manager
+        provider = payload.get("provider", "groq")
+        key = payload.get("key") or payload.get("api_key") or payload.get("token")
+        name = payload.get("name")
+        if not key:
+            return JSONResponse({"success": False, "error": "Missing key/api_key/token"}, status_code=400)
+
+        result = multi_key_manager.add_key(provider, key, name=name)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/keys/remove")
+async def keys_remove(payload: Dict):
+    """Remove API key via Settings"""
+    try:
+        from core.multi_key import multi_key_manager
+        provider = payload.get("provider")
+        key = payload.get("key") or payload.get("name")
+        if not provider or not key:
+            return JSONResponse({"success": False, "error": "Need provider and key/name"}, status_code=400)
+        result = multi_key_manager.remove_key(provider, key)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/custom-apis/add")
+async def custom_apis_add(payload: Dict):
+    """Add custom API via Settings panel - free"""
+    try:
+        from core.custom_api import custom_api_manager
+        result = custom_api_manager.add_api(payload)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.get("/custom-apis/list")
+async def custom_apis_list():
+    """List custom APIs"""
+    try:
+        from core.custom_api import custom_api_manager
+        apis = custom_api_manager.list_apis()
+        return {"custom_apis": apis, "count": len(apis)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/custom-apis/remove")
+async def custom_apis_remove(payload: Dict):
+    """Remove custom API by name or id - for Settings panel add API key in settings"""
+    try:
+        from core.custom_api import custom_api_manager
+        name = payload.get("name")
+        api_id = payload.get("id")
+        # Try by id first, then name
+        if api_id:
+            result = custom_api_manager.remove_api(api_id)
+            if not result.get("success"):
+                # Try by name
+                result = custom_api_manager.remove_api(name)
+        else:
+            result = custom_api_manager.remove_api(name)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 # CLI for gateway setup/start - free
 def setup(platform: str):
     print(f"[Gateway] Setup for {platform} - Free")
