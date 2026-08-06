@@ -76,6 +76,20 @@ class HermusAgent:
         except Exception as e:
             print(f"[Internet Eyes] Failed to load: {e}")
 
+        # Agent Reach Doctor - real probing
+        try:
+            from tools.agent_reach_doctor import TOOLS as DOCTOR_TOOLS
+            tools.extend(DOCTOR_TOOLS)
+        except:
+            pass
+
+        # More platforms: Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou
+        try:
+            from tools.facebook import TOOLS as FB_TOOLS
+            tools.extend(FB_TOOLS)
+        except:
+            pass
+
         # Backends: Docker, SSH, Modal free tier, Daytona, Vercel Sandbox
         try:
             from backends.backend_manager import TOOL_DEFINITION as BACKEND_TOOL
@@ -267,6 +281,26 @@ class HermusAgent:
                     return {"error": f"Internet Eyes tool {name} not found"}
                 except Exception as e:
                     return {"error": f"Internet Eyes tool {name} failed: {e}"}
+            # Agent Reach Doctor
+            elif name in ("doctor_check_all", "doctor_text_report"):
+                try:
+                    from tools.agent_reach_doctor import TOOL_MAP as DOCTOR_MAP
+                    func = DOCTOR_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Doctor tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Doctor tool {name} failed: {e}"}
+            # Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou
+            elif name in ("facebook_search", "instagram_user_search", "xiaohongshu_search", "linkedin_read", "xiaoyuzhou_transcribe"):
+                try:
+                    from tools.facebook import TOOL_MAP as FB_MAP
+                    func = FB_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Social tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Social tool {name} failed: {e}"}
             else:
                 # Check if it's a custom API - free custom API feature
                 try:
