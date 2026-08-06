@@ -120,6 +120,13 @@ class HermusAgent:
         except:
             pass
 
+        # Pentest tools - Strix features - Open-source AI penetration testing tool
+        try:
+            from tools.pentest import TOOLS as PENTEST_TOOLS
+            tools.extend(PENTEST_TOOLS)
+        except Exception as e:
+            print(f"[Pentest] Failed to load pentest tools: {e}")
+
         # Add custom APIs as tools - free custom API feature
         try:
             custom_tools = custom_api_manager.get_tool_definitions()
@@ -288,6 +295,16 @@ class HermusAgent:
                     return {"error": f"Response tester tool {name} not found"}
                 except Exception as e:
                     return {"error": f"Response tester tool {name} failed: {e}"}
+            # Pentest tools - Strix features - free
+            elif name in ("subdomain_enum", "fingerprinting", "attack_surface_mapping", "browser_xss_test", "shell_exploit", "custom_exploit_runtime", "http_proxy_intercept", "search_vuln_kb", "get_owasp_categories", "comprehensive_scan", "scan_api_spec", "pentest_distribute_task", "pentest_chain_vulns", "pentest_scalable_scan", "pentest_create_run", "pentest_add_finding", "pentest_generate_patch", "pentest_generate_report", "pentest_view_run"):
+                try:
+                    from tools.pentest import TOOL_MAP as PENTEST_MAP
+                    func = PENTEST_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Pentest tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Pentest tool {name} failed: {e}"}
             # Internet Eyes - Agent Reach features - free, zero API fees
             elif name in ("web_read", "rss_read", "youtube_transcript", "youtube_search", "github_read", "github_search", "twitter_read", "twitter_search", "bilibili_search", "reddit_read", "reddit_search", "v2ex_hot", "xueqiu_stock_search"):
                 try:
