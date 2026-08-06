@@ -42,7 +42,7 @@ class HermusAgent:
             pass
 
     def _get_tools(self) -> List[Dict]:
-        """40+ free tools - we implement core free ones + custom APIs + browser, vision, voice, backends, trajectory"""
+        """40+ free tools - we implement core free ones + custom APIs + browser, vision, voice, backends, trajectory + internet eyes (Agent Reach)"""
         tools = []
         tools.append(WEB_SEARCH_TOOL)
         tools.extend(FILE_TOOLS)
@@ -68,6 +68,13 @@ class HermusAgent:
             tools.extend(VOICE_TOOLS)
         except:
             pass
+
+        # Internet Eyes - Agent Reach features - Give AI agent eyes to see entire internet, zero API fees
+        try:
+            from tools.internet_eyes import TOOLS as INTERNET_EYES_TOOLS
+            tools.extend(INTERNET_EYES_TOOLS)
+        except Exception as e:
+            print(f"[Internet Eyes] Failed to load: {e}")
 
         # Backends: Docker, SSH, Modal free tier, Daytona, Vercel Sandbox
         try:
@@ -250,6 +257,16 @@ class HermusAgent:
                     return {"error": f"Trajectory tool {name} not found"}
                 except Exception as e:
                     return {"error": f"Trajectory tool {name} failed: {e}"}
+            # Internet Eyes - Agent Reach features - free, zero API fees
+            elif name in ("web_read", "rss_read", "youtube_transcript", "youtube_search", "github_read", "github_search", "twitter_read", "twitter_search", "bilibili_search", "reddit_read", "reddit_search", "v2ex_hot", "xueqiu_stock_search"):
+                try:
+                    from tools.internet_eyes import TOOL_MAP as INTERNET_MAP
+                    func = INTERNET_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Internet Eyes tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Internet Eyes tool {name} failed: {e}"}
             else:
                 # Check if it's a custom API - free custom API feature
                 try:
