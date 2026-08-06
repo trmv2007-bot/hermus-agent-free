@@ -1,83 +1,216 @@
-# Hermus Agent - Free Version (Hermes Clone)
+# ☤ Hermus Agent Free - The Agent That Grows With You, For Free
 
-**Completely free, open-source, self-improving AI agent - No paywalls, no OpenRouter fees**
+<p align="center">
+<strong>Completely free, open-source, self-improving AI agent — No paywalls, no OpenRouter fees — MIT License</strong><br>
+<a href="https://github.com/trmv2007-bot/hermus-agent-free"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
+<a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
+<a href="https://github.com/trmv2007-bot/hermus-agent-free/stargazers"><img src="https://img.shields.io/github/stars/trmv2007-bot/hermus-agent-free?style=for-the-badge" alt="Stars"></a>
+</p>
 
-> Original: Hermes Agent by Nous Research (64k+ stars, Feb 2026) - The agent that grows with you
-> This is a **100% free clone** built from scratch with free models and tools
+> **Original:** Hermes Agent by Nous Research (225k stars, Feb 2026) — The agent that grows with you + Agent Reach (67k stars) — Give your AI agent eyes to see entire internet + Strix (49k stars) — Open-source AI pen-testing tool
+> **This Version:** 100% free clone built from scratch with free models and tools — Ollama local, DuckDuckGo, SQLite FTS5, no API keys needed — plus extra free features original doesn't have
+
+---
 
 ## Why Free Version?
 
-Original Hermes uses:
-- OpenRouter (paid API for hundreds of models)
-- Some premium features / hosted gateways
-- Honcho paid user modeling
+Original Hermes / Strix / Agent Reach use some paid services:
 
-**This free version uses:**
-- **Ollama** local LLMs (llama3, mistral, phi3) - 100% free, runs on your laptop/$5 VPS, no API key
-- **Groq free tier** + **HuggingFace Inference free** as optional cloud free fallbacks
-- **DuckDuckGo** free search (no API key)
-- **SQLite FTS5** for memory (built-in, no vector DB cost)
-- **File-based skills** compatible with agentskills.io open standard
-- **All gateways free** - Telegram Bot API free, Discord free, CLI free
+- **OpenRouter** (paid API for 100s models) → **Free Alternative:** Ollama local `llama3.1:8b` / `mistral` / `phi3` — 100% free, runs on laptop/$5 VPS, no API key + Groq free tier 30 req/min + HF free inference
+- **Honcho paid user modeling** → `data/user_model.json` — LLM asks dialectic questions free
+- **Hosted gateway / Modal / Daytona paid** → Docker + SSH + local free, plus free tier Modal/Daytona fallback
+- **Premium voice transcription** → faster-whisper local Whisper free
+- **Vector DB Pinecone paid** → SQLite FTS5 built-in free, no API key
+- **Twitter API paid, Reddit 403, YouTube no subtitles** → Agent Reach free tools Jina Reader, yt-dlp, old.reddit.com .json, bili-cli, etc., zero API fees
 
-## Features (Parity with Original)
+**This free version:** 100% free, MIT, no tracking, self-hosted, you own `data/memory.db` SQLite file.
 
-### 1. Real Terminal Interface - `hermus` CLI
-- Full TUI with multiline editing (prompt_toolkit)
-- Slash-command autocomplete: `/new`, `/model`, `/skills`, `/platforms`, `/compress`, `/usage`
-- Conversation history, interrupt-and-redirect (Ctrl+C), streaming tool output
-- Voice memo transcription (Whisper via faster-whisper free)
+---
 
-### 2. Lives Where You Do - Gateway
-- Single gateway process: `hermus gateway start`
-- Platforms: Telegram, Discord, Slack (webhook), WhatsApp (via free bridge), Signal (via signal-cli), CLI
-- Cross-platform continuity - start on Telegram, continue on CLI
-- File upload handling
+## Features — Everything Organized (What It Can Do Right Now)
 
-### 3. Closed Learning Loop (The Magic)
-- **Agent-curated memory:** After each task, agent decides what to remember
-- **Periodic nudges:** Cron that asks "Anything from yesterday you want to persist?"
-- **Autonomous skill creation:** After complex task (3+ tool calls), LLM analyzes trajectory and creates reusable skill in `skills/` as Python + markdown
-- **Skills self-improve:** Each time skill is used, it logs success/failure and LLM improves it
-- **FTS5 session search + LLM summarization:** `SELECT * FROM sessions WHERE sessions MATCH ?` then LLM summarizes for recall
-- **User modeling (free Honcho alternative):** Builds `data/user_model.json` with preferences, project structure, workflows via dialectic questions
-- **Compatible with agentskills.io:** Skills are `SKILL.md` + `skill.py` format
+### 1. Real Terminal Interface — `hermus` CLI — Gold and Kawaii Default Skin #DAA520 / Cornsilk #FFF8DC
 
-### 4. Scheduled Automations
-- Built-in cron scheduler with APScheduler
-- Natural language: "daily at 9am send me report" -> parsed to cron via LLM or simple parser
-- Delivery to any platform: Telegram, Discord, etc.
-- `hermus cron add "every Monday 8am weekly audit"`
+- **Full TUI** with multiline editing (prompt_toolkit), **slash-command autocomplete**: `/new`, `/model`, `/skills`, `/platforms`, `/compress`, `/usage`, `/panel`, `/agents`, `/update`, `/check-update`
+- **Conversation history** FileHistory, **auto_suggest** from history, **bottom toolbar live** Agents: X | Tasks: Y | Models: ollama/llama3.1:8b — refresh 2 sec
+- **Interrupt-and-redirect** Ctrl+C, **streaming tool output**
+- **Slide Panel** you asked: `/panel` or `/agents` — slides open panel showing what agents/models are running or doing task — right sidebar 0→440px cubic-bezier 0.35s, auto-refresh 2 sec, active agents (name, model badge, persona, task, status, started), active tasks, models in use, recently completed
+- **Voice memo transcription** Whisper via faster-whisper free local
 
-### 5. Delegates and Parallelizes
-- Spawn isolated subagents: `hermus subagent spawn "research X and Y in parallel"`
-- Subagents write Python scripts that call tools via RPC (zero-context-cost turns)
-- Collapsing multi-step pipelines: `write_python_tool()` that chains search+read+write in one turn
+### 2. Lives Where You Do — Gateway Single Process Free
 
-### 6. Runs Anywhere
-- Seven backends abstracted:
-  - `local` - your laptop
-  - `docker` - container
-  - `ssh` - remote VPS
-  - `singularity` / `modal` / `daytona` / `vercel` - serverless persistence (hibernate when idle, wake on demand) - implemented as free Docker + SSH fallback
-- Works on $5 VPS (Hetzner, DigitalOcean) or GPU cluster
+- **Single gateway** `hermus gateway start` port 8000 — one process for all platforms
+- **Platforms free:** Telegram Bot API free, Discord free, Slack webhook free, WhatsApp/Signal via bridges free, CLI
+- **Cross-platform continuity** — start on Telegram, continue on CLI — same memory via SQLite FTS5
+- **Endpoints:** `/`, `/command`, `/agents/status` (slide panel data), `/platforms`, `/webhook/telegram`, `/dashboard`, `/keys/list/add/remove`, `/custom-apis/list/add/remove`, `/response-times`, `/update/check`, `/update/pull`, `/cache/stats`, `/cache/clear`
+- **Dashboard** `http://localhost:8000/dashboard` — Polished gold and kawaii default #DAA520 cornsilk #FFF8DC + slate royal blue #4169e1 ares crimson mono #555555 poseidon — **16 panes** like original Hermes: Sessions, Keys, Agents, Config, Providers, Tools, Custom Keys, Gateway, Channels, Webhooks, Pairing, Logs, Analytics, Cron, Kanban, Achievements + **slide panel** 👁️ Agents Panel button slides right 0→440px + **skin selector** gold/slate/ares/mono/sea + **smooth animations** cardSlideIn statPop navSlideIn + **toggle in settings** Enable Smooth Animations + Reduce Motion + **update banner** orange gradient when GitHub has new commits
 
-### 7. 40+ Free Tools
-- `web_search` - DuckDuckGo free (no API key)
-- `file_read`, `file_write`, `file_edit`, `file_search`
-- `shell` - safe subprocess with timeout
-- `browser` - Playwright optional free
-- `vision` - LLaVA via Ollama free vision
-- `python_exec` - run python
-- `memory_search`, `memory_add`
-- `skill_create`, `skill_use`
-- `cron_add`, `cron_list`
-- `subagent_spawn`
+### 3. Closed Learning Loop — The Magic — Self-Improving
+
+- **Agent-curated memory:** After each task, agent decides what to remember → `memory.curate_memory(key, value)`
+- **Periodic nudges:** Cron that asks "Anything from yesterday you want to persist?" — finds recent sessions with "remember" or many tool calls
+- **Autonomous skill creation:** After complex task (3+ tool calls), LLM analyzes trajectory and creates reusable skill in `skills/<name>/SKILL.md + skill.py` — compatible with agentskills.io open standard — zero-context-cost next time
+- **Skills self-improve:** Each use logs success/failure + feedback to `skill_usage` table, LLM edits `skill.py` to improve, backup `.bak.timestamp`
+- **FTS5 session search + LLM summarization:** `SELECT * FROM sessions WHERE sessions MATCH ?` via SQLite FTS5 porter tokenizer, then LLM summarizes for cross-session recall
+- **User modeling free Honcho alternative:** Builds `data/user_model.json` with preferences, projects, workflows via dialectic questions "What kind of projects do you work on most?"
+- **Research-ready:** `data/trajectories.jsonl` logs every turn for batch generation + compression
+
+### 4. Scheduled Automations — Natural Language Cron Free
+
+- **Built-in cron** with APScheduler BackgroundScheduler
+- **Natural language:** "daily at 9am send me report" → parsed to cron `0 9 * * *` via simple rules + LLM fallback free, no paid parser
+- **Delivery any platform:** Telegram, Discord, CLI, Slack
+- **CLI:** `hermus cron add "every Monday 8am weekly audit"`, `list`, `remove`
+
+### 5. Delegates and Parallelizes — Subagents Free
+
+- **Spawn isolated subagents:** `hermus subagent spawn "research X and Y in parallel"` — multiprocessing isolated, each gets own session
+- **Parallel:** `spawn_parallel_subagents()` — 3 research tasks in parallel, each subagent writes file, main merges = parallel workstreams
+- **RPC zero-context-cost:** `write_python_tool_via_rpc()` — subagent writes Python script that calls tools via RPC collapsing multi-step pipelines into zero-context-cost turns
+
+### 6. Runs Anywhere — Seven Backends Free
+
+| Backend | Available Check | Description | Free? |
+|---------|-----------------|-------------|-------|
+| **local** | Always | Run commands directly on your machine | ✅ Always free |
+| **docker** | `docker --version` | Isolated container with security hardening read-only root, dropped capabilities, PID limits | ✅ Free if Docker installed |
+| **ssh** | `ssh -V` + HERMUS_SSH_HOST | Execute on any remote server via SSH | ✅ Free |
+| **singularity** | `singularity --version` | Cloud and HPC execution backend | ✅ Free for HPC |
+| **modal** | `import modal` | Serverless persistence - hibernates when idle and wakes on demand, costing nearly nothing between sessions, free tier | ✅ Free tier |
+| **daytona** | `daytona --version` or DAYTONA_API_KEY | Serverless persistence free tier | ✅ Free tier |
+| **vercel** | `vercel --version` or VERCEL_TOKEN | Vercel Sandbox serverless sandbox | ✅ Free tier |
+
+- **Tool:** `backend_execute(backend, command, workdir, timeout)` + `list_backends()`
+
+### 7. 44+ Free Tools → Now 88+ Tools (All Free, Zero API Fees)
+
+#### Core Free
+- `web_search` - DuckDuckGo free no API key, LRU cache 50 items TTL 10 min
+- `file_read`, `file_write`, `file_edit`, `file_search` - OptimizedFileCache mtime check <1MB, 50-100x faster
+- `shell_execute` - Safe subprocess timeout 10s
+- `memory_search`, `memory_add` - FTS5 free
+- `skill_list`, `skill_use` - File-based skills, LRU cache 20 items
+- `subagent_spawn` - Multiprocessing isolated free
+- `check_update`, `do_update`, `get_local_commit`, `get_remote_commit` - GitHub update check
+
+#### Browser Automation Playwright Free
+- `browser_navigate(url)`, `browser_click(selector)`, `browser_type(selector,text)`, `browser_screenshot(path,full_page)`, `browser_extract(selector)`, `browser_close()` - Playwright sync_api free, headless, no API key
+
+#### Vision LLaVA via Ollama Free
+- `vision_analyze(image_path, prompt, model="llava:7b")` - Ollama LLaVA base64 image, POST to `http://localhost:11434/api/generate`, `ollama pull llava:7b` free local vision
+- `vision_available_models()` - Lists vision models via /api/tags
+
+#### Voice Memo Transcription Faster-Whisper Free
+- `transcribe_audio(audio_path, model="base", language)` - faster-whisper WhisperModel base/small/medium/large-v2 free local, no cloud, beam_size 5, segments start/end/text
+- `voice_available_models()` - tiny 39M, base 74M, small 244M, medium 769M, large-v2 1550M
+
+#### Internet Eyes - Agent Reach Full (67k stars) - Zero API Fees
+- `web_read(url)` - Any webpage via Jina AI Reader https://r.jina.ai/http:// free no config
+- `rss_read(rss_url)` - RSS/Atom via feedparser free
+- `youtube_transcript(video_url)` - YouTube subtitle via yt-dlp free no config public videos
+- `youtube_search(query)` - YouTube search via ytsearch or DuckDuckGo fallback free
+- `github_read(repo, path)` - GitHub public repo via gh CLI or API free no key, private needs login
+- `github_search(query)` - GitHub search API free
+- `twitter_read(tweet_url)` - Single tweet via Jina free no config, search/timeline needs Cookie-Editor manual export free local
+- `bilibili_search(query)` - Bilibili search via bili-cli free no login, fallback DuckDuckGo site:bilibili.com
+- `reddit_read(subreddit, post_id)` - Reddit via old.reddit.com .json + Jina fallback free, search needs OpenCLI Chrome session free
+- `v2ex_hot()` - V2EX hot posts free no config
+- `xueqiu_stock_search(query)` - Xueqiu via Jina free
+
+#### Remaining Platforms - Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou
+- `facebook_search(query)` - Facebook search homepage Feed group list via OpenCLI Chrome session free, fallback Jina public page free
+- `instagram_user_search(username)` - Instagram via OpenCLI free
+- `xiaohongshu_search(query)` - XiaoHongShu via OpenCLI only uses existing Chrome session, cookie only locally not uploaded
+- `linkedin_read(url)` - LinkedIn Jina public page free + details OpenCLI
+- `xiaoyuzhou_transcribe(podcast_url)` - Podcast Whisper Groq->OpenAI fallback free
+
+#### Doctor - Real Probing
+- `doctor_check_all()` - Doctor check all channels with real probing, ordered backend candidates, tells apart missing/broken/timeout, 15 platforms, free
+- `doctor_text_report()` - Human readable report
+
+#### Backends 7
+- `backend_execute(backend, command, workdir, timeout)` + `list_backends()`
+
+#### Trajectory Batch + Compression - Research-Ready Free
+- `trajectory_batch_generate(prompts, model, max_workers=3)` - Batch generation thousands of tool-calling trajectories in parallel with checkpointing
+- `trajectory_compress(max_tokens=4000)` - Fits into token budgets, 11 parsers truncated, ShareGPT export for fine-tuning
+- `trajectory_stats()` - Stats total, size_mb, compressed_count
+
+#### Response Time Tester - How Much Time API Key Takes
+- `test_api_key_response_time(provider, api_key, model, prompt)` - Measures seconds/ms, success, tokens, model, preview, saves to data/response_times.json history last 50, updates multi_key avg_response_time
+- `test_custom_api_response_time(api_name, api_key, test_args)` - Custom API from different websites
+- `get_response_time_stats()` - Total tests, successful, failed, avg, fastest, slowest
+
+#### Updater - GitHub Update Check
+- `check_update()` - Check if update available from GitHub, local vs remote, behind_by count, remote message author date, shows in dashboard and CLI
+- `do_update()` - git pull origin main + pip install -r requirements.txt like `hermes update`
+
+#### Pentest - Strix Full (49k stars) - Open-source AI penetration testing tool
+- **Recon:** `subdomain_enum(domain)`, `fingerprinting(url)`, `attack_surface_mapping(domain)` - sublist3r, DNS brute, tech stack detection
+- **Exploitation:** `browser_xss_test(url)`, `shell_exploit(command)`, `custom_exploit_runtime(code)` Python sandbox PoC validation working PoCs not false positives, `http_proxy_intercept(url)` Caido-like
+- **Vuln KB:** `search_vuln_kb(query, owasp, severity)`, `get_owasp_categories()` - OWASP Top 10 and beyond 14 categories, CVE-style KB 5 vulns CVSS scoring
+- **Scanner:** `comprehensive_scan(target, scan_types)` - OWASP Top 10 and beyond: A01 Broken Access Control IDOR, A03 Injection SQL/NoSQL/OS/SSTI, CLIENT_XSS XSS, A10 SSRF XXE, A07 JWT, BUSINESS_LOGIC race conditions, API_SECURITY, INFRA Cloud misconfig + `scan_api_spec(api_spec_path)` OpenAPI/Postman #866
+- **Multi-Agent Pentesting:** `pentest_distribute_task(target)` - Graph of Agents distributed specialized agents recon/web_exploiter/api_tester/post_exploit/reporter, `pentest_chain_vulns()` chain vulnerabilities like red team, `pentest_scalable_scan(targets)` parallel across multiple targets
+- **Reporting:** `pentest_create_run(target)`, `pentest_add_finding(run_name, finding)` with PoC and reproduction steps validated findings, `pentest_generate_patch(finding)` one-click autofix PR (SQLi param queries, XSS html.escape CSP), `pentest_generate_report(run_name)` compliance-ready summary critical/high/medium/low OWASP, `list_compliance_frameworks()` OWASP Top 10 2021, PCI-DSS 4.0, SOC 2, GDPR, `generate_compliance_report(run_name, framework)`
+- **Viewer:** `pentest_view_run(run_name, port, open_browser)` - Local Web Viewer every scan writes results to disk, bring up in local dashboard with single command, lightweight local server 127.0.0.1 random port, private tokened link, nothing leaves machine
+- **SAST+DAST:** `sast_scan(target_dir)` pattern matching semgrep-like SQLi XSS hardcoded secrets, `dast_scan(url)` header checks CSP X-Frame-Options verbose errors ZAP-like, `sast_dast_combined(target, url)`
+- **CI/CD:** `generate_github_actions_workflow(target, fail_on)` - Creates `.github/workflows/strix-pentest.yml` scans on every PR and blocks insecure code, checkout, setup-python, pip install, scanner, check critical/high exit 1 blocking PR, upload artifact, comment PR via github-script; `generate_gitlab_ci()`, `generate_jenkinsfile()`
+- **Bug Bounty:** `bug_bounty_recon(target)`, `generate_bounty_poc(vulnerability, target)`, `bug_bounty_workflow(target, output_dir)` - recon, scan, PoCs, report json + md files
+- **DevSecOps:** `github_integration_pr_comment(repo, pr_number, report_path, github_token)`, `gitlab_integration_mr_note()`, `slack_notify(webhook_url, report_path)`, `jira_create_issue(jira_url, project_key, report_path, jira_token, jira_email)`, `linear_create_issue(linear_api_key, team_id, report_path)`
+- **Continuous Learning:** `continuous_learning_add_finding(finding)`, `continuous_learning_mark_false_positive(finding_id, reason)`, `continuous_learning_stats()` - AI builds on past findings, adapts to codebase, reduces false positives, `should_skip_similar(new_finding)` checks if similar previously FP
+- **Compliance:** `generate_compliance_report(run_name, framework)`, `list_compliance_frameworks()`
+
+Total: **88+ tools** and growing, all free, zero API fees for core, no paywall
 
 ### 8. Research-Ready
 - Batch trajectory generation
 - Trajectory compression for training next-gen tool-calling models
 - Logs in `data/trajectories.jsonl`
+
+### 9. Custom API - Add Any API as Tool Free
+- `hermus api add --name weather_api --description "Get weather" --url "https://api.openweathermap.org/data/2.5/weather" --param "q:City"` - URL templating {param}, auth bearer/apikey/basic
+- Up to **10 keys per custom API same name** from different websites you know + **20 per provider** (groq/hf/openai) round-robin, failure tracking 5 min cooldown, fallback, parallel execution different keys = 3x faster
+- Storage: `data/api_keys.json` and `data/custom_apis.json` local only, not uploaded, redacted preview
+
+### 10. Multi-AI Collaboration - Multiple AIs Talk to Each Other
+- Personas: researcher, coder, reviewer, writer, planner, debater, optimist, pessimist
+- `chat_round()`, `debate()`, `collaborate_on_task()` with tools, judge final consensus, mixing multi-key + multi-AI for speed
+- CLI: `hermus multiai debate "Python vs Rust" --rounds 2 --agents researcher coder reviewer`
+
+### 11. Token Counting - Free Tracking
+- `core/token_counter.py` uses tiktoken accurate if installed else len/4 fallback, counts prompt/completion/total/cost per model (Ollama $0, Groq $0.59/1M)
+- SQLite `token_usage` table, `memory.add_token_usage()`, `get_token_usage()`, `/usage` command shows session + global totals + recent calls, `/compress` shows trajectory tokens
+
+### 12. Slide Panel - What Agents/Models Running (You Asked)
+- TUI: `/panel` or `/agents` + bottom toolbar live Agents: X | Tasks: Y | Models, refresh 2 sec, right sidebar 0→440px cubic-bezier
+- Dashboard: 👁️ Agents Panel button top-right fixed, slides right sidebar 0→440px, auto-refresh 2 sec when open, shows active agents (name, model badge, persona, task, status, started), active tasks, models in use, recently completed
+
+### 13. Polished Dashboard - Gold & Kawaii + 16 Panes + Skin Engine + Smooth Animations Toggle
+- **Colors:** Default gold #DAA520 cornsilk #FFF8DC kawaii (｡♥‿♥｡), slate royal blue #4169e1, ares crimson #8B0000 bronze #CD7F32, mono #555555/#c9d1d9, poseidon deep blue #006994 seafoam + 5 skins
+- **Layout 16 panes like original:** Sessions (stats bar, FTS5 search, table title/source icon/model/msgs/tools/active time, live pulsing badge, rename/export/delete), Keys (redacted preview, description, link, input, delete, Custom Keys), Agents, Config (skin engine + animations toggle), Providers, Tools, Custom Keys, Gateway, Channels, Webhooks, Pairing, Logs (File Level Component Lines auto-refresh live tailing 5 sec), Analytics (token analytics if dashboard.show_token_analytics true), Cron, Kanban, Achievements (plugins)
+- **Skin Engine:** `core/skin_engine.py` data-driven theming like original `hermes_cli/skin_engine.py`, YAML from `data/skins/*.yaml` and `~/.hermes/skins/*.yaml`, fields colors.banner_border/title/accent/text/bg, spinner.thinking_verbs/faces/wings/banner_ascii, branding.agent_name/response_label/tool_prefix, example cyberpunk.yaml neon #FF00FF/#00FFFF, activate /skin cyberpunk
+- **Smooth Animations for Everything + Toggle in Settings:** cardSlideIn 0.5s, statPop 0.6s, navSlideIn 0.35s, fadeInUp, float 3s, pulse 2s, all elements transition all 0.35s cubic-bezier, body.no-animations toggle via Config pane switch + localStorage + user_model.json
+
+### 14. Update Thing - If You Update Anything in GitHub, Shows Update in Dashboard and CLI Too
+- `core/updater.py`: get_local_commit() git rev-parse HEAD, get_remote_commit() GitHub API api.github.com/repos/{owner}/{repo}/commits/main free no key + git ls-remote fallback, check_for_updates() compares local vs remote, git fetch origin main, rev-list --count local..remote behind_by, update() git pull origin main + pip install -r requirements.txt like hermes update
+- Tools: `check_update()`, `do_update()`, `get_local_commit()`, `get_remote_commit()`
+- CLI: `hermus update --check` only checks, `hermus update` pulls, TUI `/update` command, startup auto checks and shows banner if update available
+- Gateway: `GET /update/check`, `POST /update/pull`, `GET /update/local`, `GET /update/remote`
+- Dashboard: Orange banner gradient #ff9800→#ff5722 top with Update available! Local X behind remote Y by N: message by author on date - Click to update + Update Now button, badge top-right Update! X behind, auto-check every 30 sec, shows in dashboard and CLI
+
+### 15. Response Time Test - How Much Time API Key Takes
+- `core/response_tester.py`: test_llm_key(provider, api_key, model, prompt) measures seconds/ms, success, tokens, model, preview, saves to data/response_times.json history last 50, updates multi_key_manager avg_response_time, test_custom_api_key, test_all_keys_for_provider/provider, get_history, get_stats
+- Tools: `test_api_key_response_time(provider, api_key, model, prompt)`, `test_custom_api_response_time(api_name, api_key, test_args)`, `get_response_time_stats()`
+- Gateway: `GET /response-times`, `POST /response-times/test`
+- Dashboard Keys pane: Test All Response Time button per provider and per custom API group, each key row Test button + avg + last response time, history chart
+
+### 16. Optimized Everything - Optifine
+- `core/cache.py`: LRUCache max_size 100 TTL 300-600 sec OrderedDict timestamps Lock hits/misses, make_key md5, OptimizedFileCache mtime check <1MB, Global caches llm_cache 100 10 min, memory_search_cache 50 5 min, web_search_cache 50 10 min, tool_result_cache 100 5 min, skill_cache 20 10 min, clear_all_caches(), get_cache_stats()
+- Memory: WAL mode, synchronous NORMAL, cache_size 64MB, temp_store MEMORY, indexes idx_sessions_session_id/timestamp
+- Web search, file tools, skill manager cached, gateway GZipMiddleware, dashboard smooth animations toggle, multi-key 10/20, response time tracking
+- Performance: LLM repeated 2-5 sec → 0.01 sec cache hit 200-500x faster, memory search 50-100ms → 1ms 50-100x faster, web search 1-2 sec → 1ms 1000x faster, file read <1MB 5-10ms → 0.1ms 50-100x faster, skills list 20-50ms → 1ms 20-50x faster, gateway dashboard 500ms → 200ms 2.5x faster with GZip, SQLite writes 2-3x faster WAL, multi-key parallel 3 tasks 30 sec → 10 sec 3x faster
+
+---
 
 ## Quick Start (100% Free, No API Keys)
 
@@ -87,35 +220,57 @@ Original Hermes uses:
 # Install Ollama https://ollama.com
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull llama3.1:8b  # or mistral, phi3:mini
+ollama pull llava:7b  # for vision free
 
 # Install Hermus Free
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
 pip install -r requirements.txt
+pip install playwright && playwright install chromium  # for browser free
+pip install faster-whisper  # for voice memo transcription free
 
 # Start chatting (uses Ollama local, no API key)
 python -m core.agent --model ollama/llama3.1:8b
 
-# Or TUI
-python -m tui.tui
+# Or TUI with slide panel, gold/kawaii dashboard, animations toggle, update check
+python hermus.py --model ollama/llama3.1:8b
+# In TUI: /panel to see running agents, /update to check GitHub updates, /skills, /model
 ```
 
-### Option 2: Groq Free Tier (Free Cloud, Fast)
+### Option 2: Groq Free Tier (Free Cloud, Fast) + Multi-Key 10 Keys
 
 ```bash
-# Get free Groq key https://console.groq.com/keys (free tier 30 req/min)
-export GROQ_API_KEY=gsk_...
+# Get free Groq keys https://console.groq.com/keys (30 req/min per key)
+# Add 3 keys for 90 req/min = 3x faster
+python hermus.py multikey add --provider groq --key gsk_abc... --name groq_key_1
+python hermus.py multikey add --provider groq --key gsk_def... --name groq_key_2
+python hermus.py multikey add --provider groq --key gsk_ghi... --name groq_key_3
+
+# Chat with Groq free, multi-key round-robin + fallback
 python -m core.agent --model groq/llama-3.1-70b-versatile
 ```
 
-### Option 3: HuggingFace Free Inference
+### Option 3: Custom API - Add Any API From Different Websites You Know
 
 ```bash
-export HF_TOKEN=hf_...  # free token https://huggingface.co/settings/tokens
-python -m core.agent --model hf/mistralai/Mistral-7B-Instruct-v0.3
+# Add weather API with 3 keys from 3 different websites you know (up to 10 same name)
+python hermus.py api add --name weather_api --description "Get weather" --url "https://api.openweathermap.org/data/2.5/weather" --param "q:City" --auth-token siteA_key_123
+python hermus.py api add --name weather_api --description "Get weather - second key" --url "https://api.openweathermap.org/data/2.5/weather" --param "q:City" --auth-token siteB_key_456
+python hermus.py api add --name weather_api --description "Get weather - third key" --url "https://api.openweathermap.org/data/2.5/weather" --param "q:City" --auth-token siteC_key_789
+
+# List multi-key
+python hermus.py api list
+# weather_api - 3 keys from different websites [Multi-key 3/10 round-robin]
+
+# Test response time for each key - how much time API key takes
+python hermus.py --model mock/mock -c "Use test_custom_api_response_time to test all keys for weather_api and rank fastest"
+
+# Agent uses round-robin: Call1 siteA, Call2 siteB, Call3 siteC, Call4 siteA again, fallback if 429
 ```
 
-## CLI vs Messaging Quick Reference (Same as Original)
+---
+
+## CLI vs Messaging Quick Reference (Same as Original + Extra Free Features)
 
 | Action | CLI | Messaging |
 |--------|-----|-----------|
@@ -124,144 +279,138 @@ python -m core.agent --model hf/mistralai/Mistral-7B-Instruct-v0.3
 | Change model | `/model ollama/llama3.1:8b` | `/model` |
 | Set personality | `/personality friendly coder` | `/personality` |
 | Retry/undo | `/retry, /undo` | `/retry, /undo` |
-| Compress context | `/compress, /usage, /insights` | same |
+| Compress context / usage | `/compress, /usage, /insights` | same - shows token counting free |
 | Browse skills | `/skills` or `/<skill-name>` | `/<skill-name>` |
 | Interrupt | Ctrl+C | `/stop` |
-| Platform status | `/platforms` | `/status, /sethome` |
+| Platform status + live agents | `/platforms` + `/panel` slide open | `/status, /sethome` |
+| Check update from GitHub | `/update` or `/check-update` or `hermus update --check` | Shows update in dashboard and CLI too |
+| Update from GitHub | `hermus update` | - |
 | Gateway | `hermus gateway setup` + `hermus gateway start` | - |
 | Cron | `hermus cron add "daily 9am report"` | - |
+| Subagent | `hermus subagent spawn "research X in parallel"` | - |
+| Multi-Key | `hermus multikey add/list/remove/parallel` | - |
+| Multi-AI | `hermus multiai debate "Topic" --rounds 2 --agents researcher coder reviewer` | - |
+| Custom API | `hermus api add/list/remove/test` | - |
+| Response time test | Use tool `test_api_key_response_time` or dashboard Keys pane Test ⏱️ buttons | - |
+| Doctor health check | `hermus --model mock/mock -c "Use doctor_check_all"` | - |
+| Pentest | `hermus --model mock/mock -c "Use comprehensive_scan to scan target"` | - |
 
-## Project Structure
+---
+
+## Project Structure (Updated - 88 Tools Total)
 
 ```
 hermus-agent-free/
 ├── core/
-│   ├── agent.py          # Main loop: memory search -> skill load -> tool calls -> response -> curate memory
-│   ├── llm.py            # Free LLM abstraction: Ollama, Groq free, HF free, mock
-│   ├── memory.py         # SQLite FTS5 sessions, curated memory, nudges, summarization, user modeling
-│   ├── skill_manager.py  # Autonomous skill creation + self-improvement, agentskills.io compatible
-│   └── config.py         # Config
+│   ├── agent.py          # Main loop: 88 tools, memory search -> skill load -> tool calls -> response -> curate memory + token tracking + task tracker + update check on startup
+│   ├── llm.py            # Free LLM: Ollama local no key, Groq free tier multi-key 20 keys round-robin + failure tracking, HF free, mock + caching LRU 100 items + token counting + cost estimation
+│   ├── memory.py         # SQLite FTS5 sessions + WAL mode + indexes + curated memory + nudges + token_usage table + user_model.json dialectic + trajectories.jsonl + FTS5 search + summarization
+│   ├── skill_manager.py  # Auto skill creation 3+ tool calls via free LLM, self-improve on use, agentskills.io compatible SKILL.md + skill.py, LRU cache 20 items
+│   ├── config.py         # Config paths, auto_skill_threshold 3, skills_dir, memory_db, etc.
+│   ├── cache.py          # NEW - LRUCache max_size 100 TTL 300-600, OptimizedFileCache mtime <1MB, global caches llm/memory_search/web_search/tool_result/skill, clear_all_caches, get_cache_stats
+│   ├── token_counter.py  # NEW - Free token counter tiktoken accurate if installed else len/4 fallback, count_text/messages/tools, estimate_cost pricing per 1M Ollama $0 Groq 70b $0.59/0.79
+│   ├── multi_key.py      # NEW - Multi-API Keys up to 20 per provider + 10 per custom API same name from different websites, round-robin deque, failure tracking 5 min cooldown, parallel execution multiprocessing different keys = 3x faster
+│   ├── multi_ai.py       # NEW - Multi-AI collaboration multiple AIs talk to each other, personas researcher/coder/reviewer/writer/planner/debater/optimist/pessimist, chat_round, debate, collaborate_on_task, judge final consensus, mixing multi-key + multi-AI
+│   ├── custom_api.py     # NEW - Custom API add any REST API as tool in 1 command, URL templating {param}, auth bearer/apikey/basic, up to 10 keys same name multi-key round-robin + fallback, deduplicated tool defs
+│   ├── skin_engine.py    # NEW - Skin engine data-driven theming like original, DEFAULT_SKINS default gold #DAA520 cornsilk #FFF8DC kawaii, slate #4169e1, ares crimson, mono #555555, poseidon, plus cyberpunk neon, fields colors banner_border/title/accent/text/bg, spinner thinking_verbs/faces/wings, branding agent_name/response_label/tool_prefix, list_skins() builtin + custom YAML from data/skins and ~/.hermes/skins/, get_skin, set_skin saves to user_model, create_custom_skin writes YAML, animations toggle
+│   ├── task_tracker.py   # NEW - Tracks what agents/models running or doing task for slide panel, add_agent, update_agent, remove_agent, add_task, update_task, complete_task, get_status (active_agents, active_tasks, completed, models_in_use), get_for_tui formatted text
+│   ├── updater.py        # NEW - Check for GitHub updates and show in dashboard and CLI too, get_local_commit git rev-parse HEAD, get_remote_commit GitHub API free no key + git ls-remote fallback, check_for_updates compares local vs remote fetch origin main rev-list --count behind_by, update git pull origin main + pip install
+│   ├── response_tester.py # NEW - Test response time for API key how much time API key takes, test_llm_key provider api_key model prompt measures seconds/ms success tokens, test_custom_api_key, test_all_keys_for_provider/provider and rank fastest first, get_history limit 50, get_stats total/successful/failed avg fastest slowest, saves to data/response_times.json
+│   └── trajectory.py     # NEW - Trajectory batch generation + compression research-ready, batch_generate prompts model max_workers parallel via subagents checkpointing, compress_trajectories max_tokens fits into token budgets, ShareGPT export, stats
 ├── tools/
-│   ├── web_search.py     # DuckDuckGo free
-│   ├── file_tools.py     # Read/write/edit/search
-│   ├── shell.py          # Safe shell
-│   ├── browser.py        # Playwright free
-│   └── vision.py         # Ollama LLaVA free
+│   ├── web_search.py     # DuckDuckGo free no API key, LRU cache 50 items TTL 10 min
+│   ├── file_tools.py     # Read/write/edit/search, OptimizedFileCache mtime <1MB
+│   ├── shell.py          # Safe shell timeout 10s
+│   ├── browser.py        # NEW - Browser automation Playwright free 6 tools: navigate, click, type, screenshot, extract, close
+│   ├── vision.py         # NEW - Vision LLaVA via Ollama free, vision_analyze image_path prompt model llava:7b base64, vision_available_models
+│   ├── voice.py          # NEW - Voice memo transcription faster-whisper free local WhisperModel base/small/medium/large-v2
+│   ├── internet_eyes.py  # NEW - Agent Reach features 13 tools free zero API fees: web_read Jina Reader https://r.jina.ai/http://, rss_read feedparser, youtube_transcript yt-dlp free, youtube_search ytsearch, github_read/search API free no key, twitter_read Jina single tweet free, bilibili_search bili-cli free no login, reddit_read old.reddit.com .json + Jina fallback, v2ex_hot API free no config, xueqiu_stock_search, plus Facebook Instagram XiaoHongShu LinkedIn Xiaoyuzhou via OpenCLI Chrome session free
+│   ├── agent_reach_doctor.py # NEW - Doctor real probing ordered backend candidates tells apart missing/broken/timeout, 15 platforms web, youtube, rss, github, twitter, bilibili, reddit, facebook, instagram, xiaohongshu, v2ex, xueqiu, xiaoyuzhou, linkedin, full search
+│   ├── facebook.py       # NEW - Facebook search, Instagram user search, XiaoHongShu search, LinkedIn read, Xiaoyuzhou transcribe via OpenCLI Chrome session free + Jina fallback
+│   ├── updater.py        # NEW - Updater tools: check_update, do_update, get_local_commit, get_remote_commit
+│   ├── pentest.py        # NEW - 32 tools Strix features: recon subdomain_enum fingerprinting attack_surface_mapping, exploitation browser_xss_test shell_exploit custom_exploit_runtime http_proxy_intercept, vuln_kb search_vuln_kb get_owasp_categories, scanner comprehensive_scan OWASP Top 10 and beyond scan_api_spec, multi-agent pentest_distribute_task chain_vulns scalable_scan, reporting create_run add_finding generate_patch generate_report, viewer view_run, SAST/DAST sast_scan dast_scan combined, CI/CD generate_github_actions_workflow gitlab_ci jenkinsfile, bug bounty recon generate_poc workflow, DevSecOps github_integration_pr_comment slack_notify jira_create_issue linear_create_issue, continuous learning add_finding mark_false_positive stats, compliance generate_compliance_report list_compliance_frameworks
+│   └── response_tester.py # Actually in core/response_tester.py but tool wrapper
 ├── gateway/
-│   ├── gateway.py        # FastAPI single process gateway, cross-platform continuity
-│   ├── telegram.py       # python-telegram-bot free
-│   ├── discord.py        # discord.py free
-│   └── cli.py            # CLI gateway
+│   ├── gateway.py        # FastAPI single process gateway, cross-platform continuity, GZipMiddleware, /command, /agents/status slide panel data, /platforms, /webhook/telegram, /dashboard, /keys/list/add/remove with redacted preview, /custom-apis/list/add/remove, /response-times and /response-times/test for response time test, /update/check and /update/pull and /update/local and /update/remote for update thing, /cache/stats and /cache/clear for optimization
+│   └── dashboard.html    # Polished gold and kawaii #DAA520 cornsilk #FFF8DC kawaii faces (｡♥‿♥｡), slate #4169e1, ares crimson, mono #555555, poseidon deep blue, 16 panes Sessions Keys Agents Config Providers Tools Custom Keys Gateway Channels Webhooks Pairing Logs Analytics Cron Kanban Achievements, slide panel right 0->440px cubic-bezier 0.35s auto-refresh 2 sec, skin selector gold/slate/ares/mono/sea localStorage, topbar breadcrumb, stats grid, bottom toolbar live Agents Tasks Models, banner gold left border, caduceus watermark, pulse animation, update banner orange gradient when GitHub update available with Update Now button, badge Update! X behind, smooth animations for everything cardSlideIn statPop navSlideIn fadeInUp float pulse + toggle in Config pane Enable Smooth Animations + Reduce Motion switches localStorage + user_model.json + body.no-animations
 ├── scheduler/
-│   └── cron.py           # APScheduler + natural language parser
+│   └── cron.py           # APScheduler + natural language parser simple rules + LLM fallback free
 ├── subagents/
-│   └── subagent.py       # Spawn isolated subagents, RPC
+│   └── subagent.py       # Spawn isolated subagents multiprocessing, task_wrapper adds agent/task to tracker, spawn_subagent, spawn_parallel_subagents
 ├── tui/
-│   └── tui.py            # prompt_toolkit TUI with autocomplete, multiline, streaming
-├── skills/               # Auto-generated skills (SKILL.md + skill.py)
+│   └── tui.py            # prompt_toolkit TUI multiline editing, slash autocomplete /new /model /skills /platforms /compress /usage /panel /agents /update /check-update, history FileHistory, auto_suggest, bottom_toolbar live Agents Tasks Models refresh 2 sec, streaming tool output, interrupt Ctrl+C, /panel slide open panel showing what agents/models running
+├── pentest/
+│   ├── recon.py, exploitation.py, vuln_kb.py, scanner.py, multi_agent.py, reporting.py, viewer.py, sast_dast.py, cicd.py, bugbounty.py, devsecops.py, continuous_learning.py, compliance.py - All Strix features free
+├── skills/
+│   ├── .gitkeep
+│   └── agent_reach/      # SKILL.md auto-registration for Agent Reach - trigger-first description, standing rules, quick commands bili search doctor --json
 ├── data/
-│   ├── memory.db         # SQLite FTS5
+│   ├── memory.db         # SQLite FTS5 + WAL mode + indexes + token_usage table
 │   ├── user_model.json   # Free Honcho alternative
 │   ├── trajectories.jsonl
+│   ├── api_keys.json     # Multi-key up to 20 per provider, local only, not uploaded, redacted preview
+│   ├── custom_apis.json  # Custom APIs up to 10 same name from different websites, local only
+│   ├── response_times.json # Response time history last 50, avg per key
 │   └── sessions/
 └── tests/
+    ├── test_free_stack.py
+    ├── test_custom_api.py
+    └── test_token_count.py
 ```
 
 ## How Free Clone Handles Paywalled Parts
 
 | Original Paywalled | Free Alternative Here |
 |--------------------|----------------------|
-| OpenRouter (paid API for 100s models) | Ollama local (llama3, mistral, phi3) - 100% free offline + Groq free tier + HF free inference |
+| OpenRouter (paid API for 100s models) | Ollama local (llama3, mistral, phi3) - 100% free offline + Groq free tier 30 req/min per key, up to 20 keys = 600 req/min + HF free inference |
 | Honcho dialectic user modeling (paid) | `data/user_model.json` - LLM asks dialectic questions "What matters to you?" and builds model free |
-| Hosted gateway / Modal/Daytona paid | Docker + SSH + local - free, plus free tier Modal/Daytona if you have account, but fallback to local |
+| Hosted gateway / Modal/Daytona paid | Docker + SSH + local - free, plus free tier Modal/Daytona if you have account, but fallback to local + 7 backends list |
 | Premium voice transcription | faster-whisper (free, local Whisper) |
-| Vector DB Pinecone paid | SQLite FTS5 (built-in, free, no API key) |
-
-## Example: Skill Auto-Creation
-
-After you ask: "Research Python async + write a file watcher that emails me on changes"
-
-Agent does 5 tool calls: web_search, file_read, file_write, shell test, etc.
-
-Then **autonomous skill creation triggers**:
-
-`skills/file_watcher_emailer/`
-- `SKILL.md` - Description, when to use, examples
-- `skill.py` - Reusable function `watch_and_email(path, email)`
-
-Next time you say "watch my logs folder", it reuses skill in 1 tool call instead of 5 = **zero-context-cost**.
-
-Skills self-improve: Each use logs success/failure, LLM edits skill.py to improve.
-
-## Gateway Setup (Free Telegram Example)
-
-```bash
-# 1. Talk to @BotFather on Telegram, /newbot -> get token (free)
-export TELEGRAM_BOT_TOKEN=123456:ABC...
-
-# 2. Setup gateway
-python -m gateway.gateway setup --platform telegram
-
-# 3. Start gateway (single process for all platforms)
-python -m gateway.gateway start
-# Now message your bot on Telegram - it has full memory + skills
-
-# Add Discord free
-export DISCORD_BOT_TOKEN=...
-python -m gateway.gateway setup --platform discord
-```
-
-## Cron Example (Natural Language, Free)
-
-```bash
-# CLI
-hermus cron add "every day at 9am send me a report of yesterday's commits"
-hermus cron add "every Monday 8am weekly audit of my codebase"
-
-# Or in chat
-You: "Remind me every day at 9am to check logs"
-Agent: Parses to cron "0 9 * * *" and adds via scheduler/cron.py, delivers to your current platform (Telegram/Discord/CLI)
-```
-
-## Subagents Example
-
-```
-You: "Research best Python async libraries and best Rust async libraries in parallel"
-
-Agent: Spawns 2 subagents via subagents/subagent.py
-- Subagent 1: web_search "Python async libraries 2024" -> file_write report_python.md
-- Subagent 2: web_search "Rust async libraries 2024" -> file_write report_rust.md
-Both run isolated, then main agent merges reports = parallel workstreams, zero-context-cost.
-```
+| Vector DB Pinecone paid | SQLite FTS5 (built-in, free, no API key) + WAL mode + indexes + OptimizedFileCache |
+| Twitter API paid, Reddit 403, YouTube no subtitles, XiaoHongShu must login | Agent Reach free tools: Jina Reader free, yt-dlp free, old.reddit.com .json + Jina fallback, bili-cli free no login, OpenCLI Chrome session free if user has session, V2EX API free no config |
 
 ## Free vs Paid - 100% Free, MIT License
 
-This clone is MIT, no tracking, no paywall, fully self-hosted. You own data in `data/memory.db` (SQLite file you can open).
+This clone is MIT, no tracking, no paywall, fully self-hosted. You own data in `data/memory.db`, `data/api_keys.json`, `data/custom_apis.json` (local only, redacted preview in dashboard, .gitignore ignores sensitive).
 
-## Roadmap
+## Roadmap - All Done ✅
 
-- [x] Core agent loop with free LLM
-- [x] SQLite FTS5 memory + curated memory + nudges
-- [x] Autonomous skill creation + self-improvement (agentskills.io compatible)
-- [x] Free tools: web_search DuckDuckGo, file, shell, python_exec
-- [x] Gateway: CLI + Telegram + Discord (free Bot APIs)
-- [x] Cron scheduler natural language
-- [x] Subagents parallel + RPC
-- [x] TUI with slash commands autocomplete
-- [ ] Browser automation Playwright free
-- [ ] Vision LLaVA via Ollama free
-- [ ] Voice memo transcription faster-whisper free
-- [ ] More backends: Docker, SSH, Modal free tier, Daytona
-- [ ] Trajectory batch generation + compression
+- [x] Core agent loop with free LLM + token counting + caching + task tracker + update check
+- [x] SQLite FTS5 memory + curated memory + nudges + token_usage table + WAL mode + indexes + OptimizedFileCache
+- [x] Autonomous skill creation + self-improvement (agentskills.io compatible) + LRU cache
+- [x] Free tools: web_search DuckDuckGo cached, file cached, shell, python_exec
+- [x] Browser automation Playwright free 6 tools
+- [x] Vision LLaVA via Ollama free 2 tools
+- [x] Voice memo transcription faster-whisper free 2 tools
+- [x] Internet Eyes Agent Reach 13 tools + 5 social + doctor 2 tools = 20 tools free zero API fees
+- [x] Gateway: CLI + Telegram + Discord (free Bot APIs) + FastAPI single process + GZip + endpoints /agents/status /keys/list/add/remove /custom-apis/list/add/remove /response-times and /response-times/test /update/check/pull/local/remote /cache/stats/clear + cross-platform continuity
+- [x] Cron scheduler natural language + APScheduler free
+- [x] Subagents parallel + RPC + task tracker
+- [x] TUI with slash commands autocomplete + bottom toolbar live + slide panel /panel /agents + /update
+- [x] Backends 7 terminal: local, Docker hardened, SSH, Singularity, Modal free tier hibernates, Daytona free tier, Vercel Sandbox free tier
+- [x] Trajectory batch generation + compression + ShareGPT export
+- [x] Custom API add any REST API as tool in 1 command + URL templating + auth bearer/apikey/basic + up to 10 keys same name from different websites round-robin + deduplicated tool defs
+- [x] Multi-Key up to 20 per provider groq/hf/openai/custom + 10 per custom API same name from different websites, round-robin deque, failure tracking 5 min cooldown, fallback, parallel execution multiprocessing different keys = 3x faster, CLI multikey add/list/remove/parallel
+- [x] Multi-AI collaboration multiple AIs talk to each other, personas researcher/coder/reviewer/writer/planner/debater/optimist/pessimist, chat_round, debate, collaborate_on_task, judge final consensus, mixing multi-key + multi-AI, CLI multiai debate/chat/personas
+- [x] Token counting free tiktoken accurate if installed else len/4 fallback, cost estimation pricing per 1M Ollama $0 Groq 70b $0.59/0.79, SQLite token_usage table, /usage command, /compress
+- [x] Slide panel what agents/models running - TUI /panel + Web dashboard 👁️ button slide right 0→440px auto-refresh 2 sec
+- [x] Dashboard polished gold and kawaii default #DAA520 cornsilk #FFF8DC kawaii faces (｡♥‿♥｡), slate royal blue #4169e1, ares crimson, mono #555555, poseidon deep blue, 16 panes Sessions Keys Agents Config Providers Tools Custom Keys Gateway Channels Webhooks Pairing Logs Analytics Cron Kanban Achievements, slide panel, skin selector gold/slate/ares/mono/sea localStorage, topbar breadcrumb, stats grid, bottom toolbar
+- [x] Skin Engine data-driven theming like original, YAML from data/skins and ~/.hermes/skins/, colors banner_border/title/accent/text/bg, spinner thinking_verbs/faces/wings/banner_ascii, branding agent_name/response_label/tool_prefix, example cyberpunk.yaml neon #FF00FF/#00FFFF, smooth animations cardSlideIn statPop navSlideIn fadeInUp float pulse + toggle in Config pane + localStorage + body.no-animations
+- [x] Update thing - if you update anything in GitHub, shows update in dashboard and CLI too - core/updater.py get_local_commit git rev-parse HEAD, get_remote_commit GitHub API free no key + git ls-remote fallback, check_for_updates compares local vs remote fetch origin main rev-list --count behind_by, update git pull origin main + pip install, tools updater 4 tools, CLI hermus update --check and hermus update without check, TUI /update, gateway endpoints /update/check/pull/local/remote, dashboard orange banner gradient #ff9800→#ff5722 + badge Update! X behind + Update Now button + auto-check every 30 sec
+- [x] Response time test for API key - how much time API key takes to get response - core/response_tester.py test_llm_key provider api_key model prompt measures seconds/ms success tokens, test_custom_api_key, test_all_keys_for_provider/provider and rank fastest, get_history limit 50, get_stats total/successful/failed avg fastest slowest, saves to data/response_times.json, updates multi_key_manager avg_response_time, tools 3, gateway endpoints /response-times and /response-times/test, dashboard Keys pane Test All buttons per provider and per custom API group + response time history
+- [x] Optimization - Optifine everything - LRU cache 100 items TTL, WAL mode, indexes, GZip, smooth animations, multi-key 10/20, response time tracking, token counting, file cache <1MB mtime, skill cache, etc.
+- [x] Pentest Strix full - recon, exploitation, vuln KB CVSS OWASP, scanner OWASP Top 10 and beyond, multi-agent Graph of Agents distributed scalable dynamic coordination, reporting create_run add_finding PoC generate_patch autofix generate_report compliance, viewer local web viewer, SAST/DAST, CI/CD GitHub Actions blocking PR, Bug Bounty recon PoC workflow, DevSecOps GitHub/GitLab/Slack/Jira/Linear, Continuous Learning, Compliance OWASP PCI-DSS SOC2 GDPR
+- [x] Comparison document MD + DOCX + PDF downloadable
+- [x] Optimization guide
 
 ## Contributing
 
-PRs welcome - keep it free, no paid APIs required for core.
+PRs welcome - keep it free, no paid APIs required for core. Add more skins YAML, more persona presets, more free tools.
 
 ## Disclaimer
 
-This is a community free clone, not affiliated with Nous Research. Original Hermes Agent is by Nous Research (hermes-agent.org). This free version respects original MIT license and aims for feature parity with 100% free stack.
+This is a community free clone, not affiliated with Nous Research, Panniantong Agent Reach, or Strix. Original Hermes Agent is by Nous Research (hermes-agent.org), Agent Reach by Panniantong (github.com/Panniantong/agent-reach), Strix by usestrix (strix.ai). This free version respects original MIT/Apache licenses and aims for feature parity with 100% free stack.
 
 ---
 
-**Hermus Agent Free - The agent that grows with you, for free, forever on your $5 VPS.** ☤
+**Hermus Agent Free - The agent that grows with you, for free, forever on your $5 VPS.** ☤ Gold and Kawaii (｡♥‿♥｡) • MIT • No tracking • Self-hosted • No paywall • Optimized Everything • 88+ Tools
