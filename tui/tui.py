@@ -137,6 +137,7 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                 new_mode = parts[1].lower()
                 try:
                     from core.modes import AgentMode, list_modes
+                    from core.skin_engine import skin_engine
                     # Validate mode
                     valid_modes = [m.value for m in AgentMode]
                     if new_mode not in valid_modes:
@@ -144,10 +145,13 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                         return True
                     self.mode = new_mode
                     self.agent = HermusAgent(model=self.model, mode=new_mode)
+                    # Persist mode as requested
+                    skin_engine.set_mode(new_mode)
                     print(f"Switched to {new_mode} mode: {self.agent.mode_config.name}")
                     print(f"Description: {self.agent.mode_config.description}")
                     print(f"Tools allowed: {self.agent.mode_config.tools_allowed[:3]}... max {self.agent.mode_config.max_tool_calls_per_turn} tool calls per turn")
                     print(f"Multi-key: {self.agent.mode_config.use_multi_key}, Multi-AI: {self.agent.mode_config.use_multi_ai}")
+                    print(f"Mode persisted to user_model.json - will remember on next startup")
                 except Exception as e:
                     print(f"Mode switch failed: {e}")
             else:
@@ -163,6 +167,13 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                 print("Chat mode let's u chat")
                 print("Multi agent mode can use multiple keys at once and reach the goal given to u no matter how difficult it is")
                 print("Multi chat mode can get u as accurate and reliable information as possible with working of multiple ai models and api keys")
+                # Show persisted mode
+                try:
+                    from core.skin_engine import skin_engine
+                    persisted = skin_engine.get_persisted_mode()
+                    print(f"\nPersisted mode: {persisted} (from user_model.json) - will load on next startup")
+                except:
+                    pass
             return True
 
         if cmd == "/skills":

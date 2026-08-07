@@ -310,5 +310,35 @@ class SkinEngine:
         except:
             return self.animations_enabled
 
+    # Mode persistence - as requested
+    def set_mode(self, mode: str) -> Dict:
+        """Set current mode and persist - agent, chat, multi-agent, multi-chat - free"""
+        try:
+            from .modes import AgentMode
+            mode_normalized = mode.lower().replace("_", "-")
+            valid_modes = [m.value for m in AgentMode]
+            if mode_normalized not in valid_modes:
+                return {"success": False, "error": f"Invalid mode {mode}. Valid: {', '.join(valid_modes)}"}
+            
+            from .memory import memory
+            memory.update_user_model({"preferences": {"mode": mode_normalized}})
+            
+            return {"success": True, "mode": mode_normalized, "message": f"Mode set to {mode_normalized} and persisted"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_current_mode(self) -> str:
+        """Get current mode with persistence - loads from user_model if exists"""
+        try:
+            from .memory import memory
+            model = memory.load_user_model()
+            return model.get("preferences", {}).get("mode", "agent")
+        except:
+            return "agent"
+
+    def get_persisted_mode(self) -> str:
+        """Get persisted mode from user_model.json"""
+        return self.get_current_mode()
+
 # Global skin engine free
 skin_engine = SkinEngine()

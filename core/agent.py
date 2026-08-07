@@ -21,12 +21,19 @@ from core.custom_api import custom_api_manager
 class HermusAgent:
     """Free Hermes-like agent - self-improving with memory and skills"""
 
-    def __init__(self, model: str = None, session_id: str = None, mode: str = "agent"):
+    def __init__(self, model: str = None, session_id: str = None, mode: str = None):
         self.model_name = model or config.model
         self.llm = FreeLLM(self.model_name)
         self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         self.trajectory: List[Dict] = []  # For skill creation + research-ready batch
-        # Mode handling - 4 modes as requested: agent, chat, multi-agent, multi-chat
+        # Mode handling - 4 modes as requested: agent, chat, multi-agent, multi-chat - with persistence
+        # If mode not provided, load from persisted user_model.json (mode persistence as requested)
+        if mode is None:
+            try:
+                from .skin_engine import skin_engine
+                mode = skin_engine.get_current_mode()
+            except:
+                mode = "agent"
         try:
             self.mode = AgentMode(mode.lower().replace("_", "-"))
         except:
@@ -36,7 +43,7 @@ class HermusAgent:
 
         self.agent_tracker_id = None
 
-        print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Mode {self.mode.value} ({self.mode_config.name}) | Free stack (no paywall)")
+        print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Mode {self.mode.value} ({self.mode_config.name}) | Free stack (no paywall) | Persisted mode loaded")
         # Track agent in task tracker for slide panel
         try:
             self.agent_tracker_id = task_tracker.add_agent(
