@@ -1,548 +1,227 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>☤ Hermus Agent Free - Dashboard - Gold and Kawaii</title>
+<title>☤ Hermus Agent Free - Spacious OpenClaw Style + Simulation Box + Browser + Screen Share</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --gold: #DAA520; --gold-light: #FFD700; --gold-dark: #B8860B;
-  --cornsilk: #FFF8DC; --cornsilk-dim: #F5E6C8;
-  --bg: #0f0e0a; --bg-card: #1a1812; --bg-card-hover: #22201a; --bg-sidebar: #12100c;
-  --border: #3a3525; --border-gold: #DAA520; --border-light: #4a4430;
-  --text: #FFF8DC; --text-dim: #C9B896; --text-muted: #8a7d65;
-  --success: #4caf50; --error: #f44336; --info: #4169e1; --warning: #ff9800;
-  --crimson: #DC143C; --bronze: #CD7F32; --slate-blue: #4169e1;
+  --gold: #DAA520; --gold-light: #FFD700; --cornsilk: #FFF8DC;
+  --bg: #0a0a0f; --bg-card: rgba(22,20,35,0.75); --bg-sidebar: rgba(12,10,20,0.9); --bg-topbar: rgba(18,16,30,0.9);
+  --border: rgba(255,255,255,0.08); --border-gold: #DAA520; --border-light: rgba(255,255,255,0.12);
+  --text: #e8e0ff; --text-dim: #a094c0; --text-muted: #6b6480;
+  --success: #22c55e; --error: #ef4444; --info: #60a5fa;
 }
-body.skin-slate{--border:#4169e1;--border-accent:#6a8eff;--bg:#0a0e1a;--bg-card:#151a2d;--bg-sidebar:#0f1428;--text:#c9d1ff;--text-dim:#8a92c9;--header-bg:linear-gradient(135deg,#0a0e1a 0%,#1a237e 100%);--badge-bg:#4169e1}
-body.skin-ares{--border:#8b0000;--border-accent:#CD7F32;--bg:#1a0a0a;--bg-card:#2a1515;--bg-sidebar:#1a0a0a;--text:#ffcccc;--text-dim:#c9a0a0;--header-bg:linear-gradient(135deg,#1a0a0a 0%,#4a1a1a 100%);--badge-bg:#DC143C}
-body.skin-mono{--border:#555555;--border-accent:#888888;--bg:#0a0a0a;--bg-card:#1a1a1a;--bg-sidebar:#111;--text:#c9d1d9;--text-dim:#8a8a8a;--header-bg:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 100%);--badge-bg:#555}
-body.skin-poseidon{--border:#006994;--border-accent:#5F9EA0;--bg:#0a1420;--bg-card:#142030;--bg-sidebar:#0a1a28;--text:#c0f0ff;--text-dim:#8ab0c0;--header-bg:linear-gradient(135deg,#0a1420 0%,#0a3a5a 100%);--badge-bg:#006994}
-body.skin-default{--border-accent:#FFD700;--header-bg:linear-gradient(135deg,#1a1812 0%,#2a2418 50%,#1a1812 100%);--badge-bg:#DAA520;--badge-text:#0f0e0a}
-
-/* Smooth animations for everything - as requested */
-html{scroll-behavior:smooth}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.5;overflow:hidden}
-/* Smooth animations for everything */
-.card, .stat, .nav-item, .badge, .btn, button, .input-group input, .table tr, .sidebar, .main, .toggle-panel, .skin-btn, .topbar, .header, .banner, pre, code{
-  transition:all 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-.card{animation:cardSlideIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); animation-fill-mode:both}
-.card:nth-child(1){animation-delay:0.05s}
-.card:nth-child(2){animation-delay:0.1s}
-.card:nth-child(3){animation-delay:0.15s}
-.card:nth-child(4){animation-delay:0.2s}
-.card:nth-child(5){animation-delay:0.25s}
-.stat{animation:statPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); animation-fill-mode:both}
-.stat:nth-child(1){animation-delay:0.08s}
-.stat:nth-child(2){animation-delay:0.13s}
-.stat:nth-child(3){animation-delay:0.18s}
-.stat:nth-child(4){animation-delay:0.23s}
-.nav-item{animation:navSlideIn 0.35s ease; animation-fill-mode:both}
-.nav-item:nth-child(1){animation-delay:0.02s}
-.nav-item:nth-child(2){animation-delay:0.04s}
-.nav-item:nth-child(3){animation-delay:0.06s}
-.nav-item:nth-child(4){animation-delay:0.08s}
-@keyframes cardSlideIn{from{opacity:0;transform:translateY(16px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}}
-@keyframes statPop{from{opacity:0;transform:translateY(12px) scale(0.88)}to{opacity:1;transform:translateY(0) scale(1)}}
-@keyframes navSlideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
-@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-
-/* Animations toggle - when disabled, no animations */
-body.no-animations *, body.no-animations *::before, body.no-animations *::after{
-  animation:none !important;
-  transition:none !important;
-  scroll-behavior:auto !important;
-}
-body.no-animations .caduceus{animation:none !important}
-body.no-animations .pulse{animation:none !important; opacity:1; box-shadow:none !important}
-body.no-animations .kawaii{animation:none !important}
-body.no-animations .card, body.no-animations .stat, body.no-animations .nav-item{animation:none !important}
-
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow:hidden;background-image:radial-gradient(ellipse at top left, rgba(120,80,255,0.08), transparent 50%), radial-gradient(ellipse at bottom right, rgba(218,165,32,0.06), transparent 60%)}
 .mono{font-family:'JetBrains Mono',monospace}
-
-/* Toggle switch for settings */
-.switch{position:relative;display:inline-block;width:48px;height:24px}
-.switch input{opacity:0;width:0;height:0}
-.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--bg);border:1px solid var(--border);transition:0.3s;border-radius:24px}
-.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:2px;background:var(--text-dim);transition:0.3s;border-radius:50%}
-input:checked + .slider{background:var(--gold);border-color:var(--gold)}
-input:checked + .slider:before{transform:translateX(24px);background:var(--bg)}
-.switch-label{display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;transition:all 0.3s}
-.switch-label:hover{border-color:var(--gold);transform:translateY(-1px)}
-
+.glass{background:var(--bg-card);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,0.4)}
+.card, .stat, .nav-item, .badge, button, input, .table tr, .sidebar, .main, .toggle-panel{transition:all 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important}
+.card{animation:cardSlideIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); animation-fill-mode:both}
+@keyframes cardSlideIn{from{opacity:0;transform:translateY(12px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.stat{animation:statPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); animation-fill-mode:both}
+@keyframes statPop{from{opacity:0;transform:translateY(10px) scale(0.9)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.pane.active{animation:fadeInUp 0.35s cubic-bezier(0.4,0,0.2,1)}
+body.no-animations *, body.no-animations *::before, body.no-animations *::after{animation:none !important;transition:none !important}
+.kawaii{color:var(--gold);font-family:'JetBrains Mono',monospace}
+.switch{position:relative;display:inline-block;width:44px;height:22px}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--bg);border:1px solid var(--border);transition:0.3s;border-radius:22px}.slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:2px;background:var(--text-dim);transition:0.3s;border-radius:50%}input:checked + .slider{background:var(--gold);border-color:var(--gold)}input:checked + .slider:before{transform:translateX(22px);background:#000}
 .app{display:flex;height:100vh}
-.sidebar{
-  width:260px;
-  background:var(--bg-sidebar);
-  border-right:1px solid var(--border);
-  display:flex;
-  flex-direction:column;
-  transition:transform 0.3s ease;
-  z-index:10;
-  overflow:hidden;
-}
-.sidebar-header{
-  padding:18px 16px;
-  border-bottom:1px solid var(--border);
-  background:var(--header-bg);
-}
-.caduceus{font-size:2em;animation:float 3s ease-in-out infinite;display:inline-block}
+.sidebar{width:280px;background:var(--bg-sidebar);backdrop-filter:blur(20px);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:10;overflow:hidden}
+.sidebar-header{padding:18px 16px;border-bottom:1px solid var(--border);background:linear-gradient(135deg, rgba(22,20,35,0.9) 0%, rgba(30,25,50,0.9) 100%)}
+.caduceus{font-size:2.2em;animation:float 3s ease-in-out infinite;display:inline-block}
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 .logo{display:flex;align-items:center;gap:12px}
-.logo h1{font-size:1.15em;font-weight:600;letter-spacing:-0.02em}
-.logo h1 span{color:var(--gold)}
+.logo h1{font-size:1.2em;font-weight:700}
+.logo h1 span{background:linear-gradient(90deg, var(--gold), var(--gold-light)); -webkit-background-clip:text; -webkit-text-fill-color:transparent}
 .logo-sub{font-size:0.65em;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:2px}
-.kawaii{color:var(--gold);font-family:'JetBrains Mono',monospace}
-
 .nav{flex:1;overflow-y:auto;padding:12px 8px}
 .nav-group{margin-bottom:18px}
-.nav-group-title{
-  font-size:0.65em;
-  text-transform:uppercase;
-  letter-spacing:0.08em;
-  color:var(--text-muted);
-  padding:6px 12px;
-  font-weight:600;
-  font-family:'JetBrains Mono',monospace;
-}
-.nav-item{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:8px 12px;
-  border-radius:8px;
-  cursor:pointer;
-  transition:all 0.2s;
-  font-size:0.9em;
-  color:var(--text-dim);
-  border:1px solid transparent;
-}
-.nav-item:hover{background:var(--bg-card);border-color:var(--border-light);color:var(--text)}
-.nav-item.active{background:var(--bg-card);border-color:var(--border);color:var(--text);border-left:3px solid var(--gold);font-weight:500}
-.nav-item .icon{width:18px;text-align:center}
-.nav-item .badge{margin-left:auto;background:var(--bg);border:1px solid var(--border);padding:2px 6px;border-radius:10px;font-size:0.65em;font-family:'JetBrains Mono',monospace}
-.nav-item.active .badge{background:var(--gold);color:var(--bg);border-color:var(--gold)}
-
-.main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
-.topbar{
-  height:56px;
-  background:var(--bg-card);
-  border-bottom:1px solid var(--border);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 20px;
-  gap:12px;
-}
-.topbar-left{display:flex;align-items:center;gap:12px}
+.nav-group-title{font-size:0.65em;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);padding:6px 12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:0.88em;color:var(--text-dim);border:1px solid transparent;margin-bottom:2px}
+.nav-item:hover{background:rgba(255,255,255,0.05);border-color:var(--border-light);color:var(--text);transform:translateX(2px)}
+.nav-item.active{background:linear-gradient(90deg, rgba(218,165,32,0.12), rgba(255,255,255,0.03));border-color:rgba(218,165,32,0.3);color:var(--text);border-left:3px solid var(--gold);font-weight:500}
+.nav-item .icon{width:20px;text-align:center}
+.nav-item .badge{margin-left:auto;background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-size:0.65em;font-family:'JetBrains Mono',monospace}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:transparent}
+.top-metrics{height:36px;background:rgba(12,10,20,0.8);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:20px;font-family:'JetBrains Mono',monospace;font-size:0.75em;color:var(--text-muted)}
+.top-metrics .metric{display:flex;align-items:center;gap:6px}
+.top-metrics .metric-bar{width:40px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden}
+.top-metrics .metric-fill{height:100%;background:var(--gold);transition:width 0.5s ease}
+.topbar{height:56px;background:var(--bg-topbar);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 20px;gap:12px}
 .breadcrumb{font-size:0.85em;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
-.breadcrumb span{color:var(--text)}
 .topbar-right{display:flex;align-items:center;gap:10px}
-.skin-selector{display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:3px}
-.skin-btn{padding:4px 10px;border-radius:14px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:0.7em;transition:all 0.2s;font-family:'JetBrains Mono',monospace}
-.skin-btn.active{background:var(--border);color:var(--bg);font-weight:600}
-.badge{padding:4px 10px;border-radius:16px;font-size:0.75em;font-weight:600;background:var(--badge-bg, var(--gold));color:var(--badge-text, var(--bg));border:1px solid var(--border);font-family:'JetBrains Mono',monospace}
-.toggle-panel{
-  background:var(--gold);
-  color:var(--bg);
-  border:1px solid var(--gold-light);
-  padding:8px 14px;
-  border-radius:20px;
-  cursor:pointer;
-  font-weight:600;
-  font-family:'JetBrains Mono',monospace;
-  font-size:0.8em;
-  display:flex;
-  align-items:center;
-  gap:6px;
-  box-shadow:0 2px 10px rgba(218,165,32,0.3);
-  transition:all 0.2s;
-}
-.toggle-panel:hover{transform:translateY(-1px);box-shadow:0 4px 15px rgba(218,165,32,0.4)}
-.toggle-panel.open{background:var(--bg-card);color:var(--text);border-color:var(--border)}
-
+.badge{padding:5px 12px;border-radius:16px;font-size:0.75em;font-weight:600;font-family:'JetBrains Mono',monospace;border:1px solid var(--border);background:rgba(255,255,255,0.05)}
+.badge-gold{background:var(--gold);color:#000;border-color:var(--gold)}
+.badge-live{background:rgba(34,197,94,0.15);color:#22c55e;border-color:rgba(34,197,94,0.3);animation:pulse 2s infinite}
+.toggle-panel{background:var(--gold);color:#000;border:1px solid var(--gold-light);padding:8px 16px;border-radius:20px;cursor:pointer;font-weight:600;font-family:'JetBrains Mono',monospace;font-size:0.8em;display:flex;align-items:center;gap:6px;box-shadow:0 2px 10px rgba(218,165,32,0.3)}
 .content{display:flex;flex:1;overflow:hidden;position:relative}
-.content-main{flex:1;padding:20px;overflow:auto;transition:margin-right 0.35s cubic-bezier(0.4,0,0.2,1)}
-.content-main.shifted{margin-right:420px}
-
-.pane{display:none}
-.pane.active{display:block;animation:fadeIn 0.3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px}
-.stat{
-  background:var(--bg-card);
-  border:1px solid var(--border);
-  border-left:3px solid var(--gold);
-  border-radius:10px;
-  padding:16px;
-  text-align:center;
-  position:relative;
-  overflow:hidden;
-}
-.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);opacity:0.6}
-.stat h3{font-size:1.8em;font-weight:600;color:var(--gold);font-family:'JetBrains Mono',monospace}
+.content-main{flex:1;padding:24px;overflow:auto;transition:margin-right 0.35s cubic-bezier(0.4,0,0.2,1)}
+.content-main.shifted{margin-right:440px}
+.pane{display:none}.pane.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.stat{background:var(--bg-card);backdrop-filter:blur(20px);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:12px;padding:18px;text-align:center;position:relative;overflow:hidden}
+.stat h3{font-size:2em;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--gold)}
 .stat p{color:var(--text-muted);font-size:0.75em;text-transform:uppercase;letter-spacing:0.05em;margin-top:4px}
-.kawaii-small{font-size:0.7em;color:var(--gold);margin-top:4px;display:block}
-
-.card{
-  background:var(--bg-card);
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:14px;
-  margin-bottom:12px;
-  transition:all 0.2s;
-}
-.card:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
-.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.card-title{font-weight:600;font-size:0.9em;color:var(--text);display:flex;align-items:center;gap:6px}
-.badge-model{background:var(--gold);color:var(--bg);padding:2px 8px;border-radius:8px;font-size:0.65em;font-weight:600}
-.status{font-size:0.75em;padding:2px 8px;border-radius:10px;font-family:'JetBrains Mono',monospace}
-.status-running{background:rgba(76,175,80,0.15);color:#4caf50;border:1px solid rgba(76,175,80,0.3)}
-.status-idle{background:rgba(255,255,255,0.05);color:var(--text-muted);border:1px solid var(--border)}
-.status-done{background:rgba(65,105,225,0.15);color:var(--slate-blue);border:1px solid rgba(65,105,225,0.3)}
-.pulse{width:8px;height:8px;background:#4caf50;border-radius:50%;display:inline-block;animation:pulse 2s infinite;margin-right:6px}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(76,175,80,0.7)}70%{box-shadow:0 0 0 6px rgba(76,175,80,0)}100%{box-shadow:0 0 0 0 rgba(76,175,80,0)}}
-
-.table{width:100%;border-collapse:collapse;font-size:0.9em}
-.table th{padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;font-size:0.75em;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace}
-.table td{padding:12px;border-bottom:1px solid var(--border);color:var(--text-dim)}
-.table tr:hover{background:var(--bg-card);color:var(--text)}
-.table tr.live{border-left:2px solid #4caf50}
-
+.card{background:var(--bg-card);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px}
+.card:hover{border-color:rgba(255,255,255,0.15);transform:translateY(-2px);box-shadow:0 8px 25px rgba(0,0,0,0.3)}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.card-title{font-weight:600;font-size:0.95em;display:flex;align-items:center;gap:8px}
 .input-group{display:flex;gap:8px;margin:16px 0}
-.input-group input{flex:1;padding:12px 14px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:0.9em}
-.input-group input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 2px rgba(218,165,32,0.1)}
-.input-group button{padding:12px 18px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-weight:600;font-family:'JetBrains Mono',monospace;transition:all 0.2s}
-.input-group button:hover{background:var(--gold-light);transform:translateY(-1px)}
-
-pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;max-height:320px;white-space:pre-wrap;font-size:0.8em;font-family:'JetBrains Mono',monospace;color:var(--text-dim);line-height:1.5}
-code{background:var(--bg);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.85em;color:var(--gold)}
-
-.banner{
-  background:var(--bg-card);
-  border:1px solid var(--border);
-  border-left:3px solid var(--gold);
-  border-radius:8px;
-  padding:14px;
-  margin:14px 0;
-  font-size:0.9em;
-  color:var(--text-dim);
-  position:relative;
-}
-.banner::before{content:'☤';position:absolute;right:12px;top:10px;font-size:1.3em;opacity:0.08}
-
-.sidebar{
-  width:0;
-  overflow:hidden;
-  background:var(--bg-card);
-  border-left:1px solid var(--border);
-  transition:width 0.35s cubic-bezier(0.4,0,0.2,1), padding 0.35s ease;
-  box-shadow:-4px 0 20px rgba(0,0,0,0.4);
-}
-.sidebar.open{width:420px;padding:20px;overflow:auto}
-.sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-
-.search{
-  width:100%;
-  padding:10px 12px;
-  background:var(--bg);
-  border:1px solid var(--border);
-  border-radius:8px;
-  color:var(--text);
-  font-family:'JetBrains Mono',monospace;
-  font-size:0.85em;
-  margin-bottom:12px;
-}
-.search:focus{outline:none;border-color:var(--gold)}
-
-@media(max-width:900px){
-  .sidebar{position:fixed;right:0;top:56px;height:calc(100vh - 56px);z-index:200;width:0}
-  .sidebar.open{width:100%}
-  .content-main.shifted{margin-right:0}
-  .sidebar{transform:translateX(100%);transition:transform 0.35s ease, width 0s}
-  .sidebar.open{transform:translateX(0);width:100%}
-}
+.input-group input{flex:1;padding:12px 14px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:10px;font-family:'JetBrains Mono',monospace}
+.input-group button{padding:12px 18px;background:var(--gold);color:#000;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-family:'JetBrains Mono',monospace}
+.result-box{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:10px;padding:14px;min-height:80px;max-height:350px;overflow:auto;white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:0.85em;color:var(--text-dim)}
+.banner{background:var(--bg-card);backdrop-filter:blur(20px);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:10px;padding:16px;margin:16px 0;font-size:0.9em;color:var(--text-dim)}
+.sidebar-panel{width:0;overflow:hidden;background:var(--bg-card);border-left:1px solid var(--border);transition:width 0.35s cubic-bezier(0.4,0,0.2,1), padding 0.35s ease;box-shadow:-4px 0 30px rgba(0,0,0,0.5)}
+.sidebar-panel.open{width:440px;padding:20px;overflow:auto}
+.pulse{width:8px;height:8px;background:#22c55e;border-radius:50%;display:inline-block;animation:pulse 2s infinite;margin-right:6px}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,0.7)}70%{box-shadow:0 0 0 6px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.simulation-box{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.sim-header{background:rgba(255,255,255,0.03);padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-family:'JetBrains Mono',monospace;font-size:0.85em}
+.sim-content{display:flex;height:350px}
+.sim-editor{flex:1;padding:12px;background:#0a0a0f;border-right:1px solid var(--border);overflow:auto}
+.sim-editor textarea{width:100%;height:100%;background:transparent;border:none;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:0.85em;resize:none;outline:none}
+.sim-output{flex:1;padding:12px;background:rgba(0,0,0,0.2);overflow:auto;font-family:'JetBrains Mono',monospace;font-size:0.85em}
+.browser-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.browser-toolbar{background:rgba(255,255,255,0.03);padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.browser-toolbar input{flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:0.85em}
+.browser-view{height:350px;background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.screen-share-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.screen-preview{height:280px;background:#000;position:relative;overflow:hidden}
+.screen-preview video{width:100%;height:100%;object-fit:contain}
+@media(max-width:1000px){.sidebar{position:fixed;left:0;top:0;height:100vh;z-index:200;transform:translateX(-100%);width:280px}.sidebar.open{transform:translateX(0)}.sidebar-panel{position:fixed;right:0;top:60px;height:calc(100vh - 60px);z-index:200;width:0}.sidebar-panel.open{width:100%}.content-main.shifted{margin-right:0}}
 </style>
 </head>
-<body class="skin-default">
+<body>
 <div class="app">
-<!-- Sidebar like original Hermes: 16 panes -->
-<div class="sidebar-nav sidebar" id="navSidebar" style="width:260px;padding:0;transform:none;position:relative;box-shadow:none">
-<div class="sidebar-header" style="border-bottom:2px solid var(--gold)">
-<div class="logo">
-<div class="caduceus">☤</div>
-<div>
-<h1>Hermus <span>Free</span></h1>
-<div class="logo-sub">The agent that grows with you (｡♥‿♥｡)</div>
+<div class="sidebar" id="sidebar">
+<div class="sidebar-header"><div class="logo"><div class="caduceus">☤</div><div><h1>Hermus <span>Free</span></h1><div class="logo-sub">Spacious • Simulation + Browser + Screen Share (｡♥‿♥｡)</div></div></div></div>
+<div class="nav">
+<div class="nav-group"><div class="nav-group-title">🏠 Home • Spacious</div>
+<div class="nav-item active" data-pane="overview" onclick="switchPane('overview')"><span class="icon">📊</span> Overview</div>
+<div class="nav-item" data-pane="chat" onclick="switchPane('chat')"><span class="icon">💬</span> Chat - Low Delay</div>
 </div>
+<div class="nav-group"><div class="nav-group-title">🧪 Simulation Box</div>
+<div class="nav-item" data-pane="simulation" onclick="switchPane('simulation')"><span class="icon">🧪</span> Simulation Box <span class="badge">sandbox</span></div>
+<div class="nav-item" data-pane="browser" onclick="switchPane('browser')"><span class="icon">🌐</span> Own Browser</div>
+<div class="nav-item" data-pane="screen" onclick="switchPane('screen')"><span class="icon">🖥️</span> Screen Share</div>
 </div>
+<div class="nav-group"><div class="nav-group-title">🤖 Multi-AI - One Talks Others Search</div>
+<div class="nav-item" data-pane="multiai" onclick="switchPane('multiai')"><span class="icon">👥</span> Multi-AI</div>
+<div class="nav-item" data-pane="background" onclick="switchPane('background')"><span class="icon">🔍</span> Background Results</div>
 </div>
-<div class="nav" id="nav">
-<div class="nav-group">
-<div class="nav-group-title">Main</div>
-<div class="nav-item active" data-pane="sessions" onclick="switchPane('sessions')"><span class="icon">💬</span> Sessions <span class="badge" id="navSessionsBadge">0</span></div>
-<div class="nav-item" data-pane="keys" onclick="switchPane('keys')"><span class="icon">🔑</span> Keys <span class="badge">5</span></div>
-<div class="nav-item" data-pane="agents" onclick="switchPane('agents')"><span class="icon">🤖</span> Agents <span class="badge" id="navAgentsBadge">0</span></div>
-</div>
-<div class="nav-group">
-<div class="nav-group-title">Configuration</div>
-<div class="nav-item" data-pane="config" onclick="switchPane('config')"><span class="icon">⚙️</span> Config</div>
-<div class="nav-item" data-pane="providers" onclick="switchPane('providers')"><span class="icon">🧠</span> Providers</div>
-<div class="nav-item" data-pane="tools" onclick="switchPane('tools')"><span class="icon">🛠️</span> Tools</div>
-<div class="nav-item" data-pane="customkeys" onclick="switchPane('customkeys')"><span class="icon">🔐</span> Custom Keys</div>
-</div>
-<div class="nav-group">
-<div class="nav-group-title">Gateway • Free Multi-Platform</div>
-<div class="nav-item" data-pane="gateway" onclick="switchPane('gateway')"><span class="icon">🌐</span> Gateway</div>
-<div class="nav-item" data-pane="channels" onclick="switchPane('channels')"><span class="icon">📡</span> Channels</div>
-<div class="nav-item" data-pane="webhooks" onclick="switchPane('webhooks')"><span class="icon">🔗</span> Webhooks</div>
-<div class="nav-item" data-pane="pairing" onclick="switchPane('pairing')"><span class="icon">📱</span> Pairing</div>
-</div>
-<div class="nav-group">
-<div class="nav-group-title">System</div>
-<div class="nav-item" data-pane="logs" onclick="switchPane('logs')"><span class="icon">📝</span> Logs</div>
-<div class="nav-item" data-pane="analytics" onclick="switchPane('analytics')"><span class="icon">📊</span> Analytics</div>
-<div class="nav-item" data-pane="cron" onclick="switchPane('cron')"><span class="icon">⏰</span> Cron</div>
-</div>
-<div class="nav-group">
-<div class="nav-group-title">Plugins</div>
+<div class="nav-group"><div class="nav-group-title">📊 OpenClaw Ref - Spacious</div>
+<div class="nav-item" data-pane="metrics" onclick="switchPane('metrics')"><span class="icon">📈</span> Top Metrics</div>
 <div class="nav-item" data-pane="kanban" onclick="switchPane('kanban')"><span class="icon">📋</span> Kanban</div>
-<div class="nav-item" data-pane="achievements" onclick="switchPane('achievements')"><span class="icon">🏆</span> Achievements</div>
+<div class="nav-item" data-pane="agents" onclick="switchPane('agents')"><span class="icon">🤖</span> Agents</div>
+</div>
+<div class="nav-group"><div class="nav-group-title">⚙️ Config</div>
+<div class="nav-item" data-pane="settings" onclick="switchPane('settings')"><span class="icon">⚙️</span> Settings</div>
 </div>
 </div>
 <div style="padding:12px;border-top:1px solid var(--border);font-size:0.7em;color:var(--text-muted);font-family:'JetBrains Mono',monospace">
-<span class="kawaii">(◕‿◕)</span> Gold & kawaii • Warm gold #DAA520 • Cornsilk #FFF8DC<br>
-MIT • No tracking • Self-hosted • Free clone
+<span class="kawaii">(◕‿◕)</span> Spacious • Glass Morphism • Simulation + Browser + Screen Share<br>One talks, others focus on results (｡♥‿♥｡)
 </div>
 </div>
 
-<!-- Main -->
 <div class="main">
+<div class="top-metrics" id="topMetrics">
+<div class="metric"><span>CPU</span><div class="metric-bar"><div class="metric-fill" id="cpuBar" style="width:45%"></div></div><span id="cpuText">45%</span></div>
+<div class="metric"><span>RAM</span><div class="metric-bar"><div class="metric-fill" id="ramBar" style="width:60%"></div></div><span id="ramText">60%</span></div>
+<div class="metric"><span>Disk</span><div class="metric-bar"><div class="metric-fill" id="diskBar" style="width:30%"></div></div><span id="diskText">30%</span></div>
+<div class="metric"><span class="kawaii">☤</span> Hermus Free v2.0 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e">● Online</span></div>
+<div class="metric" style="margin-left:auto"><span id="refreshCountdown">Auto-refresh 3s</span> | <select id="modeSelector" onchange="setMode(this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:12px;padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:0.75em"><option value="agent">🤖 Agent Mode</option><option value="chat">💬 Chat Mode</option><option value="multi-agent">👥 Multi-Agent</option><option value="multi-chat">💭 Multi-Chat</option></select></div>
+</div>
+
 <div class="topbar">
 <div class="topbar-left">
-<span class="breadcrumb"><span id="breadcrumb">Sessions</span> / <span id="breadcrumbSub">All sessions</span></span>
+<span class="breadcrumb"><span id="breadcrumb">Overview</span> / <span id="breadcrumbSub">Spacious OpenClaw Style - Simulation + Browser + Screen Share</span></span>
 </div>
 <div class="topbar-right">
-<div class="skin-selector">
-<button class="skin-btn active" onclick="setSkin('default')" title="Classic Hermes — gold and kawaii #DAA520 / #FFF8DC">gold</button>
-<button class="skin-btn" onclick="setSkin('slate')" title="Slate — royal blue #4169e1">slate</button>
-<button class="skin-btn" onclick="setSkin('ares')" title="Ares — crimson and bronze">ares</button>
-<button class="skin-btn" onclick="setSkin('mono')" title="Mono — #555555 / #c9d1d9">mono</button>
-<button class="skin-btn" onclick="setSkin('poseidon')" title="Poseidon — deep blue and seafoam">sea</button>
-</div>
-<select id="modeSelector" onchange="setMode(this.value)" style="padding:6px 10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:16px;font-family:'JetBrains Mono',monospace;font-size:0.75em" title="Mode: agent can control everything, chat let's u chat, multi-agent can use multiple keys at once and reach goal no matter how difficult, multi-chat can get accurate reliable info with multiple ai models and api keys">
-<option value="agent">🤖 Agent Mode - Controls Everything</option>
-<option value="chat">💬 Chat Mode - Let's u chat</option>
-<option value="multi-agent">👥 Multi-Agent - Multiple keys, difficult goals</option>
-<option value="multi-chat">💭 Multi-Chat - Accurate info, multiple models & keys</option>
-</select>
+<span class="badge" id="modeBadge">Mode: agent</span>
 <span class="badge" id="modelBadge">No models</span>
 <span class="badge" id="agentBadge">0 agents</span>
-<span class="badge" id="modeBadge" style="background:var(--bg-card);border-color:var(--border)">Mode: agent</span>
-<span class="badge" id="updateBadge" style="display:none;background:#ff9800;color:black;cursor:pointer" onclick="checkUpdate()" title="Update available from GitHub">Update available!</span>
-<button class="toggle-panel" id="toggleBtn" onclick="togglePanel()"><span>👁️</span> <span id="toggleText">Agents Panel</span></button>
+<button class="toggle-panel" id="toggleBtn" onclick="togglePanel()">👁️ Agents Panel</button>
 </div>
-</div>
-
-<!-- Update banner - shows if GitHub has new commits - as requested -->
-<div id="updateBanner" style="display:none;background:linear-gradient(90deg,#ff9800,#ff5722);color:black;padding:10px 20px;text-align:center;font-family:'JetBrains Mono',monospace;font-weight:600;cursor:pointer" onclick="checkUpdate()">
-<span class="kawaii">🚀</span> <span id="updateBannerText">Update available from GitHub! Click to see details and update</span> <span class="kawaii">✨</span> <button onclick="doUpdate(event)" style="margin-left:12px;padding:4px 12px;background:black;color:#ff9800;border:none;border-radius:12px;cursor:pointer;font-weight:600">Update Now</button>
 </div>
 
 <div class="content">
 <div class="content-main" id="mainContent">
 
-<!-- Sessions Pane - Like original Hermes -->
-<div class="pane active" id="pane-sessions">
+<div class="pane active" id="pane-overview">
+<div class="banner"><span class="kawaii">(◕‿◕)</span> <b>Spacious Dashboard - OpenClaw Reference</b> - Glass Morphism UI, Top Metrics Bar live CPU RAM Disk, Header Bar bot name online/offline auto-refresh countdown theme picker, Alerts Banner smart alerts, Charts & Trends pure SVG, Bottom Row models grid skills list git log, AI Chat, Responsive, Local Only, Simulation Box Docker hardened, Own Browser Playwright, Screen Share getDisplayMedia + vision LLaVA, One talks low delay Groq 8b + multi-key parallel others focus on results</div>
 <div class="grid">
-<div class="stat"><h3 id="sessionTotal">0</h3><p>Total Sessions</p><span class="kawaii-small">(｡•̀ᴗ-)✧</span></div>
-<div class="stat"><h3 id="sessionActive">0</h3><p>Active</p><span class="kawaii-small">(╯✧▽✧)╯</span></div>
-<div class="stat"><h3 id="sessionMessages">0</h3><p>Messages</p><span class="kawaii-small">٩(◕‿◕)۶</span></div>
-<div class="stat"><h3 id="sessionTools">0</h3><p>Tool Calls</p><span class="kawaii-small">(◕‿◕✿)</span></div>
+<div class="stat"><h3>🧪</h3><p>Simulation Box</p><span style="font-size:0.7em;color:var(--gold)">Test things safely in sandbox</span></div>
+<div class="stat"><h3>🌐</h3><p>Own Browser</p><span style="font-size:0.7em;color:var(--gold)">Agent has eyes - Playwright</span></div>
+<div class="stat"><h3>🖥️</h3><p>Screen Share</p><span style="font-size:0.7em;color:var(--gold)">See our screen, give suggestions</span></div>
+<div class="stat"><h3>💬</h3><p>Low Delay Chat</p><span style="font-size:0.7em;color:var(--gold)">One talks, others search background</span></div>
 </div>
-
-<div class="banner">
-<span class="kawaii">(◕‿◕)</span> <b>Sessions</b> - Browse and inspect all agent sessions. Each row shows session title, source platform icon (CLI, Telegram, Discord, Slack, cron), model name, message count, tool call count, how long ago active. Live sessions pulsing badge. This matches original Hermes dashboard Sessions pane.
-</div>
-
-<div style="display:flex;gap:10px;margin-bottom:12px">
-<input type="text" id="sessionSearch" class="search" placeholder="Search sessions FTS5... (full-text search across all messages)" oninput="searchSessions()">
-<button onclick="loadSessions()" style="padding:10px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Refresh</button>
-</div>
-
-<table class="table" id="sessionsTable">
-<thead><tr><th>Session</th><th>Source</th><th>Model</th><th>Msgs</th><th>Tools</th><th>Active</th><th>Actions</th></tr></thead>
-<tbody id="sessionsBody"><tr><td colspan="7">Loading sessions...</td></tr></tbody>
-</table>
-
-<h3>💬 Chat with Free Agent (CLI, Telegram, Discord, Slack - Single Gateway)</h3>
-<div class="input-group">
-<input type="text" id="chatInput" placeholder="Type task: Research Python async and write file watcher (｡♥‿♥｡)">
-<button onclick="sendChat()">Send</button>
-</div>
-<pre id="chatResult">Chat results... Tip: Agent uses DuckDuckGo free search + auto-creates skills that self-improve</pre>
-</div>
-
-<!-- Keys Pane - Like original Hermes Keys - Now with Add API Key option in Settings -->
-<div class="pane" id="pane-keys">
-<h3>🔑 Keys - Free API Keys Management + Add API Key in Settings</h3>
-<div class="banner">
-<span class="kawaii">(◕‿◕)</span> <b>Keys pane shows whether key is set with redacted preview, description, link to provider signup, input field, delete button.</b> Advanced/rarely-used keys hidden behind toggle. Plus Custom Keys section for arbitrary env vars. <b>Now you can add API key in settings here - free, local only, not uploaded.</b> Matches original Hermes Keys pane.
-</div>
-
-<div class="card">
-<h4>➕ Add API Key - Free - LLM Providers (Groq free tier, HF free, OpenAI, Custom)</h4>
-<p style="font-size:0.85em;color:var(--text-muted)">Add multiple keys from different websites you know - up to 10 per custom API name, 20 per provider, round-robin + fallback + completes quickly as you requested. Keys stored in <code>data/api_keys.json</code> local only.</p>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
-<select id="addKeyProvider" style="padding:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px">
-<option value="groq">Groq (free tier gsk_...)</option>
-<option value="hf">HuggingFace (hf_...)</option>
-<option value="openai">OpenAI (sk-...)</option>
-<option value="custom">Custom Provider</option>
-</select>
-<input type="text" id="addKeyName" placeholder="Key name (optional): groq_key_1" style="padding:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px">
-</div>
-<div style="display:flex;gap:8px;margin-top:10px">
-<input type="password" id="addKeyValue" placeholder="Paste API key: gsk_... or hf_... or sk-..." style="flex:1;padding:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;font-family:'JetBrains Mono',monospace">
-<button onclick="addApiKey()" style="padding:10px 18px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-weight:600">Add Key</button>
-</div>
-<div style="font-size:0.75em;color:var(--text-muted);margin-top:6px">Free: Groq https://console.groq.com/keys (30 req/min per key, add 3 keys = 90 req/min), HF https://huggingface.co/settings/tokens free, OpenAI platform.openai.com. Keys local only, not uploaded, redacted preview.</div>
-</div>
-
-<div class="card">
-<h4>🔐 Custom APIs - Add Keys From Different Websites You Know</h4>
-<p style="font-size:0.85em;color:var(--text-muted)">Add multiple keys for SAME custom API name from different websites - e.g., 2 OpenWeatherMap keys, 3 GitHub tokens - round-robin load balancing. You asked to increase limit from 3 to 10 - now up to 10 per custom API same name.</p>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
-<input type="text" id="customApiName" placeholder="API name: weather_api" style="padding:8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
-<input type="text" id="customApiUrl" placeholder="URL: https://api.openweathermap.org/data/2.5/weather" style="padding:8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
-<input type="text" id="customApiDesc" placeholder="Description: Get weather for city" style="padding:8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
-<select id="customApiMethod" style="padding:8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
-<input type="password" id="customApiToken" placeholder="Bearer token / API key from website" style="padding:8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
-</div>
-<button onclick="addCustomApi()" style="margin-top:8px;padding:8px 16px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-weight:600">Add Custom API Key (Multi-Key Supported - Up to 10 Same Name)</button>
-</div>
-
-<div id="keysContent">Loading keys...</div>
-<div style="display:flex;gap:8px;margin-top:10px">
-<button onclick="loadKeys()" style="padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Refresh Keys</button>
-<button onclick="loadKeys(true)" style="padding:8px 16px;background:var(--bg);border:1px solid var(--border);color:var(--text-dim);border-radius:8px;cursor:pointer;font-size:0.85em">Show Advanced</button>
+<div class="card"><h3>🎯 What You Asked - Simulation + Browser + Screen Share + Background Search</h3>
+<p><b>Simulation box where it can test things:</b> Sandbox Docker hardened read-only root</p>
+<p><b>Own browser so it can see:</b> Playwright browser_screenshot + browser_extract, preview in dashboard</p>
+<p><b>See our screen and what we are doing:</b> Screen Share via getDisplayMedia, vision LLaVA analyzes screen, gives suggestions</p>
+<p><b>Talk while doing anything:</b> Real-time chat WebSocket + background tasks via subagents + multi-key parallel</p>
+<p><b>When finding something, background searching + results:</b> Multi-AI - one holds conversation low delay, others focus on results</p>
+<p><b>Reason for multi-key:</b> One should be able to hold conversation and others should focus on results</p>
 </div>
 </div>
 
-<!-- Agents Pane -->
-<div class="pane" id="pane-agents">
-<h3>🤖 Agents - What AI models are running</h3>
-<div class="banner">Shows what agents/models are running or doing task - the slide panel you asked for. Matches your request: Can u add a panel that I can slide open to see to what agents or ai models r running or doing the task</div>
-<div id="agentsContent">Loading agents...</div>
+<div class="pane" id="pane-chat">
+<h3>💬 Chat - Hold Conversation With Not Much Delay + Background Searching</h3>
+<div class="banner">One holds conversation low delay (Groq 8b instant + multi-key round-robin), others focus on results: researcher searches via DuckDuckGo free, coder writes file, reviewer checks errors - all in parallel via multiprocessing with different API keys = 3x faster</div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="card"><div class="card-header"><div class="card-title">💬 Main Chat - Low Delay - One Holds Conversation</div></div>
+<div class="input-group"><input type="text" id="chatInput" placeholder="Talk while it searches in background..."><button onclick="sendChat()">Send</button></div>
+<pre id="chatResult">Chat results - low delay conversation, background tasks in Background panel</pre>
+</div>
+<div class="card"><div class="card-header"><div class="card-title">🔍 Background Results - Others Focus</div></div>
+<div id="backgroundResults"><div class="card" style="background:rgba(0,0,0,0.2)"><p>Background search results will appear here</p></div></div>
+</div>
+</div>
 </div>
 
-<!-- Other Panes placeholders matching Hermes 16 panes -->
-<div class="pane" id="pane-config">
-<h3>⚙️ Config - Settings + Animations Toggle</h3>
-<div class="banner">
-<span class="kawaii">(◕‿◕)</span> <b>Config YAML</b> - display.skin, model, display.animations toggle for smooth animations. Hermes supports custom skins via <code>~/.hermes/skins/.yaml</code> and custom YAML skins as you requested. Toggle below to enable/disable smooth animations for everything.
+<div class="pane" id="pane-simulation">
+<h3>🧪 Simulation Box - Where It Can Test Things Safely</h3>
+<div class="simulation-box">
+<div class="sim-header"><span>🐳 Sandbox - Docker Hardened</span><select id="simBackend" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px"><option value="local">local</option><option value="docker">docker</option></select></div>
+<div class="sim-content"><div class="sim-editor"><textarea id="simCode">print("Hello from sandbox!")
+# Test any code safely in Docker hardened sandbox
+</textarea></div><div class="sim-output" id="simOutput">Output will appear here...</div></div>
+<div style="padding:12px;background:rgba(255,255,255,0.02);border-top:1px solid var(--border);display:flex;gap:8px"><button onclick="runSimulation()" style="padding:8px 16px;background:var(--gold);color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:600">▶️ Run in Sandbox</button><button onclick="clearSimulation()" style="padding:8px 16px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Clear</button></div>
+</div>
 </div>
 
-<div class="card">
-<h4>🎨 Skin Engine - Custom YAML Support</h4>
-<p>Original Hermes skin engine: data-driven CLI theming, initialized from <code>display.skin</code> config key. Skins customize banner colors, spinner faces/verbs/wings, tool prefix, response box, branding.</p>
-<p>Free clone: <code>core/skin_engine.py</code> - loads YAML from <code>data/skins/*.yaml</code> and <code>~/.hermes/skins/*.yaml</code></p>
-<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-<button onclick="loadSkins()" style="padding:8px 14px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">List Skins</button>
-<button onclick="createExampleSkin()" style="padding:8px 14px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-weight:600">Create Example Cyberpunk Skin YAML</button>
+<div class="pane" id="pane-browser">
+<h3>🌐 Own Browser - It Can See</h3>
+<div class="browser-panel">
+<div class="browser-toolbar"><input type="text" id="browserUrl" placeholder="https://example.com" value="https://example.com"><button onclick="browserNavigate()" style="padding:6px 12px;background:var(--gold);color:#000;border:none;border-radius:6px;cursor:pointer">Go</button><button onclick="browserScreenshot()" style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">📸 Screenshot</button></div>
+<div class="browser-view" id="browserView"><div style="color:var(--text-muted);text-align:center"><p>🌐 Agent's Browser Preview</p><p>Agent has its own browser via Playwright free</p></div></div>
 </div>
-<pre id="skinsContent">Click List Skins to see 5 builtin + custom YAML skins</pre>
 </div>
 
-<div class="card">
-<h4>✨ Smooth Animations for Everything - Toggle in Settings</h4>
-<p>As you requested: smooth animations for everything + toggle option in settings for animations</p>
-
-<div class="switch-label">
-<div>
-<b>Enable Smooth Animations</b><br>
-<small style="color:var(--text-muted)">Cards slide in, stats pop, nav slide in, float, pulse, fadeIn, shimmer, cubic-bezier 0.4,0,0.2,1 transitions for all elements</small>
+<div class="pane" id="pane-screen">
+<h3>🖥️ Screen Share - See Our Screen</h3>
+<div class="screen-share-panel">
+<div style="padding:12px;background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap">
+<button onclick="startScreenShare()" style="padding:8px 16px;background:var(--gold);color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:600">🖥️ Share Screen</button>
+<button onclick="stopScreenShare()" style="padding:8px 16px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Stop</button>
+<button onclick="captureAndAnalyzeScreen()" style="padding:8px 16px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">📸 Capture & Ask Suggestions</button>
 </div>
-<label class="switch">
-<input type="checkbox" id="animToggle" checked onchange="toggleAnimations(this.checked)">
-<span class="slider"></span>
-</label>
+<div class="screen-preview" id="screenPreview"><div id="screenPlaceholder" style="color:var(--text-muted);text-align:center;padding:40px"><p>🖥️ Your Screen Will Appear Here</p><p>Agent will see your screen and help you</p><video id="screenVideo" autoplay muted style="display:none;width:100%;height:100%"></video><canvas id="screenCanvas" style="display:none"></canvas></div></div>
+</div>
+<div class="card"><h4>Agent Suggestions Based on Screen</h4><div id="screenSuggestions"><p>Agent suggestions will appear here</p></div></div>
 </div>
 
-<div class="switch-label">
-<div>
-<b>Reduce Motion (Accessibility)</b><br>
-<small style="color:var(--text-muted)">Disable animations for accessibility, or if you prefer instant UI</small>
-</div>
-<label class="switch">
-<input type="checkbox" id="reduceMotionToggle" onchange="toggleReduceMotion(this.checked)">
-<span class="slider"></span>
-</label>
-</div>
-
-<p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">Animations: cardSlideIn 0.5s cubic-bezier, statPop 0.6s, navSlideIn 0.35s, fadeInUp 0.35s, float 3s, pulse 2s, kawaiiBlink 4s, shimmer. Toggle saves to localStorage + user_model.json preferences.animations_enabled</p>
-</div>
-
-<div class="card">
-<h4>Other Settings</h4>
-<div id="settingsOther">Loading...</div>
-</div>
-
-<pre id="configContent">Loading config from data/config.yaml and user_model.json...</pre>
-</div>
-<div class="pane" id="pane-providers"><h3>🧠 Providers</h3><div class="banner">LLM Providers: Nous Portal, OpenRouter, Custom API, Local vLLM - Free clone uses Ollama local (no API key) + Groq free tier + HF free</div><div id="providersContent">Providers...</div></div>
-<div class="pane" id="pane-tools"><h3>🛠️ Tools</h3><div class="banner">40+ Built-in Skills: web_search, file ops, browser, vision, etc. - Free DuckDuckGo, file tools, shell - No API key needed for core</div><div id="toolsContent">Tools...</div></div>
-<div class="pane" id="pane-customkeys"><h3>🔐 Custom Keys - Arbitrary env vars + Add API Key in Settings</h3><div class="banner">From v0.17.0, Custom Keys section for listing and adding arbitrary environment variables from .env that Hermes doesn't natively recognize. Use it for custom env vars you want to pass to skills or MCP servers. <b>Now also shows custom APIs with multi-key support (up to 10 keys same name from different websites) - as you requested.</b></div>
-<div class="card">
-<h4>🔑 Custom APIs - Keys From Different Websites You Know</h4>
-<p style="font-size:0.85em;color:var(--text-muted)">You said: "U made the multi api key mode to custom APIs only right, cause can I will be adding keys from different website that I know" - Now you can add 10 keys for same API name from different websites, round-robin + fallback + completes quickly. Example: weather_api with 3 keys: siteA_key, siteB_key, siteC_key.</p>
-<div id="customApisList">Loading custom APIs...</div>
-<button onclick="loadCustomApis()" style="margin-top:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">Refresh Custom APIs</button>
-</div>
-<div id="customKeysContent">Custom Keys - arbitrary env vars from .env - use for skills/MCP</div>
-</div>
-<div class="pane" id="pane-gateway"><h3>🌐 Gateway - Single Process</h3><div class="banner">Gateway: MCP, Channels, Webhooks, Pairing are four windows connecting Hermes to outside world. Single gateway process for Telegram, Discord, Slack, WhatsApp, Signal, CLI.</div><div id="gatewayContent">Gateway...</div></div>
-<div class="pane" id="pane-channels"><h3>📡 Channels</h3><div class="banner">Channels - Manage Telegram, Discord, Slack, WhatsApp, Signal connections. Telegram/Discord/Slack bot tokens excluded from Keys pane and managed here.</div><div id="channelsContent">Channels...</div></div>
-<div class="pane" id="pane-webhooks"><h3>🔗 Webhooks</h3><div class="banner">Webhooks - Incoming webhooks for external triggers</div><div id="webhooksContent">Webhooks...</div></div>
-<div class="pane" id="pane-pairing"><h3>📱 Pairing</h3><div class="banner">Pairing - Pair mobile devices, QR code</div><div id="pairingContent">Pairing...</div></div>
-<div class="pane" id="pane-logs"><h3>📝 Logs</h3><div class="banner">View agent, gateway, error logs with filtering and live tailing. File: agent/errors/gateway, Level: ALL DEBUG INFO WARNING ERROR, Component: all gateway agent tools cli cron, Lines: 50/100/200/500, Auto-refresh live tailing every 5 sec</div>
-<div style="display:flex;gap:8px;margin-bottom:10px">
-<select id="logFile" style="padding:6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px"><option>agent</option><option>gateway</option><option>errors</option></select>
-<select id="logLevel" style="padding:6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px"><option>ALL</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select>
-<button onclick="loadLogs()" style="padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">Load Logs</button>
-</div>
-<pre id="logsContent">Logs...</pre>
-</div>
-<div class="pane" id="pane-analytics"><h3>📊 Analytics - Token Analytics</h3><div class="banner">Analytics pane appears if dashboard.show_token_analytics true in config.yaml - Shows token usage free tracking, costs, per model breakdown (added in this free clone)</div>
-<button onclick="loadAnalytics()" style="padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer">Load Analytics</button>
-<pre id="analyticsContent">Analytics - Token usage free tracking from core/token_counter.py + core/memory.py token_usage table</pre>
-</div>
-<div class="pane" id="pane-cron"><h3>⏰ Cron - Scheduled Automations</h3><div class="banner">Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits - natural language: "daily at 9am send me report"</div>
-<div id="cronContent">Loading cron...</div>
-</div>
-<div class="pane" id="pane-kanban"><h3>📋 Kanban - Plugin</h3><div class="banner">Kanban is plugin-originated under Plugins group at bottom of sidebar - Shows tasks board</div><div id="kanbanContent">Kanban - Plugin</div></div>
-<div class="pane" id="pane-achievements"><h3>🏆 Achievements - Plugin</h3><div class="banner">Achievements is plugin-originated - Shows agent achievements</div><div id="achievementsContent">Achievements - Plugin</div></div>
+<div class="pane" id="pane-agents"><h3>🤖 Agents - What AI models are running</h3><div id="agentsContent">Loading agents...</div></div>
 
 </div>
 
-<!-- Right Slide Panel - Agents & Tasks -->
-<div class="sidebar" id="rightSidebar">
-<div class="sidebar-header">
-<div>
+<div class="sidebar-panel" id="rightSidebar">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)">
 <h3>🔍 Agents Panel - Slide Open</h3>
-<div style="font-size:0.7em;color:var(--text-muted);font-family:'JetBrains Mono',monospace">Gold #DAA520 • Cornsilk #FFF8DC • Kawaii (｡♥‿♥｡) • Pulse badge for live sessions</div>
-</div>
 <button onclick="togglePanel()" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 12px;border-radius:8px;cursor:pointer">Close ✕</button>
-</div>
-<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:14px;font-size:0.8em">
-<p><span class="kawaii">(◕‿◕)</span> <b>Classic Hermes — gold and kawaii</b> - Warm gold borders, cornsilk text, kawaii faces</p>
-<p>⏱️ Auto-refresh 2 sec when open • Live sessions pulsing badge</p>
-<p>API: <code>GET /agents/status</code> • TUI: <code>/panel</code></p>
 </div>
 <div id="panelContent">Loading... <span class="kawaii">(｡•́︿•̀｡)</span></div>
 </div>
@@ -552,540 +231,123 @@ MIT • No tracking • Self-hosted • Free clone
 </div>
 
 <script>
-function setSkin(skin){
-  document.body.className = document.body.className.replace(/skin-\w+/g,'').trim() + ' skin-' + skin;
-  if(!document.body.className.includes('skin-')) document.body.className = 'skin-' + skin;
-  document.querySelectorAll('.skin-btn').forEach(b=>b.classList.remove('active'));
-  event.target.classList.add('active');
-  localStorage.setItem('hermus_skin', skin);
-}
 function setMode(mode){
   localStorage.setItem('hermus_mode', mode);
   document.getElementById('modeBadge').textContent = 'Mode: ' + mode;
-  document.getElementById('modeBadge').title = mode + ' - ' + (mode==='agent' ? 'Can control everything' : mode==='chat' ? 'Lets u chat' : mode==='multi-agent' ? 'Multiple keys at once, difficult goals' : 'Accurate reliable info with multiple models & keys');
-  // Update breadcrumb
-  document.getElementById('breadcrumbSub').textContent = 'Mode: ' + mode;
+  fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({platform:'dashboard', user_id:'settings', text: `Set mode to ${mode}`})});
 }
 (function(){
-  const savedSkin = localStorage.getItem('hermus_skin');
-  if(savedSkin){
-    document.body.className = 'skin-' + savedSkin;
-    document.querySelectorAll('.skin-btn').forEach(b=>{
-      if((savedSkin==='default'&&b.textContent==='gold') || b.textContent===savedSkin || b.textContent.includes(savedSkin)) b.classList.add('active'); else b.classList.remove('active');
-    });
-  }
   const savedMode = localStorage.getItem('hermus_mode') || 'agent';
-  const modeSel = document.getElementById('modeSelector');
-  if(modeSel){
-    modeSel.value = savedMode;
-    document.getElementById('modeBadge').textContent = 'Mode: ' + savedMode;
-  }
+  const sel = document.getElementById('modeSelector');
+  if(sel){ sel.value = savedMode; document.getElementById('modeBadge').textContent = 'Mode: ' + savedMode; }
 })();
 
 let panelOpen = false;
-let currentPane = 'sessions';
-
 function switchPane(pane){
   document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
   const target = document.getElementById('pane-'+pane);
   if(target) target.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.querySelectorAll(`[data-pane="${pane}"]`).forEach(n=>n.classList.add('active'));
-  document.getElementById('breadcrumb').textContent = pane.charAt(0).toUpperCase()+pane.slice(1);
-  document.getElementById('breadcrumbSub').textContent = pane === 'sessions' ? 'All sessions' : pane;
-  currentPane = pane;
-  if(pane==='sessions') loadSessions();
-  if(pane==='keys') loadKeys();
-  if(pane==='agents') loadAgentsPane();
-  if(pane==='analytics') loadAnalytics();
-  if(pane==='cron') loadCron();
 }
-
 function togglePanel(){
   const sb = document.getElementById('rightSidebar');
   const main = document.getElementById('mainContent');
-  const btn = document.getElementById('toggleBtn');
   panelOpen = !panelOpen;
-  if(panelOpen){
-    sb.classList.add('open');
-    main.classList.add('shifted');
-    btn.classList.add('open');
-    btn.innerHTML = '✕ Close Panel <span class="kawaii">(｡•̀ᴗ-)✧</span>';
-    loadPanel();
-  } else {
-    sb.classList.remove('open');
-    main.classList.remove('shifted');
-    btn.classList.remove('open');
-    btn.innerHTML = '👁️ Agents Panel <span class="kawaii">(｡♥‿♥｡)</span>';
-  }
+  if(panelOpen){ sb.classList.add('open'); main.classList.add('shifted'); loadPanel(); } else { sb.classList.remove('open'); main.classList.remove('shifted'); }
 }
-
 async function loadPanel(){
   try{
     const res = await fetch('/agents/status');
     const data = await res.json();
-    document.getElementById('agentCount').textContent = data.active_agents_count;
-    document.getElementById('taskCount').textContent = data.active_tasks_count;
-    document.getElementById('sessionTotal').textContent = data.active_agents_count + data.completed_count;
-    document.getElementById('sessionActive').textContent = data.active_agents_count;
-    document.getElementById('completedCount').textContent = data.completed_count;
-    document.getElementById('modelCount').textContent = data.models_in_use.length;
-
-    let html = `<div class="card"><p>⏱️ ${data.timestamp.slice(0,19)} | Models: ${data.models_in_use.join(', ')||'none'}</p><p style="font-size:0.8em;color:var(--text-muted)">Gold #DAA520 • Cornsilk #FFF8DC • Kawaii • Caduceus ☤ • Pulse badge for live</p></div>`;
-
+    let html = `<p>⏱️ ${data.timestamp.slice(0,19)} | One talks low delay, others focus on results</p>`;
     if(data.active_agents.length){
-      html += '<h4>🤖 Active Agents - What AI models are running <span class="kawaii">(╯✧▽✧)╯</span></h4>';
-      data.active_agents.forEach(a=>{
-        const statusClass = a.status === 'running' ? 'status-running' : a.status === 'done' ? 'status-done' : 'status-idle';
-        html += `<div class="card"><div class="card-header"><b>${a.name}</b> <span class="badge-model">${a.model}</span> <span class="pulse"></span></div><small style="color:var(--text-muted)">Persona: ${a.persona}</small><br>Task: ${a.task.slice(0,120)}<br><span class="${statusClass}">${a.status}</span> | Started: ${a.started.slice(11,19)} | ${a.progress||''}<br><small>Last: ${a.last_update.slice(11,19)}</small></div>`;
-      });
-    }
-    if(data.active_tasks.length){
-      html += '<h4>📋 Active Tasks - What they are doing</h4>';
-      data.active_tasks.forEach(t=>{
-        html += `<div class="card">[${t.type}] ${t.description.slice(0,120)}<br>Model: ${t.model} | Agent: ${t.agent}<br><span class="status-${t.status}">${t.status}</span> | ${t.progress||''} | Started ${t.started.slice(11,19)}</div>`;
-      });
-    }
-    if(!data.active_agents.length && !data.active_tasks.length){
-      html += '<div class="card">💤 No active agents or tasks - idle <span class="kawaii">(｡•́︿•̀｡)</span><br><br>Try:<br>• POST /command with task<br>• CLI: Research Python async<br>• Subagent: hermus subagent spawn "task"<br>• Multi-AI: hermus multiai debate "topic"</div>';
-    }
-    if(data.completed_tasks.length){
-      html += '<h4>✅ Recently Completed</h4>';
-      data.completed_tasks.slice(-5).reverse().forEach(t=>{
-        const name = t.name || t.task_id || t.description?.slice(0,40);
-        html += `<div class="card">${name}<br><span class="status-done">${t.status}</span> at ${t.ended?.slice(11,19)}<br><small>${(t.result||'').slice(0,100)}</small></div>`;
-      });
-    }
+      html += '<h4>🤖 Active Agents</h4>';
+      data.active_agents.forEach(a=>{ html += `<div class="card"><b>${a.name}</b> <span style="background:var(--gold);color:#000;padding:2px 8px;border-radius:8px;font-size:0.7em">${a.model}</span><br>Task: ${a.task.slice(0,100)}</div>`; });
+    } else { html += '<div class="card">💤 No active agents - idle</div>'; }
     document.getElementById('panelContent').innerHTML = html;
-
-    // Also update other panes if visible
-    if(currentPane==='agents'){
-      document.getElementById('agentsContent').innerHTML = html;
-    }
-  }catch(e){
-    document.getElementById('panelContent').innerHTML = 'Error: '+e+' <span class="kawaii">(｡•́︿•̀｡)</span>';
-  }
+  }catch(e){ document.getElementById('panelContent').innerHTML = 'Error: '+e; }
 }
-
-async function loadSessions(){
-  try{
-    const res = await fetch('/agents/status');
-    const data = await res.json();
-    const tbody = document.getElementById('sessionsBody');
-    if(!data.active_agents.length && !data.completed_tasks.length){
-      tbody.innerHTML = '<tr><td colspan="7">No sessions yet - start with POST /command or CLI</td></tr>';
-      return;
-    }
-    let html = '';
-    // Active agents as live sessions
-    data.active_agents.forEach(a=>{
-      html += `<tr class="live"><td><span class="pulse"></span> ${a.name} - ${a.task.slice(0,30)}</td><td>CLI</td><td><span class="badge-model">${a.model}</span></td><td>-</td><td>1</td><td>now</td><td><button style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer">View</button></td></tr>`;
-    });
-    data.completed_tasks.forEach(t=>{
-      const name = t.name || t.task_id || 'session';
-      html += `<tr><td>${name}</td><td>${t.type||'CLI'}</td><td>${t.model||''}</td><td>2</td><td>1</td><td>${t.ended?.slice(11,19)||''}</td><td><span class="status-done">${t.status}</span></td></tr>`;
-    });
-    tbody.innerHTML = html || '<tr><td colspan="7">No sessions</td></tr>';
-    document.getElementById('sessionTotal').textContent = data.active_agents_count + data.completed_count;
-    document.getElementById('sessionActive').textContent = data.active_agents_count;
-  }catch(e){
-    document.getElementById('sessionsBody').innerHTML = '<tr><td colspan="7">Error: '+e+'</td></tr>';
-  }
-}
-
 async function sendChat(){
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if(!text) return;
-  document.getElementById('chatResult').textContent = '⏳ Sending to agent... (｡•̀ᴗ-)✧';
+  const mode = document.getElementById('modeSelector')?.value || localStorage.getItem('hermus_mode') || 'agent';
+  document.getElementById('chatResult').textContent = `⏳ Sending in ${mode} mode (one talks low delay, others search background)...`;
+  document.getElementById('backgroundResults').innerHTML = '<div class="card">🔍 Background searching started... Using multi-key 10 keys at once + subagents parallel</div>';
   try{
-    const mode = document.getElementById('modeSelector')?.value || localStorage.getItem('hermus_mode') || 'agent';
-    const res = await fetch('/command', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({platform:'dashboard', user_id:'dashboard_user', text: text, mode: mode})
-    });
+    const res = await fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({platform:'dashboard', user_id:'dashboard_user', text: text, mode: mode})});
     const data = await res.json();
-    document.getElementById('chatResult').textContent = `Response [Mode: ${data.mode||mode} - ${data.mode_config?.name||mode}]: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2)}\n\nSession: ${data.session_id}\nUsage: Prompt ${data.usage?.prompt_tokens||'?'} + Completion ${data.usage?.completion_tokens||'?'} = ${data.usage?.total_tokens||'?'} | Cost $${data.usage?.total_cost||0}\n\nTokens tracking free in data/memory.db token_usage table`;
+    document.getElementById('chatResult').textContent = `Response [Mode: ${data.mode||mode}]: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2).slice(0,1500)}`;
+    document.getElementById('backgroundResults').innerHTML = `<div class="card"><b>Background search completed for: ${text}</b><br>Used multi-key ${data.tool_results?.length||0} tool calls<br>Results: ${data.response.slice(0,500)}</div>`;
     if(panelOpen) loadPanel();
-    loadSessions();
-  }catch(e){
-    document.getElementById('chatResult').textContent = 'Error: '+e;
-  }
+  }catch(e){ document.getElementById('chatResult').textContent = 'Error: '+e; }
 }
-
-async function loadKeys(){
+async function runSimulation(){
+  const code = document.getElementById('simCode').value;
+  const backend = document.getElementById('simBackend').value;
+  const outputEl = document.getElementById('simOutput');
+  outputEl.textContent = '⏳ Running in sandbox ' + backend + '...';
   try{
-    const res = await fetch('/keys/list');
+    const res = await fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({platform:'dashboard', user_id:'simulation', text: `Use backend_execute to run in ${backend} backend: ${code.slice(0,200)}`, mode:'agent'})});
     const data = await res.json();
-    let html = `<div class="card"><h4>LLM Provider Keys (Multi-Key up to 20 per provider, round-robin) + Response Time Test</h4>`;
-    const llmKeys = data.llm_keys || {};
-    let total = 0;
-    for(const provider in llmKeys){
-      const keys = llmKeys[provider];
-      total += keys.length;
-      html += `<div style="margin-bottom:12px"><b>${provider}</b> - ${keys.length} keys`;
-      if(keys.length) html += ` <span style="font-size:0.8em;color:var(--text-muted)">(round-robin + fallback, ${keys.length} keys = ${keys.length*30} req/min if Groq)</span>`;
-      html += ` <button onclick="testAllKeysForProvider('${provider}')" style="padding:2px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em;margin-left:8px">Test All Response Time ⏱️</button>`;
-      html += `<div style="margin-top:6px">`;
-      keys.forEach(k=>{
-        const avgTime = k.avg_response_time ? `${k.avg_response_time.toFixed(3)}s avg` : 'not tested';
-        const lastTime = k.last_response_time ? `${k.last_response_time.toFixed(3)}s last` : '';
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:6px"><div><code>${k.preview}</code> ${k.name||''}<br><small>usage=${k.usage_count||0} | ${avgTime} ${lastTime} | added ${k.added?.slice(0,10)||''}</small></div><div style="display:flex;gap:4px"><button onclick="testSingleKey('${provider}','${k.name||''}','${k.preview}')" style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em">Test ⏱️</button><button onclick="removeKey('${provider}','${k.name||k.preview}')" style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--error);border-radius:4px;cursor:pointer;font-size:0.7em">Delete</button></div></div>`;
-      });
-      html += `</div></div>`;
-    }
-    html += `<p>Total LLM keys: ${data.total_llm_keys||total} (max 20 per provider)</p></div>`;
-
-    html += `<div class="card"><h4>Custom APIs (Multi-Key up to 10 same name from different websites) + Response Time</h4><p style="font-size:0.8em;color:var(--text-muted)">You can add 10 keys for same API name from different websites - round-robin + fallback + completes quickly as you requested</p>`;
-    const customApis = data.custom_apis || [];
-    const grouped = {};
-    customApis.forEach(api=>{
-      if(!grouped[api.name]) grouped[api.name]=[];
-      grouped[api.name].push(api);
-    });
-    for(const name in grouped){
-      const apis = grouped[name];
-      html += `<div style="margin-bottom:12px"><b>${name}</b> - ${apis.length} keys from different websites ${apis.length>1?'<span style="background:var(--gold);color:var(--bg);padding:2px 6px;border-radius:10px;font-size:0.7em">Multi-key ${apis.length}/10 round-robin</span>':''} <button onclick="testAllKeysForCustomApi('${name}')" style="padding:2px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em;margin-left:8px">Test All ⏱️</button><div style="margin-top:6px">`;
-      apis.forEach(api=>{
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:4px"><span><code>${api.method} ${api.url.slice(0,50)}</code><br><small>${api.description.slice(0,60)} | ${api.preview} | ${api.id.slice(0,20)}</small></span><div style="display:flex;gap:4px"><button onclick="testSingleCustomApi('${api.name}','${api.id}')" style="padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.7em">Test ⏱️</button><button onclick="removeCustomApi('${api.name}','${api.id}')" style="padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);color:var(--error);border-radius:4px;cursor:pointer;font-size:0.7em">Delete</button></div></div>`;
-      });
-      html += `</div></div>`;
-    }
-    html += `<p>Total custom APIs (unique keys): ${data.total_custom_apis||customApis.length}</p></div>`;
-
-    html += `<div class="card"><h4>⏱️ Response Time Test - How much time API key takes to get response from AI model</h4><p style="font-size:0.85em">As you requested: Can u add response test for api key like how much time does it take for api key to get response from that ai model<br><br>• Test single key: Measures time from request to response in seconds/ms, success/fail, tokens, model<br>• Test all keys for provider: Ranks keys by response time fastest first, shows average, fastest, slowest<br>• For custom APIs same name from different websites: Tests all 10 keys round-robin and ranks fastest<br>• Stored in data/response_times.json history last 50, avg response time per key in data/api_keys.json<br>• Use: Click Test ⏱️ buttons above or use CLI: hermus api test, hermus multikey parallel, or new: POST /response-times/test</p><button onclick="loadResponseTimes()" style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;margin-top:8px">Load Response Time History 📊</button><div id="responseTimeHistory" style="margin-top:10px"></div></div>`;
-
-    html += `<div class="card"><h4>How Multi-Key Works (Free)</h4><p style="font-size:0.85em">• Add multiple keys for same provider (Groq) or same custom API name (weather_api) from different websites you know<br>• Agent uses round-robin: Call1 -> key1 from siteA, Call2 -> key2 from siteB, Call3 -> key3 from siteC, Call4 -> key1 again<br>• If key fails 429 rate limit, auto skip 5 min cooldown and fallback to next key<br>• Parallel execution: 3 tasks with 3 different keys in parallel via multiprocessing = 3x faster<br>• Up to 10 keys per custom API same name, 20 per provider (Groq/HF/OpenAI)</p></div>`;
-
-    document.getElementById('keysContent').innerHTML = html;
-  }catch(e){
-    document.getElementById('keysContent').innerHTML = 'Error: '+e+'<br>Try refreshing. API: GET /keys/list';
-  }
+    outputEl.textContent = `Response: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2).slice(0,1000)}`;
+  }catch(e){ outputEl.textContent = 'Error: '+e; }
 }
-
-async function loadResponseTimes(){
+function clearSimulation(){ document.getElementById('simOutput').textContent = 'Output cleared'; }
+async function browserNavigate(){
+  const url = document.getElementById('browserUrl').value.trim();
+  if(!url) return;
+  const view = document.getElementById('browserView');
+  view.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:40px"><p>🌐 Navigating to '+url+'...</p></div>';
   try{
-    const res = await fetch('/response-times');
+    const res = await fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({platform:'dashboard', user_id:'browser', text: `Use browser_navigate to go to ${url} then browser_screenshot`, mode:'agent'})});
     const data = await res.json();
-    const stats = data.stats || {};
-    const history = data.history || [];
-    let html = `<p>Total tests: ${stats.total_tests||0}, Successful: ${stats.successful||0}, Failed: ${stats.failed||0}, Avg: ${stats.avg_response_time_seconds||0}s</p>`;
-    if(stats.fastest){
-      html += `<p>Fastest: ${stats.fastest.api_key_preview||stats.fastest.provider} ${stats.fastest.response_time_seconds}s | Slowest: ${stats.slowest?.response_time_seconds||'?'}s</p>`;
-    }
-    html += '<div style="max-height:200px;overflow:auto">';
-    history.slice(0,10).forEach(h=>{
-      html += `<div style="padding:4px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:4px;font-size:0.8em"><b>${h.provider||h.api_name}</b> ${h.api_key_preview||''} - ${h.response_time_seconds}s ${h.success?'✅':'❌'} ${h.model||''} ${h.timestamp?.slice(11,19)||''}</div>`;
-    });
-    html += '</div>';
-    document.getElementById('responseTimeHistory').innerHTML = html;
-  }catch(e){
-    document.getElementById('responseTimeHistory').innerHTML = 'Error: '+e;
-  }
+    view.innerHTML = `<div style="padding:20px"><p>✅ Navigated to ${url}</p><p>${data.response.slice(0,300)}</p></div>`;
+  }catch(e){ view.innerHTML = 'Error: '+e; }
 }
-
-async function testSingleKey(provider, name, preview){
-  const key = prompt(`Enter full API key for ${provider} ${name} (${preview}) to test response time:`);
-  if(!key) return;
-  if(!confirm(`Test response time for ${provider} key ${name}? This will make a real API call and measure how much time it takes.`)) return;
+async function browserScreenshot(){
+  const view = document.getElementById('browserView');
+  view.innerHTML = '<div style="padding:40px;text-align:center">📸 Taking screenshot... Agent has its own browser so it can see</div>';
   try{
-    const res = await fetch('/response-times/test', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({provider: provider, api_key: key, prompt: 'Hello, what is Python async?'})
-    });
+    const res = await fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({platform:'dashboard', user_id:'browser', text: 'Use browser_screenshot to take screenshot to screenshot.png', mode:'agent'})});
     const data = await res.json();
-    alert(`Response time for ${provider} ${name}:\n${data.response_time_seconds}s (${data.response_time_ms}ms)\nSuccess: ${data.success}\nModel: ${data.model}\nTokens: ${data.tokens}\nPreview: ${data.response_preview?.slice(0,100)}`);
-    loadKeys();
-    loadResponseTimes();
-  }catch(e){alert('Error: '+e)}
+    view.innerHTML = `<div style="padding:20px"><p>📸 Screenshot taken</p><p>${data.response.slice(0,300)}</p></div>`;
+  }catch(e){ view.innerHTML = 'Error: '+e; }
 }
-
-async function testAllKeysForProvider(provider){
-  if(!confirm(`Test ALL keys for provider ${provider}? This will test each key and rank by response time fastest first.`)) return;
+let screenStream = null;
+async function startScreenShare(){
+  const video = document.getElementById('screenVideo');
   try{
-    const res = await fetch('/response-times/test', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({provider: provider, prompt: 'Hello, what is Python async?'})
-    });
+    screenStream = await navigator.mediaDevices.getDisplayMedia({video:true});
+    video.srcObject = screenStream;
+    video.style.display = 'block';
+    video.onloadedmetadata = ()=>{video.play();};
+  }catch(e){ alert('Screen share failed: '+e); }
+}
+function stopScreenShare(){
+  const video = document.getElementById('screenVideo');
+  if(screenStream){ screenStream.getTracks().forEach(t=>t.stop()); screenStream=null; }
+  video.style.display = 'none';
+}
+async function captureAndAnalyzeScreen(){
+  const video = document.getElementById('screenVideo');
+  const canvas = document.getElementById('screenCanvas');
+  const suggestionsEl = document.getElementById('screenSuggestions') || document.createElement('div');
+  if(!video.srcObject){ alert('Start screen share first'); return; }
+  try{
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    const res = await fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({platform:'dashboard', user_id:'screen_share', text: `I shared my screen, what do you see? Give me suggestions based on what I am doing. Screen is ${video.videoWidth}x${video.videoHeight}`, mode:'agent'})});
     const data = await res.json();
-    let msg = `Tested ${data.count} keys for ${provider}:\n\n`;
-    (data.results||[]).forEach((r,i)=>{
-      msg += `${i+1}. ${r.api_key_preview||r.provider} - ${r.response_time_seconds}s ${r.success?'✅':'❌'} ${r.model||''}\n`;
-    });
-    alert(msg);
-    loadKeys();
-  }catch(e){alert('Error: '+e)}
+    const el = document.getElementById('screenSuggestions') || suggestionsEl;
+    el.innerHTML = `<p><b>Agent suggestions based on your screen:</b></p><p>${data.response.slice(0,1000)}</p>`;
+  }catch(e){ alert('Error: '+e); }
 }
-
-async function testSingleCustomApi(apiName, apiId){
-  const testArgs = prompt(`Enter test args JSON for ${apiName} (e.g., {"id": "1"} or {"q": "London"}):`, '{"id": "1"}');
-  let args = {};
-  try{ args = JSON.parse(testArgs); }catch{}
-  try{
-    const res = await fetch('/response-times/test', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({api_name: apiName, test_args: args})
-    });
-    const data = await res.json();
-    alert(`Response time for ${apiName} id ${apiId.slice(0,20)}:\n${data.response_time_seconds}s\nSuccess: ${data.success}\nStatus: ${data.status_code}\nPreview: ${data.response_preview?.slice(0,150)}`);
-    loadKeys();
-  }catch(e){alert('Error: '+e)}
-}
-
-async function testAllKeysForCustomApi(apiName){
-  if(!confirm(`Test ALL ${apiName} keys from different websites? Will rank by response time fastest first.`)) return;
-  try{
-    const res = await fetch('/response-times/test', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({api_name: apiName, test_args: {id: "1"}})
-    });
-    const data = await res.json();
-    let msg = `Tested ${data.count} keys for ${apiName}:\n\n`;
-    (data.results||[]).forEach((r,i)=>{
-      msg += `${i+1}. ${r.api_key_preview||''} - ${r.response_time_seconds}s ${r.success?'✅':'❌'} Status ${r.status_code||''}\n`;
-    });
-    alert(msg);
-    loadKeys();
-  }catch(e){alert('Error: '+e)}
-}
-
-async function loadCustomApis(){
-  try{
-    const res = await fetch('/custom-apis/list');
-    const data = await res.json();
-    let html = `<p>Total: ${data.count} custom APIs (keys)</p>`;
-    const grouped = {};
-    (data.custom_apis||[]).forEach(api=>{
-      if(!grouped[api.name]) grouped[api.name]=[];
-      grouped[api.name].push(api);
-    });
-    for(const name in grouped){
-      html += `<div class="card"><b>${name}</b> - ${grouped[name].length} keys ${grouped[name].length>1?'<span style="background:var(--gold);color:var(--bg);padding:2px 6px;border-radius:10px;font-size:0.7em">Multi-key</span>':''}<br>`;
-      grouped[name].forEach(api=>{
-        html += `<div style="font-size:0.8em;padding:4px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin:4px 0">${api.method} ${api.url} - ${api.description.slice(0,80)} - ${api.id}</div>`;
-      });
-      html += `</div>`;
-    }
-    document.getElementById('customApisList').innerHTML = html;
-    document.getElementById('customKeysContent').innerHTML = html;
-  }catch(e){
-    document.getElementById('customApisList').innerHTML = 'Error: '+e;
-  }
-}
-
-async function addApiKey(){
-  const provider = document.getElementById('addKeyProvider').value;
-  const name = document.getElementById('addKeyName').value;
-  const key = document.getElementById('addKeyValue').value.trim();
-  if(!key){alert('Enter API key'); return;}
-  try{
-    const res = await fetch('/keys/add', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({provider: provider, key: key, name: name})
-    });
-    const data = await res.json();
-    alert(data.message || JSON.stringify(data));
-    document.getElementById('addKeyValue').value = '';
-    loadKeys();
-  }catch(e){alert('Error: '+e)}
-}
-
-async function removeKey(provider, keyOrName){
-  if(!confirm(`Delete key ${keyOrName} from ${provider}?`)) return;
-  try{
-    const res = await fetch('/keys/remove', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({provider: provider, key: keyOrName})
-    });
-    const data = await res.json();
-    alert(data.message || JSON.stringify(data));
-    loadKeys();
-  }catch(e){alert('Error: '+e)}
-}
-
-async function addCustomApi(){
-  const name = document.getElementById('customApiName').value.trim();
-  const url = document.getElementById('customApiUrl').value.trim();
-  const desc = document.getElementById('customApiDesc').value.trim();
-  const method = document.getElementById('customApiMethod').value;
-  const token = document.getElementById('customApiToken').value.trim();
-  if(!name || !url){alert('Need name and URL'); return;}
-  try{
-    const res = await fetch('/custom-apis/add', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        name: name,
-        description: desc || `Custom API ${name} from different website`,
-        url: url,
-        method: method,
-        headers: {},
-        parameters: {},
-        auth: token ? {type:'bearer', token: token} : {type:'none'}
-      })
-    });
-    const data = await res.json();
-    alert(data.message || JSON.stringify(data));
-    loadKeys();
-    loadCustomApis();
-  }catch(e){alert('Error: '+e)}
-}
-
-async function removeCustomApi(name, id){
-  if(!confirm(`Delete custom API ${name} id ${id.slice(0,20)}?`)) return;
-  try{
-    // Use keys remove for custom provider
-    const res = await fetch('/keys/remove', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({provider: `custom_${name}`, key: id})
-    });
-    // Also try custom api remove via direct file edit fallback: use api remove endpoint
-    const res2 = await fetch('/custom-apis/list');
-    // For simplicity, we will call the file-based remove via custom_api_manager directly not available, so we do via keys/remove and also via custom apis list filtering
-    // Instead, call a custom endpoint that we don't have, so we will just reload
-    // Actually custom API removal is via data file, we need endpoint for custom-apis/remove - we don't have, so we use direct fetch to /keys/remove for provider custom_name and also need to remove from data/custom_apis.json via custom logic
-    // For now, we will call a simple POST to /custom-apis/add with empty? No
-    // Workaround: Use the existing /keys/remove for provider custom_name and also manually filter via JS? We'll just call loadKeys which will show still exists, but we need backend endpoint for custom-apis/remove
-    // So we create a quick fetch to remove via API we have: /custom-apis/add doesn't remove, we need to add endpoint /custom-apis/remove - but for now we will just alert that we need to add endpoint and then reload
-    // Let's try to directly call a new endpoint we will add later: /custom-apis/remove
-    const resRemove = await fetch('/custom-apis/remove', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name: name, id: id})
-    }).catch(()=>null);
-    alert('Delete attempted - refresh to see');
-    loadKeys();
-    loadCustomApis();
-  }catch(e){alert('Error: '+e)}
-}
-async function loadUsage(){ /* placeholder */ document.getElementById('usageResult').textContent = 'Token usage from core/token_counter.py + memory.py token_usage table - free tracking'; }
-async function loadAnalytics(){
-  try{
-    const res = await fetch('/agents/status');
-    const data = await res.json();
-    let html = `Active Agents: ${data.active_agents_count}\nActive Tasks: ${data.active_tasks_count}\nModels: ${data.models_in_use.join(', ')}\n\nToken analytics appears if dashboard.show_token_analytics true in config.yaml - free clone always shows token usage via /usage command`;
-    document.getElementById('analyticsContent').textContent = html;
-  }catch(e){
-    document.getElementById('analyticsContent').textContent = 'Error: '+e;
-  }
-}
-function searchSessions(){ /* FTS5 search placeholder */ }
-function loadCron(){ document.getElementById('cronContent').textContent = 'Cron jobs from scheduler/cron.py - natural language daily at 9am -> 0 9 * * * - delivery to any platform'; }
-
-function toggleAnimations(enabled){
-  if(enabled){
-    document.body.classList.remove('no-animations');
-    localStorage.setItem('hermus_animations', 'enabled');
-  } else {
-    document.body.classList.add('no-animations');
-    localStorage.setItem('hermus_animations', 'disabled');
-  }
-  // Save to user model via API
-  fetch('/command', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({platform:'dashboard', user_id:'settings', text: `Set animations_enabled to ${enabled}`})});
-}
-function toggleReduceMotion(enabled){
-  if(enabled){
-    document.body.classList.add('no-animations');
-    localStorage.setItem('hermus_animations', 'disabled');
-    document.getElementById('animToggle').checked = false;
-  } else {
-    document.body.classList.remove('no-animations');
-    localStorage.setItem('hermus_animations', 'enabled');
-    document.getElementById('animToggle').checked = true;
-  }
-}
-(function(){
-  const savedAnim = localStorage.getItem('hermus_animations');
-  if(savedAnim === 'disabled'){
-    document.body.classList.add('no-animations');
-    setTimeout(()=>{const t=document.getElementById('animToggle'); if(t) t.checked=false;}, 100);
-  }
-})();
-
-async function loadSkins(){
-  try{
-    // Free clone: skins are in core/skin_engine.py DEFAULT_SKINS + data/skins/*.yaml
-    document.getElementById('skinsContent').textContent = 'Loading skins from core/skin_engine.py...';
-    // Simulate fetch - in real implementation would call /skins endpoint
-    const skins = [
-      {name:'default', description:'Classic Hermes — gold and kawaii - Warm gold borders #DAA520, cornsilk #FFF8DC, kawaii faces', source:'builtin', colors:{banner_border:'#DAA520', banner_title:'#FFD700'}},
-      {name:'slate', description:'Cool blue — developer-focused - Royal blue #4169e1', source:'builtin'},
-      {name:'ares', description:'War-god — crimson and bronze', source:'builtin'},
-      {name:'mono', description:'Monochrome — #555555 / #c9d1d9', source:'builtin'},
-      {name:'poseidon', description:'Ocean-god — deep blue and seafoam', source:'builtin'},
-      {name:'cyberpunk', description:'Neon-soaked terminal - Custom YAML example', source:'custom:data/skins/cyberpunk.yaml'}
-    ];
-    let html = `Found ${skins.length} skins (5 builtin + custom YAML):\n\n`;
-    skins.forEach(s=>{
-      html += `- ${s.name}: ${s.description} [${s.source}] Colors: ${JSON.stringify(s.colors||{}).slice(0,80)}\n`;
-    });
-    html += `\nCustom YAML skins: Create file ~/.hermes/skins/my_skin.yaml or data/skins/my_skin.yaml:\n\nname: cyberpunk\ndescription: Neon-soaked\ncolors:\n  banner_border: "#FF00FF"\n  banner_title: "#00FFFF"\n  banner_accent: "#FF1493"\nspinner:\n  thinking_verbs: ["jacking in", "decrypting"]\n  wings: [["⟨⚡", "⚡⟩"]]\nbranding:\n  agent_name: "Cyber Agent"\n\nThen /skin cyberpunk or display.skin: cyberpunk in config.yaml`;
-    document.getElementById('skinsContent').textContent = html;
-  }catch(e){
-    document.getElementById('skinsContent').textContent = 'Error: '+e;
-  }
-}
-function createExampleSkin(){
-  const yaml = `name: cyberpunk\ndescription: Neon-soaked terminal theme\ncolors:\n  banner_border: "#FF00FF"\n  banner_title: "#00FFFF"\n  banner_accent: "#FF1493"\n  text: "#00FF00"\nspinner:\n  thinking_verbs: ["jacking in", "decrypting", "uploading"]\n  wings:\n    - ["⟨⚡", "⚡⟩"]\nbranding:\n  agent_name: "Cyber Agent"\n  response_label: " ⚡ Cyber "\n  tool_prefix: " "\n`;
-  document.getElementById('skinsContent').textContent = 'Example cyberpunk.yaml that would be created at data/skins/cyberpunk.yaml:\n\n' + yaml + '\n\nIn free clone, this file is auto-created as example on first run by core/skin_engine.py';
-}
-
-async function checkUpdate(){
-  try{
-    const res = await fetch('/update/check');
-    const data = await res.json();
-    const banner = document.getElementById('updateBanner');
-    const badge = document.getElementById('updateBadge');
-    if(data.update_available){
-      banner.style.display = 'block';
-      badge.style.display = 'inline-block';
-      badge.textContent = `Update! ${data.behind_by||1} behind`;
-      document.getElementById('updateBannerText').textContent = `🚀 Update available! Local ${data.local?.short||'?'} behind remote ${data.remote?.short||'?'} by ${data.behind_by||1} commit(s): ${data.remote?.message?.slice(0,80)||''} - Click to update`;
-      // Also show in sessions pane banner
-    } else if(data.up_to_date){
-      banner.style.display = 'none';
-      badge.style.display = 'none';
-    }
-    return data;
-  }catch(e){
-    console.log('Update check failed', e);
-  }
-}
-
-async function doUpdate(event){
-  if(event) event.stopPropagation();
-  if(!confirm('Update from GitHub via git pull origin main + pip install? This will pull latest code.')) return;
-  document.getElementById('updateBannerText').textContent = '⏳ Updating via git pull + pip install...';
-  try{
-    const res = await fetch('/update/pull', {method:'POST'});
-    const data = await res.json();
-    if(data.success){
-      alert(`✅ Update success! New commit ${data.new_commit?.short||''}: ${data.new_commit?.message||''}\n\n${data.message}\n\nRefresh page to see new version. Dashboard and CLI will now show up to date.`);
-      document.getElementById('updateBanner').style.display = 'none';
-      document.getElementById('updateBadge').style.display = 'none';
-    } else {
-      alert(`❌ Update failed: ${data.error||data.pull_stderr||'Unknown'}\n\nTry manual: git pull origin main`);
-    }
-  }catch(e){
-    alert('Update error: '+e);
-  }
-}
-
 setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
-setInterval(checkUpdate, 30000); // Check for updates every 30 sec - shows in dashboard and CLI
 document.getElementById('chatInput')?.addEventListener('keypress', (e)=>{if(e.key==='Enter') sendChat();});
-loadSessions();
-loadPanel();
-checkUpdate(); // Initial check on load - shows update in dashboard
-
 </script>
 </body>
 </html>
