@@ -22,10 +22,10 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # Store agents per user/platform for continuity
 AGENTS: Dict[str, HermusAgent] = {}
 
-def get_agent_for_user(platform: str, user_id: str, model: str = None) -> HermusAgent:
-    key = f"{platform}:{user_id}"
+def get_agent_for_user(platform: str, user_id: str, model: str = None, mode: str = "agent") -> HermusAgent:
+    key = f"{platform}:{user_id}:{mode}"
     if key not in AGENTS:
-        AGENTS[key] = HermusAgent(model=model, session_id=f"{platform}_{user_id}_{os.urandom(4).hex()}")
+        AGENTS[key] = HermusAgent(model=model, session_id=f"{platform}_{user_id}_{os.urandom(4).hex()}", mode=mode)
     return AGENTS[key]
 
 @app.get("/")
@@ -173,14 +173,18 @@ async def telegram_webhook(request: Request):
 
 @app.post("/command")
 async def command_endpoint(payload: Dict):
-    """Generic command endpoint for CLI, Discord, etc. - free"""
+    """Generic command endpoint for CLI, Discord, etc. - free - now supports modes"""
     platform = payload.get("platform", "cli")
     user_id = payload.get("user_id", "cli_user")
     text = payload.get("text", "")
     model = payload.get("model")
+    mode = payload.get("mode", "agent")
 
-    agent = get_agent_for_user(platform, user_id, model=model)
+    agent = get_agent_for_user(platform, user_id, model=model, mode=mode)
     result = agent.chat(text)
+    # Include mode in response
+    result["mode"] = agent.mode.value
+    result["mode_config"] = {"name": agent.mode_config.name, "description": agent.mode_config.description[:200]}
     return result
 
 @app.get("/platforms")

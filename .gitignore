@@ -16,3 +16,11 @@ venv/
 node_modules/
 .DS_Store
 *.log
+data/api_keys.json
+data/custom_apis.json
+data/response_times.json
+data/config.yaml
+pentest_runs/
+bounty_reports/
+*.mp4
+*.mp3

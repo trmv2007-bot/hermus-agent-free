@@ -27,6 +27,7 @@ def main():
 
     # Default: start TUI chat
     parser.add_argument("--model", default=config.model, help="Model: ollama/llama3.1:8b (free offline), groq/... (free tier), hf/... (free), mock/mock")
+    parser.add_argument("--mode", default="agent", choices=["agent", "chat", "multi-agent", "multi-chat"], help="Mode: agent can control everything, chat let's u chat, multi-agent can use multiple keys at once and reach goal no matter how difficult, multi-chat can get accurate reliable info with multiple ai models and api keys")
 
     # gateway subcommand
     gateway_parser = subparsers.add_parser("gateway", help="Gateway - single process for Telegram/Discord/CLI")
@@ -342,7 +343,7 @@ def main():
 
     else:
         # Default: start TUI - show update check on startup
-        print(f"Hermus Agent Free - Model {args.model}")
+        print(f"Hermus Agent Free - Model {args.model} | Mode {args.mode}")
         # Check for updates on startup and show in CLI
         try:
             from core.updater import get_updater_for_current_repo
@@ -355,19 +356,19 @@ def main():
         except:
             pass
         print("Starting TUI (full terminal interface with slash commands)...")
-        print("Starting TUI (full terminal interface with slash commands)...")
+        print(f"Modes: agent can control everything, chat let's u chat, multi-agent can use multiple keys at once and reach goal no matter how difficult, multi-chat can get accurate reliable info with multiple ai models and api keys")
         try:
             from tui.tui import HermusTUI
-            tui = HermusTUI(model=args.model)
+            tui = HermusTUI(model=args.model, mode=args.mode)
             tui.run()
         except ImportError as e:
             print(f"TUI deps missing: {e} - pip install prompt_toolkit rich - falling back to simple agent")
             from core.agent import HermusAgent
-            agent = HermusAgent(model=args.model)
-            print("Simple chat (type /exit to quit, /new for new session, /skills to list skills)")
+            agent = HermusAgent(model=args.model, mode=args.mode)
+            print(f"Simple chat in {args.mode} mode (type /exit to quit, /new for new session, /skills to list skills, /mode to switch)")
             while True:
                 try:
-                    text = input("\nYou> ").strip()
+                    text = input(f"\nYou [{args.mode}]> ").strip()
                     if not text:
                         continue
                     if text.lower() in ("/exit", "exit", "quit"):
@@ -380,8 +381,22 @@ def main():
                         skills = skill_manager.list_skills()
                         print(f"Skills: {skills}")
                         continue
+                    if text.lower().startswith("/mode"):
+                        parts = text.split()
+                        if len(parts) > 1:
+                            new_mode = parts[1]
+                            agent = HermusAgent(model=args.model, mode=new_mode)
+                            print(f"Switched to {new_mode} mode: {agent.mode_config.description[:100]}")
+                        else:
+                            from core.modes import list_modes
+                            modes = list_modes()
+                            print(f"Current mode: {agent.mode.value} - {agent.mode_config.name}")
+                            print("Available modes:")
+                            for m, cfg in modes.items():
+                                print(f" - {m}: {cfg['name']} - {cfg['description'][:80]}")
+                        continue
                     result = agent.chat(text)
-                    print(f"\nHermus> {result['response']}")
+                    print(f"\nHermus [{args.mode}]> {result['response']}")
                     if result.get("skill_created", {}).get("created"):
                         print(f"[New skill: {result['skill_created']['name']}]")
                 except KeyboardInterrupt:

@@ -10,6 +10,7 @@ from .llm import free_llm, FreeLLM
 from .memory import memory
 from .skill_manager import skill_manager
 from .task_tracker import task_tracker
+from .modes import AgentMode, get_mode_config, list_modes
 
 # Import tools
 from tools.web_search import web_search, TOOL_DEFINITION as WEB_SEARCH_TOOL
@@ -20,82 +21,88 @@ from core.custom_api import custom_api_manager
 class HermusAgent:
     """Free Hermes-like agent - self-improving with memory and skills"""
 
-    def __init__(self, model: str = None, session_id: str = None):
+    def __init__(self, model: str = None, session_id: str = None, mode: str = "agent"):
         self.model_name = model or config.model
         self.llm = FreeLLM(self.model_name)
         self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         self.trajectory: List[Dict] = []  # For skill creation + research-ready batch
+        # Mode handling - 4 modes as requested: agent, chat, multi-agent, multi-chat
+        try:
+            self.mode = AgentMode(mode.lower().replace("_", "-"))
+        except:
+            self.mode = AgentMode.AGENT
+        self.mode_config = get_mode_config(self.mode)
         self.tools = self._get_tools()
+
         self.agent_tracker_id = None
 
-        print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Free stack (no paywall)")
+        print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Mode {self.mode.value} ({self.mode_config.name}) | Free stack (no paywall)")
         # Track agent in task tracker for slide panel
         try:
             self.agent_tracker_id = task_tracker.add_agent(
                 agent_id=self.session_id,
-                name=f"agent_{self.session_id[:6]}",
+                name=f"agent_{self.mode.value}_{self.session_id[:6]}",
                 model=self.model_name,
-                persona="main",
-                task="idle"
+                persona=self.mode.value,
+                task=f"Mode: {self.mode_config.name} - {self.mode_config.description[:60]}"
             )
         except:
             pass
 
     def _get_tools(self) -> List[Dict]:
-        """40+ free tools - we implement core free ones + custom APIs + browser, vision, voice, backends, trajectory + internet eyes (Agent Reach)"""
-        tools = []
-        tools.append(WEB_SEARCH_TOOL)
-        tools.extend(FILE_TOOLS)
-        tools.append(SHELL_TOOL)
+        """40+ free tools - we implement core free ones + custom APIs + browser, vision, voice, backends, trajectory + internet eyes (Agent Reach) + filtered by mode"""
+        all_tools = []
+        all_tools.append(WEB_SEARCH_TOOL)
+        all_tools.extend(FILE_TOOLS)
+        all_tools.append(SHELL_TOOL)
 
         # Browser automation Playwright free
         try:
             from tools.browser import TOOLS as BROWSER_TOOLS
-            tools.extend(BROWSER_TOOLS)
+            all_tools.extend(BROWSER_TOOLS)
         except:
             pass
 
         # Vision LLaVA via Ollama free
         try:
             from tools.vision import TOOLS as VISION_TOOLS
-            tools.extend(VISION_TOOLS)
+            all_tools.extend(VISION_TOOLS)
         except:
             pass
 
         # Voice memo transcription faster-whisper free
         try:
             from tools.voice import TOOLS as VOICE_TOOLS
-            tools.extend(VOICE_TOOLS)
+            all_tools.extend(VOICE_TOOLS)
         except:
             pass
 
         # Internet Eyes - Agent Reach features - Give AI agent eyes to see entire internet, zero API fees
         try:
             from tools.internet_eyes import TOOLS as INTERNET_EYES_TOOLS
-            tools.extend(INTERNET_EYES_TOOLS)
+            all_tools.extend(INTERNET_EYES_TOOLS)
         except Exception as e:
             print(f"[Internet Eyes] Failed to load: {e}")
 
         # Agent Reach Doctor - real probing
         try:
             from tools.agent_reach_doctor import TOOLS as DOCTOR_TOOLS
-            tools.extend(DOCTOR_TOOLS)
+            all_tools.extend(DOCTOR_TOOLS)
         except:
             pass
 
         # More platforms: Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou
         try:
             from tools.facebook import TOOLS as FB_TOOLS
-            tools.extend(FB_TOOLS)
+            all_tools.extend(FB_TOOLS)
         except:
             pass
 
         # Backends: Docker, SSH, Modal free tier, Daytona, Vercel Sandbox
         try:
             from backends.backend_manager import TOOL_DEFINITION as BACKEND_TOOL
-            from backends.backend_manager import list_backends as list_backends_tool
-            tools.append(BACKEND_TOOL)
-            tools.append({
+            all_tools.append(BACKEND_TOOL)
+            all_tools.append({
                 "type": "function",
                 "function": {
                     "name": "list_backends",
@@ -109,39 +116,39 @@ class HermusAgent:
         # Trajectory batch generation + compression
         try:
             from core.trajectory import TOOLS as TRAJECTORY_TOOLS
-            tools.extend(TRAJECTORY_TOOLS)
+            all_tools.extend(TRAJECTORY_TOOLS)
         except:
             pass
 
         # Response time tester - how much time API key takes to get response from AI model - free
         try:
             from core.response_tester import TOOLS as RESPONSE_TESTER_TOOLS
-            tools.extend(RESPONSE_TESTER_TOOLS)
+            all_tools.extend(RESPONSE_TESTER_TOOLS)
         except:
             pass
 
         # Updater - check for GitHub updates and show in dashboard and CLI too - free
         try:
             from tools.updater import TOOLS as UPDATER_TOOLS
-            tools.extend(UPDATER_TOOLS)
+            all_tools.extend(UPDATER_TOOLS)
         except:
             pass
 
         # Pentest tools - Strix features - Open-source AI penetration testing tool
         try:
             from tools.pentest import TOOLS as PENTEST_TOOLS
-            tools.extend(PENTEST_TOOLS)
+            all_tools.extend(PENTEST_TOOLS)
         except Exception as e:
             print(f"[Pentest] Failed to load pentest tools: {e}")
 
         # Add custom APIs as tools - free custom API feature
         try:
             custom_tools = custom_api_manager.get_tool_definitions()
-            tools.extend(custom_tools)
+            all_tools.extend(custom_tools)
         except Exception as e:
             print(f"[Custom API] Failed to load custom tools: {e}")
         # Memory tools
-        tools.append({
+        all_tools.append({
             "type": "function",
             "function": {
                 "name": "memory_search",
@@ -149,7 +156,7 @@ class HermusAgent:
                 "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
             }
         })
-        tools.append({
+        all_tools.append({
             "type": "function",
             "function": {
                 "name": "memory_add",
@@ -157,7 +164,7 @@ class HermusAgent:
                 "parameters": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}
             }
         })
-        tools.append({
+        all_tools.append({
             "type": "function",
             "function": {
                 "name": "skill_list",
@@ -165,7 +172,7 @@ class HermusAgent:
                 "parameters": {"type": "object", "properties": {}, "required": []}
             }
         })
-        tools.append({
+        all_tools.append({
             "type": "function",
             "function": {
                 "name": "skill_use",
@@ -174,7 +181,7 @@ class HermusAgent:
             }
         })
         # Subagent spawn free
-        tools.append({
+        all_tools.append({
             "type": "function",
             "function": {
                 "name": "subagent_spawn",
@@ -182,7 +189,33 @@ class HermusAgent:
                 "parameters": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]}
             }
         })
-        return tools
+
+        # Filter by mode as requested: agent, chat, multi-agent, multi-chat
+        mode_config = self.mode_config
+        allowed = mode_config.tools_allowed
+
+        if "all" in allowed:
+            # Agent mode can control everything + Multi Agent Mode can use multiple keys at once and reach goal no matter how difficult
+            return all_tools
+        elif "none" in allowed:
+            # Chat mode let's u chat - no tools, just chat
+            return []
+        else:
+            # Multi-chat mode and other modes with limited tools for accurate reliable info
+            # Multi-chat: get u as accurate and reliable information as possible with working of multiple ai models and api keys
+            filtered = []
+            allowed_set = set(allowed)
+            for tool in all_tools:
+                tool_name = tool.get("function", {}).get("name", "")
+                if tool_name in allowed_set:
+                    filtered.append(tool)
+            # Always include memory_search for context even in limited modes
+            if "memory_search" not in allowed_set:
+                for t in all_tools:
+                    if t.get("function", {}).get("name") == "memory_search":
+                        filtered.append(t)
+                        break
+            return filtered
 
     def _execute_tool(self, name: str, args: Dict) -> Dict:
         """Execute free tool"""

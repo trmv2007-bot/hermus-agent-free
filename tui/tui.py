@@ -30,15 +30,16 @@ class HermusTUI:
     """Free TUI - Full terminal interface like original Hermes"""
 
     SLASH_COMMANDS = [
-        "/new", "/reset", "/model", "/personality", "/retry", "/undo",
+        "/new", "/reset", "/model", "/mode", "/personality", "/retry", "/undo",
         "/compress", "/usage", "/insights", "/skills", "/platforms",
         "/status", "/help", "/exit", "/clear", "/panel", "/agents",
         "/update", "/check-update"
     ]
 
-    def __init__(self, model: str = None):
+    def __init__(self, model: str = None, mode: str = "agent"):
         self.model = model or config.model
-        self.agent = HermusAgent(model=self.model)
+        self.mode = mode or "agent"
+        self.agent = HermusAgent(model=self.model, mode=self.mode)
         self.console = Console() if RICH_AVAILABLE else None
 
         # History file
@@ -68,13 +69,13 @@ class HermusTUI:
         self._print_banner()
 
     def _get_bottom_toolbar(self):
-        """Bottom toolbar showing active agents/models for slide panel hint - free"""
+        """Bottom toolbar showing active agents/models for slide panel hint + mode - free"""
         try:
             from core.task_tracker import task_tracker
             status = task_tracker.get_status()
-            return f" Agents: {status['active_agents_count']} | Tasks: {status['active_tasks_count']} | Models: {','.join(status['models_in_use'][:2]) or 'none'} | Press /panel to slide open agents view | /help "
+            return f" Mode: {self.mode} | Agents: {status['active_agents_count']} | Tasks: {status['active_tasks_count']} | Models: {','.join(status['models_in_use'][:2]) or 'none'} | /mode for agent/chat/multi-agent/multi-chat | /panel slide open | /help "
         except:
-            return " /panel to see running agents/models | /help "
+            return f" Mode: {self.mode} | /mode for agent/chat/multi-agent/multi-chat | /panel slide open | /help "
 
     def _print_banner(self):
         banner = f"""
@@ -82,15 +83,23 @@ class HermusTUI:
 ║  ☤ Hermus Agent Free - The agent that grows with you      ║
 ║  100% Free, No Paywall, MIT                               ║
 ║  Model: {self.model:<50} ║
+║  Mode: {self.mode:<51} ║
 ║  Session: {self.agent.session_id:<48} ║
 ╚════════════════════════════════════════════════════════════╝
 
 Free stack: Ollama local (no API key) + DuckDuckGo search + SQLite FTS5 memory + auto skills
 
+Modes (as you requested):
+  agent - Can control everything (full 88+ tools)
+  chat - Let's u chat (no tools, just conversation)
+  multi-agent - Can use multiple keys at once and reach goal no matter how difficult (parallel subagents + multi-key)
+  multi-chat - Can get accurate reliable info with multiple AI models and API keys (researcher/coder/reviewer debate)
+
 Slash commands: {', '.join(self.SLASH_COMMANDS)}
 
 Type your message, or /help for help. Ctrl+D or /exit to quit. Ctrl+C to interrupt.
 Tip: Type /panel to slide open panel showing what agents/models are running
+Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate info
         """
         if self.console:
             self.console.print(banner)
@@ -114,11 +123,46 @@ Tip: Type /panel to slide open panel showing what agents/models are running
         if cmd == "/model":
             if len(parts) > 1:
                 new_model = parts[1]
-                self.agent = HermusAgent(model=new_model)
+                self.model = new_model
+                self.agent = HermusAgent(model=new_model, mode=self.mode)
                 print(f"Switched model to {new_model} (free: ollama/llama3.1:8b, groq/llama-3.1-70b-versatile, mock/mock)")
+                print(f"Current mode: {self.mode} - {self.agent.mode_config.name}: {self.agent.mode_config.description[:100]}")
             else:
-                print(f"Current model: {self.agent.model_name}")
+                print(f"Current model: {self.agent.model_name} | Mode: {self.mode}")
                 print("Free options: ollama/llama3.1:8b, ollama/mistral, groq/llama-3.1-70b-versatile (free tier), hf/mistralai/Mistral-7B-Instruct-v0.3 (free), mock/mock")
+            return True
+
+        if cmd == "/mode":
+            if len(parts) > 1:
+                new_mode = parts[1].lower()
+                try:
+                    from core.modes import AgentMode, list_modes
+                    # Validate mode
+                    valid_modes = [m.value for m in AgentMode]
+                    if new_mode not in valid_modes:
+                        print(f"Invalid mode {new_mode}. Valid: {', '.join(valid_modes)}")
+                        return True
+                    self.mode = new_mode
+                    self.agent = HermusAgent(model=self.model, mode=new_mode)
+                    print(f"Switched to {new_mode} mode: {self.agent.mode_config.name}")
+                    print(f"Description: {self.agent.mode_config.description}")
+                    print(f"Tools allowed: {self.agent.mode_config.tools_allowed[:3]}... max {self.agent.mode_config.max_tool_calls_per_turn} tool calls per turn")
+                    print(f"Multi-key: {self.agent.mode_config.use_multi_key}, Multi-AI: {self.agent.mode_config.use_multi_ai}")
+                except Exception as e:
+                    print(f"Mode switch failed: {e}")
+            else:
+                print(f"Current mode: {self.mode} - {self.agent.mode_config.name}")
+                print(f"Description: {self.agent.mode_config.description}")
+                from core.modes import list_modes
+                modes = list_modes()
+                print("\nAvailable modes (as you requested):")
+                for m, cfg in modes.items():
+                    print(f" - {m}: {cfg['name']} - {cfg['description'][:100]}")
+                print("\nUsage: /mode agent | /mode chat | /mode multi-agent | /mode multi-chat")
+                print("Agent mode can control everything")
+                print("Chat mode let's u chat")
+                print("Multi agent mode can use multiple keys at once and reach the goal given to u no matter how difficult it is")
+                print("Multi chat mode can get u as accurate and reliable information as possible with working of multiple ai models and api keys")
             return True
 
         if cmd == "/skills":
