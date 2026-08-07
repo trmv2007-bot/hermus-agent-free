@@ -333,8 +333,15 @@ MIT • No tracking • Self-hosted • Free clone
 <button class="skin-btn" onclick="setSkin('mono')" title="Mono — #555555 / #c9d1d9">mono</button>
 <button class="skin-btn" onclick="setSkin('poseidon')" title="Poseidon — deep blue and seafoam">sea</button>
 </div>
+<select id="modeSelector" onchange="setMode(this.value)" style="padding:6px 10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:16px;font-family:'JetBrains Mono',monospace;font-size:0.75em" title="Mode: agent can control everything, chat let's u chat, multi-agent can use multiple keys at once and reach goal no matter how difficult, multi-chat can get accurate reliable info with multiple ai models and api keys">
+<option value="agent">🤖 Agent Mode - Controls Everything</option>
+<option value="chat">💬 Chat Mode - Let's u chat</option>
+<option value="multi-agent">👥 Multi-Agent - Multiple keys, difficult goals</option>
+<option value="multi-chat">💭 Multi-Chat - Accurate info, multiple models & keys</option>
+</select>
 <span class="badge" id="modelBadge">No models</span>
 <span class="badge" id="agentBadge">0 agents</span>
+<span class="badge" id="modeBadge" style="background:var(--bg-card);border-color:var(--border)">Mode: agent</span>
 <span class="badge" id="updateBadge" style="display:none;background:#ff9800;color:black;cursor:pointer" onclick="checkUpdate()" title="Update available from GitHub">Update available!</span>
 <button class="toggle-panel" id="toggleBtn" onclick="togglePanel()"><span>👁️</span> <span id="toggleText">Agents Panel</span></button>
 </div>
@@ -546,18 +553,32 @@ MIT • No tracking • Self-hosted • Free clone
 
 <script>
 function setSkin(skin){
-  document.body.className = 'skin-' + skin;
+  document.body.className = document.body.className.replace(/skin-\w+/g,'').trim() + ' skin-' + skin;
+  if(!document.body.className.includes('skin-')) document.body.className = 'skin-' + skin;
   document.querySelectorAll('.skin-btn').forEach(b=>b.classList.remove('active'));
   event.target.classList.add('active');
   localStorage.setItem('hermus_skin', skin);
 }
+function setMode(mode){
+  localStorage.setItem('hermus_mode', mode);
+  document.getElementById('modeBadge').textContent = 'Mode: ' + mode;
+  document.getElementById('modeBadge').title = mode + ' - ' + (mode==='agent' ? 'Can control everything' : mode==='chat' ? 'Lets u chat' : mode==='multi-agent' ? 'Multiple keys at once, difficult goals' : 'Accurate reliable info with multiple models & keys');
+  // Update breadcrumb
+  document.getElementById('breadcrumbSub').textContent = 'Mode: ' + mode;
+}
 (function(){
-  const saved = localStorage.getItem('hermus_skin');
-  if(saved){
-    document.body.className = 'skin-' + saved;
+  const savedSkin = localStorage.getItem('hermus_skin');
+  if(savedSkin){
+    document.body.className = 'skin-' + savedSkin;
     document.querySelectorAll('.skin-btn').forEach(b=>{
-      if((saved==='default'&&b.textContent==='gold') || b.textContent===saved || b.textContent.includes(saved)) b.classList.add('active'); else b.classList.remove('active');
+      if((savedSkin==='default'&&b.textContent==='gold') || b.textContent===savedSkin || b.textContent.includes(savedSkin)) b.classList.add('active'); else b.classList.remove('active');
     });
+  }
+  const savedMode = localStorage.getItem('hermus_mode') || 'agent';
+  const modeSel = document.getElementById('modeSelector');
+  if(modeSel){
+    modeSel.value = savedMode;
+    document.getElementById('modeBadge').textContent = 'Mode: ' + savedMode;
   }
 })();
 
@@ -678,13 +699,14 @@ async function sendChat(){
   if(!text) return;
   document.getElementById('chatResult').textContent = '⏳ Sending to agent... (｡•̀ᴗ-)✧';
   try{
+    const mode = document.getElementById('modeSelector')?.value || localStorage.getItem('hermus_mode') || 'agent';
     const res = await fetch('/command', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({platform:'dashboard', user_id:'dashboard_user', text: text})
+      body: JSON.stringify({platform:'dashboard', user_id:'dashboard_user', text: text, mode: mode})
     });
     const data = await res.json();
-    document.getElementById('chatResult').textContent = `Response: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2)}\n\nSession: ${data.session_id}\nUsage: Prompt ${data.usage?.prompt_tokens||'?'} + Completion ${data.usage?.completion_tokens||'?'} = ${data.usage?.total_tokens||'?'} | Cost $${data.usage?.total_cost||0}\n\nTokens tracking free in data/memory.db token_usage table`;
+    document.getElementById('chatResult').textContent = `Response [Mode: ${data.mode||mode} - ${data.mode_config?.name||mode}]: ${data.response}\n\nTools: ${JSON.stringify(data.tool_results||[], null, 2)}\n\nSession: ${data.session_id}\nUsage: Prompt ${data.usage?.prompt_tokens||'?'} + Completion ${data.usage?.completion_tokens||'?'} = ${data.usage?.total_tokens||'?'} | Cost $${data.usage?.total_cost||0}\n\nTokens tracking free in data/memory.db token_usage table`;
     if(panelOpen) loadPanel();
     loadSessions();
   }catch(e){
