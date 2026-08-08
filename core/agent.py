@@ -134,6 +134,13 @@ class HermusAgent:
         except:
             pass
 
+        # Self-Improvement - reflection when idle, sees mistakes, searches how to improve, fixes itself in background - free
+        try:
+            from tools.self_improvement import TOOLS as SELF_IMPROVEMENT_TOOLS
+            all_tools.extend(SELF_IMPROVEMENT_TOOLS)
+        except:
+            pass
+
         # Updater - check for GitHub updates and show in dashboard and CLI too - free
         try:
             from tools.updater import TOOLS as UPDATER_TOOLS
@@ -342,6 +349,16 @@ class HermusAgent:
                     return {"error": f"Response tester tool {name} not found"}
                 except Exception as e:
                     return {"error": f"Response tester tool {name} failed: {e}"}
+            # Self-Improvement - reflection when idle, sees mistakes, searches how to improve, fixes itself in background
+            elif name in ("run_self_improvement_reflection", "get_self_improvement_status", "start_self_improvement_background_checker", "stop_self_improvement_background_checker"):
+                try:
+                    from tools.self_improvement import TOOL_MAP as SELF_MAP
+                    func = SELF_MAP.get(name)
+                    if func:
+                        return func(**args)
+                    return {"error": f"Self-improvement tool {name} not found"}
+                except Exception as e:
+                    return {"error": f"Self-improvement tool {name} failed: {e}"}
             # Updater - check for GitHub updates and show in dashboard and CLI too - free
             elif name in ("check_update", "do_update", "get_local_commit", "get_remote_commit"):
                 try:
@@ -549,6 +566,32 @@ Rules:
             task_tracker.update_agent(self.agent_tracker_id, status="idle", progress="Done", task="idle")
         except:
             pass
+
+        # Self-improving agent: When given work is done as it goes idle, trigger reflection in background
+        # As requested: if given work is done as it goes idle, it should go through reflections and see what mistakes it did, search how to improve, fix itself in background
+        try:
+            from .self_improvement import self_improvement
+            # Start background idle checker if not already running (checks every 30 sec if idle)
+            if not self_improvement.background_thread or not self_improvement.background_thread.is_alive():
+                self_improvement.start_background_idle_checker()
+
+            # Also trigger immediate reflection in background thread for this trajectory if it had mistakes
+            # Don't block main response - run in background
+            import threading
+            def background_reflection():
+                try:
+                    # Only reflect if trajectory had some tool failures or >2 turns (complex work)
+                    tool_failures = sum(1 for turn in self.trajectory if "error" in turn.get("content","").lower() or "failed" in turn.get("content","").lower())
+                    if len(self.trajectory) >= 3 or tool_failures > 0:
+                        self_improvement.run_idle_reflection(trajectory=self.trajectory[-20:])
+                except Exception as e:
+                    print(f"[Self-Improvement] Background reflection failed: {e}")
+
+            thread = threading.Thread(target=background_reflection, daemon=True)
+            thread.start()
+
+        except Exception as e:
+            print(f"[Self-Improvement] Failed to trigger background reflection: {e}")
 
         # Post-execution: Check if should create skill (autonomous skill creation)
         skill_created = None
