@@ -93,7 +93,7 @@ class SkillManager:
                     skill_data = {
                         "name": f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                         "description": f"Auto-created from session {session_id}: {traj_text[:200]}",
-                        "code": f"# Auto skill from {session_id}\n# Trajectory: {traj_text[:500]}\n\ndef run():\n    print('Auto skill - implement based on trajectory')\n"
+                        "code": f"# Auto skill from {session_id}\n# Trajectory: {traj_text[:500]}\n\ndef run(task: str = '', query: str = '', **context):\n    '''Reusable skill - task/query/context passed by skill_use'''\n    print('Auto skill - implement based on trajectory')\n    return {{'task': task or query, 'note': 'stub auto skill'}}\n"
                     }
             else:
                 skill_data = {
@@ -105,7 +105,7 @@ class SkillManager:
             skill_data = {
                 "name": f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                 "description": f"Auto skill from {session_id} (LLM failed: {e})",
-                "code": f"# Fallback skill\n# Original trajectory: {traj_text[:500]}\n\ndef run():\n    pass\n"
+                "code": f"# Fallback skill\n# Original trajectory: {traj_text[:500]}\n\ndef run(task: str = '', query: str = '', **context):\n    return {{'task': task or query, 'trajectory_hint': '''{traj_text[:200]}'''}}\n"
             }
 
         name = re.sub(r'[^a-zA-Z0-9_]', '_', skill_data.get("name", "auto_skill")).lower()
@@ -127,7 +127,7 @@ class SkillManager:
 ## Usage
 ```python
 from skills.{name}.skill import run
-run()
+run(task="...", query="...", **context)
 ```
 
 ## When to use
@@ -141,7 +141,14 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
         (skill_dir / "SKILL.md").write_text(md_content)
         code = skill_data.get("code", "# No code")
         if "def " not in code:
-            code = f"def run():\n    {code}\n"
+            code = (
+                "def run(task: str = '', query: str = '', **context):\n"
+                f"    result = {code!r}\n"
+                "    return {'task': task or query, 'result': result}\n"
+            )
+        elif "def run(" in code and "task" not in code.split("def run(", 1)[1].split(")", 1)[0]:
+            # Best-effort: leave as-is; skill_use handles bare run()
+            pass
         (skill_dir / "skill.py").write_text(code)
         # Clear cache after creation
         skill_cache.clear()

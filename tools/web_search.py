@@ -58,3 +58,6 @@ TOOL_DEFINITION = {
 def execute(query: str, max_results: int = 5) -> Dict:
     results = web_search(query, max_results)
     return {"results": results, "count": len(results)}
+
+TOOLS = [TOOL_DEFINITION]
+TOOL_MAP = {"web_search": execute}

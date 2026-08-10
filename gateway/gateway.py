@@ -2,8 +2,8 @@
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict
-from fastapi import FastAPI, Request
+from typing import Dict, Optional
+from fastapi import FastAPI, Request, Header
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +13,26 @@ from core.config import config
 from core.agent import HermusAgent
 from core.task_tracker import task_tracker
 from core.cache import get_cache_stats
+try:
+    from gateway.channels import (
+        handle_telegram_update,
+        start_all_channels,
+        get_channel_status,
+        telegram_send_message,
+        get_telegram_token,
+        get_discord_token,
+        set_agent_factory,
+    )
+except ImportError:
+    from channels import (  # type: ignore
+        handle_telegram_update,
+        start_all_channels,
+        get_channel_status,
+        telegram_send_message,
+        get_telegram_token,
+        get_discord_token,
+        set_agent_factory,
+    )
 
 app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized")
 
@@ -28,6 +48,32 @@ def get_agent_for_user(platform: str, user_id: str, model: str = None, mode: str
         AGENTS[key] = HermusAgent(model=model, session_id=f"{platform}_{user_id}_{os.urandom(4).hex()}", mode=mode)
     return AGENTS[key]
 
+
+def _agent_factory(platform: str, user_id: str, model: str = None, mode: str = "agent"):
+    return get_agent_for_user(platform, user_id, model=model, mode=mode)
+
+
+def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> Optional[JSONResponse]:
+    """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token."""
+    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    if not expected:
+        return None  # open (local default)
+    provided = x_hermus_token or request.headers.get("X-Hermus-Token") or request.query_params.get("token")
+    if provided != expected:
+        return JSONResponse({"error": "Unauthorized - set X-Hermus-Token header"}, status_code=401)
+    return None
+
+
+@app.on_event("startup")
+async def _startup_channels():
+    """Auto-start Telegram polling + Discord bot when tokens present."""
+    set_agent_factory(_agent_factory)
+    if getattr(config, "auto_start_channels", True):
+        mode = getattr(config, "telegram_mode", "auto")
+        started = start_all_channels(_agent_factory, telegram_mode=mode)
+        print(f"[Gateway] Channels started: {started}")
+
+
 @app.get("/")
 async def root():
     from core.cache import get_cache_stats
@@ -35,9 +81,18 @@ async def root():
         "message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI - Optimized",
         "platforms": ["telegram", "discord", "cli"],
         "agents": len(AGENTS),
+        "channels": get_channel_status(),
         "optimized": True,
         "cache_stats": get_cache_stats(),
-        "version": "2.0-free-optimized"
+        "features": [
+            "multi_step_agent_loop",
+            "tool_registry",
+            "telegram_send_and_poll",
+            "discord_bot",
+            "mcp_client",
+            "semantic_embeddings",
+        ],
+        "version": "2.1-free-versatile"
     }
 
 @app.get("/cache/stats")
@@ -62,7 +117,11 @@ async def dashboard():
     """Dashboard with slide panel to see what agents/models are running"""
     html_path = Path(__file__).parent / "dashboard.html"
     if html_path.exists():
-        return HTMLResponse(html_path.read_text())
+        # Disable caching so UI updates show immediately after deploys
+        return HTMLResponse(
+            html_path.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     # Fallback inline HTML if file not exists
     return HTMLResponse("""
 <!DOCTYPE html>
@@ -151,25 +210,156 @@ setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
-    """Telegram free Bot API webhook - cross-platform continuity"""
+    """Telegram free Bot API webhook - real sendMessage reply + multi-step agent"""
     try:
         data = await request.json()
-        message = data.get("message", {})
-        text = message.get("text", "")
-        user_id = str(message.get("from", {}).get("id", "unknown"))
-        
-        if not text:
-            return JSONResponse({"ok": True})
-
-        agent = get_agent_for_user("telegram", user_id)
-        result = agent.chat(text)
-
-        # For free version, we don't actually send via Telegram API here - gateway would need TELEGRAM_BOT_TOKEN
-        # But we return response for polling or for testing
-        # Real implementation would: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={...})
-        return JSONResponse({"ok": True, "response": result["response"], "tool_results": result.get("tool_results", [])})
+        # Full handler: chat + sendMessage (+ voice transcribe)
+        result = handle_telegram_update(data, agent_factory=_agent_factory)
+        return JSONResponse(result if isinstance(result, dict) else {"ok": True, "result": result})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/channels/status")
+async def channels_status():
+    """Telegram/Discord channel runtime status"""
+    return {
+        "channels": get_channel_status(),
+        "telegram_token_set": bool(get_telegram_token()),
+        "discord_token_set": bool(get_discord_token()),
+        "agents": len(AGENTS),
+    }
+
+
+@app.post("/channels/start")
+async def channels_start(payload: Dict = None):
+    """Manually start Telegram polling + Discord bot"""
+    payload = payload or {}
+    mode = payload.get("telegram_mode") or getattr(config, "telegram_mode", "auto")
+    started = start_all_channels(_agent_factory, telegram_mode=mode)
+    return {"started": started, "status": get_channel_status()}
+
+
+@app.post("/telegram/send")
+async def telegram_send(payload: Dict):
+    """Send a Telegram message directly (ops / cron delivery)"""
+    chat_id = payload.get("chat_id")
+    text = payload.get("text", "")
+    if not chat_id or not text:
+        return JSONResponse({"ok": False, "error": "need chat_id and text"}, status_code=400)
+    return telegram_send_message(chat_id, text)
+
+
+@app.get("/tools")
+async def tools_list():
+    """List registered tools from auto tool registry"""
+    from core.tool_registry import tool_registry
+
+    return tool_registry.list_tools()
+
+
+@app.get("/mcp/servers")
+async def mcp_servers():
+    from core.mcp_client import mcp_manager
+
+    return {"servers": mcp_manager.list_servers()}
+
+
+@app.post("/mcp/connect")
+async def mcp_connect():
+    from core.mcp_client import mcp_manager
+    from core.tool_registry import tool_registry
+
+    result = mcp_manager.connect_enabled()
+    tool_registry.load(force=True)
+    return {**result, "tools": tool_registry.list_tools()}
+
+
+@app.get("/embeddings/status")
+async def embeddings_status():
+    from core.embeddings import embedding_store
+
+    return embedding_store.backend_info()
+
+
+@app.get("/providers")
+async def providers_list():
+    from core.providers import list_providers
+
+    return {"providers": list_providers()}
+
+
+@app.get("/fleet/workers")
+async def fleet_workers():
+    from core.model_fleet import model_fleet
+
+    return model_fleet.list_workers()
+
+
+@app.post("/fleet/run")
+async def fleet_run(payload: Dict):
+    from core.model_fleet import model_fleet
+
+    goal = payload.get("goal") or payload.get("prompt") or ""
+    if not goal:
+        return JSONResponse({"error": "goal required"}, status_code=400)
+    strategy = payload.get("strategy", "auto")
+    models = payload.get("models")
+    if isinstance(models, str):
+        models = [m.strip() for m in models.split(",") if m.strip()]
+    providers = payload.get("providers")
+    if isinstance(providers, str):
+        providers = [p.strip() for p in providers.split(",") if p.strip()]
+    return model_fleet.auto_distribute(
+        goal,
+        strategy=strategy,
+        models=models,
+        providers=providers,
+        max_workers=int(payload.get("max_workers") or 4),
+    )
+
+
+@app.get("/keys/health")
+async def keys_health(provider: str = None):
+    from core.multi_key import multi_key_manager
+
+    return {"results": multi_key_manager.check_all_health(provider)}
+
+
+@app.get("/keys/rates")
+async def keys_rates(provider: str = None):
+    from core.multi_key import multi_key_manager
+
+    return multi_key_manager.rate_status(provider)
+
+
+@app.get("/keys/models")
+async def keys_models(provider: str, key: str = None, base_url: str = None):
+    from core.multi_key import multi_key_manager
+
+    return multi_key_manager.discover_models(provider, api_key=key, base_url=base_url)
+
+
+@app.post("/embeddings/ingest")
+async def embeddings_ingest(payload: Dict):
+    from core.embeddings import embedding_store
+
+    path = payload.get("path")
+    if not path:
+        return JSONResponse({"error": "path required"}, status_code=400)
+    return embedding_store.ingest_path(path, source=payload.get("source"))
+
+
+@app.post("/embeddings/search")
+async def embeddings_search(payload: Dict):
+    from core.embeddings import embedding_store
+
+    query = payload.get("query", "")
+    limit = int(payload.get("limit", 5))
+    hybrid = payload.get("hybrid", True)
+    if hybrid:
+        return embedding_store.hybrid_search(query, limit=limit)
+    return embedding_store.search(query, limit=limit)
 
 @app.post("/command")
 async def command_endpoint(payload: Dict):
@@ -193,66 +383,61 @@ async def platforms():
 
 @app.get("/keys/list")
 async def keys_list():
-    """List API keys - free, with redacted preview - for Settings panel to add API key"""
+    """List API keys - redacted preview + health/models metadata for dashboard"""
     try:
         from core.multi_key import multi_key_manager
         from core.custom_api import custom_api_manager
-        # LLM provider keys
-        llm_keys = multi_key_manager.list_keys()
-        # Redact preview
-        redacted = {}
-        for provider, keys in llm_keys.items():
-            redacted[provider] = []
-            for k in keys:
-                if isinstance(k, dict):
-                    key_val = k.get("key","")
-                    redacted.append({
-                        "name": k.get("name",""),
-                        "preview": f"{key_val[:6]}...{key_val[-4:]}" if len(key_val) > 10 else "****",
-                        "added": k.get("added",""),
-                        "usage_count": k.get("usage_count",0),
-                        "provider": provider
-                    })
-                else:
-                    redacted[provider].append({"preview": f"{k[:6]}...{k[-4:]}" if len(k)>10 else "****", "provider": provider})
+        # Prefer rich redacted listing from multi_key manager
+        redacted = multi_key_manager.list_keys(redact=True)
+        llm_raw = multi_key_manager.list_keys(redact=False)
+        total_llm = sum(len(v) for v in llm_raw.values())
 
-        # Custom APIs
         custom_apis = custom_api_manager.list_apis()
         custom_redacted = []
         for api in custom_apis:
-            token = api.get("auth",{}).get("token") or api.get("auth",{}).get("value") or ""
+            token = api.get("auth", {}).get("token") or api.get("auth", {}).get("value") or ""
             custom_redacted.append({
                 "name": api["name"],
-                "description": api.get("description",""),
-                "url": api.get("url",""),
-                "method": api.get("method","GET"),
-                "preview": f"{token[:6]}...{token[-4:]}" if token and len(token)>10 else "no-token" if not token else "****",
-                "id": api.get("id",""),
-                "created": api.get("created","")
+                "description": api.get("description", ""),
+                "url": api.get("url", ""),
+                "method": api.get("method", "GET"),
+                "preview": f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else ("no-token" if not token else "****"),
+                "id": api.get("id", ""),
+                "created": api.get("created", ""),
             })
 
         return {
             "llm_keys": redacted,
             "custom_apis": custom_redacted,
-            "total_llm_keys": sum(len(v) for v in llm_keys.values()),
+            "total_llm_keys": total_llm,
             "total_custom_apis": len(custom_apis),
-            "note": "Free API Keys Management - Add API key in Settings via /keys/add endpoint or dashboard. Keys stored in data/api_keys.json and data/custom_apis.json, local only, not uploaded."
+            "rates": multi_key_manager.rate_status(),
+            "note": "Add any OpenAI-compatible key via dashboard Keys pane or hermus multikey add. Local only.",
         }
     except Exception as e:
         return {"error": str(e)}
 
 @app.post("/keys/add")
 async def keys_add(payload: Dict):
-    """Add API key via Settings panel - free"""
+    """Add ANY AI API key — auto health + model discovery"""
     try:
         from core.multi_key import multi_key_manager
         provider = payload.get("provider", "groq")
         key = payload.get("key") or payload.get("api_key") or payload.get("token")
         name = payload.get("name")
-        if not key:
+        if not key and provider not in ("ollama", "lmstudio"):
             return JSONResponse({"success": False, "error": "Missing key/api_key/token"}, status_code=400)
 
-        result = multi_key_manager.add_key(provider, key, name=name)
+        result = multi_key_manager.add_key(
+            provider,
+            key or "",
+            name=name,
+            base_url=payload.get("base_url"),
+            default_model=payload.get("model") or payload.get("default_model"),
+            rpm_limit=payload.get("rpm") or payload.get("rpm_limit"),
+            tpm_limit=payload.get("tpm") or payload.get("tpm_limit"),
+            auto_discover=payload.get("auto_discover", True),
+        )
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -409,15 +594,21 @@ def setup(platform: str):
         token = os.getenv("TELEGRAM_BOT_TOKEN") or config.telegram_bot_token
         if not token:
             print("Set TELEGRAM_BOT_TOKEN env: https://t.me/BotFather /newbot (free)")
+            print("Then: hermus gateway start  (auto long-poll) OR set webhook to /webhook/telegram")
         else:
-            print(f"Telegram token found: {token[:10]}... - Ready for webhook")
-            print(f"Set webhook: https://api.telegram.org/bot{token}/setWebhook?url=https://yourdomain.com/webhook/telegram")
+            print(f"Telegram token found: {token[:10]}... - Ready")
+            print("Modes:")
+            print("  1) Long-polling (default, no public URL): hermus gateway start")
+            print("  2) Webhook: export HERMUS_TELEGRAM_MODE=webhook")
+            print(f"     https://api.telegram.org/bot{token}/setWebhook?url=https://yourdomain.com/webhook/telegram")
+            print("Bot will REALLY sendMessage replies (not stub).")
     elif platform == "discord":
         token = os.getenv("DISCORD_BOT_TOKEN") or config.discord_bot_token
         if not token:
             print("Set DISCORD_BOT_TOKEN env: https://discord.com/developers/applications (free)")
+            print("Enable Message Content Intent in the Discord developer portal.")
         else:
-            print(f"Discord token found - Ready")
+            print(f"Discord token found - bot starts with gateway (mention or DM the bot)")
     else:
         print(f"Platform {platform} setup - just set env token")
 
@@ -425,9 +616,12 @@ def start(port: int = None):
     port = port or config.gateway_port
     print(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
     print(f"Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /dashboard")
+    print(f"Channels: /channels/status, /channels/start, /telegram/send")
+    print(f"Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
     print(f"Docs: http://localhost:{port}/docs")
-    print(f"Dashboard with slide panel: http://localhost:{port}/dashboard - Click 'Agents Panel' to slide open and see what agents/models running")
-    print(f"Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5")
+    print(f"Dashboard: http://localhost:{port}/dashboard")
+    print(f"Telegram mode={getattr(config,'telegram_mode','auto')} | auto_channels={getattr(config,'auto_start_channels',True)}")
+    print(f"Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":

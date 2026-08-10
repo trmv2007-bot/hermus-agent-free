@@ -212,6 +212,39 @@ Total: **88+ tools** and growing, all free, zero API fees for core, no paywall
 
 ---
 
+## Quick Start — one command from scratch
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash
+```
+
+That clones (if needed), creates `.venv`, installs **all** deps, Playwright browser, launchers, and verifies Hermus.
+
+```bash
+# + local Ollama model
+curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash -s -- --with-ollama
+
+# + Groq key + start dashboard
+curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash -s -- \
+  --groq-key gsk_YOUR_KEY --start
+
+# Already cloned?
+cd hermus-agent-free && bash setup.sh
+```
+
+After setup:
+
+```bash
+cd ~/hermus-agent-free
+source activate.sh
+./hermus --model groq/llama-3.1-8b-instant   # or ollama/llama3.1:8b
+./bin/hermus-gateway                           # http://localhost:8000/dashboard
+```
+
+See **[QUICKSTART.md](QUICKSTART.md)** for all flags (`--custom-base-url`, `--openrouter-key`, etc.).
+
+---
+
 ## Quick Start (100% Free, No API Keys)
 
 ### Option 1: Ollama (Fully Free, Offline)
@@ -373,8 +406,117 @@ hermus-agent-free/
 
 This clone is MIT, no tracking, no paywall, fully self-hosted. You own data in `data/memory.db`, `data/api_keys.json`, `data/custom_apis.json` (local only, redacted preview in dashboard, .gitignore ignores sensitive).
 
+## New in 2.2 — Any AI API Key + Multi-Model Fleet
+
+### Any OpenAI-compatible API key works
+Hermus talks to **any** provider with a `/v1/chat/completions` endpoint:
+
+`openai` · `groq` · `openrouter` · `together` · `fireworks` · `deepseek` · `mistral` · `gemini` · `cerebras` · `sambanova` · `hf` · `github` · `azure` · `ollama` · `lmstudio` · `vllm` · `custom` · `anthropic`
+
+```bash
+# List known providers
+hermus multikey providers
+
+# Add ANY key — auto health check + model discovery + rate-limit headers
+hermus multikey add --provider groq --key gsk_...
+hermus multikey add --provider openrouter --key sk-or-...
+hermus multikey add --provider gemini --key AIza...
+hermus multikey add --provider custom --key sk-... \
+  --base-url https://my-proxy.example.com/v1 --model my-model --rpm 30 --tpm 60000
+
+# What models can this key run?
+hermus multikey models --provider groq
+
+# Health: auth, latency, RPM/TPM headers, sample models
+hermus multikey health
+hermus multikey rates
+
+# Chat with that provider
+hermus --model groq/llama-3.1-8b-instant
+hermus --model openrouter/auto
+hermus --model custom/my-model   # uses stored custom base_url
+```
+
+### Multi-model task distribution (fleet)
+Give work to **multiple models + keys in parallel**:
+
+| Strategy | Behavior |
+|----------|----------|
+| `fanout` | Same prompt → many models → judge consensus |
+| `map` | Split goal into subtasks → each model/key does one → merge |
+| `race` | First healthy successful response wins |
+| `auto` | Picks map vs fanout from goal complexity |
+
+```bash
+hermus fleet workers
+hermus fleet run "Compare Python vs Rust async and recommend" --strategy auto
+hermus fleet fanout "What is CRDT?" --providers groq,openai
+hermus fleet map "Research X, implement Y, review risks" --workers 3
+
+# Multi-agent mode auto-dispatches hard goals across the fleet
+hermus --mode multi-agent --model groq/llama-3.1-8b-instant
+hermus --mode multi-chat   # fanout consensus for accuracy
+```
+
+Agent tools: `add_api_key`, `discover_models`, `check_api_key_health`, `get_rate_limit_status`, `fleet_distribute_task`, `fleet_fanout`, `fleet_map_goal`, `list_ai_providers`.
+
+Gateway: `GET /providers`, `/keys/health`, `/keys/rates`, `/keys/models`, `/fleet/workers`, `POST /fleet/run`.
+
+---
+
+## New in 2.1 — Versatility Upgrade
+
+### A. Multi-step agent loop + auto tool registry
+- **ReAct loop** — agent can call tools across multiple rounds (`HERMUS_MAX_TOOL_STEPS`, default 8) until the task is done
+- **`core/tool_registry.py`** — auto-discovers `TOOLS` + `TOOL_MAP` from all modules (no more giant if/elif)
+- **109 tools registered** including full pentest map (SAST/DAST, CI/CD, bounty, compliance) previously missing from execute path
+- **`skill_use(name, task=...)`** — skills receive task/query context
+- CLI: `hermus tools`
+
+### B. Real Telegram + Discord channels
+- **Telegram** — real `sendMessage` replies, voice memo → Whisper, `/new` `/status` `/help`
+  - Long-polling by default (no public URL): set `TELEGRAM_BOT_TOKEN` and `hermus gateway start`
+  - Or webhook mode: `HERMUS_TELEGRAM_MODE=webhook` + `/webhook/telegram`
+- **Discord** — real `discord.py` bot (mention or DM); set `DISCORD_BOT_TOKEN` + Message Content Intent
+- Gateway: `/channels/status`, `/channels/start`, `/telegram/send`
+
+### C. MCP client + semantic embeddings (free local RAG)
+- **MCP stdio client** — plug external tool servers into the agent tool bus
+  - CLI: `hermus mcp add|list|remove|connect|call`
+  - Built-in test server: `tools/mcp_echo_server.py`
+  - Config: `data/mcp_servers.json`
+- **Semantic memory** — Ollama `nomic-embed-text` when available, hashing fallback offline
+  - Hybrid FTS5 + vector search on every chat turn
+  - Ingest files/dirs: `hermus embed ingest ./docs`
+  - Tools: `embeddings_ingest`, `embeddings_search`, `embeddings_hybrid_search`, `memory_semantic_search`
+  - CLI: `hermus embed status|ingest|search|clear`
+
+```bash
+# Multi-step agent (default)
+python hermus.py --model mock/mock
+
+# Semantic RAG
+python hermus.py embed ingest ./README.md
+python hermus.py embed search "tool registry"
+
+# MCP echo server test
+python hermus.py mcp add --name echo --command python3 --arg tools/mcp_echo_server.py
+python hermus.py mcp connect
+python hermus.py mcp call --server echo --tool echo --args '{"message":"hi"}'
+
+# Telegram + Discord (with gateway)
+export TELEGRAM_BOT_TOKEN=...
+export DISCORD_BOT_TOKEN=...
+python hermus.py gateway start
+```
+
+---
+
 ## Roadmap - All Done ✅
 
+- [x] Multi-step ReAct tool loop + auto tool registry (109 tools)
+- [x] Real Telegram sendMessage + long-poll + Discord bot listener
+- [x] MCP client (stdio) + semantic embeddings hybrid memory (free local RAG)
 - [x] Core agent loop with free LLM + token counting + caching + task tracker + update check
 - [x] SQLite FTS5 memory + curated memory + nudges + token_usage table + WAL mode + indexes + OptimizedFileCache
 - [x] Autonomous skill creation + self-improvement (agentskills.io compatible) + LRU cache

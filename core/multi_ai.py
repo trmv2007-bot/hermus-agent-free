@@ -9,13 +9,27 @@ from .config import config
 from .llm import FreeLLM
 from .memory import memory
 
+# re-export for type hints used in helpers
+
 class AgentPersona:
-    """Persona for multi-AI chat"""
-    def __init__(self, name: str, persona: str, model: str = None, color: str = "white"):
+    """Persona for multi-AI chat — each agent can use different model + API key."""
+    def __init__(
+        self,
+        name: str,
+        persona: str,
+        model: str = None,
+        color: str = "white",
+        api_key: str = None,
+        base_url: str = None,
+        provider: str = None,
+    ):
         self.name = name
-        self.persona = persona  # e.g., "You are a researcher", "You are a coder", "You are a reviewer"
+        self.persona = persona
         self.model = model or config.model
-        self.llm = FreeLLM(self.model)
+        self.api_key = api_key
+        self.base_url = base_url
+        self.provider = provider
+        self.llm = FreeLLM(self.model, api_key=api_key, base_url=base_url, provider=provider)
         self.color = color
         self.agent_id = f"{name}_{uuid.uuid4().hex[:4]}"
 
@@ -28,18 +42,77 @@ class MultiAIChat:
         self.conversation_history: List[Dict] = []
         self.rounds = 0
 
-    def add_agent(self, name: str, persona: str, model: str = None, color: str = "white") -> AgentPersona:
-        """Add AI agent with persona"""
-        agent = AgentPersona(name, persona, model, color)
+    def add_agent(
+        self,
+        name: str,
+        persona: str,
+        model: str = None,
+        color: str = "white",
+        api_key: str = None,
+        base_url: str = None,
+        provider: str = None,
+    ) -> AgentPersona:
+        """Add AI agent with persona — optionally pin model/key/provider."""
+        agent = AgentPersona(name, persona, model, color, api_key=api_key, base_url=base_url, provider=provider)
         self.agents.append(agent)
-        print(f"[MultiAI] Added agent {name} with persona: {persona[:60]}... model {model or config.model}")
+        print(
+            f"[MultiAI] Added agent {name} | model {agent.model} | "
+            f"key={(api_key[:8]+'...') if api_key else 'auto'} | persona: {persona[:50]}..."
+        )
         return agent
 
-    def add_default_team(self, model: str = None):
-        """Add default team: researcher, coder, reviewer - free"""
-        self.add_agent("researcher", "You are a thorough researcher. You search, analyze, and provide facts, sources, and deep insights. Be curious and detailed.", model=model, color="cyan")
-        self.add_agent("coder", "You are an expert coder. You write clean, efficient code, use tools, and implement solutions. Be practical and precise.", model=model, color="green")
-        self.add_agent("reviewer", "You are a critical reviewer. You check for errors, security issues, edge cases, and improvements. Be skeptical and thorough.", model=model, color="yellow")
+    def add_default_team(self, model: str = None, diversify_keys: bool = True):
+        """
+        Default team: researcher, coder, reviewer.
+        When diversify_keys=True, assign different providers/keys/models from the fleet.
+        """
+        assignments = self._pick_diverse_assignments(3) if diversify_keys else [None, None, None]
+        specs = [
+            ("researcher", "You are a thorough researcher. You search, analyze, and provide facts, sources, and deep insights. Be curious and detailed.", "cyan"),
+            ("coder", "You are an expert coder. You write clean, efficient code, use tools, and implement solutions. Be practical and precise.", "green"),
+            ("reviewer", "You are a critical reviewer. You check for errors, security issues, edge cases, and improvements. Be skeptical and thorough.", "yellow"),
+        ]
+        for i, (name, persona, color) in enumerate(specs):
+            a = assignments[i] if i < len(assignments) else None
+            if a:
+                self.add_agent(
+                    name,
+                    persona,
+                    model=f"{a['provider']}/{a['model']}",
+                    color=color,
+                    api_key=a.get("key"),
+                    base_url=a.get("base_url"),
+                    provider=a.get("provider"),
+                )
+            else:
+                self.add_agent(name, persona, model=model, color=color)
+
+    def _pick_diverse_assignments(self, n: int = 3) -> List[Dict]:
+        """Pick up to n different provider/model/key combos from multi_key + ollama."""
+        try:
+            from .model_fleet import _available_workers
+
+            workers = _available_workers(limit=n * 2)
+            # Prefer diversity across providers
+            picked = []
+            seen_p = set()
+            for w in workers:
+                if w["provider"] in seen_p and len(picked) < n:
+                    continue
+                picked.append(w)
+                seen_p.add(w["provider"])
+                if len(picked) >= n:
+                    break
+            if len(picked) < n:
+                for w in workers:
+                    if w in picked:
+                        continue
+                    picked.append(w)
+                    if len(picked) >= n:
+                        break
+            return picked
+        except Exception:
+            return []
 
     def _build_agent_prompt(self, agent: AgentPersona, topic: str, include_history: bool = True) -> List[Dict]:
         """Build prompt for agent with persona + history"""
