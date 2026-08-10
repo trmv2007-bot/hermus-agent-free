@@ -1,9 +1,12 @@
-"""Main Agent Loop - Free Hermes Clone with memory, skills, tools, self-improvement"""
+"""Main Agent Loop - Free Hermes Clone
+Multi-step ReAct tool loop + auto tool registry + semantic memory hooks.
+"""
+from __future__ import annotations
+
 import json
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from .config import config
 from .llm import free_llm, FreeLLM
@@ -11,465 +14,143 @@ from .memory import memory
 from .skill_manager import skill_manager
 from .task_tracker import task_tracker
 from .modes import AgentMode, get_mode_config, list_modes
+from .tool_registry import tool_registry
 
-# Import tools
-from tools.web_search import web_search, TOOL_DEFINITION as WEB_SEARCH_TOOL
-from tools.file_tools import file_read, file_write, file_edit, file_search, TOOLS as FILE_TOOLS
-from tools.shell import shell_execute, TOOL_DEFINITION as SHELL_TOOL
-from core.custom_api import custom_api_manager
 
 class HermusAgent:
-    """Free Hermes-like agent - self-improving with memory and skills"""
+    """Free Hermes-like agent - self-improving with memory, skills, multi-step tools."""
 
-    def __init__(self, model: str = None, session_id: str = None, mode: str = None):
+    def __init__(
+        self,
+        model: str = None,
+        session_id: str = None,
+        mode: str = None,
+        max_steps: int = None,
+    ):
         self.model_name = model or config.model
         self.llm = FreeLLM(self.model_name)
-        self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
-        self.trajectory: List[Dict] = []  # For skill creation + research-ready batch
-        # Mode handling - 4 modes as requested: agent, chat, multi-agent, multi-chat - with persistence
-        # If mode not provided, load from persisted user_model.json (mode persistence as requested)
+        self.session_id = session_id or (
+            f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
+        )
+        self.trajectory: List[Dict] = []
+        self.max_steps = max_steps or getattr(config, "max_tool_steps", 8)
+
         if mode is None:
             try:
                 from .skin_engine import skin_engine
+
                 mode = skin_engine.get_current_mode()
-            except:
+            except Exception:
                 mode = "agent"
         try:
             self.mode = AgentMode(mode.lower().replace("_", "-"))
-        except:
+        except Exception:
             self.mode = AgentMode.AGENT
         self.mode_config = get_mode_config(self.mode)
-        self.tools = self._get_tools()
 
+        # Load tool registry once
+        tool_registry.load()
+        self.tools = self._get_tools()
         self.agent_tracker_id = None
 
-        print(f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | Mode {self.mode.value} ({self.mode_config.name}) | Free stack (no paywall) | Persisted mode loaded")
-        # Track agent in task tracker for slide panel
+        print(
+            f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | "
+            f"Mode {self.mode.value} ({self.mode_config.name}) | "
+            f"Tools {len(self.tools)} | max_steps={self.max_steps} | Free stack"
+        )
         try:
             self.agent_tracker_id = task_tracker.add_agent(
                 agent_id=self.session_id,
                 name=f"agent_{self.mode.value}_{self.session_id[:6]}",
                 model=self.model_name,
                 persona=self.mode.value,
-                task=f"Mode: {self.mode_config.name} - {self.mode_config.description[:60]}"
+                task=f"Mode: {self.mode_config.name} - {self.mode_config.description[:60]}",
             )
-        except:
+        except Exception:
             pass
 
     def _get_tools(self) -> List[Dict]:
-        """40+ free tools - we implement core free ones + custom APIs + browser, vision, voice, backends, trajectory + internet eyes (Agent Reach) + filtered by mode"""
-        all_tools = []
-        all_tools.append(WEB_SEARCH_TOOL)
-        all_tools.extend(FILE_TOOLS)
-        all_tools.append(SHELL_TOOL)
-
-        # Browser automation Playwright free
-        try:
-            from tools.browser import TOOLS as BROWSER_TOOLS
-            all_tools.extend(BROWSER_TOOLS)
-        except:
-            pass
-
-        # Vision LLaVA via Ollama free
-        try:
-            from tools.vision import TOOLS as VISION_TOOLS
-            all_tools.extend(VISION_TOOLS)
-        except:
-            pass
-
-        # Voice memo transcription faster-whisper free
-        try:
-            from tools.voice import TOOLS as VOICE_TOOLS
-            all_tools.extend(VOICE_TOOLS)
-        except:
-            pass
-
-        # Internet Eyes - Agent Reach features - Give AI agent eyes to see entire internet, zero API fees
-        try:
-            from tools.internet_eyes import TOOLS as INTERNET_EYES_TOOLS
-            all_tools.extend(INTERNET_EYES_TOOLS)
-        except Exception as e:
-            print(f"[Internet Eyes] Failed to load: {e}")
-
-        # Agent Reach Doctor - real probing
-        try:
-            from tools.agent_reach_doctor import TOOLS as DOCTOR_TOOLS
-            all_tools.extend(DOCTOR_TOOLS)
-        except:
-            pass
-
-        # More platforms: Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou
-        try:
-            from tools.facebook import TOOLS as FB_TOOLS
-            all_tools.extend(FB_TOOLS)
-        except:
-            pass
-
-        # Backends: Docker, SSH, Modal free tier, Daytona, Vercel Sandbox
-        try:
-            from backends.backend_manager import TOOL_DEFINITION as BACKEND_TOOL
-            all_tools.append(BACKEND_TOOL)
-            all_tools.append({
-                "type": "function",
-                "function": {
-                    "name": "list_backends",
-                    "description": "List seven terminal backends: local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox - free, with availability and descriptions",
-                    "parameters": {"type": "object", "properties": {}, "required": []}
-                }
-            })
-        except:
-            pass
-
-        # Trajectory batch generation + compression
-        try:
-            from core.trajectory import TOOLS as TRAJECTORY_TOOLS
-            all_tools.extend(TRAJECTORY_TOOLS)
-        except:
-            pass
-
-        # Response time tester - how much time API key takes to get response from AI model - free
-        try:
-            from core.response_tester import TOOLS as RESPONSE_TESTER_TOOLS
-            all_tools.extend(RESPONSE_TESTER_TOOLS)
-        except:
-            pass
-
-        # Self-Improvement - reflection when idle, sees mistakes, searches how to improve, fixes itself in background - free
-        try:
-            from tools.self_improvement import TOOLS as SELF_IMPROVEMENT_TOOLS
-            all_tools.extend(SELF_IMPROVEMENT_TOOLS)
-        except:
-            pass
-
-        # Updater - check for GitHub updates and show in dashboard and CLI too - free
-        try:
-            from tools.updater import TOOLS as UPDATER_TOOLS
-            all_tools.extend(UPDATER_TOOLS)
-        except:
-            pass
-
-        # Pentest tools - Strix features - Open-source AI penetration testing tool
-        try:
-            from tools.pentest import TOOLS as PENTEST_TOOLS
-            all_tools.extend(PENTEST_TOOLS)
-        except Exception as e:
-            print(f"[Pentest] Failed to load pentest tools: {e}")
-
-        # Add custom APIs as tools - free custom API feature
-        try:
-            custom_tools = custom_api_manager.get_tool_definitions()
-            all_tools.extend(custom_tools)
-        except Exception as e:
-            print(f"[Custom API] Failed to load custom tools: {e}")
-        # Memory tools
-        all_tools.append({
-            "type": "function",
-            "function": {
-                "name": "memory_search",
-                "description": "Search prior sessions via free FTS5",
-                "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
-            }
-        })
-        all_tools.append({
-            "type": "function",
-            "function": {
-                "name": "memory_add",
-                "description": "Add to curated memory - agent decides what to remember",
-                "parameters": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}
-            }
-        })
-        all_tools.append({
-            "type": "function",
-            "function": {
-                "name": "skill_list",
-                "description": "List available auto-created skills",
-                "parameters": {"type": "object", "properties": {}, "required": []}
-            }
-        })
-        all_tools.append({
-            "type": "function",
-            "function": {
-                "name": "skill_use",
-                "description": "Use a skill by name",
-                "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
-            }
-        })
-        # Subagent spawn free
-        all_tools.append({
-            "type": "function",
-            "function": {
-                "name": "subagent_spawn",
-                "description": "Spawn isolated subagent for parallel work",
-                "parameters": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]}
-            }
-        })
-
-        # Filter by mode as requested: agent, chat, multi-agent, multi-chat
-        mode_config = self.mode_config
-        allowed = mode_config.tools_allowed
-
+        """Definitions from auto-discovered registry, filtered by mode."""
+        allowed = self.mode_config.tools_allowed
         if "all" in allowed:
-            # Agent mode can control everything + Multi Agent Mode can use multiple keys at once and reach goal no matter how difficult
-            return all_tools
-        elif "none" in allowed:
-            # Chat mode let's u chat - no tools, just chat
+            return tool_registry.get_definitions(allowed={"all"})
+        if "none" in allowed:
             return []
-        else:
-            # Multi-chat mode and other modes with limited tools for accurate reliable info
-            # Multi-chat: get u as accurate and reliable information as possible with working of multiple ai models and api keys
-            filtered = []
-            allowed_set = set(allowed)
-            for tool in all_tools:
-                tool_name = tool.get("function", {}).get("name", "")
-                if tool_name in allowed_set:
-                    filtered.append(tool)
-            # Always include memory_search for context even in limited modes
-            if "memory_search" not in allowed_set:
-                for t in all_tools:
-                    if t.get("function", {}).get("name") == "memory_search":
-                        filtered.append(t)
-                        break
-            return filtered
+        return tool_registry.get_definitions(allowed=set(allowed))
+
+    def reload_tools(self):
+        """Force reload registry (e.g. after MCP connect)."""
+        tool_registry.load(force=True)
+        self.tools = self._get_tools()
+        return {"tools": len(self.tools)}
 
     def _execute_tool(self, name: str, args: Dict) -> Dict:
-        """Execute free tool"""
-        try:
-            if name == "web_search":
-                from tools.web_search import execute
-                return execute(**args)
-            elif name == "file_read":
-                return file_read(**args)
-            elif name == "file_write":
-                return file_write(**args)
-            elif name == "file_edit":
-                return file_edit(**args)
-            elif name == "file_search":
-                return file_search(**args)
-            elif name == "shell_execute":
-                return shell_execute(**args)
-            elif name == "memory_search":
-                results = memory.search_sessions(args.get("query",""), limit=5)
-                summary = memory.summarize_search_results(args.get("query",""), results)
-                return {"query": args.get("query"), "results": results, "summary": summary}
-            elif name == "memory_add":
-                memory.curate_memory(args.get("key"), args.get("value"), source_session=self.session_id)
-                return {"success": True, "key": args.get("key")}
-            elif name == "skill_list":
-                skills = skill_manager.list_skills()
-                return {"skills": skills, "count": len(skills)}
-            elif name == "skill_use":
-                skill = skill_manager.get_skill(args.get("name"))
-                if not skill:
-                    return {"error": f"Skill {args.get('name')} not found"}
-                # Try execute skill.py
-                try:
-                    import importlib.util
-                    skill_path = Path(skill["path"]) / "skill.py"
-                    if skill_path.exists():
-                        spec = importlib.util.spec_from_file_location("skill", skill_path)
-                        mod = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        result = None
-                        if hasattr(mod, "run"):
-                            result = mod.run()
-                        skill_manager.log_skill_usage(args.get("name"), success=True, feedback="Executed via skill_use")
-                        return {"skill": args.get("name"), "result": str(result)[:1000], "code": skill.get("code","")[:1000]}
-                    return skill
-                except Exception as e:
-                    skill_manager.log_skill_usage(args.get("name"), success=False, feedback=str(e))
-                    return {"error": f"Skill exec failed: {e}", "skill": skill}
-            elif name == "subagent_spawn":
-                # Free subagent - spawn via subagents/subagent.py
-                try:
-                    from subagents.subagent import spawn_subagent
-                    result = spawn_subagent(args.get("task"))
-                    return result
-                except Exception as e:
-                    return {"error": f"Subagent spawn failed: {e}, task: {args.get('task')}"}
-            # Browser automation free
-            elif name in ("browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_extract", "browser_close"):
-                try:
-                    from tools.browser import TOOL_MAP as BROWSER_MAP
-                    func = BROWSER_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Browser tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Browser tool {name} failed: {e}"}
-            # Vision free
-            elif name in ("vision_analyze", "vision_available_models"):
-                try:
-                    from tools.vision import TOOL_MAP as VISION_MAP
-                    func = VISION_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Vision tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Vision tool {name} failed: {e}"}
-            # Voice memo transcription free
-            elif name in ("transcribe_audio", "transcribe_voice_memo", "voice_available_models"):
-                try:
-                    from tools.voice import TOOL_MAP as VOICE_MAP
-                    func = VOICE_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Voice tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Voice tool {name} failed: {e}"}
-            # Backends free
-            elif name == "backend_execute":
-                try:
-                    from backends.backend_manager import backend_execute
-                    return backend_execute(**args)
-                except Exception as e:
-                    return {"error": f"Backend execute failed: {e}"}
-            elif name == "list_backends":
-                try:
-                    from backends.backend_manager import list_backends
-                    return list_backends()
-                except Exception as e:
-                    return {"error": f"List backends failed: {e}"}
-            # Trajectory batch generation + compression free
-            elif name in ("trajectory_batch_generate", "trajectory_compress", "trajectory_stats"):
-                try:
-                    from core.trajectory import TOOL_MAP as TRAJECTORY_MAP
-                    func = TRAJECTORY_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Trajectory tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Trajectory tool {name} failed: {e}"}
-            # Response time tester - how much time API key takes
-            elif name in ("test_api_key_response_time", "test_custom_api_response_time", "get_response_time_stats"):
-                try:
-                    from core.response_tester import TOOL_MAP as RESPONSE_MAP
-                    func = RESPONSE_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Response tester tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Response tester tool {name} failed: {e}"}
-            # Self-Improvement - reflection when idle, sees mistakes, searches how to improve, fixes itself in background
-            elif name in ("run_self_improvement_reflection", "get_self_improvement_status", "start_self_improvement_background_checker", "stop_self_improvement_background_checker"):
-                try:
-                    from tools.self_improvement import TOOL_MAP as SELF_MAP
-                    func = SELF_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Self-improvement tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Self-improvement tool {name} failed: {e}"}
-            # Updater - check for GitHub updates and show in dashboard and CLI too - free
-            elif name in ("check_update", "do_update", "get_local_commit", "get_remote_commit"):
-                try:
-                    from tools.updater import TOOL_MAP as UPDATER_MAP
-                    func = UPDATER_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Updater tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Updater tool {name} failed: {e}"}
-            # Pentest tools - Strix features - free
-            elif name in ("subdomain_enum", "fingerprinting", "attack_surface_mapping", "browser_xss_test", "shell_exploit", "custom_exploit_runtime", "http_proxy_intercept", "search_vuln_kb", "get_owasp_categories", "comprehensive_scan", "scan_api_spec", "pentest_distribute_task", "pentest_chain_vulns", "pentest_scalable_scan", "pentest_create_run", "pentest_add_finding", "pentest_generate_patch", "pentest_generate_report", "pentest_view_run"):
-                try:
-                    from tools.pentest import TOOL_MAP as PENTEST_MAP
-                    func = PENTEST_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Pentest tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Pentest tool {name} failed: {e}"}
-            # Internet Eyes - Agent Reach features - free, zero API fees
-            elif name in ("web_read", "rss_read", "youtube_transcript", "youtube_search", "github_read", "github_search", "twitter_read", "twitter_search", "bilibili_search", "reddit_read", "reddit_search", "v2ex_hot", "xueqiu_stock_search"):
-                try:
-                    from tools.internet_eyes import TOOL_MAP as INTERNET_MAP
-                    func = INTERNET_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Internet Eyes tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Internet Eyes tool {name} failed: {e}"}
-            # Agent Reach Doctor
-            elif name in ("doctor_check_all", "doctor_text_report"):
-                try:
-                    from tools.agent_reach_doctor import TOOL_MAP as DOCTOR_MAP
-                    func = DOCTOR_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Doctor tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Doctor tool {name} failed: {e}"}
-            # Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou
-            elif name in ("facebook_search", "instagram_user_search", "xiaohongshu_search", "linkedin_read", "xiaoyuzhou_transcribe"):
-                try:
-                    from tools.facebook import TOOL_MAP as FB_MAP
-                    func = FB_MAP.get(name)
-                    if func:
-                        return func(**args)
-                    return {"error": f"Social tool {name} not found"}
-                except Exception as e:
-                    return {"error": f"Social tool {name} failed: {e}"}
-            else:
-                # Check if it's a custom API - free custom API feature
-                try:
-                    # If tool name matches a custom API, execute it
-                    custom_apis = custom_api_manager.list_apis()
-                    custom_names = [api["name"] for api in custom_apis]
-                    if name in custom_names:
-                        return custom_api_manager.execute_api(name, args)
-                except Exception as e:
-                    print(f"[Custom API] Execution check failed: {e}")
-
-                return {"error": f"Unknown tool {name}"}
-        except Exception as e:
-            return {"error": f"Tool {name} execution failed: {e}"}
+        """Execute via central registry — all tools including full pentest map."""
+        return tool_registry.execute(name, args or {})
 
     def _build_system_prompt(self) -> str:
-        """System prompt with memory + user model + skills context (free)"""
         curated = memory.get_curated_memory(limit=10)
-        curated_text = "\n".join([f"- {m['key']}: {m['value'][:200]}" for m in curated]) if curated else "No curated memory yet."
+        curated_text = (
+            "\n".join([f"- {m['key']}: {m['value'][:200]}" for m in curated])
+            if curated
+            else "No curated memory yet."
+        )
 
         user_model = memory.load_user_model()
         user_model_text = json.dumps(user_model, indent=2)[:1000] if user_model else "No user model yet."
 
         skills = skill_manager.list_skills()
-        skills_text = ", ".join([s["name"] for s in skills[:10]]) if skills else "No skills yet."
+        skills_text = ", ".join([s["name"] for s in skills[:15]]) if skills else "No skills yet."
 
         nudges = memory.periodic_nudges()
         nudges_text = "\n".join(nudges) if nudges else "No nudges."
 
-        return f"""You are Hermus Agent Free - a self-improving AI agent that grows with user.
+        tool_count = len(self.tools)
+
+        return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
 
 You have:
-- Persistent memory across sessions via free SQLite FTS5
-- Auto-created skills that self-improve
-- Free tools: web_search (DuckDuckGo), file_read/write/edit/search, shell_execute, memory_search/add, skill_list/use, subagent_spawn
+- Multi-step tool use (ReAct): you may call tools across multiple rounds until the task is done (max {self.max_steps} steps)
+- Persistent memory (SQLite FTS5) + semantic/hybrid search (embeddings)
+- Auto-created skills (skill_list / skill_use with task context)
+- MCP tools when configured (mcp_list_servers / mcp_connect_all)
+- {tool_count} tools registered (browser, vision, voice, internet eyes, pentest, backends, etc.)
 
-Curated Memory (agent-curated, what you decided to remember):
+Curated Memory:
 {curated_text}
 
-User Model (free Honcho alternative, your model of who user is):
+User Model:
 {user_model_text}
 
-Available Skills (auto-created from past trajectories):
+Available Skills:
 {skills_text}
 
-Periodic Nudges (things to consider persisting):
+Periodic Nudges:
 {nudges_text}
 
 Rules:
-- Use tools when needed, don't hallucinate
-- After complex task (3+ tool calls), curated memory and skill creation will trigger automatically
-- Prefer reusing skills via skill_use for zero-context-cost turns
-- Be helpful, concise, and learn from user
-- You are free, MIT, no paywall, runs on local Ollama or free Groq/HF
-- Current session: {self.session_id}
+- Use tools when needed; do not hallucinate facts you can look up
+- After tools return, continue reasoning; call more tools if needed
+- When finished, respond with a clear final answer and NO further tool calls
+- Prefer skill_use for known workflows; memory_search/hybrid for past context
+- Prefer embeddings_ingest + embeddings_search for document Q&A
+- You are free, MIT, no paywall — Ollama / Groq / HF
+- Session: {self.session_id}
 - Model: {self.model_name}
+- Mode: {self.mode.value}
 """
 
+    def _format_tool_result(self, name: str, result: Any, limit: int = 3000) -> str:
+        try:
+            text = json.dumps(result, ensure_ascii=False, default=str)
+        except Exception:
+            text = str(result)
+        if len(text) > limit:
+            text = text[:limit] + "...(truncated)"
+        return f"Tool {name} returned:\n{text}"
+
     def chat(self, user_message: str) -> Dict[str, Any]:
-        """Main chat loop - free version of Hermes agent loop"""
-        # Track task in slide panel
+        """Multi-step agent loop: plan → tool calls → observe → repeat → final answer."""
         task_id = None
         try:
             task_id = task_tracker.add_task(
@@ -477,166 +158,416 @@ Rules:
                 task_type="chat",
                 description=user_message[:100],
                 model=self.model_name,
-                agent=self.session_id
+                agent=self.session_id,
             )
-            task_tracker.update_agent(self.agent_tracker_id, task=user_message[:100], status="running", progress="Thinking...")
-        except:
+            task_tracker.update_agent(
+                self.agent_tracker_id,
+                task=user_message[:100],
+                status="running",
+                progress="Thinking...",
+            )
+        except Exception:
             pass
 
-        # Add user message to memory + trajectory
+        # Multi-agent / multi-chat modes: distribute across models+keys when beneficial
+        if self.mode in (AgentMode.MULTI_AGENT, AgentMode.MULTI_CHAT) and self.mode_config.use_multi_ai:
+            fleet_result = self._maybe_fleet_distribute(user_message)
+            if fleet_result is not None:
+                return fleet_result
+
         memory.add_session_message(self.session_id, "user", user_message)
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
 
-        # Build messages with system prompt + recent history + memory search
+        # Index user turn into semantic memory (best-effort)
+        try:
+            from .embeddings import embedding_store
+
+            embedding_store.add_text(
+                user_message,
+                metadata={"session_id": self.session_id, "role": "user"},
+                source=f"session:{self.session_id}",
+            )
+        except Exception:
+            pass
+
         system_prompt = self._build_system_prompt()
 
-        # Search memory for relevant prior sessions (free FTS5)
-        memory_results = memory.search_sessions(user_message, limit=3)
-        memory_summary = memory.summarize_search_results(user_message, memory_results) if memory_results else ""
+        # Hybrid memory recall
+        memory_results = []
+        memory_summary = ""
+        try:
+            from .embeddings import embedding_store
 
-        messages = [
-            {"role": "system", "content": system_prompt + f"\n\nRelevant prior sessions summary:\n{memory_summary}"},
+            hybrid = embedding_store.hybrid_search(user_message, limit=3)
+            memory_results = hybrid.get("results") or []
+            memory_summary = hybrid.get("summary") or ""
+            if memory_results and not memory_summary:
+                memory_summary = "\n".join(
+                    f"- ({r.get('score', '?')}) {(r.get('content') or '')[:200]}"
+                    for r in memory_results[:3]
+                )
+        except Exception:
+            memory_results = memory.search_sessions(user_message, limit=3)
+            memory_summary = (
+                memory.summarize_search_results(user_message, memory_results)
+                if memory_results
+                else ""
+            )
+
+        messages: List[Dict] = [
+            {
+                "role": "system",
+                "content": system_prompt
+                + (f"\n\nRelevant memory:\n{memory_summary}" if memory_summary else ""),
+            },
         ]
-        # Add recent trajectory (last 10)
-        for turn in self.trajectory[-10:]:
-            messages.append({"role": turn["role"], "content": turn["content"]})
+        # Recent trajectory context
+        for turn in self.trajectory[-12:]:
+            role = turn.get("role") or "user"
+            if role == "tool":
+                # Represent prior tool outcomes as user observations for providers without tool role
+                messages.append(
+                    {"role": "user", "content": turn.get("content", "")[:2000]}
+                )
+            elif role in ("user", "assistant", "system"):
+                messages.append({"role": role, "content": turn.get("content", "")[:4000]})
 
-        # Call free LLM with tools
-        response = self.llm.chat(messages, tools=self.tools)
+        all_tool_results: List[Dict] = []
+        steps = 0
+        final_content = ""
+        last_usage = {}
 
-        # Handle tool calls loop (like Hermes)
-        tool_results = []
-        if response.tool_calls:
+        # ---- Multi-step ReAct loop ----
+        while steps < self.max_steps:
+            steps += 1
+            try:
+                task_tracker.update_agent(
+                    self.agent_tracker_id,
+                    status="running",
+                    progress=f"Step {steps}/{self.max_steps}",
+                )
+            except Exception:
+                pass
+
+            # Only pass tools while we still have budget for another tool round
+            use_tools = self.tools if self.tools else None
+            response = self.llm.chat(messages, tools=use_tools)
+            last_usage = getattr(response, "usage", None) or last_usage
+
+            if not response.tool_calls:
+                final_content = response.content or ""
+                break
+
+            # Record assistant tool-call turn
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": response.tool_calls,
+                }
+            )
+            self.trajectory.append(
+                {
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": response.tool_calls,
+                }
+            )
+
+            # Execute each tool call
+            observations = []
             for tc in response.tool_calls:
                 tool_name = tc.get("name")
                 tool_args = tc.get("arguments", {})
                 if isinstance(tool_args, str):
                     try:
                         tool_args = json.loads(tool_args)
-                    except:
+                    except Exception:
                         tool_args = {}
-                print(f"[Tool] {tool_name}({tool_args})")
+                print(f"[Tool step {steps}] {tool_name}({tool_args})")
                 result = self._execute_tool(tool_name, tool_args)
-                tool_results.append({"tool": tool_name, "args": tool_args, "result": result})
+                all_tool_results.append(
+                    {"tool": tool_name, "args": tool_args, "result": result, "step": steps}
+                )
+                obs = self._format_tool_result(tool_name, result)
+                observations.append(obs)
 
-                # Add tool result to memory
                 memory.add_session_message(
                     self.session_id,
                     "tool",
-                    f"Tool {tool_name} result: {json.dumps(result)[:1000]}",
+                    f"Tool {tool_name} result: {json.dumps(result, default=str)[:1000]}",
                     tool_calls=[tc],
-                    metadata={"tool": tool_name}
+                    metadata={"tool": tool_name, "step": steps},
                 )
-                self.trajectory.append({"role": "tool", "content": f"{tool_name} result: {json.dumps(result)[:500]}", "tool_calls": [tc]})
+                self.trajectory.append(
+                    {
+                        "role": "tool",
+                        "content": f"{tool_name} result: {json.dumps(result, default=str)[:800]}",
+                        "tool_calls": [tc],
+                    }
+                )
 
-            # After tool calls, get final response from LLM
-            messages.append({"role": "assistant", "content": response.content, "tool_calls": response.tool_calls})
-            # Add tool results as assistant context for next turn (simplified)
-            for tr in tool_results:
-                messages.append({"role": "user", "content": f"Tool {tr['tool']} returned: {json.dumps(tr['result'])[:1000]}"})
-
-            final_resp = self.llm.chat(messages)
-            final_content = final_resp.content
+            # Feed observations back for next reasoning step
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Tool results (step "
+                        f"{steps}):\n\n"
+                        + "\n\n".join(observations)
+                        + "\n\nContinue. Call more tools if needed, otherwise give the final answer."
+                    ),
+                }
+            )
         else:
-            final_content = response.content
-            tool_results = []
+            # Hit max steps with pending work — force a final synthesis without tools
+            print(f"[Agent] max_steps={self.max_steps} reached, forcing final answer")
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"You hit the max tool steps ({self.max_steps}). "
+                        "Give the best final answer now from the information gathered. No more tools."
+                    ),
+                }
+            )
+            final_resp = self.llm.chat(messages, tools=None)
+            final_content = final_resp.content or ""
+            last_usage = getattr(final_resp, "usage", None) or last_usage
 
-        # Save assistant response to memory + token usage free tracking
+        if not final_content:
+            final_content = "(No response generated)"
+
+        # Persist assistant reply
         memory.add_session_message(self.session_id, "assistant", final_content)
-        self.trajectory.append({"role": "assistant", "content": final_content, "tool_calls": response.tool_calls})
+        self.trajectory.append(
+            {"role": "assistant", "content": final_content, "tool_calls": []}
+        )
 
-        # Track token usage free
         try:
-            # response.usage from LLM, plus final response usage
-            usage = getattr(response, 'usage', None) or {}
-            if usage:
-                memory.add_token_usage(self.session_id, usage)
-            # Also track final response if different
-            if 'final_resp' in locals():
-                final_usage = getattr(final_resp, 'usage', None)
-                if final_usage:
-                    memory.add_token_usage(self.session_id, final_usage)
-        except:
+            from .embeddings import embedding_store
+
+            embedding_store.add_text(
+                final_content[:2000],
+                metadata={"session_id": self.session_id, "role": "assistant"},
+                source=f"session:{self.session_id}",
+            )
+        except Exception:
             pass
 
-        # Complete task tracking for slide panel
+        # Token usage
+        try:
+            if last_usage:
+                memory.add_token_usage(self.session_id, last_usage)
+        except Exception:
+            pass
+
         try:
             if task_id:
-                task_tracker.complete_task(task_id, status="done", result=final_content[:200])
-            task_tracker.update_agent(self.agent_tracker_id, status="idle", progress="Done", task="idle")
-        except:
+                task_tracker.complete_task(
+                    task_id, status="done", result=final_content[:200]
+                )
+            task_tracker.update_agent(
+                self.agent_tracker_id, status="idle", progress="Done", task="idle"
+            )
+        except Exception:
             pass
 
-        # Self-improving agent: When given work is done as it goes idle, trigger reflection in background
-        # As requested: if given work is done as it goes idle, it should go through reflections and see what mistakes it did, search how to improve, fix itself in background
+        # Background self-improvement
         try:
             from .self_improvement import self_improvement
-            # Start background idle checker if not already running (checks every 30 sec if idle)
-            if not self_improvement.background_thread or not self_improvement.background_thread.is_alive():
+            import threading
+
+            if (
+                not self_improvement.background_thread
+                or not self_improvement.background_thread.is_alive()
+            ):
                 self_improvement.start_background_idle_checker()
 
-            # Also trigger immediate reflection in background thread for this trajectory if it had mistakes
-            # Don't block main response - run in background
-            import threading
             def background_reflection():
                 try:
-                    # Only reflect if trajectory had some tool failures or >2 turns (complex work)
-                    tool_failures = sum(1 for turn in self.trajectory if "error" in turn.get("content","").lower() or "failed" in turn.get("content","").lower())
+                    tool_failures = sum(
+                        1
+                        for turn in self.trajectory
+                        if "error"
+                        in turn.get("content", "").lower()
+                        or "failed" in turn.get("content", "").lower()
+                    )
                     if len(self.trajectory) >= 3 or tool_failures > 0:
-                        self_improvement.run_idle_reflection(trajectory=self.trajectory[-20:])
+                        self_improvement.run_idle_reflection(
+                            trajectory=self.trajectory[-20:]
+                        )
                 except Exception as e:
                     print(f"[Self-Improvement] Background reflection failed: {e}")
 
-            thread = threading.Thread(target=background_reflection, daemon=True)
-            thread.start()
-
+            threading.Thread(target=background_reflection, daemon=True).start()
         except Exception as e:
-            print(f"[Self-Improvement] Failed to trigger background reflection: {e}")
+            print(f"[Self-Improvement] Failed to trigger: {e}")
 
-        # Post-execution: Check if should create skill (autonomous skill creation)
+        # Auto skill creation
         skill_created = None
         if skill_manager.should_create_skill(self.trajectory):
             print("[Skill] Complex trajectory detected, auto-creating skill...")
-            skill_created = skill_manager.create_skill_from_trajectory(self.trajectory, self.session_id)
+            skill_created = skill_manager.create_skill_from_trajectory(
+                self.trajectory, self.session_id
+            )
 
-        # Post-execution: Curate memory - agent decides what to remember (free)
+        # Curate memory heuristic
         try:
-            # Simple heuristic: if user said "remember" or trajectory had success, curate
-            if "remember" in user_message.lower() or len(tool_results) >= 2:
+            if "remember" in user_message.lower() or len(all_tool_results) >= 2:
                 memory.curate_memory(
                     key=f"session_{self.session_id[:8]}_topic",
                     value=user_message[:200] + " -> " + final_content[:300],
                     source_session=self.session_id,
-                    importance=6
+                    importance=6,
                 )
-        except:
+        except Exception:
             pass
 
         return {
             "session_id": self.session_id,
             "response": final_content,
-            "tool_results": tool_results,
-            "tool_calls": response.tool_calls,
+            "tool_results": all_tool_results,
+            "tool_calls": [tr["tool"] for tr in all_tool_results],
+            "steps": steps,
+            "max_steps": self.max_steps,
             "skill_created": skill_created,
-            "memory_results": memory_results[:2] if memory_results else []
+            "memory_results": memory_results[:3] if memory_results else [],
+            "tools_available": len(self.tools),
         }
+
+    def _maybe_fleet_distribute(self, user_message: str) -> Optional[Dict[str, Any]]:
+        """
+        In multi-agent / multi-chat modes, auto-dispatch hard goals across
+        multiple models and API keys via the model fleet.
+        Skip for short greetings / simple questions.
+        """
+        msg = (user_message or "").strip()
+        if len(msg) < 40:
+            return None
+        # Explicit commands
+        lower = msg.lower()
+        force = any(
+            k in lower
+            for k in (
+                "multi model",
+                "multi-model",
+                "multiple models",
+                "multiple ai",
+                "fleet",
+                "fanout",
+                "debate",
+                "no matter how",
+                "use all keys",
+                "use multiple",
+            )
+        )
+        complexish = (
+            force
+            or len(msg) > 120
+            or any(k in lower for k in ("research", "compare", "plan", "analyze", " and ", "1.", "2."))
+        )
+        if not complexish:
+            return None
+
+        try:
+            from .model_fleet import model_fleet
+
+            workers = model_fleet.list_workers().get("count", 0)
+            if workers < 2 and not force:
+                return None
+
+            strategy = "fanout" if self.mode == AgentMode.MULTI_CHAT else "auto"
+            if "race" in lower:
+                strategy = "race"
+            elif "map" in lower or "subtask" in lower or self.mode == AgentMode.MULTI_AGENT:
+                strategy = "map" if self.mode == AgentMode.MULTI_AGENT else strategy
+
+            print(f"[Fleet] Multi-mode dispatch strategy={strategy} workers≈{workers}")
+            try:
+                task_tracker.update_agent(
+                    self.agent_tracker_id,
+                    status="running",
+                    progress=f"Fleet {strategy} across models/keys",
+                )
+            except Exception:
+                pass
+
+            result = model_fleet.auto_distribute(msg, strategy=strategy, max_workers=4)
+            final = (
+                result.get("consensus")
+                or result.get("merged")
+                or (result.get("winner") or {}).get("response")
+                or ""
+            )
+            if not final and result.get("results"):
+                chunks = []
+                for r in result["results"]:
+                    if r.get("success") and r.get("response"):
+                        chunks.append(f"### {r.get('model')}\n{r['response'][:1500]}")
+                final = "\n\n".join(chunks) if chunks else str(result.get("error") or "Fleet finished with no text")
+
+            memory.add_session_message(self.session_id, "user", user_message)
+            memory.add_session_message(self.session_id, "assistant", final)
+            self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
+            self.trajectory.append({"role": "assistant", "content": final, "tool_calls": []})
+
+            try:
+                task_tracker.update_agent(
+                    self.agent_tracker_id, status="idle", progress="Fleet done", task="idle"
+                )
+            except Exception:
+                pass
+
+            return {
+                "session_id": self.session_id,
+                "response": final,
+                "tool_results": [
+                    {
+                        "tool": "fleet_distribute_task",
+                        "args": {"goal": msg, "strategy": strategy},
+                        "result": {
+                            "mode": result.get("mode"),
+                            "success": result.get("success"),
+                            "workers_used": result.get("workers_used") or len(result.get("results") or []),
+                            "subtasks": result.get("subtasks"),
+                        },
+                    }
+                ],
+                "tool_calls": ["fleet_distribute_task"],
+                "steps": 1,
+                "max_steps": self.max_steps,
+                "fleet": result,
+                "mode": self.mode.value,
+                "tools_available": len(self.tools),
+            }
+        except Exception as e:
+            print(f"[Fleet] dispatch skipped: {e}")
+            return None
 
     def new_session(self):
         """Start fresh conversation - /new"""
-        self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
+        self.session_id = (
+            f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
+        )
         self.trajectory = []
         print(f"[Hermus] New session {self.session_id}")
         return self.session_id
 
-# For CLI usage
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Hermus Agent Free - Self-improving AI")
-    parser.add_argument("--model", default=config.model, help="Model: ollama/llama3.1:8b, groq/llama-3.1-70b-versatile, hf/mistralai/Mistral-7B, mock/mock")
+    parser.add_argument(
+        "--model",
+        default=config.model,
+        help="Model: ollama/llama3.1:8b, groq/..., hf/..., mock/mock",
+    )
     args = parser.parse_args()
 
     agent = HermusAgent(model=args.model)
-    print(f"Hermus Free ready. Model {args.model}. Type /new, /skills, /model, /exit")
+    print(f"Hermus Free ready. Model {args.model}. Type /new, /skills, /model, /tools, /exit")
     while True:
         try:
             user_input = input("\nYou> ").strip()
@@ -654,6 +585,11 @@ if __name__ == "__main__":
                 for s in skills:
                     print(f" - {s['name']}: {s['description'][:100]}")
                 continue
+            if user_input.lower().startswith("/tools"):
+                info = tool_registry.list_tools()
+                print(f"Tools: {info['count']}")
+                print(", ".join(info["tools"][:40]), "...")
+                continue
             if user_input.lower().startswith("/model"):
                 parts = user_input.split()
                 if len(parts) > 1:
@@ -665,9 +601,12 @@ if __name__ == "__main__":
 
             result = agent.chat(user_input)
             print(f"\nHermus> {result['response']}")
-            if result['tool_results']:
-                print(f"[Tools used: {', '.join([tr['tool'] for tr in result['tool_results']])}]")
-            if result['skill_created'] and result['skill_created'].get('created'):
+            if result["tool_results"]:
+                print(
+                    f"[Tools used ({result.get('steps')} steps): "
+                    f"{', '.join([tr['tool'] for tr in result['tool_results']])}]"
+                )
+            if result["skill_created"] and result["skill_created"].get("created"):
                 print(f"[New skill created: {result['skill_created']['name']}]")
 
         except KeyboardInterrupt:

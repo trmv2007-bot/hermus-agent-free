@@ -25,75 +25,60 @@ class ResponseTimeTester:
     def _save(self, data: List[Dict]):
         self.results_path.write_text(json.dumps(data, indent=2))
 
-    def test_llm_key(self, provider: str, api_key: str, model: str = None, prompt: str = "Hello, what is Python async?", timeout: int = 30) -> Dict:
-        """Test response time for LLM API key - free"""
+    def test_llm_key(
+        self,
+        provider: str,
+        api_key: str,
+        model: str = None,
+        prompt: str = "Hello, what is Python async?",
+        timeout: int = 30,
+        base_url: str = None,
+    ) -> Dict:
+        """Test response time for ANY LLM API key (OpenAI-compatible)."""
         start = time.time()
         success = False
         error = None
         response_text = ""
         tokens = 0
+        rate_limit = {}
+        health = {}
 
         try:
-            from .llm import FreeLLM
-            # Use provided key via env override for this test
-            import os
-            original_key = None
-            env_var = None
-            if provider == "groq":
-                env_var = "GROQ_API_KEY"
-                original_key = os.getenv(env_var)
-                os.environ[env_var] = api_key
-                model_name = model or "llama-3.1-8b-instant"  # Fast model for testing
-                llm = FreeLLM(f"groq/{model_name}")
-            elif provider == "hf":
-                env_var = "HF_TOKEN"
-                original_key = os.getenv(env_var)
-                os.environ[env_var] = api_key
-                model_name = model or "mistralai/Mistral-7B-Instruct-v0.3"
-                llm = FreeLLM(f"hf/{model_name}")
-            elif provider == "openai":
-                # For OpenAI, we would need openai package, but we can simulate via custom
-                env_var = "OPENAI_API_KEY"
-                original_key = os.getenv(env_var)
-                os.environ[env_var] = api_key
-                llm = FreeLLM(f"openai/{model or 'gpt-3.5-turbo'}")
-            else:
-                # Custom provider
-                llm = FreeLLM(f"{provider}/{model or 'test'}")
+            from .providers import get_provider
+            from .openai_compat import health_ping, chat_completions, CompatAPIError
 
-            messages = [{"role": "user", "content": prompt}]
-            resp = llm.chat(messages)
+            preset = get_provider(provider)
+            model_name = model or preset.get("default_model") or "gpt-3.5-turbo"
+            # Full health includes models + tiny chat
+            health = health_ping(
+                provider,
+                api_key=api_key,
+                base_url=base_url or preset.get("base_url"),
+                model=model_name,
+                timeout=timeout,
+            )
             end = time.time()
             elapsed = end - start
-            success = True
-            response_text = resp.content[:500]
-            tokens = resp.usage.get("total_tokens", 0) if hasattr(resp, 'usage') and resp.usage else len(response_text.split())
-
-            # Restore original env
-            if env_var:
-                if original_key:
-                    os.environ[env_var] = original_key
-                else:
-                    os.environ.pop(env_var, None)
+            success = bool(health.get("healthy") or health.get("success"))
+            response_text = health.get("response_preview") or ""
+            error = health.get("error")
+            rate_limit = health.get("rate_limit") or {}
+            usage = health.get("usage") or {}
+            tokens = usage.get("total_tokens") or 0
+            if health.get("model_tested"):
+                model_name = health["model_tested"]
 
         except Exception as e:
             end = time.time()
             elapsed = end - start
             error = str(e)
-            # Restore env
-            try:
-                if env_var and original_key:
-                    os.environ[env_var] = original_key
-                elif env_var:
-                    os.environ.pop(env_var, None)
-            except:
-                pass
 
         result = {
             "provider": provider,
-            "api_key_preview": f"{api_key[:6]}...{api_key[-4:]}" if len(api_key) > 10 else "****",
-            "api_key_full": api_key,  # For internal, but redacted in display
+            "api_key_preview": f"{api_key[:6]}...{api_key[-4:]}" if api_key and len(api_key) > 10 else "****",
+            "api_key_full": api_key,
             "model": model or f"{provider}/default",
+            "model_tested": health.get("model_tested") if isinstance(health, dict) else model,
             "prompt": prompt[:100],
             "response_time_seconds": round(elapsed, 3),
             "response_time_ms": int(elapsed * 1000),
@@ -101,8 +86,12 @@ class ResponseTimeTester:
             "error": error,
             "response_preview": response_text[:200] if success else "",
             "tokens": tokens,
+            "rate_limit": rate_limit,
+            "models_sample": (health.get("models_probe") or {}).get("sample") if isinstance(health, dict) else [],
+            "models_count": (health.get("models_probe") or {}).get("count") if isinstance(health, dict) else 0,
+            "health_status": health.get("status") if isinstance(health, dict) else None,
             "timestamp": datetime.now().isoformat(),
-            "test_id": f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{provider}"
+            "test_id": f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{provider}",
         }
 
         # Save to history

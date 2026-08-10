@@ -59,21 +59,68 @@ def main():
     skill_parser.add_argument("action", choices=["list", "improve"], help="list or improve")
     skill_parser.add_argument("--name", help="Skill name for improve")
 
-    # multi-key subcommand - multiple API keys at once
-    multikey_parser = subparsers.add_parser("multikey", help="Multi-API Keys - use multiple keys at once to complete quickly")
+    # multi-key subcommand - any AI API key works
+    multikey_parser = subparsers.add_parser(
+        "multikey",
+        help="Multi-API Keys - ANY OpenAI-compatible key (groq/openai/openrouter/gemini/custom/...). Health, models, rate limits, parallel.",
+    )
     multikey_sub = multikey_parser.add_subparsers(dest="multikey_action")
-    multikey_add = multikey_sub.add_parser("add", help="Add API key for provider")
-    multikey_add.add_argument("--provider", required=True, choices=["groq", "hf", "openai", "custom"], help="Provider")
+    multikey_add = multikey_sub.add_parser("add", help="Add ANY API key (auto model discover + health)")
+    multikey_add.add_argument(
+        "--provider",
+        required=True,
+        help="Provider id: groq, openai, openrouter, together, gemini, deepseek, mistral, cerebras, hf, custom, ...",
+    )
     multikey_add.add_argument("--key", required=True, help="API key")
     multikey_add.add_argument("--name", help="Key name")
-    multikey_list = multikey_sub.add_parser("list", help="List keys per provider")
+    multikey_add.add_argument("--base-url", help="OpenAI-compatible base URL e.g. https://api.groq.com/openai/v1")
+    multikey_add.add_argument("--model", help="Default model id for this key")
+    multikey_add.add_argument("--rpm", type=int, help="Requests-per-minute budget")
+    multikey_add.add_argument("--tpm", type=int, help="Tokens-per-minute budget")
+    multikey_add.add_argument("--no-probe", action="store_true", help="Skip auto health/model probe")
+    multikey_list = multikey_sub.add_parser("list", help="List keys per provider (redacted + health)")
     multikey_list.add_argument("--provider", help="Provider filter")
     multikey_remove = multikey_sub.add_parser("remove", help="Remove key")
     multikey_remove.add_argument("--provider", required=True)
     multikey_remove.add_argument("--key", required=True, help="Key or name to remove")
-    multikey_parallel = multikey_sub.add_parser("parallel", help="Test parallel execution with multiple keys")
+    multikey_parallel = multikey_sub.add_parser("parallel", help="Run tasks in parallel on different keys")
     multikey_parallel.add_argument("--provider", default="groq")
     multikey_parallel.add_argument("--tasks", nargs="+", help="Tasks to run in parallel with different keys")
+    multikey_health = multikey_sub.add_parser("health", help="Check API key health + rate limits + models")
+    multikey_health.add_argument("--provider", help="Provider filter (default: all)")
+    multikey_models = multikey_sub.add_parser("models", help="Discover models for a provider/key")
+    multikey_models.add_argument("--provider", required=True)
+    multikey_models.add_argument("--key", help="Specific key (optional)")
+    multikey_models.add_argument("--base-url", help="Override base URL")
+    multikey_rates = multikey_sub.add_parser("rates", help="Show RPM/TPM usage vs limits")
+    multikey_rates.add_argument("--provider", help="Provider filter")
+    multikey_providers = multikey_sub.add_parser("providers", help="List known AI providers")
+
+    # fleet - multi-model task distribution
+    fleet_parser = subparsers.add_parser(
+        "fleet",
+        help="Model fleet - distribute tasks across multiple AI models + API keys",
+    )
+    fleet_sub = fleet_parser.add_subparsers(dest="fleet_action")
+    fleet_workers = fleet_sub.add_parser("workers", help="List available model/key workers")
+    fleet_workers.add_argument("--providers", help="Comma-separated providers")
+    fleet_workers.add_argument("--models", help="Comma-separated provider/model")
+    fleet_run = fleet_sub.add_parser("run", help="Distribute a goal (auto|fanout|map|race)")
+    fleet_run.add_argument("goal", help="Goal / prompt")
+    fleet_run.add_argument("--strategy", default="auto", choices=["auto", "fanout", "map", "race"])
+    fleet_run.add_argument("--models", help="Comma-separated provider/model")
+    fleet_run.add_argument("--providers", help="Comma-separated providers")
+    fleet_run.add_argument("--workers", type=int, default=4)
+    fleet_fanout = fleet_sub.add_parser("fanout", help="Same prompt → many models → consensus")
+    fleet_fanout.add_argument("prompt")
+    fleet_fanout.add_argument("--models", help="Comma-separated")
+    fleet_fanout.add_argument("--providers", help="Comma-separated")
+    fleet_fanout.add_argument("--workers", type=int, default=4)
+    fleet_map = fleet_sub.add_parser("map", help="Split goal into subtasks across models")
+    fleet_map.add_argument("goal")
+    fleet_map.add_argument("--models", help="Comma-separated")
+    fleet_map.add_argument("--providers", help="Comma-separated")
+    fleet_map.add_argument("--workers", type=int, default=4)
 
     # multi-ai subcommand - multiple AIs talk to each other
     multiai_parser = subparsers.add_parser("multiai", help="Multi-AI - multiple AIs talk to each other for anything")
@@ -116,6 +163,41 @@ def main():
     # update subcommand - check for GitHub updates and show in dashboard and CLI too
     update_parser = subparsers.add_parser("update", help="Update from GitHub - shows update in dashboard and CLI too - like hermes update")
     update_parser.add_argument("--check", action="store_true", help="Only check for updates, don't pull")
+
+    # mcp subcommand - Model Context Protocol servers
+    mcp_parser = subparsers.add_parser("mcp", help="MCP servers - connect external tool servers (stdio)")
+    mcp_sub = mcp_parser.add_subparsers(dest="mcp_action")
+    mcp_list = mcp_sub.add_parser("list", help="List MCP servers")
+    mcp_add = mcp_sub.add_parser("add", help="Add MCP server")
+    mcp_add.add_argument("--name", required=True)
+    mcp_add.add_argument("--command", required=True, help="Executable e.g. npx or python3")
+    mcp_add.add_argument("--arg", action="append", default=[], help="Repeatable arg")
+    mcp_add.add_argument("--disabled", action="store_true", help="Add but leave disabled")
+    mcp_remove = mcp_sub.add_parser("remove", help="Remove MCP server")
+    mcp_remove.add_argument("name")
+    mcp_connect = mcp_sub.add_parser("connect", help="Connect enabled MCP servers and register tools")
+    mcp_call = mcp_sub.add_parser("call", help="Call MCP tool")
+    mcp_call.add_argument("--server", required=True)
+    mcp_call.add_argument("--tool", required=True)
+    mcp_call.add_argument("--args", default="{}", help="JSON arguments")
+
+    # embeddings / semantic memory
+    emb_parser = subparsers.add_parser("embed", help="Semantic memory - ingest docs + vector search (free local)")
+    emb_sub = emb_parser.add_subparsers(dest="embed_action")
+    emb_status = emb_sub.add_parser("status", help="Backend status")
+    emb_ingest = emb_sub.add_parser("ingest", help="Ingest file or directory")
+    emb_ingest.add_argument("path")
+    emb_ingest.add_argument("--source", default=None)
+    emb_search = emb_sub.add_parser("search", help="Semantic or hybrid search")
+    emb_search.add_argument("query")
+    emb_search.add_argument("--limit", type=int, default=5)
+    emb_search.add_argument("--hybrid", action="store_true", default=True)
+    emb_search.add_argument("--semantic-only", action="store_true")
+    emb_clear = emb_sub.add_parser("clear", help="Clear embeddings")
+    emb_clear.add_argument("--source", default=None)
+
+    # tools list
+    tools_parser = subparsers.add_parser("tools", help="List registered tools (auto registry)")
 
     args = parser.parse_args()
 
@@ -167,27 +249,52 @@ def main():
 
     elif args.command == "multikey":
         from core.multi_key import multi_key_manager
+        from core.providers import list_providers
         import json as json_lib
         if args.multikey_action == "add":
-            result = multi_key_manager.add_key(args.provider, args.key, name=args.name)
-            print(f"Add key result: {result}")
+            result = multi_key_manager.add_key(
+                args.provider,
+                args.key,
+                name=args.name,
+                base_url=getattr(args, "base_url", None),
+                default_model=getattr(args, "model", None),
+                rpm_limit=getattr(args, "rpm", None),
+                tpm_limit=getattr(args, "tpm", None),
+                auto_discover=not getattr(args, "no_probe", False),
+            )
+            print(json_lib.dumps(result, indent=2, default=str)[:4000])
             if result.get("success"):
-                print(f"✅ Added key for {args.provider}, now total {result['total_keys']} keys - will use round-robin + fallback, completing quickly")
+                print(
+                    f"\n✅ Added {args.provider} key '{result.get('key_name')}'. "
+                    f"Total keys for provider: {result.get('total_keys')}"
+                )
+                print(f"   Use model like: --model {args.provider}/{result.get('default_model') or 'MODEL'}")
+                h = result.get("health") or {}
+                if h:
+                    print(
+                        f"   Health: {h.get('status')} healthy={h.get('healthy')} "
+                        f"latency={h.get('latency_ms')}ms models={h.get('models_count')}"
+                    )
+                    if h.get("models_sample"):
+                        print(f"   Models sample: {', '.join(h['models_sample'][:8])}")
         elif args.multikey_action == "list":
-            apis = multi_key_manager.list_keys(args.provider)
-            print(f"Multi-API Keys:")
+            apis = multi_key_manager.list_keys(args.provider, redact=True)
+            print("Multi-API Keys (redacted):")
             for provider, keys in apis.items():
                 print(f" {provider}: {len(keys)} keys")
                 for k in keys:
-                    if isinstance(k, dict):
-                        print(f"   - {k.get('name')}: {k.get('key','')[:10]}... usage={k.get('usage_count',0)} added={k.get('added','')[:10]}")
-                    else:
-                        print(f"   - {k[:10]}...")
+                    print(
+                        f"   - {k.get('name')}: {k.get('preview')} | model={k.get('default_model')} "
+                        f"| healthy={k.get('healthy')} status={k.get('health_status')} "
+                        f"| models={k.get('models_count')} rpm={k.get('rpm_limit')} "
+                        f"| avg_rt={k.get('avg_response_time')} usage={k.get('usage_count')}"
+                    )
+                    if k.get("models_sample"):
+                        print(f"     models: {', '.join(k['models_sample'][:6])}")
         elif args.multikey_action == "remove":
             result = multi_key_manager.remove_key(args.provider, args.key)
             print(f"Remove result: {result}")
         elif args.multikey_action == "parallel":
-            # Example parallel tasks with different keys
             tasks = []
             if args.tasks:
                 for t in args.tasks:
@@ -199,11 +306,75 @@ def main():
                     {"prompt": "What is Go concurrency?", "messages": [{"role": "user", "content": "What is Go concurrency?"}]},
                 ]
             results = multi_key_manager.execute_parallel_with_keys(args.provider, tasks)
-            print(f"Parallel results with {args.provider} multiple keys ({len(results)} tasks):")
+            print(f"Parallel results with {args.provider} ({len(results)} tasks):")
             for r in results:
-                print(f" - Task {r.get('task_id')}: success={r.get('success')} key={r.get('api_key')} response={str(r.get('response',''))[:150]}")
+                print(
+                    f" - Task {r.get('task_id')}: success={r.get('success')} "
+                    f"model={r.get('model')} key={r.get('api_key')} "
+                    f"response={str(r.get('response') or r.get('error',''))[:150]}"
+                )
+        elif args.multikey_action == "health":
+            results = multi_key_manager.check_all_health(args.provider)
+            print(json_lib.dumps(results, indent=2, default=str)[:6000])
+            ok = sum(1 for r in results if r.get("healthy"))
+            print(f"\nHealthy: {ok}/{len(results)}")
+        elif args.multikey_action == "models":
+            result = multi_key_manager.discover_models(
+                args.provider,
+                api_key=args.key,
+                base_url=getattr(args, "base_url", None),
+            )
+            print(json_lib.dumps(result, indent=2, default=str)[:6000])
+        elif args.multikey_action == "rates":
+            print(json_lib.dumps(multi_key_manager.rate_status(args.provider), indent=2, default=str)[:5000])
+        elif args.multikey_action == "providers":
+            for p in list_providers():
+                print(f" - {p['id']}: {p['name']} | default={p.get('default_model')} | {p.get('base_url')}")
+                if p.get("notes"):
+                    print(f"     {p['notes']}")
         else:
             parser.parse_args(["multikey", "--help"])
+
+    elif args.command == "fleet":
+        from core.model_fleet import model_fleet
+        import json as json_lib
+
+        def _split(s):
+            return [x.strip() for x in (s or "").split(",") if x.strip()] or None
+
+        if args.fleet_action == "workers":
+            print(json_lib.dumps(model_fleet.list_workers(models=_split(args.models), providers=_split(args.providers)), indent=2)[:4000])
+        elif args.fleet_action == "run":
+            result = model_fleet.auto_distribute(
+                args.goal,
+                strategy=args.strategy,
+                models=_split(args.models),
+                providers=_split(args.providers),
+                max_workers=args.workers,
+            )
+            print(json_lib.dumps({k: result[k] for k in result if k not in ("results",)}, indent=2, default=str))
+            if result.get("consensus"):
+                print("\n=== CONSENSUS ===\n", result["consensus"][:3000])
+            elif result.get("merged"):
+                print("\n=== MERGED ===\n", result["merged"][:3000])
+            elif result.get("winner"):
+                print("\n=== WINNER ===\n", (result["winner"].get("response") or "")[:3000])
+            else:
+                for r in (result.get("results") or [])[:5]:
+                    print(f"\n--- {r.get('model')} success={r.get('success')} ---")
+                    print((r.get("response") or r.get("error") or "")[:800])
+        elif args.fleet_action == "fanout":
+            result = model_fleet.fanout(args.prompt, models=_split(args.models), providers=_split(args.providers), max_workers=args.workers)
+            print("Workers:", result.get("workers_used"), "success:", result.get("success"))
+            if result.get("consensus"):
+                print("\n=== CONSENSUS ===\n", result["consensus"][:4000])
+        elif args.fleet_action == "map":
+            result = model_fleet.map_goal(args.goal, models=_split(args.models), providers=_split(args.providers), max_workers=args.workers)
+            print("Subtasks:", result.get("subtasks"))
+            if result.get("merged"):
+                print("\n=== MERGED ===\n", result["merged"][:4000])
+        else:
+            parser.parse_args(["fleet", "--help"])
 
     elif args.command == "multiai":
         from core.multi_ai import multi_ai_manager, PERSONA_PRESETS
@@ -311,6 +482,73 @@ def main():
 
         else:
             parser.parse_args(["api", "--help"])
+
+    elif args.command == "mcp":
+        from core.mcp_client import mcp_manager
+        import json as json_lib
+        if args.mcp_action == "list":
+            servers = mcp_manager.list_servers()
+            print(f"MCP servers ({len(servers)}):")
+            for s in servers:
+                print(f" - {s.get('name')}: cmd={s.get('command')} enabled={s.get('enabled')} running={s.get('running')} tools={s.get('tool_count')}")
+                if s.get("last_error"):
+                    print(f"   error: {s['last_error']}")
+        elif args.mcp_action == "add":
+            result = mcp_manager.add_server(
+                args.name,
+                args.command,
+                args=args.arg or [],
+                enabled=not args.disabled,
+            )
+            print(result)
+            print("Tip: hermus mcp connect  # register tools on agent")
+        elif args.mcp_action == "remove":
+            print(mcp_manager.remove_server(args.name))
+        elif args.mcp_action == "connect":
+            result = mcp_manager.connect_enabled()
+            from core.tool_registry import tool_registry
+            tool_registry.load(force=True)
+            info = tool_registry.list_tools()
+            mcp_tools = [t for t in info.get("tools", []) if t.startswith("mcp_")]
+            print(result)
+            print(f"Registered MCP tools ({len(mcp_tools)}): {mcp_tools}")
+        elif args.mcp_action == "call":
+            try:
+                call_args = json_lib.loads(args.args)
+            except Exception:
+                call_args = {}
+            print(json_lib.dumps(mcp_manager.call(args.server, args.tool, call_args), indent=2)[:3000])
+        else:
+            parser.parse_args(["mcp", "--help"])
+
+    elif args.command == "embed":
+        from core.embeddings import embedding_store
+        import json as json_lib
+        if args.embed_action == "status":
+            print(json_lib.dumps(embedding_store.backend_info(), indent=2))
+        elif args.embed_action == "ingest":
+            print(json_lib.dumps(embedding_store.ingest_path(args.path, source=args.source), indent=2))
+        elif args.embed_action == "search":
+            if args.semantic_only:
+                print(json_lib.dumps(embedding_store.search(args.query, limit=args.limit), indent=2)[:4000])
+            else:
+                print(json_lib.dumps(embedding_store.hybrid_search(args.query, limit=args.limit), indent=2)[:4000])
+        elif args.embed_action == "clear":
+            print(embedding_store.clear(source=args.source))
+        else:
+            parser.parse_args(["embed", "--help"])
+
+    elif args.command == "tools":
+        from core.tool_registry import tool_registry
+        info = tool_registry.list_tools()
+        print(f"Registered tools: {info['count']} defs={info['definitions']}")
+        for t in info.get("tools", []):
+            src = info.get("sources", {}).get(t, "")
+            print(f" - {t}  [{src}]")
+        if info.get("errors"):
+            print("Load errors:")
+            for e in info["errors"]:
+                print(f"   ! {e}")
 
     elif args.command == "update":
         from core.updater import get_updater_for_current_repo

@@ -1,262 +1,654 @@
-"""Multi-API Keys - Use multiple API keys at once to complete tasks quickly, free load balancing, fallback"""
+"""
+Multi-API Keys — any AI API key works.
+- Unlimited providers (OpenAI-compatible + presets)
+- Per-key: base_url, health, models, rate limits, RPM/TPM budgets
+- Round-robin + cooldown + parallel task dispatch across keys/models
+"""
+from __future__ import annotations
+
 import json
-import random
+import threading
 import time
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from .config import config
+from .providers import get_provider, list_providers
+
 
 class MultiKeyManager:
-    """Manage multiple API keys per provider - free load balancing, rate limit handling, parallel execution"""
+    """Manage many API keys across any providers — load balance, health, limits."""
 
-    MAX_KEYS_PER_PROVIDER = 20  # Increased from 3 to 20 as requested (user asked 10 or 8, we allow 20 for future)
-    MAX_KEYS_PER_CUSTOM_API = 10  # For custom APIs same name, allow up to 10 keys from different websites
+    MAX_KEYS_PER_PROVIDER = 50
+    MAX_KEYS_PER_CUSTOM_API = 10
 
     def __init__(self, db_path: str = None):
         self.db_path = Path(db_path or config.resolve_path("data/api_keys.json"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.db_path.exists():
-            self.db_path.write_text(json.dumps({
-                "groq": [],
-                "hf": [],
-                "openai": [],
-                "custom": []
-            }, indent=2))
+            self.db_path.write_text(
+                json.dumps({"groq": [], "hf": [], "openai": [], "custom": []}, indent=2)
+            )
 
-        # In-memory tracking for rate limits and round-robin
         self.key_queues: Dict[str, deque] = defaultdict(deque)
-        self.key_failures: Dict[str, Dict[str, int]] = defaultdict(dict)  # provider -> key -> fail count
+        self.key_failures: Dict[str, Dict[str, int]] = defaultdict(dict)
         self.key_last_used: Dict[str, Dict[str, datetime]] = defaultdict(dict)
+        # Live rate windows: provider -> key -> list of timestamps
+        self._rpm_hits: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+        self._tpm_hits: Dict[str, Dict[str, List[tuple]]] = defaultdict(lambda: defaultdict(list))
+        self._lock = threading.Lock()
         self._load_queues()
+
+    # ---------- persistence ----------
 
     def _load(self) -> Dict:
         try:
             return json.loads(self.db_path.read_text())
-        except:
+        except Exception:
             return {"groq": [], "hf": [], "openai": [], "custom": []}
 
     def _save(self, data: Dict):
         self.db_path.write_text(json.dumps(data, indent=2))
 
-    def _load_queues(self):
-        """Load keys into round-robin queues"""
-        data = self._load()
-        for provider, keys in data.items():
-            # Keys can be list of strings or list of dicts with extra info
-            normalized_keys = []
-            for k in keys:
-                if isinstance(k, str):
-                    normalized_keys.append(k)
-                elif isinstance(k, dict):
-                    # Dict format: {"key": "...", "name": "..."}
-                    normalized_keys.append(k.get("key") or k.get("token") or "")
-            # Filter empty
-            normalized_keys = [k for k in normalized_keys if k]
-            self.key_queues[provider] = deque(normalized_keys)
-            for key in normalized_keys:
-                self.key_failures[provider][key] = 0
-                self.key_last_used[provider][key] = datetime.min
+    def _entry_key(self, entry) -> str:
+        if isinstance(entry, str):
+            return entry
+        return entry.get("key") or entry.get("token") or ""
 
-    def list_keys(self, provider: str = None) -> Dict:
+    def _normalize_entry(self, entry, provider: str, idx: int = 0) -> Dict:
+        if isinstance(entry, str):
+            preset = get_provider(provider)
+            return {
+                "key": entry,
+                "name": f"{provider}_key_{idx+1}",
+                "provider": provider,
+                "base_url": preset.get("base_url") or "",
+                "added": datetime.now().isoformat(),
+                "usage_count": 0,
+                "healthy": None,
+                "models": [],
+                "default_model": preset.get("default_model"),
+                "rpm_limit": preset.get("default_rpm"),
+                "tpm_limit": preset.get("default_tpm"),
+            }
+        e = dict(entry)
+        e.setdefault("provider", provider)
+        e.setdefault("key", e.get("token") or "")
+        e.setdefault("name", f"{provider}_key")
+        e.setdefault("usage_count", 0)
+        e.setdefault("models", e.get("models") or [])
+        if not e.get("base_url"):
+            e["base_url"] = get_provider(provider).get("base_url") or ""
+        if not e.get("default_model"):
+            e["default_model"] = get_provider(provider).get("default_model")
+        return e
+
+    def _load_queues(self):
+        data = self._load()
+        self.key_queues = defaultdict(deque)
+        for provider, keys in data.items():
+            normalized = []
+            for i, k in enumerate(keys):
+                entry = self._normalize_entry(k, provider, i)
+                if entry.get("key") or get_provider(provider).get("no_auth"):
+                    # allow empty key for no_auth providers only if explicitly stored
+                    if entry.get("key") or provider in ("ollama", "lmstudio"):
+                        normalized.append(entry.get("key") or f"noauth:{provider}")
+            self.key_queues[provider] = deque([k for k in normalized if k])
+            for key in self.key_queues[provider]:
+                self.key_failures[provider].setdefault(key, 0)
+                self.key_last_used[provider].setdefault(key, datetime.min)
+
+    # ---------- CRUD ----------
+
+    def list_keys(self, provider: str = None, redact: bool = False) -> Dict:
         data = self._load()
         if provider:
-            return {provider: data.get(provider, [])}
-        return data
+            data = {provider: data.get(provider, [])}
+        if not redact:
+            return data
+        out = {}
+        for p, keys in data.items():
+            out[p] = []
+            for k in keys:
+                e = self._normalize_entry(k, p)
+                key_val = e.get("key") or ""
+                preview = (
+                    f"{key_val[:6]}...{key_val[-4:]}" if len(key_val) > 10 else ("(no-key)" if not key_val else "****")
+                )
+                out[p].append(
+                    {
+                        "name": e.get("name"),
+                        "preview": preview,
+                        "base_url": e.get("base_url"),
+                        "default_model": e.get("default_model"),
+                        "healthy": e.get("healthy"),
+                        "health_status": e.get("health_status"),
+                        "models_count": len(e.get("models") or []),
+                        "models_sample": (e.get("models") or [])[:8],
+                        "usage_count": e.get("usage_count", 0),
+                        "avg_response_time": e.get("avg_response_time"),
+                        "last_tested": e.get("last_tested"),
+                        "rpm_limit": e.get("rpm_limit"),
+                        "tpm_limit": e.get("tpm_limit"),
+                        "rate_limit": e.get("last_rate_limit"),
+                        "added": e.get("added"),
+                    }
+                )
+        return out
 
-    def add_key(self, provider: str, api_key: str, name: str = None) -> Dict:
-        """Add API key for provider - free - now supports up to 10-20 keys as requested"""
+    def add_key(
+        self,
+        provider: str,
+        api_key: str,
+        name: str = None,
+        base_url: str = None,
+        default_model: str = None,
+        rpm_limit: int = None,
+        tpm_limit: int = None,
+        auto_discover: bool = True,
+    ) -> Dict:
+        """Add any API key. Works with openai/groq/openrouter/custom/etc."""
+        provider = (provider or "custom").lower().strip()
         data = self._load()
         if provider not in data:
             data[provider] = []
 
-        # Check limit (increased to 10-20 as user requested)
-        max_keys = self.MAX_KEYS_PER_CUSTOM_API if provider.startswith("custom_") else self.MAX_KEYS_PER_PROVIDER
+        max_keys = (
+            self.MAX_KEYS_PER_CUSTOM_API
+            if provider.startswith("custom")
+            else self.MAX_KEYS_PER_PROVIDER
+        )
         if len(data[provider]) >= max_keys:
-            return {"success": False, "error": f"Max {max_keys} keys per provider reached for {provider}. Remove old keys first with multikey remove."}
+            return {
+                "success": False,
+                "error": f"Max {max_keys} keys for {provider}. Remove old keys first.",
+            }
 
-        # Check if key already exists
-        existing_keys = [k if isinstance(k, str) else k.get("key","") for k in data[provider]]
-        if api_key in existing_keys:
+        existing = [self._entry_key(k) for k in data[provider]]
+        if api_key and api_key in existing:
             return {"success": False, "error": f"Key already exists for {provider}"}
 
-        # Store as dict with metadata for better tracking
+        preset = get_provider(provider)
         key_entry = {
-            "key": api_key,
+            "key": api_key or "",
             "name": name or f"{provider}_key_{len(data[provider])+1}",
+            "provider": provider,
+            "base_url": base_url or preset.get("base_url") or "",
+            "default_model": default_model or preset.get("default_model"),
             "added": datetime.now().isoformat(),
-            "usage_count": 0
+            "usage_count": 0,
+            "healthy": None,
+            "models": [],
+            "rpm_limit": rpm_limit if rpm_limit is not None else preset.get("default_rpm"),
+            "tpm_limit": tpm_limit if tpm_limit is not None else preset.get("default_tpm"),
         }
+        if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
+            # custom without base_url is ok if they set later — warn
+            if provider in ("custom", "vllm", "azure"):
+                key_entry["warning"] = "base_url empty — set with --base-url for this provider"
+
         data[provider].append(key_entry)
         self._save(data)
-        self._load_queues()  # Reload queues
+        self._load_queues()
 
-        return {"success": True, "provider": provider, "key_name": key_entry["name"], "total_keys": len(data[provider])}
+        result = {
+            "success": True,
+            "provider": provider,
+            "key_name": key_entry["name"],
+            "base_url": key_entry["base_url"],
+            "default_model": key_entry["default_model"],
+            "total_keys": len(data[provider]),
+            "preset": preset.get("name"),
+        }
+
+        if auto_discover and (api_key or preset.get("no_auth")):
+            try:
+                health = self.check_key_health(provider, api_key, base_url=key_entry["base_url"])
+                result["health"] = {
+                    "healthy": health.get("healthy"),
+                    "status": health.get("status"),
+                    "latency_ms": health.get("latency_ms"),
+                    "models_count": (health.get("models_probe") or {}).get("count"),
+                    "models_sample": (health.get("models_probe") or {}).get("sample"),
+                    "rate_limit": health.get("rate_limit"),
+                    "error": health.get("error"),
+                }
+            except Exception as e:
+                result["health_error"] = str(e)
+
+        return result
 
     def remove_key(self, provider: str, key_or_name: str) -> Dict:
         data = self._load()
         if provider not in data:
             return {"success": False, "error": f"Provider {provider} not found"}
-
         original_len = len(data[provider])
-        # Remove by key or name
         data[provider] = [
-            k for k in data[provider]
-            if (k if isinstance(k, str) else k.get("key","")) != key_or_name
-            and (k if isinstance(k, dict) else {}).get("name","") != key_or_name
+            k
+            for k in data[provider]
+            if self._entry_key(k) != key_or_name
+            and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
         ]
         if len(data[provider]) == original_len:
             return {"success": False, "error": f"Key {key_or_name} not found for {provider}"}
-
         self._save(data)
         self._load_queues()
         return {"success": True, "provider": provider, "remaining": len(data[provider])}
 
-    def get_key(self, provider: str = "groq") -> Optional[str]:
-        """Get next available key via round-robin, skip failed keys - free load balancing"""
-        if provider not in self.key_queues or not self.key_queues[provider]:
-            # Fallback to env var single key
-            if provider == "groq":
-                env_key = config.groq_api_key
-                if env_key:
-                    return env_key
-            elif provider == "hf":
-                env_key = config.hf_token
-                if env_key:
-                    return env_key
+    def get_entry(self, provider: str, api_key: str = None) -> Optional[Dict]:
+        data = self._load()
+        keys = data.get(provider, [])
+        if api_key:
+            for k in keys:
+                e = self._normalize_entry(k, provider)
+                if e.get("key") == api_key or e.get("name") == api_key:
+                    return e
             return None
+        # first healthy or first
+        for k in keys:
+            e = self._normalize_entry(k, provider)
+            if e.get("healthy") is not False:
+                return e
+        return self._normalize_entry(keys[0], provider) if keys else None
 
-        # Round-robin with failure handling
+    def get_all_entries(self, provider: str = None) -> List[Dict]:
+        data = self._load()
+        out = []
+        providers = [provider] if provider else list(data.keys())
+        for p in providers:
+            for i, k in enumerate(data.get(p, [])):
+                out.append(self._normalize_entry(k, p, i))
+        return out
+
+    # ---------- selection / rate limits ----------
+
+    def _under_rpm(self, provider: str, key: str, rpm_limit: int = None) -> bool:
+        if not rpm_limit:
+            return True
+        now = time.time()
+        hits = self._rpm_hits[provider][key]
+        # prune > 60s
+        hits[:] = [t for t in hits if now - t < 60.0]
+        return len(hits) < rpm_limit
+
+    def _record_use(self, provider: str, key: str, tokens: int = 0):
+        now = time.time()
+        self._rpm_hits[provider][key].append(now)
+        if tokens:
+            self._tpm_hits[provider][key].append((now, tokens))
+            self._tpm_hits[provider][key][:] = [
+                (t, n) for t, n in self._tpm_hits[provider][key] if now - t < 60.0
+            ]
+
+    def _tpm_used(self, provider: str, key: str) -> int:
+        now = time.time()
+        hits = self._tpm_hits[provider][key]
+        hits[:] = [(t, n) for t, n in hits if now - t < 60.0]
+        return sum(n for _, n in hits)
+
+    def get_key(self, provider: str = "groq") -> Optional[str]:
+        """Next available key via round-robin, skip failed / rate-limited."""
+        provider = (provider or "groq").lower()
+        # env fallbacks
+        if provider not in self.key_queues or not self.key_queues[provider]:
+            env_map = {
+                "groq": config.groq_api_key,
+                "hf": config.hf_token,
+                "huggingface": config.hf_token,
+                "openai": getattr(config, "openai_api_key", None),
+            }
+            # also check os env via preset
+            import os
+
+            preset = get_provider(provider)
+            env_key_name = preset.get("env_key")
+            if env_key_name and os.getenv(env_key_name):
+                return os.getenv(env_key_name)
+            return env_map.get(provider)
+
         queue = self.key_queues[provider]
         attempts = len(queue)
+        entry_meta = {self._entry_key(e): e for e in self.get_all_entries(provider)}
 
-        for _ in range(attempts):
-            key = queue[0]  # Peek
-            # Check if key has too many failures (rate limited)
-            fails = self.key_failures[provider].get(key, 0)
-            if fails >= 3:
-                # Check if enough time passed (5 min cooldown)
-                last_used = self.key_last_used[provider].get(key, datetime.min)
-                if datetime.now() - last_used < timedelta(minutes=5):
-                    # Rotate and skip
-                    queue.rotate(-1)
-                    continue
-                else:
-                    # Reset failures after cooldown
+        with self._lock:
+            for _ in range(max(attempts, 1)):
+                if not queue:
+                    break
+                key = queue[0]
+                fails = self.key_failures[provider].get(key, 0)
+                if fails >= 3:
+                    last_used = self.key_last_used[provider].get(key, datetime.min)
+                    if datetime.now() - last_used < timedelta(minutes=5):
+                        queue.rotate(-1)
+                        continue
                     self.key_failures[provider][key] = 0
 
-            # Use this key
-            queue.rotate(-1)  # Move to end for round-robin
-            self.key_last_used[provider][key] = datetime.now()
-            return key
+                meta = entry_meta.get(key) or {}
+                rpm = meta.get("rpm_limit")
+                if not self._under_rpm(provider, key, rpm):
+                    queue.rotate(-1)
+                    continue
+                tpm_limit = meta.get("tpm_limit")
+                if tpm_limit and self._tpm_used(provider, key) >= tpm_limit:
+                    queue.rotate(-1)
+                    continue
 
-        # All keys failed, return first anyway as fallback
-        return queue[0] if queue else None
+                queue.rotate(-1)
+                self.key_last_used[provider][key] = datetime.now()
+                if key.startswith("noauth:"):
+                    return ""
+                return key
 
-    def mark_key_success(self, provider: str, key: str):
-        """Mark key as successful - reset failures"""
+        return queue[0] if queue and not str(queue[0]).startswith("noauth:") else (
+            "" if queue else None
+        )
+
+    def get_key_bundle(self, provider: str) -> Optional[Dict]:
+        """Return key + base_url + default_model for LLM calls."""
+        key = self.get_key(provider)
+        if key is None and not get_provider(provider).get("no_auth"):
+            return None
+        entry = self.get_entry(provider, key) if key else self.get_entry(provider)
+        preset = get_provider(provider)
+        if not entry:
+            import os
+
+            env_key = preset.get("env_key")
+            api_key = os.getenv(env_key) if env_key else None
+            if not api_key and not preset.get("no_auth"):
+                if key:
+                    api_key = key
+                else:
+                    return None
+            return {
+                "key": api_key or key or "",
+                "base_url": preset.get("base_url") or "",
+                "default_model": preset.get("default_model"),
+                "provider": provider,
+                "name": "env",
+            }
+        return {
+            "key": entry.get("key") or key or "",
+            "base_url": entry.get("base_url") or preset.get("base_url") or "",
+            "default_model": entry.get("default_model") or preset.get("default_model"),
+            "provider": provider,
+            "name": entry.get("name"),
+            "models": entry.get("models") or [],
+            "rpm_limit": entry.get("rpm_limit"),
+            "tpm_limit": entry.get("tpm_limit"),
+        }
+
+    def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: Dict = None):
+        if not key:
+            return
         if provider in self.key_failures and key in self.key_failures[provider]:
             self.key_failures[provider][key] = max(0, self.key_failures[provider][key] - 1)
-
-        # Update usage count in file
+        self._record_use(provider, key, tokens=tokens or 0)
         try:
             data = self._load()
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["usage_count"] = k.get("usage_count", 0) + 1
                     k["last_used"] = datetime.now().isoformat()
+                    k["healthy"] = True
+                    k["health_status"] = "ok"
+                    if latency_ms is not None:
+                        times = k.get("response_times") or []
+                        times.append(latency_ms / 1000.0)
+                        k["response_times"] = times[-10:]
+                        k["avg_response_time"] = sum(k["response_times"]) / len(k["response_times"])
+                        k["last_response_time"] = latency_ms / 1000.0
+                    if rate_limit:
+                        k["last_rate_limit"] = rate_limit
+                        # adopt server-reported limits when present
+                        if rate_limit.get("limit_requests") and not k.get("rpm_limit"):
+                            try:
+                                k["rpm_limit"] = int(rate_limit["limit_requests"])
+                            except Exception:
+                                pass
+                        if rate_limit.get("limit_tokens") and not k.get("tpm_limit"):
+                            try:
+                                k["tpm_limit"] = int(rate_limit["limit_tokens"])
+                            except Exception:
+                                pass
             self._save(data)
-        except:
+        except Exception:
             pass
 
-    def mark_key_failed(self, provider: str, key: str, error: str = ""):
-        """Mark key as failed - for rate limit handling"""
+    def mark_key_failed(self, provider: str, key: str, error: str = "", rate_limit: Dict = None):
+        if not key:
+            return
         if provider in self.key_failures:
             self.key_failures[provider][key] = self.key_failures[provider].get(key, 0) + 1
-        print(f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), failures: {self.key_failures[provider].get(key,0)}")
+        print(
+            f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), "
+            f"failures: {self.key_failures[provider].get(key, 0)}"
+        )
+        try:
+            data = self._load()
+            for k in data.get(provider, []):
+                if isinstance(k, dict) and k.get("key") == key:
+                    k["last_error"] = str(error)[:300]
+                    k["last_failed"] = datetime.now().isoformat()
+                    if rate_limit:
+                        k["last_rate_limit"] = rate_limit
+                    err_l = (error or "").lower()
+                    if "429" in err_l or "rate" in err_l:
+                        k["health_status"] = "rate_limited"
+                    elif "401" in err_l or "403" in err_l or "auth" in err_l:
+                        k["healthy"] = False
+                        k["health_status"] = "auth_failed"
+            self._save(data)
+        except Exception:
+            pass
 
-    def execute_parallel_with_keys(self, provider: str, tasks: List[Dict]) -> List[Dict]:
-        """Execute tasks in parallel using different API keys - complete task quickly, free"""
-        import multiprocessing
-        from .llm import FreeLLM
+    # ---------- health + models ----------
 
-        data = self._load()
-        keys = data.get(provider, [])
-        if not keys:
-            # Fallback to single env key
-            single_key = self.get_key(provider)
-            if not single_key:
-                return [{"success": False, "error": f"No keys for {provider}"}]
-            keys = [single_key]
+    def discover_models(self, provider: str, api_key: str = None, base_url: str = None) -> Dict:
+        from .openai_compat import list_models
 
-        # Normalize keys to strings
-        key_strings = [k if isinstance(k, str) else k.get("key","") for k in keys]
-        key_strings = [k for k in key_strings if k]
-
-        if not key_strings:
-            return [{"success": False, "error": "No valid keys"}]
-
-        print(f"[MultiKey] Parallel execution with {len(key_strings)} keys for {len(tasks)} tasks - completing quickly")
-
-        # Create queue for results
-        result_queue = multiprocessing.Queue()
-        processes = []
-
-        def task_wrapper(task_data, api_key, task_id, queue):
+        if api_key is None:
+            bundle = self.get_key_bundle(provider)
+            if not bundle:
+                return {"success": False, "error": f"No key for {provider}"}
+            api_key = bundle.get("key")
+            base_url = base_url or bundle.get("base_url")
+        result = list_models(provider, api_key=api_key, base_url=base_url)
+        if result.get("success") and api_key is not None:
+            # persist models onto matching key entry
             try:
-                # Each parallel task uses different API key via env var override
-                # For Groq, set GROQ_API_KEY env for this process
-                import os
-                if provider == "groq":
-                    os.environ["GROQ_API_KEY"] = api_key
-                elif provider == "hf":
-                    os.environ["HF_TOKEN"] = api_key
+                data = self._load()
+                ids = [m.get("id") for m in result.get("models") or [] if m.get("id")]
+                for k in data.get(provider, []):
+                    if isinstance(k, dict) and (not api_key or k.get("key") == api_key):
+                        k["models"] = ids
+                        k["models_updated"] = datetime.now().isoformat()
+                        if ids and not k.get("default_model"):
+                            k["default_model"] = ids[0]
+                        if result.get("rate_limit"):
+                            k["last_rate_limit"] = result["rate_limit"]
+                self._save(data)
+            except Exception:
+                pass
+        return result
 
-                # Create LLM with specific key
-                # For simplicity, use FreeLLM which will pick up env var
-                llm = FreeLLM(f"{provider}/{task_data.get('model','llama-3.1-70b-versatile')}" if provider=="groq" else f"{provider}/mistralai/Mistral-7B-Instruct-v0.3")
+    def check_key_health(
+        self,
+        provider: str,
+        api_key: str = None,
+        base_url: str = None,
+        model: str = None,
+    ) -> Dict:
+        from .openai_compat import health_ping
 
-                messages = task_data.get("messages", [{"role": "user", "content": task_data.get("prompt","")}])
-                resp = llm.chat(messages, tools=task_data.get("tools"))
+        entry = None
+        if api_key:
+            entry = self.get_entry(provider, api_key)
+        if entry is None:
+            entry = self.get_entry(provider)
+        if api_key is None and entry:
+            api_key = entry.get("key")
+        base_url = base_url or (entry or {}).get("base_url")
+        model = model or (entry or {}).get("default_model")
 
-                queue.put({
-                    "task_id": task_id,
-                    "task": task_data,
-                    "api_key": api_key[:10] + "...",
-                    "response": resp.content,
-                    "tool_calls": resp.tool_calls,
-                    "success": True
-                })
-            except Exception as e:
-                queue.put({
-                    "task_id": task_id,
-                    "task": task_data,
-                    "api_key": api_key[:10] + "..." if api_key else "none",
-                    "error": str(e),
-                    "success": False
-                })
+        result = health_ping(provider, api_key=api_key, base_url=base_url, model=model)
 
-        # Spawn processes, each with different key (round-robin)
-        for idx, task in enumerate(tasks):
-            key = key_strings[idx % len(key_strings)]
-            p = multiprocessing.Process(target=task_wrapper, args=(task, key, idx, result_queue))
-            p.start()
-            processes.append(p)
+        # persist
+        try:
+            data = self._load()
+            for k in data.get(provider, []):
+                if not isinstance(k, dict):
+                    continue
+                if api_key and k.get("key") != api_key:
+                    continue
+                k["healthy"] = result.get("healthy")
+                k["health_status"] = result.get("status")
+                k["last_tested"] = datetime.now().isoformat()
+                k["last_latency_ms"] = result.get("latency_ms")
+                if result.get("error"):
+                    k["last_error"] = str(result["error"])[:300]
+                if result.get("rate_limit"):
+                    k["last_rate_limit"] = result["rate_limit"]
+                sample = (result.get("models_probe") or {}).get("sample") or []
+                if sample:
+                    # merge into models list
+                    existing = k.get("models") or []
+                    merged = list(dict.fromkeys(list(existing) + list(sample)))
+                    k["models"] = merged
+                if result.get("model_tested"):
+                    k.setdefault("default_model", result["model_tested"])
+                if result.get("latency_ms"):
+                    times = k.get("response_times") or []
+                    times.append(result["latency_ms"] / 1000.0)
+                    k["response_times"] = times[-10:]
+                    k["avg_response_time"] = sum(k["response_times"]) / len(k["response_times"])
+                    k["last_response_time"] = result["latency_ms"] / 1000.0
+                if api_key:
+                    break  # only one
+            self._save(data)
+        except Exception as e:
+            result["persist_error"] = str(e)
+        return result
 
-        # Wait for all with timeout
-        for p in processes:
-            p.join(timeout=60)
-            if p.is_alive():
-                p.terminate()
-
+    def check_all_health(self, provider: str = None) -> List[Dict]:
+        entries = self.get_all_entries(provider)
         results = []
-        while not result_queue.empty():
-            results.append(result_queue.get())
-
-        # Sort by task_id
-        results.sort(key=lambda x: x.get("task_id",0))
+        # Also probe no-key local providers
+        if provider is None:
+            for local in ("ollama",):
+                if not any(e["provider"] == local for e in entries):
+                    results.append(self.check_key_health(local, api_key=""))
+        for e in entries:
+            r = self.check_key_health(
+                e.get("provider"),
+                api_key=e.get("key"),
+                base_url=e.get("base_url"),
+                model=e.get("default_model"),
+            )
+            r["key_name"] = e.get("name")
+            r["key_preview"] = (
+                f"{e['key'][:6]}...{e['key'][-4:]}" if e.get("key") and len(e["key"]) > 10 else "****"
+            )
+            results.append(r)
         return results
 
-# Global manager free
+    def rate_status(self, provider: str = None) -> Dict:
+        """Snapshot of RPM/TPM usage vs limits for all keys."""
+        entries = self.get_all_entries(provider)
+        out = []
+        for e in entries:
+            p = e.get("provider")
+            key = e.get("key") or ""
+            rpm_used = len(
+                [t for t in self._rpm_hits[p][key] if time.time() - t < 60]
+            ) if key else 0
+            tpm_used = self._tpm_used(p, key) if key else 0
+            out.append(
+                {
+                    "provider": p,
+                    "name": e.get("name"),
+                    "preview": f"{key[:6]}...{key[-4:]}" if len(key) > 10 else "****",
+                    "rpm_used": rpm_used,
+                    "rpm_limit": e.get("rpm_limit"),
+                    "tpm_used": tpm_used,
+                    "tpm_limit": e.get("tpm_limit"),
+                    "healthy": e.get("healthy"),
+                    "health_status": e.get("health_status"),
+                    "last_rate_limit": e.get("last_rate_limit"),
+                    "avg_response_time": e.get("avg_response_time"),
+                    "models_count": len(e.get("models") or []),
+                    "default_model": e.get("default_model"),
+                    "failures": self.key_failures.get(p, {}).get(key, 0),
+                }
+            )
+        return {"keys": out, "count": len(out), "providers_known": [p["id"] for p in list_providers()]}
+
+    # ---------- parallel execution ----------
+
+    def execute_parallel_with_keys(self, provider: str, tasks: List[Dict]) -> List[Dict]:
+        """Execute tasks in parallel using different API keys (thread pool)."""
+        entries = self.get_all_entries(provider)
+        if not entries:
+            bundle = self.get_key_bundle(provider)
+            if not bundle:
+                return [{"success": False, "error": f"No keys for {provider}"}]
+            entries = [bundle]
+
+        print(
+            f"[MultiKey] Parallel execution with {len(entries)} keys for {len(tasks)} tasks"
+        )
+
+        def run_one(task_id: int, task_data: Dict, entry: Dict) -> Dict:
+            try:
+                from .llm import FreeLLM
+
+                model = task_data.get("model") or entry.get("default_model") or get_provider(provider).get("default_model")
+                # Force this key via FreeLLM kwargs path
+                llm = FreeLLM(
+                    f"{provider}/{model}",
+                    api_key=entry.get("key"),
+                    base_url=entry.get("base_url"),
+                )
+                messages = task_data.get(
+                    "messages",
+                    [{"role": "user", "content": task_data.get("prompt", "")}],
+                )
+                resp = llm.chat(messages, tools=task_data.get("tools"))
+                return {
+                    "task_id": task_id,
+                    "task": task_data.get("prompt") or task_data.get("messages", [{}])[-1].get("content", "")[:80],
+                    "api_key": (entry.get("key") or "")[:10] + "...",
+                    "key_name": entry.get("name"),
+                    "model": f"{provider}/{model}",
+                    "response": resp.content,
+                    "tool_calls": resp.tool_calls,
+                    "usage": getattr(resp, "usage", {}),
+                    "success": True,
+                }
+            except Exception as e:
+                return {
+                    "task_id": task_id,
+                    "success": False,
+                    "error": str(e),
+                    "api_key": (entry.get("key") or "")[:10] + "...",
+                    "key_name": entry.get("name"),
+                }
+
+        results = []
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(tasks)))) as ex:
+            futs = []
+            for idx, task in enumerate(tasks):
+                entry = entries[idx % len(entries)]
+                futs.append(ex.submit(run_one, idx, task, entry))
+            for fut in as_completed(futs):
+                results.append(fut.result())
+        results.sort(key=lambda x: x.get("task_id", 0))
+        return results
+
+
+# Global manager
 multi_key_manager = MultiKeyManager()

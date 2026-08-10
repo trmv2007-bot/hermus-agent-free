@@ -38,3 +38,6 @@ TOOL_DEFINITION = {
         }
     }
 }
+
+TOOLS = [TOOL_DEFINITION]
+TOOL_MAP = {"shell_execute": shell_execute}

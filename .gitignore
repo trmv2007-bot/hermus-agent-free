@@ -20,6 +20,10 @@ data/api_keys.json
 data/custom_apis.json
 data/response_times.json
 data/config.yaml
+data/embeddings.db
+data/mcp_servers.json
+data/telegram_offset.txt
+data/tmp/
 pentest_runs/
 bounty_reports/
 *.mp4
