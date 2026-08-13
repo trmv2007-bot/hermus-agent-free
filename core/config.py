@@ -18,6 +18,27 @@ class Config(BaseModel):
     # Agent loop
     max_tool_steps: int = int(os.getenv("HERMUS_MAX_TOOL_STEPS", "8"))
 
+    # DeepThink — plan-first thinking (Phase 0)
+    think_enabled: bool = os.getenv("HERMUS_THINK_ENABLED", "1") not in ("0", "false", "False")
+
+    # DeepThink strategies + lessons loop (Phase 3)
+    # auto | none | reflexion | self_consistency | verify
+    think_strategy: str = os.getenv("HERMUS_STRATEGY", "auto")
+    self_consistency_k: int = int(os.getenv("HERMUS_SELF_CONSISTENCY_K", "3"))
+    verify_threshold: int = int(os.getenv("HERMUS_VERIFY_THRESHOLD", "4"))
+    lessons_in_prompt: int = int(os.getenv("HERMUS_LESSONS_IN_PROMPT", "8"))
+
+    # Project-scoped memory (Phase 4)
+    project: str = os.getenv("HERMUS_PROJECT", "default")
+
+    # Counsel System — council of AIs that plans together and upgrades itself (Phases 0-2)
+    counsel_enabled: bool = os.getenv("HERMUS_COUNSEL_ENABLED", "1") not in ("0", "false", "False")
+    counsel_min_difficulty: int = int(os.getenv("HERMUS_COUNSEL_MIN_DIFFICULTY", "4"))
+    counsel_max_members: int = int(os.getenv("HERMUS_COUNSEL_MAX_MEMBERS", "6"))
+    counsel_max_rounds: int = int(os.getenv("HERMUS_COUNSEL_MAX_ROUNDS", "3"))
+    # Meta-Counsel reviews each session and proposes self-upgrades
+    counsel_auto_review: bool = os.getenv("HERMUS_COUNSEL_AUTO_REVIEW", "1") not in ("0", "false", "False")
+
     # Memory
     memory_db_path: str = "data/memory.db"
     user_model_path: str = "data/user_model.json"

@@ -1,6 +1,9 @@
-"""
-Tool Registry - Auto-discover TOOLS + TOOL_MAP from modules.
+"""Tool Registry - Auto-discover TOOLS + TOOL_MAP from modules.
 Replaces giant if/elif chains in agent._execute_tool.
+
+Phase 4: registry-level tool failure fallbacks — if a tool errors, walk its
+fallback chain (retry / alternate tool) and attach a fallback_trail to the
+result so callers and the lessons loop can see what happened.
 """
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ import json
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
+from urllib.parse import quote
 
 # Modules that expose TOOLS (list of OpenAI-style defs) and/or TOOL_MAP (name -> callable)
 # Also supports TOOL_DEFINITION (single) which gets wrapped.
@@ -33,6 +37,25 @@ DISCOVER_MODULES = [
     "core.response_tester",
     "backends.backend_manager",
 ]
+
+# Fallback chains (Phase 4, P3): tool -> ordered fallbacks.
+# entry: {"retry": True} = call the same tool once more,
+#        {"tool": name, "args": dict | callable} = call another tool.
+TOOL_FALLBACK_CHAINS: Dict[str, List[Dict]] = {
+    "web_search": [
+        {"retry": True},
+        {
+            "tool": "browser_navigate",
+            "args": lambda a: {"url": "https://html.duckduckgo.com/html/?q=" + quote((a.get("query") or "")[:200])},
+        },
+    ],
+    "web_read": [
+        {"retry": True},
+        {"tool": "browser_navigate", "args": lambda a: {"url": a.get("url") or a.get("link") or ""}},
+    ],
+    "browser_navigate": [{"retry": True}],
+    "file_read": [{"retry": True}],
+}
 
 
 def _normalize_tool_def(item: Any) -> Optional[Dict]:
@@ -136,7 +159,9 @@ class ToolRegistry:
         from core.memory import memory
         from core.skill_manager import skill_manager
 
-        def memory_search(query: str, limit: int = 5, hybrid: bool = True) -> Dict:
+        def memory_search(query: str, limit: int = 5, hybrid: bool = True, project: str = "") -> Dict:
+            # Phase 4 (P4): optional project-scoped recall
+            proj = project or None
             # Prefer hybrid semantic+FTS when available
             if hybrid:
                 try:
@@ -146,9 +171,9 @@ class ToolRegistry:
                         return embedding_store.hybrid_search(query, limit=limit)
                 except Exception:
                     pass
-            results = memory.search_sessions(query, limit=limit)
+            results = memory.search_sessions(query, limit=limit, project=proj)
             summary = memory.summarize_search_results(query, results)
-            return {"query": query, "results": results, "summary": summary, "mode": "fts5"}
+            return {"query": query, "results": results, "summary": summary, "mode": "fts5", "project": proj or "all"}
 
         def memory_add(key: str, value: str, importance: int = 5) -> Dict:
             memory.curate_memory(key, value, importance=importance)
@@ -234,6 +259,12 @@ class ToolRegistry:
                 }
             except Exception as e:
                 skill_manager.log_skill_usage(name, success=False, feedback=str(e))
+                try:
+                    from core.reasoning.lessons import lessons_store
+
+                    lessons_store.distill_skill_failure(name, str(e))
+                except Exception:
+                    pass
                 return {"error": f"Skill exec failed: {e}", "skill": name}
 
         def subagent_spawn(task: str) -> Dict:
@@ -241,15 +272,36 @@ class ToolRegistry:
 
             return spawn_subagent(task)
 
+        def counsel_convoke(goal: str, execute: bool = True) -> Dict:
+            """Convene the Council of AIs: members talk, vote on a plan, then optionally execute it."""
+            try:
+                from core.counsel.council import CouncilSession
+
+                cs = CouncilSession(goal, execute=execute)
+                result = cs.run()
+                return {
+                    "success": True,
+                    "session_id": result.get("session_id"),
+                    "members": [m["name"] for m in result.get("members", [])],
+                    "votes": result.get("votes"),
+                    "plan": result.get("plan"),
+                    "replanned": result.get("replanned"),
+                    "final_answer": result.get("final_answer"),
+                    "transcript_turns": result.get("transcript_turns"),
+                }
+            except Exception as e:
+                return {"success": False, "error": str(e), "goal": goal}
+
         defs = [
             (
                 "memory_search",
                 memory_search,
-                "Search prior sessions via free FTS5 + optional semantic hybrid search",
+                "Search prior sessions via free FTS5 + optional semantic hybrid search (project filters to a project scope)",
                 {
                     "query": {"type": "string"},
                     "limit": {"type": "integer", "default": 5},
                     "hybrid": {"type": "boolean", "default": True},
+                    "project": {"type": "string", "description": "Restrict to a project (default: all projects)"},
                 },
                 ["query"],
             ),
@@ -308,6 +360,16 @@ class ToolRegistry:
                 "Spawn isolated subagent for parallel work",
                 {"task": {"type": "string"}},
                 ["task"],
+            ),
+            (
+                "counsel_convoke",
+                counsel_convoke,
+                "Convene the Council of AIs: multiple AI members talk, critique, vote on a plan, then execute it (self-upgrading system)",
+                {
+                    "goal": {"type": "string", "description": "The task/goal for the council"},
+                    "execute": {"type": "boolean", "default": True, "description": "Execute the voted plan with tools"},
+                },
+                ["goal"],
             ),
         ]
 
@@ -491,7 +553,88 @@ class ToolRegistry:
                 "available_sample": list(self.executors.keys())[:20],
                 "hint": "Tool not registered. Check tool_registry DISCOVER_MODULES.",
             }
-        return fn(**args)
+
+        # Phase 4 (P3): registry-level fallback chains
+        try:
+            result = fn(**args)
+            if not self._looks_like_error(result):
+                return result
+            trail = self._walk_fallback(name, args, result)
+            if trail:
+                return trail
+            return result
+        except Exception as e:
+            trail = self._walk_fallback(name, args, {"error": str(e)})
+            if trail:
+                return trail
+            return {"error": f"{name} failed: {e}"}
+
+    @staticmethod
+    def _looks_like_error(result: Any) -> bool:
+        if isinstance(result, dict):
+            err = result.get("error")
+            return bool(err) or str(result.get("success", "")).lower() == "false"
+        return False
+
+    def _walk_fallback(self, name: str, args: Dict, original: Any) -> Optional[Dict]:
+        """Walk the fallback chain for a failed tool. Returns result with trail or None."""
+        chain = TOOL_FALLBACK_CHAINS.get(name)
+        if not chain:
+            return None
+        trail = [f"{name}: failed"]
+        for entry in chain:
+            if entry.get("retry"):
+                fn2 = self.executors.get(name)
+                if fn2:
+                    try:
+                        res = fn2(**args)
+                        if not self._looks_like_error(res):
+                            trail.append(f"{name}: retry ok")
+                            return self._with_trail(res, trail)
+                    except Exception:
+                        trail.append(f"{name}: retry failed")
+                continue
+            tool = entry.get("tool")
+            fn2 = self.executors.get(tool)
+            if not fn2:
+                continue
+            fargs = entry.get("args")
+            if callable(fargs):
+                try:
+                    fargs = fargs(args)
+                except Exception:
+                    continue
+            if fargs is None:
+                fargs = {}
+            if not isinstance(fargs, dict):
+                continue
+            try:
+                res = fn2(**fargs)
+                if not self._looks_like_error(res):
+                    trail.append(f"{tool}: ok")
+                    # Feed the lessons loop: this tool needed a fallback
+                    try:
+                        from core.reasoning.lessons import lessons_store
+
+                        lessons_store.add(
+                            f"Tool {name} failed; fell back to {tool} successfully. Try {tool} earlier next time.",
+                            category="tool_fallback",
+                            keywords=f"{name} {tool} fallback retry",
+                            source="tool_registry",
+                        )
+                    except Exception:
+                        pass
+                    return self._with_trail(res, trail)
+                trail.append(f"{tool}: failed")
+            except Exception:
+                trail.append(f"{tool}: failed")
+        return self._with_trail(original, trail) if isinstance(original, dict) else None
+
+    @staticmethod
+    def _with_trail(result: Dict, trail: List[str]) -> Dict:
+        out = dict(result)
+        out["fallback_trail"] = trail
+        return out
 
     def list_tools(self) -> Dict:
         self.load()

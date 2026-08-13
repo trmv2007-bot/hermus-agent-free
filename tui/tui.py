@@ -33,7 +33,7 @@ class HermusTUI:
         "/new", "/reset", "/model", "/mode", "/personality", "/retry", "/undo",
         "/compress", "/usage", "/insights", "/skills", "/platforms",
         "/status", "/help", "/exit", "/clear", "/panel", "/agents",
-        "/update", "/check-update"
+        "/update", "/check-update", "/counsel", "/think", "/plan", "/eval", "/project"
     ]
 
     def __init__(self, model: str = None, mode: str = "agent"):
@@ -130,6 +130,75 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
             else:
                 print(f"Current model: {self.agent.model_name} | Mode: {self.mode}")
                 print("Free options: ollama/llama3.1:8b, ollama/mistral, groq/llama-3.1-70b-versatile (free tier), hf/mistralai/Mistral-7B-Instruct-v0.3 (free), mock/mock")
+            return True
+
+        if cmd == "/think":
+            # DeepThink plan-first toggle (Phase 0)
+            if len(parts) > 1 and parts[1].lower() in ("on", "off"):
+                config.think_enabled = parts[1].lower() == "on"
+            else:
+                config.think_enabled = not config.think_enabled
+            print(f"DeepThink plan-first: {'ON' if config.think_enabled else 'OFF'} (counsel: "
+                  f"{'ON' if config.counsel_enabled else 'OFF'}, min difficulty {config.counsel_min_difficulty})")
+            return True
+
+        if cmd == "/plan":
+            # DeepThink plan persistence (Phase 4, P1)
+            from core.reasoning.scaffold import list_plans, show_plan
+            plans = list_plans(limit=5)
+            if not plans:
+                print("No saved plans yet. Multi-step tasks auto-draft plans (data/plans/).")
+            else:
+                for p in plans:
+                    print(f"  {p['session_id'][:30]} | steps={p['steps']} done={p['done']} status={p['status']} | {p['goal']}")
+                print("Resume from CLI: hermus plan resume <session_id>")
+            return True
+
+        if cmd == "/eval":
+            # Eval harness summary (Phase 4)
+            try:
+                from core.reasoning.eval import eval_harness
+                s = eval_harness.summary()
+                if s.get("runs"):
+                    print(f"Eval history: {s['runs']} runs | last: {s.get('last_strategy')} "
+                          f"rate={s.get('last_success_rate')} runs={s.get('last_runs')}")
+                    for r in s.get("recent", [])[-3:]:
+                        print(f"  {r['timestamp'][:16]} {r['strategy']} rate={r['success_rate']} runs={r['runs']}")
+                else:
+                    print("No eval runs yet — `hermus eval run --strategy reflexion`")
+            except Exception as e:
+                print(f"Eval status error: {e}")
+            return True
+
+        if cmd == "/project":
+            # Project-scoped memory (Phase 4, P4)
+            if len(parts) > 2 and parts[1] == "set":
+                config.project = " ".join(parts[2:])
+                print(f"Project set to: {config.project} (memory_search(project=...) now scopes to it)")
+            else:
+                print(f"Current project: {config.project} | set: /project set <name>")
+            return True
+
+        if cmd == "/counsel":
+            # Counsel System status / quick run (Phases 0-2)
+            if len(parts) > 1 and parts[1] == "run" and len(parts) > 2:
+                from core.counsel.council import CouncilSession
+                goal = " ".join(parts[2:])
+                print(f"⚖️ Convening council for: {goal[:120]}... (this streams live)")
+                result = CouncilSession(goal, model=self.model, execute=True).run()
+                print(f"\n✅ Council final answer:\n{result['final_answer']}")
+                return True
+            try:
+                from core.counsel.meta import meta_counsel
+                st = meta_counsel.status()
+                print(f"⚖️ COUNSEL — constitution v{st['constitution']['version']} | "
+                      f"members: {', '.join(st['constitution']['members'])} | "
+                      f"pending amendments: {st['pending_amendments']} | reviews: {st['reviews_logged']}")
+                print(f"   Rules: {st['constitution']['rules']}")
+                print("   Hard tasks (difficulty >= {} ) auto-convene the council. "
+                      "Try: /counsel run <your task>".format(config.counsel_min_difficulty))
+            except Exception as e:
+                print(f"Counsel status error: {e}")
             return True
 
         if cmd == "/mode":

@@ -33,6 +33,7 @@ class HermusAgent:
             f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         )
         self.trajectory: List[Dict] = []
+        self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
         self.max_steps = max_steps or getattr(config, "max_tool_steps", 8)
 
         if mode is None:
@@ -88,7 +89,7 @@ class HermusAgent:
         """Execute via central registry — all tools including full pentest map."""
         return tool_registry.execute(name, args or {})
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, user_message: str = "") -> str:
         curated = memory.get_curated_memory(limit=10)
         curated_text = (
             "\n".join([f"- {m['key']}: {m['value'][:200]}" for m in curated])
@@ -106,6 +107,15 @@ class HermusAgent:
         nudges_text = "\n".join(nudges) if nudges else "No nudges."
 
         tool_count = len(self.tools)
+
+        # Lessons loop (Phase 3): past corrections/failures injected into the prompt
+        lessons_block = ""
+        try:
+            from .reasoning.lessons import lessons_store
+
+            lessons_block = lessons_store.to_prompt_block(user_message)
+        except Exception:
+            pass
 
         return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
 
@@ -127,7 +137,7 @@ Available Skills:
 
 Periodic Nudges:
 {nudges_text}
-
+{lessons_block}
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
 - After tools return, continue reasoning; call more tools if needed
@@ -169,6 +179,61 @@ Rules:
         except Exception:
             pass
 
+        # Counsel System (Phases 0-2): for hard tasks, convene the council of AIs
+        # instead of answering alone. Falls back to the normal loop on any failure.
+        try:
+            from .reasoning.governor import governor
+
+            if governor.should_use_council(user_message, mode=self.mode.value):
+                cc = governor.council_config(user_message, mode=self.mode.value)
+                print(f"[Counsel] difficulty={cc['difficulty']} -> convening council "
+                      f"({cc['max_members']} members, {cc['max_rounds']} rounds)")
+                try:
+                    task_tracker.update_agent(
+                        self.agent_tracker_id, status="running", progress="Council convening..."
+                    )
+                except Exception:
+                    pass
+                from .counsel.council import CouncilSession
+
+                cs = CouncilSession(
+                    user_message,
+                    model=self.model_name,
+                    difficulty=cc["difficulty"],
+                    max_members=cc["max_members"],
+                    max_rounds=cc["max_rounds"],
+                    execute=True,
+                )
+                result = cs.run()
+                if result and result.get("final_answer"):
+                    return {
+                        "session_id": self.session_id,
+                        "response": result["final_answer"],
+                        "tool_results": [
+                            {
+                                "tool": "council",
+                                "args": {"goal": user_message, "difficulty": cc["difficulty"]},
+                                "result": {
+                                    "session_id": result.get("session_id"),
+                                    "members": result.get("members"),
+                                    "votes": result.get("votes"),
+                                    "replanned": result.get("replanned"),
+                                    "steps": result.get("step_results"),
+                                },
+                            }
+                        ],
+                        "tool_calls": ["council"],
+                        "steps": result.get("transcript_turns", 1),
+                        "max_steps": self.max_steps,
+                        "council": result,
+                        "mode": self.mode.value,
+                        "tools_available": len(self.tools),
+                        "strategy": "council",
+                        "strategy_meta": {"strategy": "council"},
+                    }
+        except Exception as e:
+            print(f"[Counsel] skipped ({e}) - falling back to normal agent loop")
+
         # Multi-agent / multi-chat modes: distribute across models+keys when beneficial
         if self.mode in (AgentMode.MULTI_AGENT, AgentMode.MULTI_CHAT) and self.mode_config.use_multi_ai:
             fleet_result = self._maybe_fleet_distribute(user_message)
@@ -177,6 +242,15 @@ Rules:
 
         memory.add_session_message(self.session_id, "user", user_message)
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
+
+        # Lessons loop (Phase 3): user pushing back on a previous answer -> lesson
+        try:
+            if len(self.trajectory) >= 3:  # only when a prior exchange exists
+                from .reasoning.lessons import lessons_store
+
+                lessons_store.distill_user_correction(user_message)
+        except Exception:
+            pass
 
         # Index user turn into semantic memory (best-effort)
         try:
@@ -190,7 +264,42 @@ Rules:
         except Exception:
             pass
 
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(user_message)
+
+        # DeepThink plan-first (Phase 0): write an explicit plan for multi-step tasks
+        # Phase 4: plan_override resumes an existing plan (hermus plan resume)
+        plan = None
+        budget_steps = self.max_steps
+        try:
+            from .reasoning.governor import governor
+            from .reasoning.scaffold import plan_builder
+
+            budget_steps = governor.step_budget(user_message, mode=self.mode.value)
+            if self.plan_override is not None:
+                plan = self.plan_override
+                if plan and plan.steps:
+                    system_prompt += (
+                        "\n\nResuming explicit plan (DeepThink):\n"
+                        + plan.to_prompt()
+                        + "\nWork through the plan from the first not-done step; you may deviate if evidence demands it."
+                    )
+                    print(f"[DeepThink] Resuming plan ({len(plan.steps)} steps)")
+            elif governor.should_plan_first(user_message, mode=self.mode.value):
+                plan = plan_builder.build_plan(
+                    user_message,
+                    session_id=self.session_id,
+                    difficulty=governor.classify_difficulty(user_message),
+                )
+                if plan and plan.steps:
+                    plan.save()
+                    system_prompt += (
+                        "\n\nExplicit plan (DeepThink):\n"
+                        + plan.to_prompt()
+                        + "\nWork through the plan; you may deviate if evidence demands it."
+                    )
+                    print(f"[DeepThink] Plan drafted ({len(plan.steps)} steps)")
+        except Exception as e:
+            print(f"[DeepThink] plan-first skipped ({e})")
 
         # Hybrid memory recall
         memory_results = []
@@ -238,13 +347,13 @@ Rules:
         last_usage = {}
 
         # ---- Multi-step ReAct loop ----
-        while steps < self.max_steps:
+        while steps < budget_steps:
             steps += 1
             try:
                 task_tracker.update_agent(
                     self.agent_tracker_id,
                     status="running",
-                    progress=f"Step {steps}/{self.max_steps}",
+                    progress=f"Step {steps}/{budget_steps}",
                 )
             except Exception:
                 pass
@@ -289,6 +398,15 @@ Rules:
                 all_tool_results.append(
                     {"tool": tool_name, "args": tool_args, "result": result, "step": steps}
                 )
+                # Lessons loop (Phase 3): tool failures become lessons immediately
+                try:
+                    rtext = json.dumps(result, default=str)
+                    if "error" in rtext[:300].lower() or "failed" in rtext[:300].lower():
+                        from .reasoning.lessons import lessons_store
+
+                        lessons_store.distill_tool_failure(tool_name, rtext[:150])
+                except Exception:
+                    pass
                 obs = self._format_tool_result(tool_name, result)
                 observations.append(obs)
 
@@ -338,8 +456,42 @@ Rules:
         if not final_content:
             final_content = "(No response generated)"
 
-        # Persist assistant reply
-        memory.add_session_message(self.session_id, "assistant", final_content)
+        # DeepThink deliberation strategy (Phase 3): reflexion / verify / self-consistency
+        strategy = "none"
+        strategy_meta: Dict = {}
+        try:
+            from .reasoning.governor import governor as _gov
+            from .reasoning.strategies import apply_strategy
+
+            strategy = _gov.strategy_for(user_message, mode=self.mode.value)
+            if strategy != "none":
+                print(f"[DeepThink] strategy={strategy} refining final answer")
+                new_content, strategy_meta = apply_strategy(
+                    strategy, user_message, all_tool_results, final_content, model=self.model_name
+                )
+                if new_content and new_content.strip():
+                    final_content = new_content
+        except Exception as e:
+            print(f"[DeepThink] strategy skipped ({e})")
+
+        # Persist assistant reply (Phase 4, P6: trajectory tagging)
+        try:
+            from .reasoning.governor import governor as _gov2
+
+            _difficulty = _gov2.classify_difficulty(user_message)
+        except Exception:
+            _difficulty = None
+        memory.add_session_message(
+            self.session_id,
+            "assistant",
+            final_content,
+            tag={
+                "strategy": strategy,
+                "difficulty": _difficulty,
+                "plan": plan.to_dict() if plan else None,
+                "council": False,
+            },
+        )
         self.trajectory.append(
             {"role": "assistant", "content": final_content, "tool_calls": []}
         )
@@ -434,6 +586,9 @@ Rules:
             "skill_created": skill_created,
             "memory_results": memory_results[:3] if memory_results else [],
             "tools_available": len(self.tools),
+            "plan": plan.to_dict() if plan else None,
+            "strategy": strategy,
+            "strategy_meta": strategy_meta,
         }
 
     def _maybe_fleet_distribute(self, user_message: str) -> Optional[Dict[str, Any]]:
@@ -477,11 +632,14 @@ Rules:
             if workers < 2 and not force:
                 return None
 
-            strategy = "fanout" if self.mode == AgentMode.MULTI_CHAT else "auto"
-            if "race" in lower:
-                strategy = "race"
-            elif "map" in lower or "subtask" in lower or self.mode == AgentMode.MULTI_AGENT:
-                strategy = "map" if self.mode == AgentMode.MULTI_AGENT else strategy
+            strategy = "auto"
+            try:
+                # Deterministic orchestrator (Phase 4): table-driven strategy
+                from .counsel.router import router as _router
+
+                strategy = _router.fleet_strategy(msg, mode=self.mode.value)
+            except Exception:
+                strategy = "fanout" if self.mode == AgentMode.MULTI_CHAT else "auto"
 
             print(f"[Fleet] Multi-mode dispatch strategy={strategy} workers≈{workers}")
             try:
