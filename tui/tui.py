@@ -33,7 +33,7 @@ class HermusTUI:
         "/new", "/reset", "/model", "/mode", "/personality", "/retry", "/undo",
         "/compress", "/usage", "/insights", "/skills", "/platforms",
         "/status", "/help", "/exit", "/clear", "/panel", "/agents",
-        "/update", "/check-update"
+        "/update", "/check-update", "/counsel", "/think"
     ]
 
     def __init__(self, model: str = None, mode: str = "agent"):
@@ -130,6 +130,38 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
             else:
                 print(f"Current model: {self.agent.model_name} | Mode: {self.mode}")
                 print("Free options: ollama/llama3.1:8b, ollama/mistral, groq/llama-3.1-70b-versatile (free tier), hf/mistralai/Mistral-7B-Instruct-v0.3 (free), mock/mock")
+            return True
+
+        if cmd == "/think":
+            # DeepThink plan-first toggle (Phase 0)
+            if len(parts) > 1 and parts[1].lower() in ("on", "off"):
+                config.think_enabled = parts[1].lower() == "on"
+            else:
+                config.think_enabled = not config.think_enabled
+            print(f"DeepThink plan-first: {'ON' if config.think_enabled else 'OFF'} (counsel: "
+                  f"{'ON' if config.counsel_enabled else 'OFF'}, min difficulty {config.counsel_min_difficulty})")
+            return True
+
+        if cmd == "/counsel":
+            # Counsel System status / quick run (Phases 0-2)
+            if len(parts) > 1 and parts[1] == "run" and len(parts) > 2:
+                from core.counsel.council import CouncilSession
+                goal = " ".join(parts[2:])
+                print(f"⚖️ Convening council for: {goal[:120]}... (this streams live)")
+                result = CouncilSession(goal, model=self.model, execute=True).run()
+                print(f"\n✅ Council final answer:\n{result['final_answer']}")
+                return True
+            try:
+                from core.counsel.meta import meta_counsel
+                st = meta_counsel.status()
+                print(f"⚖️ COUNSEL — constitution v{st['constitution']['version']} | "
+                      f"members: {', '.join(st['constitution']['members'])} | "
+                      f"pending amendments: {st['pending_amendments']} | reviews: {st['reviews_logged']}")
+                print(f"   Rules: {st['constitution']['rules']}")
+                print("   Hard tasks (difficulty >= {} ) auto-convene the council. "
+                      "Try: /counsel run <your task>".format(config.counsel_min_difficulty))
+            except Exception as e:
+                print(f"Counsel status error: {e}")
             return True
 
         if cmd == "/mode":

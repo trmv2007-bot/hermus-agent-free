@@ -241,6 +241,26 @@ class ToolRegistry:
 
             return spawn_subagent(task)
 
+        def counsel_convoke(goal: str, execute: bool = True) -> Dict:
+            """Convene the Council of AIs: members talk, vote on a plan, then optionally execute it."""
+            try:
+                from core.counsel.council import CouncilSession
+
+                cs = CouncilSession(goal, execute=execute)
+                result = cs.run()
+                return {
+                    "success": True,
+                    "session_id": result.get("session_id"),
+                    "members": [m["name"] for m in result.get("members", [])],
+                    "votes": result.get("votes"),
+                    "plan": result.get("plan"),
+                    "replanned": result.get("replanned"),
+                    "final_answer": result.get("final_answer"),
+                    "transcript_turns": result.get("transcript_turns"),
+                }
+            except Exception as e:
+                return {"success": False, "error": str(e), "goal": goal}
+
         defs = [
             (
                 "memory_search",
@@ -308,6 +328,16 @@ class ToolRegistry:
                 "Spawn isolated subagent for parallel work",
                 {"task": {"type": "string"}},
                 ["task"],
+            ),
+            (
+                "counsel_convoke",
+                counsel_convoke,
+                "Convene the Council of AIs: multiple AI members talk, critique, vote on a plan, then execute it (self-upgrading system)",
+                {
+                    "goal": {"type": "string", "description": "The task/goal for the council"},
+                    "execute": {"type": "boolean", "default": True, "description": "Execute the voted plan with tools"},
+                },
+                ["goal"],
             ),
         ]
 

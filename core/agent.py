@@ -169,6 +169,59 @@ Rules:
         except Exception:
             pass
 
+        # Counsel System (Phases 0-2): for hard tasks, convene the council of AIs
+        # instead of answering alone. Falls back to the normal loop on any failure.
+        try:
+            from .reasoning.governor import governor
+
+            if governor.should_use_council(user_message, mode=self.mode.value):
+                cc = governor.council_config(user_message, mode=self.mode.value)
+                print(f"[Counsel] difficulty={cc['difficulty']} -> convening council "
+                      f"({cc['max_members']} members, {cc['max_rounds']} rounds)")
+                try:
+                    task_tracker.update_agent(
+                        self.agent_tracker_id, status="running", progress="Council convening..."
+                    )
+                except Exception:
+                    pass
+                from .counsel.council import CouncilSession
+
+                cs = CouncilSession(
+                    user_message,
+                    model=self.model_name,
+                    difficulty=cc["difficulty"],
+                    max_members=cc["max_members"],
+                    max_rounds=cc["max_rounds"],
+                    execute=True,
+                )
+                result = cs.run()
+                if result and result.get("final_answer"):
+                    return {
+                        "session_id": self.session_id,
+                        "response": result["final_answer"],
+                        "tool_results": [
+                            {
+                                "tool": "council",
+                                "args": {"goal": user_message, "difficulty": cc["difficulty"]},
+                                "result": {
+                                    "session_id": result.get("session_id"),
+                                    "members": result.get("members"),
+                                    "votes": result.get("votes"),
+                                    "replanned": result.get("replanned"),
+                                    "steps": result.get("step_results"),
+                                },
+                            }
+                        ],
+                        "tool_calls": ["council"],
+                        "steps": result.get("transcript_turns", 1),
+                        "max_steps": self.max_steps,
+                        "council": result,
+                        "mode": self.mode.value,
+                        "tools_available": len(self.tools),
+                    }
+        except Exception as e:
+            print(f"[Counsel] skipped ({e}) - falling back to normal agent loop")
+
         # Multi-agent / multi-chat modes: distribute across models+keys when beneficial
         if self.mode in (AgentMode.MULTI_AGENT, AgentMode.MULTI_CHAT) and self.mode_config.use_multi_ai:
             fleet_result = self._maybe_fleet_distribute(user_message)
@@ -191,6 +244,29 @@ Rules:
             pass
 
         system_prompt = self._build_system_prompt()
+
+        # DeepThink plan-first (Phase 0): write an explicit plan for multi-step tasks
+        plan = None
+        try:
+            from .reasoning.governor import governor
+            from .reasoning.scaffold import plan_builder
+
+            if governor.should_plan_first(user_message, mode=self.mode.value):
+                plan = plan_builder.build_plan(
+                    user_message,
+                    session_id=self.session_id,
+                    difficulty=governor.classify_difficulty(user_message),
+                )
+                if plan and plan.steps:
+                    plan.save()
+                    system_prompt += (
+                        "\n\nExplicit plan (DeepThink):\n"
+                        + plan.to_prompt()
+                        + "\nWork through the plan; you may deviate if evidence demands it."
+                    )
+                    print(f"[DeepThink] Plan drafted ({len(plan.steps)} steps)")
+        except Exception as e:
+            print(f"[DeepThink] plan-first skipped ({e})")
 
         # Hybrid memory recall
         memory_results = []
@@ -434,6 +510,7 @@ Rules:
             "skill_created": skill_created,
             "memory_results": memory_results[:3] if memory_results else [],
             "tools_available": len(self.tools),
+            "plan": plan.to_dict() if plan else None,
         }
 
     def _maybe_fleet_distribute(self, user_message: str) -> Optional[Dict[str, Any]]:

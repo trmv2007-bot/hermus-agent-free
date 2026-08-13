@@ -68,6 +68,16 @@ Original Hermes / Strix / Agent Reach use some paid services:
 - **Parallel:** `spawn_parallel_subagents()` — 3 research tasks in parallel, each subagent writes file, main merges = parallel workstreams
 - **RPC zero-context-cost:** `write_python_tool_via_rpc()` — subagent writes Python script that calls tools via RPC collapsing multi-step pipelines into zero-context-cost turns
 
+### 5b. Counsel System — Council of AIs That Plans Together & Upgrades Itself ⭐
+
+- **Council of AIs:** hard tasks (difficulty ≥ 4) auto-convene a council — Chair, Researcher(s), Critic, Synthesizer, Judge — each member with its own free model/key when available (Ollama local, Groq free tier, HF)
+- **They talk, then vote:** parallel proposals → deliberation rounds (Critic must attach evidence/objection) → Judge scores 0-10 → Chair writes the voted plan → plan executes with real tools → transcripts saved to `data/counsel/`
+- **It upgrades itself:** after each session the Meta-Counsel reviews the transcript and proposes AMENDMENTS to the council's own constitution (member prompts, rules, budgets). Low-risk changes auto-apply with versioning; high-risk wait for your approval; `rollback` anytime
+- **CLI:** `hermus counsel run "task"`, `hermus counsel status`, `hermus counsel amend list|approve|reject|rollback <v>`, `hermus counsel review` — **TUI:** `/counsel`, `/counsel run <task>`, `/think on|off`
+- **DeepThink plan-first:** multi-step tasks now get an explicit written plan before acting (`data/plans/`), zero-token difficulty governor decides how hard to think
+- **Config:** `HERMUS_COUNSEL_ENABLED`, `HERMUS_COUNSEL_MIN_DIFFICULTY`, `HERMUS_COUNSEL_MAX_MEMBERS/ROUNDS`, `HERMUS_COUNSEL_AUTO_REVIEW`, `HERMUS_THINK_ENABLED`
+- Design doc: `THINKING_SYSTEM_PLAN.md` — tests: `python tests/test_counsel_system.py` (offline, free mock model)
+
 ### 6. Runs Anywhere — Seven Backends Free
 
 | Backend | Available Check | Description | Free? |
