@@ -28,6 +28,9 @@ class Config(BaseModel):
     verify_threshold: int = int(os.getenv("HERMUS_VERIFY_THRESHOLD", "4"))
     lessons_in_prompt: int = int(os.getenv("HERMUS_LESSONS_IN_PROMPT", "8"))
 
+    # Project-scoped memory (Phase 4)
+    project: str = os.getenv("HERMUS_PROJECT", "default")
+
     # Counsel System — council of AIs that plans together and upgrades itself (Phases 0-2)
     counsel_enabled: bool = os.getenv("HERMUS_COUNSEL_ENABLED", "1") not in ("0", "false", "False")
     counsel_min_difficulty: int = int(os.getenv("HERMUS_COUNSEL_MIN_DIFFICULTY", "4"))

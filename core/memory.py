@@ -42,6 +42,11 @@ class Memory:
         # Indexes for faster queries - optimized
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp);")
+        # Project-scoped memory (Phase 4, P4): migration for older DBs
+        try:
+            cur.execute("ALTER TABLE sessions ADD COLUMN project TEXT DEFAULT 'default';")
+        except Exception:
+            pass  # column already exists
         # FTS5 virtual table for free search
         cur.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
@@ -95,14 +100,19 @@ class Memory:
         conn.commit()
         conn.close()
 
-    def add_session_message(self, session_id: str, role: str, content: str, tool_calls: List[Dict] = None, metadata: Dict = None):
-        """Add message to session + FTS index"""
+    def add_session_message(self, session_id: str, role: str, content: str, tool_calls: List[Dict] = None, metadata: Dict = None, project: str = None, tag: Dict = None):
+        """Add message to session + FTS index.
+
+        Phase 4: `project` scopes messages to a project (P4); `tag` attaches
+        reasoning metadata (strategy/difficulty/plan) to the trajectory line (P6).
+        """
+        project = project or getattr(config, "project", "default")
         conn = sqlite3.connect(str(self.db_path))
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO sessions (session_id, timestamp, role, content, tool_calls, metadata)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (session_id, datetime.now().isoformat(), role, content, json.dumps(tool_calls or []), json.dumps(metadata or {})))
+            INSERT INTO sessions (session_id, timestamp, role, content, tool_calls, metadata, project)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session_id, datetime.now().isoformat(), role, content, json.dumps(tool_calls or []), json.dumps(metadata or {}), project))
         # Add to FTS
         cur.execute("""
             INSERT INTO sessions_fts (content, session_id, role) VALUES (?, ?, ?)
@@ -110,42 +120,59 @@ class Memory:
         conn.commit()
         conn.close()
 
-        # Also log to trajectory file for batch generation
+        # Also log to trajectory file for batch generation (+ Phase 4 tag)
         try:
             traj_path = config.resolve_path(config.trajectory_path)
             traj_path.parent.mkdir(parents=True, exist_ok=True)
+            line = {
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "role": role,
+                "content": content,
+                "tool_calls": tool_calls,
+            }
+            if tag:
+                line["tag"] = tag
             with open(traj_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "session_id": session_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "role": role,
-                    "content": content,
-                    "tool_calls": tool_calls
-                }) + "\n")
+                f.write(json.dumps(line) + "\n")
         except:
             pass
 
-    def search_sessions(self, query: str, limit: int = 5) -> List[Dict]:
-        """Free FTS5 search - no vector DB needed"""
+    def search_sessions(self, query: str, limit: int = 5, project: str = None) -> List[Dict]:
+        """Free FTS5 search - no vector DB needed. Phase 4: project filter."""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         try:
             # FTS5 search with ranking
-            cur.execute("""
-                SELECT s.*, rank FROM sessions_fts
-                JOIN sessions s ON s.rowid = sessions_fts.rowid
-                WHERE sessions_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-            """, (query, limit))
+            if project:
+                cur.execute("""
+                    SELECT s.*, rank FROM sessions_fts
+                    JOIN sessions s ON s.rowid = sessions_fts.rowid
+                    WHERE sessions_fts MATCH ? AND s.project = ?
+                    ORDER BY rank
+                    LIMIT ?
+                """, (query, project, limit))
+            else:
+                cur.execute("""
+                    SELECT s.*, rank FROM sessions_fts
+                    JOIN sessions s ON s.rowid = sessions_fts.rowid
+                    WHERE sessions_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                """, (query, limit))
             rows = cur.fetchall()
             result = [dict(r) for r in rows]
         except Exception as e:
             # Fallback LIKE search if FTS fails
-            cur.execute("""
-                SELECT * FROM sessions WHERE content LIKE ? ORDER BY id DESC LIMIT ?
-            """, (f"%{query}%", limit))
+            if project:
+                cur.execute("""
+                    SELECT * FROM sessions WHERE content LIKE ? AND project = ? ORDER BY id DESC LIMIT ?
+                """, (f"%{query}%", project, limit))
+            else:
+                cur.execute("""
+                    SELECT * FROM sessions WHERE content LIKE ? ORDER BY id DESC LIMIT ?
+                """, (f"%{query}%", limit))
             rows = cur.fetchall()
             result = [dict(r) for r in rows]
         conn.close()

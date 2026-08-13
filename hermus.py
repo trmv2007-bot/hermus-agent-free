@@ -164,6 +164,33 @@ def main():
     counsel_review = counsel_sub.add_parser("review", help="Run Meta-Counsel review on the last council session")
     counsel_review.add_argument("--session-id", default=None, help="Specific session id (default: latest)")
 
+    # eval subcommand - benchmark harness (Phase 4)
+    eval_parser = subparsers.add_parser("eval", help="Eval harness - measure thinking strategies")
+    eval_sub = eval_parser.add_subparsers(dest="eval_action")
+    eval_run = eval_sub.add_parser("run", help="Run benchmark tasks under a strategy")
+    eval_run.add_argument("--strategy", default="auto", help="auto|none|reflexion|self_consistency|verify")
+    eval_run.add_argument("--limit", type=int, default=None, help="Limit number of tasks")
+    eval_run.add_argument("--category", default=None, help="Only one category: fact|research|code|extraction|math")
+    eval_run.add_argument("--model", default=None, help="Model for the solver")
+    eval_list = eval_sub.add_parser("list", help="List benchmark tasks")
+    eval_compare = eval_sub.add_parser("compare", help="A/B two strategies on the same tasks")
+    eval_compare.add_argument("--a", required=True, help="Strategy A: auto|none|reflexion|self_consistency|verify")
+    eval_compare.add_argument("--b", required=True, help="Strategy B")
+    eval_compare.add_argument("--limit", type=int, default=None)
+    eval_compare.add_argument("--model", default=None)
+    eval_history = eval_sub.add_parser("history", help="Show eval run history")
+    eval_history.add_argument("--limit", type=int, default=10)
+
+    # plan subcommand - plan persistence & resume (Phase 4, P1)
+    plan_parser = subparsers.add_parser("plan", help="Plans - DeepThink plan persistence & resume")
+    plan_sub = plan_parser.add_subparsers(dest="plan_action")
+    plan_list = plan_sub.add_parser("list", help="List saved plans")
+    plan_show = plan_sub.add_parser("show", help="Show a plan")
+    plan_show.add_argument("session_id")
+    plan_resume = plan_sub.add_parser("resume", help="Resume a plan (runs remaining steps)")
+    plan_resume.add_argument("session_id")
+    plan_resume.add_argument("--model", default=None)
+
     # api subcommand - custom API feature free
     api_parser = subparsers.add_parser("api", help="Custom API - add any API as tool (free)")
     api_sub = api_parser.add_subparsers(dest="api_action")
@@ -517,6 +544,70 @@ def main():
                 print(f"  - {r}")
         else:
             parser.parse_args(["counsel", "--help"])
+
+    elif args.command == "eval":
+        import json as _json
+
+        from core.reasoning.eval import eval_harness
+
+        if args.eval_action == "run":
+            tasks = eval_harness.load_tasks()
+            if args.category:
+                tasks = [t for t in tasks if t.get("category") == args.category]
+                print(f"Eval tasks filtered to category '{args.category}': {len(tasks)}")
+            res = eval_harness.run(strategy=args.strategy, tasks=tasks, limit=args.limit, model=args.model)
+            print(f"\n=== Eval run: strategy={res.get('strategy')} ===")
+            print(f"  {res.get('success')}/{res.get('runs')} passed | success_rate={res.get('success_rate')} | "
+                  f"avg_steps={res.get('avg_steps')} | avg_tool_failures={res.get('avg_tool_failures')}")
+            for cat, c in (res.get("by_category") or {}).items():
+                print(f"  {cat:12s} {c['success']}/{c['runs']}")
+            for r in res.get("results", []):
+                print(f"  [{'✅' if r['success'] else '❌'}] {r['id']:14s} ({r['strategy']:16s}) steps={r['steps']} fails={r['tool_failures']}")
+        elif args.eval_action == "list":
+            for t in eval_harness.load_tasks():
+                print(f"  {t['id']:16s} {t['category']:10s} {t['prompt'][:70]}")
+        elif args.eval_action == "compare":
+            res = eval_harness.compare(args.a, args.b, limit=args.limit, model=args.model)
+            print(f"Compare {args.a} vs {args.b}: WINNER = {res['winner']}")
+            print(f"  {args.a}: {res['a']}")
+            print(f"  {args.b}: {res['b']}")
+            print("Tip: rerun with different strategies or --limit to get stable results on real models.")
+        elif args.eval_action == "history":
+            h = eval_harness.history(limit=args.limit)
+            if not h:
+                print("No eval runs yet — `hermus eval run`")
+            for run in h:
+                print(f"  {run.get('timestamp','')[:19]} | {str(run.get('strategy'))[:16]:16s} | "
+                      f"rate={run.get('success_rate')} | runs={run.get('runs')} | tag={run.get('tag','')}")
+        else:
+            parser.parse_args(["eval", "--help"])
+
+    elif args.command == "plan":
+        import json as _json
+
+        from core.reasoning.scaffold import list_plans, resume_plan, show_plan
+
+        if args.plan_action == "list":
+            plans = list_plans()
+            if not plans:
+                print("No plans saved yet — ask a multi-step task (DeepThink on) or run `hermus counsel run`.")
+            for p in plans:
+                print(f"  {p['session_id'][:38]:38s} steps={p['steps']} done={p['done']} "
+                      f"status={p['status']} | {p['goal']}")
+        elif args.plan_action == "show":
+            plan = show_plan(args.session_id)
+            if not plan:
+                print(f"No plan found for '{args.session_id}'. Try `hermus plan list`")
+            else:
+                print(plan.to_prompt())
+        elif args.plan_action == "resume":
+            res = resume_plan(args.session_id, model=args.model)
+            print(f"Resume result: success={res.get('success')} remaining_before={res.get('remaining_before')}")
+            print(f"Response: {str(res.get('response'))[:400]}")
+            if res.get("plan"):
+                print("Plan state: " + _json.dumps([(s['goal'][:40], s['status']) for s in res['plan']['steps']]))
+        else:
+            parser.parse_args(["plan", "--help"])
 
     elif args.command == "api":
         from core.custom_api import custom_api_manager

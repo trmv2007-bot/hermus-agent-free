@@ -25,6 +25,7 @@ data/mcp_servers.json
 data/telegram_offset.txt
 data/tmp/
 data/self_improvement.json
+data/eval_history.json
 # Counsel System runtime artifacts (Phases 0-2)
 data/counsel/
 data/plans/

@@ -77,8 +77,12 @@ Original Hermes / Strix / Agent Reach use some paid services:
 - **DeepThink plan-first:** multi-step tasks now get an explicit written plan before acting (`data/plans/`), zero-token difficulty governor decides how hard to think
 - **Deliberation strategies (Phase 3):** difficulty 3 → reflexion (critique→revise pass), difficulty 4 → verify (key claims re-checked with web search before answering), difficulty 5 → self-consistency (k=3 parallel drafts merged) — all bounded and with graceful fallback. Per-task step budgets: easy tasks ≤2 steps, hard tasks up to 12
 - **Lessons loop (Phase 3):** user corrections, tool failures, reflections and skill failures are distilled into a `lessons` table (`data/memory.db`) and the top relevant lessons are injected into every system prompt — the agent stops repeating its own past mistakes. `HERMUS_LESSONS_IN_PROMPT=8` controls how many
-- **Config:** `HERMUS_COUNSEL_ENABLED`, `HERMUS_COUNSEL_MIN_DIFFICULTY`, `HERMUS_COUNSEL_MAX_MEMBERS/ROUNDS`, `HERMUS_COUNSEL_AUTO_REVIEW`, `HERMUS_THINK_ENABLED`, `HERMUS_STRATEGY` (auto|none|reflexion|self_consistency|verify), `HERMUS_SELF_CONSISTENCY_K`, `HERMUS_VERIFY_THRESHOLD`
-- Design doc: `THINKING_SYSTEM_PLAN.md` — tests: `python tests/test_counsel_system.py` and `python tests/test_deepthink.py` (offline, free mock model)
+- **Eval harness (Phase 4):** 21 benchmark tasks in 5 categories — `hermus eval run --strategy reflexion`, `hermus eval compare --a reflexion --b self_consistency`, `hermus eval list|history`. Measures success rate / steps / tool failures so upgrades are proven, not guessed
+- **Deterministic router (Phase 4):** task type + mode + workers → single / council / fleet / subagents; fleet strategy (fanout/race/map) chosen by a table, not keywords
+- **Tool fallbacks (Phase 4):** registry-level retry + alternate-tool chains (web_search → retry → browser DDG; web_read → retry → browser_navigate) with a `fallback_trail` on the result; successful fallbacks feed the lessons loop
+- **Project memory + plan resume + tags (Phase 4):** `memory_search(query, project=…)` scoped recall (TUI `/project set <name>`); `hermus plan list|show|resume <id>` resumes saved plans; trajectories are tagged with strategy/difficulty/plan for future training; dashboard has a **🧭 Reasoning** pane (`/eval/summary`, `/counsel/status`)
+- **Config:** `HERMUS_COUNSEL_ENABLED`, `HERMUS_COUNSEL_MIN_DIFFICULTY`, `HERMUS_COUNSEL_MAX_MEMBERS/ROUNDS`, `HERMUS_COUNSEL_AUTO_REVIEW`, `HERMUS_THINK_ENABLED`, `HERMUS_STRATEGY` (auto|none|reflexion|self_consistency|verify), `HERMUS_SELF_CONSISTENCY_K`, `HERMUS_VERIFY_THRESHOLD`, `HERMUS_PROJECT`
+- Design doc: `THINKING_SYSTEM_PLAN.md` — tests: `python tests/test_counsel_system.py`, `python tests/test_deepthink.py`, `python tests/test_phase4.py` (all offline, free mock model)
 
 ### 6. Runs Anywhere — Seven Backends Free
 

@@ -205,3 +205,73 @@ class PlanBuilder:
 
 
 plan_builder = PlanBuilder()
+
+
+# ---------------------------------------------------------------- Phase 4: plan persistence & resume (P1)
+
+
+def list_plans(limit: int = 10) -> List[Dict]:
+    """List saved plans from data/plans/."""
+    d = config.resolve_path("data/plans")
+    if not d.exists():
+        return []
+    out = []
+    for p in sorted(d.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:limit]:
+        try:
+            plan = Plan.load(str(p))
+            if plan:
+                done = sum(1 for s in plan.steps if s.status == "done")
+                out.append(
+                    {
+                        "session_id": plan.session_id,
+                        "path": str(p),
+                        "goal": plan.goal[:120],
+                        "steps": len(plan.steps),
+                        "done": done,
+                        "status": plan.status,
+                        "created_at": plan.created_at[:19],
+                    }
+                )
+        except Exception:
+            continue
+    return out
+
+
+def show_plan(session_id: str) -> Optional[Plan]:
+    p = config.resolve_path(f"data/plans/plan_{session_id}.json")
+    if not p.exists():
+        return None
+    return Plan.load(str(p))
+
+
+def resume_plan(session_id: str, model: Optional[str] = None) -> Dict:
+    """Resume a saved plan: mark failed steps pending, run remaining steps with the agent."""
+    plan = show_plan(session_id)
+    if not plan:
+        return {"success": False, "error": f"no plan found for {session_id}"}
+    remaining = [s for s in plan.steps if s.status != "done"]
+    if not remaining:
+        return {"success": True, "message": "plan already complete", "plan": plan.to_dict()}
+    for s in plan.steps:
+        if s.status == "failed":
+            s.status = "pending"
+    plan.status = "active"
+    plan.save()
+
+    from ..agent import HermusAgent
+
+    agent = HermusAgent(model=model or config.model, mode="agent")
+    agent.plan_override = plan
+    instruction = (
+        "Resume this plan and complete the remaining steps:\n"
+        + "\n".join(f"{i+1}. {s.goal} (action: {s.action})" for i, s in enumerate(plan.steps) if s.status != "done")
+        + "\nExecute the remaining steps and give the final result."
+    )
+    result = agent.chat(instruction)
+    return {
+        "success": True,
+        "plan": plan.to_dict(),
+        "response": result.get("response"),
+        "session_id": result.get("session_id"),
+        "remaining_before": len(remaining),
+    }

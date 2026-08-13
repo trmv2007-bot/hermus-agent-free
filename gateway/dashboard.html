@@ -106,6 +106,7 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
         <div class="nav-item" data-pane="channels" onclick="switchPane('channels')"><span>📡</span> Channels</div>
         <div class="nav-item" data-pane="memory" onclick="switchPane('memory')"><span>🧠</span> Memory / RAG</div>
         <div class="nav-item" data-pane="mcp" onclick="switchPane('mcp')"><span>🔌</span> MCP</div>
+        <div class="nav-item" data-pane="reasoning" onclick="switchPane('reasoning')"><span>🧭</span> Reasoning</div>
         <div class="nav-item" data-pane="settings" onclick="switchPane('settings')"><span>⚙️</span> Settings</div>
       </div>
     </nav>
@@ -380,6 +381,24 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
           <div class="pre" id="mcpStatus" style="margin-top:10px">Loading…</div>
         </div>
 
+        <!-- REASONING (Phase 4) -->
+        <div class="pane" id="pane-reasoning">
+          <h3 style="margin-bottom:8px">🧭 Reasoning — DeepThink, Council & Lessons</h3>
+          <div class="banner">Council of AIs + deliberation strategies + lessons loop. CLI: <span class="mono">hermus counsel status</span> · <span class="mono">hermus eval run</span></div>
+          <div class="row">
+            <button class="btn primary" onclick="loadReasoning()">Refresh</button>
+            <button class="btn" onclick="loadReasoning(true)">Force review</button>
+          </div>
+          <div id="reasoningEval" class="card" style="margin-top:10px">
+            <h4>📊 Eval harness</h4>
+            <div class="pre" id="reasoningEvalBody">Loading…</div>
+          </div>
+          <div class="card">
+            <h4>⚖️ Council constitution</h4>
+            <div class="pre" id="reasoningCounselBody">Loading…</div>
+          </div>
+        </div>
+
         <!-- SETTINGS -->
         <div class="pane" id="pane-settings">
           <h3 style="margin-bottom:8px">⚙️ Settings</h3>
@@ -452,6 +471,7 @@ function switchPane(pane){
   if(pane==='memory') loadEmbStatus();
   if(pane==='mcp') loadMcp();
   if(pane==='agents') loadAgents();
+  if(pane==='reasoning') loadReasoning();
   if(pane==='settings'){ loadCache(); checkUpdate(); loadRoot(); }
 }
 
@@ -839,6 +859,17 @@ async function embSearch(){
     if(d.summary) out += 'Summary: ' + d.summary;
     $('embSearchResult').textContent = out.slice(0,4000);
   }catch(e){ $('embSearchResult').textContent=String(e); }
+}
+
+async function loadReasoning(forceReview){
+  try{
+    const ev = await jget('/eval/summary');
+    $('reasoningEvalBody').textContent = JSON.stringify(ev, null, 2);
+  }catch(e){ $('reasoningEvalBody').textContent = String(e); }
+  try{
+    const cs = await jget('/counsel/status');
+    $('reasoningCounselBody').textContent = JSON.stringify(cs, null, 2);
+  }catch(e){ $('reasoningCounselBody').textContent = String(e); }
 }
 
 async function loadMcp(){

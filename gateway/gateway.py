@@ -289,6 +289,28 @@ async def providers_list():
     return {"providers": list_providers()}
 
 
+@app.get("/eval/summary")
+async def eval_summary():
+    """Eval harness summary (Phase 4) for the dashboard Reasoning pane."""
+    try:
+        from core.reasoning.eval import eval_harness
+
+        return eval_harness.summary()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/counsel/status")
+async def counsel_status():
+    """Counsel constitution + amendment status (Phase 2/4) for the dashboard."""
+    try:
+        from core.counsel.meta import meta_counsel
+
+        return meta_counsel.status()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/fleet/workers")
 async def fleet_workers():
     from core.model_fleet import model_fleet

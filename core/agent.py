@@ -33,6 +33,7 @@ class HermusAgent:
             f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         )
         self.trajectory: List[Dict] = []
+        self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
         self.max_steps = max_steps or getattr(config, "max_tool_steps", 8)
 
         if mode is None:
@@ -266,6 +267,7 @@ Rules:
         system_prompt = self._build_system_prompt(user_message)
 
         # DeepThink plan-first (Phase 0): write an explicit plan for multi-step tasks
+        # Phase 4: plan_override resumes an existing plan (hermus plan resume)
         plan = None
         budget_steps = self.max_steps
         try:
@@ -273,7 +275,16 @@ Rules:
             from .reasoning.scaffold import plan_builder
 
             budget_steps = governor.step_budget(user_message, mode=self.mode.value)
-            if governor.should_plan_first(user_message, mode=self.mode.value):
+            if self.plan_override is not None:
+                plan = self.plan_override
+                if plan and plan.steps:
+                    system_prompt += (
+                        "\n\nResuming explicit plan (DeepThink):\n"
+                        + plan.to_prompt()
+                        + "\nWork through the plan from the first not-done step; you may deviate if evidence demands it."
+                    )
+                    print(f"[DeepThink] Resuming plan ({len(plan.steps)} steps)")
+            elif governor.should_plan_first(user_message, mode=self.mode.value):
                 plan = plan_builder.build_plan(
                     user_message,
                     session_id=self.session_id,
@@ -463,8 +474,24 @@ Rules:
         except Exception as e:
             print(f"[DeepThink] strategy skipped ({e})")
 
-        # Persist assistant reply
-        memory.add_session_message(self.session_id, "assistant", final_content)
+        # Persist assistant reply (Phase 4, P6: trajectory tagging)
+        try:
+            from .reasoning.governor import governor as _gov2
+
+            _difficulty = _gov2.classify_difficulty(user_message)
+        except Exception:
+            _difficulty = None
+        memory.add_session_message(
+            self.session_id,
+            "assistant",
+            final_content,
+            tag={
+                "strategy": strategy,
+                "difficulty": _difficulty,
+                "plan": plan.to_dict() if plan else None,
+                "council": False,
+            },
+        )
         self.trajectory.append(
             {"role": "assistant", "content": final_content, "tool_calls": []}
         )
@@ -605,11 +632,14 @@ Rules:
             if workers < 2 and not force:
                 return None
 
-            strategy = "fanout" if self.mode == AgentMode.MULTI_CHAT else "auto"
-            if "race" in lower:
-                strategy = "race"
-            elif "map" in lower or "subtask" in lower or self.mode == AgentMode.MULTI_AGENT:
-                strategy = "map" if self.mode == AgentMode.MULTI_AGENT else strategy
+            strategy = "auto"
+            try:
+                # Deterministic orchestrator (Phase 4): table-driven strategy
+                from .counsel.router import router as _router
+
+                strategy = _router.fleet_strategy(msg, mode=self.mode.value)
+            except Exception:
+                strategy = "fanout" if self.mode == AgentMode.MULTI_CHAT else "auto"
 
             print(f"[Fleet] Multi-mode dispatch strategy={strategy} workers≈{workers}")
             try:

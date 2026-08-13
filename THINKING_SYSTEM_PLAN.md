@@ -1,10 +1,10 @@
 # 🧠 Hermus Counsel — Council of AIs That Plans Everything & Upgrades Itself
 
-> **Status: Phases 0–3 IMPLEMENTED (2026-08-13).** The rest of this document is the design
-> record; sections marked ✅ are built and tested (`tests/test_counsel_system.py` +
-> `tests/test_deepthink.py`, offline with the free mock model). Remaining: Phase 4
-> (eval harness + power-ups). Everything respects the project's core constraint:
-> **100% free stack** — Ollama local, Groq free tier, HF free inference, SQLite, no paid APIs.
+> **Status: ALL PHASES (0–4) IMPLEMENTED (2026-08-13).** The rest of this document is the
+> design record; sections marked ✅ are built and tested offline with the free mock model
+> (`tests/test_counsel_system.py`, `tests/test_deepthink.py`, `tests/test_phase4.py`).
+> Everything respects the project's core constraint: **100% free stack** — Ollama local,
+> Groq free tier, HF free inference, SQLite, no paid APIs.
 
 ## ✅ What is built right now (Phases 0–2)
 
@@ -18,6 +18,10 @@
 | **Governor** | `core/reasoning/governor.py` | Zero-token difficulty 1–5 classifier + budget table → council vs plain loop, **per-task step budgets, strategy routing** |
 | **Deliberation strategies** ✅ | `core/reasoning/strategies.py` | `reflexion_in_loop` (critique→revise, difficulty 3), `verify_with_tools` (claims → web_search evidence → revise, difficulty 4), `self_consistency` (k parallel drafts → merge, difficulty 5) — bounded, audited, graceful fallback |
 | **Lessons loop** ✅ | `core/reasoning/lessons.py` | `lessons` table in `data/memory.db`; distillers for user corrections, tool failures, reflections, skill failures; top relevant lessons (keyword match, zero tokens) injected into every system prompt; applied/improved counters |
+| **Eval harness** ✅ | `core/reasoning/eval.py`, `tests/eval/benchmark_tasks.json` | 21 benchmark tasks in 5 categories (fact/research/code/extraction/math) with substring/regex checks; `hermus eval run|list|compare|history`; history in `data/eval_history.json`; isolates strategy (single-agent, no council) |
+| **Deterministic router** ✅ | `core/counsel/router.py` | Table-driven orchestrator: task type + mode + workers → single/council/fleet/subagents; fleet strategy (fanout/race/map) per mode; replaces keyword heuristics in `_maybe_fleet_distribute` |
+| **Tool fallbacks** ✅ | `core/tool_registry.py` `TOOL_FALLBACK_CHAINS` | Registry-level retry + alternate-tool chains (web_search → retry → browser DDG html; web_read → retry → browser_navigate; browser_navigate/file_read → retry); `fallback_trail` attached; success feeds the lessons loop |
+| **Project memory + tags + plan resume** ✅ | `core/memory.py`, `core/reasoning/scaffold.py` | `memory_search(query, project=…)` scoped recall; trajectory JSONL tagged with strategy/difficulty/plan (P6); `hermus plan list|show|resume` (P1); TUI `/plan /eval /project`; dashboard **Reasoning** pane + `/eval/summary` + `/counsel/status` endpoints (P5) |
 | **Agent integration** | `core/agent.py` | Hard tasks auto-convene the council; multi-step tasks get an explicit plan first; graceful fallback to the old loop on any failure |
 | **Tool** | `counsel_convoke` | The agent can summon the council as a tool mid-task (114 tools now) |
 | **CLI** | `hermus.py` | `hermus counsel run/status/review`, `hermus counsel amend list/approve/reject/rollback` |
@@ -271,7 +275,7 @@ The Counsel decides *what* to do; DeepThink decides *how hard to think*. They co
 | **1 — Counsel core** ✅⭐ | Council session: roster, convene, proposals, deliberation, vote, plan, execute, transcript | `core/counsel/__init__.py`, `core/counsel/council.py`, `core/counsel/members.py`, `data/counsel/` | `core/agent.py` (hook), `core/reasoning/governor.py`, `hermus.py` (`counsel` CLI), `tui/tui.py` | **DONE** — `hermus counsel run "task"` produces a voted plan + transcript with 3-6 members talking |
 | **2 — Self-upgrade loop** ✅⭐ | Meta-Counsel, constitution + versions, amendments, eval gate, rollback | `core/counsel/meta.py`, `core/counsel/constitution.py`, `data/counsel/constitution.json` | `core/self_improvement.py`, `hermus.py` (`amend` CLI) | **DONE** — Meta proposes amendments after sessions; low-risk auto-apply, high-risk `amend approve`; `amend rollback` works. (Full eval-gate moves to Phase 4 with the harness) |
 | **3 — DeepThink + Governor** ✅ | Strategies (reflexion, self-consistency, verify), lessons table + prompt injection, governor routing council vs single | `core/reasoning/strategies.py`, `core/reasoning/lessons.py`, `core/reasoning/governor.py` | `core/agent.py`, `core/memory.py`, `core/config.py`, `core/self_improvement.py`, `core/counsel/council.py`, `core/tool_registry.py` | **DONE** — easy tasks ≤2 steps; difficulty 3→reflexion, 4→verify, 5→self-consistency, 4+→council; corrections/failures/reflections become lessons injected into every prompt (`tests/test_deepthink.py`, 8 offline tests) |
-| **4 — Eval + power-ups** | Benchmark harness, `hermus eval compare`, orchestrator, fallbacks, project memory, dashboard panes, plan resume | `core/reasoning/eval.py`, `tests/eval/benchmark_tasks.json`, `core/counsel/router.py` | `hermus.py`, `core/tool_registry.py`, `core/memory.py`, `gateway/dashboard.html`, `scheduler/cron.py` | `eval compare --a single --b counsel` works; upgrades gated by scores; P1–P6 shipped |
+| **4 — Eval + power-ups** ✅ | Benchmark harness, `hermus eval compare`, deterministic orchestrator, tool fallbacks, project memory, dashboard Reasoning pane, plan resume, trajectory tagging | `core/reasoning/eval.py`, `tests/eval/benchmark_tasks.json`, `core/counsel/router.py` | `hermus.py`, `core/tool_registry.py`, `core/memory.py`, `gateway/dashboard.html`, `gateway/gateway.py`, `core/reasoning/scaffold.py`, `tui/tui.py`, `core/agent.py` | **DONE** — `hermus eval compare --a X --b Y` works; router drives fleet strategy; fallback chains + trails; project-scoped memory; `hermus plan resume`; dashboard Reasoning pane; trajectories tagged (`tests/test_phase4.py`, 9 offline tests) |
 
 **Suggested build order:** Phase 0 (foundation) → Phase 1 (counsel core, the thing you asked for) → Phase 2 (self-upgrade, the second thing you asked for) → Phase 3 → Phase 4. Phases 1–2 are independently shippable and demo-able.
 

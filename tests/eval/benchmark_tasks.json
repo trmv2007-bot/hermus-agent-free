@@ -1,0 +1,23 @@
+[
+  {"id": "fact_01", "category": "fact", "prompt": "What is the capital of France?", "checks": [{"type": "substring", "value": "paris"}]},
+  {"id": "fact_02", "category": "fact", "prompt": "Who wrote the play Romeo and Juliet?", "checks": [{"type": "substring", "value": "shakespeare"}]},
+  {"id": "fact_03", "category": "fact", "prompt": "What is the chemical symbol for gold?", "checks": [{"type": "substring", "value": "au"}]},
+  {"id": "fact_04", "category": "fact", "prompt": "How many continents are there on Earth?", "checks": [{"type": "regex", "value": "\\b7\\b|seven"}]},
+  {"id": "fact_05", "category": "fact", "prompt": "Which planet is known as the Red Planet?", "checks": [{"type": "substring", "value": "mars"}]},
+  {"id": "research_01", "category": "research", "prompt": "Research and name three of the most popular free password managers.", "checks": [{"type": "regex", "value": "bitwarden|keepass|dashlane|1password|proton|lastpass|nordpass"}]},
+  {"id": "research_02", "category": "research", "prompt": "Name three programming languages commonly used for web development.", "checks": [{"type": "regex", "value": "python|javascript|typescript|php|java|ruby|go|rust|html|css"}]},
+  {"id": "research_03", "category": "research", "prompt": "What is the capital city of Japan? Verify your answer.", "checks": [{"type": "substring", "value": "tokyo"}]},
+  {"id": "research_04", "category": "research", "prompt": "Name two free video calling applications.", "checks": [{"type": "regex", "value": "zoom|google meet|meet|skype|facetime|whatsapp|telegram|jitsi|discord"}]},
+  {"id": "code_01", "category": "code", "prompt": "Write a Python function that returns the sum of two numbers.", "checks": [{"type": "regex", "value": "def (sum|add|plus)"}]},
+  {"id": "code_02", "category": "code", "prompt": "Write Python code that prints hello world.", "checks": [{"type": "substring", "value": "print("}]},
+  {"id": "code_03", "category": "code", "prompt": "Write a Python function that checks whether a number is even.", "checks": [{"type": "regex", "value": "def|% ?2"}]},
+  {"id": "code_04", "category": "code", "prompt": "Write Python code to sort a list of numbers in ascending order.", "checks": [{"type": "substring", "value": "sort("}]},
+  {"id": "extraction_01", "category": "extraction", "prompt": "Extract the number from this text: 'The package costs 49.99 dollars'. Reply with the number only.", "checks": [{"type": "substring", "value": "49.99"}]},
+  {"id": "extraction_02", "category": "extraction", "prompt": "What year was the Python programming language first released? Just the year.", "checks": [{"type": "regex", "value": "\\b1991\\b"}]},
+  {"id": "extraction_03", "category": "extraction", "prompt": "From 'Meeting at 3pm on Tuesday', extract the day of the week.", "checks": [{"type": "substring", "value": "tuesday"}]},
+  {"id": "extraction_04", "category": "extraction", "prompt": "How many legs does a spider have? Answer with just the number.", "checks": [{"type": "regex", "value": "\\b8\\b"}]},
+  {"id": "math_01", "category": "math", "prompt": "What is 7 times 8?", "checks": [{"type": "regex", "value": "\\b56\\b"}]},
+  {"id": "math_02", "category": "math", "prompt": "What is 15 + 27?", "checks": [{"type": "regex", "value": "\\b42\\b"}]},
+  {"id": "math_03", "category": "math", "prompt": "A train travels 60 km in one hour. How far does it travel in 3 hours?", "checks": [{"type": "regex", "value": "\\b180\\b"}]},
+  {"id": "math_04", "category": "math", "prompt": "What is 2 to the power of 10?", "checks": [{"type": "regex", "value": "\\b1024\\b"}]}
+]
