@@ -424,6 +424,14 @@ class CouncilSession:
                         result = {"error": str(e)}
                         text = f"error: {e}"
                         failures += 1
+                    # Lessons loop (Phase 3): council tool failures feed the prompt lessons
+                    try:
+                        if "error" in text[:300].lower() or "failed" in text[:300].lower():
+                            from ..reasoning.lessons import lessons_store
+
+                            lessons_store.distill_tool_failure(tname, text[:150])
+                    except Exception:
+                        pass
                     observations.append(f"tool {tname} -> {text}")
                     step.evidence.append(f"{tname}: {text[:150]}")
                     messages.append({"role": "user", "content": f"Tool {tname} returned: {text}"})

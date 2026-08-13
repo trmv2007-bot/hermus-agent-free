@@ -1,8 +1,8 @@
 # 🧠 Hermus Counsel — Council of AIs That Plans Everything & Upgrades Itself
 
-> **Status: Phases 0–2 IMPLEMENTED (2026-08-13).** The rest of this document is the design
-> record; sections marked ✅ are built and tested (`tests/test_counsel_system.py`, offline
-> with the free mock model). Remaining: Phase 3 (strategies/lessons) and Phase 4
+> **Status: Phases 0–3 IMPLEMENTED (2026-08-13).** The rest of this document is the design
+> record; sections marked ✅ are built and tested (`tests/test_counsel_system.py` +
+> `tests/test_deepthink.py`, offline with the free mock model). Remaining: Phase 4
 > (eval harness + power-ups). Everything respects the project's core constraint:
 > **100% free stack** — Ollama local, Groq free tier, HF free inference, SQLite, no paid APIs.
 
@@ -15,7 +15,9 @@
 | **Constitution (self-upgrade)** | `core/counsel/constitution.py` | Versioned constitution (prompts, rules, budgets). Amendments: low-risk auto-apply, high-risk wait for approval. Snapshots + `rollback <version>` |
 | **Meta-Counsel** | `core/counsel/meta.py` | Reviews sessions (transcript → amendment proposals); reflection mistakes → amendments; upgrade audit log |
 | **DeepThink scaffold** | `core/reasoning/scaffold.py` | Explicit `Plan` (steps/goals/evidence), plan-first stage in `agent.chat()`, saved to `data/plans/` |
-| **Governor** | `core/reasoning/governor.py` | Zero-token difficulty 1–5 classifier + budget table → council vs plain loop |
+| **Governor** | `core/reasoning/governor.py` | Zero-token difficulty 1–5 classifier + budget table → council vs plain loop, **per-task step budgets, strategy routing** |
+| **Deliberation strategies** ✅ | `core/reasoning/strategies.py` | `reflexion_in_loop` (critique→revise, difficulty 3), `verify_with_tools` (claims → web_search evidence → revise, difficulty 4), `self_consistency` (k parallel drafts → merge, difficulty 5) — bounded, audited, graceful fallback |
+| **Lessons loop** ✅ | `core/reasoning/lessons.py` | `lessons` table in `data/memory.db`; distillers for user corrections, tool failures, reflections, skill failures; top relevant lessons (keyword match, zero tokens) injected into every system prompt; applied/improved counters |
 | **Agent integration** | `core/agent.py` | Hard tasks auto-convene the council; multi-step tasks get an explicit plan first; graceful fallback to the old loop on any failure |
 | **Tool** | `counsel_convoke` | The agent can summon the council as a tool mid-task (114 tools now) |
 | **CLI** | `hermus.py` | `hermus counsel run/status/review`, `hermus counsel amend list/approve/reject/rollback` |
@@ -268,7 +270,7 @@ The Counsel decides *what* to do; DeepThink decides *how hard to think*. They co
 | **0 — Foundation** ✅ | Plan scaffold: `Plan` dataclass, plan-first stage, save/load, `/think` toggle | `core/reasoning/__init__.py`, `core/reasoning/scaffold.py`, `data/plans/` | `core/agent.py`, `core/config.py`, `tui/tui.py` | **DONE** — agent writes a visible plan before tools; plans saved to `data/plans/`; `/think on|off` works |
 | **1 — Counsel core** ✅⭐ | Council session: roster, convene, proposals, deliberation, vote, plan, execute, transcript | `core/counsel/__init__.py`, `core/counsel/council.py`, `core/counsel/members.py`, `data/counsel/` | `core/agent.py` (hook), `core/reasoning/governor.py`, `hermus.py` (`counsel` CLI), `tui/tui.py` | **DONE** — `hermus counsel run "task"` produces a voted plan + transcript with 3-6 members talking |
 | **2 — Self-upgrade loop** ✅⭐ | Meta-Counsel, constitution + versions, amendments, eval gate, rollback | `core/counsel/meta.py`, `core/counsel/constitution.py`, `data/counsel/constitution.json` | `core/self_improvement.py`, `hermus.py` (`amend` CLI) | **DONE** — Meta proposes amendments after sessions; low-risk auto-apply, high-risk `amend approve`; `amend rollback` works. (Full eval-gate moves to Phase 4 with the harness) |
-| **3 — DeepThink + Governor** | Strategies (reflexion, self-consistency, verify), lessons table + prompt injection, governor routing council vs single | `core/reasoning/strategies.py`, `core/reasoning/lessons.py`, `core/reasoning/governor.py` | `core/agent.py`, `core/memory.py`, `core/config.py` | Easy tasks stay ≤2 steps; hard tasks convene council; lessons from yesterday appear in today's prompts |
+| **3 — DeepThink + Governor** ✅ | Strategies (reflexion, self-consistency, verify), lessons table + prompt injection, governor routing council vs single | `core/reasoning/strategies.py`, `core/reasoning/lessons.py`, `core/reasoning/governor.py` | `core/agent.py`, `core/memory.py`, `core/config.py`, `core/self_improvement.py`, `core/counsel/council.py`, `core/tool_registry.py` | **DONE** — easy tasks ≤2 steps; difficulty 3→reflexion, 4→verify, 5→self-consistency, 4+→council; corrections/failures/reflections become lessons injected into every prompt (`tests/test_deepthink.py`, 8 offline tests) |
 | **4 — Eval + power-ups** | Benchmark harness, `hermus eval compare`, orchestrator, fallbacks, project memory, dashboard panes, plan resume | `core/reasoning/eval.py`, `tests/eval/benchmark_tasks.json`, `core/counsel/router.py` | `hermus.py`, `core/tool_registry.py`, `core/memory.py`, `gateway/dashboard.html`, `scheduler/cron.py` | `eval compare --a single --b counsel` works; upgrades gated by scores; P1–P6 shipped |
 
 **Suggested build order:** Phase 0 (foundation) → Phase 1 (counsel core, the thing you asked for) → Phase 2 (self-upgrade, the second thing you asked for) → Phase 3 → Phase 4. Phases 1–2 are independently shippable and demo-able.

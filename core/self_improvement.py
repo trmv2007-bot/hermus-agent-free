@@ -308,6 +308,14 @@ class SelfImprovement:
             except Exception as e:
                 print(f"[Counsel] amendment proposal from reflection failed: {e}")
 
+            # Lessons loop (Phase 3): reflection mistakes also become prompt lessons
+            try:
+                from core.reasoning.lessons import lessons_store
+
+                lessons_store.distill_reflection(reflection)
+            except Exception as e:
+                print(f"[Lessons] reflection distillation failed: {e}")
+
             self.current_reflection["stage"] = "fixed"
             self.current_reflection["fixes"] = fixes_result.get("fixes_applied", [])
             self.current_reflection["fixes_count"] = len(fixes_result.get("fixes_applied", []))

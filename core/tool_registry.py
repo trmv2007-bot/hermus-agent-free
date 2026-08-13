@@ -234,6 +234,12 @@ class ToolRegistry:
                 }
             except Exception as e:
                 skill_manager.log_skill_usage(name, success=False, feedback=str(e))
+                try:
+                    from core.reasoning.lessons import lessons_store
+
+                    lessons_store.distill_skill_failure(name, str(e))
+                except Exception:
+                    pass
                 return {"error": f"Skill exec failed: {e}", "skill": name}
 
         def subagent_spawn(task: str) -> Dict:

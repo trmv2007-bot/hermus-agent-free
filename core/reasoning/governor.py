@@ -23,12 +23,13 @@ _STRONG_HARD = (
     "debug", "fix", "security", "pentest", "audit", "design", "implement",
     "architect", "review", "investigat", "strateg", "optimiz", "migrat",
     "refactor", "architect", "forecast", "report", "essay", "framework",
+    "verif", "evaluat", "recommend", "deployment",
 )
 _MEDIUM_HARD = (
-    "explain", "summar", "list", "compare", "write", "draft", "generate",
-    "evaluate", "recommend", "decide", "choose", "improve", "test",
+    "explain", "summar", "list", "write", "draft", "generate",
+    "decide", "choose", "improve", "test", "detail", "example", "how to", "steps",
 )
-_EXPLICIT_HARD = ("complex", "hard", "thorough", "deep", "careful", "difficult", "extensive", "comprehensive", "critical")
+_EXPLICIT_HARD = ("complex", "hard", "thorough", "deep", "careful", "difficult", "extensive", "comprehensive", "critical", "in detail", "complete")
 
 # Budget table: difficulty -> (max_members, max_rounds, plan_first, council)
 _BUDGET_TABLE: Dict[int, Tuple[int, int, bool, bool]] = {
@@ -50,10 +51,10 @@ class Governor:
         score = 1
 
         # Length signals real work
+        if len(text) > 80:
+            score += 1
         if len(text) > 200:
             score += 1
-        elif len(text) > 80:
-            score += 1 if len(text) > 120 else 0
 
         # Explicit hard words
         if any(w in low for w in _EXPLICIT_HARD):
@@ -71,7 +72,7 @@ class Governor:
         medium = sum(1 for k in _MEDIUM_HARD if k in low)
         if strong >= 3:
             score += 2
-        elif strong >= 1 or medium >= 3:
+        elif strong >= 1 or medium >= 2:
             score += 1
 
         # Very long + tool-flavored = hard
@@ -124,6 +125,43 @@ class Governor:
         if mode and str(mode).lower() in ("chat", "multi-chat"):
             return False
         return self.classify_difficulty(text) >= 3
+
+    # ------------------------------------------------------------ Phase 3
+
+    _STEP_CAPS = {1: 2, 2: 4, 3: 6, 4: 8, 5: 12}
+
+    def step_budget(self, text: str, mode: str = "agent") -> int:
+        """Per-task max tool steps: easy tasks stay cheap, hard tasks get room."""
+        if mode and str(mode).lower() in ("chat", "multi-chat"):
+            return min(2, config.max_tool_steps)
+        diff = self.classify_difficulty(text)
+        return min(self._STEP_CAPS.get(diff, config.max_tool_steps), config.max_tool_steps)
+
+    def strategy_for(self, text: str, mode: str = "agent", council_used: bool = False) -> str:
+        """Pick the deliberation strategy for a task (auto) or honor overrides.
+
+        Returns: "none" | "reflexion" | "verify" | "self_consistency"
+        """
+        if council_used:
+            return "none"  # the council already deliberated
+        override = getattr(config, "think_strategy", "auto")
+        if override != "auto":
+            return override if override in STRATEGY_NAMES else "none"
+        if not config.think_enabled:
+            return "none"
+        if mode and str(mode).lower() in ("chat", "multi-chat"):
+            return "none"
+        diff = self.classify_difficulty(text)
+        if diff <= 2:
+            return "none"
+        if diff == 3:
+            return "reflexion"
+        if diff == 4:
+            return "verify" if config.verify_threshold <= 4 else "reflexion"
+        return "self_consistency"
+
+
+STRATEGY_NAMES = ("none", "reflexion", "verify", "self_consistency")
 
 
 governor = Governor()
