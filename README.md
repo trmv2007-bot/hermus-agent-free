@@ -117,6 +117,46 @@ Original Hermes / Strix / Agent Reach use some paid services:
 - `vision_analyze(image_path, prompt, model="llava:7b")` - Ollama LLaVA base64 image, POST to `http://localhost:11434/api/generate`, `ollama pull llava:7b` free local vision
 - `vision_available_models()` - Lists vision models via /api/tags
 
+#### Hermus Computer Agent v1 — Record → Detect → Understand → Verify
+
+```bash
+# Detached recording survives the command that starts it
+hermus screen record start --fps 10 --buffer-seconds 30 --format mp4
+hermus screen record status
+hermus screen record stop
+
+# A filename saves video + named JSON sidecars
+hermus screen record save task-123.mp4
+
+# A task id (no extension) creates the complete task bundle
+hermus screen record save task_042
+# data/recordings/task_042/{recording.mp4,timeline.json,events.json,
+#                           actions.json,result.json,manifest.json}
+
+# Turn a recording into a semantic timeline with local Ollama/LLaVA
+hermus screen analyze data/recordings/task-123.mp4 --task "Install X"
+# Change detection only (no model calls)
+hermus screen analyze data/recordings/task-123.mp4 --no-vision
+
+# Event-driven condition watching
+hermus screen watch "wait until the installation finishes" --timeout 60
+```
+
+The rolling RAM buffer contains JPEG bytes, not full PIL screen images, and is
+bounded by both duration and memory. The full session is streamed separately
+to MP4/WebM through free FFmpeg (`imageio-ffmpeg` is included as a fallback).
+Only debounced important frames are decoded for vision. Screen capture and
+watch tools are privacy-gated in `core.permissions`; recordings default to
+private files under `data/recordings/` and are ignored by Git.
+
+Agent/gateway tools: `screen_record_start`, `screen_record_stop`,
+`screen_record_status`, `screen_record_save`, `screen_analyze`, `screen_verify`,
+`screen_action_before` / `screen_action_after`, and `screen_watch`. The action
+boundary pair captures exact evidence around a click/type/launch instead of
+inferring boundaries from an arbitrary time window. Gateway routes mirror these at
+`/screen/{start,stop,status,save,analyze,watch}` and
+`/screen/action/{before,after}`.
+
 #### Voice Memo Transcription Faster-Whisper Free
 - `transcribe_audio(audio_path, model="base", language)` - faster-whisper WhisperModel base/small/medium/large-v2 free local, no cloud, beam_size 5, segments start/end/text
 - `voice_available_models()` - tiny 39M, base 74M, small 244M, medium 769M, large-v2 1550M

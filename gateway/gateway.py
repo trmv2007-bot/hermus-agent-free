@@ -863,10 +863,22 @@ async def screen_status():
 
 @app.post("/screen/start")
 async def screen_start(payload: Dict = None):
+    from core.computer import recording_policy
     from core.integrations import _screen_recorder
 
     payload = payload or {}
-    return _screen_recorder().start()
+    fps = float(payload.get("fps", 10.0))
+    max_seconds = float(payload.get("max_seconds", 30.0))
+    valid = recording_policy.validate_settings(fps, max_seconds)
+    if not valid.get("ok"):
+        return {"success": False, "error": valid["error"]}
+    output = payload.get("output_path") or None
+    if output:
+        try:
+            output = str(recording_policy.output_path(output))
+        except (ValueError, PermissionError) as exc:
+            return {"success": False, "error": str(exc)}
+    return _screen_recorder().start(max_seconds=max_seconds, fps=fps, output_path=output)
 
 
 @app.post("/screen/stop")
@@ -874,6 +886,79 @@ async def screen_stop():
     from core.integrations import _screen_recorder
 
     return _screen_recorder().stop()
+
+
+@app.post("/screen/save")
+async def screen_save(payload: Dict):
+    from core.computer import recording_policy
+    from core.integrations import _screen_recorder
+
+    try:
+        path = recording_policy.output_path(payload.get("path", "recording.mp4"))
+    except (ValueError, PermissionError) as exc:
+        return {"success": False, "error": str(exc)}
+    seconds = float(payload.get("seconds", 0.0))
+    return _screen_recorder().save(str(path), seconds=seconds if seconds > 0 else None)
+
+
+@app.post("/screen/analyze")
+async def screen_analyze(payload: Dict):
+    from core.computer import VideoAnalyzer
+    from core.integrations import _screen_recorder
+
+    frames = _screen_recorder().recent(float(payload.get("seconds", 10.0)))
+    analyzer = (VideoAnalyzer.with_ollama(payload.get("model", "llava:7b"))
+                if payload.get("use_vision", True) else VideoAnalyzer())
+    return await asyncio.to_thread(
+        analyzer.analyze,
+        frames,
+        payload.get("task", ""),
+        int(payload.get("max_events", 12)),
+    )
+
+
+@app.post("/screen/watch")
+async def screen_watch(payload: Dict):
+    from core.computer import ScreenWatcher, VideoAnalyzer
+    from core.integrations import _screen_recorder
+
+    analyzer = VideoAnalyzer.with_ollama(payload.get("model", "llava:7b"))
+    watcher = ScreenWatcher(_screen_recorder(), analyzer=analyzer)
+    return await asyncio.to_thread(
+        watcher.watch,
+        payload.get("condition", ""),
+        float(payload.get("timeout", 60.0)),
+        0.25,
+        int(payload.get("stable_matches", 1)),
+        False,
+    )
+
+
+@app.post("/screen/action/before")
+async def screen_action_before(payload: Dict):
+    from core.integrations import _screen_action_manager
+
+    return _screen_action_manager().before(
+        payload.get("action", ""), payload.get("expected_state", "")
+    )
+
+
+@app.post("/screen/action/after")
+async def screen_action_after(payload: Dict):
+    from core.computer import ScreenVerifier, VideoAnalyzer
+    from core.integrations import _screen_action_manager
+
+    analyzer = (VideoAnalyzer.with_ollama(payload.get("model", "llava:7b"))
+                if payload.get("use_vision", False) else None)
+    verifier = ScreenVerifier(
+        vision_model=analyzer.evaluate_condition if analyzer else None,
+        transition_model=analyzer.evaluate_transition if analyzer else None,
+    )
+    return await asyncio.to_thread(
+        _screen_action_manager().after,
+        payload.get("action_id", ""),
+        verifier,
+    )
 
 
 @app.post("/watchdog/handle")

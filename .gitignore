@@ -34,4 +34,6 @@ data/plans/
 pentest_runs/
 bounty_reports/
 *.mp4
+*.webm
 *.mp3
+data/recordings/
