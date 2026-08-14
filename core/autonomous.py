@@ -73,7 +73,8 @@ class Verifier:
     """
 
     ERROR_MARKERS = ("error", "exception", "traceback", "failed", "failure", "no such file",
-                     "command not found", "refused", "timeout")
+                     "command not found", "refused", "timeout", "not running",
+                     "no api key", "not installed", "permission denied", "denied")
 
     def verify(self, task: str, result: Any) -> Dict[str, Any]:
         text = str(result or "").strip()

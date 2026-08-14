@@ -19,6 +19,12 @@ os.environ["HERMUS_HOME"] = _TMP
 
 from core.config import config  # noqa: E402
 config.model = "mock/mock"
+# Isolate memory stores so tests don't pollute the shared repo data/*.db
+config.memory_db_path = str(Path(_TMP) / "memory.db")
+config.memory2_db_path = str(Path(_TMP) / "memory2.db")
+config.trajectory_path = str(Path(_TMP) / "trajectories.jsonl")
+config.user_model_path = str(Path(_TMP) / "user_model.json")
+config.embeddings_db_path = str(Path(_TMP) / "embeddings.db")
 
 
 # --------------------------------------------------------------------------

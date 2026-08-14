@@ -89,6 +89,25 @@ async def _startup_channels():
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
         print(f"[Gateway] Channels started: {started}")
+    if getattr(config, "background_agents_enabled", True):
+        try:
+            _watchdog_task = asyncio.create_task(_background_agent_watchdog())
+        except Exception as e:
+            print(f"[Gateway] background-agent watchdog failed to start: {e}")
+
+
+async def _background_agent_watchdog():
+    """Periodically revive stale/dead persistent background agents."""
+    from core.agent_manager import agent_manager
+
+    while True:
+        try:
+            tick = agent_manager.watchdog_tick(restart=True)
+            if tick.get("revived") or tick.get("errors"):
+                print(f"[Gateway] background agents tick: {tick}")
+        except Exception as e:
+            print(f"[Gateway] background agents tick error: {e}")
+        await asyncio.sleep(30)
 
 
 @app.get("/")
@@ -109,8 +128,18 @@ async def root():
             "mcp_client",
             "semantic_embeddings",
             "public_api_discovery",
+            "memory2_typed_scored_memory",
+            "model_router2",
+            "autonomous_verify_repair_loop",
+            "persistent_background_agents",
+            "permission_manager",
+            "research_pipeline",
+            "computer_control_screen",
+            "self_healing_watchdog",
+            "workspace_projects",
+            "profiles_personas",
         ],
-        "version": "2.1-free-versatile"
+        "version": "2.2-free-architecture"
     }
 
 @app.get("/cache/stats")
@@ -451,6 +480,8 @@ async def command_endpoint(payload: Dict):
     base_url = payload.get("base_url")
     provider = payload.get("provider")
     key_name = payload.get("key_name")
+    autonomous = bool(payload.get("autonomous", False))
+    profile = payload.get("profile") or ""
 
     # Allow selecting a stored key by provider + key name (dashboard chat).
     # The key itself is looked up server-side — never sent from the browser.
@@ -470,7 +501,17 @@ async def command_endpoint(payload: Dict):
     agent = get_agent_for_user(
         platform, user_id, model=model, mode=mode, api_key=api_key, base_url=base_url
     )
-    result = agent.chat(text)
+    if profile:
+        agent.profile = profile
+    if autonomous:
+        result = agent.autonomous(text)
+        result["autonomous"] = True
+    else:
+        result = agent.chat(text)
+        # Self-healing watchdog (architecture upgrade)
+        from core.integrations import maybe_self_heal
+
+        result = maybe_self_heal(result)
     # Include mode in response
     result["mode"] = agent.mode.value
     result["mode_config"] = {"name": agent.mode_config.name, "description": agent.mode_config.description[:200]}
@@ -696,6 +737,166 @@ async def update_remote():
         return updater.get_remote_commit()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+# ---- Architecture-upgrade endpoints ------------------------------------------
+
+@app.get("/agents")
+async def background_agents_list():
+    from core.agent_manager import agent_manager
+
+    return {"agents": agent_manager.list()}
+
+
+@app.post("/agents/start")
+async def background_agents_start(payload: Dict):
+    from core.agent_manager import agent_manager
+
+    name = payload.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    return agent_manager.start(name)
+
+
+@app.post("/agents/stop")
+async def background_agents_stop(payload: Dict):
+    from core.agent_manager import agent_manager
+
+    name = payload.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    return agent_manager.stop(name)
+
+
+@app.post("/agents/create")
+async def background_agents_create(payload: Dict):
+    from core.agent_manager import agent_manager
+
+    name = payload.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    return agent_manager.create(name, role=payload.get("role", "generic"),
+                                model=payload.get("model"), persona=payload.get("persona"))
+
+
+@app.get("/workspace")
+async def workspace_info():
+    from core.workspace import workspace as ws
+
+    return {"base_dir": str(ws.base_dir), "projects": ws.list_projects(),
+            "current": ws.current_project(), "dirs": {k: str(v) for k, v in ws.dirs.items()}}
+
+
+@app.post("/workspace/create")
+async def workspace_create(payload: Dict):
+    from core.workspace import workspace as ws
+
+    return ws.create_project(payload.get("name", ""), description=payload.get("description", ""))
+
+
+@app.post("/workspace/use")
+async def workspace_use(payload: Dict):
+    from core.workspace import workspace as ws
+
+    return ws.set_current_project(payload.get("name", ""))
+
+
+@app.post("/memory2/remember")
+async def memory2_remember(payload: Dict):
+    from core.memory2 import memory2
+
+    return memory2.remember(payload.get("kind", "semantic"), payload.get("content", ""),
+                            importance=payload.get("importance", 5.0),
+                            success=payload.get("success"), project=payload.get("project"))
+
+
+@app.post("/memory2/recall")
+async def memory2_recall(payload: Dict):
+    from core.memory2 import memory2
+
+    return {"results": memory2.recall(payload.get("query", ""), limit=int(payload.get("limit", 10)),
+                                      kinds=payload.get("kinds"), project=payload.get("project"))}
+
+
+@app.get("/permissions/log")
+async def permissions_log(limit: int = 20):
+    from core.permissions import permission_manager
+
+    return {"log": permission_manager.recent(limit=limit)}
+
+
+@app.post("/permissions/check")
+async def permissions_check(payload: Dict):
+    from core.permissions import permission_manager
+
+    return permission_manager.check(payload.get("tool", ""), agent=payload.get("agent"),
+                                    args=payload.get("args"))
+
+
+@app.post("/permissions/set")
+async def permissions_set(payload: Dict):
+    from core.permissions import permission_manager
+
+    return permission_manager.set_policy(payload.get("tool", ""), payload.get("decision", "ask"),
+                                         agent=payload.get("agent"))
+
+
+@app.post("/research")
+async def research_run(payload: Dict):
+    from core.research import research_pipeline
+
+    return research_pipeline.run(payload.get("query", ""), limit=int(payload.get("limit", 10)))
+
+
+@app.post("/router/select")
+async def router_select(payload: Dict):
+    from core.router2 import router2
+
+    return router2.select(payload.get("text", ""))
+
+
+@app.get("/screen/status")
+async def screen_status():
+    from core.integrations import _screen_recorder
+
+    return _screen_recorder().status()
+
+
+@app.post("/screen/start")
+async def screen_start(payload: Dict = None):
+    from core.integrations import _screen_recorder
+
+    payload = payload or {}
+    return _screen_recorder().start()
+
+
+@app.post("/screen/stop")
+async def screen_stop():
+    from core.integrations import _screen_recorder
+
+    return _screen_recorder().stop()
+
+
+@app.post("/watchdog/handle")
+async def watchdog_handle(payload: Dict):
+    from core.watchdog import watchdog
+
+    return watchdog.handle(payload.get("error", ""), context=payload.get("context", ""))
+
+
+@app.get("/profiles")
+async def profiles_list():
+    from core.profiles import profile_manager
+
+    return {"profiles": profile_manager.list()}
+
+
+@app.post("/profiles/create")
+async def profiles_create(payload: Dict):
+    from core.profiles import profile_manager
+
+    return profile_manager.create(payload.get("name", ""), persona=payload.get("persona"),
+                                  model=payload.get("model"))
+
 
 # CLI for gateway setup/start - free
 def setup(platform: str):

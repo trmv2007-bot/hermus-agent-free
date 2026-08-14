@@ -470,6 +470,13 @@ class ToolRegistry:
         for mod_path in DISCOVER_MODULES:
             self._load_module(mod_path)
         self.register_builtin_memory_and_skills()
+        # Architecture-upgrade tools (research / memory2 / router / workspace / screen)
+        try:
+            from .integrations import register_architecture_tools
+
+            register_architecture_tools(self)
+        except Exception as e:
+            self._errors.append(f"integrations: {e}")
         # Custom APIs as tools
         try:
             from core.custom_api import custom_api_manager
@@ -538,6 +545,15 @@ class ToolRegistry:
                 args = json.loads(args)
             except Exception:
                 args = {"input": args}
+
+        # ---- Permission gate (architecture upgrade) ------------------------
+        # Runs before the existence check so DENY-listed tools are blocked even
+        # when no executor is registered (e.g. credential_access / GUI actions).
+        # Always audited; blocks DENY (and ASK when ask_policy=deny).
+        permission_denied = self._check_permission(name, args)
+        if permission_denied is not None:
+            return permission_denied
+
         fn = self.executors.get(name)
         if not fn:
             # Last-chance custom API
@@ -569,6 +585,37 @@ class ToolRegistry:
             if trail:
                 return trail
             return {"error": f"{name} failed: {e}"}
+
+    def _check_permission(self, name: str, args: Dict) -> Optional[Dict]:
+        """Return a denial result dict to short-circuit execution, or None to allow."""
+        try:
+            from .config import config
+            from .permissions import Decision, permission_manager
+
+            decision = permission_manager.check(name, args=args)
+            if not getattr(config, "permissions_enforce", True):
+                return None
+            d = Decision(decision["decision"])
+            if d == Decision.ALLOW:
+                return None
+            if d == Decision.DENY:
+                return {
+                    "error": f"Permission DENIED for tool '{name}'",
+                    "permission": decision,
+                    "hint": "Enable with: hermus perms set %s allow" % name,
+                }
+            if d == Decision.ASK:
+                if getattr(config, "ask_policy", "allow") == "allow":
+                    # audited but allowed (backward-compatible default)
+                    return None
+                return {
+                    "error": f"Permission requires confirmation (ASK) for tool '{name}'",
+                    "permission": decision,
+                    "hint": "Enable with: hermus perms set %s allow  (or set HERMUS_ASK_POLICY=allow)" % name,
+                }
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _looks_like_error(result: Any) -> bool:

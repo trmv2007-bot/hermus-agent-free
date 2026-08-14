@@ -81,7 +81,14 @@ DEFAULT_POLICY: Dict[str, tuple] = {
     "type_text": (Risk.GUI, Decision.DENY),
     "keyboard": (Risk.GUI, Decision.DENY),
     "mouse": (Risk.GUI, Decision.DENY),
-    "screen_record": (Risk.GUI, Decision.DENY),
+    # screen recording: capturing the display is sensitive (DENY), but
+    # read-only inspection of the recorder state is safe (ALLOW).
+    "screen_record_start": (Risk.GUI, Decision.DENY),
+    "screen_record_stop": (Risk.GUI, Decision.ALLOW),
+    "screen_record_status": (Risk.READ, Decision.ALLOW),
+    "screen_get_recent": (Risk.READ, Decision.ALLOW),
+    "screen_understand": (Risk.READ, Decision.ALLOW),
+    "screen_verify": (Risk.READ, Decision.ALLOW),
     "credential_access": (Risk.ADMIN, Decision.DENY),
     "get_credential": (Risk.ADMIN, Decision.DENY),
     "install_package": (Risk.ADMIN, Decision.ASK),
@@ -168,10 +175,20 @@ class PermissionManager:
 
     def audit(self, tool_name: str, decision: str, agent: Optional[str],
               risk: Optional[str] = None) -> Path:
-        return workspace.log("permissions", json.dumps({
-            "tool": tool_name, "decision": decision, "agent": agent, "risk": risk,
+        # Append a structured JSONL entry directly (workspace.log wraps strings
+        # as {"ts", "line"}, which would double-encode the fields we need).
+        path = workspace.dirs["logs"] / "permissions.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
             "ts": datetime.now().isoformat(),
-        }))
+            "tool": tool_name,
+            "decision": decision,
+            "agent": agent,
+            "risk": risk,
+        }
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        return path
 
     def recent(self, limit: int = 20) -> List[Dict[str, Any]]:
         path = workspace.dirs["logs"] / "permissions.jsonl"

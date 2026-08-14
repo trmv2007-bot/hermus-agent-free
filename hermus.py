@@ -28,6 +28,7 @@ def main():
     # Default: start TUI chat
     parser.add_argument("--model", default=config.model, help="Model: ollama/llama3.1:8b (free offline), groq/... (free tier), hf/... (free), mock/mock")
     parser.add_argument("--mode", default=None, help="Mode: agent can control everything, chat let's u chat, multi-agent can use multiple keys at once and reach goal no matter how difficult, multi-chat can get accurate reliable info with multiple ai models and api keys - persisted to user_model.json")
+    parser.add_argument("--profile", default=None, help="Persona profile (hermus profile list) - gives the agent an independent memory + system prompt")
 
     # gateway subcommand
     gateway_parser = subparsers.add_parser("gateway", help="Gateway - single process for Telegram/Discord/CLI")
@@ -299,6 +300,8 @@ def main():
     # autonomous loop
     run_parser = subparsers.add_parser("run", help="Autonomous task loop - plan/execute/verify/repair")
     run_parser.add_argument("task", help="Goal to drive through the verify/repair loop")
+    run_parser.add_argument("--model", default=None, help="Model to run with (default: config.model)")
+    run_parser.add_argument("--max-repairs", type=int, default=2, help="Max diagnose/repair cycles")
 
     # persistent background agents
     agent_parser = subparsers.add_parser("agent", help="Persistent background agents")
@@ -1055,13 +1058,14 @@ def main():
             print(f"Alt       : {', '.join(sel['alternatives'])}")
 
     elif args.command == "run":
-        from core.autonomous import AutonomousRunner, Verifier
-        runner = AutonomousRunner(verifier=Verifier())
-        report = runner.run(args.task)
-        print(f"Autonomous run: status={report.status} verified={report.verified} repairs={report.repairs}")
-        for s in report.steps:
-            print(f"  [{s.status}] {s.goal[:70]} (attempts={s.attempts})")
-        print(f"\nResult:\n{report.final_answer[:1500]}")
+        from core.agent import HermusAgent
+
+        agent = HermusAgent(model=args.model)
+        report = agent.autonomous(args.task, max_repairs=args.max_repairs)
+        print(f"Autonomous run: status={report['status']} verified={report['verified']} repairs={report['repairs']}")
+        for s in report["steps"]:
+            print(f"  [{s['status']}] {s['goal'][:70]} (attempts={s['attempts']})")
+        print(f"\nResult:\n{str(report['final_answer'])[:1500]}")
 
     elif args.command == "agent":
         from core.agent_manager import agent_manager
@@ -1187,7 +1191,9 @@ def main():
 
     else:
         # Default: start TUI - show update check on startup
-        print(f"Hermus Agent Free - Model {args.model} | Mode {args.mode}")
+        if args.profile:
+            config.profile = args.profile
+        print(f"Hermus Agent Free - Model {args.model} | Mode {args.mode}" + (f" | Profile {args.profile}" if args.profile else ""))
         # Check for updates on startup and show in CLI
         try:
             from core.updater import get_updater_for_current_repo

@@ -75,19 +75,57 @@ Classify → known fix (apply) : diagnose (generate patch) → test → commit/r
 Default fixes: JSON-parse, missing-import, timeout-retry. Register custom fixes
 via `register_fix(pattern, fn)`; attach `tester` / `rollbacker` callables.
 
-## Deeper wiring (next steps)
+## Full wiring (done)
 
-These foundations are intentionally *not* yet forced into the default agent
-path. To make them authoritative:
+All subsystems are now wired into the live agent loop, tool registry, and
+gateway:
 
-1. **Permissions** — in `core/tool_registry.execute`, call
-   `permission_manager.check(name, agent=…)` and block/confirm non-ALLOW
-   decisions before running the tool.
-2. **Memory 2.0** — in `core/agent._build_system_prompt`, add
-   `memory2.recall_prompt_block(user_message)` alongside the existing
-   `curated_memory` block.
-3. **Router** — in `core/agent.chat`, route each step's model via
-   `router2.select(…)` instead of a fixed `self.model_name`.
-4. **Autonomous loop** — wrap `HermusAgent.chat` as the `executor` of
-   `AutonomousRunner` so multi-step goals get verify/repair gating.
-5. **Watchdog** — run `watchdog.handle` from the gateway on task failures.
+1. **Permissions** — `core/tool_registry.execute` gates *every* tool call
+   before execution. Always audited to `~/.hermus/logs/permissions.jsonl`;
+   DENY blocks (even for unregistered policy-listed tools like
+   `credential_access`), ASK resolves via `HERMUS_ASK_POLICY` (default
+   `allow` = audited-but-allowed for backward compatibility; `deny` = strict).
+2. **Memory 2.0** — `core/agent._build_system_prompt` injects a scored recall
+   block; after each turn the agent auto-persists episodic (+ semantic facts,
+   + procedural tool-sequences) memories scoped to the active project.
+3. **Router** — `core.agent.chat` re-selects the model per turn via
+   `router2.select` (skipped when the model is pinned explicitly or the
+   provider is `mock`). Response includes a `router` field.
+4. **Autonomous loop** — `HermusAgent.autonomous(task)` wraps the ReAct loop
+   as the executor of `AutonomousRunner` (verify/repair). Exposed via
+   `hermus run` and the gateway `{"autonomous": true}` flag. An optional
+   non-blocking verify gate (`HERMUS_AUTONOMOUS_ENABLED=1`) adds a
+   `verification` field to every chat result.
+5. **Watchdog** — `core.integrations.maybe_self_heal` attaches a
+   `self_healing` block to failed results (gateway `/command` path).
+6. **Persistent agents** — the gateway runs a background watchdog tick
+   (`/agents` endpoints + `watchdog_tick` on a 30s loop).
+7. **Research / computer / router / memory2 / workspace** exposed as tools
+   (`research_deep`, `screen_*`, `router_choose`, `memory2_recall/remember`,
+   `workspace_list_projects`) and REST endpoints.
+8. **Profiles** — `--profile` / `HERMUS_PROFILE` injects a persona + gives the
+   agent an independent Memory 2.0 store.
+
+### Config flags (env)
+| Flag | Default | Effect |
+|---|---|---|
+| `HERMUS_PERMISSIONS_ENFORCE` | `1` | gate tools via ALLOW/ASK/DENY |
+| `HERMUS_ASK_POLICY` | `allow` | how ASK resolves (`allow`/`deny`) |
+| `HERMUS_MEMORY2_ENABLED` | `1` | typed memory recall + auto-persist |
+| `HERMUS_ROUTER2_ENABLED` | `1` | per-turn model routing |
+| `HERMUS_AUTONOMOUS_ENABLED` | `0` | add verify gate to every chat turn |
+| `HERMUS_WATCHDOG_ENABLED` | `1` | self-heal on failures |
+| `HERMUS_BG_AGENTS_ENABLED` | `1` | gateway keeps background agents alive |
+| `HERMUS_PROFILE` | `""` | active persona profile |
+
+### New gateway endpoints
+`/agents`, `/agents/{create,start,stop}`, `/workspace`, `/workspace/{create,use}`,
+`/memory2/{remember,recall}`, `/permissions/{check,set,log}`, `/research`,
+`/router/select`, `/screen/{status,start,stop}`, `/watchdog/handle`,
+`/profiles`, `/profiles/create`.
+
+### Tests
+- `tests/test_architecture.py` — 10/10 (foundation units)
+- `tests/test_integration.py` — 6/6 (live wiring: registry gate, agent loop,
+  gateway endpoints)
+- full suite — 77 passing

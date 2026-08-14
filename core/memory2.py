@@ -60,7 +60,7 @@ class MemoryStore:
     """Typed memory backed by a single SQLite database."""
 
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = Path(db_path or config.resolve_path("data/memory2.db"))
+        self.db_path = Path(db_path or config.resolve_path(config.memory2_db_path))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 

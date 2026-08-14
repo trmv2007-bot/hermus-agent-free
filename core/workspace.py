@@ -243,5 +243,13 @@ class Workspace:
                 return name
         return None
 
+    def active_project(self) -> str:
+        """Resolve the effective project: explicit config.project, else the
+        workspace's current project, else 'default'."""
+        cfg_project = getattr(config, "project", "default") or "default"
+        if cfg_project and cfg_project != "default":
+            return cfg_project
+        return self.current_project() or "default"
+
 
 workspace = Workspace()
