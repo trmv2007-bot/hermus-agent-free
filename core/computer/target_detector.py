@@ -168,7 +168,7 @@ class TargetDetector:
         prompt = (
             f"Locate the UI element described as: {target}\n"
             "Respond with ONLY a JSON object, no prose, in the form:\n"
-            '{"found": true, "x": 742, "y": 381, "confidence": 0.94, "description": "Install button"}\n'
+            '{"found": true, "x": 742, "y": 381, "bbox": [ymin, xmin, ymax, xmax], "confidence": 0.94, "description": "Install button"}\n'
             "Use pixel coordinates relative to the top-left of the image. "
             "If the element is not visible, use found: false and x/y as 0."
         )
@@ -180,9 +180,10 @@ class TargetDetector:
             "found": bool(parsed.get("found")),
             "x": parsed.get("x"),
             "y": parsed.get("y"),
+            "bbox": parsed.get("bbox"),
             "confidence": parsed.get("confidence", 0.0),
             "description": parsed.get("description", ""),
-            "box": parsed.get("box"),
+            "box": parsed.get("box") or parsed.get("bbox"),
         }
 
     def find_template(self, frame: Any, template: Any, threshold: float = 0.05) -> Dict[str, Any]:

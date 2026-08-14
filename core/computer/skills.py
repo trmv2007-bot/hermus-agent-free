@@ -33,6 +33,9 @@ class ComputerSkill:
     evidence: Dict[str, Any] = field(default_factory=dict)
     created: str = field(default_factory=_now)
     uses: int = 0
+    success_rate: float = 1.0
+    runs: int = 0
+    typical_failures: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -46,6 +49,9 @@ class ComputerSkill:
             evidence=data.get("evidence", {}),
             created=data.get("created", _now()),
             uses=int(data.get("uses", 0)),
+            success_rate=float(data.get("success_rate", 1.0)),
+            runs=int(data.get("runs", 0)),
+            typical_failures=data.get("typical_failures", []),
         )
 
 
@@ -125,9 +131,26 @@ class ComputerSkillStore:
                 best, best_score = skill, score
         return best if best_score > 0 else None
 
-    def record_use(self, name: str) -> None:
+    def record_run(self, name: str, success: bool, error: Optional[str] = None) -> None:
+        """Update skill stats after an execution attempt."""
         skill = self.get_skill(name)
         if skill is None:
             return
+        
+        skill.runs += 1
         skill.uses += 1
-        self._path(name).write_text(json.dumps(skill.to_dict(), indent=2, default=str), encoding="utf-8")
+        
+        # Incremental success rate calculation
+        old_successes = skill.success_rate * (skill.runs - 1)
+        new_successes = old_successes + (1 if success else 0)
+        skill.success_rate = round(new_successes / skill.runs, 3)
+        
+        if error:
+            skill.typical_failures.append(str(error))
+            skill.typical_failures = skill.typical_failures[-5:] # Keep last 5
+            
+        path = self._path(name)
+        path.write_text(json.dumps(skill.to_dict(), indent=2, default=str), encoding="utf-8")
+
+    def record_use(self, name: str) -> None:
+        self.record_run(name, success=True)

@@ -387,6 +387,7 @@ def main():
     computer_task.add_argument("--model", default=None, help="Ollama vision model (e.g. llava:7b) for semantic verification")
     computer_task.add_argument("--retries", type=int, default=2)
     computer_task.add_argument("--no-skill", action="store_true", help="Do not save a skill on success")
+    computer_task.add_argument("--dry-run", action="store_true", help="Plan and simulate actions without touching the machine")
     computer_sub.add_parser("stop", help="Emergency stop - halt all mouse/keyboard/autonomous control")
     computer_sub.add_parser("status", help="Show the computer control center")
     computer_target = computer_sub.add_parser("target", help="Vision-driven find-on-screen for a UI element")
@@ -1268,7 +1269,7 @@ def main():
                 learn_skills=not args.no_skill,
                 max_retries=args.retries,
             )
-            result = agent.run(task, task_id=args.task_id)
+            result = agent.run(task, task_id=args.task_id, dry_run=args.dry_run)
             print(json.dumps(result, indent=2, default=str))
         elif args.computer_action == "stop":
             emergency_stop.halt()
