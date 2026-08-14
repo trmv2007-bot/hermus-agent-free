@@ -80,7 +80,11 @@ Original Hermes (Nous Research) is 225k stars but needs OpenRouter paid API. Thi
 - **Parallel execution:** 3 tasks with 3 different keys in parallel = 3x faster vs 1 key sequential
 - **Round-robin + failure tracking:** 5 min cooldown if fails >=3 times
 
-### 🔌 Custom API - Add Any API as Tool in 1 Command Free
+### 🔌 Public API Discovery + Custom API Tools
+- `hermus api discover "weather forecast" --auth No` searches the bundled `public-apis/public-apis` directory offline
+- Filter with `--category Security`, `--cors Yes`, `--allow-http`, or refresh via `hermus api refresh-catalog`
+- Agent tools: `public_api_search`, `public_api_categories`, `public_api_refresh`; gateway endpoints: `/public-apis/search`, `/public-apis/categories`, `/public-apis/refresh`
+- Discovery returns provider documentation links, not automatically trusted endpoints. Review the provider's docs and terms first
 - `hermus api add --name weather_api --description "Get weather" --url "https://api.openweathermap.org/data/2.5/weather/{city}" --param "city:City name" --auth-type bearer --auth-token YOUR_KEY`
 - URL templating `{param}`, auth bearer/apikey/basic, up to 10 keys same name round-robin
 - Stored in `data/custom_apis.json` local only, not uploaded

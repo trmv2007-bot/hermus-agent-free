@@ -108,6 +108,7 @@ async def root():
             "discord_bot",
             "mcp_client",
             "semantic_embeddings",
+            "public_api_discovery",
         ],
         "version": "2.1-free-versatile"
     }
@@ -273,6 +274,44 @@ async def tools_list():
     from core.tool_registry import tool_registry
 
     return tool_registry.list_tools()
+
+
+@app.get("/public-apis/search")
+async def public_apis_search(
+    query: str = "",
+    category: str = "",
+    auth: str = "any",
+    https_only: bool = True,
+    cors: str = "any",
+    limit: int = 10,
+    refresh: bool = False,
+):
+    """Discover APIs from the bundled/updatable public-apis catalog."""
+    from tools.public_apis import public_api_catalog
+
+    return public_api_catalog.search(
+        query=query,
+        category=category,
+        auth=auth,
+        https_only=https_only,
+        cors=cors,
+        limit=limit,
+        refresh=refresh,
+    )
+
+
+@app.get("/public-apis/categories")
+async def public_apis_categories():
+    from tools.public_apis import public_api_catalog
+
+    return public_api_catalog.categories()
+
+
+@app.post("/public-apis/refresh")
+async def public_apis_refresh():
+    from tools.public_apis import public_api_catalog
+
+    return public_api_catalog.refresh()
 
 
 @app.get("/mcp/servers")

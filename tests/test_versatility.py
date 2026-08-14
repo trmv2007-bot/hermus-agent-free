@@ -21,7 +21,14 @@ def test_tool_registry_discovers_tools():
     for name in ("sast_scan", "dast_scan", "bug_bounty_recon", "generate_compliance_report"):
         assert name in info["tools"], f"missing pentest tool {name}"
     # New versatility tools
-    for name in ("mcp_list_servers", "embeddings_status", "embeddings_search"):
+    for name in (
+        "mcp_list_servers",
+        "embeddings_status",
+        "embeddings_search",
+        "public_api_search",
+        "public_api_categories",
+        "public_api_refresh",
+    ):
         assert name in info["tools"], f"missing {name}"
 
 
