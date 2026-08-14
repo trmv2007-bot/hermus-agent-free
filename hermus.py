@@ -309,7 +309,8 @@ def main():
     agent_create = agent_sub.add_parser("create", help="Create a named agent")
     agent_create.add_argument("name")
     agent_create.add_argument("--role", default="generic",
-                              choices=["researcher", "coder", "system-monitor", "scheduler", "memory-manager", "watchdog", "generic"])
+                              choices=["researcher", "coder", "system-monitor", "scheduler", "memory-manager",
+                                       "watchdog", "computer-operator", "coordinator", "generic"])
     agent_create.add_argument("--model", default=None)
     agent_start = agent_sub.add_parser("start", help="Start a background agent worker")
     agent_start.add_argument("name")
@@ -317,6 +318,14 @@ def main():
     agent_status.add_argument("name")
     agent_stop = agent_sub.add_parser("stop", help="Stop an agent")
     agent_stop.add_argument("name")
+    agent_job = agent_sub.add_parser("job", help="Queue a task for a background agent")
+    agent_job.add_argument("name")
+    agent_job.add_argument("task", nargs="+")
+    agent_job.add_argument("--wait", action="store_true")
+    agent_job.add_argument("--timeout", type=float, default=180.0)
+    agent_result = agent_sub.add_parser("result", help="Inspect a background job")
+    agent_result.add_argument("name")
+    agent_result.add_argument("job_id")
     agent_sub.add_parser("list", help="List all agents")
 
     # permissions
@@ -381,13 +390,31 @@ def main():
     computer_parser = subparsers.add_parser("computer", help="Autonomous computer agent - plan/act/record/verify/repair")
     computer_sub = computer_parser.add_subparsers(dest="computer_action")
 
+    def add_computer_task_args(command_parser):
+        command_parser.add_argument("task", nargs="+", help="Natural-language desktop task")
+        command_parser.add_argument("--task-id", default=None)
+        command_parser.add_argument("--model", default=None, help="Ollama vision model for semantic verification")
+        command_parser.add_argument("--retries", type=int, default=2)
+        command_parser.add_argument("--no-skill", action="store_true", help="Do not learn/update a skill")
+        command_parser.add_argument("--dry-run", action="store_true", help="Plan and simulate without touching the machine")
+
     computer_task = computer_sub.add_parser("task", help="Run a desktop task autonomously")
-    computer_task.add_argument("task", nargs="+", help="Natural-language task, e.g. 'Click the Install button'")
-    computer_task.add_argument("--task-id", default=None)
-    computer_task.add_argument("--model", default=None, help="Ollama vision model (e.g. llava:7b) for semantic verification")
-    computer_task.add_argument("--retries", type=int, default=2)
-    computer_task.add_argument("--no-skill", action="store_true", help="Do not save a skill on success")
-    computer_task.add_argument("--dry-run", action="store_true", help="Plan and simulate actions without touching the machine")
+    add_computer_task_args(computer_task)
+    computer_run = computer_sub.add_parser("run", help="Run and persist a resumable desktop task")
+    add_computer_task_args(computer_run)
+    computer_resume = computer_sub.add_parser("resume", help="Resume a persisted desktop task")
+    computer_resume.add_argument("task_id")
+    computer_resume.add_argument("--model", default=None)
+    computer_resume.add_argument("--retries", type=int, default=2)
+    computer_resume.add_argument("--dry-run", action="store_true")
+    computer_sub.add_parser("tasks", help="List persisted desktop tasks")
+    computer_show = computer_sub.add_parser("show", help="Show a persisted desktop task checkpoint")
+    computer_show.add_argument("task_id")
+    computer_delegate = computer_sub.add_parser("delegate", help="Delegate a task across persistent agents")
+    computer_delegate.add_argument("task", nargs="+")
+    computer_delegate.add_argument("--no-wait", action="store_true")
+    computer_delegate.add_argument("--timeout", type=float, default=180.0)
+    computer_delegate.add_argument("--dry-run", action="store_true")
     computer_sub.add_parser("stop", help="Emergency stop - halt all mouse/keyboard/autonomous control")
     computer_sub.add_parser("status", help="Show the computer control center")
     computer_target = computer_sub.add_parser("target", help="Vision-driven find-on-screen for a UI element")
@@ -1146,6 +1173,15 @@ def main():
         elif args.agent_action == "stop":
             r = agent_manager.stop(args.name)
             print(f"{'✅' if r.get('success') else '❌'} {args.name} stopped")
+        elif args.agent_action == "job":
+            r = agent_manager.submit_job(args.name, {"task": " ".join(args.task)})
+            if r.get("success") and args.wait:
+                r = agent_manager.wait_job(args.name, r["job_id"], timeout=args.timeout)
+            print(__import__("json").dumps(r, indent=2, default=str))
+        elif args.agent_action == "result":
+            print(__import__("json").dumps(
+                agent_manager.job_status(args.name, args.job_id), indent=2, default=str
+            ))
         elif args.agent_action == "list":
             agents = agent_manager.list()
             if not agents:
@@ -1250,26 +1286,56 @@ def main():
             ScreenRecorder,
             ScreenWatcher,
             TargetDetector,
+            TaskStore,
             VideoAnalyzer,
             emergency_stop,
         )
 
-        if args.computer_action == "task":
-            task = " ".join(args.task)
-            analyzer = VideoAnalyzer.with_ollama(args.model) if args.model else None
-            # Frame provider so click_target can locate UI elements on the live screen.
-            # The agent owns the recorder lifecycle (start/stop) around the task.
+        def build_computer_agent(model=None, retries=2, learn_skills=True):
+            analyzer = VideoAnalyzer.with_ollama(model) if model else None
             recorder = ScreenRecorder(fps=2.0, max_seconds=120.0)
-            controller = ComputerActionController(frame_provider=recorder.latest,
-                                                  target_detector=TargetDetector(vision_model=analyzer.vision_model if analyzer else None))
-            agent = ComputerAgent(
+            controller = ComputerActionController(
+                frame_provider=recorder.latest,
+                target_detector=TargetDetector(vision_model=analyzer.vision_model if analyzer else None),
+            )
+            return ComputerAgent(
                 controller=controller,
                 recorder=recorder,
                 analyzer=analyzer,
-                learn_skills=not args.no_skill,
-                max_retries=args.retries,
+                learn_skills=learn_skills,
+                max_retries=retries,
             )
-            result = agent.run(task, task_id=args.task_id, dry_run=args.dry_run)
+
+        if args.computer_action in ("task", "run"):
+            task = " ".join(args.task)
+            computer_agent = build_computer_agent(
+                model=args.model,
+                retries=args.retries,
+                learn_skills=not args.no_skill,
+            )
+            result = computer_agent.run(task, task_id=args.task_id, dry_run=args.dry_run)
+            print(json.dumps(result, indent=2, default=str))
+        elif args.computer_action == "resume":
+            computer_agent = build_computer_agent(model=args.model, retries=args.retries)
+            print(json.dumps(computer_agent.resume(args.task_id, dry_run=args.dry_run), indent=2, default=str))
+        elif args.computer_action == "tasks":
+            print(json.dumps(TaskStore().list(), indent=2, default=str))
+        elif args.computer_action == "show":
+            checkpoint = TaskStore().load(args.task_id)
+            print(json.dumps(checkpoint.to_dict() if checkpoint else {
+                "success": False, "error": f"task '{args.task_id}' not found"
+            }, indent=2, default=str))
+        elif args.computer_action == "delegate":
+            from core.computer import MultiAgentDelegator
+
+            delegator = MultiAgentDelegator()
+            delegation_plan = delegator.plan(" ".join(args.task))
+            result = delegator.execute(
+                delegation_plan,
+                wait=not args.no_wait,
+                timeout_per_unit=args.timeout,
+                dry_run=args.dry_run,
+            )
             print(json.dumps(result, indent=2, default=str))
         elif args.computer_action == "stop":
             emergency_stop.halt()
@@ -1314,7 +1380,12 @@ def main():
             if not skills:
                 print("No computer skills learned yet.")
             for skill in skills:
-                print(f" - {skill['name']}: {skill['task']} ({skill['steps']} steps, used {skill['uses']}x)")
+                print(
+                    f" - {skill['name']}: {skill['task']} "
+                    f"({skill['steps']} steps, {skill['successes']}/{skill['runs']} successful, "
+                    f"rate={skill['success_rate']:.1%}, avg={skill['average_duration']:.1f}s, "
+                    f"repairs={skill['known_repairs']})"
+                )
         else:
             parser.parse_args(["computer", "--help"])
 

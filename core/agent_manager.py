@@ -30,7 +30,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .workspace import workspace
 
-ROLES = ("researcher", "coder", "system-monitor", "scheduler", "memory-manager", "watchdog", "generic")
+ROLES = (
+    "researcher", "coder", "system-monitor", "scheduler", "memory-manager",
+    "watchdog", "computer-operator", "coordinator", "generic",
+)
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -43,14 +46,66 @@ def register_handler(role: str, handler: Callable[[Dict[str, Any]], Dict[str, An
     ROLE_HANDLERS[role] = handler
 
 
-def worker_entry(name: str) -> None:
-    """Subprocess entrypoint: load the agent's role handler and run its loop.
+def _general_agent_handler(config: Dict[str, Any]) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+    def handle(job: Dict[str, Any]) -> Dict[str, Any]:
+        from .agent import HermusAgent
 
-    Run detached via ``python -c "... worker_entry('name')"`` so the worker
-    survives the CLI process that started it.
-    """
+        task = str(job.get("task") or job.get("goal") or "")
+        if not task:
+            return {"ok": False, "error": "job has no task"}
+        agent = HermusAgent(
+            model=config.get("model"),
+            session_id=f"background_{config.get('name', 'agent')}",
+        )
+        result = agent.chat(task)
+        ok = bool(result.get("success", True)) if isinstance(result, dict) else bool(result)
+        return {"ok": ok, "task": task, "result": result}
+    return handle
+
+
+def _computer_agent_handler(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Run or resume one persistent desktop task in a detached worker."""
+    from core.computer import (
+        ComputerActionController,
+        ComputerAgent,
+        ScreenRecorder,
+        TargetDetector,
+        VideoAnalyzer,
+    )
+
+    model = job.get("model")
+    analyzer = VideoAnalyzer.with_ollama(model) if model else None
+    recorder = ScreenRecorder(fps=float(job.get("fps", 2.0)), max_seconds=float(job.get("max_seconds", 120.0)))
+    controller = ComputerActionController(
+        frame_provider=recorder.latest,
+        target_detector=TargetDetector(vision_model=analyzer.vision_model if analyzer else None),
+        scope=str(job.get("scope") or "background-computer"),
+    )
+    agent = ComputerAgent(
+        controller=controller,
+        recorder=recorder,
+        analyzer=analyzer,
+        learn_skills=not bool(job.get("no_skill")),
+        max_retries=int(job.get("retries", 2)),
+    )
+    if job.get("resume"):
+        result = agent.resume(str(job.get("task_id")), dry_run=bool(job.get("dry_run")))
+    else:
+        result = agent.run(
+            str(job.get("task") or ""),
+            task_id=job.get("task_id"),
+            dry_run=bool(job.get("dry_run")),
+        )
+    return {"ok": bool(result.get("success")), "computer_task": result}
+
+
+def worker_entry(name: str) -> None:
+    """Detached worker entrypoint with built-in autonomous role handlers."""
     cfg = _read_json(_agent_dir(name) / "agent.json", {})
-    handler = ROLE_HANDLERS.get(cfg.get("role", "generic"))
+    role = cfg.get("role", "generic")
+    handler = ROLE_HANDLERS.get(role)
+    if handler is None:
+        handler = _computer_agent_handler if role == "computer-operator" else _general_agent_handler(cfg)
     worker_loop(name, handler=handler)
 
 
@@ -90,7 +145,9 @@ def worker_loop(name: str, handler=None, heartbeat_interval: float = 2.0,
     handler = handler or (lambda job: {"ok": True, "echo": job})
     adir = _agent_dir(name)
     jobs_dir = adir / "jobs"
+    results_dir = adir / "results"
     jobs_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
     state = {"status": "running", "pid": os.getpid(), "heartbeat": datetime.now().isoformat(),
              "last_result": None, "jobs_done": 0}
     _write_json(_state_path(name), state)
@@ -107,6 +164,16 @@ def worker_loop(name: str, handler=None, heartbeat_interval: float = 2.0,
                     result = result if isinstance(result, dict) else {"result": result}
                 except Exception as e:  # noqa: BLE001
                     result = {"ok": False, "error": str(e)}
+                job_id = str(job.get("_job_id") or job_path.stem)
+                result_record = {
+                    "job_id": job_id,
+                    "agent": name,
+                    "task": job.get("task"),
+                    "success": bool(result.get("ok", result.get("success", False))),
+                    "result": result,
+                    "finished": datetime.now().isoformat(),
+                }
+                _write_json(results_dir / f"{job_id}.json", result_record)
                 job_path.unlink(missing_ok=True)
                 state = _read_json(_state_path(name), state)
                 state.update(
@@ -114,7 +181,8 @@ def worker_loop(name: str, handler=None, heartbeat_interval: float = 2.0,
                         "status": "running",
                         "pid": os.getpid(),
                         "heartbeat": datetime.now().isoformat(),
-                        "last_result": result,
+                        "last_job_id": job_id,
+                        "last_result": result_record,
                         "jobs_done": state.get("jobs_done", 0) + 1,
                     }
                 )
@@ -145,6 +213,7 @@ class AgentManager:
             return {"success": False, "error": f"agent '{name}' already exists"}
         adir.mkdir(parents=True, exist_ok=True)
         (adir / "jobs").mkdir(exist_ok=True)
+        (adir / "results").mkdir(exist_ok=True)
         _write_json(adir / "agent.json", {
             "name": name, "role": role, "model": model, "persona": persona,
             "created": datetime.now().isoformat(),
@@ -221,9 +290,32 @@ class AgentManager:
         jobs_dir = _agent_dir(name) / "jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        payload = {**job, "_job_id": ts, "_submitted": datetime.now().isoformat()}
         path = jobs_dir / f"{ts}.json"
-        path.write_text(json.dumps(job), encoding="utf-8")
-        return {"success": True, "name": name, "job_id": ts, "queued": True}
+        _write_json(path, payload)
+        return {"success": True, "name": name, "job_id": ts, "queued": True,
+                "status_path": str(_agent_dir(name) / "results" / f"{ts}.json")}
+
+    def job_status(self, name: str, job_id: str) -> Dict[str, Any]:
+        if not _agent_dir(name).exists():
+            return {"success": False, "error": f"agent '{name}' not found"}
+        result_path = _agent_dir(name) / "results" / f"{job_id}.json"
+        if result_path.exists():
+            return {"success": True, "status": "finished", **_read_json(result_path, {})}
+        queued = (_agent_dir(name) / "jobs" / f"{job_id}.json").exists()
+        return {"success": True, "status": "queued" if queued else "unknown",
+                "name": name, "job_id": job_id}
+
+    def wait_job(self, name: str, job_id: str, timeout: float = 120.0,
+                 interval: float = 0.2) -> Dict[str, Any]:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while time.monotonic() <= deadline:
+            status = self.job_status(name, job_id)
+            if status.get("status") in {"finished", "unknown"} or not status.get("success"):
+                return status
+            time.sleep(max(0.02, float(interval)))
+        return {"success": False, "status": "timeout", "name": name,
+                "job_id": job_id, "error": f"job did not finish within {timeout:g}s"}
 
     def watchdog_tick(self, stale_seconds: float = 30.0, restart: bool = True) -> Dict[str, Any]:
         """Detect dead/stale agents and (optionally) restart them."""

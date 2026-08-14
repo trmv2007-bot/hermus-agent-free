@@ -1,18 +1,7 @@
-"""Autonomous computer agent — Plan → Act → Record → Verify → Repair.
-
-This is where Hermus stops *seeing* the computer and starts *operating* it.
-
-:class:`ComputerAgent` accepts a natural-language task, plans a sequence of
-desktop steps (recalling a previously-learned skill when one matches), executes
-each step through the gated :class:`ComputerActionController`, records the
-exact BEFORE/AFTER screen boundaries, verifies the expected visual transition,
-and diagnoses/repairs failures instead of blindly retrying.  A full run
-produces an evidence bundle (``recording.mp4``, ``timeline.json``,
-``actions.json``, ``verification.json``, ``result.json``, ``summary.md``) and,
-on success, promotes the procedure to a reusable skill.
-"""
+"""Persistent autonomous desktop agent: plan → act → verify → repair → resume."""
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +13,8 @@ from .planner import ComputerPlanner
 from .repair import RepairEngine
 from .recorder import ImageGrabSource, ScreenRecorder
 from .skills import ComputerSkillStore
-from .state_machine import VisualState, VisualStateMachine, dispatch_action
+from .state_machine import VisualStateMachine, dispatch_action
+from .task_store import TaskStore
 from .timeline import TaskArtifacts, Timeline
 from .verifier import ScreenVerifier
 from .video_analyzer import VideoAnalyzer
@@ -48,8 +38,15 @@ def _duration_text(seconds: float) -> str:
     return f"{max(0.0, seconds):.1f}s"
 
 
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
 class ComputerAgent:
-    """Run a user task as a recorded, verified, repairable desktop procedure."""
+    """Run, checkpoint, repair, learn from, and resume a desktop task."""
 
     def __init__(
         self,
@@ -58,24 +55,27 @@ class ComputerAgent:
         planner: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
         analyzer: Optional[VideoAnalyzer] = None,
         verifier: Optional[ScreenVerifier] = None,
+        repair_engine: Optional[RepairEngine] = None,
         policy: Optional[RecordingPolicy] = None,
         skills: Optional[ComputerSkillStore] = None,
+        task_store: Optional[TaskStore] = None,
+        world_state: Optional[WorldState] = None,
         learn_skills: bool = True,
         max_retries: int = 2,
     ):
         self.controller = controller or ComputerActionController()
         self.recorder = recorder or ScreenRecorder(source=ImageGrabSource())
+        self.policy = policy or recording_policy
         self.skills = skills or ComputerSkillStore()
-        self.planner = planner or ComputerPlanner(skills=self.skills).plan
+        self.world_state = world_state or WorldState()
+        self.planner_engine = ComputerPlanner(skills=self.skills, world_state=self.world_state)
+        self.planner = planner
         self.analyzer = analyzer
         self.verifier = verifier or ScreenVerifier()
-        self.policy = policy or recording_policy
+        self.repair_engine = repair_engine or RepairEngine()
+        self.task_store = task_store or TaskStore(str(self.policy.root))
         self.learn_skills = learn_skills
         self.max_retries = max_retries
-        self.world_state = WorldState()
-
-    # -- planning -------------------------------------------------------
-    # Default planning now handled by ComputerPlanner in .planner
 
     # -- convenience tools ----------------------------------------------
     def find_on_screen(self, target: str) -> Dict[str, Any]:
@@ -85,12 +85,80 @@ class ComputerAgent:
         return self.controller.click_target(target)
 
     def wait_until(self, condition: str, timeout: float = 60.0) -> Dict[str, Any]:
-        """Expose ScreenWatcher as a first-class agent tool."""
         watcher = ScreenWatcher(self.recorder, analyzer=self.analyzer or VideoAnalyzer())
         return watcher.watch(condition, timeout=timeout, start_if_needed=False)
 
+    # -- planning / resume ----------------------------------------------
+    def _make_plan(self, task: str) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        if self.planner is not None:
+            plan = self.planner(task) or []
+            return plan, {
+                "task": task,
+                "nodes": plan,
+                "source": "injected_planner",
+                "start": plan[0].get("name") if plan else None,
+            }
+        graph = self.planner_engine.plan_graph(task, self.world_state)
+        return graph.to_plan(), graph.to_dict()
+
+    @staticmethod
+    def _recalled_skill(plan: List[Dict[str, Any]], graph: Dict[str, Any]) -> Optional[str]:
+        source = str(graph.get("source") or "")
+        if source.startswith("skill:"):
+            return source.split(":", 1)[1]
+        for step in plan:
+            if step.get("_recalled_from"):
+                return str(step["_recalled_from"])
+            metadata = step.get("metadata") if isinstance(step.get("metadata"), dict) else {}
+            if metadata.get("recalled_from"):
+                return str(metadata["recalled_from"])
+        return None
+
+    def resume(self, task_id: str, dry_run: bool = False) -> Dict[str, Any]:
+        checkpoint = self.task_store.load(task_id)
+        if checkpoint is None:
+            return {"success": False, "task_id": task_id, "error": f"task '{task_id}' was not found"}
+        if checkpoint.status == "success" and not checkpoint.pending_states:
+            return {
+                "success": True,
+                "task_id": task_id,
+                "task": checkpoint.task,
+                "result": "SUCCESS",
+                "resumed": False,
+                "message": "task is already complete",
+                "checkpoint": checkpoint.to_dict(),
+            }
+        next_state = self.task_store.next_state(checkpoint)
+        if next_state is None:
+            return {
+                "success": False,
+                "task_id": task_id,
+                "error": "task has no pending state to resume",
+                "checkpoint": checkpoint.to_dict(),
+            }
+        self.world_state = WorldState.from_dict(checkpoint.world_state)
+        self.planner_engine.world_state = self.world_state
+        return self.run(
+            checkpoint.task,
+            task_id=checkpoint.task_id,
+            dry_run=dry_run,
+            plan=checkpoint.plan,
+            graph=checkpoint.graph,
+            resume=True,
+            start_state=next_state,
+        )
+
     # -- main loop ------------------------------------------------------
-    def run(self, task: str, task_id: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
+    def run(
+        self,
+        task: str,
+        task_id: Optional[str] = None,
+        dry_run: bool = False,
+        plan: Optional[List[Dict[str, Any]]] = None,
+        graph: Optional[Dict[str, Any]] = None,
+        resume: bool = False,
+        start_state: Optional[str] = None,
+    ) -> Dict[str, Any]:
         if dry_run:
             from .keyboard import DryRunKeyboard
             from .mouse import DryRunMouse
@@ -104,182 +172,307 @@ class ComputerAgent:
         task_id = task_id or f"{datetime.now().strftime('%Y-%m-%d')}-{_slug(task)}"
         artifacts = TaskArtifacts(task_id, root=str(self.policy.root))
         task_dir = artifacts.directory
-        recording_path = task_dir / "recording.mp4"
 
-        # Stream to disk when FFmpeg is available; otherwise stay RAM-bounded.
+        if plan is None:
+            self.world_state.reset(task)
+            if self.analyzer is not None and self.analyzer.vision_model is not None:
+                initial_frame = self.recorder.capture_now(store=False)
+                if initial_frame is not None:
+                    self.world_state.update(
+                        self.analyzer.observe_world(initial_frame), source="initial_vision"
+                    )
+            plan, graph = self._make_plan(task)
+        else:
+            plan = list(plan)
+            graph = dict(graph or {"task": task, "nodes": plan, "source": "persisted"})
+            self.world_state.begin_task(task, "RESUMING" if resume else "PLANNING")
+
+        checkpoint = self.task_store.initialize(
+            task_id,
+            task,
+            plan,
+            graph=graph,
+            world_state=self.world_state,
+            resume=resume,
+        )
+        start_state = start_state or (self.task_store.next_state(checkpoint) if resume else None)
+
+        generation = checkpoint.resume_count if resume else 0
+        recording_name = "recording.mp4" if generation == 0 else f"recording-resume-{generation}.mp4"
+        recording_path = task_dir / recording_name
         ffmpeg = VideoWriter.available()["available"]
         started = self.recorder.start(output_path=str(recording_path)) if ffmpeg else self.recorder.start()
         if not started.get("success"):
-            # A failed writer must not block the whole loop; degrade gracefully.
             started = self.recorder.start()
 
-        timeline = Timeline(task=task, recording=str(recording_path) if ffmpeg else None)
-        timeline.add(0.0, "task_start", f"Task: {task}", 1.0, _now())
+        # Preserve prior timeline/evidence across resume generations.
+        previous_timeline = _read_json(task_dir / "timeline.json", {}) if resume else {}
+        previous_actions = _read_json(task_dir / "actions.json", []) if resume else []
+        previous_verifications = _read_json(task_dir / "verification.json", []) if resume else []
+        previous_repairs_payload = _read_json(task_dir / "repairs.json", {}) if resume else {}
+        base_offset = max(
+            [float(item.get("offset", 0.0)) for item in previous_timeline.get("events", []) if isinstance(item, dict)]
+            or [0.0]
+        )
+        timeline = Timeline(task=task, recording=str(recording_path) if ffmpeg else None,
+                            started=previous_timeline.get("started") if resume else None)
+        for event in previous_timeline.get("events", []):
+            if isinstance(event, dict):
+                timeline.add(
+                    event.get("offset", 0.0), event.get("type", "event"), event.get("description", ""),
+                    event.get("confidence", 0.0), event.get("timestamp"), event.get("evidence", {}),
+                )
+        timeline.add(base_offset, "task_resume" if resume else "task_start",
+                     f"{'Resume' if resume else 'Task'}: {task}", 1.0, _now(),
+                     {"generation": generation, "start_state": start_state})
 
-        plan = self.planner(task) or []
-        
         if dry_run:
             print("\n[SIMULATION MODE] Plan for:", task)
-            for i, step in enumerate(plan, 1):
+            for index, step in enumerate(plan, 1):
                 action = step.get("action") or {}
-                desc = action.get("kind") or "act"
-                target = action.get("target") or action.get("name") or action.get("text") or ""
-                print(f"  {i}. {step.get('name', 'STEP')}: {desc} {target}")
+                target = action.get("target") or action.get("name") or action.get("text") or action.get("condition") or ""
+                print(f"  {index}. {step.get('name', 'STEP')}: {action.get('kind', 'act')} {target}")
                 if step.get("expected"):
-                    print(f"     Expected: {step.get('expected')}")
+                    print(f"     Expected: {step['expected']}")
             print("[SIMULATION MODE] No real actions will be performed.\n")
 
-        # Track if we are using an existing skill to update its stats later.
-        recalled_skill = None
-        for step in plan:
-            if step.get("_recalled_from"):
-                recalled_skill = step["_recalled_from"]
-                break
+        recalled_skill = self._recalled_skill(plan, graph or {})
+        if recalled_skill:
+            skill = self.skills.get_skill(recalled_skill)
+            if skill and hasattr(self.repair_engine, "set_known_repairs"):
+                self.repair_engine.set_known_repairs(skill.repairs)
 
         states = VisualStateMachine.plan_to_states(plan)
+
+        def checkpoint_event(event: Dict[str, Any]) -> None:
+            self.task_store.checkpoint_event(checkpoint, event, self.world_state)
 
         machine = VisualStateMachine(
             controller=self.controller,
             recorder=self.recorder,
-            wait_until=self.wait_until,
+            wait_until=(lambda condition, timeout: {"matched": True, "success": True,
+                                                     "detail": "simulation condition"}) if dry_run else self.wait_until,
             execute=lambda spec: dispatch_action(self.controller, spec),
-            verify=self._verify,
-            repair=RepairEngine().repair,
+            verify=(lambda before, after, expected: {"ok": True, "matched": True,
+                                                     "detail": "simulation verification",
+                                                     "confidence": 1.0}) if dry_run else self._verify,
+            repair=self.repair_engine.create_plan,
             max_retries=self.max_retries,
+            world_state=self.world_state,
+            on_event=checkpoint_event,
         )
-        report = machine.run(states, timeout_per_state=60.0)
+        try:
+            report = machine.run(states, timeout_per_state=60.0, start_state=start_state)
+        except (KeyboardInterrupt, SystemExit):
+            self.recorder.stop()
+            self.task_store.mark_interrupted(task_id, "task interrupted by user")
+            raise
+        except Exception as exc:  # noqa: BLE001
+            report = {
+                "success": False,
+                "states_visited": [],
+                "final_state": start_state,
+                "error": f"computer task crashed: {exc}",
+                "failure": {"state": start_state, "category": "agent_exception", "reason": str(exc)},
+            }
+            self.task_store.mark_interrupted(task_id, report["error"])
 
-        # Collect evidence from the state trace.
-        actions: List[Dict[str, Any]] = []
-        verifications: List[Dict[str, Any]] = []
+        # Collect structured evidence from the current generation's trace.
+        actions: List[Dict[str, Any]] = list(previous_actions) if isinstance(previous_actions, list) else []
+        verifications: List[Dict[str, Any]] = list(previous_verifications) if isinstance(previous_verifications, list) else []
+        diagnoses: List[Dict[str, Any]] = list(previous_repairs_payload.get("diagnoses", [])) if isinstance(previous_repairs_payload, dict) else []
+        repairs: List[Dict[str, Any]] = list(previous_repairs_payload.get("repairs", [])) if isinstance(previous_repairs_payload, dict) else []
         retries = 0
         for visited in report.get("states_visited", []):
+            phase = visited.get("phase", "")
             action = visited.get("action")
             verification = visited.get("verification")
-            
-            # Calculate a best-effort offset relative to the task start.
+            if phase == "diagnose":
+                diagnoses.append({
+                    "state": visited.get("state"),
+                    "attempt": visited.get("attempt"),
+                    "failure_reason": visited.get("failure_reason"),
+                    "diagnosis": visited.get("diagnosis", {}),
+                    "repair_plan": visited.get("repair_plan", {}),
+                    "repair_error": visited.get("repair_error"),
+                })
+            if phase == "original_action" and int(visited.get("attempt", 1) or 1) > 1:
+                retries += 1
+
             step_ts = action.get("ts") if isinstance(action, dict) else None
-            step_offset = 0.0
+            step_offset = base_offset
             if step_ts:
                 try:
-                    start_dt = datetime.fromisoformat(timeline.started)
                     event_dt = datetime.fromisoformat(step_ts)
-                    step_offset = max(0.0, (event_dt - start_dt).total_seconds())
+                    current_started = datetime.fromisoformat(started.get("started") or _now())
+                    step_offset += max(0.0, (event_dt - current_started).total_seconds())
                 except (ValueError, TypeError):
-                    pass
+                    step_offset = base_offset
 
             if isinstance(action, dict) and action:
-                actions.append(action)
+                action_record = {
+                    **action,
+                    "state": visited.get("state"),
+                    "phase": phase,
+                    "attempt": visited.get("attempt"),
+                    "repair_for": visited.get("repair_for"),
+                    "repair_state": visited.get("repair_state"),
+                    "outcome": visited.get("outcome"),
+                    "generation": generation,
+                }
+                actions.append(action_record)
+                if phase == "repair":
+                    repairs.append({
+                        "state": visited.get("repair_state"),
+                        "repair_for": visited.get("repair_for"),
+                        "repair_plan_id": visited.get("repair_plan_id"),
+                        "failure": next((item.get("failure_reason") for item in reversed(diagnoses)
+                                         if item.get("state") == visited.get("state")), None),
+                        "action": action_record,
+                        "verification": verification,
+                        "success": visited.get("outcome") == "success",
+                        "outcome": visited.get("outcome"),
+                        "failure_reason": visited.get("failure_reason"),
+                    })
                 timeline.add(
                     step_offset,
-                    action.get("action", "action"),
+                    f"repair:{action.get('action', 'action')}" if phase == "repair" else action.get("action", "action"),
                     action.get("description") or str(action.get("action", "action")),
                     action.get("confidence", 0.0),
                     action.get("ts"),
-                    {"action": action.get("action"), "args": action.get("args", {})},
+                    {"action": action.get("action"), "args": action.get("args", {}),
+                     "state": visited.get("state"), "phase": phase, "generation": generation},
                 )
             if isinstance(verification, dict) and verification:
-                verifications.append(verification)
-                # Use the action offset for the verification that followed it.
+                verification_record = {
+                    **verification,
+                    "state": visited.get("state"),
+                    "phase": phase,
+                    "attempt": visited.get("attempt"),
+                    "repair_state": visited.get("repair_state"),
+                    "generation": generation,
+                }
+                verifications.append(verification_record)
                 timeline.add(
                     step_offset,
-                    "verify",
+                    "verify_repair" if phase == "repair" else "verify",
                     verification.get("detail") or ("PASS" if verification.get("ok") else "FAIL"),
                     verification.get("confidence", 0.0),
                     step_ts,
-                    {"ok": bool(verification.get("ok"))},
+                    {"ok": bool(verification.get("ok")), "state": visited.get("state"),
+                     "phase": phase, "generation": generation},
                 )
-                if not verification.get("ok"):
-                    retries += 1
-                
-                # Update world state from the semantic verification result.
-                self.world_state.update(verification)
 
         stopped = self.recorder.stop()
         recording = (stopped.get("video") or {}).get("path") if ffmpeg else None
-        if recording is None and ffmpeg and (task_dir / "recording.mp4").exists():
-            recording = str(task_dir / "recording.mp4")
+        if recording is None and ffmpeg and recording_path.exists():
+            recording = str(recording_path)
 
         success = bool(report.get("success"))
         duration = time.monotonic() - started_monotonic
-        
+        self.world_state.finish_task(success)
+        timeline.add(base_offset + duration, "task_end", "SUCCESS" if success else "FAILURE",
+                     1.0 if success else 0.0, _now(), {"generation": generation})
+
+        visual_states = [
+            str(item.get("expected")) for item in plan if isinstance(item, dict) and item.get("expected")
+        ]
         if recalled_skill:
-            self.skills.record_run(recalled_skill, success=success, error=report.get("error"))
-
-        timeline.add(duration, "task_end", "SUCCESS" if success else "FAILURE", 1.0 if success else 0.0, _now())
-
-        # Save a task checkpoint for resume/independent auditing.
-        checkpoint = {
-            "task": task,
-            "task_id": task_id,
-            "success": success,
-            "world_state": self.world_state.to_dict(),
-            "completed": [v["state"] for v in report.get("states_visited", [])
-                          if v.get("verification", {}).get("ok")],
-            "timeline": timeline.to_dict(),
-        }
-        (task_dir / "task_state.json").write_text(__import__("json").dumps(checkpoint, indent=2, default=str), encoding="utf-8")
-
-        # Persist the evidence bundle (recording + timeline/actions/result…).
-        bundle = artifacts.write(
-            timeline=timeline,
-            events=[],
-            actions=actions,
-            result={"success": success, "task": task, "duration": duration,
-                    "actions": len(actions), "retries": retries, "result": "SUCCESS" if success else "FAILURE"},
-            recording_path=recording,
-        )
-
-        # Extra artifacts from the agent spec: verification.json + summary.md.
-        verification_path = task_dir / "verification.json"
-        verification_path.write_text(
-            __import__("json").dumps(verifications, indent=2, default=str), encoding="utf-8"
-        )
-        summary_path = task_dir / "summary.md"
-        summary_path.write_text(self._summary(task, success, duration, actions, verifications, retries, timeline), encoding="utf-8")
-        self.policy.secure(verification_path)
-        self.policy.secure(summary_path)
-
-        # Promote the successful procedure to a skill.
-        skill = None
-        if success and self.learn_skills:
-            procedure = []
-            for visited in report.get("states_visited", []):
-                if isinstance(visited.get("action"), dict) and visited["action"]:
-                    procedure.append({
-                        "name": visited.get("state"),
-                        "action": visited["action"].get("action"),
-                        "args": visited["action"].get("args", {}),
-                        "expected": "",
-                        "verification": visited.get("verification"),
-                        "evidence": {"recording": recording, "offset": visited["action"].get("ts")},
-                    })
-            skill = self.skills.save_skill(
-                task,
-                procedure,
-                evidence={"recording": recording, "task_id": task_id},
+            self.skills.record_run(
+                recalled_skill,
+                success=success,
+                error=report.get("error"),
+                duration=duration,
+                repairs=repairs,
+                visual_states=visual_states,
+                evidence={"runs": {"task_id": task_id, "recording": recording, "success": success}},
             )
 
-        return {
+        result_payload = {
             "success": success,
             "task": task,
             "task_id": task_id,
             "duration": duration,
+            "actions": len(actions),
+            "retries": retries,
+            "repair_steps": len(repairs),
+            "diagnoses": diagnoses,
+            "failure": report.get("failure"),
+            "result": "SUCCESS" if success else "FAILURE",
+            "resumed": resume,
+            "generation": generation,
+        }
+        bundle = artifacts.write(
+            timeline=timeline,
+            events=[],
+            actions=actions,
+            result=result_payload,
+            recording_path=recording,
+        )
+
+        verification_path = task_dir / "verification.json"
+        verification_path.write_text(json.dumps(verifications, indent=2, default=str), encoding="utf-8")
+        repairs_path = task_dir / "repairs.json"
+        repairs_path.write_text(json.dumps({"diagnoses": diagnoses, "repairs": repairs}, indent=2, default=str), encoding="utf-8")
+        summary_path = task_dir / "summary.md"
+        summary_path.write_text(
+            self._summary(task, success, duration, actions, verifications, retries, repairs,
+                          report.get("failure"), timeline, resume=resume),
+            encoding="utf-8",
+        )
+        self.policy.secure(verification_path)
+        self.policy.secure(repairs_path)
+        self.policy.secure(summary_path)
+
+        # Promote a new successful graph. Recalled skills were updated above.
+        skill_result = None
+        if success and self.learn_skills and not recalled_skill:
+            procedure = []
+            for step in plan:
+                if not isinstance(step, dict) or not isinstance(step.get("action"), dict):
+                    continue
+                procedure.append({
+                    "name": step.get("name"),
+                    "goal": step.get("goal", ""),
+                    "precondition": step.get("precondition", ""),
+                    "action": step["action"],
+                    "expected": step.get("expected", ""),
+                    "on_success": step.get("on_success"),
+                    "on_failure": step.get("on_failure"),
+                })
+            skill_result = self.skills.save_skill(
+                task,
+                procedure,
+                evidence={"recording": recording, "task_id": task_id,
+                          "runs": [{"task_id": task_id, "success": True}]},
+                duration=duration,
+                repairs=repairs,
+                visual_states=visual_states,
+            )
+
+        final_result = {
+            **result_payload,
             "duration_text": _duration_text(duration),
             "actions": actions,
             "verifications": verifications,
-            "retries": retries,
-            "result": "SUCCESS" if success else "FAILURE",
+            "diagnoses": diagnoses,
+            "repairs": repairs,
             "states_visited": report.get("states_visited", []),
+            "world_state": self.world_state.to_dict(),
             "timeline": timeline.to_dict(),
             "timeline_text": timeline.render_text(),
             "recording": recording,
             "artifacts": bundle,
+            "state_path": str(self.task_store.state_path(task_id)),
             "verification_path": str(verification_path),
+            "repairs_path": str(repairs_path),
             "summary_path": str(summary_path),
-            "skill": skill,
+            "skill": skill_result,
             "error": report.get("error"),
         }
+        self.task_store.complete(checkpoint, success, final_result, self.world_state, recording)
+        final_result["checkpoint"] = self.task_store.load(task_id).to_dict()
+        return final_result
 
     # -- verification ---------------------------------------------------
     def _verify(self, before: Any, after: Any, expected: str) -> Dict[str, Any]:
@@ -289,22 +482,37 @@ class ComputerAgent:
             return result
         return self.verifier.verify(before, after, expected)
 
-    # -- summary --------------------------------------------------------
     @staticmethod
-    def _summary(task: str, success: bool, duration: float, actions: List[Dict[str, Any]],
-                 verifications: List[Dict[str, Any]], retries: int, timeline: Timeline) -> str:
+    def _summary(
+        task: str,
+        success: bool,
+        duration: float,
+        actions: List[Dict[str, Any]],
+        verifications: List[Dict[str, Any]],
+        retries: int,
+        repairs: List[Dict[str, Any]],
+        failure: Optional[Dict[str, Any]],
+        timeline: Timeline,
+        resume: bool = False,
+    ) -> str:
         lines = [
             f"# Task: {task}",
             "",
             f"Duration: {_duration_text(duration)}",
             f"Actions: {len(actions)}",
             f"Visual verifications: {len(verifications)}",
+            f"Repair steps: {len(repairs)}",
             f"Retries: {retries}",
+            f"Resumed: {'yes' if resume else 'no'}",
             "",
             f"Result: {'SUCCESS' if success else 'FAILURE'}",
-            "",
-            "Timeline:",
         ]
+        if failure:
+            lines.extend([
+                f"Failure category: {failure.get('category', 'unknown')}",
+                f"Failure reason: {failure.get('reason', 'unknown')}",
+            ])
+        lines.extend(["", "Timeline:"])
         for event in timeline.events:
             minutes, seconds = divmod(max(0, int(event.offset)), 60)
             lines.append(f"{minutes:02d}:{seconds:02d} {event.description}")

@@ -230,6 +230,39 @@ class VideoAnalyzer:
             "detail": text,
         }
 
+    def observe_world(self, frame: Any) -> Dict[str, Any]:
+        """Produce one structured observation for the shared WorldState."""
+        response = self._call_vision(
+            decode_frame(frame),
+            "Inspect the current desktop. Return ONLY JSON with keys: "
+            "active_application (string or null), active_window (string or null), "
+            "visible_targets (short list of visible actionable controls), dialogs "
+            "(list of visible popups/dialogs), task_state (short state label), "
+            "confidence (0 to 1), detail (one evidence sentence).",
+        )
+        if not response.get("success"):
+            return {"confidence": 0.0, "detail": response.get("error", "vision failed"),
+                    "source": "vision_error"}
+        text = str(response.get("description") or "").strip()
+        parsed = None
+        decoder = __import__("json").JSONDecoder()
+        start = text.find("{")
+        if start >= 0:
+            try:
+                parsed, _ = decoder.raw_decode(text[start:])
+            except Exception:
+                parsed = None
+        if isinstance(parsed, dict):
+            parsed.setdefault("detail", text)
+            parsed.setdefault("confidence", response.get("confidence", 0.65))
+            parsed["source"] = "vision"
+            return parsed
+        return {
+            "detail": text,
+            "confidence": response.get("confidence", 0.65),
+            "source": "vision_prose",
+        }
+
     def evaluate_condition(self, frame: Any, condition: str) -> Dict[str, Any]:
         """Ask the vision model whether a visual condition is currently true."""
         response = self._call_vision(

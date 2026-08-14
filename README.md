@@ -117,7 +117,7 @@ Original Hermes / Strix / Agent Reach use some paid services:
 - `vision_analyze(image_path, prompt, model="llava:7b")` - Ollama LLaVA base64 image, POST to `http://localhost:11434/api/generate`, `ollama pull llava:7b` free local vision
 - `vision_available_models()` - Lists vision models via /api/tags
 
-#### Hermus Computer Agent v1 — Record → Detect → Understand → Verify
+#### Hermus Computer Agent v3 — World State → Graph Plan → Act → Verify → Repair → Resume
 
 ```bash
 # Detached recording survives the command that starts it
@@ -140,7 +140,36 @@ hermus screen analyze data/recordings/task-123.mp4 --no-vision
 
 # Event-driven condition watching
 hermus screen watch "wait until the installation finishes" --timeout 60
+
+# Run a persistent, repairable computer task
+hermus computer run "Open Chrome and go to youtube.com" --task-id youtube
+hermus computer show youtube
+hermus computer tasks
+
+# Continue at the first unfinished visual state after a crash/failure
+hermus computer resume youtube
+
+# Learned skills report runs, success rate, failures, repairs and duration
+hermus computer skills
+
+# Dependency-aware background delegation. GUI work is serialized through one
+# computer-operator while research/coding agents can work independently.
+hermus computer delegate "research the package then download and install it"
+
+# Persistent background-agent jobs are queryable by job id
+hermus agent create desktop --role computer-operator
+hermus agent start desktop
+hermus agent job desktop "Open Chrome" --wait
 ```
+
+Every task directory contains `state.json`, `plan.json`, recording generation(s),
+`timeline.json`, `actions.json`, `verification.json`, `repairs.json`,
+`result.json`, and `summary.md`. `state.json` is updated atomically after each
+state-machine event and includes completed/pending states, known failures,
+repairs, and the shared `WorldState`. The planner produces a validated state
+graph with goals, preconditions, post-action visual states, dependencies,
+transitions and fallbacks. Failed verification is diagnosed and repaired; the
+original action is retried only after the repair itself is visually verified.
 
 The rolling RAM buffer contains JPEG bytes, not full PIL screen images, and is
 bounded by both duration and memory. The full session is streamed separately

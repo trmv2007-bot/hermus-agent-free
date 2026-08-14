@@ -2,10 +2,11 @@
 
 v1 added the recording pipeline (rolling capture, event detection, semantic
 video analysis, timelines, before/after verification, and condition watching).
-v2 adds the action layer that closes the loop into an *autonomous* computer
-agent: gated mouse/keyboard/window backends, vision-driven target detection, a
-visual state machine, skill learning from successful recordings, a permission
-+ emergency-stop layer, and a task control center.
+v2 added the gated action layer. v3 adds a shared persistent WorldState,
+validated task graphs, diagnosed/verified repair plans, evidence-backed skill
+statistics, crash-safe task resume, persistent computer-operator workers, and
+dependency-aware multi-agent delegation. GUI input remains serialized through
+the same permission and emergency-stop gates.
 
 The package is headless-safe and dependency-injectable. Capture uses a bounded
 compressed RAM buffer; full sessions can stream to MP4/WebM; only debounced
@@ -16,6 +17,7 @@ auditable dry-run otherwise, so every path is testable offline.
 from .controller import ComputerActionController
 from .computer_agent import ComputerAgent
 from .control_center import ControlCenter
+from .delegation import DelegationPlan, MultiAgentDelegator, WorkUnit
 from .event_detector import EventDetector, StreamingEventDetector
 from .frame_sampler import FrameSampler
 from .keyboard import DryRunKeyboard, KeyboardBackend, PyAutoGUIKeyboard, default_keyboard
@@ -30,6 +32,8 @@ from .permissions import (
     emergency_stop,
     recording_policy,
 )
+from .planner import ComputerPlanner, PlanNode, TaskGoal, TaskGraph
+from .repair import FailureDiagnosis, FailureKind, RepairEngine, RepairPlan, RepairStep
 from .recorder import (
     CallableSource,
     ImageGrabSource,
@@ -42,11 +46,13 @@ from .recorder import (
 from .skills import ComputerSkill, ComputerSkillStore
 from .state_machine import VisualState, VisualStateMachine, dispatch_action
 from .target_detector import TargetDetector, extract_json_object
+from .task_store import TaskCheckpoint, TaskStore
 from .timeline import TaskArtifacts, Timeline, TimelineEvent
 from .verifier import ActionVerificationManager, ScreenVerifier
 from .video_analyzer import OllamaVisionModel, VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
+from .world_state import WorldObservation, WorldState
 from .window_manager import (
     DryRunWindowBackend,
     PyGetWindowBackend,
@@ -102,8 +108,24 @@ __all__ = [
     "VisualState",
     "VisualStateMachine",
     "dispatch_action",
+    "FailureKind",
+    "FailureDiagnosis",
+    "RepairStep",
+    "RepairPlan",
+    "RepairEngine",
+    "WorldObservation",
+    "WorldState",
+    "TaskGoal",
+    "PlanNode",
+    "TaskGraph",
+    "ComputerPlanner",
+    "TaskCheckpoint",
+    "TaskStore",
     "ComputerSkill",
     "ComputerSkillStore",
     "ComputerAgent",
+    "WorkUnit",
+    "DelegationPlan",
+    "MultiAgentDelegator",
     "ControlCenter",
 ]
