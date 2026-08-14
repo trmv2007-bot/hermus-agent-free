@@ -67,6 +67,7 @@ class VisualStateMachine:
         wait_until: Optional[Callable[[str, float], Dict[str, Any]]] = None,
         execute: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
         verify: Optional[Callable[[Any, Any, str], Dict[str, Any]]] = None,
+        repair: Optional[Callable[[str, str, Dict[str, Any]], List[Dict[str, Any]]]] = None,
         max_retries: int = 2,
     ):
         self.controller = controller
@@ -74,6 +75,7 @@ class VisualStateMachine:
         self.wait_until = wait_until or (lambda _c, _t: {"matched": True, "success": True})
         self.execute = execute or (lambda spec: dispatch_action(self.controller, spec) if self.controller else {"ok": False, "error": "no controller"})
         self.verify = verify or (lambda before, after, expected: {"ok": True, "detail": "no verifier", "confidence": 0.0})
+        self.repair = repair
         self.max_retries = max(0, int(max_retries))
 
     def _capture(self) -> Any:
@@ -129,9 +131,31 @@ class VisualStateMachine:
                 })
                 if executed.get("ok") and verification.get("ok"):
                     break
-                # Diagnose: the failed verification itself is the hint for the
-                # next attempt, so the loop can re-locate and re-act rather
-                # than blindly repeating the same coordinates.
+
+                # If we have a repair engine, try to diagnose and fix before the next retry.
+                if self.repair and attempt < self.max_retries:
+                    repair_steps = self.repair(
+                        verification.get("detail") or verification.get("error") or "unknown failure",
+                        current.expected,
+                        executed,
+                    )
+                    for step in repair_steps:
+                        r_action = step.get("action")
+                        if not r_action:
+                            continue
+                        r_before = self._capture()
+                        r_executed = self.execute(r_action)
+                        r_after = self._capture()
+                        r_verify = self.verify(r_before, r_after, step.get("expected") or "")
+                        visited.append({
+                            "state": f"REPAIR:{step.get('name', 'step')}",
+                            "action": r_executed,
+                            "verification": r_verify,
+                            "repair_for": current.name,
+                        })
+                    # Re-capture 'before' so the next retry starts from the repaired state.
+                    before = self._capture()
+
             if executed is not None and executed.get("ok") and verification.get("ok"):
                 nxt = current.on_success
                 current = by_name[nxt] if nxt and nxt in by_name else current

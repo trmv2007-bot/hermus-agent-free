@@ -20,6 +20,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .controller import ComputerActionController
 from .permissions import RecordingPolicy, recording_policy
+from .planner import ComputerPlanner
+from .repair import RepairEngine
 from .recorder import ImageGrabSource, ScreenRecorder
 from .skills import ComputerSkillStore
 from .state_machine import VisualState, VisualStateMachine, dispatch_action
@@ -28,6 +30,7 @@ from .verifier import ScreenVerifier
 from .video_analyzer import VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
+from .world_state import WorldState
 
 
 def _slug(value: str) -> str:
@@ -62,33 +65,17 @@ class ComputerAgent:
     ):
         self.controller = controller or ComputerActionController()
         self.recorder = recorder or ScreenRecorder(source=ImageGrabSource())
-        self.planner = planner or self._default_plan
+        self.skills = skills or ComputerSkillStore()
+        self.planner = planner or ComputerPlanner(skills=self.skills).plan
         self.analyzer = analyzer
         self.verifier = verifier or ScreenVerifier()
         self.policy = policy or recording_policy
-        self.skills = skills or ComputerSkillStore()
         self.learn_skills = learn_skills
         self.max_retries = max_retries
+        self.world_state = WorldState()
 
     # -- planning -------------------------------------------------------
-    def _default_plan(self, task: str) -> List[Dict[str, Any]]:
-        """Recall a matching skill, else fall back to a single vision action."""
-        skill = self.skills.recall(task)
-        if skill is not None and skill.procedure:
-            plan = []
-            for step in skill.procedure:
-                plan.append({
-                    "name": step.get("name", "step"),
-                    "expected": step.get("expected", ""),
-                    "action": step.get("action"),
-                })
-            plan[0].setdefault("_recalled_from", skill.name)
-            return plan
-        return [{
-            "name": "act",
-            "expected": "",
-            "action": {"kind": "click_target", "target": task},
-        }]
+    # Default planning now handled by ComputerPlanner in .planner
 
     # -- convenience tools ----------------------------------------------
     def find_on_screen(self, target: str) -> Dict[str, Any]:
@@ -103,7 +90,16 @@ class ComputerAgent:
         return watcher.watch(condition, timeout=timeout, start_if_needed=False)
 
     # -- main loop ------------------------------------------------------
-    def run(self, task: str, task_id: Optional[str] = None) -> Dict[str, Any]:
+    def run(self, task: str, task_id: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
+        if dry_run:
+            from .keyboard import DryRunKeyboard
+            from .mouse import DryRunMouse
+            from .window_manager import DryRunWindowBackend
+
+            self.controller.mouse = DryRunMouse()
+            self.controller.keyboard = DryRunKeyboard()
+            self.controller.windows = DryRunWindowBackend()
+
         started_monotonic = time.monotonic()
         task_id = task_id or f"{datetime.now().strftime('%Y-%m-%d')}-{_slug(task)}"
         artifacts = TaskArtifacts(task_id, root=str(self.policy.root))
@@ -121,6 +117,25 @@ class ComputerAgent:
         timeline.add(0.0, "task_start", f"Task: {task}", 1.0, _now())
 
         plan = self.planner(task) or []
+        
+        if dry_run:
+            print("\n[SIMULATION MODE] Plan for:", task)
+            for i, step in enumerate(plan, 1):
+                action = step.get("action") or {}
+                desc = action.get("kind") or "act"
+                target = action.get("target") or action.get("name") or action.get("text") or ""
+                print(f"  {i}. {step.get('name', 'STEP')}: {desc} {target}")
+                if step.get("expected"):
+                    print(f"     Expected: {step.get('expected')}")
+            print("[SIMULATION MODE] No real actions will be performed.\n")
+
+        # Track if we are using an existing skill to update its stats later.
+        recalled_skill = None
+        for step in plan:
+            if step.get("_recalled_from"):
+                recalled_skill = step["_recalled_from"]
+                break
+
         states = VisualStateMachine.plan_to_states(plan)
 
         machine = VisualStateMachine(
@@ -129,6 +144,7 @@ class ComputerAgent:
             wait_until=self.wait_until,
             execute=lambda spec: dispatch_action(self.controller, spec),
             verify=self._verify,
+            repair=RepairEngine().repair,
             max_retries=self.max_retries,
         )
         report = machine.run(states, timeout_per_state=60.0)
@@ -140,10 +156,22 @@ class ComputerAgent:
         for visited in report.get("states_visited", []):
             action = visited.get("action")
             verification = visited.get("verification")
+            
+            # Calculate a best-effort offset relative to the task start.
+            step_ts = action.get("ts") if isinstance(action, dict) else None
+            step_offset = 0.0
+            if step_ts:
+                try:
+                    start_dt = datetime.fromisoformat(timeline.started)
+                    event_dt = datetime.fromisoformat(step_ts)
+                    step_offset = max(0.0, (event_dt - start_dt).total_seconds())
+                except (ValueError, TypeError):
+                    pass
+
             if isinstance(action, dict) and action:
                 actions.append(action)
                 timeline.add(
-                    0.0,
+                    step_offset,
                     action.get("action", "action"),
                     action.get("description") or str(action.get("action", "action")),
                     action.get("confidence", 0.0),
@@ -152,16 +180,20 @@ class ComputerAgent:
                 )
             if isinstance(verification, dict) and verification:
                 verifications.append(verification)
+                # Use the action offset for the verification that followed it.
                 timeline.add(
-                    0.0,
+                    step_offset,
                     "verify",
                     verification.get("detail") or ("PASS" if verification.get("ok") else "FAIL"),
                     verification.get("confidence", 0.0),
-                    None,
+                    step_ts,
                     {"ok": bool(verification.get("ok"))},
                 )
                 if not verification.get("ok"):
                     retries += 1
+                
+                # Update world state from the semantic verification result.
+                self.world_state.update(verification)
 
         stopped = self.recorder.stop()
         recording = (stopped.get("video") or {}).get("path") if ffmpeg else None
@@ -170,7 +202,23 @@ class ComputerAgent:
 
         success = bool(report.get("success"))
         duration = time.monotonic() - started_monotonic
+        
+        if recalled_skill:
+            self.skills.record_run(recalled_skill, success=success, error=report.get("error"))
+
         timeline.add(duration, "task_end", "SUCCESS" if success else "FAILURE", 1.0 if success else 0.0, _now())
+
+        # Save a task checkpoint for resume/independent auditing.
+        checkpoint = {
+            "task": task,
+            "task_id": task_id,
+            "success": success,
+            "world_state": self.world_state.to_dict(),
+            "completed": [v["state"] for v in report.get("states_visited", [])
+                          if v.get("verification", {}).get("ok")],
+            "timeline": timeline.to_dict(),
+        }
+        (task_dir / "task_state.json").write_text(__import__("json").dumps(checkpoint, indent=2, default=str), encoding="utf-8")
 
         # Persist the evidence bundle (recording + timeline/actions/result…).
         bundle = artifacts.write(
