@@ -19,6 +19,7 @@ from urllib.parse import quote
 # Also supports TOOL_DEFINITION (single) which gets wrapped.
 DISCOVER_MODULES = [
     "tools.web_search",
+    "tools.public_apis",
     "tools.file_tools",
     "tools.shell",
     "tools.browser",

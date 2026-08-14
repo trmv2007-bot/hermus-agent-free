@@ -98,10 +98,11 @@ Original Hermes / Strix / Agent Reach use some paid services:
 
 - **Tool:** `backend_execute(backend, command, workdir, timeout)` + `list_backends()`
 
-### 7. 44+ Free Tools → Now 88+ Tools (All Free, Zero API Fees)
+### 7. 44+ Free Tools → Now 91+ Tools (All Free, Zero API Fees)
 
 #### Core Free
 - `web_search` - DuckDuckGo free no API key, LRU cache 50 items TTL 10 min
+- `public_api_search`, `public_api_categories`, `public_api_refresh` - Search 1,600+ community-curated APIs from [`public-apis/public-apis`](https://github.com/public-apis/public-apis), filter by auth/HTTPS/CORS/category, offline snapshot + opt-in GitHub refresh
 - `file_read`, `file_write`, `file_edit`, `file_search` - OptimizedFileCache mtime check <1MB, 50-100x faster
 - `shell_execute` - Safe subprocess timeout 10s
 - `memory_search`, `memory_add` - FTS5 free
@@ -176,17 +177,31 @@ Original Hermes / Strix / Agent Reach use some paid services:
 - **Continuous Learning:** `continuous_learning_add_finding(finding)`, `continuous_learning_mark_false_positive(finding_id, reason)`, `continuous_learning_stats()` - AI builds on past findings, adapts to codebase, reduces false positives, `should_skip_similar(new_finding)` checks if similar previously FP
 - **Compliance:** `generate_compliance_report(run_name, framework)`, `list_compliance_frameworks()`
 
-Total: **88+ tools** and growing, all free, zero API fees for core, no paywall
+Total: **91+ tools** and growing, all free, zero API fees for core, no paywall
 
 ### 8. Research-Ready
 - Batch trajectory generation
 - Trajectory compression for training next-gen tool-calling models
 - Logs in `data/trajectories.jsonl`
 
-### 9. Custom API - Add Any API as Tool Free
-- `hermus api add --name weather_api --description "Get weather" --url "https://api.openweathermap.org/data/2.5/weather" --param "q:City"` - URL templating {param}, auth bearer/apikey/basic
+### 9. Public API Discovery + Custom API Tools
+
+Find a suitable provider before registering its documented endpoint:
+
+```bash
+hermus api discover "weather forecast" --auth No
+hermus api discover "threat intelligence" --category Security --limit 5
+hermus api categories
+hermus api refresh-catalog             # optional; refreshes an untracked runtime cache
+```
+
+- Bundles an offline snapshot of **1,600+ APIs across 51 categories** from [`public-apis/public-apis`](https://github.com/public-apis/public-apis), with filters for authentication, HTTPS, CORS, and category
+- Agent tools: `public_api_search(...)`, `public_api_categories()`, `public_api_refresh()`
+- Gateway: `GET /public-apis/search`, `GET /public-apis/categories`, `POST /public-apis/refresh`
+- Catalog links point to provider documentation, **not automatically trusted executable endpoints**. Review provider terms, privacy, and docs before use. Attribution/license: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+- `hermus api add --name weather_api --description "Get weather" --url "https://api.openweathermap.org/data/2.5/weather" --param "q:City"` - URL templating `{param}`, auth bearer/apikey/basic
 - Up to **10 keys per custom API same name** from different websites you know + **20 per provider** (groq/hf/openai) round-robin, failure tracking 5 min cooldown, fallback, parallel execution different keys = 3x faster
-- Storage: `data/api_keys.json` and `data/custom_apis.json` local only, not uploaded, redacted preview
+- Runtime storage: `data/api_keys.json`, `data/custom_apis.json`, and `data/public_apis_catalog_cache.json` are local only and not uploaded
 
 ### 10. Multi-AI Collaboration - Multiple AIs Talk to Each Other
 - Personas: researcher, coder, reviewer, writer, planner, debater, optimist, pessimist
@@ -339,19 +354,19 @@ python hermus.py --model mock/mock -c "Use test_custom_api_response_time to test
 | Subagent | `hermus subagent spawn "research X in parallel"` | - |
 | Multi-Key | `hermus multikey add/list/remove/parallel` | - |
 | Multi-AI | `hermus multiai debate "Topic" --rounds 2 --agents researcher coder reviewer` | - |
-| Custom API | `hermus api add/list/remove/test` | - |
+| Public/custom API | `hermus api discover/categories/refresh-catalog` + `add/list/remove/test` | - |
 | Response time test | Use tool `test_api_key_response_time` or dashboard Keys pane Test ⏱️ buttons | - |
 | Doctor health check | `hermus --model mock/mock -c "Use doctor_check_all"` | - |
 | Pentest | `hermus --model mock/mock -c "Use comprehensive_scan to scan target"` | - |
 
 ---
 
-## Project Structure (Updated - 88 Tools Total)
+## Project Structure (Updated - 91+ Tools)
 
 ```
 hermus-agent-free/
 ├── core/
-│   ├── agent.py          # Main loop: 88 tools, memory search -> skill load -> tool calls -> response -> curate memory + token tracking + task tracker + update check on startup
+│   ├── agent.py          # Main loop: 91+ tools, memory search -> skill load -> tool calls -> response -> curate memory + token tracking + task tracker + update check on startup
 │   ├── llm.py            # Free LLM: Ollama local no key, Groq free tier multi-key 20 keys round-robin + failure tracking, HF free, mock + caching LRU 100 items + token counting + cost estimation
 │   ├── memory.py         # SQLite FTS5 sessions + WAL mode + indexes + curated memory + nudges + token_usage table + user_model.json dialectic + trajectories.jsonl + FTS5 search + summarization
 │   ├── skill_manager.py  # Auto skill creation 3+ tool calls via free LLM, self-improve on use, agentskills.io compatible SKILL.md + skill.py, LRU cache 20 items
@@ -368,6 +383,7 @@ hermus-agent-free/
 │   └── trajectory.py     # NEW - Trajectory batch generation + compression research-ready, batch_generate prompts model max_workers parallel via subagents checkpointing, compress_trajectories max_tokens fits into token budgets, ShareGPT export, stats
 ├── tools/
 │   ├── web_search.py     # DuckDuckGo free no API key, LRU cache 50 items TTL 10 min
+│   ├── public_apis.py    # Offline-first public API discovery, filters + explicit upstream refresh
 │   ├── file_tools.py     # Read/write/edit/search, OptimizedFileCache mtime <1MB
 │   ├── shell.py          # Safe shell timeout 10s
 │   ├── browser.py        # NEW - Browser automation Playwright free 6 tools: navigate, click, type, screenshot, extract, close
@@ -399,8 +415,11 @@ hermus-agent-free/
 │   ├── trajectories.jsonl
 │   ├── api_keys.json     # Multi-key up to 20 per provider, local only, not uploaded, redacted preview
 │   ├── custom_apis.json  # Custom APIs up to 10 same name from different websites, local only
+│   ├── public_apis_catalog_cache.json # Optional refreshed catalog, local only, ignored by Git
 │   ├── response_times.json # Response time history last 50, avg per key
 │   └── sessions/
+├── resources/
+│   └── public_apis_catalog.json # Bundled offline public-apis snapshot (MIT)
 └── tests/
     ├── test_free_stack.py
     ├── test_custom_api.py
@@ -571,4 +590,4 @@ This is a community free clone, not affiliated with Nous Research, Panniantong A
 
 ---
 
-**Hermus Agent Free - The agent that grows with you, for free, forever on your $5 VPS.** ☤ Gold and Kawaii (｡♥‿♥｡) • MIT • No tracking • Self-hosted • No paywall • Optimized Everything • 88+ Tools
+**Hermus Agent Free - The agent that grows with you, for free, forever on your $5 VPS.** ☤ Gold and Kawaii (｡♥‿♥｡) • MIT • No tracking • Self-hosted • No paywall • Optimized Everything • 91+ Tools

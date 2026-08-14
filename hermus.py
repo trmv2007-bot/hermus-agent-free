@@ -213,6 +213,20 @@ def main():
     api_test.add_argument("name", help="API name")
     api_test.add_argument("--args", help="JSON args for test, e.g., '{\"city\": \"London\"}'")
 
+    api_discover = api_sub.add_parser(
+        "discover",
+        help="Find useful APIs in the public-apis catalog (offline snapshot)",
+    )
+    api_discover.add_argument("query", nargs="?", default="", help="Task/API keywords, e.g. weather or threat intelligence")
+    api_discover.add_argument("--category", default="", help="Category filter, e.g. Security")
+    api_discover.add_argument("--auth", default="any", help="any, No, apiKey, OAuth, ...")
+    api_discover.add_argument("--allow-http", action="store_true", help="Include APIs without confirmed HTTPS")
+    api_discover.add_argument("--cors", default="any", choices=["any", "Yes", "No", "Unknown"])
+    api_discover.add_argument("--limit", type=int, default=10)
+    api_discover.add_argument("--refresh", action="store_true", help="Refresh the runtime catalog from GitHub first")
+    api_sub.add_parser("categories", help="List public API categories and free/HTTPS counts")
+    api_sub.add_parser("refresh-catalog", help="Refresh public API catalog from GitHub")
+
     # update subcommand - check for GitHub updates and show in dashboard and CLI too
     update_parser = subparsers.add_parser("update", help="Update from GitHub - shows update in dashboard and CLI too - like hermes update")
     update_parser.add_argument("--check", action="store_true", help="Only check for updates, don't pull")
@@ -746,6 +760,67 @@ def main():
                 if result.get("used_key"):
                     print(f"   key used: {result['used_key']}")
                     print(f"   keys for this API: {result.get('total_keys_for_this_api')}")
+
+        elif args.api_action == "discover":
+            from tools.public_apis import public_api_catalog
+
+            result = public_api_catalog.search(
+                query=args.query,
+                category=args.category,
+                auth=args.auth,
+                https_only=not args.allow_http,
+                cors=args.cors,
+                limit=args.limit,
+                refresh=args.refresh,
+            )
+            refresh = result.get("refresh")
+            if refresh and not refresh.get("success"):
+                print(f"⚠️ Refresh failed; using {refresh.get('using_fallback')}: {refresh.get('error')}")
+            print(
+                f"Public APIs matching '{args.query or '*'}': "
+                f"{result.get('total_matched', 0)} found, showing {result.get('count', 0)}"
+            )
+            for item in result.get("results", []):
+                print(f"\n - {item['name']} [{item['category']}]")
+                print(f"   {item['description']}")
+                print(
+                    f"   auth={item['auth']} https={item['https']} cors={item['cors']} "
+                    f"| {item['documentation_url']}"
+                )
+            catalog = result.get("catalog", {})
+            print(
+                f"\nSource: {catalog.get('source')} ({catalog.get('loaded_from')}, "
+                f"{catalog.get('total_apis')} APIs)"
+            )
+            print("Note: links are documentation, not trusted endpoints. Review the docs, then use `hermus api add`.")
+
+        elif args.api_action == "categories":
+            from tools.public_apis import public_api_catalog
+
+            result = public_api_catalog.categories()
+            print(f"Public API categories ({result.get('count', 0)}):")
+            for item in result.get("categories", []):
+                print(
+                    f" - {item['category']}: total={item['total']} "
+                    f"no-auth={item['no_auth']} https={item['https']} cors={item['cors_yes']}"
+                )
+
+        elif args.api_action == "refresh-catalog":
+            from tools.public_apis import public_api_catalog
+
+            result = public_api_catalog.refresh()
+            if result.get("success"):
+                print(
+                    f"✅ Refreshed {result.get('count')} APIs across "
+                    f"{result.get('categories')} categories from {result.get('source')}"
+                )
+                print(f"   Runtime cache: {result.get('cache_path')}")
+            else:
+                print(f"❌ Refresh failed: {result.get('error')}")
+                print(
+                    f"   Continuing with {result.get('using_fallback')} "
+                    f"({result.get('fallback_count')} APIs)"
+                )
 
         else:
             parser.parse_args(["api", "--help"])

@@ -18,6 +18,7 @@ node_modules/
 *.log
 data/api_keys.json
 data/custom_apis.json
+data/public_apis_catalog_cache.json
 data/response_times.json
 data/config.yaml
 data/skins/
