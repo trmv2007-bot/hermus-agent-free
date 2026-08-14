@@ -85,6 +85,45 @@ The computer subsystem now implements **Record → Detect → Understand → Ver
 continues after the starting CLI process exits. Headless/test sources remain
 available through `NullSource` and `CallableSource`.
 
+### Hermus Computer Agent v2 — autonomous desktop control
+
+v2 closes the loop from *seeing* to *operating* the computer:
+
+- **Action engine** (`controller.py`, `mouse.py`, `keyboard.py`,
+  `window_manager.py`) — `move_mouse/click/double_click/right_click`,
+  `type_text/press_key/hotkey`, `scroll`, `open_application/close_application/
+  focus_window`. Backends use `pyautogui`/`pygetwindow` when present and
+  degrade to an auditable dry-run otherwise, so the loop is testable offline.
+- **Vision-driven targeting** (`target_detector.py`) — `find_on_screen(target)`
+  asks the vision model to locate a *described* UI element inside a captured
+  frame and rescales its answer back to screen coordinates, so
+  `click_target("Install button")` works across resolutions instead of hard
+  coding `click(742, 381)`. A pure-PIL template matcher is included as a
+  fallback.
+- **Autonomous loop** (`computer_agent.py`, `state_machine.py`) — a visual
+  state machine drives `Plan → Act → Record → Verify → Repair`. Each action is
+  bracketed by exact BEFORE/AFTER captures and semantically verified; a failed
+  verification is diagnosed and retried (re-located, re-acted) instead of
+  blindly repeated. `wait_until(condition, timeout)` is exposed as a
+  first-class agent tool on top of `ScreenWatcher`.
+- **Evidence bundle** — every run writes `recording.mp4` + `timeline.json` +
+  `actions.json` + `verification.json` + `result.json` + `summary.md` under
+  `data/recordings/<task-id>/`, so the recording is agent evidence, not just
+  debugging output.
+- **Skill learning** (`skills.py`) — a successful procedure (actions with their
+  verification results and recording evidence) is promoted to a reusable
+  skill; the next similar task recalls it and adapts it to the current screen.
+- **Safety layer** (`permissions.py`, wired through `core/permissions.py`) —
+  every desktop action is classified LOW/MEDIUM/HIGH; high-risk actions
+  (`sudo`, admin, system config) require explicit approval, and a global,
+  file-backed `EmergencyStop` (`hermus computer stop`) halts all further
+  mouse/keyboard/autonomous control across processes.
+- **Control center** (`control_center.py`) — `hermus computer status` renders a
+  live panel (status, action count, last action + verification, active
+  backends).
+
+CLI: `hermus computer task|target|click|wait|skills|status|stop`.
+
 ### Research pipeline
 `search → dedupe → rank → extract claims → cross-check → contradictions →
 synthesize → citations`, with confidence + uncertain-claims output. Default
