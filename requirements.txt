@@ -28,6 +28,8 @@ playwright>=1.40.0
 # Uses Ollama LLaVA via requests, no extra pip dep, but for image handling:
 Pillow>=10.0.0
 # Ollama already required, llava model pulled via ollama pull llava:7b (free)
+# Conventional MP4/WebM screen recording (bundled free FFmpeg binary fallback)
+imageio-ffmpeg>=0.5.1
 
 # Voice Memo Transcription faster-whisper Free - Local Whisper, no API key
 faster-whisper>=0.9.0

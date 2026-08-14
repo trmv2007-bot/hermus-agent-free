@@ -52,7 +52,9 @@ def test_architecture_tools_registered():
     names = tool_registry.list_tools()["tools"]
     for expected in ("research_deep", "memory2_recall", "memory2_remember",
                      "router_choose", "workspace_list_projects",
-                     "screen_record_start", "screen_record_status", "screen_verify"):
+                     "screen_record_start", "screen_record_status", "screen_record_save",
+                     "screen_analyze", "screen_verify", "screen_action_before",
+                     "screen_action_after", "screen_watch"):
         assert expected in names, f"{expected} not registered"
 
     # screen status works headless

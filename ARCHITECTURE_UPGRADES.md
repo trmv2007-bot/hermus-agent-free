@@ -58,12 +58,32 @@ ALLOW/ASK/DENY default, escalates risk from args (e.g. `sudo` in a shell
 command), supports per-agent + per-tool overrides, and appends to an audit
 log. **Wire into `core/tool_registry.execute` to enforce** (see below).
 
-### Computer control (hybrid recording)
-A rolling screen buffer (`ScreenRecorder`, last N seconds) instead of streaming
-everything to a model. `FrameSampler` promotes only *changed* frames (motion /
-UI events); `ScreenVerifier` confirms expected states from before/after frames
-(optionally via a vision-model callback). Headless-safe (`NullSource` /
-`CallableSource` for tests).
+### Hermus Computer Agent v1
+
+The computer subsystem now implements **Record → Detect → Understand → Verify**:
+
+- `ScreenRecorder` keeps only a bounded rolling window of JPEG-compressed
+  frames in RAM (duration *and* byte guards), while optionally fanning the full
+  session to disk.
+- `VideoWriter` streams those JPEG frames through free FFmpeg to real MP4/WebM;
+  Hermus resolves system FFmpeg or the `imageio-ffmpeg` fallback.
+- `FrameSampler` + `EventDetector` find changes, debounce UI animation bursts,
+  and select important evidence rather than sending every frame to vision.
+- `VideoAnalyzer` compares BEFORE/AFTER composites with an injected model or
+  local Ollama/LLaVA and generates an agent-readable `Timeline`.
+- `ScreenVerifier` returns action, visual result, confidence, and recording
+  evidence suitable for procedural memory.
+- `ScreenWatcher` evaluates only new/changed frames until a visual condition is
+  true or a timeout expires.
+- `TaskArtifacts` writes `recording.mp4`, `timeline.json`, `events.json`,
+  `actions.json`, `result.json`, and `manifest.json` together.
+- `RecordingPolicy` constrains agent-created recordings to a private
+  `data/recordings/` root; tool-level capture/watch consent remains controlled
+  by `core.permissions`.
+
+`hermus screen record start` uses a detached local service, so recording really
+continues after the starting CLI process exits. Headless/test sources remain
+available through `NullSource` and `CallableSource`.
 
 ### Research pipeline
 `search → dedupe → rank → extract claims → cross-check → contradictions →
@@ -121,11 +141,14 @@ gateway:
 ### New gateway endpoints
 `/agents`, `/agents/{create,start,stop}`, `/workspace`, `/workspace/{create,use}`,
 `/memory2/{remember,recall}`, `/permissions/{check,set,log}`, `/research`,
-`/router/select`, `/screen/{status,start,stop}`, `/watchdog/handle`,
-`/profiles`, `/profiles/create`.
+`/router/select`, `/screen/{status,start,stop,save,analyze,watch}`,
+`/screen/action/{before,after}`, `/watchdog/handle`, `/profiles`,
+`/profiles/create`.
 
 ### Tests
 - `tests/test_architecture.py` — 10/10 (foundation units)
 - `tests/test_integration.py` — 6/6 (live wiring: registry gate, agent loop,
   gateway endpoints)
-- full suite — 77 passing
+- `tests/test_computer_agent_v1.py` — compressed RAM, MP4 round-trip,
+  event timelines, before/after memory, watcher, artifacts and privacy policy
+- full suite — 87 passing
