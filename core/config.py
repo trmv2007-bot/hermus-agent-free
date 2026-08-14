@@ -41,8 +41,31 @@ class Config(BaseModel):
 
     # Memory
     memory_db_path: str = "data/memory.db"
+    memory2_db_path: str = "data/memory2.db"
     user_model_path: str = "data/user_model.json"
     trajectory_path: str = "data/trajectories.jsonl"
+
+    # Workspace — per-project isolation (agent OS layout)
+    workspace_dir: str = os.getenv("HERMUS_HOME", "~/.hermus")
+
+    # ---- Architecture upgrades (full wiring) -------------------------------
+    # Permissions: enforce ALLOW/ASK/DENY on every tool call (always audited).
+    permissions_enforce: bool = os.getenv("HERMUS_PERMISSIONS_ENFORCE", "1") not in ("0", "false", "False")
+    # How an ASK decision resolves when no interactive prompt is attached.
+    # "allow" (default, backward-compatible) | "deny" (strict / fail-safe).
+    ask_policy: str = os.getenv("HERMUS_ASK_POLICY", "allow")
+    # Memory 2.0: typed + scored recall injected into the system prompt + auto-persist.
+    memory2_enabled: bool = os.getenv("HERMUS_MEMORY2_ENABLED", "1") not in ("0", "false", "False")
+    # Model Router 2.0: per-turn model selection.
+    router2_enabled: bool = os.getenv("HERMUS_ROUTER2_ENABLED", "1") not in ("0", "false", "False")
+    # Autonomous verify/repair gate applied after the ReAct loop.
+    autonomous_enabled: bool = os.getenv("HERMUS_AUTONOMOUS_ENABLED", "0") not in ("0", "false", "False")
+    # Self-healing watchdog on task/tool failures (gateway + agent).
+    watchdog_enabled: bool = os.getenv("HERMUS_WATCHDOG_ENABLED", "1") not in ("0", "false", "False")
+    # Keep persistent background agents alive (gateway watchdog tick).
+    background_agents_enabled: bool = os.getenv("HERMUS_BG_AGENTS_ENABLED", "1") not in ("0", "false", "False")
+    # Active persona / profile name (independent memory + system prompt).
+    profile: str = os.getenv("HERMUS_PROFILE", "")
 
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"

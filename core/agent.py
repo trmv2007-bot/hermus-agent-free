@@ -30,6 +30,7 @@ class HermusAgent:
         base_url: str = None,
     ):
         self.model_name = model or config.model
+        self._model_pinned = model is not None
         self.llm = FreeLLM(self.model_name, api_key=api_key, base_url=base_url)
         self.session_id = session_id or (
             f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
@@ -55,6 +56,15 @@ class HermusAgent:
         tool_registry.load()
         self.tools = self._get_tools()
         self.agent_tracker_id = None
+
+        # Architecture upgrades: active project + persona profile
+        try:
+            from .workspace import workspace
+
+            self.project = workspace.active_project()
+        except Exception:
+            self.project = getattr(config, "project", "default") or "default"
+        self.profile = getattr(config, "profile", "") or ""
 
         print(
             f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | "
@@ -123,6 +133,33 @@ class HermusAgent:
         """Execute via central registry — all tools including full pentest map."""
         return tool_registry.execute(name, args or {})
 
+    def _apply_router(self, user_message: str) -> Optional[Dict]:
+        """Model Router 2.0: swap the LLM to the best available model for this turn.
+
+        Returns the selection dict on success, or None when routing is skipped
+        (mock provider, no workers, or same model).
+        """
+        try:
+            if getattr(self.llm, "provider", "") == "mock":
+                return None
+            from .router2 import router2
+            from .llm import FreeLLM
+
+            sel = router2.select(user_message)
+            if not sel.get("success"):
+                return None
+            new_ref = sel["model"]
+            if new_ref == self.model_name:
+                return sel
+            new_llm = FreeLLM(new_ref)
+            self.llm = new_llm
+            self.model_name = new_ref
+            print(f"[Router] {sel['task_type']} -> {new_ref} ({sel['reason']})")
+            return sel
+        except Exception as e:
+            print(f"[Router] skipped ({e})")
+            return None
+
     def _build_system_prompt(self, user_message: str = "") -> str:
         curated = memory.get_curated_memory(limit=10)
         curated_text = (
@@ -151,14 +188,37 @@ class HermusAgent:
         except Exception:
             pass
 
+        # Memory 2.0 (architecture upgrade): typed + scored recall
+        memory2_block = ""
+        if getattr(config, "memory2_enabled", True):
+            try:
+                from .memory2 import memory2
+
+                memory2_block = memory2.recall_prompt_block(
+                    user_message, limit=5, project=self.project
+                )
+            except Exception:
+                memory2_block = ""
+
+        # Profile persona (architecture upgrade)
+        persona_block = ""
+        if self.profile:
+            try:
+                from .profiles import profile_manager
+
+                persona_block = f"\nPersona ({self.profile}):\n{profile_manager.system_prompt(self.profile)}\n"
+            except Exception:
+                persona_block = ""
+
         return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
 
 You have:
 - Multi-step tool use (ReAct): you may call tools across multiple rounds until the task is done (max {self.max_steps} steps)
 - Persistent memory (SQLite FTS5) + semantic/hybrid search (embeddings)
+- Typed long-term memory (episodic/semantic/procedural/project) via memory2_recall / memory2_remember
 - Auto-created skills (skill_list / skill_use with task context)
 - MCP tools when configured (mcp_list_servers / mcp_connect_all)
-- {tool_count} tools registered (browser, vision, voice, internet eyes, pentest, backends, etc.)
+- {tool_count} tools registered (browser, vision, voice, internet eyes, pentest, backends, research, screen, etc.)
 
 Curated Memory:
 {curated_text}
@@ -172,16 +232,20 @@ Available Skills:
 Periodic Nudges:
 {nudges_text}
 {lessons_block}
+{memory2_block}
+{persona_block}
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
 - After tools return, continue reasoning; call more tools if needed
 - When finished, respond with a clear final answer and NO further tool calls
 - Prefer skill_use for known workflows; memory_search/hybrid for past context
+- Prefer research_deep for multi-source questions needing citations
 - Prefer embeddings_ingest + embeddings_search for document Q&A
 - You are free, MIT, no paywall — Ollama / Groq / HF
 - Session: {self.session_id}
 - Model: {self.model_name}
 - Mode: {self.mode.value}
+- Project: {self.project}
 """
 
     def _format_tool_result(self, name: str, result: Any, limit: int = 3000) -> str:
@@ -279,6 +343,11 @@ Rules:
             fleet_result = self._maybe_fleet_distribute(user_message)
             if fleet_result is not None:
                 return fleet_result
+
+        # Model Router 2.0 (architecture upgrade): per-turn model selection
+        routed = None
+        if not self._model_pinned and getattr(config, "router2_enabled", True):
+            routed = self._apply_router(user_message)
 
         memory.add_session_message(self.session_id, "user", user_message)
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
@@ -616,6 +685,14 @@ Rules:
         except Exception:
             pass
 
+        # Memory 2.0 (architecture upgrade): auto-persist typed memories
+        self._persist_memory2(user_message, final_content, all_tool_results)
+
+        # Optional autonomous verify gate (non-blocking metadata)
+        verification = None
+        if getattr(config, "autonomous_enabled", False):
+            verification = self._verify_final(user_message, final_content)
+
         return {
             "session_id": self.session_id,
             "response": final_content,
@@ -629,7 +706,72 @@ Rules:
             "plan": plan.to_dict() if plan else None,
             "strategy": strategy,
             "strategy_meta": strategy_meta,
+            "router": routed,
+            "project": self.project,
+            "verification": verification,
         }
+
+    def _persist_memory2(self, user_message: str, final_content: str,
+                         tool_results: List[Dict]) -> None:
+        """Auto-persist typed memories after a turn (best-effort, offline-safe)."""
+        if not getattr(config, "memory2_enabled", True):
+            return
+        try:
+            from .memory2 import memory2
+
+            project = self.project
+            # episodic: what happened this turn
+            n_tools = len(tool_results)
+            failed = sum(1 for tr in tool_results if "error" in str(tr.get("result", "")).lower()[:300])
+            memory2.remember(
+                "episodic",
+                f"User asked: {user_message[:200]}. Agent used {n_tools} tool(s) "
+                f"and {'failed' if failed else 'succeeded'}.",
+                project=project, success=(failed == 0),
+            )
+            # semantic: explicit facts / preferences
+            low = user_message.lower()
+            if any(k in low for k in ("remember that", "i prefer", "i like", "my name is", "i use", "my favorite")):
+                memory2.remember("semantic", user_message[:300], project=project, importance=7)
+            # procedural: successful multi-tool sequences become recipes
+            if n_tools >= 2 and failed == 0:
+                chain = " -> ".join(tr["tool"] for tr in tool_results[:5])
+                memory2.remember(
+                    "procedural",
+                    f"For '{user_message[:120]}', a working tool sequence: {chain}",
+                    project=project, success=True,
+                )
+        except Exception:
+            pass
+
+    def _verify_final(self, user_message: str, final_content: str) -> Dict:
+        """Lightweight verification of the final answer (autonomous gate)."""
+        try:
+            from .autonomous import Verifier
+
+            v = Verifier().verify(user_message, final_content)
+            return {"verified": v.get("ok", True), "problems": v.get("problems", [])}
+        except Exception as e:
+            return {"verified": True, "error": str(e)}
+
+    def autonomous(self, task: str, max_repairs: int = 2) -> Dict[str, Any]:
+        """Run a goal through the full plan→execute→observe→verify→repair loop.
+
+        Each execution step reuses this agent's ReAct loop (``self.chat``); the
+        autonomous runner re-runs steps and repairs until a verifier confirms
+        the goal is met (bounded by ``max_repairs``).
+        """
+        from .autonomous import AutonomousRunner, Verifier
+
+        def executor(goal: str) -> str:
+            res = self.chat(goal)
+            return str(res.get("response") or "")
+
+        runner = AutonomousRunner(
+            executor=executor, verifier=Verifier(), max_repairs=max_repairs
+        )
+        report = runner.run(task)
+        return report.to_dict()
 
     def _maybe_fleet_distribute(self, user_message: str) -> Optional[Dict[str, Any]]:
         """
