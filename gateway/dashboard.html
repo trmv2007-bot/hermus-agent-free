@@ -67,6 +67,11 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
 .tag.bad{color:var(--bad);border-color:rgba(239,68,68,.4)}
 .tag.warn{color:var(--warn);border-color:rgba(245,158,11,.4)}
 .muted{color:var(--text-muted);font-size:.8em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:.8em;align-items:baseline}
+.kv b{color:var(--text-muted);font-weight:400;font-family:"JetBrains Mono",monospace;white-space:nowrap}
+.ok-text{color:var(--ok)}.bad-text{color:var(--bad)}.warn-text{color:var(--warn)}
+.subtle{font-size:.75em;color:var(--text-muted)}
+.hr{border:none;border-top:1px solid var(--border);margin:10px 0}
 .sidebar-panel{width:0;overflow:hidden;background:var(--bg-card);border-left:1px solid var(--border);transition:width .3s ease}
 .sidebar-panel.open{width:400px;padding:14px;overflow:auto}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -172,14 +177,22 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
         <!-- CHAT -->
         <div class="pane" id="pane-chat">
           <h3 style="margin-bottom:8px">💬 Chat</h3>
-          <div class="banner">Uses current mode (multi-agent/multi-chat auto-distributes hard goals across models + keys).</div>
+          <div class="banner">Uses current mode (multi-agent/multi-chat auto-distributes hard goals across models + keys). Pick an API key / custom URL below — chat will really use it, in every mode.</div>
           <div class="row">
-            <input id="chatModel" placeholder="model e.g. groq/llama-3.1-8b-instant (optional)" style="flex:1;min-width:220px"/>
+            <div class="field" style="flex:1;min-width:240px">
+              <label>Model (optional — leave empty for the key's default)</label>
+              <input id="chatModel" placeholder="e.g. groq/llama-3.1-8b-instant, custom/gpt-4o-mini…"/>
+            </div>
+            <div class="field" style="flex:1;min-width:280px">
+              <label>API key / custom URL to use</label>
+              <select id="chatKeySel" onchange="loadChatKeys()"><option value="">Auto — first healthy key</option></select>
+            </div>
           </div>
           <div class="row">
             <input id="chatInput" placeholder="Message Hermus…" style="flex:1;min-width:220px" onkeydown="if(event.key==='Enter')sendChat()"/>
             <button class="btn primary" onclick="sendChat()">Send</button>
           </div>
+          <div id="chatMeta" class="subtle" style="margin:6px 0"></div>
           <div class="pre" id="chatResult">Responses appear here.</div>
         </div>
 
@@ -232,6 +245,7 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
                 <button class="btn sm" onclick="runHealthAll()">Test all health</button>
               </div>
             </div>
+            <div id="probeResult" class="pre" style="display:none;margin-bottom:8px"></div>
             <div id="keysTable" class="muted">Loading…</div>
           </div>
         </div>
@@ -404,19 +418,51 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
           <h3 style="margin-bottom:8px">⚙️ Settings</h3>
           <div class="two">
             <div class="card">
-              <h4>Cache</h4>
-              <div class="pre" id="cacheStats">—</div>
+              <h4>🗂️ Cache</h4>
+              <div class="kv" id="cacheStats">Loading…</div>
               <div class="row"><button class="btn sm" onclick="loadCache()">Refresh</button><button class="btn sm" onclick="clearCache()">Clear caches</button></div>
             </div>
             <div class="card">
-              <h4>Updates</h4>
-              <div class="pre" id="updateStatus">—</div>
+              <h4>🔄 Updates</h4>
+              <div id="updateStatus" class="muted">—</div>
               <div class="row"><button class="btn sm" onclick="checkUpdate()">Check</button><button class="btn sm" onclick="doUpdate()">Pull update</button></div>
             </div>
           </div>
           <div class="card">
-            <h4>Gateway info</h4>
-            <div class="pre" id="rootInfo">—</div>
+            <h4>🌐 Gateway info</h4>
+            <div id="rootInfo" class="muted">—</div>
+          </div>
+          <div class="card">
+            <div class="row" style="justify-content:space-between">
+              <h4>🔌 Custom APIs <span class="subtle">(your own API endpoints, usable in every chat mode)</span></h4>
+              <button class="btn sm" onclick="loadCustomApis()">Refresh</button>
+            </div>
+            <div class="row">
+              <div class="field" style="flex:1;min-width:140px"><label>Name</label><input id="caName" placeholder="weather"/></div>
+              <div class="field" style="flex:2;min-width:220px"><label>Description</label><input id="caDesc" placeholder="Get weather for a city"/></div>
+              <div class="field" style="flex:2;min-width:220px"><label>URL (use {param} placeholders)</label><input id="caUrl" placeholder="https://api.example.com/weather?city={city}"/></div>
+            </div>
+            <div class="row">
+              <div class="field"><label>Method</label>
+                <select id="caMethod" style="min-width:110px">
+                  <option value="GET">GET</option><option value="POST">POST</option>
+                  <option value="PUT">PUT</option><option value="DELETE">DELETE</option>
+                </select>
+              </div>
+              <div class="field"><label>Auth type</label>
+                <select id="caAuthType" style="min-width:110px">
+                  <option value="">None</option><option value="bearer">Bearer token</option>
+                  <option value="apikey">API key header</option><option value="basic">Basic auth</option>
+                </select>
+              </div>
+              <div class="field" style="flex:1;min-width:140px"><label>Token / key</label><input id="caToken" type="password" placeholder="optional"/></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Header name (apikey)</label><input id="caHeader" placeholder="X-API-Key"/></div>
+              <div class="field" style="flex:1;min-width:120px"><label>Params (comma)</label><input id="caParams" placeholder="city,units"/></div>
+              <button class="btn primary" onclick="addCustomApi()" style="align-self:end">Add custom API</button>
+            </div>
+            <div id="customApiResult" class="pre" style="display:none;margin-top:8px"></div>
+            <hr class="hr"/>
+            <div id="customApisList" class="muted">Loading…</div>
           </div>
         </div>
 
@@ -462,7 +508,8 @@ function switchPane(pane){
   $('crumb').textContent = meta[0];
   $('crumbSub').textContent = meta[1];
   // lazy load
-  if(pane==='keys') loadKeys();
+  if(pane==='keys'){ loadKeys(); loadChatKeys(); }
+  if(pane==='chat') loadChatKeys();
   if(pane==='fleet') loadWorkers();
   if(pane==='health'){ loadRates(); }
   if(pane==='providers') loadProviders();
@@ -472,7 +519,7 @@ function switchPane(pane){
   if(pane==='mcp') loadMcp();
   if(pane==='agents') loadAgents();
   if(pane==='reasoning') loadReasoning();
-  if(pane==='settings'){ loadCache(); checkUpdate(); loadRoot(); }
+  if(pane==='settings'){ loadCache(); checkUpdate(); loadRoot(); loadCustomApis(); }
 }
 
 function togglePanel(){
@@ -506,7 +553,24 @@ async function loadRoot(){
     const d = await jget('/');
     $('statusPill').textContent = 'online · ' + (d.version||'ok');
     $('statusPill').className = 'pill ok';
-    if($('rootInfo')) $('rootInfo').textContent = JSON.stringify(d, null, 2);
+    if($('rootInfo')){
+      const ch = d.channels || {};
+      const tg = ch.telegram || {}, dc = ch.discord || {};
+      const cs = d.cache_stats || {};
+      const rows = [
+        ['Version', d.version||'—'],
+        ['Platforms', (d.platforms||[]).join(', ')],
+        ['Active agents', d.agents ?? '—'],
+        ['Telegram', tg.running ? '✅ running' : 'stopped'],
+        ['Discord', dc.running ? '✅ running' : 'stopped'],
+        ['LLM cache', `${cs.llm_cache?.hits ?? '—'} hits · ${cs.llm_cache?.misses ?? '—'} misses`],
+      ];
+      const feats = (d.features||[]).map(f=>`<span class="tag mono">${esc(f)}</span>`).join(' ');
+      $('rootInfo').innerHTML =
+        `<div class="kv">${rows.map(([k,v])=>`<b>${esc(k)}</b><span>${esc(String(v))}</span>`).join('')}</div>` +
+        `<div class="subtle" style="margin-top:8px">${esc(d.message||'')}</div>` +
+        `<div style="margin-top:8px">${feats}</div>`;
+    }
   }catch(e){
     $('statusPill').textContent = 'offline';
     $('statusPill').className = 'pill bad';
@@ -571,7 +635,7 @@ async function loadKeys(silent){
     if(!providers.length || total===0){
       html = '<p class="muted">No keys yet. Add Groq/OpenRouter/OpenAI/custom above.</p>';
     } else {
-      html = '<table class="table"><tr><th>Provider</th><th>Name</th><th>Preview</th><th>Model</th><th>Health</th><th>Models</th><th>RPM</th><th></th></tr>';
+      html = '<table class="table"><tr><th>Provider</th><th>Name</th><th>Preview</th><th>Model</th><th>Base URL</th><th>Health</th><th>Models</th><th>RPM</th><th></th></tr>';
       for(const [p, arr] of Object.entries(keys)){
         (arr||[]).forEach(k=>{
           const healthy = k.healthy;
@@ -581,6 +645,7 @@ async function loadKeys(silent){
             <td>${esc(k.name||'')}</td>
             <td class="mono">${esc(k.preview||'')}</td>
             <td class="mono">${esc(k.default_model||'')}</td>
+            <td class="mono subtle">${esc(k.base_url||'preset')}</td>
             <td>${tag(healthy, st)}</td>
             <td>${k.models_count??0}${(k.models_sample&&k.models_sample.length)?`<div class="muted">${esc(k.models_sample.slice(0,4).join(', '))}</div>`:''}</td>
             <td>${esc(k.rpm_limit??'—')}</td>
@@ -629,21 +694,57 @@ async function addKey(){
   $('keyAddResult').textContent = 'Adding + probing…';
   try{
     const d = await jpost('/keys/add', body);
-    $('keyAddResult').textContent = JSON.stringify(d, null, 2).slice(0,3000);
-    if(d.success){ $('keyValue').value=''; loadKeys(); }
-  }catch(e){ $('keyAddResult').textContent = String(e); }
+    if(!d.success){
+      $('keyAddResult').innerHTML = `<span class="bad-text">❌ ${esc(d.error||'Failed to add key')}</span>`;
+      return;
+    }
+    const h = d.health || {};
+    const healthTxt = h.status
+      ? `<span class="${h.healthy?'ok-text':'bad-text'}">${h.healthy?'✅':'⚠️'} health: ${esc(h.status)} · ${esc(h.latency_ms??'—')}ms · ${esc(h.models_count??0)} models</span>`
+      : (d.health_error ? `<span class="warn-text">⚠️ probe error: ${esc(d.health_error)}</span>` : '<span class="subtle">not probed</span>');
+    let html = `<div class="ok-text">✅ Key added — ${esc(d.provider)} / ${esc(d.key_name||'')}</div>` +
+      `<div class="kv" style="margin-top:6px">` +
+      `<b>Model</b><span class="mono">${esc(d.default_model||'—')}</span>` +
+      `<b>Base URL</b><span class="mono subtle">${esc(d.base_url||'preset')}</span>` +
+      `<b>Health</b><span>${healthTxt}</span>` +
+      `<b>Keys for provider</b><span>${esc(d.total_keys)}</span></div>`;
+    if(h.models_sample && h.models_sample.length)
+      html += `<div class="subtle" style="margin-top:6px">Models: ${esc(h.models_sample.slice(0,8).join(', '))}</div>`;
+    if(h.error) html += `<div class="bad-text" style="margin-top:4px">${esc(String(h.error).slice(0,200))}</div>`;
+    $('keyAddResult').innerHTML = html;
+    $('keyValue').value='';
+    loadKeys(); loadChatKeys();
+  }catch(e){ $('keyAddResult').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function removeKey(provider, keyOrName){
   if(!confirm(`Remove ${provider} / ${keyOrName}?`)) return;
-  await jpost('/keys/remove', {provider, key: keyOrName, name: keyOrName});
-  loadKeys();
+  const d = await jpost('/keys/remove', {provider, key: keyOrName, name: keyOrName});
+  loadKeys(); loadChatKeys();
 }
 
 async function probeOne(provider, name){
-  // health endpoint probes all; for one we use models + health with provider filter via POST fleet-less
-  const d = await jget('/keys/health?provider='+encodeURIComponent(provider));
-  alert(JSON.stringify(d, null, 2).slice(0,1500));
+  const box = $('probeResult');
+  box.style.display='block';
+  box.textContent = `Probing ${provider} / ${name}…`;
+  try{
+    const d = await jget('/keys/health?provider='+encodeURIComponent(provider));
+    const results = (d.results||[]).filter(r => !name || r.key_name===name || r.name===name);
+    if(!results.length){
+      box.innerHTML = '<span class="warn-text">No health result for this key.</span>';
+      return;
+    }
+    box.innerHTML = results.map(r=>{
+      const m = r.models_probe || {};
+      return `<div class="${r.healthy?'ok-text':'bad-text'}">${r.healthy?'✅':'❌'} ${esc(r.provider)} / ${esc(r.key_name||'')} — ${esc(r.status||(r.healthy?'ok':'bad'))} · ${esc(r.latency_ms??'—')}ms</div>` +
+        `<div class="kv" style="margin:6px 0">` +
+        `<b>Model tested</b><span class="mono">${esc(r.model_tested||'—')}</span>` +
+        `<b>Models found</b><span>${esc(m.count??0)} ${(m.sample||[]).length?`<span class="subtle">(${esc(m.sample.slice(0,6).join(', '))})</span>`:''}</span>` +
+        `<b>Rate limit</b><span class="mono subtle">${esc(Object.entries(r.rate_limit||{}).filter(([k,v])=>v!=null).map(([k,v])=>k+'='+v).join(' ')||'—')}</span>` +
+        (r.error?`<b>Error</b><span class="bad-text">${esc(String(r.error).slice(0,200))}</span>`:'') +
+        `</div>`;
+    }).join('<hr class="hr"/>');
+  }catch(e){ box.innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
   loadKeys();
 }
 
@@ -707,11 +808,18 @@ async function discoverModels(){
   $('modelsResult').textContent = 'Loading…';
   try{
     const d = await jget(url);
-    const models = (d.models||[]).map(m=>m.id||m).slice(0,80);
-    $('modelsResult').textContent = d.success
-      ? `✅ ${d.count} models\n\n` + models.join('\n')
-      : JSON.stringify(d,null,2).slice(0,3000);
-  }catch(e){ $('modelsResult').textContent = String(e); }
+    if(d.success){
+      const models = (d.models||[]).map(m=>m.id||m).slice(0,80);
+      $('modelsResult').innerHTML =
+        `<span class="ok-text">✅ ${d.count} models for ${esc(p)}${d.base_url?` @ <span class="mono subtle">${esc(d.base_url)}</span>`:''}</span>` +
+        `<div class="mono" style="margin-top:6px;white-space:pre-wrap">${esc(models.join('\n'))}</div>`;
+    } else {
+      $('modelsResult').innerHTML =
+        `<span class="bad-text">❌ Could not list models for ${esc(p)}</span>` +
+        `<div class="subtle" style="margin-top:6px">${esc((d.error||d.message||'unknown error').toString().slice(0,300))}</div>` +
+        `<div class="subtle">Try setting a base URL (custom endpoints) or check the API key.</div>`;
+    }
+  }catch(e){ $('modelsResult').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function loadProviders(){
@@ -800,21 +908,36 @@ async function loadChannels(silent){
   try{
     const d = await jget('/channels/status');
     const ch = d.channels || {};
-    $('channelsStatus').textContent = JSON.stringify(d, null, 2);
+    const tg = ch.telegram || {}, dc = ch.discord || {};
+    const statusHtml =
+      `<div class="kv">` +
+      `<b>Telegram token</b><span>${d.telegram_token_set? tag(true,'set'): tag(false,'missing')}</span>` +
+      `<b>Telegram status</b><span>${tg.running? tag(true,'running'): tag(false,'stopped')} mode=${esc(tg.mode||'—')} · ${tg.updates||0} updates</span>` +
+      `<b>Discord token</b><span>${d.discord_token_set? tag(true,'set'): tag(false,'missing')}</span>` +
+      `<b>Discord status</b><span>${dc.running? tag(true,'running'): tag(false,'stopped')} · ${dc.messages||0} messages</span>` +
+      `</div>`;
+    $('channelsStatus').innerHTML = statusHtml;
+    if(tg.last_error) $('channelsStatus').insertAdjacentHTML('beforeend', `<div class="bad-text" style="margin-top:6px">Telegram: ${esc(String(tg.last_error).slice(0,200))}</div>`);
+    if(dc.last_error) $('channelsStatus').insertAdjacentHTML('beforeend', `<div class="bad-text" style="margin-top:6px">Discord: ${esc(String(dc.last_error).slice(0,200))}</div>`);
     let html = '';
     html += `<div>Telegram token: ${d.telegram_token_set? tag(true,'set'): tag(false,'missing')}
-      running=${ch.telegram?.running} mode=${esc(ch.telegram?.mode||'—')}</div>`;
+      running=${tg.running} mode=${esc(tg.mode||'—')}</div>`;
     html += `<div style="margin-top:6px">Discord token: ${d.discord_token_set? tag(true,'set'): tag(false,'missing')}
-      running=${ch.discord?.running}</div>`;
-    if(ch.telegram?.last_error) html += `<div class="muted">TG err: ${esc(ch.telegram.last_error)}</div>`;
-    if(ch.discord?.last_error) html += `<div class="muted">DC err: ${esc(ch.discord.last_error)}</div>`;
+      running=${dc.running}</div>`;
+    if(tg.last_error) html += `<div class="muted">TG err: ${esc(String(tg.last_error).slice(0,100))}</div>`;
+    if(dc.last_error) html += `<div class="muted">DC err: ${esc(String(dc.last_error).slice(0,100))}</div>`;
     $('overviewChannels').innerHTML = html;
-  }catch(e){ if(!silent) $('channelsStatus').textContent = String(e); }
+  }catch(e){ if(!silent) $('channelsStatus').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function startChannels(){
-  const d = await jpost('/channels/start', {});
-  $('channelsStatus').textContent = JSON.stringify(d, null, 2);
+  try{
+    const d = await jpost('/channels/start', {});
+    const started = (d.started||[]);
+    $('channelsStatus').insertAdjacentHTML('afterbegin',
+      `<div class="${started.length?'ok-text':'warn-text'}" style="margin-bottom:8px">` +
+      (started.length? `✅ Started: ${esc(started.join(', '))}` : '⚠️ Nothing to start (tokens missing?)') + `</div>`);
+  }catch(e){ $('channelsStatus').insertAdjacentHTML('afterbegin', `<div class="bad-text">❌ ${esc(String(e))}</div>`); }
   loadChannels();
 }
 
@@ -822,9 +945,14 @@ async function sendTelegram(){
   const chat_id = $('tgChatId').value.trim();
   const text = $('tgText').value.trim();
   if(!chat_id||!text) return alert('chat_id + text required');
-  const d = await jpost('/telegram/send', {chat_id, text});
   $('tgSendResult').style.display='block';
-  $('tgSendResult').textContent = JSON.stringify(d,null,2);
+  $('tgSendResult').textContent='Sending…';
+  try{
+    const d = await jpost('/telegram/send', {chat_id, text});
+    $('tgSendResult').innerHTML = d && d.ok
+      ? `<span class="ok-text">✅ Sent to ${esc(chat_id)}</span>`
+      : `<span class="bad-text">❌ ${esc((d&&d.error)||d.description||'send failed')}</span>`;
+  }catch(e){ $('tgSendResult').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function loadEmbStatus(){
@@ -841,9 +969,19 @@ async function embIngest(){
   $('embIngestResult').textContent='Ingesting…';
   try{
     const d = await jpost('/embeddings/ingest', {path});
-    $('embIngestResult').textContent = JSON.stringify(d,null,2).slice(0,2000);
+    if(d && d.success!==false && !d.error){
+      $('embIngestResult').innerHTML =
+        `<span class="ok-text">✅ Ingested ${esc(path)}</span>` +
+        `<div class="kv" style="margin-top:6px">` +
+        `<b>Files</b><span>${esc(d.files??d.files_processed??'—')}</span>` +
+        `<b>Chunks added</b><span>${esc(d.chunks??d.added??d.count??'—')}</span>` +
+        `<b>Embeddings</b><span>${esc(d.embeddings??d.total??'—')}</span>` +
+        `</div>`;
+    } else {
+      $('embIngestResult').innerHTML = `<span class="bad-text">❌ ${esc((d&&d.error)||'ingest failed')}</span>`;
+    }
     loadEmbStatus();
-  }catch(e){ $('embIngestResult').textContent=String(e); }
+  }catch(e){ $('embIngestResult').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function embSearch(){
@@ -864,59 +1002,188 @@ async function embSearch(){
 async function loadReasoning(forceReview){
   try{
     const ev = await jget('/eval/summary');
-    $('reasoningEvalBody').textContent = JSON.stringify(ev, null, 2);
-  }catch(e){ $('reasoningEvalBody').textContent = String(e); }
+    let html;
+    if(!ev.runs){
+      html = '<p class="muted">No eval runs yet — run <span class="mono">hermus eval run</span>.</p>';
+    } else {
+      const rate = ev.last_success_rate!=null ? Math.round(Number(ev.last_success_rate)*100)+'%' : '—';
+      html = `<div class="kv">` +
+        `<b>Runs</b><span>${esc(ev.runs)}</span>` +
+        `<b>Last run</b><span>${esc((ev.last_run||'').slice(0,19))}</span>` +
+        `<b>Last strategy</b><span class="mono">${esc(ev.last_strategy||'—')}</span>` +
+        `<b>Success rate</b><span>${rate} (${esc(ev.last_runs||0)} runs)</span>` +
+        `</div>`;
+      if((ev.recent||[]).length){
+        html += '<div class="subtle" style="margin-top:6px">Recent:</div>';
+        html += ev.recent.slice().reverse().map(r=>
+          `<div class="subtle">${esc((r.timestamp||'').slice(0,16))} · ${esc(r.strategy)} · ${r.success_rate!=null?Math.round(Number(r.success_rate)*100)+'%':'—'}</div>`).join('');
+      }
+    }
+    $('reasoningEvalBody').innerHTML = html;
+  }catch(e){ $('reasoningEvalBody').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
   try{
     const cs = await jget('/counsel/status');
-    $('reasoningCounselBody').textContent = JSON.stringify(cs, null, 2);
-  }catch(e){ $('reasoningCounselBody').textContent = String(e); }
+    const c = cs.constitution || {};
+    const rules = c.rules || {};
+    const budget = c.budget || {};
+    const amendments = cs.pending_amendments || [];
+    const ruleLines = Object.entries(rules).map(([k,v])=>`<div class="subtle">· ${esc(k)}: ${esc(typeof v==='object'?JSON.stringify(v).slice(0,120):String(v))}</div>`).join('');
+    let html = `<div class="kv">` +
+      `<b>Constitution</b><span>v${esc(c.version||'—')} — ${esc(c.name||'')}</span>` +
+      `<b>Members</b><span>${esc((c.members||[]).join(', ')||'—')}</span>` +
+      `<b>Default strategy</b><span class="mono">${esc(c.default_strategy||'—')}</span>` +
+      `<b>Pending amendments</b><span>${esc((amendments||[]).length)}</span>` +
+      `<b>Reviews logged</b><span>${esc(cs.reviews_logged||0)}</span>` +
+      `<b>Upgrades</b><span>${esc(c.upgrade_events||0)}</span>` +
+      `</div>`;
+    if(ruleLines){
+      html += `<div class="subtle" style="margin-top:6px">Rules (max ${esc(budget.max_rules??'—')}):</div>`;
+      html += `<div style="margin-top:2px">${ruleLines}</div>`;
+    }
+    if(Array.isArray(amendments) && amendments.length){
+      html += `<div class="warn-text" style="margin-top:6px">⏳ ${amendments.length} amendment${amendments.length>1?'s':''} waiting for approval — CLI: hermus counsel amend list</div>`;
+    }
+    $('reasoningCounselBody').innerHTML = html;
+  }catch(e){ $('reasoningCounselBody').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function loadMcp(){
   try{
     const d = await jget('/mcp/servers');
-    $('mcpStatus').textContent = JSON.stringify(d, null, 2);
-  }catch(e){ $('mcpStatus').textContent=String(e); }
+    const servers = d.servers || [];
+    if(!servers.length){
+      $('mcpStatus').innerHTML = '<p class="muted">No MCP servers configured. Add data/mcp_servers.json entries or <span class="mono">hermus mcp add</span>.</p>';
+      return;
+    }
+    $('mcpStatus').innerHTML = '<table class="table"><tr><th>Name</th><th>Command</th><th>Enabled</th><th>Tools</th><th>Status</th></tr>' +
+      servers.map(s=>`<tr>
+        <td>${esc(s.name||s.id||'—')}</td>
+        <td class="mono subtle">${esc((s.command||s.cmd||'—')+' '+(s.args||[]).join(' '))}</td>
+        <td>${s.enabled!==false? tag(true,'on'): tag(false,'off')}</td>
+        <td>${esc((s.tools||[]).length||(s.tool_names||[]).length||'—')}</td>
+        <td class="muted">${esc(s.status||(s.connected?'connected':'idle'))}${s.error?`<div class="bad-text">${esc(String(s.error).slice(0,120))}</div>`:''}</td>
+      </tr>`).join('') + '</table>';
+  }catch(e){ $('mcpStatus').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 async function mcpConnect(){
-  $('mcpStatus').textContent='Connecting…';
+  $('mcpStatus').innerHTML = '<span class="warn-text">⏳ Connecting…</span>';
   try{
     const d = await jpost('/mcp/connect', {});
-    $('mcpStatus').textContent = JSON.stringify(d, null, 2).slice(0,4000);
+    const tools = d.tools || {};
+    const toolNames = tools.tools ? tools.tools : (Array.isArray(tools) ? tools : []);
+    const n = Array.isArray(toolNames) ? toolNames.length : Object.keys(toolNames).length;
+    $('mcpStatus').insertAdjacentHTML('afterbegin',
+      `<div class="${d.error?'bad-text':'ok-text'}" style="margin-bottom:8px">` +
+      (d.error ? `⚠️ ${esc(String(d.error).slice(0,200))}` : `✅ Connected — ${n} tools available (registered=${d.registered!==undefined?d.registered:true})`) + `</div>`);
+    loadMcp();
     loadTools();
-  }catch(e){ $('mcpStatus').textContent=String(e); }
+  }catch(e){ $('mcpStatus').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
 async function loadCache(){
-  try{ $('cacheStats').textContent = JSON.stringify(await jget('/cache/stats'), null, 2); }
+  try{
+    const d = await jget('/cache/stats');
+    const labels = {llm_cache:'LLM responses', memory_search_cache:'Memory search', web_search_cache:'Web search', tool_result_cache:'Tool results', skill_cache:'Skills'};
+    let rows = '';
+    for(const [key,label] of Object.entries(labels)){
+      const s = d[key] || {};
+      const rate = s.hit_rate!=null ? Math.round(Number(s.hit_rate)*100) : 0;
+      rows += `<b>${esc(label)}</b><span>${s.size||0}/${s.max_size||'?'} entries · ${s.hits||0} hits · ${s.misses||0} misses · ${rate}% hit rate</span>`;
+    }
+    if(d.total_hit_rate!=null) rows += `<b>Overall hit rate</b><span>${Math.round(Number(d.total_hit_rate)*100)}%</span>`;
+    $('cacheStats').innerHTML = rows;
+  }
   catch(e){ $('cacheStats').textContent=String(e); }
 }
 async function clearCache(){
-  await jpost('/cache/clear', {});
+  const d = await jpost('/cache/clear', {});
+  const ok = d && (d.cleared || d.success);
+  $('cacheStats').insertAdjacentHTML('beforebegin', `<div class="subtle ${ok?'ok-text':'bad-text'}" id="cacheClearMsg">${ok?'✅ '+esc(d.message||'Caches cleared'):'❌ '+esc(JSON.stringify(d))}</div>`);
+  setTimeout(()=>{const el=$('cacheClearMsg'); if(el) el.remove();}, 4000);
   loadCache();
 }
 
 async function checkUpdate(silent){
   try{
     const d = await jget('/update/check');
-    if($('updateStatus')) $('updateStatus').textContent = JSON.stringify(d,null,2).slice(0,2000);
+    if($('updateStatus')) $('updateStatus').innerHTML = fmtUpdate(d);
     if(d.update_available){
       $('updatePill').style.display='inline-block';
       $('updatePill').className='pill warn';
       $('updatePill').textContent = 'update · behind ' + (d.behind_by||'?');
       $('updateBanner').style.display='block';
-      $('updateBanner').innerHTML = `🚀 Update available (behind ${esc(d.behind_by||1)}). <button class="btn sm primary" onclick="doUpdate()">Update now</button>`;
+      $('updateBanner').innerHTML = `🚀 Update available (behind ${esc(d.behind_by||1)} commit${d.behind_by>1?'s':''}). <button class="btn sm primary" onclick="doUpdate()">Update now</button>`;
     } else {
       $('updatePill').style.display='none';
       $('updateBanner').style.display='none';
     }
   }catch(e){ if(!silent && $('updateStatus')) $('updateStatus').textContent=String(e); }
 }
+
+function fmtUpdate(d){
+  const L = d.local||{}, R = d.remote||{};
+  let rows = [
+    ['Local commit', `${esc(L.short||L.commit||'—')} <span class="subtle">${esc((L.message||'').slice(0,70))}</span>`],
+    ['Remote commit', `${esc(R.short||R.commit||'—')} <span class="subtle">${esc((R.message||'').slice(0,70))}</span>`],
+  ];
+  if(R.author) rows.push(['Remote author', esc(R.author) + ' · ' + esc((R.date||'').slice(0,10))]);
+  if(d.behind_by) rows.push(['Behind by', `${esc(d.behind_by)} commit${d.behind_by>1?'s':''}`]);
+  if(d.remote_url) rows.push(['Repository', `<span class="mono" style="font-size:.72em">${esc(d.remote_url)}</span>`]);
+  let html = `<div class="kv">${rows.map(([k,v])=>`<b>${esc(k)}</b><span>${v}</span>`).join('')}</div>`;
+  if(d.error) html += `<div class="bad-text" style="margin-top:6px">⚠️ ${esc(d.error)}</div>`;
+  else if(d.up_to_date) html += `<div class="ok-text" style="margin-top:6px">✅ ${esc(d.message||'Up to date')}</div>`;
+  else if(d.update_available) html += `<div class="warn-text" style="margin-top:6px">🚀 ${esc(d.message||'Update available')}</div>`;
+  else if(d.message) html += `<div class="subtle" style="margin-top:6px">${esc(d.message)}</div>`;
+  return html;
+}
+
 async function doUpdate(){
-  if($('updateStatus')) $('updateStatus').textContent='Updating…';
-  const d = await jpost('/update/pull', {});
-  if($('updateStatus')) $('updateStatus').textContent = JSON.stringify(d,null,2).slice(0,2000);
+  if($('updateStatus')) $('updateStatus').innerHTML = '<span class="warn-text">⏳ Pulling update…</span>';
+  try{
+    const d = await jpost('/update/pull', {});
+    if($('updateStatus')){
+      const ok = d && !d.error;
+      $('updateStatus').innerHTML =
+        `<div class="${ok?'ok-text':'bad-text'}">${ok?'✅':'❌'} ${esc((d&&(d.message||d.output))||'Done')}</div>` +
+        (d&&d.error?`<div class="subtle">${esc(String(d.error).slice(0,300))}</div>`:'');
+    }
+  }catch(e){ if($('updateStatus')) $('updateStatus').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
   checkUpdate();
+}
+
+let chatKeysCache = {};
+async function loadChatKeys(){
+  try{
+    const d = await jget('/keys/list');
+    const keys = d.llm_keys || {};
+    const sel = $('chatKeySel'); if(!sel) return;
+    const prev = sel.value;
+    let opts = '<option value="">Auto — first healthy key</option>';
+    chatKeysCache = {};
+    for(const [p, arr] of Object.entries(keys)){
+      (arr||[]).forEach(k=>{
+        const label = `${p} · ${k.name||k.preview||''} · ${k.default_model||'default'}${k.base_url? ' · '+k.base_url : ''}`;
+        const val = `${p}|${k.name||''}`;
+        chatKeysCache[val] = {provider:p, name:k.name||'', model:k.default_model, base_url:k.base_url};
+        opts += `<option value="${esc(val)}">${esc(label)}</option>`;
+      });
+    }
+    sel.innerHTML = opts;
+    if([...sel.options].some(o=>o.value===prev)) sel.value = prev;
+  }catch(e){}
+}
+
+function fmtToolResult(r){
+  if(r==null) return '—';
+  if(typeof r === 'string') return r.slice(0,220);
+  if(typeof r !== 'object') return String(r).slice(0,220);
+  if(r.success===true && r.api){
+    const data = String((r.data_str||r.data||'')).slice(0,180);
+    return `ok (HTTP ${r.status_code??'—'}) → ${String(r.url||'').slice(0,70)} · ${data}`;
+  }
+  if(r.error) return `error: ${String(r.error).slice(0,220)}`;
+  const s = JSON.stringify(r);
+  return s.length>240 ? s.slice(0,240)+'…' : s;
 }
 
 async function sendChat(){
@@ -924,15 +1191,28 @@ async function sendChat(){
   if(!text) return;
   const mode = $('modeSelector').value || localStorage.getItem('hermus_mode') || 'agent';
   const model = $('chatModel').value.trim() || undefined;
+  const selVal = $('chatKeySel') ? $('chatKeySel').value : '';
+  const body = {platform:'dashboard', user_id:'dashboard_user', text, mode, model};
+  if(selVal && chatKeysCache[selVal]){
+    const k = chatKeysCache[selVal];
+    body.provider = k.provider;
+    body.key_name = k.name || undefined;
+    if(!model && k.model && k.model !== 'default') body.model = `${k.provider}/${k.model}`;
+  }
   $('chatResult').textContent = `⏳ [${mode}] …`;
   try{
-    const d = await jpost('/command', {platform:'dashboard', user_id:'dashboard_user', text, mode, model});
-    let out = `Mode: ${d.mode||mode} | steps: ${d.steps||'—'} | tools: ${(d.tool_calls||[]).join(', ')||'none'}\n\n`;
-    out += (d.response||'') + '\n';
+    const d = await jpost('/command', body);
+    const resolved = d.resolved || {};
+    let meta = `Mode: ${esc(d.mode||mode)}`;
+    if(d.model) meta += ` · Model: ${esc(d.model)}`;
+    if(resolved.provider) meta += ` · Key: ${esc(resolved.provider)}${resolved.base_url? ' @ '+esc(String(resolved.base_url).slice(0,70)) : ''}`;
+    meta += ` · Steps: ${esc(d.steps??'—')} · Tools used: ${(d.tool_calls||[]).join(', ')||'none'}`;
+    if($('chatMeta')) $('chatMeta').textContent = meta;
+    let out = (d.response||'') + '\n';
     if(d.tool_results?.length){
-      out += '\n--- tools ---\n' + JSON.stringify(d.tool_results, null, 2).slice(0,2500);
+      out += '\n--- tools ---\n' + d.tool_results.map(tr=>`• ${esc(tr.tool)} → ${fmtToolResult(tr.result)}`).join('\n');
     }
-    if(d.fleet) out += '\n--- fleet ---\n' + JSON.stringify({mode:d.fleet.mode, success:d.fleet.success}, null, 2);
+    if(d.fleet) out += `\n--- fleet (${esc(d.fleet.mode||'auto')}) ---\n${esc(String(d.fleet.success))} · ${esc((d.fleet.workers_used||d.fleet.results?.length||0))} workers`;
     $('chatResult').textContent = out;
     $('chatInput').value='';
     loadAgents();
@@ -940,11 +1220,101 @@ async function sendChat(){
   }catch(e){ $('chatResult').textContent = String(e); }
 }
 
+async function loadCustomApis(){
+  try{
+    const d = await jget('/custom-apis/list');
+    const apis = d.custom_apis || [];
+    if(!apis.length){
+      $('customApisList').innerHTML = '<p class="muted">No custom APIs yet. Add one above — it becomes a tool you can use in chat (all modes).</p>';
+      return;
+    }
+    $('customApisList').innerHTML = '<table class="table"><tr><th>Name</th><th>Description</th><th>URL</th><th>Method</th><th>Token</th><th>Added</th><th></th></tr>' +
+      apis.map(a=>{
+        const token = (a.auth||{}).token || (a.auth||{}).value || '';
+        const preview = token ? `${String(token).slice(0,6)}…${String(token).slice(-4)}` : 'none';
+        return `<tr>
+          <td class="mono">${esc(a.name)}</td>
+          <td>${esc(a.description||'').slice(0,80)}</td>
+          <td class="mono subtle">${esc(a.url||'')}</td>
+          <td class="mono">${esc(a.method||'GET')}</td>
+          <td class="mono">${esc(preview)}</td>
+          <td class="subtle">${esc((a.created||'').slice(0,10))}</td>
+          <td>
+            <button class="btn sm" onclick="testCustomApi('${esc(a.name)}')">Test</button>
+            <button class="btn sm" onclick="removeCustomApi('${esc(a.id||'')}','${esc(a.name)}')">Del</button>
+          </td>
+        </tr>`;
+      }).join('') + '</table>';
+  }catch(e){ $('customApisList').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
+}
+
+async function addCustomApi(){
+  const name = $('caName').value.trim();
+  const url = $('caUrl').value.trim();
+  if(!name || !url){ alert('Name and URL are required'); return; }
+  const authType = $('caAuthType').value;
+  const auth = {};
+  if(authType==='bearer') auth.type='bearer', auth.token=$('caToken').value.trim();
+  else if(authType==='apikey') auth.type='apikey', auth.key=$('caHeader').value.trim()||'X-API-Key', auth.value=$('caToken').value.trim();
+  else if(authType==='basic') auth.type='basic', auth.username=$('caHeader').value.trim(), auth.password=$('caToken').value.trim();
+  const params = {};
+  $('caParams').value.split(',').map(s=>s.trim()).filter(Boolean).forEach(p=>{ params[p] = 'Value for '+p; });
+  const body = {
+    name, description: $('caDesc').value.trim() || name,
+    url, method: $('caMethod').value,
+    auth, parameters: params,
+  };
+  const box = $('customApiResult');
+  box.style.display='block';
+  box.textContent='Adding…';
+  try{
+    const d = await jpost('/custom-apis/add', body);
+    if(d && d.success){
+      box.innerHTML = `<span class="ok-text">✅ ${esc(d.message||('Custom API "'+name+'" added'))}</span>` +
+        `<div class="subtle" style="margin-top:4px">Now usable as the <b class="mono">${esc(name)}</b> tool in chat — every mode (agent, chat, multi-agent, multi-chat).</div>`;
+      $('caName').value=''; $('caDesc').value=''; $('caUrl').value=''; $('caToken').value='';
+      loadCustomApis();
+    } else {
+      box.innerHTML = `<span class="bad-text">❌ ${esc((d&&d.error)||'Failed to add custom API')}</span>`;
+    }
+  }catch(e){ box.innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
+}
+
+async function removeCustomApi(id, name){
+  if(!confirm(`Remove custom API ${name}?`)) return;
+  try{
+    const d = await jpost('/custom-apis/remove', {id, name});
+    const ok = d && (d.success || (!d.error && !d.success===false));
+    $('customApiResult').style.display='block';
+    $('customApiResult').innerHTML = ok
+      ? `<span class="ok-text">✅ Removed ${esc(name)}</span>`
+      : `<span class="bad-text">❌ ${esc((d&&(d.error||d.message))||'remove failed')}</span>`;
+    loadCustomApis();
+  }catch(e){ $('customApiResult').innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
+}
+
+async function testCustomApi(name){
+  const box = $('customApiResult');
+  box.style.display='block';
+  box.innerHTML = `<span class="warn-text">⏳ Testing ${esc(name)}…</span>`;
+  try{
+    const d = await jpost('/response-times/test', {api_name: name, test_args: {}});
+    const results = d.results || (d.success!==undefined ? [d] : []);
+    box.innerHTML = results.map(r=>{
+      const ok = r && r.success!==false && !r.error;
+      return `<div class="${ok?'ok-text':'bad-text'}">${ok?'✅':'❌'} ${esc(r.api_name||r.name||name)}` +
+        `${r.status_code!=null? ` — HTTP ${esc(r.status_code)}` : ''}${r.response_time_ms!=null? ` · ${esc(r.response_time_ms)}ms` : ''}</div>` +
+        (r.error? `<div class="subtle">${esc(String(r.error).slice(0,200))}</div>` : '');
+    }).join('<hr class="hr"/>');
+  }catch(e){ box.innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
+}
+
 // boot
 (function init(){
   const mode = localStorage.getItem('hermus_mode') || 'agent';
   $('modeSelector').value = mode;
   fillProvidersSelects();
+  loadChatKeys();
   refreshAll();
   setInterval(()=>{ loadAgents(); if(panelOpen) loadPanel(); }, 3000);
   setInterval(()=>checkUpdate(true), 60000);

@@ -26,6 +26,17 @@ class CustomAPIManager:
     def _save(self, apis: List[Dict]):
         self.db_path.write_text(json.dumps(apis, indent=2))
 
+    def _invalidate_tool_registry(self):
+        """Custom API changes must be visible to agents immediately (the tool
+        registry caches its first load, so new APIs would otherwise be ignored
+        until restart)."""
+        try:
+            from .tool_registry import tool_registry
+
+            tool_registry._loaded = False
+        except Exception:
+            pass
+
     def list_apis(self) -> List[Dict]:
         return self._load()
 
@@ -77,6 +88,7 @@ class CustomAPIManager:
         apis = apis_filtered
         apis.append(api_def)
         self._save(apis)
+        self._invalidate_tool_registry()
 
         # Also add to multi-key manager for custom provider for load balancing
         try:
@@ -104,6 +116,7 @@ class CustomAPIManager:
         if len(apis) == original_len:
             return {"success": False, "error": f"API '{name}' not found"}
         self._save(apis)
+        self._invalidate_tool_registry()
         return {"success": True, "message": f"Removed custom API '{name}'"}
 
     def get_api(self, name: str) -> Optional[Dict]:

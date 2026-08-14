@@ -32,7 +32,7 @@ class HermusTUI:
     SLASH_COMMANDS = [
         "/new", "/reset", "/model", "/mode", "/personality", "/retry", "/undo",
         "/compress", "/usage", "/insights", "/skills", "/platforms",
-        "/status", "/help", "/exit", "/clear", "/panel", "/agents",
+        "/status", "/settings", "/help", "/exit", "/clear", "/panel", "/agents",
         "/update", "/check-update", "/counsel", "/think", "/plan", "/eval", "/project"
     ]
 
@@ -91,9 +91,9 @@ Free stack: Ollama local (no API key) + DuckDuckGo search + SQLite FTS5 memory +
 
 Modes (as you requested):
   agent - Can control everything (full 88+ tools)
-  chat - Let's u chat (no tools, just conversation)
+  chat - Let's u chat (no system tools, but your custom APIs work here)
   multi-agent - Can use multiple keys at once and reach goal no matter how difficult (parallel subagents + multi-key)
-  multi-chat - Can get accurate reliable info with multiple AI models and API keys (researcher/coder/reviewer debate)
+  multi-chat - Can get accurate reliable info with multiple AI models and API keys (researcher/coder/reviewer debate + custom APIs)
 
 Slash commands: {', '.join(self.SLASH_COMMANDS)}
 
@@ -130,6 +130,7 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
             else:
                 print(f"Current model: {self.agent.model_name} | Mode: {self.mode}")
                 print("Free options: ollama/llama3.1:8b, ollama/mistral, groq/llama-3.1-70b-versatile (free tier), hf/mistralai/Mistral-7B-Instruct-v0.3 (free), mock/mock")
+                print("Custom URL + key: /model custom/<your-model>  (after: hermus multikey add --provider custom --base-url https://... --key sk-...)")
             return True
 
         if cmd == "/think":
@@ -194,7 +195,11 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                 print(f"⚖️ COUNSEL — constitution v{st['constitution']['version']} | "
                       f"members: {', '.join(st['constitution']['members'])} | "
                       f"pending amendments: {st['pending_amendments']} | reviews: {st['reviews_logged']}")
-                print(f"   Rules: {st['constitution']['rules']}")
+                rules = st.get("constitution", {}).get("rules", {})
+                if rules:
+                    print("   Rules:")
+                    for k, v in rules.items():
+                        print(f"     - {k}: {str(v)[:120]}")
                 print("   Hard tasks (difficulty >= {} ) auto-convene the council. "
                       "Try: /counsel run <your task>".format(config.counsel_min_difficulty))
             except Exception as e:
@@ -314,8 +319,10 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                 elif result.get("up_to_date"):
                     print(f"\n✅ Up to date! {result.get('message')}")
                     print(f"Local: {result.get('local',{}).get('short')} == Remote: {result.get('remote',{}).get('short')}")
+                elif result.get("error"):
+                    print(f"\n⚠️ Update check: {result.get('error')}")
                 else:
-                    print(f"\nUpdate check result: {result}")
+                    print(f"\nUpdate check: {result.get('message', 'see status')}")
             except Exception as e:
                 print(f"Update check error: {e}")
                 print("Try: git fetch origin main && git log --oneline HEAD..origin/main")
@@ -363,11 +370,56 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
 
             return True
 
+        if cmd == "/settings":
+            print("\n⚙️ SETTINGS (human-readable)")
+            print(f"  Model            : {self.agent.model_name}")
+            print(f"  Mode             : {self.mode} ({self.agent.mode_config.name})")
+            print(f"  Session          : {self.agent.session_id}")
+            print(f"  Tools            : {len(self.agent.tools)} available for this mode")
+            print(f"  DeepThink        : {'ON' if config.think_enabled else 'OFF'} (strategy={config.think_strategy})")
+            print(f"  Counsel          : {'ON' if config.counsel_enabled else 'OFF'} (min difficulty {config.counsel_min_difficulty})")
+            print(f"  Project memory   : {config.project}")
+            print(f"  Max tool steps   : {self.agent.max_steps}")
+
+            print("\n  API keys / custom URLs:")
+            try:
+                from core.multi_key import multi_key_manager
+                keys = multi_key_manager.list_keys(redact=True)
+                found = False
+                for provider, entries in keys.items():
+                    for k in entries or []:
+                        found = True
+                        healthy = "✅" if k.get("healthy") else ("❌" if k.get("healthy") is False else "❓")
+                        base = f" @ {k.get('base_url')}" if k.get("base_url") else ""
+                        print(f"    {healthy} {provider}/{k.get('name','')} | model={k.get('default_model','—')}{base}")
+                if not found:
+                    print("    (none added — hermus multikey add --provider custom --base-url https://... --key sk-...)")
+            except Exception as e:
+                print(f"    error listing keys: {e}")
+
+            print("\n  Custom APIs (usable as tools in every mode):")
+            try:
+                from core.custom_api import custom_api_manager
+                apis = custom_api_manager.list_apis()
+                if not apis:
+                    print("    (none — hermus api add ...)")
+                for a in apis:
+                    token = a.get("auth", {}).get("token") or a.get("auth", {}).get("value") or ""
+                    tok = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else ("no-token" if not token else "****")
+                    print(f"    - {a.get('name')} [{a.get('method','GET')}] {a.get('url','')} token={tok}")
+            except Exception as e:
+                print(f"    error listing custom APIs: {e}")
+
+            print("\n  Hint: change model with /model custom/<your-model>, mode with /mode <name>")
+            return True
+
         if cmd in ("/help", "/?"):
             print("""
 Hermus Agent Free - Slash Commands (same as original Hermes):
   /new or /reset - Start fresh conversation
-  /model [model] - Change model: ollama/llama3.1:8b (free offline), groq/llama-3.1-70b-versatile (free tier), hf/... (free), mock/mock (test)
+  /model [model] - Change model: ollama/llama3.1:8b (free offline), groq/llama-3.1-70b-versatile (free tier), hf/... (free), custom/<model> (your URL+key), mock/mock (test)
+  /mode [name] - agent | chat | multi-agent | multi-chat
+  /settings - Human-readable settings: model, mode, API keys, custom URLs, custom APIs
   /skills - Browse skills
   /<skill-name> - Use skill directly e.g. /file_watcher_emailer
   /platforms - Platform-specific status

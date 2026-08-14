@@ -64,27 +64,27 @@ Use tools aggressively to complete any task no matter how complex.
     ),
     AgentMode.CHAT: ModeConfig(
         name="Chat Mode",
-        description="Let's u chat - Simple conversation, no tools or limited tools, just chat - Fast, low token usage, for casual conversation",
-        tools_allowed=["none"],  # No tools, or only memory_search for context
-        max_tool_calls_per_turn=0,
+        description="Let's u chat - Simple conversation, no system tools - just chat and any custom APIs you added (custom URL + API key work here). Fast, low token usage",
+        tools_allowed=["none"],  # No system tools; custom APIs still available (use_custom_api=True)
+        max_tool_calls_per_turn=5,
         use_multi_key=False,
         use_multi_ai=False,
-        use_custom_api=False,
+        use_custom_api=True,
         use_memory=True,  # Still uses memory for context but no tools
         use_skills=False,
         system_prompt_addition="""
 You are in CHAT MODE - Let's you chat.
 
-You are a friendly conversational AI, no tools, just chat.
-You can still use memory_search to recall prior sessions for context, but no file ops, no shell, no web search, no browser, no pentest.
+You are a friendly conversational AI. You have NO system tools (no file ops, no shell, no web search, no browser, no pentest).
+The only tools you may call are the user-defined CUSTOM APIs listed in your tool list (names marked [CUSTOM API]) — use them when the user asks about their own API/URL.
 
 Use for:
 - Casual conversation
 - Quick questions
 - Brainstorming without tools
-- Low token usage, fast response
+- Calling the user's custom APIs (custom URL + API key)
 
-If user asks to do something requiring tools (write file, search web, etc.), ask them to switch to Agent Mode via /mode agent or --mode agent.
+If user asks to do something requiring system tools (write file, search web, etc.), ask them to switch to Agent Mode via /mode agent or --mode agent.
 """
     ),
     AgentMode.MULTI_AGENT: ModeConfig(
@@ -131,12 +131,12 @@ Tools: All 88+ tools, plus parallel execution via multi_key_manager.execute_para
     ),
     AgentMode.MULTI_CHAT: ModeConfig(
         name="Multi Chat Mode",
-        description="Can get u as accurate and reliable information as possible with working of multiple ai models and api keys - Multiple AIs with different models and API keys debate and consensus for accurate reliable info",
+        description="Can get u as accurate and reliable information as possible with working of multiple ai models and api keys - Multiple AIs with different models and API keys debate and consensus. Custom APIs work here too",
         tools_allowed=["web_search", "web_read", "rss_read", "youtube_transcript", "youtube_search", "github_read", "github_search", "twitter_read", "bilibili_search", "reddit_read", "v2ex_hot", "memory_search", "doctor_check_all"],  # Limited to research tools for accurate info, not file write/shell for safety
         max_tool_calls_per_turn=5,
         use_multi_key=True,
         use_multi_ai=True,
-        use_custom_api=False,
+        use_custom_api=True,
         use_memory=True,
         use_skills=False,
         system_prompt_addition="""
@@ -173,7 +173,7 @@ Multi Chat Mode would:
 
 Result: More accurate and reliable than single AI because multiple models and API keys with different knowledge cutoffs and perspectives debate and reach consensus.
 
-Tools allowed: Limited to research tools for accurate info (web_search, web_read, youtube_transcript, github_read, etc.) + memory_search, not file_write/shell for safety in multi-chat mode.
+Tools allowed: Limited to research tools for accurate info (web_search, web_read, youtube_transcript, github_read, etc.) + memory_search + the user's CUSTOM APIs (marked [CUSTOM API] in your tool list — custom URL + API key work here too), not file_write/shell for safety in multi-chat mode.
 But you can still use multi-key to use multiple API keys at once for parallel research = accurate + reliable + fast.
 
 You can get user as accurate and reliable information as possible with working of multiple AI models and API keys.

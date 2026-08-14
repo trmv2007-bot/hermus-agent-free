@@ -382,6 +382,38 @@ class MultiKeyManager:
             "tpm_limit": entry.get("tpm_limit"),
         }
 
+    def first_available_bundle(self, prefer: Optional[List[str]] = None) -> Optional[Dict]:
+        """
+        First usable key bundle across all providers (used as a fallback when
+        the requested provider has no key, e.g. Ollama not running but a
+        custom/groq/... key was added). Providers listed in `prefer` win;
+        providers with an explicit base_url (custom endpoints) rank next.
+        """
+        data = self._load()
+        providers = [p for p, keys in data.items() if keys]
+        if not providers:
+            return None
+        prefer = [p.lower() for p in (prefer or ["custom"])]
+        # Prefer explicitly listed providers, then ones with a base_url set,
+        # then everything else. Keep insertion order otherwise.
+        def rank(p: str) -> tuple:
+            base_set = any(
+                (isinstance(k, dict) and k.get("base_url")) for k in data.get(p, [])
+            )
+            pref = prefer.index(p) if p in prefer else len(prefer) + 1
+            return (pref, 0 if base_set else 1)
+
+        for provider in sorted(providers, key=rank):
+            if provider in ("ollama", "lmstudio", "mock"):
+                continue
+            # Skip pseudo-providers created for custom-API tool round-robin
+            if provider.startswith("custom_"):
+                continue
+            bundle = self.get_key_bundle(provider)
+            if bundle and bundle.get("key") and bundle.get("base_url"):
+                return bundle
+        return None
+
     def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: Dict = None):
         if not key:
             return
