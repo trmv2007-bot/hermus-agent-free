@@ -377,6 +377,30 @@ def main():
     screen_watch.add_argument("--fps", type=float, default=2.0)
     screen_watch.add_argument("--model", default="llava:7b")
 
+    # computer agent (autonomous desktop control)
+    computer_parser = subparsers.add_parser("computer", help="Autonomous computer agent - plan/act/record/verify/repair")
+    computer_sub = computer_parser.add_subparsers(dest="computer_action")
+
+    computer_task = computer_sub.add_parser("task", help="Run a desktop task autonomously")
+    computer_task.add_argument("task", nargs="+", help="Natural-language task, e.g. 'Click the Install button'")
+    computer_task.add_argument("--task-id", default=None)
+    computer_task.add_argument("--model", default=None, help="Ollama vision model (e.g. llava:7b) for semantic verification")
+    computer_task.add_argument("--retries", type=int, default=2)
+    computer_task.add_argument("--no-skill", action="store_true", help="Do not save a skill on success")
+    computer_sub.add_parser("stop", help="Emergency stop - halt all mouse/keyboard/autonomous control")
+    computer_sub.add_parser("status", help="Show the computer control center")
+    computer_target = computer_sub.add_parser("target", help="Vision-driven find-on-screen for a UI element")
+    computer_target.add_argument("target", nargs="+")
+    computer_target.add_argument("--model", default="llava:7b")
+    computer_click = computer_sub.add_parser("click", help="Vision-driven click: locate a UI element, then click it")
+    computer_click.add_argument("target", nargs="+")
+    computer_click.add_argument("--model", default="llava:7b")
+    computer_wait = computer_sub.add_parser("wait", help="Wait until a visual condition is true")
+    computer_wait.add_argument("condition", nargs="+")
+    computer_wait.add_argument("--timeout", type=float, default=60.0)
+    computer_wait.add_argument("--model", default="llava:7b")
+    computer_sub.add_parser("skills", help="List learned computer skills")
+
     # watchdog (self-healing)
     watchdog_parser = subparsers.add_parser("watchdog", help="Self-healing watchdog - classify/repair errors")
     watchdog_parser.add_argument("error", nargs="?", default="", help="Error text to classify/repair")
@@ -1215,6 +1239,83 @@ def main():
             print(json.dumps(result, indent=2, default=str))
         else:
             parser.parse_args(["screen", "--help"])
+
+    elif args.command == "computer":
+        import json
+        from core.computer import (
+            ComputerActionController,
+            ComputerAgent,
+            ControlCenter,
+            ScreenRecorder,
+            ScreenWatcher,
+            TargetDetector,
+            VideoAnalyzer,
+            emergency_stop,
+        )
+
+        if args.computer_action == "task":
+            task = " ".join(args.task)
+            analyzer = VideoAnalyzer.with_ollama(args.model) if args.model else None
+            # Frame provider so click_target can locate UI elements on the live screen.
+            # The agent owns the recorder lifecycle (start/stop) around the task.
+            recorder = ScreenRecorder(fps=2.0, max_seconds=120.0)
+            controller = ComputerActionController(frame_provider=recorder.latest,
+                                                  target_detector=TargetDetector(vision_model=analyzer.vision_model if analyzer else None))
+            agent = ComputerAgent(
+                controller=controller,
+                recorder=recorder,
+                analyzer=analyzer,
+                learn_skills=not args.no_skill,
+                max_retries=args.retries,
+            )
+            result = agent.run(task, task_id=args.task_id)
+            print(json.dumps(result, indent=2, default=str))
+        elif args.computer_action == "stop":
+            emergency_stop.halt()
+            print(json.dumps({"success": True, "halted": True,
+                              "note": "mouse/keyboard/autonomous control halted. Release in-process or restart."}, indent=2))
+        elif args.computer_action == "status":
+            print(ControlCenter(ComputerActionController()).render())
+        elif args.computer_action == "target":
+            target = " ".join(args.target)
+            analyzer = VideoAnalyzer.with_ollama(args.model)
+            recorder = ScreenRecorder(fps=2.0, max_seconds=10.0)
+            recorder.start()
+            try:
+                detector = TargetDetector(vision_model=analyzer.vision_model)
+                controller = ComputerActionController(frame_provider=recorder.latest, target_detector=detector)
+                print(json.dumps(controller.find_on_screen(target), indent=2, default=str))
+            finally:
+                recorder.stop()
+        elif args.computer_action == "click":
+            target = " ".join(args.target)
+            analyzer = VideoAnalyzer.with_ollama(args.model)
+            recorder = ScreenRecorder(fps=2.0, max_seconds=10.0)
+            recorder.start()
+            try:
+                detector = TargetDetector(vision_model=analyzer.vision_model)
+                controller = ComputerActionController(frame_provider=recorder.latest, target_detector=detector)
+                print(json.dumps(controller.click_target(target), indent=2, default=str))
+            finally:
+                recorder.stop()
+        elif args.computer_action == "wait":
+            condition = " ".join(args.condition)
+            analyzer = VideoAnalyzer.with_ollama(args.model)
+            recorder = ScreenRecorder(fps=2.0, max_seconds=max(10.0, args.timeout))
+            result = ScreenWatcher(recorder, analyzer=analyzer).watch(
+                condition, timeout=args.timeout, start_if_needed=True
+            )
+            print(json.dumps(result, indent=2, default=str))
+        elif args.computer_action == "skills":
+            from core.computer import ComputerSkillStore
+
+            skills = ComputerSkillStore().list_skills()
+            if not skills:
+                print("No computer skills learned yet.")
+            for skill in skills:
+                print(f" - {skill['name']}: {skill['task']} ({skill['steps']} steps, used {skill['uses']}x)")
+        else:
+            parser.parse_args(["computer", "--help"])
 
     elif args.command == "watchdog":
         from core.watchdog import watchdog as wd
