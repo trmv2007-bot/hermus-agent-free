@@ -42,10 +42,27 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # Store agents per user/platform for continuity
 AGENTS: Dict[str, HermusAgent] = {}
 
-def get_agent_for_user(platform: str, user_id: str, model: str = None, mode: str = "agent") -> HermusAgent:
-    key = f"{platform}:{user_id}:{mode}"
+def get_agent_for_user(
+    platform: str,
+    user_id: str,
+    model: str = None,
+    mode: str = "agent",
+    api_key: str = None,
+    base_url: str = None,
+) -> HermusAgent:
+    # The cache key includes model + base_url so switching the model or the
+    # custom URL/API in chat actually takes effect (previously a changed model
+    # was silently ignored because the cached agent kept the old one).
+    model = model or config.model
+    key = f"{platform}:{user_id}:{mode}:{model}:{base_url or ''}"
     if key not in AGENTS:
-        AGENTS[key] = HermusAgent(model=model, session_id=f"{platform}_{user_id}_{os.urandom(4).hex()}", mode=mode)
+        AGENTS[key] = HermusAgent(
+            model=model,
+            session_id=f"{platform}_{user_id}_{os.urandom(4).hex()}",
+            mode=mode,
+            api_key=api_key,
+            base_url=base_url,
+        )
     return AGENTS[key]
 
 
@@ -391,12 +408,44 @@ async def command_endpoint(payload: Dict):
     text = payload.get("text", "")
     model = payload.get("model")
     mode = payload.get("mode", "agent")
+    api_key = payload.get("api_key")
+    base_url = payload.get("base_url")
+    provider = payload.get("provider")
+    key_name = payload.get("key_name")
 
-    agent = get_agent_for_user(platform, user_id, model=model, mode=mode)
+    # Allow selecting a stored key by provider + key name (dashboard chat).
+    # The key itself is looked up server-side — never sent from the browser.
+    if key_name and provider:
+        try:
+            from core.multi_key import multi_key_manager
+
+            entry = multi_key_manager.get_entry(provider, key_name)
+            if entry:
+                api_key = api_key or entry.get("key")
+                base_url = base_url or entry.get("base_url")
+                if not model and entry.get("default_model"):
+                    model = f"{provider}/{entry['default_model']}"
+        except Exception:
+            pass
+
+    agent = get_agent_for_user(
+        platform, user_id, model=model, mode=mode, api_key=api_key, base_url=base_url
+    )
     result = agent.chat(text)
     # Include mode in response
     result["mode"] = agent.mode.value
     result["mode_config"] = {"name": agent.mode_config.name, "description": agent.mode_config.description[:200]}
+    # Tell the UI which model/key/base_url was actually used
+    result["model"] = agent.model_name
+    try:
+        bundle = agent.llm._resolve_bundle()
+        result["resolved"] = {
+            "provider": bundle.get("provider") or agent.llm.provider,
+            "base_url": bundle.get("base_url") or None,
+            "default_model": bundle.get("default_model"),
+        }
+    except Exception:
+        pass
     return result
 
 @app.get("/platforms")

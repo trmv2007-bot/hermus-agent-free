@@ -315,21 +315,26 @@ def main():
                 tpm_limit=getattr(args, "tpm", None),
                 auto_discover=not getattr(args, "no_probe", False),
             )
-            print(json_lib.dumps(result, indent=2, default=str)[:4000])
             if result.get("success"):
                 print(
                     f"\n✅ Added {args.provider} key '{result.get('key_name')}'. "
                     f"Total keys for provider: {result.get('total_keys')}"
                 )
-                print(f"   Use model like: --model {args.provider}/{result.get('default_model') or 'MODEL'}")
+                print(f"   Model       : {args.provider}/{result.get('default_model') or 'MODEL'}")
+                print(f"   Base URL    : {result.get('base_url') or '(provider default)'}")
+                print(f"   Preset      : {result.get('preset') or args.provider}")
                 h = result.get("health") or {}
                 if h:
                     print(
-                        f"   Health: {h.get('status')} healthy={h.get('healthy')} "
+                        f"   Health      : {h.get('status')} healthy={h.get('healthy')} "
                         f"latency={h.get('latency_ms')}ms models={h.get('models_count')}"
                     )
                     if h.get("models_sample"):
-                        print(f"   Models sample: {', '.join(h['models_sample'][:8])}")
+                        print(f"   Models      : {', '.join(h['models_sample'][:8])}")
+                    if h.get("error"):
+                        print(f"   Probe error : {str(h['error'])[:200]}")
+            else:
+                print(f"❌ {result.get('error', 'Failed to add key')}")
         elif args.multikey_action == "list":
             apis = multi_key_manager.list_keys(args.provider, redact=True)
             print("Multi-API Keys (redacted):")
@@ -368,18 +373,42 @@ def main():
                 )
         elif args.multikey_action == "health":
             results = multi_key_manager.check_all_health(args.provider)
-            print(json_lib.dumps(results, indent=2, default=str)[:6000])
             ok = sum(1 for r in results if r.get("healthy"))
-            print(f"\nHealthy: {ok}/{len(results)}")
+            print(f"\nKey health — {ok}/{len(results)} healthy\n")
+            for r in results:
+                mark = "✅" if r.get("healthy") else "❌"
+                mp = r.get("models_probe") or {}
+                print(
+                    f" {mark} {r.get('provider')}/{r.get('key_name','')} — {r.get('status', 'ok' if r.get('healthy') else 'bad')}"
+                    f" | latency={r.get('latency_ms')}ms | model={r.get('model_tested')}"
+                )
+                print(f"     base_url={r.get('base_url') or '(preset)'} | models found={mp.get('count', 0)}"
+                      f"{(' | sample: ' + ', '.join((mp.get('sample') or [])[:6])) if mp.get('sample') else ''}")
+                if r.get("error"):
+                    print(f"     error: {str(r['error'])[:200]}")
         elif args.multikey_action == "models":
             result = multi_key_manager.discover_models(
                 args.provider,
                 api_key=args.key,
                 base_url=getattr(args, "base_url", None),
             )
-            print(json_lib.dumps(result, indent=2, default=str)[:6000])
+            if result.get("success"):
+                print(f"✅ {result.get('count', 0)} models for {args.provider} (base_url={result.get('base_url') or '(preset)'}):")
+                for m in (result.get("models") or [])[:80]:
+                    print(f"   - {m.get('id') if isinstance(m, dict) else m}")
+            else:
+                print(f"❌ Could not list models: {result.get('error', 'unknown error')}")
         elif args.multikey_action == "rates":
-            print(json_lib.dumps(multi_key_manager.rate_status(args.provider), indent=2, default=str)[:5000])
+            rates = multi_key_manager.rate_status(args.provider)
+            print("\nRate limits (RPM/TPM used vs limit):")
+            for k in rates.get("keys") or []:
+                mark = "✅" if k.get("healthy") else ("❌" if k.get("healthy") is False else "❓")
+                rt = f"{k['avg_response_time']:.2f}s" if k.get("avg_response_time") is not None else "—"
+                print(
+                    f" {mark} {k.get('provider')}/{k.get('name','')} | RPM {k.get('rpm_used',0)}/{k.get('rpm_limit') or '∞'}"
+                    f" | TPM {k.get('tpm_used',0)}/{k.get('tpm_limit') or '∞'}"
+                    f" | avg response {rt} | model={k.get('default_model')}"
+                )
         elif args.multikey_action == "providers":
             for p in list_providers():
                 print(f" - {p['id']}: {p['name']} | default={p.get('default_model')} | {p.get('base_url')}")
@@ -396,7 +425,14 @@ def main():
             return [x.strip() for x in (s or "").split(",") if x.strip()] or None
 
         if args.fleet_action == "workers":
-            print(json_lib.dumps(model_fleet.list_workers(models=_split(args.models), providers=_split(args.providers)), indent=2)[:4000])
+            w = model_fleet.list_workers(models=_split(args.models), providers=_split(args.providers))
+            print(f"\nFleet workers ({w.get('count', 0)}):")
+            for worker in w.get("workers") or []:
+                print(f" - {worker.get('name')}: {worker.get('provider')}/{worker.get('model')}"
+                      f" | key={'yes' if worker.get('has_key') else 'no'}"
+                      f" | base_url={worker.get('base_url') or '(preset)'}")
+            if w.get("providers_configured"):
+                print(f"Providers configured: {', '.join(w['providers_configured'])}")
         elif args.fleet_action == "run":
             result = model_fleet.auto_distribute(
                 args.goal,
@@ -405,7 +441,12 @@ def main():
                 providers=_split(args.providers),
                 max_workers=args.workers,
             )
-            print(json_lib.dumps({k: result[k] for k in result if k not in ("results",)}, indent=2, default=str))
+            print(f"\nFleet run: mode={result.get('mode')} strategy={result.get('strategy') or args.strategy}"
+                  f" | success={result.get('success')} workers_used={result.get('workers_used') or len(result.get('results') or [])}")
+            if result.get("subtasks"):
+                print("Subtasks:")
+                for i, s in enumerate(result["subtasks"], 1):
+                    print(f"   {i}. {s}")
             if result.get("consensus"):
                 print("\n=== CONSENSUS ===\n", result["consensus"][:3000])
             elif result.get("merged"):
@@ -416,6 +457,8 @@ def main():
                 for r in (result.get("results") or [])[:5]:
                     print(f"\n--- {r.get('model')} success={r.get('success')} ---")
                     print((r.get("response") or r.get("error") or "")[:800])
+            if result.get("error"):
+                print(f"\n⚠️ {result['error']}")
         elif args.fleet_action == "fanout":
             result = model_fleet.fanout(args.prompt, models=_split(args.models), providers=_split(args.providers), max_workers=args.workers)
             print("Workers:", result.get("workers_used"), "success:", result.get("success"))
@@ -423,7 +466,9 @@ def main():
                 print("\n=== CONSENSUS ===\n", result["consensus"][:4000])
         elif args.fleet_action == "map":
             result = model_fleet.map_goal(args.goal, models=_split(args.models), providers=_split(args.providers), max_workers=args.workers)
-            print("Subtasks:", result.get("subtasks"))
+            print("Subtasks:")
+            for i, s in enumerate(result.get("subtasks") or [], 1):
+                print(f"   {i}. {s}")
             if result.get("merged"):
                 print("\n=== MERGED ===\n", result["merged"][:4000])
         else:
@@ -483,7 +528,11 @@ def main():
             print(f"⚖️ COUNSEL SESSION: {result['session_id']}")
             print(f"   Difficulty: {result['difficulty']} | Members: "
                   f"{', '.join(m['name'] for m in result['members'])}")
-            print(f"   Votes: {_json.dumps(result.get('votes'))}")
+            votes = result.get("votes")
+            if votes:
+                print("   Votes:")
+                for k, v in votes.items():
+                    print(f"     - {k}: {str(v)[:100]}")
             print(f"{'='*60}")
             if result.get("plan") and result["plan"].get("steps"):
                 print("\n📋 VOTED PLAN:")
@@ -496,8 +545,14 @@ def main():
             st = meta_counsel.status()
             print(f"Council status — constitution v{st['constitution']['version']} ({st['constitution']['name']})")
             print(f"  Members: {', '.join(st['constitution']['members'])}")
-            print(f"  Rules: {_json.dumps(st['constitution']['rules'])}")
-            print(f"  Budget: {_json.dumps(st['constitution']['budget'])}")
+            rules = st.get("constitution", {}).get("rules", {})
+            if rules:
+                print("  Rules:")
+                for k, v in rules.items():
+                    print(f"    - {k}: {str(v)[:120]}")
+            budget = st.get("constitution", {}).get("budget", {})
+            if budget:
+                print(f"  Budget: max_members={budget.get('max_members')}, max_rounds={budget.get('max_rounds')}")
             print(f"  Pending amendments: {st['pending_amendments']}")
             print(f"  Meta reviews logged: {st['reviews_logged']}")
             print(f"  Upgrade events: {st['constitution']['upgrade_events']}")
@@ -604,8 +659,10 @@ def main():
             res = resume_plan(args.session_id, model=args.model)
             print(f"Resume result: success={res.get('success')} remaining_before={res.get('remaining_before')}")
             print(f"Response: {str(res.get('response'))[:400]}")
-            if res.get("plan"):
-                print("Plan state: " + _json.dumps([(s['goal'][:40], s['status']) for s in res['plan']['steps']]))
+            if res.get("plan") and res["plan"].get("steps"):
+                print("Plan state:")
+                for i, s in enumerate(res["plan"]["steps"], 1):
+                    print(f"   {i}. [{s.get('status', '?')}] {s.get('goal', '')[:60]}")
         else:
             parser.parse_args(["plan", "--help"])
 
@@ -677,7 +734,18 @@ def main():
                     print(f"Failed to parse --args JSON: {args.args}, using empty")
             result = custom_api_manager.execute_api(args.name, test_args)
             print(f"Test {args.name} with {test_args}:")
-            print(json_lib.dumps(result, indent=2)[:2000])
+            if not result.get("success"):
+                print(f"❌ error: {result.get('error')}")
+                print(f"   url: {result.get('url')}")
+            else:
+                print(f"✅ HTTP {result.get('status_code')}")
+                print(f"   url: {result.get('url')}")
+                data = result.get("data_str") or result.get("data")
+                if data:
+                    print(f"   data: {str(data)[:1000]}")
+                if result.get("used_key"):
+                    print(f"   key used: {result['used_key']}")
+                    print(f"   keys for this API: {result.get('total_keys_for_this_api')}")
 
         else:
             parser.parse_args(["api", "--help"])
@@ -716,22 +784,53 @@ def main():
                 call_args = json_lib.loads(args.args)
             except Exception:
                 call_args = {}
-            print(json_lib.dumps(mcp_manager.call(args.server, args.tool, call_args), indent=2)[:3000])
+            result = mcp_manager.call(args.server, args.tool, call_args)
+            print(f"MCP call {args.server}/{args.tool} {call_args}:")
+            if isinstance(result, dict):
+                if result.get("error"):
+                    print(f"❌ {result['error']}")
+                else:
+                    for k, v in result.items():
+                        print(f"   {k}: {str(v)[:300]}")
+            else:
+                print(str(result)[:2000])
         else:
             parser.parse_args(["mcp", "--help"])
 
     elif args.command == "embed":
         from core.embeddings import embedding_store
-        import json as json_lib
         if args.embed_action == "status":
-            print(json_lib.dumps(embedding_store.backend_info(), indent=2))
+            info = embedding_store.backend_info()
+            print(f"Embeddings backend: {info.get('backend')}")
+            print(f"  model: {info.get('model')} | dim: {info.get('dim')}")
+            print(f"  stored embeddings: {info.get('count')}")
+            print(f"  db: {info.get('db')}")
         elif args.embed_action == "ingest":
-            print(json_lib.dumps(embedding_store.ingest_path(args.path, source=args.source), indent=2))
+            result = embedding_store.ingest_path(args.path, source=args.source)
+            if result.get("success") is False or result.get("error"):
+                print(f"❌ {result.get('error', 'ingest failed')}")
+            else:
+                print(f"✅ Ingested {args.path}")
+                print(f"  files: {result.get('files') or result.get('ingested_files')}")
+                print(f"  chunks added: {result.get('chunks') or result.get('total_chunks')}")
+                print(f"  total embeddings: {result.get('count') or result.get('total')}")
+                for err in (result.get("errors") or [])[:5]:
+                    print(f"  ⚠️ {err}")
         elif args.embed_action == "search":
             if args.semantic_only:
-                print(json_lib.dumps(embedding_store.search(args.query, limit=args.limit), indent=2)[:4000])
+                result = embedding_store.search(args.query, limit=args.limit)
             else:
-                print(json_lib.dumps(embedding_store.hybrid_search(args.query, limit=args.limit), indent=2)[:4000])
+                result = embedding_store.hybrid_search(args.query, limit=args.limit)
+            print(f"Results for '{args.query}' (mode={result.get('mode', 'semantic')}):")
+            for i, r in enumerate(result.get("results") or [], 1):
+                score = r.get("score")
+                score_txt = f"{score:.3f}" if isinstance(score, (int, float)) else str(score)
+                print(f"\n #{i} score={score_txt} source={r.get('source', '?')}")
+                print(f"    {(r.get('content') or '')[:400]}")
+            if result.get("summary"):
+                print(f"\nSummary: {result['summary'][:500]}")
+            if result.get("error"):
+                print(f"⚠️ {result['error']}")
         elif args.embed_action == "clear":
             print(embedding_store.clear(source=args.source))
         else:

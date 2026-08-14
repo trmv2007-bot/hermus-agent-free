@@ -26,9 +26,11 @@ class HermusAgent:
         session_id: str = None,
         mode: str = None,
         max_steps: int = None,
+        api_key: str = None,
+        base_url: str = None,
     ):
         self.model_name = model or config.model
-        self.llm = FreeLLM(self.model_name)
+        self.llm = FreeLLM(self.model_name, api_key=api_key, base_url=base_url)
         self.session_id = session_id or (
             f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         )
@@ -76,14 +78,46 @@ class HermusAgent:
         if "all" in allowed:
             return tool_registry.get_definitions(allowed={"all"})
         if "none" in allowed:
-            return []
-        return tool_registry.get_definitions(allowed=set(allowed))
+            defs: List[Dict] = []
+        else:
+            defs = tool_registry.get_definitions(allowed=set(allowed))
+        # User-defined custom APIs are available in every mode that allows them
+        # (agent, chat, multi-agent, multi-chat) — even when the mode has no
+        # other tools. The registry already includes them for "all".
+        if self.mode_config.use_custom_api:
+            try:
+                from .custom_api import custom_api_manager
+
+                existing = {d.get("function", {}).get("name") for d in defs}
+                for tdef in custom_api_manager.get_tool_definitions():
+                    if tdef.get("function", {}).get("name") not in existing:
+                        defs.append(tdef)
+            except Exception:
+                pass
+        return defs
 
     def reload_tools(self):
         """Force reload registry (e.g. after MCP connect)."""
         tool_registry.load(force=True)
         self.tools = self._get_tools()
         return {"tools": len(self.tools)}
+
+    def _custom_api_signature(self) -> str:
+        """Compact signature of the current custom APIs (name/url/token) so we
+        can detect additions/removals made via Settings between messages."""
+        try:
+            from .custom_api import custom_api_manager
+
+            return json.dumps(
+                [
+                    (a.get("name"), a.get("url"), a.get("auth", {}).get("token") or a.get("auth", {}).get("value") or "")
+                    for a in custom_api_manager.list_apis()
+                ],
+                sort_keys=True,
+                default=str,
+            )
+        except Exception:
+            return ""
 
     def _execute_tool(self, name: str, args: Dict) -> Dict:
         """Execute via central registry — all tools including full pentest map."""
@@ -161,6 +195,12 @@ Rules:
 
     def chat(self, user_message: str) -> Dict[str, Any]:
         """Multi-step agent loop: plan → tool calls → observe → repeat → final answer."""
+        # Pick up custom APIs added/removed via Settings since this agent started
+        sig = self._custom_api_signature()
+        if sig != getattr(self, "_custom_api_sig", None):
+            self._custom_api_sig = sig
+            self.reload_tools()
+
         task_id = None
         try:
             task_id = task_tracker.add_task(

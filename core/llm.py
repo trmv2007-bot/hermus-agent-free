@@ -65,6 +65,13 @@ class FreeLLM:
             bundle = multi_key_manager.get_key_bundle(self.provider)
             if bundle:
                 return bundle
+            # Unknown/custom providers with no own key → shared "custom" pool
+            from .providers import PROVIDER_PRESETS
+
+            if self.provider not in PROVIDER_PRESETS:
+                custom_bundle = multi_key_manager.get_key_bundle("custom")
+                if custom_bundle:
+                    return custom_bundle
         except Exception:
             pass
         preset = get_provider(self.provider)
@@ -81,6 +88,15 @@ class FreeLLM:
             "provider": self.provider,
         }
 
+    def _fallback_bundle(self) -> Optional[Dict]:
+        """First usable API key bundle across providers (custom preferred)."""
+        try:
+            from .multi_key import multi_key_manager
+
+            return multi_key_manager.first_available_bundle()
+        except Exception:
+            return None
+
     def _call_openai_compat(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
         """Universal path for any OpenAI-compatible provider."""
         from .openai_compat import chat_completions, CompatAPIError
@@ -92,20 +108,40 @@ class FreeLLM:
         base_url = bundle.get("base_url") or ""
         model = self.model_name or bundle.get("default_model")
         preset = get_provider(self.provider)
+        used_provider = self.provider
 
         if not api_key and not preset.get("no_auth"):
-            err = (
-                f"No API key for provider '{self.provider}'. "
-                f"Add one: hermus multikey add --provider {self.provider} --key YOUR_KEY"
-                + (f" --base-url https://..." if self.provider in ('custom','vllm','azure') else "")
+            # No key for the requested provider → try any configured key when
+            # the user did not pin a specific known provider (default model,
+            # "custom", or an unknown OpenAI-compatible provider name).
+            from .providers import PROVIDER_PRESETS
+
+            fallback_allowed = (
+                self.model == config.model
+                or self.provider == "custom"
+                or self.provider not in PROVIDER_PRESETS
             )
-            usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}")
-            return LLMResponse(err, usage=usage)
+            fb = self._fallback_bundle() if fallback_allowed else None
+            if fb:
+                used_provider = fb.get("provider") or self.provider
+                api_key = fb.get("key") or ""
+                base_url = fb.get("base_url") or base_url
+                fb_model = fb.get("default_model") or ""
+                if not model or model == preset.get("default_model") or model == "default":
+                    model = fb_model or model
+            if not api_key:
+                err = (
+                    f"No API key for provider '{self.provider}' and no other keys configured. "
+                    f"Add one: hermus multikey add --provider {self.provider} --key YOUR_KEY"
+                    + (f" --base-url https://..." if self.provider in ('custom','vllm','azure') else "")
+                )
+                usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}")
+                return LLMResponse(err, usage=usage)
 
         # Optional cache (skip when tools present — side effects)
         if not tools:
             cache_key = llm_cache.make_key(
-                self.provider,
+                used_provider,
                 model,
                 (messages[-1].get("content", "")[:200] if messages else ""),
                 len(messages),
@@ -122,7 +158,7 @@ class FreeLLM:
             tries += 1
             try:
                 resp = chat_completions(
-                    provider=self.provider,
+                    provider=used_provider,
                     model=model,
                     messages=messages,
                     api_key=current_key,
@@ -132,7 +168,7 @@ class FreeLLM:
                 )
                 try:
                     multi_key_manager.mark_key_success(
-                        self.provider,
+                        used_provider,
                         current_key,
                         tokens=resp.usage.get("total_tokens", 0),
                         latency_ms=resp.latency_ms,
@@ -151,16 +187,16 @@ class FreeLLM:
                 last_err = e
                 try:
                     multi_key_manager.mark_key_failed(
-                        self.provider, current_key, e.message, rate_limit=e.rate_limit
+                        used_provider, current_key, e.message, rate_limit=e.rate_limit
                     )
                 except Exception:
                     pass
                 # Retry with next key on rate limit / auth / 5xx
                 if e.is_rate_limit or e.status_code >= 500 or e.is_auth_error:
-                    nxt = multi_key_manager.get_key(self.provider)
+                    nxt = multi_key_manager.get_key(used_provider)
                     if nxt and nxt != current_key:
                         current_key = nxt
-                        b2 = multi_key_manager.get_entry(self.provider, nxt) or {}
+                        b2 = multi_key_manager.get_entry(used_provider, nxt) or {}
                         base_url = b2.get("base_url") or base_url
                         continue
                 break
@@ -168,8 +204,8 @@ class FreeLLM:
                 last_err = e
                 break
 
-        err = f"{self.provider} error: {last_err}"
-        usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}")
+        err = f"{used_provider} error (base_url={base_url or 'preset'}): {last_err}"
+        usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{used_provider}/{model}")
         return LLMResponse(err, usage=usage)
 
     def _call_ollama(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
@@ -239,9 +275,49 @@ class FreeLLM:
                 llm_cache.set(cache_key, response)
             return response
         except requests.exceptions.ConnectionError:
+            # Ollama is not running — fall back to any configured API key
+            # (custom URL / groq / openai / ...) so chat keeps working.
+            fb = self._fallback_bundle()
+            if fb:
+                fb_provider = fb.get("provider") or "custom"
+                fb_model = fb.get("default_model") or ""
+                ollama_default = get_provider("ollama").get("default_model")
+                model = self.model_name
+                if not model or model == ollama_default:
+                    model = fb_model or model
+                try:
+                    from .openai_compat import chat_completions, CompatAPIError
+                    from .multi_key import multi_key_manager
+
+                    resp = chat_completions(
+                        provider=fb_provider,
+                        model=model or "default",
+                        messages=messages,
+                        api_key=fb.get("key") or "",
+                        base_url=fb.get("base_url") or "",
+                        tools=tools,
+                        timeout=120,
+                    )
+                    try:
+                        multi_key_manager.mark_key_success(
+                            fb_provider,
+                            fb.get("key") or "",
+                            tokens=resp.usage.get("total_tokens", 0),
+                            latency_ms=resp.latency_ms,
+                        )
+                    except Exception:
+                        pass
+                    return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                except Exception as e:
+                    fb_err = f"Ollama not running and fallback key failed: {e}"
+                    usage = token_counter.estimate_cost(
+                        prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
+                    )
+                    return LLMResponse(fb_err, usage=usage)
             mock_content = (
-                f"⚠️ Ollama not running at {config.ollama_base_url}. "
-                f"Start with: ollama serve && ollama pull {self.model_name}\n\n"
+                f"⚠️ Ollama not running at {config.ollama_base_url} and no API keys configured. "
+                f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
+                f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
                 f"Fallback mock for: {messages[-1].get('content','')[:100]}"
             )
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(mock_content), model="ollama/mock")

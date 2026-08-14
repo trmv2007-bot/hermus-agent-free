@@ -291,6 +291,10 @@ def resolve_endpoint(
             f"Provider '{provider}' needs a base_url. "
             f"Example: hermus multikey add --provider custom --base-url https://api.example.com/v1 --key sk-..."
         )
+    # Don't double-append the path when the user pasted the full endpoint
+    # (e.g. base_url = https://api.example.com/v1/chat/completions).
+    if root.endswith(path):
+        return root
     return root + path
 
 
@@ -347,5 +351,7 @@ def parse_model_ref(model_str: str) -> tuple:
     # e.g. openrouter/meta-llama/... — provider is first segment only if known
     if provider in PROVIDER_PRESETS or provider in ("hf", "huggingface", "mock"):
         return provider, name
-    # Unknown first segment → could be org/model on default provider
-    return "ollama", s
+    # Unknown first segment → treat it as a custom OpenAI-compatible provider
+    # (it may have keys added via `hermus multikey add --provider <name>`),
+    # falling back to the shared "custom" key pool when no key exists.
+    return provider, name
