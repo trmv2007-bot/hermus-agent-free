@@ -44,6 +44,9 @@ class Config(BaseModel):
     user_model_path: str = "data/user_model.json"
     trajectory_path: str = "data/trajectories.jsonl"
 
+    # Workspace — per-project isolation (agent OS layout)
+    workspace_dir: str = os.getenv("HERMUS_HOME", "~/.hermus")
+
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"
     embedding_model: str = os.getenv("HERMUS_EMBED_MODEL", "nomic-embed-text")

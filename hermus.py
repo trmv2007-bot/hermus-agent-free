@@ -266,6 +266,92 @@ def main():
     # tools list
     tools_parser = subparsers.add_parser("tools", help="List registered tools (auto registry)")
 
+    # ---- architecture upgrades (foundation) ---------------------------------
+    # workspace — per-project isolation
+    ws_parser = subparsers.add_parser("workspace", help="Workspace - per-project isolation (agent OS)")
+    ws_sub = ws_parser.add_subparsers(dest="ws_action")
+    ws_sub.add_parser("layout", help="Show workspace layout + paths")
+    ws_create = ws_sub.add_parser("create", help="Create a project")
+    ws_create.add_argument("name")
+    ws_create.add_argument("--description", default="")
+    ws_sub.add_parser("list", help="List projects")
+    ws_use = ws_sub.add_parser("use", help="Set the current project")
+    ws_use.add_argument("name")
+
+    # memory 2.0 — typed + scored memory
+    mem2_parser = subparsers.add_parser("mem2", help="Memory 2.0 - typed long-term memory with scoring")
+    mem2_sub = mem2_parser.add_subparsers(dest="mem2_action")
+    mem2_remember = mem2_sub.add_parser("remember", help="Persist a typed memory")
+    mem2_remember.add_argument("kind", choices=["working", "episodic", "semantic", "procedural", "project"])
+    mem2_remember.add_argument("content")
+    mem2_remember.add_argument("--importance", type=float, default=5.0)
+    mem2_remember.add_argument("--success", choices=["true", "false", "none"], default="none")
+    mem2_recall = mem2_sub.add_parser("recall", help="Ranked recall")
+    mem2_recall.add_argument("query")
+    mem2_recall.add_argument("--limit", type=int, default=10)
+
+    # model router 2.0
+    router_parser = subparsers.add_parser("router", help="Model Router 2.0 - per-step model selection")
+    router_sub = router_parser.add_subparsers(dest="router_action")
+    router_choose = router_sub.add_parser("choose", help="Choose the best model for a step")
+    router_choose.add_argument("text")
+
+    # autonomous loop
+    run_parser = subparsers.add_parser("run", help="Autonomous task loop - plan/execute/verify/repair")
+    run_parser.add_argument("task", help="Goal to drive through the verify/repair loop")
+
+    # persistent background agents
+    agent_parser = subparsers.add_parser("agent", help="Persistent background agents")
+    agent_sub = agent_parser.add_subparsers(dest="agent_action")
+    agent_create = agent_sub.add_parser("create", help="Create a named agent")
+    agent_create.add_argument("name")
+    agent_create.add_argument("--role", default="generic",
+                              choices=["researcher", "coder", "system-monitor", "scheduler", "memory-manager", "watchdog", "generic"])
+    agent_create.add_argument("--model", default=None)
+    agent_start = agent_sub.add_parser("start", help="Start a background agent worker")
+    agent_start.add_argument("name")
+    agent_status = agent_sub.add_parser("status", help="Inspect an agent")
+    agent_status.add_argument("name")
+    agent_stop = agent_sub.add_parser("stop", help="Stop an agent")
+    agent_stop.add_argument("name")
+    agent_sub.add_parser("list", help="List all agents")
+
+    # permissions
+    perms_parser = subparsers.add_parser("perms", help="Permission manager - ALLOW/ASK/DENY")
+    perms_sub = perms_parser.add_subparsers(dest="perms_action")
+    perms_check = perms_sub.add_parser("check", help="Check a tool's permission decision")
+    perms_check.add_argument("tool")
+    perms_set = perms_sub.add_parser("set", help="Override a tool's policy")
+    perms_set.add_argument("tool")
+    perms_set.add_argument("decision", choices=["allow", "ask", "deny"])
+    perms_set.add_argument("--agent", default=None)
+    perms_sub.add_parser("list", help="Recent audit log")
+
+    # research pipeline
+    research_parser = subparsers.add_parser("research", help="Web research - multi-source with citations")
+    research_parser.add_argument("query")
+
+    # screen recording (computer control)
+    screen_parser = subparsers.add_parser("screen", help="Screen recording / computer control")
+    screen_sub = screen_parser.add_subparsers(dest="screen_action")
+    screen_sub.add_parser("start", help="Start the rolling screen recorder")
+    screen_sub.add_parser("stop", help="Stop the recorder")
+    screen_sub.add_parser("status", help="Recorder status")
+
+    # watchdog (self-healing)
+    watchdog_parser = subparsers.add_parser("watchdog", help="Self-healing watchdog - classify/repair errors")
+    watchdog_parser.add_argument("error", nargs="?", default="", help="Error text to classify/repair")
+
+    # profiles
+    profile_parser = subparsers.add_parser("profile", help="Agent profiles - personas with independent memory")
+    profile_sub = profile_parser.add_subparsers(dest="profile_action")
+    profile_create = profile_sub.add_parser("create", help="Create a profile")
+    profile_create.add_argument("name")
+    profile_create.add_argument("--persona", default=None)
+    profile_sub.add_parser("list", help="List profiles")
+    profile_use = profile_sub.add_parser("use", help="Show a profile's system prompt")
+    profile_use.add_argument("name")
+
     args = parser.parse_args()
 
     if args.command == "gateway":
@@ -922,6 +1008,153 @@ def main():
             print("Load errors:")
             for e in info["errors"]:
                 print(f"   ! {e}")
+
+    elif args.command == "workspace":
+        from core.workspace import workspace as ws
+        if args.ws_action == "layout":
+            print(f"Workspace base: {ws.base_dir}")
+            for name, p in ws.dirs.items():
+                print(f"  {name:12s} {p}")
+        elif args.ws_action == "create":
+            r = ws.create_project(args.name, description=args.description)
+            print(f"{'✅' if r.get('success') else '❌'} {r.get('name') or r.get('error')} -> {r.get('path','')}")
+        elif args.ws_action == "list":
+            projects = ws.list_projects()
+            print(f"Projects ({len(projects)}):")
+            for p in projects:
+                cur = " *" if p.get("name") == ws.current_project() else ""
+                print(f" - {p.get('name')}{cur} | {p.get('description','')}")
+        elif args.ws_action == "use":
+            r = ws.set_current_project(args.name)
+            print(f"{'✅' if r.get('success') else '❌'} current project: {r.get('name') or r.get('error')}")
+        else:
+            parser.parse_args(["workspace", "--help"])
+
+    elif args.command == "mem2":
+        from core.memory2 import memory2
+        if args.mem2_action == "remember":
+            success = None if args.success == "none" else (args.success == "true")
+            r = memory2.remember(args.kind, args.content, importance=args.importance, success=success)
+            print(f"{'✅' if r.get('success') else '❌'} {args.kind} memory {'merged' if r.get('merged') else 'saved'} id={r.get('id')}")
+        elif args.mem2_action == "recall":
+            res = memory2.recall(args.query, limit=args.limit)
+            if not res:
+                print("No memories found.")
+            for m in res:
+                print(f" [{m['kind']:10s}] score={m['score']:.3f} | {m['content'][:120]}")
+        else:
+            parser.parse_args(["mem2", "--help"])
+
+    elif args.command == "router":
+        from core.router2 import router2
+        sel = router2.select(args.text)
+        print(f"Task type : {sel['task_type']} (difficulty {sel['difficulty']}, ~{sel['context_tokens']} tokens)")
+        print(f"Model     : {sel['model']}")
+        print(f"Reason    : {sel['reason']}")
+        if sel.get("alternatives"):
+            print(f"Alt       : {', '.join(sel['alternatives'])}")
+
+    elif args.command == "run":
+        from core.autonomous import AutonomousRunner, Verifier
+        runner = AutonomousRunner(verifier=Verifier())
+        report = runner.run(args.task)
+        print(f"Autonomous run: status={report.status} verified={report.verified} repairs={report.repairs}")
+        for s in report.steps:
+            print(f"  [{s.status}] {s.goal[:70]} (attempts={s.attempts})")
+        print(f"\nResult:\n{report.final_answer[:1500]}")
+
+    elif args.command == "agent":
+        from core.agent_manager import agent_manager
+        if args.agent_action == "create":
+            r = agent_manager.create(args.name, role=args.role, model=args.model)
+            print(f"{'✅' if r.get('success') else '❌'} {r.get('name') or r.get('error')} (role={r.get('role','')})")
+        elif args.agent_action == "start":
+            r = agent_manager.start(args.name)
+            print(f"{'✅' if r.get('success') else '❌'} {args.name} started (pid={r.get('pid')})" if r.get("success") else f"❌ {r.get('error')}")
+        elif args.agent_action == "status":
+            s = agent_manager.status(args.name)
+            if not s.get("success"):
+                print(f"❌ {s.get('error')}")
+            else:
+                print(f" {args.name} | role={s.get('role')} status={s.get('status')} pid={s.get('pid')} alive={s.get('alive')}")
+                print(f"   heartbeat={s.get('heartbeat')} jobs_done={s.get('jobs_done')} last={s.get('last_result')}")
+        elif args.agent_action == "stop":
+            r = agent_manager.stop(args.name)
+            print(f"{'✅' if r.get('success') else '❌'} {args.name} stopped")
+        elif args.agent_action == "list":
+            agents = agent_manager.list()
+            if not agents:
+                print("No agents. Create one: hermus agent create researcher --role researcher")
+            for a in agents:
+                print(f" - {a.get('name')} | role={a.get('role')} status={a.get('status')} alive={a.get('alive')}")
+        else:
+            parser.parse_args(["agent", "--help"])
+
+    elif args.command == "perms":
+        from core.permissions import permission_manager
+        if args.perms_action == "check":
+            r = permission_manager.check(args.tool)
+            print(f"{args.tool}: risk={r['risk']} decision={r['decision']}")
+        elif args.perms_action == "set":
+            r = permission_manager.set_policy(args.tool, args.decision, agent=args.agent)
+            print(f"{'✅' if r.get('success') else '❌'} {args.tool} -> {args.decision}" + (f" (agent={args.agent})" if args.agent else ""))
+        elif args.perms_action == "list":
+            for e in permission_manager.recent():
+                print(f" {e.get('ts','')[:19]} {e.get('tool')} -> {e.get('decision')} (risk={e.get('risk')}, agent={e.get('agent')})")
+        else:
+            parser.parse_args(["perms", "--help"])
+
+    elif args.command == "research":
+        from core.research import research_pipeline
+        out = research_pipeline.run(args.query)
+        print(f"\n=== RESEARCH: {args.query} ===\n{out['answer']}\n")
+        print(f"Confidence: {out['confidence']}")
+        print(f"Sources ({len(out['sources'])}):")
+        for s in out["sources"]:
+            print(f" - [{s['rank']}] {s['title']} ({s['url']})")
+        if out.get("contradictions"):
+            print(f"\n⚠️ Contradictions ({len(out['contradictions'])}):")
+            for c in out["contradictions"]:
+                print(f"   A: {c['a'][:90]} [{c['source_a']}]")
+                print(f"   B: {c['b'][:90]} [{c['source_b']}]")
+        if out.get("uncertain"):
+            print(f"\nUncertain claims: {out['uncertain'][:3]}")
+
+    elif args.command == "screen":
+        from core.computer.recorder import ScreenRecorder
+        recorder = ScreenRecorder()
+        if args.screen_action == "start":
+            print(recorder.start())
+        elif args.screen_action == "stop":
+            print(recorder.stop())
+        elif args.screen_action == "status":
+            print(recorder.status())
+        else:
+            parser.parse_args(["screen", "--help"])
+
+    elif args.command == "watchdog":
+        from core.watchdog import watchdog as wd
+        err = args.error or "JSONDecodeError: expecting value"
+        r = wd.handle(err)
+        print(f"Known={r['known']} action={r['action']} ok={r.get('ok')} fix={r.get('fix','')}")
+
+    elif args.command == "profile":
+        from core.profiles import profile_manager
+        if args.profile_action == "create":
+            r = profile_manager.create(args.name, persona=args.persona)
+            print(f"{'✅' if r.get('success') else '❌'} {r.get('name') or r.get('error')}")
+            if r.get("success"):
+                print(f"   persona: {r['persona']}")
+        elif args.profile_action == "list":
+            profiles = profile_manager.list()
+            if not profiles:
+                print("No profiles. Create one: hermus profile create coder")
+            for p in profiles:
+                print(f" - {p.get('name')} | {p.get('persona','')[:70]}")
+        elif args.profile_action == "use":
+            print(profile_manager.system_prompt(args.name))
+        else:
+            parser.parse_args(["profile", "--help"])
 
     elif args.command == "update":
         from core.updater import get_updater_for_current_repo
