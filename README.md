@@ -162,16 +162,16 @@ Original Hermes / Strix / Agent Reach use some paid services:
 - `check_update()` - Check if update available from GitHub, local vs remote, behind_by count, remote message author date, shows in dashboard and CLI
 - `do_update()` - git pull origin main + pip install -r requirements.txt like `hermes update`
 
-#### Pentest - Strix Full (49k stars) - Open-source AI penetration testing tool
+#### Pentest - real, runnable security tooling
 - **Recon:** `subdomain_enum(domain)`, `fingerprinting(url)`, `attack_surface_mapping(domain)` - sublist3r, DNS brute, tech stack detection
 - **Exploitation:** `browser_xss_test(url)`, `shell_exploit(command)`, `custom_exploit_runtime(code)` Python sandbox PoC validation working PoCs not false positives, `http_proxy_intercept(url)` Caido-like
 - **Vuln KB:** `search_vuln_kb(query, owasp, severity)`, `get_owasp_categories()` - OWASP Top 10 and beyond 14 categories, CVE-style KB 5 vulns CVSS scoring
-- **Scanner:** `comprehensive_scan(target, scan_types)` - OWASP Top 10 and beyond: A01 Broken Access Control IDOR, A03 Injection SQL/NoSQL/OS/SSTI, CLIENT_XSS XSS, A10 SSRF XXE, A07 JWT, BUSINESS_LOGIC race conditions, API_SECURITY, INFRA Cloud misconfig + `scan_api_spec(api_spec_path)` OpenAPI/Postman #866
+- **Scanner:** `scan_api_spec(api_spec_path)` - parse OpenAPI / Swagger / Postman collections, return endpoint list
 - **Multi-Agent Pentesting:** `pentest_distribute_task(target)` - Graph of Agents distributed specialized agents recon/web_exploiter/api_tester/post_exploit/reporter, `pentest_chain_vulns()` chain vulnerabilities like red team, `pentest_scalable_scan(targets)` parallel across multiple targets
 - **Reporting:** `pentest_create_run(target)`, `pentest_add_finding(run_name, finding)` with PoC and reproduction steps validated findings, `pentest_generate_patch(finding)` one-click autofix PR (SQLi param queries, XSS html.escape CSP), `pentest_generate_report(run_name)` compliance-ready summary critical/high/medium/low OWASP, `list_compliance_frameworks()` OWASP Top 10 2021, PCI-DSS 4.0, SOC 2, GDPR, `generate_compliance_report(run_name, framework)`
 - **Viewer:** `pentest_view_run(run_name, port, open_browser)` - Local Web Viewer every scan writes results to disk, bring up in local dashboard with single command, lightweight local server 127.0.0.1 random port, private tokened link, nothing leaves machine
 - **SAST+DAST:** `sast_scan(target_dir)` pattern matching semgrep-like SQLi XSS hardcoded secrets, `dast_scan(url)` header checks CSP X-Frame-Options verbose errors ZAP-like, `sast_dast_combined(target, url)`
-- **CI/CD:** `generate_github_actions_workflow(target, fail_on)` - Creates `.github/workflows/strix-pentest.yml` scans on every PR and blocks insecure code, checkout, setup-python, pip install, scanner, check critical/high exit 1 blocking PR, upload artifact, comment PR via github-script; `generate_gitlab_ci()`, `generate_jenkinsfile()`
+- **CI/CD:** `generate_github_actions_workflow(target, fail_on)` - Creates `.github/workflows/pentest.yml` that runs the real SAST scanner on every PR and blocks insecure code; `generate_gitlab_ci()`, `generate_jenkinsfile()`
 - **Bug Bounty:** `bug_bounty_recon(target)`, `generate_bounty_poc(vulnerability, target)`, `bug_bounty_workflow(target, output_dir)` - recon, scan, PoCs, report json + md files
 - **DevSecOps:** `github_integration_pr_comment(repo, pr_number, report_path, github_token)`, `gitlab_integration_mr_note()`, `slack_notify(webhook_url, report_path)`, `jira_create_issue(jira_url, project_key, report_path, jira_token, jira_email)`, `linear_create_issue(linear_api_key, team_id, report_path)`
 - **Continuous Learning:** `continuous_learning_add_finding(finding)`, `continuous_learning_mark_false_positive(finding_id, reason)`, `continuous_learning_stats()` - AI builds on past findings, adapts to codebase, reduces false positives, `should_skip_similar(new_finding)` checks if similar previously FP
@@ -357,7 +357,7 @@ python hermus.py --model mock/mock -c "Use test_custom_api_response_time to test
 | Public/custom API | `hermus api discover/categories/refresh-catalog` + `add/list/remove/test` | - |
 | Response time test | Use tool `test_api_key_response_time` or dashboard Keys pane Test ⏱️ buttons | - |
 | Doctor health check | `hermus --model mock/mock -c "Use doctor_check_all"` | - |
-| Pentest | `hermus --model mock/mock -c "Use comprehensive_scan to scan target"` | - |
+| Pentest | `hermus --model mock/mock -c "Use sast_scan to scan the repo, then generate a report"` | - |
 
 ---
 
@@ -393,7 +393,7 @@ hermus-agent-free/
 │   ├── agent_reach_doctor.py # NEW - Doctor real probing ordered backend candidates tells apart missing/broken/timeout, 15 platforms web, youtube, rss, github, twitter, bilibili, reddit, facebook, instagram, xiaohongshu, v2ex, xueqiu, xiaoyuzhou, linkedin, full search
 │   ├── facebook.py       # NEW - Facebook search, Instagram user search, XiaoHongShu search, LinkedIn read, Xiaoyuzhou transcribe via OpenCLI Chrome session free + Jina fallback
 │   ├── updater.py        # NEW - Updater tools: check_update, do_update, get_local_commit, get_remote_commit
-│   ├── pentest.py        # NEW - 32 tools Strix features: recon subdomain_enum fingerprinting attack_surface_mapping, exploitation browser_xss_test shell_exploit custom_exploit_runtime http_proxy_intercept, vuln_kb search_vuln_kb get_owasp_categories, scanner comprehensive_scan OWASP Top 10 and beyond scan_api_spec, multi-agent pentest_distribute_task chain_vulns scalable_scan, reporting create_run add_finding generate_patch generate_report, viewer view_run, SAST/DAST sast_scan dast_scan combined, CI/CD generate_github_actions_workflow gitlab_ci jenkinsfile, bug bounty recon generate_poc workflow, DevSecOps github_integration_pr_comment slack_notify jira_create_issue linear_create_issue, continuous learning add_finding mark_false_positive stats, compliance generate_compliance_report list_compliance_frameworks
+│   ├── pentest.py        # NEW - 31 tools: recon subdomain_enum fingerprinting attack_surface_mapping, exploitation browser_xss_test shell_exploit custom_exploit_runtime http_proxy_intercept, vuln_kb search_vuln_kb get_owasp_categories, scanner scan_api_spec, multi-agent pentest_distribute_task chain_vulns scalable_scan, reporting create_run add_finding generate_patch generate_report, viewer view_run, SAST/DAST sast_scan dast_scan combined, CI/CD generate_github_actions_workflow gitlab_ci jenkinsfile, bug bounty recon generate_poc workflow, DevSecOps github_integration_pr_comment slack_notify jira_create_issue linear_create_issue, continuous learning add_finding mark_false_positive stats, compliance generate_compliance_report list_compliance_frameworks
 │   └── response_tester.py # Actually in core/response_tester.py but tool wrapper
 ├── gateway/
 │   ├── gateway.py        # FastAPI single process gateway, cross-platform continuity, GZipMiddleware, /command, /agents/status slide panel data, /platforms, /webhook/telegram, /dashboard, /keys/list/add/remove with redacted preview, /custom-apis/list/add/remove, /response-times and /response-times/test for response time test, /update/check and /update/pull and /update/local and /update/remote for update thing, /cache/stats and /cache/clear for optimization

@@ -45,12 +45,12 @@ Original Hermes (Nous Research) is 225k stars but needs OpenRouter paid API. Thi
 - **Recon:** `subdomain_enum(domain)`, `fingerprinting(url)`, `attack_surface_mapping(domain)`
 - **Exploitation:** `browser_xss_test(url)` XSS via Playwright free, `shell_exploit(command)`, `custom_exploit_runtime(code)` Python sandbox PoC validation
 - **Vuln Knowledge Base:** `search_vuln_kb(query)` - CVE-style with CVSS scoring + OWASP Top 10
-- **Scanner:** `comprehensive_scan(target)` - OWASP Top 10: A01 Broken Access Control IDOR, A03 Injection SQL/XSS, A10 SSRF, A07 JWT, etc., `scan_api_spec(path)` OpenAPI/Postman
+- **Scanner:** `scan_api_spec(path)` - parse OpenAPI / Swagger / Postman collections, return endpoint list
 - **Multi-Agent Pentest:** `pentest_distribute_task(target)` - 5 specialized agents recon/web_exploiter/api_tester/post_exploit/reporter collaborate, chain vulns, scalable scan parallel
 - **Reporting:** `pentest_create_run(target)`, `pentest_add_finding(run_name, finding)` with PoC, `pentest_generate_patch(finding)` autofix PR, `pentest_generate_report(run_name)` compliance-ready summary critical/high/medium/low
 - **Viewer:** `pentest_view_run(run_name)` - Local web viewer 127.0.0.1 random port private tokened link
 - **SAST/DAST:** `sast_scan(dir)` pattern matching semgrep-like, `dast_scan(url)` header checks ZAP-like
-- **CI/CD:** `generate_github_actions_workflow(target)` - Creates `.github/workflows/strix-pentest.yml` scans on every PR and blocks insecure code
+- **CI/CD:** `generate_github_actions_workflow(target)` - Creates `.github/workflows/pentest.yml` that runs the real SAST scanner on every PR and blocks insecure code
 - **Bug Bounty:** `bug_bounty_recon(target)`, `generate_bounty_poc(vuln, target)`, `bug_bounty_workflow(target)` - Recon + scan + PoCs + report
 - **DevSecOps:** `github_integration_pr_comment()`, `slack_notify()`, `jira_create_issue()`, `linear_create_issue()`
 - **Continuous Learning:** `continuous_learning_add_finding()`, `mark_false_positive()`, `stats()` - AI builds on past findings, reduces false positives
@@ -208,8 +208,8 @@ python hermus.py multiai debate "Python vs Rust for async?" --rounds 2 --agents 
 # Recon
 python hermus.py --model mock/mock -c "Use subdomain_enum to find subdomains for example.com"
 
-# Scan OWASP Top 10
-python hermus.py --model mock/mock -c "Use comprehensive_scan to scan https://example.com"
+# Scan OWASP Top 10 - the real SAST scanner
+python hermus.py --model mock/mock -c "Use sast_scan to scan the repo"
 
 # Create pentest run and view in local dashboard
 python hermus.py --model mock/mock -c "Use pentest_create_run to create run for target example.com"
@@ -218,7 +218,7 @@ python hermus.py --model mock/mock -c "Use pentest_view_run to view latest run"
 
 # CI/CD - Generate GitHub Actions workflow that blocks PR if critical vulns
 python hermus.py --model mock/mock -c "Use generate_github_actions_workflow to create workflow for target ."
-# Creates .github/workflows/strix-pentest.yml
+# Creates .github/workflows/pentest.yml
 ```
 
 ### Internet Eyes - See Entire Internet Free (Agent Reach features)
