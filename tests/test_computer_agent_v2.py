@@ -18,6 +18,7 @@ from core.computer import (
     DryRunWindowBackend,
     EmergencyStop,
     RecordingPolicy,
+    RepairEngine,
     ScreenRecorder,
     CallableSource,
     TargetDetector,
@@ -169,8 +170,185 @@ def test_state_machine_repairs_on_failure():
     )
     report = machine.run(states)
     assert report["success"] is True
-    attempts = [v for v in report["states_visited"] if "attempt" in v]
-    assert len(attempts) == 2  # one failure + one success
+    attempts = [v for v in report["states_visited"] if v.get("phase") == "original_action"]
+    assert len(attempts) == 2  # one failure + one bounded retry success
+
+
+def test_repair_engine_diagnoses_popup_without_llm_guessing():
+    class NoLLM:
+        def chat(self, messages):
+            raise AssertionError("deterministic popup repair should not call the LLM")
+
+    engine = RepairEngine(llm=NoLLM())
+    plan = engine.create_plan(
+        "Unexpected popup detected with a 'Not now' button",
+        "YouTube is loaded",
+        {
+            "spec": {"kind": "click_target", "target": "address bar"},
+            "result": {"ok": False, "error": "target not visible"},
+            "verification": {"ok": False, "detail": "A popup is blocking the browser"},
+        },
+    )
+
+    assert plan.available is True
+    assert plan.source == "heuristic"
+    assert plan.diagnosis.kind == "blocking_dialog"
+    assert plan.steps[0].action == {"kind": "click_target", "target": "Not Now"}
+    assert "no longer visible" in plan.steps[0].expected
+
+
+def test_repair_engine_will_not_retry_permission_rejection():
+    engine = RepairEngine(use_llm=False)
+    plan = engine.create_plan(
+        "permission policy denied",
+        "Application is open",
+        {"result": {"ok": False, "error": "permission policy denied"}},
+    )
+    assert plan.available is False
+    assert plan.retry_original is False
+    assert plan.diagnosis.retryable is False
+    assert plan.diagnosis.kind == "action_rejected"
+
+
+def test_repair_engine_sanitizes_model_actions():
+    class FakeResponse:
+        content = json.dumps({
+            "retry_original": True,
+            "steps": [
+                {"name": "UNSAFE_COORDINATE", "action": {"kind": "click", "x": 10, "y": 10}, "expected": "gone"},
+                {"name": "SAFE_ESCAPE", "action": {"kind": "press_key", "key": "escape"}, "expected": "The overlay is gone"},
+            ],
+        })
+
+    class FakeLLM:
+        def chat(self, messages):
+            return FakeResponse()
+
+    engine = RepairEngine(llm=FakeLLM())
+    plan = engine.create_plan(
+        "The screen shows different content than expected",
+        "The settings page is visible",
+        {
+            "result": {"ok": True},
+            "verification": {"ok": False, "changed": True, "detail": "Different content is visible"},
+        },
+    )
+    assert plan.source == "llm"
+    assert [step.name for step in plan.steps] == ["SAFE_ESCAPE"]
+    assert plan.steps[0].action["kind"] == "press_key"
+
+
+def test_state_machine_executes_verified_repair_before_original_retry():
+    actions = []
+    original_verifications = {"count": 0}
+
+    def execute(spec):
+        actions.append(spec["kind"])
+        return {"ok": True, "action": spec["kind"], "description": spec["kind"]}
+
+    def verify(before, after, expected):
+        if "dialog" in expected.lower():
+            return {"ok": True, "detail": "popup disappeared", "confidence": 0.95}
+        original_verifications["count"] += 1
+        if original_verifications["count"] == 1:
+            return {"ok": False, "detail": "Unexpected popup with a Not now button", "confidence": 0.9}
+        return {"ok": True, "detail": "YouTube loaded", "confidence": 0.95}
+
+    states = VisualStateMachine.plan_to_states([{
+        "name": "OPEN_YOUTUBE",
+        "action": {"kind": "press_key", "key": "enter"},
+        "expected": "YouTube is loaded",
+    }])
+    engine = RepairEngine(use_llm=False)
+    report = VisualStateMachine(
+        execute=execute,
+        verify=verify,
+        repair=engine.create_plan,
+        max_retries=2,
+    ).run(states)
+
+    assert report["success"] is True
+    assert actions == ["press_key", "click_target", "press_key"]
+    phases = [event.get("phase") for event in report["states_visited"]]
+    assert phases.index("diagnose") < phases.index("repair")
+    assert any(event.get("outcome") == "retry_after_repair" for event in report["states_visited"])
+
+
+def test_failed_repair_never_blindly_retries_original_action():
+    actions = []
+
+    def execute(spec):
+        actions.append(spec["kind"])
+        return {"ok": True, "action": spec["kind"]}
+
+    def verify(before, after, expected):
+        return {"ok": False, "detail": "popup still visible"}
+
+    repair = lambda detail, expected, context: [{  # noqa: E731
+        "name": "DISMISS",
+        "action": {"kind": "press_key", "key": "escape"},
+        "expected": "popup is gone",
+    }]
+    states = VisualStateMachine.plan_to_states([{
+        "name": "ACT",
+        "action": {"kind": "click_target", "target": "Continue"},
+        "expected": "Next page is visible",
+    }])
+    report = VisualStateMachine(
+        execute=execute,
+        verify=verify,
+        repair=repair,
+        max_retries=3,
+    ).run(states)
+
+    assert report["success"] is False
+    assert actions == ["click_target", "press_key"]
+    assert report["failure"]["category"] == "repair_failed"
+    assert "repair step 'DISMISS' failed" in report["error"]
+
+
+def test_non_retryable_diagnosis_stops_even_with_retry_budget():
+    calls = {"actions": 0}
+
+    def denied(spec):
+        calls["actions"] += 1
+        return {"ok": False, "action": spec["kind"], "error": "permission policy denied"}
+
+    states = VisualStateMachine.plan_to_states([{
+        "name": "DENIED",
+        "action": {"kind": "click_target", "target": "Allow"},
+        "expected": "Permission accepted",
+    }])
+    engine = RepairEngine(use_llm=False)
+    report = VisualStateMachine(
+        execute=denied,
+        verify=lambda b, a, e: {"ok": False, "detail": "permission policy denied"},
+        repair=engine.create_plan,
+        max_retries=5,
+    ).run(states)
+
+    assert report["success"] is False
+    assert calls["actions"] == 1
+    assert report["failure"]["category"] == "non_retryable"
+    assert "not safe to retry" in report["error"]
+
+
+def test_plan_preserves_explicit_failure_transition():
+    states = VisualStateMachine.plan_to_states([{
+        "name": "ACT",
+        "action": {"kind": "press_key", "key": "enter"},
+        "expected": "Next page",
+        "on_failure": "FAILURE",
+    }], terminal="FAILURE")
+    assert states[0].on_failure == "FAILURE"
+    report = VisualStateMachine(
+        execute=lambda spec: {"ok": False, "error": "backend failed"},
+        verify=lambda b, a, e: {"ok": False, "detail": "no change"},
+        max_retries=0,
+    ).run(states)
+    assert report["success"] is False
+    assert report["final_state"] == "FAILURE"
+    assert any(event.get("outcome") == "failure_transition" for event in report["states_visited"])
 
 
 # -- skill store --------------------------------------------------------
@@ -225,6 +403,45 @@ def test_agent_run_produces_evidence_bundle_and_skill(tmp_path):
     # A successful run promotes a reusable skill.
     assert result["skill"]["success"] is True
     assert skills.recall("install the app") is not None
+
+
+def test_computer_agent_wires_injected_repair_engine_into_state_machine(tmp_path):
+    class SpyRepairEngine:
+        def __init__(self):
+            self.calls = []
+
+        def create_plan(self, detail, expected, context):
+            self.calls.append({"detail": detail, "expected": expected, "context": context})
+            return []  # no repair available; state machine may use one bounded retry
+
+    spy = SpyRepairEngine()
+    recorder = ScreenRecorder(
+        source=CallableSource(lambda: Image.new("RGB", (64, 48), "white")),
+        fps=20,
+        max_seconds=30,
+    )
+    controller = _FreshController.make(frame_provider=recorder.latest)
+    agent = ComputerAgent(
+        controller=controller,
+        recorder=recorder,
+        planner=lambda task: [{
+            "name": "TYPE",
+            "action": {"kind": "type_text", "text": "hello"},
+            "expected": "The text hello is visible",
+        }],
+        repair_engine=spy,
+        policy=RecordingPolicy(str(tmp_path / "recordings")),
+        skills=ComputerSkillStore(str(tmp_path / "recordings" / "skills")),
+        learn_skills=False,
+        max_retries=1,
+    )
+
+    result = agent.run("type hello", task_id="repair-wiring")
+    assert result["success"] is False
+    assert len(spy.calls) == 1
+    assert spy.calls[0]["context"]["spec"]["kind"] == "type_text"
+    assert spy.calls[0]["context"]["verification"]["ok"] is False
+    assert Path(result["repairs_path"]).exists()
 
 
 def test_agent_failure_is_diagnosed_not_blindly_repeated(tmp_path):

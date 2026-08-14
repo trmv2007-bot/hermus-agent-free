@@ -1,51 +1,385 @@
-"""World State — persistent understanding of the current desktop environment."""
+"""Shared, persistent model of the desktop currently visible to Hermus.
+
+Vision, planning, execution, verification, repair, persistence, and resume all
+read and update this one model instead of independently guessing what is on the
+screen.  The model accepts structured vision output when available and keeps a
+small heuristic compatibility path for existing string-only verifiers.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import re
+import threading
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+
+def _now() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def _unique(values: Iterable[Any], limit: int = 50) -> List[str]:
+    output: List[str] = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        key = text.casefold()
+        if text and key not in seen:
+            seen.add(key)
+            output.append(text)
+    return output[-limit:]
+
+
+@dataclass
+class WorldObservation:
+    source: str
+    detail: str = ""
+    confidence: float = 0.0
+    timestamp: str = field(default_factory=_now)
+    application: Optional[str] = None
+    window: Optional[str] = None
+    visible_targets: List[str] = field(default_factory=list)
+    dialogs: List[str] = field(default_factory=list)
+    task_state: Optional[str] = None
+    verification_ok: Optional[bool] = None
+    evidence: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
 class WorldState:
-    """A snapshot of the current desktop environment as understood by vision."""
+    """Canonical desktop state shared by all computer-agent components."""
 
-    application: Optional[str] = None
-    window: Optional[str] = None
-    elements: List[str] = field(default_factory=list)
-    modal: Optional[str] = None
+    active_application: Optional[str] = None
+    active_window: Optional[str] = None
+    visible_targets: List[str] = field(default_factory=list)
+    dialogs: List[str] = field(default_factory=list)
     task: Optional[str] = None
-    current_state: Optional[str] = None
+    task_state: str = "UNKNOWN"
     confidence: float = 0.0
-    timestamp: str = field(default_factory=lambda: datetime.now().astimezone().isoformat())
+    timestamp: str = field(default_factory=_now)
+    revision: int = 0
+    last_action: Optional[Dict[str, Any]] = None
+    last_verification: Optional[Dict[str, Any]] = None
+    completed_states: List[str] = field(default_factory=list)
+    failed_states: List[str] = field(default_factory=list)
+    observations: List[Dict[str, Any]] = field(default_factory=list)
+    max_observations: int = 100
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
-    def update(self, observation: Dict[str, Any]) -> None:
-        """Update the world model from a vision observation record."""
-        self.timestamp = datetime.now().astimezone().isoformat()
-        self.confidence = float(observation.get("confidence", self.confidence))
-        
-        # If the observation provides semantic details, try to extract them.
-        detail = observation.get("detail", "")
-        if not detail:
-            return
-            
-        # Very simple heuristic parsing of vision descriptions.
-        # In a real system, this would be a structured LLM output.
-        if "window" in detail.lower():
-            self.window = detail.split("window")[0].strip().split()[-1]
-        
-        if "button" in detail.lower() or "link" in detail.lower():
-            # Add to elements if not already there
-            self.elements.append(detail)
-            
-    def to_dict(self) -> Dict[str, Any]:
+    # Compatibility aliases for the initial WorldState API.
+    @property
+    def application(self) -> Optional[str]:
+        return self.active_application
+
+    @application.setter
+    def application(self, value: Optional[str]) -> None:
+        self.active_application = value
+
+    @property
+    def window(self) -> Optional[str]:
+        return self.active_window
+
+    @window.setter
+    def window(self, value: Optional[str]) -> None:
+        self.active_window = value
+
+    @property
+    def elements(self) -> List[str]:
+        return self.visible_targets
+
+    @elements.setter
+    def elements(self, value: List[str]) -> None:
+        self.visible_targets = list(value or [])
+
+    @property
+    def modal(self) -> Optional[str]:
+        return self.dialogs[-1] if self.dialogs else None
+
+    @modal.setter
+    def modal(self, value: Optional[str]) -> None:
+        self.dialogs = [value] if value else []
+
+    @property
+    def current_state(self) -> str:
+        return self.task_state
+
+    @current_state.setter
+    def current_state(self, value: Optional[str]) -> None:
+        self.task_state = value or "UNKNOWN"
+
+    @staticmethod
+    def _confidence(value: Any, default: float = 0.0) -> float:
+        try:
+            return max(0.0, min(float(value), 1.0))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _as_list(value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return _unique(value)
+        return [str(value)] if str(value).strip() else []
+
+    @staticmethod
+    def _heuristics(detail: str) -> Dict[str, Any]:
+        """Extract conservative structure from legacy prose observations."""
+        text = str(detail or "").strip()
+        lowered = text.lower()
+        result: Dict[str, Any] = {"visible_targets": [], "dialogs": []}
+
+        app_match = re.search(
+            r"\b(?:in|inside|shows?|visible in)\s+(?:the\s+)?([A-Z][A-Za-z0-9 ._-]{1,40})\s+(?:app|application|browser)\b",
+            text,
+        )
+        if app_match:
+            result["application"] = app_match.group(1).strip()
+        window_match = re.search(r"\b([A-Z][A-Za-z0-9 ._:/-]{1,60})\s+window\b", text)
+        if window_match:
+            result["window"] = window_match.group(1).strip()
+
+        # Quoted labels and common control phrases are useful target names but
+        # arbitrary prose is not added to visible_targets.
+        quoted = re.findall(r"[\"']([^\"']{1,80})[\"']", text)
+        controls = re.findall(
+            r"\b([A-Za-z0-9][A-Za-z0-9 _-]{0,50}\s+(?:button|link|field|tab|menu|address bar|search box))\b",
+            text,
+            flags=re.I,
+        )
+        result["visible_targets"] = _unique([*quoted, *controls], limit=30)
+
+        if re.search(r"\b(?:popup|pop-up|modal|dialog|permission prompt|alert)\b", lowered):
+            dialog_match = re.search(
+                r"([^.!?]{0,100}\b(?:popup|pop-up|modal|dialog|permission prompt|alert)\b[^.!?]{0,100})",
+                text,
+                flags=re.I,
+            )
+            result["dialogs"] = [(dialog_match.group(1) if dialog_match else text)[:200]]
+        if re.search(r"(?:dialog|popup|modal).*(?:closed|dismissed|gone|no longer visible)", lowered):
+            result["dialogs"] = []
+            result["clear_dialogs"] = True
+        return result
+
+    def reset(self, task: Optional[str] = None) -> None:
+        with self._lock:
+            self.active_application = None
+            self.active_window = None
+            self.visible_targets = []
+            self.dialogs = []
+            self.task = task
+            self.task_state = "PLANNING" if task else "UNKNOWN"
+            self.confidence = 0.0
+            self.timestamp = _now()
+            self.revision += 1
+            self.last_action = None
+            self.last_verification = None
+            self.completed_states = []
+            self.failed_states = []
+            self.observations = []
+
+    def update(self, observation: Dict[str, Any], source: str = "vision") -> Dict[str, Any]:
+        """Merge one structured or prose observation and return the new snapshot."""
+        if not isinstance(observation, dict):
+            observation = {"detail": str(observation)}
+        detail = str(
+            observation.get("detail")
+            or observation.get("description")
+            or observation.get("visual_result")
+            or ""
+        ).strip()
+        heuristic = self._heuristics(detail)
+
+        application = (
+            observation.get("active_application")
+            or observation.get("application")
+            or observation.get("app")
+            or heuristic.get("application")
+        )
+        window = (
+            observation.get("active_window")
+            or observation.get("window")
+            or observation.get("title")
+            or heuristic.get("window")
+        )
+        targets = self._as_list(
+            observation.get("visible_targets", observation.get("targets", observation.get("elements")))
+        ) or heuristic.get("visible_targets", [])
+        dialogs_supplied = any(key in observation for key in ("dialogs", "dialog", "modal"))
+        dialogs = self._as_list(
+            observation.get("dialogs", observation.get("dialog", observation.get("modal")))
+        )
+        if not dialogs_supplied:
+            dialogs = heuristic.get("dialogs", [])
+        clear_dialogs = bool(observation.get("clear_dialogs") or heuristic.get("clear_dialogs"))
+        confidence = self._confidence(observation.get("confidence"), self.confidence)
+        task_state = observation.get("task_state") or observation.get("current_state")
+        verification_ok = observation.get("ok") if "ok" in observation else observation.get("matched")
+
+        with self._lock:
+            if application:
+                self.active_application = str(application).strip()
+            if window:
+                self.active_window = str(window).strip()
+            if observation.get("replace_targets"):
+                self.visible_targets = _unique(targets)
+            else:
+                self.visible_targets = _unique([*self.visible_targets, *targets])
+            if clear_dialogs or (dialogs_supplied and not dialogs):
+                self.dialogs = []
+            elif dialogs:
+                self.dialogs = _unique(dialogs, limit=10)
+            if task_state:
+                self.task_state = str(task_state)
+            self.confidence = confidence
+            self.timestamp = str(observation.get("timestamp") or observation.get("ts") or _now())
+            self.revision += 1
+            self.last_verification = dict(observation)
+            record = WorldObservation(
+                source=source,
+                detail=detail,
+                confidence=confidence,
+                timestamp=self.timestamp,
+                application=self.active_application,
+                window=self.active_window,
+                visible_targets=list(targets),
+                dialogs=list(self.dialogs),
+                task_state=self.task_state,
+                verification_ok=bool(verification_ok) if verification_ok is not None else None,
+                evidence=dict(observation.get("evidence") or {}),
+            ).to_dict()
+            self.observations.append(record)
+            self.observations = self.observations[-max(1, int(self.max_observations)):]
+            return self.to_dict()
+
+    def begin_task(self, task: str, state: str = "PLANNING") -> None:
+        with self._lock:
+            self.task = task
+            self.task_state = state
+            self.timestamp = _now()
+            self.revision += 1
+
+    def before_action(self, state: str, action: Dict[str, Any]) -> None:
+        with self._lock:
+            self.task_state = state
+            self.last_action = {"state": state, "action": dict(action), "started": _now()}
+            self.timestamp = _now()
+            self.revision += 1
+
+    def mark_state(self, state: str, success: bool, detail: str = "") -> None:
+        with self._lock:
+            target = self.completed_states if success else self.failed_states
+            target.append(state)
+            if success:
+                self.failed_states = [item for item in self.failed_states if item != state]
+            self.completed_states = _unique(self.completed_states, limit=1000)
+            self.failed_states = _unique(self.failed_states, limit=1000)
+            self.task_state = state if success else f"FAILED:{state}"
+            self.timestamp = _now()
+            self.revision += 1
+            if detail:
+                self.observations.append(WorldObservation(
+                    source="state_machine",
+                    detail=detail,
+                    confidence=self.confidence,
+                    task_state=self.task_state,
+                    verification_ok=success,
+                ).to_dict())
+                self.observations = self.observations[-max(1, int(self.max_observations)):]
+
+    def finish_task(self, success: bool) -> None:
+        with self._lock:
+            self.task_state = "SUCCESS" if success else "FAILURE"
+            self.timestamp = _now()
+            self.revision += 1
+
+    def satisfies(self, condition: str) -> Dict[str, Any]:
+        """Best-effort local precondition check before asking vision again."""
+        wanted = str(condition or "").strip().casefold()
+        if not wanted:
+            return {"matched": True, "confidence": 1.0, "detail": "empty condition"}
+        haystack = " ".join(
+            filter(None, [
+                self.active_application,
+                self.active_window,
+                *self.visible_targets,
+                *self.dialogs,
+                self.task_state,
+            ])
+        ).casefold()
+        tokens = [token for token in re.findall(r"[a-z0-9]+", wanted) if len(token) > 2]
+        matched_tokens = [token for token in tokens if token in haystack]
+        ratio = len(matched_tokens) / len(tokens) if tokens else 0.0
         return {
-            "application": self.application,
-            "window": self.window,
-            "elements": self.elements[-10:], # Keep recent elements
-            "modal": self.modal,
-            "task": self.task,
-            "current_state": self.current_state,
-            "confidence": self.confidence,
-            "timestamp": self.timestamp,
+            "matched": ratio >= 0.7,
+            "confidence": round(min(self.confidence, ratio), 3),
+            "detail": f"world-state token match {len(matched_tokens)}/{len(tokens)}",
         }
+
+    def to_dict(self, include_history: bool = True) -> Dict[str, Any]:
+        with self._lock:
+            data = {
+                "active_application": self.active_application,
+                "active_window": self.active_window,
+                "visible_targets": list(self.visible_targets),
+                "dialogs": list(self.dialogs),
+                "task": self.task,
+                "task_state": self.task_state,
+                "confidence": round(self._confidence(self.confidence), 4),
+                "timestamp": self.timestamp,
+                "revision": self.revision,
+                "last_action": self.last_action,
+                "last_verification": self.last_verification,
+                "completed_states": list(self.completed_states),
+                "failed_states": list(self.failed_states),
+                # Compatibility names for older checkpoints.
+                "application": self.active_application,
+                "window": self.active_window,
+                "elements": list(self.visible_targets),
+                "modal": self.modal,
+                "current_state": self.task_state,
+            }
+            if include_history:
+                data["observations"] = list(self.observations)
+            return data
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "WorldState":
+        data = data if isinstance(data, dict) else {}
+        return cls(
+            active_application=data.get("active_application", data.get("application")),
+            active_window=data.get("active_window", data.get("window")),
+            visible_targets=cls._as_list(data.get("visible_targets", data.get("elements"))),
+            dialogs=cls._as_list(data.get("dialogs", data.get("modal"))),
+            task=data.get("task"),
+            task_state=str(data.get("task_state", data.get("current_state", "UNKNOWN"))),
+            confidence=cls._confidence(data.get("confidence"), 0.0),
+            timestamp=str(data.get("timestamp") or _now()),
+            revision=int(data.get("revision", 0)),
+            last_action=data.get("last_action"),
+            last_verification=data.get("last_verification"),
+            completed_states=cls._as_list(data.get("completed_states")),
+            failed_states=cls._as_list(data.get("failed_states")),
+            observations=list(data.get("observations") or []),
+        )
+
+    def save(self, path: str) -> str:
+        target = Path(path).expanduser().resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_text(json.dumps(self.to_dict(), indent=2, default=str), encoding="utf-8")
+        temporary.replace(target)
+        return str(target)
+
+    @classmethod
+    def load(cls, path: str) -> "WorldState":
+        target = Path(path).expanduser().resolve()
+        try:
+            return cls.from_dict(json.loads(target.read_text(encoding="utf-8")))
+        except Exception:
+            return cls()

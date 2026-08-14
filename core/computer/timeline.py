@@ -97,7 +97,10 @@ def _write_json(path: Path, data: Any) -> None:
 class TaskArtifacts:
     """Persist the debuggable recording/timeline/actions/result task layout."""
 
-    FILES = ("timeline.json", "events.json", "actions.json", "result.json")
+    FILES = (
+        "state.json", "plan.json", "timeline.json", "events.json", "actions.json",
+        "verification.json", "repairs.json", "result.json", "summary.md",
+    )
 
     def __init__(self, task_id: str, root: str = "data/recordings"):
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id.strip()).strip(".-")
@@ -157,6 +160,11 @@ class TaskArtifacts:
             "timeline": str(self.directory / "timeline.json"),
             "events": str(self.directory / "events.json"),
             "actions": str(self.directory / "actions.json"),
+            "verification": str(self.directory / "verification.json"),
+            "repairs": str(self.directory / "repairs.json"),
+            "state": str(self.directory / "state.json"),
+            "plan": str(self.directory / "plan.json"),
+            "summary": str(self.directory / "summary.md"),
             "result": str(self.directory / "result.json"),
             "manifest": str(self.directory / "manifest.json"),
         }
