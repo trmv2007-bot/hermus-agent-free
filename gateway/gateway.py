@@ -1482,30 +1482,60 @@ async def computer_events_ws(websocket: WebSocket):
     repair_*, task_completed, emergency_stop, world_changed, ..."""
     from core.computer.events import computer_event_bus
 
+    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
+    if expected and provided != expected:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
     await websocket.accept()
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+
+    def enqueue(event: Dict) -> None:
+        def put() -> None:
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            queue.put_nowait(event)
+        loop.call_soon_threadsafe(put)
+
+    unsubscribe = computer_event_bus.subscribe(enqueue)
+    seen = set()
     try:
         snapshot = computer_event_bus.recent(100)
-        cursor = len(computer_event_bus.journal_lines())
-        try:
-            await websocket.send_json({"kind": "snapshot", "events": snapshot})
-        except Exception:
-            return
+        seen.update(str(event.get("id")) for event in snapshot if event.get("id"))
+        await websocket.send_json({"kind": "snapshot", "events": snapshot})
         while True:
-            lines = computer_event_bus.journal_lines()
-            if len(lines) > cursor:
-                new_lines = lines[cursor:]
-                cursor = len(lines)
-                for line in new_lines:
-                    try:
-                        event = json.loads(line)
-                    except (ValueError, TypeError):
-                        continue
-                    if isinstance(event, dict) and event.get("type"):
-                        await websocket.send_json(event)
-            await asyncio.sleep(0.5)
+            # In-process events arrive instantly through the subscriber. The
+            # bounded journal tail also captures events from a separate Hermus
+            # CLI process and remains correct when the journal rotates.
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=0.25)
+                event_id = str(event.get("id") or "")
+                if not event_id or event_id not in seen:
+                    if event_id:
+                        seen.add(event_id)
+                    await websocket.send_json(event)
+            except asyncio.TimeoutError:
+                pass
+
+            for event in computer_event_bus.read_journal(limit=250):
+                event_id = str(event.get("id") or "")
+                if event_id and event_id in seen:
+                    continue
+                if event_id:
+                    seen.add(event_id)
+                await websocket.send_json(event)
+            if len(seen) > 5000:
+                # IDs only deduplicate a short cross-process overlap window.
+                seen = {str(event.get("id")) for event in computer_event_bus.read_journal(limit=500) if event.get("id")}
     except Exception:
         pass
     finally:
+        unsubscribe()
         try:
             await websocket.close()
         except Exception:
