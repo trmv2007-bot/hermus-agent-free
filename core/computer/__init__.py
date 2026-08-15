@@ -5,8 +5,13 @@ video analysis, timelines, before/after verification, and condition watching).
 v2 added the gated action layer. v3 adds a shared persistent WorldState,
 validated task graphs, diagnosed/verified repair plans, evidence-backed skill
 statistics, crash-safe task resume, persistent computer-operator workers, and
-dependency-aware multi-agent delegation. GUI input remains serialized through
-the same permission and emergency-stop gates.
+dependency-aware multi-agent delegation. v4 adds:
+- Enhanced WorldState with observation types (OBSERVED/INFERRED/EXPECTED/UNKNOWN)
+- Adaptive Replanner for dynamic plan modification
+- Task Control System (Pause/Resume/Cancel)
+- Visual Grounding System with pre-click verification
+
+GUI input remains serialized through the same permission and emergency-stop gates.
 
 The package is headless-safe and dependency-injectable. Capture uses a bounded
 compressed RAM buffer; full sessions can stream to MP4/WebM; only debounced
@@ -20,6 +25,14 @@ from .control_center import ControlCenter
 from .delegation import DelegationPlan, MultiAgentDelegator, WorkUnit
 from .event_detector import EventDetector, StreamingEventDetector
 from .frame_sampler import FrameSampler
+from .grounding import (
+    BoundingBox,
+    GroundedTarget,
+    GroundingSystem,
+    PreClickVerifier,
+    VisualGrounder,
+    create_grounding_system,
+)
 from .keyboard import DryRunKeyboard, KeyboardBackend, PyAutoGUIKeyboard, default_keyboard
 from .mouse import DryRunMouse, MouseBackend, PyAutoGUIMouse, default_mouse
 from .permissions import (
@@ -34,6 +47,14 @@ from .permissions import (
 )
 from .planner import ComputerPlanner, PlanNode, TaskGoal, TaskGraph
 from .repair import FailureDiagnosis, FailureKind, RepairEngine, RepairPlan, RepairStep
+from .replanner import (
+    AdaptiveReplanner,
+    PlanDelta,
+    ReplanContext,
+    ReplanReason,
+    ReplanStrategy,
+    create_replanner,
+)
 from .recorder import (
     CallableSource,
     ImageGrabSource,
@@ -46,6 +67,15 @@ from .recorder import (
 from .skills import ComputerSkill, ComputerSkillStore
 from .state_machine import VisualState, VisualStateMachine, dispatch_action
 from .target_detector import TargetDetector, extract_json_object
+from .task_control import (
+    ControlAction,
+    ControlEvent,
+    TaskControlContext,
+    TaskControlManager,
+    TaskControlState,
+    get_task_control,
+    task_control,
+)
 from .task_store import TaskCheckpoint, TaskStore
 from .timeline import TaskArtifacts, Timeline, TimelineEvent
 from .verifier import ActionVerificationManager, ScreenVerifier
@@ -53,6 +83,16 @@ from .video_analyzer import OllamaVisionModel, VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
 from .world_state import WorldObservation, WorldState
+from .world_state_v2 import (
+    CertaintyLevel,
+    DesktopContext,
+    GroundedTarget as GroundedTargetV2,
+    ObservationType,
+    RichObservation,
+    TaskContext,
+    WorldStateV2,
+    create_world_state,
+)
 from .window_manager import (
     DryRunWindowBackend,
     PyGetWindowBackend,
@@ -128,4 +168,36 @@ __all__ = [
     "DelegationPlan",
     "MultiAgentDelegator",
     "ControlCenter",
+    # v4 — Phase A: Enhanced capabilities
+    # Task Control
+    "TaskControlManager",
+    "TaskControlState",
+    "TaskControlContext",
+    "ControlAction",
+    "ControlEvent",
+    "task_control",
+    "get_task_control",
+    # Visual Grounding
+    "BoundingBox",
+    "GroundedTarget",
+    "VisualGrounder",
+    "PreClickVerifier",
+    "GroundingSystem",
+    "create_grounding_system",
+    # Adaptive Replanning
+    "AdaptiveReplanner",
+    "PlanDelta",
+    "ReplanContext",
+    "ReplanReason",
+    "ReplanStrategy",
+    "create_replanner",
+    # Enhanced World State
+    "WorldStateV2",
+    "ObservationType",
+    "CertaintyLevel",
+    "DesktopContext",
+    "TaskContext",
+    "RichObservation",
+    "GroundedTargetV2",
+    "create_world_state",
 ]

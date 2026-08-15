@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermus Computer Agent - Live Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #1a1f2e;
+            --bg-card: #242b3d;
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --accent-blue: #4a9eff;
+            --accent-green: #34d399;
+            --accent-yellow: #fbbf24;
+            --accent-red: #ef4444;
+            --accent-purple: #a78bfa;
+            --border-color: #2d3548;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0f1f3d 100%);
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .status-badge.running { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
+        .status-badge.paused { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
+        .status-badge.idle { background: rgba(156, 163, 175, 0.2); color: var(--text-secondary); }
+        .status-badge.emergency { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); animation: pulse 1s infinite; }
+        
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .card-body {
+            padding: 16px 20px;
+        }
+        
+        /* Event Feed */
+        .event-feed {
+            height: 500px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+        
+        .event-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            transition: background 0.2s;
+        }
+        
+        .event-item:last-child { border-bottom: none; }
+        .event-item:hover { background: rgba(255,255,255,0.02); }
+        
+        .event-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+        
+        .event-icon.task { background: rgba(74, 158, 255, 0.15); }
+        .event-icon.plan { background: rgba(167, 139, 250, 0.15); }
+        .event-icon.action { background: rgba(52, 211, 153, 0.15); }
+        .event-icon.verify { background: rgba(251, 191, 36, 0.15); }
+        .event-icon.repair { background: rgba(239, 68, 68, 0.15); }
+        .event-icon.world { background: rgba(156, 163, 175, 0.15); }
+        .event-icon.emergency { background: rgba(239, 68, 68, 0.3); }
+        .event-icon.success { background: rgba(52, 211, 153, 0.2); }
+        .event-icon.failed { background: rgba(239, 68, 68, 0.2); }
+        
+        .event-content { flex: 1; min-width: 0; }
+        
+        .event-title {
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .event-detail {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            word-break: break-word;
+        }
+        
+        .event-time {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        
+        /* Control Panel */
+        .control-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .control-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        
+        .control-btn {
+            padding: 14px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        
+        .control-btn:hover:not(:disabled) {
+            background: var(--bg-card);
+            border-color: var(--accent-blue);
+        }
+        
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .control-btn.run { background: rgba(52, 211, 153, 0.1); border-color: var(--accent-green); }
+        .control-btn.run:hover:not(:disabled) { background: rgba(52, 211, 153, 0.2); }
+        
+        .control-btn.pause { background: rgba(251, 191, 36, 0.1); border-color: var(--accent-yellow); }
+        .control-btn.pause:hover:not(:disabled) { background: rgba(251, 191, 36, 0.2); }
+        
+        .control-btn.cancel { background: rgba(239, 68, 68, 0.1); border-color: var(--accent-red); }
+        .control-btn.cancel:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); }
+        
+        .control-btn.emergency {
+            grid-column: span 2;
+            background: rgba(239, 68, 68, 0.15);
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+        .control-btn.emergency:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.3);
+        }
+        
+        /* World State */
+        .world-state-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .world-state-item {
+            background: var(--bg-secondary);
+            padding: 12px;
+            border-radius: 8px;
+        }
+        
+        .world-state-item label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .world-state-item .value {
+            font-size: 0.875rem;
+            margin-top: 4px;
+            word-break: break-word;
+        }
+        
+        /* Task Input */
+        .task-input-container {
+            margin-bottom: 16px;
+        }
+        
+        .task-input {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            resize: none;
+        }
+        
+        .task-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent-blue);
+        }
+        
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        
+        /* Connection Status */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.75rem;
+        }
+        
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+        }
+        
+        .connection-dot.disconnected { background: var(--accent-red); }
+        
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>
+            🖥️ Computer Agent
+            <span id="statusBadge" class="status-badge idle">IDLE</span>
+        </h1>
+        <div class="connection-status">
+            <span class="connection-dot" id="wsDot"></span>
+            <span id="wsStatus">Connecting...</span>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <div class="left-panel">
+            <!-- Stats -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-body">
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="statActions">0</div>
+                            <div class="stat-label">Actions</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statRepairs">0</div>
+                            <div class="stat-label">Repairs</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statVerifications">0</div>
+                            <div class="stat-label">Verified</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statDuration">0s</div>
+                            <div class="stat-label">Duration</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Event Feed -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📡 Live Events</h2>
+                    <span id="eventCount" style="font-size: 0.75rem; color: var(--text-secondary);">0 events</span>
+                </div>
+                <div class="event-feed" id="eventFeed">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        Waiting for events...
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <!-- Control Panel -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h2>🎛️ Controls</h2>
+                </div>
+                <div class="card-body control-panel">
+                    <div class="task-input-container">
+                        <textarea class="task-input" id="taskInput" rows="2" 
+                            placeholder="Enter task (e.g., 'Open Calculator and verify it works')"></textarea>
+                    </div>
+                    <div class="control-buttons">
+                        <button class="control-btn run" id="btnRun" onclick="runTask()">
+                            ▶ Run
+                        </button>
+                        <button class="control-btn pause" id="btnPause" onclick="pauseTask()" disabled>
+                            ⏸ Pause
+                        </button>
+                        <button class="control-btn run" id="btnResume" onclick="resumeTask()" disabled>
+                            ▶ Resume
+                        </button>
+                        <button class="control-btn cancel" id="btnCancel" onclick="cancelTask()" disabled>
+                            ⏹ Cancel
+                        </button>
+                        <button class="control-btn emergency" id="btnEmergency" onclick="emergencyStop()">
+                            🔴 EMERGENCY STOP
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- World State -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🧠 World State</h2>
+                </div>
+                <div class="card-body">
+                    <div class="world-state-grid">
+                        <div class="world-state-item">
+                            <label>Application</label>
+                            <div class="value" id="wsApp">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Window</label>
+                            <div class="value" id="wsWindow">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Task State</label>
+                            <div class="value" id="wsTaskState">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Confidence</label>
+                            <div class="value" id="wsConfidence">—</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 16px;">
+                        <div class="world-state-item" style="margin-bottom: 8px;">
+                            <label>Visible Targets</label>
+                            <div class="value" id="wsTargets">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Dialogs</label>
+                            <div class="value" id="wsDialogs">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // State
+        let ws = null;
+        let eventCount = 0;
+        let currentTaskId = null;
+        let taskRunning = false;
+        let taskPaused = false;
+        let stats = { actions: 0, repairs: 0, verifications: 0, startTime: null };
+        
+        // Event type icons
+        const eventIcons = {
+            'task_started': { icon: '🧠', class: 'task' },
+            'plan_created': { icon: '📋', class: 'plan' },
+            'action_started': { icon: '🖱️', class: 'action' },
+            'action_completed': { icon: '✅', class: 'action' },
+            'verification_completed': { icon: '🔍', class: 'verify' },
+            'repair_started': { icon: '🔧', class: 'repair' },
+            'repair_completed': { icon: '🛠️', class: 'repair' },
+            'checkpoint_saved': { icon: '💾', class: 'world' },
+            'world_changed': { icon: '🌍', class: 'world' },
+            'task_completed': { icon: '🏁', class: 'success' },
+            'task_failed': { icon: '❌', class: 'failed' },
+            'task_paused': { icon: '⏸️', class: 'world' },
+            'task_resumed': { icon: '▶️', class: 'action' },
+            'task_cancelled': { icon: '🚫', class: 'failed' },
+            'emergency_stop': { icon: '🔴', class: 'emergency' },
+            'emergency_stop_released': { icon: '🟢', class: 'success' },
+            'skill_recalled': { icon: '📚', class: 'plan' },
+        };
+        
+        // Connect WebSocket
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/computer/events`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                document.getElementById('wsStatus').textContent = 'Connected';
+                document.getElementById('wsDot').classList.remove('disconnected');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.kind === 'snapshot') {
+                        handleSnapshot(data.events);
+                    } else if (data.kind === 'ping') {
+                        // Keepalive
+                    } else {
+                        handleEvent(data);
+                    }
+                } catch (e) {
+                    console.error('WS parse error:', e);
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('wsStatus').textContent = 'Disconnected - reconnecting...';
+                document.getElementById('wsDot').classList.add('disconnected');
+                setTimeout(connect, 2000);
+            };
+            
+            ws.onerror = () => {
+                document.getElementById('wsStatus').textContent = 'Error';
+            };
+        }
+        
+        function handleSnapshot(events) {
+            events.reverse().forEach(handleEvent);
+        }
+        
+        function handleEvent(event) {
+            eventCount++;
+            
+            // Update stats
+            const type = event.type;
+            if (type === 'action_completed') stats.actions++;
+            if (type === 'repair_completed') stats.repairs++;
+            if (type === 'verification_completed') stats.verifications++;
+            
+            // Update task state
+            const data = event.data || {};
+            if (data.task_id) currentTaskId = data.task_id;
+            
+            if (type === 'task_started') {
+                taskRunning = true;
+                taskPaused = false;
+                stats = { actions: 0, repairs: 0, verifications: 0, startTime: Date.now() };
+                updateButtons();
+            }
+            
+            if (type === 'task_completed' || type === 'task_failed') {
+                taskRunning = false;
+                taskPaused = false;
+                updateButtons();
+            }
+            
+            if (type === 'task_paused') {
+                taskPaused = true;
+                updateButtons();
+            }
+            
+            if (type === 'task_resumed') {
+                taskPaused = false;
+                updateButtons();
+            }
+            
+            if (type === 'task_cancelled') {
+                taskRunning = false;
+                taskPaused = false;
+                updateButtons();
+            }
+            
+            if (type === 'emergency_stop') {
+                taskRunning = false;
+                updateButtons();
+            }
+            
+            // Update world state
+            if (type === 'world_changed' && data.world) {
+                updateWorldState(data.world);
+            }
+            
+            // Update status badge
+            updateStatusBadge();
+            
+            // Update stats display
+            updateStats();
+            
+            // Add to feed
+            addEventToFeed(event);
+        }
+        
+        function addEventToFeed(event) {
+            const feed = document.getElementById('eventFeed');
+            const type = event.type;
+            const data = event.data || {};
+            
+            const iconInfo = eventIcons[type] || { icon: '📌', class: 'world' };
+            
+            const item = document.createElement('div');
+            item.className = 'event-item';
+            
+            let title = formatEventTitle(type);
+            let detail = formatEventDetail(type, data);
+            let time = event.ts ? new Date(event.ts).toLocaleTimeString() : '';
+            
+            item.innerHTML = `
+                <div class="event-icon ${iconInfo.class}">${iconInfo.icon}</div>
+                <div class="event-content">
+                    <div class="event-title">${title}</div>
+                    <div class="event-detail">${detail}</div>
+                    <div class="event-time">${time}</div>
+                </div>
+            `;
+            
+            // Insert at top
+            if (feed.firstChild && feed.firstChild.className !== 'event-item') {
+                feed.innerHTML = '';
+            }
+            feed.insertBefore(item, feed.firstChild);
+            
+            // Keep only last 100 events
+            while (feed.children.length > 100) {
+                feed.removeChild(feed.lastChild);
+            }
+            
+            document.getElementById('eventCount').textContent = `${eventCount} events`;
+        }
+        
+        function formatEventTitle(type) {
+            return type
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        function formatEventDetail(type, data) {
+            switch(type) {
+                case 'task_started':
+                    return data.task || 'Task started';
+                case 'plan_created':
+                    return `${data.nodes || 0} states`;
+                case 'action_started':
+                case 'action_completed':
+                    return `${data.action || 'Action'} - ${data.state || ''}`;
+                case 'verification_completed':
+                    return data.ok ? '✓ Verified' : '✗ Failed';
+                case 'repair_started':
+                    return data.summary || data.kind || 'Repair';
+                case 'repair_completed':
+                    return data.ok ? '✓ Repaired' : '✗ Repair failed';
+                case 'checkpoint_saved':
+                    return `${data.state || 'Checkpoint'} - ${data.status || ''}`;
+                case 'world_changed':
+                    return data.world?.application || 'World updated';
+                case 'task_completed':
+                    return `✓ Success - ${data.duration || 0}s`;
+                case 'task_failed':
+                    return `✗ Failed - ${data.error || 'Unknown error'}`;
+                case 'task_paused':
+                    return `Paused at ${data.state || 'unknown'}`;
+                case 'task_resumed':
+                    return `Resume #${data.resume_count || 1}`;
+                case 'task_cancelled':
+                    return data.reason || 'Cancelled by user';
+                case 'emergency_stop':
+                    return data.reason || 'EMERGENCY STOP ACTIVATED';
+                default:
+                    return JSON.stringify(data).slice(0, 100);
+            }
+        }
+        
+        function updateWorldState(world) {
+            if (!world) return;
+            document.getElementById('wsApp').textContent = world.application || '—';
+            document.getElementById('wsWindow').textContent = world.window || '—';
+            document.getElementById('wsTaskState').textContent = world.task_state || '—';
+            document.getElementById('wsConfidence').textContent = world.confidence ? `${(world.confidence * 100).toFixed(0)}%` : '—';
+            document.getElementById('wsTargets').textContent = (world.visible_targets || []).slice(0, 5).join(', ') || '—';
+            document.getElementById('wsDialogs').textContent = (world.dialogs || []).join(', ') || 'None';
+        }
+        
+        function updateStats() {
+            document.getElementById('statActions').textContent = stats.actions;
+            document.getElementById('statRepairs').textContent = stats.repairs;
+            document.getElementById('statVerifications').textContent = stats.verifications;
+            
+            if (stats.startTime) {
+                const elapsed = Math.floor((Date.now() - stats.startTime) / 1000);
+                document.getElementById('statDuration').textContent = `${elapsed}s`;
+            }
+        }
+        
+        function updateStatusBadge() {
+            const badge = document.getElementById('statusBadge');
+            badge.className = 'status-badge';
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                if (taskRunning && !taskPaused) {
+                    badge.textContent = 'RUNNING';
+                    badge.classList.add('running');
+                } else if (taskPaused) {
+                    badge.textContent = 'PAUSED';
+                    badge.classList.add('paused');
+                } else {
+                    badge.textContent = 'IDLE';
+                    badge.classList.add('idle');
+                }
+            } else {
+                badge.textContent = 'DISCONNECTED';
+                badge.classList.add('idle');
+            }
+        }
+        
+        function updateButtons() {
+            document.getElementById('btnRun').disabled = taskRunning;
+            document.getElementById('btnPause').disabled = !taskRunning || taskPaused;
+            document.getElementById('btnResume').disabled = !taskPaused;
+            document.getElementById('btnCancel').disabled = !taskRunning;
+        }
+        
+        // API calls
+        async function runTask() {
+            const task = document.getElementById('taskInput').value.trim();
+            if (!task) {
+                alert('Please enter a task');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/computer/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task, dry_run: false })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentTaskId = result.task_id;
+                    taskRunning = true;
+                    taskPaused = false;
+                    updateButtons();
+                }
+            } catch (e) {
+                console.error('Run error:', e);
+            }
+        }
+        
+        async function pauseTask() {
+            if (!currentTaskId) return;
+            
+            try {
+                await fetch(`/computer/control/pause/${currentTaskId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'User requested pause' })
+                });
+            } catch (e) {
+                console.error('Pause error:', e);
+            }
+        }
+        
+        async function resumeTask() {
+            if (!currentTaskId) return;
+            
+            try {
+                await fetch(`/computer/control/resume/${currentTaskId}`, {
+                    method: 'POST'
+                });
+            } catch (e) {
+                console.error('Resume error:', e);
+            }
+        }
+        
+        async function cancelTask() {
+            if (!currentTaskId) return;
+            
+            try {
+                await fetch(`/computer/control/cancel/${currentTaskId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'User requested cancellation' })
+                });
+            } catch (e) {
+                console.error('Cancel error:', e);
+            }
+        }
+        
+        async function emergencyStop() {
+            if (!confirm('⚠️ EMERGENCY STOP: This will immediately halt all computer actions. Continue?')) {
+                return;
+            }
+            
+            try {
+                await fetch('/computer/control/emergency-stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'User emergency stop' })
+                });
+                taskRunning = false;
+                updateButtons();
+                updateStatusBadge();
+            } catch (e) {
+                console.error('Emergency stop error:', e);
+            }
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 'Enter':
+                        e.preventDefault();
+                        runTask();
+                        break;
+                    case ' ':
+                        e.preventDefault();
+                        if (taskPaused) resumeTask();
+                        else pauseTask();
+                        break;
+                    case 'Escape':
+                        e.preventDefault();
+                        emergencyStop();
+                        break;
+                }
+            }
+        });
+        
+        // Start
+        connect();
+        updateButtons();
+        
+        // Load initial status
+        fetch('/computer/status').then(r => r.json()).then(data => {
+            if (data.current_task) {
+                currentTaskId = data.current_task.task_id;
+                updateWorldState(data.world);
+            }
+            if (data.halted) {
+                document.getElementById('statusBadge').textContent = 'EMERGENCY';
+                document.getElementById('statusBadge').classList.add('emergency');
+            }
+        });
+    </script>
+</body>
+</html>
