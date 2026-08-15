@@ -97,18 +97,39 @@ class FreeLLM:
         except Exception:
             return None
 
+    @staticmethod
+    def _tools_for_provider(tools: Optional[List[Dict]], provider: str) -> Optional[List[Dict]]:
+        """Return a tool set accepted by the selected provider.
+
+        The registry can contain more functions than hosted APIs permit.  In
+        particular Groq validates ``tools`` at a hard maximum of 128 items.
+        Keep the local registry intact, but advertise only the provider's
+        supported maximum for each model request.
+        """
+        if not tools:
+            return None
+        preset = get_provider(provider)
+        if preset.get("supports_tools") is False:
+            return None
+        max_tools = preset.get("max_tools")
+        if max_tools:
+            return tools[: int(max_tools)]
+        return tools
+
     def _call_openai_compat(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
         """Universal path for any OpenAI-compatible provider."""
         from .openai_compat import chat_completions, CompatAPIError
         from .multi_key import multi_key_manager
 
-        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
         bundle = self._resolve_bundle()
         api_key = bundle.get("key") or ""
         base_url = bundle.get("base_url") or ""
         model = self.model_name or bundle.get("default_model")
         preset = get_provider(self.provider)
         used_provider = self.provider
+        requested_tools = tools
+        tools = self._tools_for_provider(requested_tools, used_provider)
+        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
 
         if not api_key and not preset.get("no_auth"):
             # No key for the requested provider → try any configured key when
@@ -137,6 +158,11 @@ class FreeLLM:
                 )
                 usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}")
                 return LLMResponse(err, usage=usage)
+
+        # A fallback can change provider capabilities/limits (for example from
+        # local Ollama to Groq), so enforce the final provider's tool contract.
+        tools = self._tools_for_provider(requested_tools, used_provider)
+        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
 
         # Optional cache (skip when tools present — side effects)
         if not tools:
@@ -289,13 +315,14 @@ class FreeLLM:
                     from .openai_compat import chat_completions, CompatAPIError
                     from .multi_key import multi_key_manager
 
+                    fallback_tools = self._tools_for_provider(tools, fb_provider)
                     resp = chat_completions(
                         provider=fb_provider,
                         model=model or "default",
                         messages=messages,
                         api_key=fb.get("key") or "",
                         base_url=fb.get("base_url") or "",
-                        tools=tools,
+                        tools=fallback_tools,
                         timeout=120,
                     )
                     try:

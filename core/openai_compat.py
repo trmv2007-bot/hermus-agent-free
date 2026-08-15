@@ -487,6 +487,45 @@ def _is_model_error(msg: str, status_code: int) -> bool:
     )
 
 
+def _rank_chat_models(model_ids: List[str]) -> List[str]:
+    """Rank discovered IDs by likelihood of supporting chat completions.
+
+    Some catalogs (notably NVIDIA NIM) mix chat, embedding, reranking,
+    vision, speech, and image models.  Trying the first catalog entries can
+    therefore report a healthy key as ``model_not_found`` even when usable
+    chat models are present later in the list.
+    """
+    excluded = (
+        "embed", "embedding", "bge", "rerank", "retriev", "whisper",
+        "tts", "speech", "moderation", "dall", "diffusion", "stable-diffusion",
+        "image", "clip", "fuyu", "ocr",
+    )
+    chat_markers = (
+        "instruct", "chat", "llama", "qwen", "mistral", "mixtral",
+        "gemma", "deepseek", "nemotron", "command-r", "jamba",
+    )
+    preferred_families = (
+        "nemotron", "llama-3", "llama3", "qwen2", "qwen3", "mistral",
+        "mixtral", "deepseek", "gemma",
+    )
+
+    ranked = []
+    for index, model_id in enumerate(model_ids):
+        low = model_id.lower()
+        if any(marker in low for marker in excluded):
+            continue
+        score = 0
+        if any(marker in low for marker in chat_markers):
+            score += 10
+        if any(marker in low for marker in preferred_families):
+            score += 5
+        if "instruct" in low or "chat" in low:
+            score += 3
+        ranked.append((-score, index, model_id))
+    ranked.sort()
+    return [model_id for _, _, model_id in ranked]
+
+
 def health_ping(
     provider: str,
     api_key: str = None,
@@ -526,13 +565,9 @@ def health_ping(
     if models_info.get("success") and models_info.get("models"):
         ids = [m["id"] for m in models_info["models"] if m.get("id")]
         # If preferred model missing from catalog, prepend discovered chat-like models
-        chat_like = []
-        for mid in ids:
-            low = mid.lower()
-            if any(x in low for x in ("embed", "whisper", "tts", "moderation", "dall", "image", "vision")):
-                continue
-            chat_like.append(mid)
-        # Move chat-like discovered models to the front when the preset model isn't in the list
+        chat_like = _rank_chat_models(ids)
+        # Move likely chat models to the front when the preset model isn't in
+        # the list. Catalog ordering is not a capability signal.
         if model not in ids and chat_like:
             candidate_models = chat_like + candidate_models
         else:

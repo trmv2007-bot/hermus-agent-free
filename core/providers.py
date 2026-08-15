@@ -32,6 +32,10 @@ PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
         "chat_path": "/chat/completions",
         "default_model": "openai/gpt-oss-20b",
         "supports_tools": True,
+        # Groq's OpenAI-compatible API rejects requests containing more than
+        # 128 function definitions.  Hermus can register more than that, so
+        # callers must trim the advertised set before sending a request.
+        "max_tools": 128,
         "env_key": "GROQ_API_KEY",
         "notes": "Free tier ~30 RPM — very fast",
         "default_rpm": 30,
