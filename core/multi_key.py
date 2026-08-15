@@ -552,7 +552,14 @@ class MultiKeyManager:
                     merged = list(dict.fromkeys(list(existing) + list(sample)))
                     k["models"] = merged
                 if result.get("model_tested"):
-                    k.setdefault("default_model", result["model_tested"])
+                    # Replace placeholder defaults after a successful fallback.
+                    # Custom endpoints are commonly added with "default", which
+                    # is not a real model ID (e.g. NVIDIA NIM catalogs).
+                    current_default = (k.get("default_model") or "").strip().lower()
+                    if result.get("healthy") and current_default in ("", "default", "auto", "local-model"):
+                        k["default_model"] = result["model_tested"]
+                    else:
+                        k.setdefault("default_model", result["model_tested"])
                 if result.get("latency_ms"):
                     times = k.get("response_times") or []
                     times.append(result["latency_ms"] / 1000.0)

@@ -288,6 +288,42 @@ class CompatAPIError(Exception):
         return "invalid api key" in msg or "unauthorized" in msg or "authentication" in msg
 
 
+# NVIDIA's /models catalog also contains downloadable-only and non-chat NIMs.
+# These are the hosted chat models marked "Free Endpoint" in the NVIDIA API
+# Catalog. Keep this allowlist deliberately strict: an unknown/new model is not
+# exposed until it is confirmed as a free hosted endpoint.
+# Catalog: https://build.nvidia.com/models?filters=free_api
+NVIDIA_FREE_CHAT_MODELS = frozenset(
+    {
+        "deepseek-ai/deepseek-v4-flash",
+        "deepseek-ai/deepseek-v4-pro",
+        "meta/llama-3.1-70b-instruct",
+        "meta/llama-3.2-11b-vision-instruct",
+        "meta/llama-3.2-1b-instruct",
+        "meta/llama-3.2-3b-instruct",
+        "meta/llama-guard-4-12b",
+        "minimaxai/minimax-m2.7",
+        "mistralai/mistral-large-2-instruct",
+        "moonshotai/kimi-k2.6",
+        "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "qwen/qwen3.5-122b-a10b",
+        "qwen/qwen3.5-397b-a17b",
+        "stepfun-ai/step-3.5-flash",
+        "z-ai/glm-5.1",
+    }
+)
+
+
+def _is_nvidia_catalog(provider: str, base_url: str = None) -> bool:
+    return (provider or "").lower() == "nvidia" or "integrate.api.nvidia.com" in (base_url or "").lower()
+
+
+def _filter_nvidia_free_chat_models(models: List[Dict]) -> List[Dict]:
+    """Keep only NVIDIA API Catalog models with hosted free chat endpoints."""
+    return [m for m in models if (m.get("id") or "").lower() in NVIDIA_FREE_CHAT_MODELS]
+
+
 def list_models(
     provider: str,
     api_key: str = None,
@@ -328,12 +364,18 @@ def list_models(
             }
 
         models = _normalize_models_list(data, provider)
+        nvidia_free_only = _is_nvidia_catalog(provider, base_url or preset.get("base_url"))
+        catalog_count = len(models)
+        if nvidia_free_only:
+            models = _filter_nvidia_free_chat_models(models)
         return {
             "success": True,
             "provider": provider,
             "base_url": (base_url or preset.get("base_url")),
             "models": models,
             "count": len(models),
+            "catalog_count": catalog_count,
+            "filter": "nvidia_free_chat_endpoints" if nvidia_free_only else None,
             "rate_limit": rate,
             "latency_ms": latency_ms,
             "default_model": preset.get("default_model"),
@@ -487,6 +529,45 @@ def _is_model_error(msg: str, status_code: int) -> bool:
     )
 
 
+def _rank_chat_models(model_ids: List[str]) -> List[str]:
+    """Rank discovered IDs by likelihood of supporting chat completions.
+
+    Some catalogs (notably NVIDIA NIM) mix chat, embedding, reranking,
+    vision, speech, and image models.  Trying the first catalog entries can
+    therefore report a healthy key as ``model_not_found`` even when usable
+    chat models are present later in the list.
+    """
+    excluded = (
+        "embed", "embedding", "bge", "rerank", "retriev", "whisper",
+        "tts", "speech", "moderation", "dall", "diffusion", "stable-diffusion",
+        "image", "clip", "fuyu", "ocr",
+    )
+    chat_markers = (
+        "instruct", "chat", "llama", "qwen", "mistral", "mixtral",
+        "gemma", "deepseek", "nemotron", "command-r", "jamba",
+    )
+    preferred_families = (
+        "nemotron", "llama-3", "llama3", "qwen2", "qwen3", "mistral",
+        "mixtral", "deepseek", "gemma",
+    )
+
+    ranked = []
+    for index, model_id in enumerate(model_ids):
+        low = model_id.lower()
+        if any(marker in low for marker in excluded):
+            continue
+        score = 0
+        if any(marker in low for marker in chat_markers):
+            score += 10
+        if any(marker in low for marker in preferred_families):
+            score += 5
+        if "instruct" in low or "chat" in low:
+            score += 3
+        ranked.append((-score, index, model_id))
+    ranked.sort()
+    return [model_id for _, _, model_id in ranked]
+
+
 def health_ping(
     provider: str,
     api_key: str = None,
@@ -516,6 +597,8 @@ def health_ping(
     result["models_probe"] = {
         "success": models_info.get("success"),
         "count": models_info.get("count", 0),
+        "catalog_count": models_info.get("catalog_count"),
+        "filter": models_info.get("filter"),
         "error": models_info.get("error"),
         "sample": [m.get("id") for m in (models_info.get("models") or [])[:15]],
         "rate_limit": models_info.get("rate_limit"),
@@ -526,13 +609,9 @@ def health_ping(
     if models_info.get("success") and models_info.get("models"):
         ids = [m["id"] for m in models_info["models"] if m.get("id")]
         # If preferred model missing from catalog, prepend discovered chat-like models
-        chat_like = []
-        for mid in ids:
-            low = mid.lower()
-            if any(x in low for x in ("embed", "whisper", "tts", "moderation", "dall", "image", "vision")):
-                continue
-            chat_like.append(mid)
-        # Move chat-like discovered models to the front when the preset model isn't in the list
+        chat_like = _rank_chat_models(ids)
+        # Move likely chat models to the front when the preset model isn't in
+        # the list. Catalog ordering is not a capability signal.
         if model not in ids and chat_like:
             candidate_models = chat_like + candidate_models
         else:

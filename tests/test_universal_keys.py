@@ -87,10 +87,53 @@ def test_providers_list():
 
     providers = list_providers()
     ids = {p["id"] for p in providers}
-    for need in ("openai", "groq", "openrouter", "gemini", "custom", "ollama"):
+    for need in ("openai", "groq", "nvidia", "openrouter", "gemini", "custom", "ollama"):
         assert need in ids
     g = get_provider("groq")
     assert "groq.com" in g["base_url"]
+    nvidia = get_provider("nvidia")
+    assert nvidia["base_url"] == "https://integrate.api.nvidia.com/v1"
+    assert "free" in nvidia["notes"].lower()
+
+
+def test_provider_tool_limit_and_chat_model_ranking():
+    from core.llm import FreeLLM
+    from core.openai_compat import _filter_nvidia_free_chat_models, _rank_chat_models
+
+    tools = [
+        {"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}}
+        for i in range(140)
+    ]
+    assert len(FreeLLM._tools_for_provider(tools, "groq")) == 128
+    assert len(FreeLLM._tools_for_provider(tools, "openai")) == 140
+    assert FreeLLM._tools_for_provider(tools, "huggingface") is None
+
+    # Mixed catalogs must prefer chat-capable models and exclude embedding /
+    # multimodal-only IDs such as the NVIDIA models seen in the dashboard.
+    ranked = _rank_chat_models([
+        "01-ai/yi-large",
+        "adept/fuyu-8b",
+        "baai/bge-m3",
+        "meta/llama-3.1-8b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+    ])
+    assert ranked[0] in {
+        "meta/llama-3.1-8b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+    }
+    assert "baai/bge-m3" not in ranked
+    assert "adept/fuyu-8b" not in ranked
+
+    filtered = _filter_nvidia_free_chat_models([
+        {"id": "baai/bge-m3"},
+        {"id": "meta/llama-3.1-70b-instruct"},
+        {"id": "nvidia/llama-3.3-nemotron-super-49b-v1.5"},
+        {"id": "downloadable/paid-model"},
+    ])
+    assert [m["id"] for m in filtered] == [
+        "meta/llama-3.1-70b-instruct",
+        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    ]
 
 
 def test_openai_compat_models_and_chat():
@@ -139,7 +182,7 @@ def test_multi_key_add_discover_health(tmp_path, monkeypatch):
             "sk-test-1234567890",
             name="fake1",
             base_url=base,
-            default_model="fake-mini",
+            default_model="default",
             rpm_limit=30,
             tpm_limit=5000,
             auto_discover=True,
@@ -147,6 +190,8 @@ def test_multi_key_add_discover_health(tmp_path, monkeypatch):
         assert result["success"]
         assert result.get("health", {}).get("healthy") is True
         assert (result.get("health") or {}).get("models_count", 0) >= 2
+        # A placeholder custom model is replaced by the working discovered ID.
+        assert mgr.get_entry("custom", "sk-test-1234567890")["default_model"] in {"fake-mini", "fake-large"}
 
         models = mgr.discover_models("custom", api_key="sk-test-1234567890", base_url=base)
         assert models["success"]
