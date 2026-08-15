@@ -12,9 +12,11 @@ from .events import machine_event, publish
 from .permissions import RecordingPolicy, recording_policy
 from .planner import ComputerPlanner
 from .repair import RepairEngine
+from .replanner import AdaptiveReplanner, ReplanContext
 from .recorder import ImageGrabSource, ScreenRecorder
 from .skills import ComputerSkillStore
 from .state_machine import VisualStateMachine, dispatch_action
+from .task_control import get_task_control, TaskControlState
 from .task_store import TaskStore
 from .timeline import TaskArtifacts, Timeline
 from .verifier import ScreenVerifier
@@ -74,6 +76,7 @@ class ComputerAgent:
         self.analyzer = analyzer
         self.verifier = verifier or ScreenVerifier()
         self.repair_engine = repair_engine or RepairEngine()
+        self.replanner = AdaptiveReplanner()
         self.task_store = task_store or TaskStore(str(self.policy.root))
         self.learn_skills = learn_skills
         self.max_retries = max_retries
@@ -199,6 +202,14 @@ class ComputerAgent:
         start_state = start_state or (self.task_store.next_state(checkpoint) if resume else None)
         state_names = [str(step.get("name") or f"STATE_{index}") for index, step in enumerate(plan)]
         source = str((graph or {}).get("source") or "planner")
+        # Register with task control system for pause/resume/cancel
+        task_control = get_task_control()
+        task_control.register_task(task_id, task, initial_state=state_names[0] if state_names else "")
+        if task_control.is_emergency_stop_active():
+            return {"success": False, "task_id": task_id, "task": task,
+                    "error": f"emergency stop: {task_control._emergency_stop_reason}",
+                    "result": "EMERGENCY_STOP"}
+
         publish("task_started", {
             "task_id": task_id,
             "task": task,
@@ -338,7 +349,81 @@ class ComputerAgent:
             on_telemetry=live_telemetry,
         )
         try:
-            report = machine.run(states, timeout_per_state=60.0, start_state=start_state)
+            report = machine.run(states, timeout_per_state=60.0, start_state=start_state, task_id=task_id)
+
+            # Adaptive replanning: if the state machine failed but not from
+            # user cancellation or emergency stop, try replanning the branch.
+            if not report.get("success"):
+                failure = report.get("failure") or {}
+                failure_category = str(failure.get("category") or "")
+                is_user_cancel = (
+                    task_control.is_cancel_requested(task_id)
+                    or failure_category == "cancelled"
+                )
+                is_emergency = (
+                    task_control.is_emergency_stop_active()
+                    or failure_category == "emergency_stop"
+                )
+                if not is_user_cancel and not is_emergency:
+                    replan_count = 0
+                    max_replans = getattr(self.replanner, "max_replans", 3)
+                    while replan_count < max_replans and not report.get("success"):
+                        replan_count += 1
+                        if not self.replanner.can_replan(replan_count, max_replans):
+                            break
+
+                        publish("replan_started", {
+                            "task_id": task_id,
+                            "task": task,
+                            "attempt": replan_count,
+                            "reason": failure.get("reason", report.get("error", "unknown")),
+                            "failed_state": report.get("final_state") or failure.get("state", ""),
+                        })
+
+                        # Build context for replanning
+                        future_plan = list(plan) if plan else []
+                        past_plan = []
+                        current_name = report.get("final_state") or failure.get("state")
+                        if current_name and plan:
+                            past_plan = []
+                            future_plan = []
+                            found = False
+                            for p in plan:
+                                if found:
+                                    future_plan.append(p)
+                                elif p.get("name") == current_name:
+                                    found = True
+                                    future_plan.append(p)
+                                else:
+                                    past_plan.append(p)
+
+                        replan_context = ReplanContext(
+                            original_task=task,
+                            current_state=report.get("final_state") or "unknown",
+                            expected_state=plan[0].get("expected", "") if plan else "",
+                            observed_state=self.world_state.to_dict(include_history=False),
+                            world_state=self.world_state,
+                            plan_so_far=past_plan or list(plan if plan else []),
+                            remaining_plan=future_plan,
+                            failure_reason=failure.get("reason", report.get("error", "")),
+                        )
+                        new_graph, deltas = self.replanner.replan(replan_context)
+
+                        if new_graph and deltas:
+                            publish("plan_updated", {
+                                "task_id": task_id,
+                                "task": task,
+                                "deltas": [d.to_dict() for d in deltas],
+                                "replan_attempt": replan_count,
+                            })
+                            # Run again with the updated plan
+                            new_plan = new_graph.to_plan()
+                            new_states = VisualStateMachine.plan_to_states(new_plan)
+                            report = machine.run(new_states, timeout_per_state=60.0,
+                                                 start_state=None, task_id=task_id)
+                        else:
+                            break
+
         except (KeyboardInterrupt, SystemExit):
             self.recorder.stop()
             self.task_store.mark_interrupted(task_id, "task interrupted by user")
@@ -548,6 +633,13 @@ class ComputerAgent:
             "skill": skill_result,
             "error": report.get("error"),
         }
+        # Notify task control of completion
+        if success:
+            task_control.complete_task(task_id, success=True)
+        else:
+            task_control.complete_task(task_id, success=False)
+        task_control.unregister_task(task_id)
+
         completed_checkpoint = self.task_store.complete(checkpoint, success, final_result, self.world_state, recording)
         publish("checkpoint_saved", {
             "task_id": task_id,

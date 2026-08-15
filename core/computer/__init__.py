@@ -23,8 +23,10 @@ from .controller import ComputerActionController
 from .computer_agent import ComputerAgent
 from .control_center import ControlCenter
 from .delegation import DelegationPlan, MultiAgentDelegator, WorkUnit
+from .episodes import Episode, EpisodeStore, get_episode_store, record_episode
 from .event_detector import EventDetector, StreamingEventDetector
 from .frame_sampler import FrameSampler
+from .grounded_controller import GroundedActionController, PreClickVerificationError, wrap_with_grounding
 from .grounding import (
     BoundingBox,
     GroundedTarget,
@@ -83,6 +85,30 @@ from .video_analyzer import OllamaVisionModel, VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
 from .world_state import WorldObservation, WorldState
+from .simulation import (
+    SimulatedScreen,
+    SimulatedWindow,
+    SimulatedElement,
+    SimulatedMouse,
+    SimulatedKeyboard,
+    SimulatedWindowManager,
+    SimulatedGrounder,
+    calculator_scenario,
+    notepad_scenario,
+    browser_scenario,
+    popup_scenario,
+    installer_scenario,
+    download_error_scenario,
+)
+from .benchmark import (
+    BenchmarkResult,
+    BenchmarkRunner,
+    COMPUTER_TASKS,
+    TaskSpec,
+    get_task,
+    list_tasks,
+    run_benchmark,
+)
 from .world_state_v2 import (
     CertaintyLevel,
     DesktopContext,
@@ -191,6 +217,37 @@ __all__ = [
     "ReplanReason",
     "ReplanStrategy",
     "create_replanner",
+    # Phase B — Reliability
+    # Episode Memory
+    "Episode",
+    "EpisodeStore",
+    "get_episode_store",
+    "record_episode",
+    # Grounded Controller
+    "GroundedActionController",
+    "wrap_with_grounding",
+    # Simulation
+    "SimulatedScreen",
+    "SimulatedWindow",
+    "SimulatedElement",
+    "SimulatedMouse",
+    "SimulatedKeyboard",
+    "SimulatedWindowManager",
+    "SimulatedGrounder",
+    "calculator_scenario",
+    "notepad_scenario",
+    "browser_scenario",
+    "popup_scenario",
+    "installer_scenario",
+    "download_error_scenario",
+    # Benchmark
+    "BenchmarkResult",
+    "BenchmarkRunner",
+    "COMPUTER_TASKS",
+    "TaskSpec",
+    "get_task",
+    "list_tasks",
+    "run_benchmark",
     # Enhanced World State
     "WorldStateV2",
     "ObservationType",

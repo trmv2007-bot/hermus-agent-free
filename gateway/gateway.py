@@ -1394,6 +1394,121 @@ async def computer_skill_detail(skill_name: str):
     return data
 
 
+# ---- Episode Memory Endpoints -----------------------------------------------
+
+@app.get("/computer/episodes")
+async def computer_episodes(limit: int = 50, outcome: str = "", tag: str = ""):
+    """List recorded episodes (task recordings with full action traces)."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    return {
+        "episodes": store.list(
+            limit=limit,
+            outcome=outcome if outcome else None,
+            tag=tag if tag else None,
+        ),
+        "stats": store.stats(),
+    }
+
+
+@app.get("/computer/episodes/search")
+async def computer_episodes_search(q: str = "", limit: int = 10):
+    """Search episodes by task description."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    return {"results": store.search(q, limit=limit)}
+
+
+@app.get("/computer/episodes/stats")
+async def computer_episodes_stats():
+    """Aggregate statistics across all episodes."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    return store.stats()
+
+
+@app.get("/computer/episodes/{task_id}")
+async def computer_episode_detail(task_id: str):
+    """Get full detail for one recorded episode."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    episode = store.load(task_id)
+    if episode is None:
+        return JSONResponse({"success": False, "error": f"episode '{task_id}' not found"}, status_code=404)
+    return episode.to_dict()
+
+
+@app.delete("/computer/episodes/{task_id}")
+async def computer_episode_delete(task_id: str):
+    """Delete a recorded episode."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    if store.delete(task_id):
+        return {"success": True, "deleted": task_id}
+    return JSONResponse({"success": False, "error": f"episode '{task_id}' not found"}, status_code=404)
+
+
+@app.post("/computer/episodes/clear")
+async def computer_episodes_clear():
+    """Delete all episodes."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    count = store.clear()
+    return {"success": True, "deleted_count": count}
+
+
+@app.get("/computer/episodes/recall")
+async def computer_episodes_recall(task: str = ""):
+    """Recall the most recent successful episode for a task description."""
+    from core.computer import get_episode_store
+    store = get_episode_store()
+    trajectory = store.recall_trajectory(task)
+    if trajectory is None:
+        return {"success": False, "error": "no matching episode found"}
+    return {"success": True, "trajectory": trajectory}
+
+
+# ---- Benchmark Endpoints ----------------------------------------------------
+
+@app.get("/computer/benchmark/tasks")
+async def computer_benchmark_tasks(category: str = "", max_difficulty: int = 3):
+    """List available benchmark tasks."""
+    from core.computer.benchmark import list_tasks, get_categories
+    if category:
+        tasks = list_tasks(category=category, max_difficulty=max_difficulty)
+    else:
+        tasks = list_tasks(max_difficulty=max_difficulty)
+    return {
+        "tasks": [t.to_dict() for t in tasks],
+        "count": len(tasks),
+        "categories": {cat: len(tasks) for cat, tasks in get_categories().items()},
+    }
+
+
+@app.post("/computer/benchmark/run")
+async def computer_benchmark_run(payload: Dict = None):
+    """Run the benchmark and return results."""
+    from core.computer.benchmark import run_benchmark
+    payload = payload or {}
+    result = run_benchmark(
+        dry_run=bool(payload.get("dry_run", True)),
+        max_tasks=int(payload.get("max_tasks", 0)),
+        categories=payload.get("categories"),
+        max_difficulty=int(payload.get("max_difficulty", 3)),
+    )
+    return result.to_dict()
+
+
+@app.get("/computer/benchmark/task/{task_id}")
+async def computer_benchmark_task(task_id: str):
+    """Get details for a specific benchmark task."""
+    from core.computer.benchmark import get_task
+    task = get_task(task_id)
+    if task is None:
+        return JSONResponse({"success": False, "error": f"task '{task_id}' not found"}, status_code=404)
+    return task.to_dict()
+
+
 @app.post("/computer/run")
 async def computer_run(payload: Dict = None):
     """Start a new autonomous computer task in the background (dry-run by default

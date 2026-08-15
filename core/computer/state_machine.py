@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .task_control import get_task_control, TaskControlState
+
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
@@ -404,6 +406,7 @@ class VisualStateMachine:
         states: List[VisualState],
         timeout_per_state: float = 30.0,
         start_state: Optional[str] = None,
+        task_id: str = "",
     ) -> Dict[str, Any]:
         if not states:
             return {"success": False, "error": "no states provided", "states_visited": [], "trace": []}
@@ -422,6 +425,18 @@ class VisualStateMachine:
                 "trace": [],
             }
 
+        task_control = get_task_control()
+
+        # Check emergency stop before we start
+        if task_control.is_emergency_stop_active():
+            return {
+                "success": False,
+                "error": "emergency stop is active",
+                "states_visited": [],
+                "trace": [],
+                "failure": {"state": "INIT", "category": "emergency_stop", "reason": task_control._emergency_stop_reason},
+            }
+
         trace: List[Dict[str, Any]] = _EventTrace(self._handle_event)
         if start_state and start_state not in by_name:
             return {
@@ -434,8 +449,92 @@ class VisualStateMachine:
         transitions = 0
         max_transitions = max(4, len(states) * (self.max_retries + 2) + 4)
 
+        # Helper to check for pause/cancel at a safe boundary
+        def _check_control() -> Optional[Dict[str, Any]]:
+            if task_control.is_emergency_stop_active():
+                trace.append({
+                    "state": current.name if current else "unknown",
+                    "phase": "emergency_stop",
+                    "outcome": "halted",
+                    "failure_reason": task_control._emergency_stop_reason,
+                })
+                return {
+                    "success": False,
+                    "states_visited": trace,
+                    "trace": trace,
+                    "final_state": current.name if current else "unknown",
+                    "error": f"emergency stop: {task_control._emergency_stop_reason}",
+                    "failure": {"state": current.name if current else "unknown", "category": "emergency_stop",
+                               "reason": task_control._emergency_stop_reason},
+                }
+            if task_id and task_control.is_cancel_requested(task_id):
+                task_control.confirm_cancel(task_id, "Cancelled during execution")
+                trace.append({
+                    "state": current.name if current else "unknown",
+                    "phase": "cancelled",
+                    "outcome": "cancelled",
+                })
+                return {
+                    "success": False,
+                    "states_visited": trace,
+                    "trace": trace,
+                    "final_state": current.name if current else "unknown",
+                    "error": "task cancelled by user",
+                    "failure": {"state": current.name if current else "unknown", "category": "cancelled",
+                               "reason": "User requested cancellation"},
+                }
+            if task_id and task_control.is_pause_requested(task_id):
+                task_control.confirm_pause(task_id, "Paused at state boundary")
+                # Wait here until resumed or cancelled
+                while task_control.is_task_paused(task_id):
+                    import time
+                    time.sleep(1)
+                    if task_control.is_emergency_stop_active():
+                        return {
+                            "success": False,
+                            "states_visited": trace,
+                            "trace": trace,
+                            "final_state": current.name if current else "unknown",
+                            "error": "emergency stop during pause",
+                            "failure": {"state": current.name if current else "unknown",
+                                       "category": "emergency_stop", "reason": task_control._emergency_stop_reason},
+                        }
+                    if task_control.is_cancel_requested(task_id):
+                        task_control.confirm_cancel(task_id, "Cancelled while paused")
+                        trace.append({
+                            "state": current.name if current else "unknown",
+                            "phase": "cancelled",
+                            "outcome": "cancelled",
+                        })
+                        return {
+                            "success": False,
+                            "states_visited": trace,
+                            "trace": trace,
+                            "final_state": current.name if current else "unknown",
+                            "error": "task cancelled while paused",
+                            "failure": {"state": current.name if current else "unknown",
+                                       "category": "cancelled", "reason": "Cancelled while paused"},
+                        }
+                # Resumed - re-check emergency stop
+                if task_control.is_emergency_stop_active():
+                    return {
+                        "success": False,
+                        "states_visited": trace,
+                        "trace": trace,
+                        "final_state": current.name if current else "unknown",
+                        "error": "emergency stop after resume",
+                        "failure": {"state": current.name if current else "unknown",
+                                   "category": "emergency_stop", "reason": task_control._emergency_stop_reason},
+                    }
+            return None
+
         while transitions < max_transitions:
             transitions += 1
+
+            # Check for control signals at each iteration boundary
+            control_result = _check_control()
+            if control_result is not None:
+                return control_result
             if current.terminal:
                 success = current.name.upper() != "FAILURE"
                 trace.append({
