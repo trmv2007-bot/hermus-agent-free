@@ -7,17 +7,23 @@ process (e.g. ``hermus computer run`` while the gateway/dashboard is open).
 
 Event types (stable, documented for consumers):
     task_started      - a task began ({task_id, task, states, source})
+    plan_created      - the executable plan graph is ready
     state_changed     - the state machine moved between plan states
+    screen_event      - a before/after screen sample was captured
     action_started    - a plan action begins ({state, attempt, action})
     action_completed  - a plan action finished ({state, attempt, outcome, ...})
-    verification      - a visual verification result ({state, ok, confidence})
+    verification_started / verification_completed - visual verification lifecycle
     repair_started    - a failure was diagnosed and a repair planned
     repair_completed  - a repair step executed and was verified
+    skill_recalled    - a learned skill was selected for this plan
+    checkpoint_saved  - crash-safe task state was persisted
     task_completed    - task ended successfully (final summary payload)
     task_failed       - task ended in failure
     task_interrupted  - task halted by interrupt/exception
     world_changed     - the shared WorldState snapshot changed
     emergency_stop    - emergency stop engaged/released
+
+``verification`` remains as a compatibility alias for older consumers.
 
 The bus is dependency-free (stdlib only) and safe to import from anywhere.
 """
@@ -33,9 +39,12 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 _EVENT_TYPES = {
-    "task_started", "state_changed", "action_started", "action_completed",
-    "verification", "repair_started", "repair_completed", "task_completed",
-    "task_failed", "task_interrupted", "world_changed", "emergency_stop",
+    "task_started", "plan_created", "state_changed", "screen_event",
+    "action_started", "action_completed", "verification_started",
+    "verification_completed", "verification", "repair_started",
+    "repair_completed", "skill_recalled", "checkpoint_saved",
+    "task_completed", "task_failed", "task_interrupted", "world_changed",
+    "emergency_stop",
 }
 
 
@@ -181,11 +190,17 @@ def _action_label(action: Any) -> str:
     return f"{kind} {target}".strip() or str(action.get("description") or kind)
 
 
-def machine_event(event: Dict[str, Any], task_id: str = "", task: str = "") -> List[Dict[str, Any]]:
-    """Translate one state-machine trace event into public bus events.
+def machine_event(
+    event: Dict[str, Any],
+    task_id: str = "",
+    task: str = "",
+    emit_lifecycle_starts: bool = True,
+) -> List[Dict[str, Any]]:
+    """Translate one durable state-machine trace event into public bus events.
 
-    Returns the list of published events (normally 0 or 1, occasionally 2 for
-    action_completed + verification).
+    ``ComputerAgent`` emits true before-action/before-verification lifecycle
+    events and passes ``emit_lifecycle_starts=False`` here.  The default keeps
+    this adapter useful on its own and backwards compatible.
     """
     if not isinstance(event, dict):
         return []
@@ -205,21 +220,7 @@ def machine_event(event: Dict[str, Any], task_id: str = "", task: str = "") -> L
         attempt = int(event.get("attempt", 1) or 1)
         action = event.get("action") or event.get("action_spec") or {}
         action_label = _action_label(event.get("action_spec") or action)
-        if attempt <= 1:
-            published.append(publish("action_started", {
-                **context,
-                "attempt": attempt,
-                "action": action_label,
-                "spec": event.get("action_spec"),
-            }))
-        else:
-            published.append(publish("action_completed", {
-                **context,
-                "attempt": attempt - 1,
-                "outcome": "failure",
-                "action": action_label,
-                "detail": "action failed; retrying",
-            }))
+        if emit_lifecycle_starts:
             published.append(publish("action_started", {
                 **context,
                 "attempt": attempt,
@@ -227,7 +228,7 @@ def machine_event(event: Dict[str, Any], task_id: str = "", task: str = "") -> L
                 "spec": event.get("action_spec"),
             }))
         outcome = event.get("outcome")
-        if outcome in ("success", "failure"):
+        if emit_lifecycle_starts and outcome in ("success", "failure"):
             published.append(publish("action_completed", {
                 **context,
                 "attempt": attempt,
@@ -238,8 +239,8 @@ def machine_event(event: Dict[str, Any], task_id: str = "", task: str = "") -> L
                 "expected": event.get("expected"),
             }))
         verification = event.get("verification")
-        if isinstance(verification, dict) and "ok" in verification:
-            published.append(publish("verification", {
+        if emit_lifecycle_starts and isinstance(verification, dict) and "ok" in verification:
+            payload = {
                 **context,
                 "phase": "action_verification",
                 "ok": bool(verification.get("ok")),
@@ -247,7 +248,9 @@ def machine_event(event: Dict[str, Any], task_id: str = "", task: str = "") -> L
                 "confidence": verification.get("confidence", 0.0),
                 "detail": verification.get("detail", ""),
                 "expected": event.get("expected", ""),
-            }))
+            }
+            published.append(publish("verification_completed", payload))
+            published.append(publish("verification", payload))
     elif phase == "diagnose":
         diagnosis = event.get("diagnosis") if isinstance(event.get("diagnosis"), dict) else {}
         plan = event.get("repair_plan") if isinstance(event.get("repair_plan"), dict) else {}
@@ -277,15 +280,17 @@ def machine_event(event: Dict[str, Any], task_id: str = "", task: str = "") -> L
             "failure_reason": event.get("failure_reason"),
         }))
         verification = event.get("verification")
-        if isinstance(verification, dict) and "ok" in verification:
-            published.append(publish("verification", {
+        if emit_lifecycle_starts and isinstance(verification, dict) and "ok" in verification:
+            payload = {
                 **context,
                 "phase": "repair_verification",
                 "ok": bool(verification.get("ok")),
                 "confidence": verification.get("confidence", 0.0),
                 "detail": verification.get("detail", ""),
                 "expected": event.get("expected", ""),
-            }))
+            }
+            published.append(publish("verification_completed", payload))
+            published.append(publish("verification", payload))
     # The terminal phase is intentionally not published here: ComputerAgent
     # emits the authoritative task_completed/task_failed (with duration, action
     # counts, and recording path) after artifacts are written, and emits

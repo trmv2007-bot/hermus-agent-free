@@ -197,12 +197,31 @@ class ComputerAgent:
             resume=resume,
         )
         start_state = start_state or (self.task_store.next_state(checkpoint) if resume else None)
+        state_names = [str(step.get("name") or f"STATE_{index}") for index, step in enumerate(plan)]
+        source = str((graph or {}).get("source") or "planner")
         publish("task_started", {
             "task_id": task_id,
             "task": task,
             "resume": bool(resume),
-            "states": [str(step.get("name") or f"STATE_{index}") for index, step in enumerate(plan)],
-            "source": str((graph or {}).get("source") or "planner"),
+            "states": state_names,
+            "source": source,
+        })
+        publish("plan_created", {
+            "task_id": task_id,
+            "task": task,
+            "source": source,
+            "start": (graph or {}).get("start") or (state_names[0] if state_names else None),
+            "states": state_names,
+            "nodes": len(state_names),
+            "resume": bool(resume),
+        })
+        publish("checkpoint_saved", {
+            "task_id": task_id,
+            "task": task,
+            "state": checkpoint.current_state,
+            "status": checkpoint.status,
+            "path": str(self.task_store.state_path(task_id)),
+            "reason": "task_initialized" if not resume else "task_resumed",
         })
 
         generation = checkpoint.resume_count if resume else 0
@@ -246,6 +265,12 @@ class ComputerAgent:
 
         recalled_skill = self._recalled_skill(plan, graph or {})
         if recalled_skill:
+            publish("skill_recalled", {
+                "task_id": task_id,
+                "task": task,
+                "skill": recalled_skill,
+                "source": source,
+            })
             skill = self.skills.get_skill(recalled_skill)
             if skill and hasattr(self.repair_engine, "set_known_repairs"):
                 self.repair_engine.set_known_repairs(skill.repairs)
@@ -253,8 +278,16 @@ class ComputerAgent:
         states = VisualStateMachine.plan_to_states(plan)
 
         def checkpoint_event(event: Dict[str, Any]) -> None:
-            self.task_store.checkpoint_event(checkpoint, event, self.world_state)
-            machine_event(event, task_id=task_id, task=task)
+            saved = self.task_store.checkpoint_event(checkpoint, event, self.world_state)
+            machine_event(event, task_id=task_id, task=task, emit_lifecycle_starts=False)
+            publish("checkpoint_saved", {
+                "task_id": task_id,
+                "task": task,
+                "state": saved.current_state,
+                "status": saved.status,
+                "phase": event.get("phase"),
+                "path": str(self.task_store.state_path(task_id)),
+            })
             try:
                 world = self.world_state.to_dict(include_history=False)
                 publish("world_changed", {
@@ -272,6 +305,23 @@ class ComputerAgent:
             except Exception:  # noqa: BLE001
                 pass
 
+        def live_telemetry(event_type: str, data: Dict[str, Any]) -> None:
+            payload = {"task_id": task_id, "task": task, **dict(data or {})}
+            spec = payload.get("action_spec")
+            if isinstance(spec, dict):
+                kind = str(spec.get("kind") or spec.get("action") or "")
+                target = str(spec.get("target") or spec.get("name") or spec.get("text") or spec.get("key") or "")
+                payload["action"] = f"{kind} {target}".strip()
+            verification = payload.pop("verification", None)
+            if isinstance(verification, dict):
+                payload.update({
+                    "ok": bool(verification.get("ok")),
+                    "matched": bool(verification.get("matched", verification.get("ok"))),
+                    "confidence": verification.get("confidence", 0.0),
+                    "detail": verification.get("detail") or verification.get("error") or "",
+                })
+            publish(event_type, payload)
+
         machine = VisualStateMachine(
             controller=self.controller,
             recorder=self.recorder,
@@ -285,6 +335,7 @@ class ComputerAgent:
             max_retries=self.max_retries,
             world_state=self.world_state,
             on_event=checkpoint_event,
+            on_telemetry=live_telemetry,
         )
         try:
             report = machine.run(states, timeout_per_state=60.0, start_state=start_state)
@@ -497,7 +548,15 @@ class ComputerAgent:
             "skill": skill_result,
             "error": report.get("error"),
         }
-        self.task_store.complete(checkpoint, success, final_result, self.world_state, recording)
+        completed_checkpoint = self.task_store.complete(checkpoint, success, final_result, self.world_state, recording)
+        publish("checkpoint_saved", {
+            "task_id": task_id,
+            "task": task,
+            "state": completed_checkpoint.current_state,
+            "status": completed_checkpoint.status,
+            "path": str(self.task_store.state_path(task_id)),
+            "reason": "task_completed" if success else "task_failed",
+        })
         publish("task_completed" if success else "task_failed", {
             "task_id": task_id,
             "task": task,

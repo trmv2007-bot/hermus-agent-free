@@ -224,6 +224,10 @@ def test_computer_dashboard_endpoints():
     with client.websocket_connect("/computer/events") as ws:
         first = ws.receive_json()
         assert first["kind"] == "snapshot" and isinstance(first["events"], list)
+        from core.computer.events import publish
+        sent = publish("screen_event", {"task_id": "integration-live", "stage": "after_action"})
+        live = ws.receive_json()
+        assert live["id"] == sent["id"] and live["type"] == "screen_event"
 
 
 if __name__ == "__main__":

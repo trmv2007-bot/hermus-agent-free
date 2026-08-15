@@ -99,6 +99,7 @@ class VisualStateMachine:
         max_retries: int = 2,
         world_state: Any = None,
         on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_telemetry: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ):
         self.controller = controller
         self.recorder = recorder
@@ -118,6 +119,15 @@ class VisualStateMachine:
         self.max_retries = max(0, int(max_retries))
         self.world_state = world_state
         self.on_event = on_event
+        self.on_telemetry = on_telemetry
+
+    def _telemetry(self, event_type: str, **data: Any) -> None:
+        """Emit transient lifecycle telemetry without affecting execution."""
+        if self.on_telemetry is not None:
+            try:
+                self.on_telemetry(event_type, data)
+            except Exception:
+                pass
 
     def _handle_event(self, event: Dict[str, Any]) -> None:
         """Update shared world state, then durably publish the event."""
@@ -310,11 +320,17 @@ class VisualStateMachine:
                 })
                 return False, reason
 
+            self._telemetry("screen_event", state=state.name, repair_state=name, attempt=attempt, stage="before_action")
             before = self._capture()
+            self._telemetry("action_started", state=state.name, repair_state=name, attempt=attempt, action_spec=action, phase="repair")
             executed = self._execute_action(action)
+            self._telemetry("action_completed", state=state.name, repair_state=name, attempt=attempt, action_spec=action, action=executed, phase="repair", ok=bool(executed.get("ok")))
             after = self._capture()
+            self._telemetry("screen_event", state=state.name, repair_state=name, attempt=attempt, stage="after_action")
             expected = str(step.get("expected") or "")
+            self._telemetry("verification_started", state=state.name, repair_state=name, attempt=attempt, expected=expected, phase="repair_verification")
             verification = self._verify_action(before, after, expected, executed)
+            self._telemetry("verification_completed", state=state.name, repair_state=name, attempt=attempt, expected=expected, verification=verification, phase="repair_verification", ok=bool(verification.get("ok")))
             ok = bool(executed.get("ok")) and bool(verification.get("ok"))
             reason = "" if ok else self._failure_reason(executed, verification)
             trace.append({
@@ -505,10 +521,16 @@ class VisualStateMachine:
             final_category = "retries_exhausted"
 
             for attempt in range(1, max_attempts + 1):
+                self._telemetry("screen_event", state=current.name, attempt=attempt, stage="before_action")
                 before = self._capture()
+                self._telemetry("action_started", state=current.name, attempt=attempt, action_spec=current.action, phase="original_action")
                 executed = self._execute_action(current.action)
+                self._telemetry("action_completed", state=current.name, attempt=attempt, action_spec=current.action, action=executed, phase="original_action", ok=bool(executed.get("ok")))
                 after = self._capture()
+                self._telemetry("screen_event", state=current.name, attempt=attempt, stage="after_action")
+                self._telemetry("verification_started", state=current.name, attempt=attempt, expected=current.expected, phase="action_verification")
                 verification = self._verify_action(before, after, current.expected, executed)
+                self._telemetry("verification_completed", state=current.name, attempt=attempt, expected=current.expected, verification=verification, phase="action_verification", ok=bool(verification.get("ok")))
                 ok = bool(executed.get("ok")) and bool(verification.get("ok"))
                 reason = "" if ok else self._failure_reason(executed, verification)
                 trace.append({

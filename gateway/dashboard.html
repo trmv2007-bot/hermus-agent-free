@@ -314,6 +314,14 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
           </div>
 
           <div class="card">
+            <div class="row" style="justify-content:space-between">
+              <h3>⚡ Live execution</h3>
+              <span class="chip muted" id="computerWsStatus"><span class="live-dot idle"></span> CONNECTING</span>
+            </div>
+            <div id="computerLiveActivity" class="feed"><span class="muted">Waiting for computer events…</span></div>
+          </div>
+
+          <div class="card">
             <div class="tabs">
               <div class="tab active" data-ctab="timeline" onclick="switchComputerTab('timeline')">⏱️ Timeline</div>
               <div class="tab" data-ctab="screen" onclick="switchComputerTab('screen')">🎬 Screen</div>
@@ -2175,18 +2183,24 @@ function openModal(html){ $('modalContent').innerHTML = html; $('modalBox').clas
 function closeModal(){ $('modalBox').classList.remove('open'); }
 
 function activityIcon(t){
-  const map = {task_started:'🧠', state_changed:'🧭', action_started:'🖱️', action_completed:'✅', verification:'👁️',
-    repair_started:'🛠️', repair_completed:'🛠️', task_completed:'🏁', task_failed:'❌', task_interrupted:'⏸',
-    emergency_stop:'🔴', world_changed:'🌍'};
+  const map = {task_started:'🧠', plan_created:'🗺️', state_changed:'🧭', screen_event:'👁️',
+    action_started:'🖱️', action_completed:'✅', verification_started:'🔍', verification_completed:'✅', verification:'👁️',
+    repair_started:'🛠️', repair_completed:'🛠️', skill_recalled:'🧩', checkpoint_saved:'💾',
+    task_completed:'🏁', task_failed:'❌', task_interrupted:'⏸', emergency_stop:'🔴', world_changed:'🌍'};
   return map[t] || '•';
 }
 function activityMessage(ev){
   const t = ev.type, d = ev.data || {};
   if(t==='task_started') return d.task ? 'Task: ' + d.task : 'Task started';
+  if(t==='plan_created') return (d.nodes || 0) + ' plan states ready' + (d.source ? ' · ' + d.source : '');
   if(t==='state_changed') return '→ ' + (d.next_state || '?');
+  if(t==='screen_event') return 'Screen sampled · ' + (d.stage || 'changed');
   if(t==='action_started') return (d.action || 'action') + ' @ ' + (d.state || '');
-  if(t==='action_completed') return (d.outcome === 'success' ? '✓ ' : '✗ ') + (d.action || '') + ' @ ' + (d.state || '');
-  if(t==='verification') return (d.ok ? 'Verified ' : 'Verification failed ') + (d.state || '') + (d.confidence != null ? ' (' + Math.round(Number(d.confidence)*100) + '%)' : '');
+  if(t==='action_completed') return (d.ok || d.outcome === 'success' ? '✓ ' : '✗ ') + (d.action || '') + ' @ ' + (d.state || '');
+  if(t==='verification_started') return 'Verifying ' + (d.state || '') + '…';
+  if(t==='verification_completed' || t==='verification') return (d.ok ? 'Verified ' : 'Verification failed ') + (d.state || '') + (d.confidence != null ? ' (' + Math.round(Number(d.confidence)*100) + '%)' : '');
+  if(t==='skill_recalled') return 'Recalled skill: ' + (d.skill || 'unknown');
+  if(t==='checkpoint_saved') return 'Checkpoint saved' + (d.state ? ' · ' + d.state : '');
   if(t==='repair_started') return (d.kind || 'repair') + ': ' + (d.summary || '');
   if(t==='repair_completed') return (d.ok ? 'Repair ok: ' : 'Repair failed: ') + (d.action || '');
   if(t==='task_completed') return (d.task || 'Task') + ' — SUCCESS' + (d.duration ? ' in ' + d.duration + 's' : '');
@@ -2200,24 +2214,27 @@ function activityMessage(ev){
   return '';
 }
 function prependActivity(ev){
-  const feed = $('overviewActivity');
-  if(!feed) return;
   const t = ev.type || '';
-  // world_changed fires on every state-machine step; the World State card
-  // already reflects it, so keep it out of the activity feed.
-  if(t === 'world_changed') return;
+  // World State already has a dedicated live card. Compatibility verification
+  // duplicates verification_completed, so do not render either noisy event.
+  if(t === 'world_changed' || t === 'verification') return;
   const msg = activityMessage(ev);
   const time = String(ev.ts || '').slice(11,19) || '--:--:--';
   const data = ev.data || {};
   let cls = '';
-  if(t==='task_failed' || t==='emergency_stop') cls = 'bad';
-  else if(t==='verification' || t==='action_completed') cls = data.ok ? 'ok' : 'bad';
-  const node = document.createElement('div');
-  node.className = 'feed-item';
-  node.innerHTML = `<span class="feed-time">${time}</span><span class="feed-ico">${activityIcon(t)}</span><span class="feed-type">${esc(t)}</span><span class="feed-msg ${cls}">${esc(msg)}</span>`;
-  node.onclick = () => showComputerEventModal(ev);
-  feed.prepend(node);
-  while(feed.children.length > 60) feed.removeChild(feed.lastChild);
+  if(t==='task_failed' || (t==='emergency_stop' && data.halted)) cls = 'bad';
+  else if(t==='verification_completed' || t==='action_completed') cls = data.ok ? 'ok' : 'bad';
+  ['overviewActivity','computerLiveActivity'].forEach(id => {
+    const feed = $(id);
+    if(!feed) return;
+    if(feed.children.length === 1 && feed.firstElementChild && feed.firstElementChild.classList.contains('muted')) feed.innerHTML = '';
+    const node = document.createElement('div');
+    node.className = 'feed-item';
+    node.innerHTML = `<span class="feed-time">${time}</span><span class="feed-ico">${activityIcon(t)}</span><span class="feed-type">${esc(t)}</span><span class="feed-msg ${cls}">${esc(msg)}</span>`;
+    node.onclick = () => showComputerEventModal(ev);
+    feed.prepend(node);
+    while(feed.children.length > 60) feed.removeChild(feed.lastChild);
+  });
 }
 function seedActivityFeed(events){
   const feed = $('overviewActivity');
@@ -2234,22 +2251,33 @@ function showComputerEventModal(ev){
     <div class="kv" style="margin:8px 0"><b>Time</b><span class="mono">${esc(ev.ts||'')}</span><b>Task</b><span>${esc(data.task||data.task_id||'—')}</span></div>
     <div class="pre">${esc(JSON.stringify(ev, null, 2))}</div>`);
 }
+function setComputerWsStatus(state){
+  const chip = $('computerWsStatus');
+  if(!chip) return;
+  const connected = state === 'LIVE';
+  chip.className = 'chip ' + (connected ? 'ok' : 'muted');
+  chip.innerHTML = `<span class="live-dot ${connected?'':'idle'}"></span> ${esc(state)}`;
+}
 function connectComputerWs(){
   if(computer.wsClosed) return;
+  setComputerWsStatus('CONNECTING');
   try{
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const ws = new WebSocket(proto + location.host + '/computer/events');
+    const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
+    const url = proto + location.host + '/computer/events' + (token ? '?token=' + encodeURIComponent(token) : '');
+    const ws = new WebSocket(url);
     computer.ws = ws;
+    ws.onopen = () => setComputerWsStatus('LIVE');
     ws.onmessage = (e) => {
       try{
         const msg = JSON.parse(e.data);
-        if(msg.kind === 'snapshot') return;
+        if(msg.kind === 'snapshot') { seedActivityFeed(msg.events || []); return; }
         handleComputerEvent(msg);
       }catch(err){}
     };
-    ws.onclose = () => { if(!computer.wsClosed) setTimeout(connectComputerWs, 3000); };
+    ws.onclose = () => { setComputerWsStatus('RECONNECTING'); if(!computer.wsClosed) setTimeout(connectComputerWs, 3000); };
     ws.onerror = () => { try{ ws.close(); }catch(err){} };
-  }catch(err){ setTimeout(connectComputerWs, 5000); }
+  }catch(err){ setComputerWsStatus('RECONNECTING'); setTimeout(connectComputerWs, 5000); }
 }
 function handleComputerEvent(ev){
   const t = ev.type || '';
