@@ -3,14 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hermus Computer Agent - Live Dashboard</title>
+    <title>Hermus Computer Agent — Mission Control</title>
     <style>
         :root {
             --bg-primary: #0a0e1a;
             --bg-secondary: #1a1f2e;
             --bg-card: #242b3d;
+            --bg-elevated: #2c3549;
             --text-primary: #e8eaed;
             --text-secondary: #9aa0a6;
+            --text-faint: #6b7280;
             --accent-blue: #4a9eff;
             --accent-green: #34d399;
             --accent-yellow: #fbbf24;
@@ -18,919 +20,1741 @@
             --accent-purple: #a78bfa;
             --border-color: #2d3548;
         }
-        
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        
+
         body {
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }
-        
-        .header {
-            background: linear-gradient(135deg, #1e3a5f 0%, #0f1f3d 100%);
-            padding: 20px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+
+        /* ============================= Top bar ============================= */
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            background: linear-gradient(135deg, #16203a 0%, #0f1f3d 100%);
             border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
         }
-        
-        .header h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
+
+        .topbar .brand {
             display: flex;
             align-items: center;
             gap: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            white-space: nowrap;
         }
-        
-        .header .status-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
+
+        .topbar .spacer { flex: 1 1 auto; }
+
+        .topbar .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        /* Global status pill (point 10) */
+        .global-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            white-space: nowrap;
+            max-width: 420px;
+        }
+        .global-status .dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .global-status .gs-label { color: var(--text-primary); }
+        .global-status .gs-detail {
+            color: var(--text-secondary);
+            font-weight: 400;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .gs-working   .dot { background: var(--accent-green); box-shadow: 0 0 8px rgba(52,211,153,.7); }
+        .gs-waiting   .dot { background: var(--accent-yellow); box-shadow: 0 0 8px rgba(251,191,36,.7); }
+        .gs-thinking  .dot { background: var(--accent-blue);   box-shadow: 0 0 8px rgba(74,158,255,.7); animation: pulse 1.2s infinite; }
+        .gs-attention .dot { background: var(--accent-red);    box-shadow: 0 0 8px rgba(239,68,68,.7);  animation: pulse 1s infinite; }
+        .gs-ready     .dot { background: var(--text-faint); }
+        .gs-stopped   .dot { background: var(--accent-red); }
+
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+        /* Simple / Advanced segmented control (point 8) */
+        .segmented {
+            display: flex;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            padding: 3px;
+        }
+        .segmented button {
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .15s;
+        }
+        .segmented button.active {
+            background: var(--accent-blue);
+            color: #04121f;
+        }
+
+        /* Autonomous toggle */
+        .autonomous {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .switch {
+            width: 40px; height: 22px;
+            border-radius: 999px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-color);
+            position: relative;
+            transition: background .15s;
+            flex-shrink: 0;
+        }
+        .switch::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            transition: all .15s;
+        }
+        .autonomous.on .switch { background: rgba(52,211,153,.25); border-color: var(--accent-green); }
+        .autonomous.on .switch::after { left: 20px; background: var(--accent-green); }
+
+        /* Connection */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 7px;
             font-size: 0.75rem;
-            font-weight: 500;
+            color: var(--text-secondary);
         }
-        
-        .status-badge.running { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
-        .status-badge.paused { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
-        .status-badge.idle { background: rgba(156, 163, 175, 0.2); color: var(--text-secondary); }
-        .status-badge.emergency { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); animation: pulse 1s infinite; }
-        
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        
-        .main-container {
+        .connection-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent-green);
+        }
+        .connection-dot.disconnected { background: var(--accent-red); }
+
+        /* ============================= Layout ============================= */
+        .layout {
             display: grid;
-            grid-template-columns: 1fr 380px;
-            gap: 20px;
-            padding: 20px;
-            max-width: 1600px;
+            grid-template-columns: minmax(0, 1fr) 320px;
+            gap: 18px;
+            padding: 18px;
+            max-width: 1500px;
             margin: 0 auto;
         }
-        
+        .col-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+        .col-side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
         .card {
             background: var(--bg-card);
             border-radius: 12px;
             border: 1px solid var(--border-color);
             overflow: hidden;
         }
-        
         .card-header {
-            padding: 16px 20px;
+            padding: 14px 18px;
             border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 10px;
         }
-        
         .card-header h2 {
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: 600;
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        
-        .card-body {
-            padding: 16px 20px;
+        .card-body { padding: 16px 18px; }
+
+        .muted { color: var(--text-secondary); font-size: 0.75rem; }
+        .tiny { color: var(--text-faint); font-size: 0.7rem; }
+
+        button.link {
+            background: none;
+            border: none;
+            color: var(--accent-blue);
+            font-size: 0.75rem;
+            cursor: pointer;
+            padding: 0;
         }
-        
-        /* Event Feed */
-        .event-feed {
-            height: 500px;
-            overflow-y: auto;
-            scroll-behavior: smooth;
+        button.link:hover { text-decoration: underline; }
+
+        /* ===================== Mission Control / empty ===================== */
+        .mission {
+            border: 1px solid rgba(52,211,153,.25);
+            background: linear-gradient(160deg, #1c2736 0%, var(--bg-card) 60%);
         }
-        
-        .event-item {
-            display: flex;
-            gap: 12px;
-            padding: 12px;
-            border-bottom: 1px solid var(--border-color);
-            transition: background 0.2s;
-        }
-        
-        .event-item:last-child { border-bottom: none; }
-        .event-item:hover { background: rgba(255,255,255,0.02); }
-        
-        .event-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
+        .mission-status {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.1rem;
-            flex-shrink: 0;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 14px;
         }
-        
-        .event-icon.task { background: rgba(74, 158, 255, 0.15); }
-        .event-icon.plan { background: rgba(167, 139, 250, 0.15); }
-        .event-icon.action { background: rgba(52, 211, 153, 0.15); }
-        .event-icon.verify { background: rgba(251, 191, 36, 0.15); }
-        .event-icon.repair { background: rgba(239, 68, 68, 0.15); }
-        .event-icon.world { background: rgba(156, 163, 175, 0.15); }
-        .event-icon.emergency { background: rgba(239, 68, 68, 0.3); }
-        .event-icon.success { background: rgba(52, 211, 153, 0.2); }
-        .event-icon.failed { background: rgba(239, 68, 68, 0.2); }
-        
-        .event-content { flex: 1; min-width: 0; }
-        
-        .event-title {
-            font-size: 0.875rem;
-            font-weight: 500;
-            margin-bottom: 4px;
+        .mission-status .dot { width: 11px; height: 11px; border-radius: 50%; }
+        .mission-task { font-size: 1.25rem; font-weight: 600; margin-bottom: 14px; word-break: break-word; }
+
+        .progress-track {
+            height: 12px;
+            background: var(--bg-secondary);
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
         }
-        
-        .event-detail {
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            word-break: break-word;
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-blue));
+            border-radius: 999px;
+            transition: width .5s ease;
+            width: 0%;
         }
-        
-        .event-time {
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-            margin-top: 4px;
-        }
-        
-        /* Control Panel */
-        .control-panel {
+        .progress-row {
             display: flex;
-            flex-direction: column;
-            gap: 16px;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 8px;
         }
-        
-        .control-buttons {
+        .progress-row .pct { font-weight: 700; color: var(--accent-green); }
+
+        .mc-steps {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
+            margin-top: 16px;
         }
-        
+        .mc-step {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 14px;
+        }
+        .mc-step label {
+            display: block;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--text-faint);
+            margin-bottom: 5px;
+        }
+        .mc-step .value { font-size: 0.9rem; font-weight: 500; word-break: break-word; }
+
+        .mc-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
         .control-btn {
-            padding: 14px 16px;
-            border-radius: 8px;
+            padding: 11px 16px;
+            border-radius: 10px;
             border: 1px solid var(--border-color);
             background: var(--bg-secondary);
             color: var(--text-primary);
-            font-size: 0.875rem;
-            font-weight: 500;
+            font-size: 0.85rem;
+            font-weight: 600;
             cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            transition: all .15s;
+        }
+        .control-btn:hover:not(:disabled) { border-color: var(--accent-blue); background: var(--bg-elevated); }
+        .control-btn:disabled { opacity: .45; cursor: not-allowed; }
+        .control-btn.pause { color: var(--accent-yellow); border-color: rgba(251,191,36,.35); }
+        .control-btn.cancel { color: var(--accent-red); border-color: rgba(239,68,68,.35); }
+        .control-btn.run { color: var(--accent-green); border-color: rgba(52,211,153,.4); }
+
+        .empty-state { text-align: center; padding: 34px 20px; }
+        .empty-state .big { font-size: 1.5rem; font-weight: 600; margin-bottom: 6px; }
+        .empty-state .sub { color: var(--text-secondary); margin-bottom: 18px; }
+        .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 18px; }
+        .suggestion {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            padding: 7px 13px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all .15s;
+        }
+        .suggestion:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+
+        .task-input {
+            width: 100%;
+            padding: 13px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            resize: none;
+            font-family: inherit;
+        }
+        .task-input:focus { outline: none; border-color: var(--accent-blue); }
+
+        /* ============================ Live screen ============================ */
+        .screen-wrap {
+            position: relative;
+            background: #0d1120;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .screen-wrap img {
+            width: 100%;
+            aspect-ratio: 16/9;
+            object-fit: contain;
+            display: block;
+        }
+        .vision-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            pointer-events: none;
+        }
+        .chip {
+            background: rgba(10,14,26,.82);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 5px 9px;
+            font-size: 0.7rem;
+            color: var(--text-primary);
+            backdrop-filter: blur(4px);
+        }
+        .chip b { color: var(--accent-green); }
+        .chip.warn b { color: var(--accent-yellow); }
+
+        .vision-panel {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .vision-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 9px 11px;
+        }
+        .vision-item label {
+            display: block;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--text-faint);
+            margin-bottom: 3px;
+        }
+        .vision-item .value { font-size: 0.82rem; word-break: break-word; }
+
+        /* ============================== Timeline ============================== */
+        .timeline { max-height: 340px; overflow-y: auto; }
+        .tl-item {
+            display: flex;
+            gap: 11px;
+            padding: 9px 4px;
+            border-bottom: 1px solid rgba(45,53,72,.5);
+            align-items: flex-start;
+        }
+        .tl-item:last-child { border-bottom: none; }
+        .tl-marker {
+            width: 24px; height: 24px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
+            font-size: 0.72rem;
+            flex-shrink: 0;
+            font-weight: 700;
         }
-        
-        .control-btn:hover:not(:disabled) {
-            background: var(--bg-card);
-            border-color: var(--accent-blue);
-        }
-        
-        .control-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .control-btn.run { background: rgba(52, 211, 153, 0.1); border-color: var(--accent-green); }
-        .control-btn.run:hover:not(:disabled) { background: rgba(52, 211, 153, 0.2); }
-        
-        .control-btn.pause { background: rgba(251, 191, 36, 0.1); border-color: var(--accent-yellow); }
-        .control-btn.pause:hover:not(:disabled) { background: rgba(251, 191, 36, 0.2); }
-        
-        .control-btn.cancel { background: rgba(239, 68, 68, 0.1); border-color: var(--accent-red); }
-        .control-btn.cancel:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); }
-        
-        .control-btn.emergency {
-            grid-column: span 2;
-            background: rgba(239, 68, 68, 0.15);
-            border-color: var(--accent-red);
-            color: var(--accent-red);
-        }
-        .control-btn.emergency:hover:not(:disabled) {
-            background: rgba(239, 68, 68, 0.3);
-        }
-        
-        /* World State */
-        .world-state-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-        
-        .world-state-item {
-            background: var(--bg-secondary);
-            padding: 12px;
-            border-radius: 8px;
-        }
-        
-        .world-state-item label {
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .world-state-item .value {
-            font-size: 0.875rem;
-            margin-top: 4px;
-            word-break: break-word;
-        }
-        
-        /* Task Input */
-        .task-input-container {
-            margin-bottom: 16px;
-        }
-        
-        .task-input {
-            width: 100%;
-            padding: 12px 16px;
-            border-radius: 8px;
+        .tl-done     .tl-marker { background: rgba(52,211,153,.18); color: var(--accent-green); }
+        .tl-active   .tl-marker { background: rgba(74,158,255,.18);  color: var(--accent-blue); }
+        .tl-pending  .tl-marker { background: var(--bg-secondary);   color: var(--text-faint); border: 1px dashed var(--border-color); }
+        .tl-warn     .tl-marker { background: rgba(251,191,36,.18); color: var(--accent-yellow); }
+        .tl-fail     .tl-marker { background: rgba(239,68,68,.18);  color: var(--accent-red); }
+
+        .tl-body { flex: 1; min-width: 0; }
+        .tl-text { font-size: 0.86rem; }
+        .tl-detail { font-size: 0.74rem; color: var(--text-secondary); margin-top: 2px; word-break: break-word; }
+        .tl-time { font-size: 0.68rem; color: var(--text-faint); margin-top: 3px; }
+        .tl-item.tl-active { background: rgba(74,158,255,.05); border-radius: 8px; }
+
+        /* Raw event feed (advanced events) */
+        .event-feed { max-height: 320px; overflow-y: auto; }
+        .event-item { display: flex; gap: 10px; padding: 9px 2px; border-bottom: 1px solid rgba(45,53,72,.5); }
+        .event-item:last-child { border-bottom: none; }
+        .event-icon { font-size: 0.95rem; flex-shrink: 0; }
+        .event-content { flex: 1; min-width: 0; }
+        .event-title { font-size: 0.78rem; font-weight: 600; font-family: ui-monospace, monospace; }
+        .event-detail { font-size: 0.72rem; color: var(--text-secondary); word-break: break-word; }
+        .event-time { font-size: 0.65rem; color: var(--text-faint); margin-top: 2px; }
+
+        /* ============================ Approval (point 7) ============================ */
+        .approval-item {
             border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 13px 14px;
+            margin-bottom: 10px;
+        }
+        .approval-item.high { border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.06); }
+        .approval-item.medium { border-color: rgba(251,191,36,.4); background: rgba(251,191,36,.05); }
+        .approval-head { font-weight: 700; font-size: 0.9rem; margin-bottom: 5px; }
+        .approval-action {
+            font-family: ui-monospace, monospace;
             background: var(--bg-secondary);
-            color: var(--text-primary);
-            font-size: 0.875rem;
-            resize: none;
+            border-radius: 6px;
+            padding: 5px 9px;
+            font-size: 0.82rem;
+            display: inline-block;
+            margin: 6px 0;
         }
-        
-        .task-input:focus {
-            outline: none;
-            border-color: var(--accent-blue);
-        }
-        
-        /* Stats */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-        }
-        
-        .stat-item {
-            text-align: center;
-            padding: 12px;
-            background: var(--bg-secondary);
-            border-radius: 8px;
-        }
-        
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--accent-blue);
-        }
-        
-        .stat-label {
+        .approval-why { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px; }
+        .risk-pill {
+            display: inline-block;
+            padding: 2px 9px;
+            border-radius: 999px;
             font-size: 0.7rem;
-            color: var(--text-secondary);
-            margin-top: 4px;
+            font-weight: 700;
         }
-        
-        /* Connection Status */
-        .connection-status {
+        .risk-low    { background: rgba(52,211,153,.18); color: var(--accent-green); }
+        .risk-medium { background: rgba(251,191,36,.18); color: var(--accent-yellow); }
+        .risk-high   { background: rgba(239,68,68,.18);  color: var(--accent-red); }
+
+        .approval-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+        /* ============================ Why? (point 4) ============================ */
+        .why-summary {
             display: flex;
             align-items: center;
             gap: 8px;
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+            cursor: pointer;
+            user-select: none;
+            padding: 6px 0;
+        }
+        .why-panel {
+            margin-top: 8px;
+            border: 1px solid rgba(167,139,250,.35);
+            background: rgba(167,139,250,.06);
+            border-radius: 10px;
+            padding: 14px;
+        }
+        .why-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .why-cell label {
+            display: block;
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--text-faint);
+            margin-bottom: 3px;
+        }
+        .why-cell .value { font-size: 0.85rem; word-break: break-word; }
+
+        /* ============================ World state (point 5) ============================ */
+        .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .kv {
+            background: var(--bg-secondary);
+            padding: 11px 12px;
+            border-radius: 8px;
+        }
+        .kv label {
+            display: block;
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--text-faint);
+            margin-bottom: 4px;
+        }
+        .kv .value { font-size: 0.86rem; word-break: break-word; }
+        .cat-block { margin-bottom: 12px; }
+        .cat-block h3 {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            color: var(--text-faint);
+            margin-bottom: 7px;
+        }
+
+        /* ============================ Plan (point 9) ============================ */
+        .plan-title { font-size: 0.85rem; font-weight: 700; letter-spacing: .6px; margin-bottom: 12px; }
+        .plan-step {
+            display: flex;
+            gap: 10px;
+            padding: 8px 4px;
+            border-bottom: 1px solid rgba(45,53,72,.5);
+            align-items: flex-start;
+        }
+        .plan-step:last-child { border-bottom: none; }
+        .plan-marker {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+        }
+        .plan-marker.done   { background: rgba(52,211,153,.18); color: var(--accent-green); }
+        .plan-marker.current{ background: rgba(74,158,255,.18);  color: var(--accent-blue); box-shadow: 0 0 0 2px rgba(74,158,255,.25); }
+        .plan-marker.todo   { background: var(--bg-secondary);   color: var(--text-faint); border: 1px dashed var(--border-color); }
+        .plan-marker.fail   { background: rgba(239,68,68,.18);  color: var(--accent-red); }
+        .plan-step .name { font-size: 0.85rem; font-weight: 500; }
+        .plan-step .goal { font-size: 0.74rem; color: var(--text-secondary); }
+
+        .plan-changed {
+            border: 1px solid rgba(251,191,36,.4);
+            background: rgba(251,191,36,.07);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+            font-size: 0.82rem;
+        }
+        .plan-changed b { color: var(--accent-yellow); }
+
+        .dag-node {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 9px 11px;
+            margin-bottom: 8px;
             font-size: 0.75rem;
         }
-        
-        .connection-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--accent-green);
+        .dag-node .dn-name { font-family: ui-monospace, monospace; font-weight: 700; font-size: 0.78rem; }
+        .dag-node .dn-line { color: var(--text-secondary); margin-top: 3px; word-break: break-word; }
+        .dag-node .dn-arrow { color: var(--accent-purple); }
+
+        /* ============================ Diagnostics (point 6) ============================ */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .stat-item { text-align: center; padding: 11px 6px; background: var(--bg-secondary); border-radius: 8px; }
+        .stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-blue); }
+        .stat-label { font-size: 0.66rem; color: var(--text-faint); margin-top: 3px; text-transform: uppercase; letter-spacing: .4px; }
+
+        /* ============================ History sidebar (point 12) ============================ */
+        .history-list { max-height: 420px; overflow-y: auto; }
+        .hist-item {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 6px;
+            border-bottom: 1px solid rgba(45,53,72,.5);
+            cursor: pointer;
+            border-radius: 6px;
         }
-        
-        .connection-dot.disconnected { background: var(--accent-red); }
-        
-        /* Responsive */
-        @media (max-width: 1024px) {
-            .main-container {
-                grid-template-columns: 1fr;
-            }
+        .hist-item:last-child { border-bottom: none; }
+        .hist-item:hover { background: rgba(255,255,255,.03); }
+        .hist-item.active { background: rgba(74,158,255,.08); }
+        .hist-icon { font-size: 1rem; flex-shrink: 0; }
+        .hist-body { flex: 1; min-width: 0; }
+        .hist-name { font-size: 0.84rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .hist-meta { font-size: 0.7rem; color: var(--text-faint); margin-top: 2px; }
+
+        /* ============================ Advanced sections ============================ */
+        .advanced { display: none; flex-direction: column; gap: 18px; }
+        body.mode-advanced .advanced { display: flex; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+        .collapse-body { display: none; }
+        .card.open .collapse-body { display: block; }
+        .card.open .chev { transform: rotate(90deg); }
+        .chev { transition: transform .15s; display: inline-block; }
+
+        /* ============================ Responsive (point 13) ============================ */
+        @media (max-width: 1080px) {
+            .layout { grid-template-columns: 1fr; }
+            .col-side { order: 2; }
+        }
+        @media (max-width: 640px) {
+            .topbar { padding: 10px 14px; gap: 10px; }
+            .global-status { order: 3; width: 100%; max-width: none; }
+            .topbar .brand { font-size: 1rem; }
+            .grid-2 { grid-template-columns: 1fr; }
+            .mc-steps { grid-template-columns: 1fr; }
+            .vision-panel { grid-template-columns: 1fr; }
+            .why-grid { grid-template-columns: 1fr; }
+            .kv-grid { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .layout { padding: 12px; gap: 12px; }
         }
     </style>
 </head>
-<body>
-    <div class="header">
-        <h1>
-            🖥️ Computer Agent
-            <span id="statusBadge" class="status-badge idle">IDLE</span>
-        </h1>
-        <div class="connection-status">
-            <span class="connection-dot" id="wsDot"></span>
-            <span id="wsStatus">Connecting...</span>
+<body class="mode-simple">
+    <!-- ===================== Top bar ===================== -->
+    <header class="topbar">
+        <div class="brand">🖥️ Hermus <span class="muted" style="font-weight:400;">Mission Control</span></div>
+
+        <div class="topbar-right">
+            <div class="global-status gs-ready" id="globalStatus">
+                <span class="dot"></span>
+                <span class="gs-label" id="gsLabel">Ready</span>
+                <span class="gs-detail" id="gsDetail">Waiting for a task</span>
+            </div>
+
+            <div class="segmented" role="tablist">
+                <button id="modeSimple" class="active" onclick="setMode('simple')">Simple</button>
+                <button id="modeAdvanced" onclick="setMode('advanced')">Advanced</button>
+            </div>
+
+            <label class="autonomous on" id="autoToggle" title="In autonomous mode Hermus acts without approval prompts">
+                <span>Autonomous</span>
+                <span class="switch" onclick="toggleAutonomous(event)"></span>
+            </label>
+
+            <div class="connection-status">
+                <span class="connection-dot" id="wsDot"></span>
+                <span id="wsStatus">Connecting…</span>
+            </div>
         </div>
+    </header>
+
+    <div class="layout">
+        <!-- ===================== MAIN COLUMN ===================== -->
+        <main class="col-main">
+
+            <!-- Mission Control / Empty state (points 1, 11) -->
+            <section class="card mission" id="missionCard" hidden>
+                <div class="card-body">
+                    <div class="mission-status">
+                        <span class="dot" id="mcDot" style="background:var(--accent-green);"></span>
+                        <span id="mcStatusText">Hermus is running</span>
+                    </div>
+                    <div class="mission-task" id="mcTask">—</div>
+                    <div class="progress-row">
+                        <span class="muted" id="mcCurrentLabel">Current</span>
+                        <span class="pct" id="mcPct">0%</span>
+                    </div>
+                    <div class="progress-track"><div class="progress-fill" id="mcProgress"></div></div>
+                    <div class="mc-steps">
+                        <div class="mc-step">
+                            <label>Current</label>
+                            <div class="value" id="mcCurrent">—</div>
+                        </div>
+                        <div class="mc-step">
+                            <label>Next</label>
+                            <div class="value" id="mcNext">—</div>
+                        </div>
+                    </div>
+                    <div class="mc-controls">
+                        <button class="control-btn pause" id="btnPause" onclick="pauseTask()" disabled>⏸ Pause</button>
+                        <button class="control-btn run" id="btnResume" onclick="resumeTask()" disabled>▶ Resume</button>
+                        <button class="control-btn cancel" id="btnCancel" onclick="cancelTask()" disabled>⏹ Cancel</button>
+                        <button class="control-btn cancel" onclick="emergencyStop()">🔴 Stop</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card empty-state" id="emptyCard">
+                <div class="big">🧠 Hermus is ready</div>
+                <div class="sub">What would you like me to do?</div>
+                <div class="suggestions" id="suggestions">
+                    <span class="suggestion" onclick="pickSuggestion(this)">Open Calculator</span>
+                    <span class="suggestion" onclick="pickSuggestion(this)">Go to youtube.com</span>
+                    <span class="suggestion" onclick="pickSuggestion(this)">Open Notepad</span>
+                    <span class="suggestion" onclick="pickSuggestion(this)">Install an application</span>
+                </div>
+                <div style="max-width:560px; margin:0 auto;">
+                    <textarea class="task-input" id="taskInput" rows="2"
+                        placeholder="Open an app, navigate a website, download something, or automate a task…"></textarea>
+                    <button class="control-btn run" style="margin-top:12px; width:100%; justify-content:center;" onclick="runTask()">▶ Run Task</button>
+                </div>
+            </section>
+
+            <!-- Live screen (point 3) -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>📺 Live Screen</h2>
+                    <div class="segmented">
+                        <button id="vsSimple" class="active" onclick="setVisionMode('simple')">Simple View</button>
+                        <button id="vsAdvanced" onclick="setVisionMode('advanced')">Advanced Vision</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="screen-wrap">
+                        <img id="liveScreen" alt="live screen">
+                        <div class="vision-overlay" id="visionOverlay"></div>
+                    </div>
+                    <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+                        <span id="liveFrameInfo" class="muted">waiting for a live frame…</span>
+                    </div>
+                    <div class="vision-panel" id="visionPanel" style="display:none;"></div>
+                </div>
+            </section>
+
+            <!-- Why? (point 4) -->
+            <section class="card" id="whyCard" hidden>
+                <div class="card-body">
+                    <div class="why-summary" onclick="toggleWhy()">
+                        <span class="chev">▶</span> <span>Why is Hermus doing this?</span>
+                    </div>
+                    <div class="why-panel collapse-body" id="whyPanel"></div>
+                </div>
+            </section>
+
+            <!-- Timeline (point 2) -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>🧭 Timeline</h2>
+                    <button class="link" onclick="toggleRawEvents()" id="rawEventsBtn">Advanced Events</button>
+                </div>
+                <div class="timeline" id="timeline">
+                    <div style="text-align:center; padding:28px; color:var(--text-secondary);" id="timelineEmpty">
+                        No activity yet. Start a task to see progress here.
+                    </div>
+                </div>
+                <!-- Raw events (progressive disclosure) -->
+                <div class="card-body collapse-body" id="rawEventsWrap" style="border-top:1px solid var(--border-color);">
+                    <div class="event-feed" id="eventFeed"></div>
+                </div>
+            </section>
+
+            <!-- Approval (point 7) -->
+            <section class="card" id="approvalCard" hidden>
+                <div class="card-header">
+                    <h2>🛡️ Hermus needs your permission</h2>
+                    <span class="muted" id="approvalCount">0</span>
+                </div>
+                <div class="card-body" id="approvalList"></div>
+            </section>
+
+            <!-- ===================== ADVANCED SECTIONS ===================== -->
+            <div class="advanced">
+                <div class="grid-2">
+                    <!-- World state (point 5) -->
+                    <section class="card">
+                        <div class="card-header">
+                            <h2>🧠 World State</h2>
+                            <div class="segmented">
+                                <button id="wsSimple" class="active" onclick="setWorldView('simple')">Simple</button>
+                                <button id="wsAdvanced" onclick="setWorldView('advanced')">Advanced</button>
+                            </div>
+                        </div>
+                        <div class="card-body" id="worldSimple">
+                            <div class="kv-grid">
+                                <div class="kv"><label>Application</label><div class="value" id="wsApp">—</div></div>
+                                <div class="kv"><label>Current target</label><div class="value" id="wsTarget">—</div></div>
+                                <div class="kv"><label>Confidence</label><div class="value" id="wsConf">—</div></div>
+                                <div class="kv"><label>State</label><div class="value" id="wsState">—</div></div>
+                            </div>
+                        </div>
+                        <div class="card-body" id="worldAdvanced" style="display:none;">
+                            <div class="cat-block"><h3>Observed</h3>
+                                <div class="kv-grid">
+                                    <div class="kv"><label>Application</label><div class="value" id="waApp">—</div></div>
+                                    <div class="kv"><label>Window</label><div class="value" id="waWindow">—</div></div>
+                                    <div class="kv"><label>Dialogs</label><div class="value" id="waDialogs">—</div></div>
+                                    <div class="kv"><label>Visible targets</label><div class="value" id="waTargets">—</div></div>
+                                </div>
+                            </div>
+                            <div class="cat-block"><h3>Inferred</h3>
+                                <div class="kv-grid">
+                                    <div class="kv"><label>Task state</label><div class="value" id="waTaskState">—</div></div>
+                                    <div class="kv"><label>Confidence</label><div class="value" id="waConf">—</div></div>
+                                </div>
+                            </div>
+                            <div class="cat-block"><h3>Expected</h3>
+                                <div class="kv-grid">
+                                    <div class="kv"><label>Expected state</label><div class="value" id="waExpected">—</div></div>
+                                    <div class="kv"><label>Last action</label><div class="value" id="waLastAction">—</div></div>
+                                </div>
+                            </div>
+                            <div class="cat-block"><h3>Unknown</h3>
+                                <div class="kv"><label>Not yet determined</label><div class="value" id="waUnknown">—</div></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Plan graph (point 9) -->
+                    <section class="card">
+                        <div class="card-header">
+                            <h2>🗺️ Plan</h2>
+                            <button class="link" id="expandPlanBtn" onclick="togglePlanExpand()">Expand plan</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="plan-changed" id="planChanged" hidden></div>
+                            <div class="plan-title" id="planTitle">No plan yet</div>
+                            <div id="planSimple"></div>
+                            <div id="planDag" class="collapse-body"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="grid-2">
+                    <!-- Repairs -->
+                    <section class="card">
+                        <div class="card-header"><h2>🔧 Repairs</h2></div>
+                        <div class="card-body" id="repairsBody"><span class="muted">No repairs yet.</span></div>
+                    </section>
+
+                    <!-- Skills -->
+                    <section class="card">
+                        <div class="card-header"><h2>📚 Skills</h2></div>
+                        <div class="card-body" id="skillsBody"><span class="muted">Loading…</span></div>
+                    </section>
+                </div>
+
+                <!-- Diagnostics (point 6) -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2>📊 Diagnostics</h2>
+                        <span class="muted" id="resStamp">—</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="stats-grid">
+                            <div class="stat-item"><div class="stat-value" id="dActions">0</div><div class="stat-label">Actions</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dRepairs">0</div><div class="stat-label">Repairs</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dVerified">0</div><div class="stat-label">Verified</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dDuration">0s</div><div class="stat-label">Duration</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dLlm">0</div><div class="stat-label">LLM calls</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dVision">0</div><div class="stat-label">Vision calls</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dReplans">0</div><div class="stat-label">Replans</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dCpu">—</div><div class="stat-label">CPU</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dMem">—</div><div class="stat-label">RAM</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dThreads">—</div><div class="stat-label">Threads</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dEvents">—</div><div class="stat-label">Events buffered</div></div>
+                            <div class="stat-item"><div class="stat-value" id="dTokens">—</div><div class="stat-label">Tokens</div></div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="grid-2">
+                    <!-- Episodes -->
+                    <section class="card">
+                        <div class="card-header"><h2>🎬 Episodes</h2></div>
+                        <div class="card-body" id="episodesBody"><span class="muted">Loading…</span></div>
+                    </section>
+
+                    <!-- Delegation -->
+                    <section class="card">
+                        <div class="card-header"><h2>🤝 Delegation</h2></div>
+                        <div class="card-body" id="delegationsBody"><span class="muted">Loading…</span></div>
+                    </section>
+                </div>
+            </div>
+        </main>
+
+        <!-- ===================== SIDEBAR ===================== -->
+        <aside class="col-side">
+            <!-- Task history (point 12) -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>🕘 Recent Tasks</h2>
+                    <button class="link" onclick="refreshHistory()">Refresh</button>
+                </div>
+                <div class="history-list" id="historyList">
+                    <div style="padding:16px; color:var(--text-secondary);">No tasks yet.</div>
+                </div>
+            </section>
+        </aside>
     </div>
-    
-    <div class="main-container">
-        <div class="left-panel">
-            <!-- Live Screen -->
-            <div class="card" style="margin-bottom: 20px;">
-                <div class="card-header">
-                    <h2>🖥️ Live Screen</h2>
-                    <span style="font-size: 0.75rem; color: var(--text-secondary);">Phase C remote view</span>
-                </div>
-                <div style="padding: 12px;">
-                    <img id="liveScreen" alt="live screen" style="width:100%; aspect-ratio:16/9; object-fit:contain; background:#0d1120; border-radius:8px; display:block;">
-                    <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-                        <span id="liveFrameInfo" style="font-size:0.72rem; color:var(--text-secondary);">waiting for a live frame…</span>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Stats -->
-            <div class="card" style="margin-bottom: 20px;">
-                <div class="card-body">
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <div class="stat-value" id="statActions">0</div>
-                            <div class="stat-label">Actions</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="statRepairs">0</div>
-                            <div class="stat-label">Repairs</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="statVerifications">0</div>
-                            <div class="stat-label">Verified</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="statDuration">0s</div>
-                            <div class="stat-label">Duration</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Event Feed -->
-            <div class="card">
-                <div class="card-header">
-                    <h2>📡 Live Events</h2>
-                    <span id="eventCount" style="font-size: 0.75rem; color: var(--text-secondary);">0 events</span>
-                </div>
-                <div class="event-feed" id="eventFeed">
-                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                        Waiting for events...
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="right-panel">
-            <!-- Control Panel -->
-            <div class="card" style="margin-bottom: 20px;">
-                <div class="card-header">
-                    <h2>🎛️ Controls</h2>
-                </div>
-                <div class="card-body control-panel">
-                    <div class="task-input-container">
-                        <textarea class="task-input" id="taskInput" rows="2" 
-                            placeholder="Enter task (e.g., 'Open Calculator and verify it works')"></textarea>
-                    </div>
-                    <div class="control-buttons">
-                        <button class="control-btn run" id="btnRun" onclick="runTask()">
-                            ▶ Run
-                        </button>
-                        <button class="control-btn pause" id="btnPause" onclick="pauseTask()" disabled>
-                            ⏸ Pause
-                        </button>
-                        <button class="control-btn run" id="btnResume" onclick="resumeTask()" disabled>
-                            ▶ Resume
-                        </button>
-                        <button class="control-btn cancel" id="btnCancel" onclick="cancelTask()" disabled>
-                            ⏹ Cancel
-                        </button>
-                        <button class="control-btn emergency" id="btnEmergency" onclick="emergencyStop()">
-                            🔴 EMERGENCY STOP
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Approval Prompts -->
-            <div class="card" style="margin-bottom: 20px; display:none;" id="approvalCard">
-                <div class="card-header">
-                    <h2>🛡️ Approval Needed</h2>
-                    <span id="approvalCount" style="font-size: 0.75rem; color: var(--accent-yellow);">0</span>
-                </div>
-                <div class="card-body" id="approvalList">
-                    <div style="color: var(--text-secondary); font-size:0.8rem;">No actions awaiting approval.</div>
-                </div>
-            </div>
-
-            <!-- World State -->
-            <div class="card">
-                <div class="card-header">
-                    <h2>🧠 World State</h2>
-                </div>
-                <div class="card-body">
-                    <div class="world-state-grid">
-                        <div class="world-state-item">
-                            <label>Application</label>
-                            <div class="value" id="wsApp">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Window</label>
-                            <div class="value" id="wsWindow">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Task State</label>
-                            <div class="value" id="wsTaskState">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Confidence</label>
-                            <div class="value" id="wsConfidence">—</div>
-                        </div>
-                    </div>
-                    <div style="margin-top: 16px;">
-                        <div class="world-state-item" style="margin-bottom: 8px;">
-                            <label>Visible Targets</label>
-                            <div class="value" id="wsTargets">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Dialogs</label>
-                            <div class="value" id="wsDialogs">—</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Resources -->
-            <div class="card" style="margin-top: 20px;">
-                <div class="card-header">
-                    <h2>📈 Resources</h2>
-                    <span id="resStamp" style="font-size:0.72rem; color:var(--text-secondary);">—</span>
-                </div>
-                <div class="card-body">
-                    <div class="world-state-grid">
-                        <div class="world-state-item">
-                            <label>CPU</label>
-                            <div class="value" id="resCpu">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Memory</label>
-                            <div class="value" id="resMem">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Threads</label>
-                            <div class="value" id="resThreads">—</div>
-                        </div>
-                        <div class="world-state-item">
-                            <label>Events Buffered</label>
-                            <div class="value" id="resEvents">—</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
     <script>
-        // State
+        // ============================= State =============================
+        let mode = localStorage.getItem('hermus.mode') || 'simple';
+        let autonomous = localStorage.getItem('hermus.autonomous') !== 'off';
+        let visionMode = 'simple';
+        let worldView = 'simple';
+        let whyOpen = false;
+        let rawEventsOpen = false;
+        let planExpanded = false;
+
         let ws = null;
-        let eventCount = 0;
+        let currentTask = null;      // checkpoint summary
         let currentTaskId = null;
         let taskRunning = false;
         let taskPaused = false;
-        let stats = { actions: 0, repairs: 0, verifications: 0, startTime: null };
-        
-        // Event type icons
-        const eventIcons = {
-            'task_started': { icon: '🧠', class: 'task' },
-            'plan_created': { icon: '📋', class: 'plan' },
-            'action_started': { icon: '🖱️', class: 'action' },
-            'action_completed': { icon: '✅', class: 'action' },
-            'verification_completed': { icon: '🔍', class: 'verify' },
-            'repair_started': { icon: '🔧', class: 'repair' },
-            'repair_completed': { icon: '🛠️', class: 'repair' },
-            'checkpoint_saved': { icon: '💾', class: 'world' },
-            'world_changed': { icon: '🌍', class: 'world' },
-            'task_completed': { icon: '🏁', class: 'success' },
-            'task_failed': { icon: '❌', class: 'failed' },
-            'task_paused': { icon: '⏸️', class: 'world' },
-            'task_resumed': { icon: '▶️', class: 'action' },
-            'task_cancelled': { icon: '🚫', class: 'failed' },
-            'emergency_stop': { icon: '🔴', class: 'emergency' },
-            'emergency_stop_released': { icon: '🟢', class: 'success' },
-            'skill_recalled': { icon: '📚', class: 'plan' },
-        };
-        
-        // Connect WebSocket
+        let halted = false;
+
+        let stats = { actions:0, repairs:0, verifications:0, startTime:null, llm:0, vision:0, replans:0 };
+        let world = {};
+        let plan = null;
+        let planSignature = '';
+        let planChangedNote = null;
+        let timeline = [];           // friendly steps
+        let rawEvents = [];
+        let approvals = [];
+        let historyTasks = [];
+        let lastEventType = null;
+        let lastAction = null;       // {label, kind, expected, state}
+        let lastVerification = null;
+        let currentActivity = 'Waiting for a task';
+
+        const $ = (id) => document.getElementById(id);
+
+        // ============================= Mode / toggles =============================
+        function setMode(m) {
+            mode = m;
+            localStorage.setItem('hermus.mode', m);
+            document.body.classList.toggle('mode-advanced', m === 'advanced');
+            $('modeSimple').classList.toggle('active', m === 'simple');
+            $('modeAdvanced').classList.toggle('active', m === 'advanced');
+            if (m === 'advanced') {
+                refreshSkills(); refreshEpisodes(); refreshDelegations();
+            }
+        }
+
+        function setVisionMode(m) {
+            visionMode = m;
+            $('vsSimple').classList.toggle('active', m === 'simple');
+            $('vsAdvanced').classList.toggle('active', m === 'advanced');
+            $('visionPanel').style.display = m === 'advanced' ? 'grid' : 'none';
+            renderVisionPanel();
+        }
+
+        function setWorldView(m) {
+            worldView = m;
+            $('wsSimple').classList.toggle('active', m === 'simple');
+            $('wsAdvanced').classList.toggle('active', m === 'advanced');
+            $('worldSimple').style.display = m === 'simple' ? '' : 'none';
+            $('worldAdvanced').style.display = m === 'advanced' ? '' : 'none';
+        }
+
+        async function toggleAutonomous(e) {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            autonomous = !autonomous;
+            localStorage.setItem('hermus.autonomous', autonomous ? 'on' : 'off');
+            $('autoToggle').classList.toggle('on', autonomous);
+            try {
+                await fetch('/remote/approval/enable', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !autonomous, required_risk: 'medium' })
+                });
+            } catch (err) { console.error(err); }
+            if (autonomous) {
+                // Auto-approve anything already queued so nothing blocks.
+                approvals.filter(p => p.state === 'pending').forEach(p => decide(p.prompt_id, true));
+            }
+            refreshApprovals();
+            renderGlobalStatus();
+        }
+
+        function toggleWhy() {
+            whyOpen = !whyOpen;
+            $('whyCard').classList.toggle('open', whyOpen);
+        }
+
+        function toggleRawEvents() {
+            rawEventsOpen = !rawEventsOpen;
+            $('timeline').parentElement.classList.toggle('open', rawEventsOpen);
+            $('rawEventsWrap').classList.toggle('collapse-body', !rawEventsOpen);
+            $('rawEventsWrap').style.display = rawEventsOpen ? 'block' : 'none';
+        }
+
+        function togglePlanExpand() {
+            planExpanded = !planExpanded;
+            $('expandPlanBtn').textContent = planExpanded ? 'Collapse plan' : 'Expand plan';
+            renderPlan();
+        }
+
+        function pickSuggestion(el) {
+            $('taskInput').value = el.textContent;
+            $('taskInput').focus();
+        }
+
+        // ============================= WebSocket =============================
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/computer/events`;
-            
             ws = new WebSocket(wsUrl);
-            
             ws.onopen = () => {
-                document.getElementById('wsStatus').textContent = 'Connected';
-                document.getElementById('wsDot').classList.remove('disconnected');
+                $('wsStatus').textContent = 'Connected';
+                $('wsDot').classList.remove('disconnected');
+                renderGlobalStatus();
             };
-            
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.kind === 'snapshot') {
-                        handleSnapshot(data.events);
+                        data.events.reverse().forEach(handleEvent);
                     } else if (data.kind === 'ping') {
-                        // Keepalive
+                        // keepalive
                     } else {
                         handleEvent(data);
                     }
-                } catch (e) {
-                    console.error('WS parse error:', e);
-                }
+                } catch (e) { console.error('WS parse error:', e); }
             };
-            
             ws.onclose = () => {
-                document.getElementById('wsStatus').textContent = 'Disconnected - reconnecting...';
-                document.getElementById('wsDot').classList.add('disconnected');
+                $('wsStatus').textContent = 'Reconnecting…';
+                $('wsDot').classList.add('disconnected');
                 setTimeout(connect, 2000);
             };
-            
-            ws.onerror = () => {
-                document.getElementById('wsStatus').textContent = 'Error';
-            };
+            ws.onerror = () => { $('wsStatus').textContent = 'Error'; };
         }
-        
-        function handleSnapshot(events) {
-            events.reverse().forEach(handleEvent);
-        }
-        
+
+        function handleSnapshot(events) { events.reverse().forEach(handleEvent); }
+
         function handleEvent(event) {
-            eventCount++;
-            
-            // Update stats
             const type = event.type;
+            const data = event.data || {};
+            lastEventType = type;
+            if (data.task_id) currentTaskId = data.task_id;
+
+            // stats
             if (type === 'action_completed') stats.actions++;
             if (type === 'repair_completed') stats.repairs++;
-            if (type === 'verification_completed') stats.verifications++;
-            
-            // Update task state
-            const data = event.data || {};
-            if (data.task_id) currentTaskId = data.task_id;
-            
+            if (type === 'verification_completed') { stats.verifications++; stats.vision++; }
+            if (type === 'screen_event') stats.vision++;
+            if (type === 'plan_created') stats.llm++;
+            if (type === 'repair_started') { stats.llm++; stats.replans++; }
+
+            // lifecycle
             if (type === 'task_started') {
-                taskRunning = true;
-                taskPaused = false;
-                stats = { actions: 0, repairs: 0, verifications: 0, startTime: Date.now() };
-                updateButtons();
+                taskRunning = true; taskPaused = false;
+                stats = { actions:0, repairs:0, verifications:0, startTime: Date.now(), llm:0, vision:0, replans:0 };
+                timeline = [];
+                planSignature = '';
+                planChangedNote = null;
+                currentActivity = `Starting: ${data.task || 'task'}`;
+                renderTimeline();
+                if (data.task_id) loadPlan(data.task_id);
             }
-            
             if (type === 'task_completed' || type === 'task_failed') {
-                taskRunning = false;
-                taskPaused = false;
-                updateButtons();
+                taskRunning = false; taskPaused = false;
+                currentActivity = type === 'task_completed' ? 'Task completed' : 'Task failed';
+                refreshStatus(); refreshHistory();
             }
-            
-            if (type === 'task_paused') {
-                taskPaused = true;
-                updateButtons();
+            if (type === 'task_paused') { taskPaused = true; currentActivity = 'Paused'; }
+            if (type === 'task_resumed') { taskPaused = false; }
+            if (type === 'task_cancelled') { taskRunning = false; taskPaused = false; currentActivity = 'Cancelled'; refreshStatus(); refreshHistory(); }
+            if (type === 'emergency_stop') { halted = true; taskRunning = false; currentActivity = 'Stopped'; }
+            if (type === 'emergency_stop_released') { halted = false; }
+
+            // action / verification context (for "Why" + live screen)
+            if (type === 'action_started') {
+                lastAction = { label: data.action || '', kind: data.spec?.kind || kindOf(data.action), expected: '', state: data.state, outcome: null };
+                currentActivity = friendlyAction(lastAction.label, 'ing');
             }
-            
-            if (type === 'task_resumed') {
-                taskPaused = false;
-                updateButtons();
+            if (type === 'action_completed') {
+                lastAction = { label: data.action || '', kind: data.spec?.kind || kindOf(data.action), expected: data.expected || '', state: data.state, outcome: data.outcome };
+                currentActivity = (data.ok === false ? 'Recovering from: ' : 'Finished: ') + friendlyAction(data.action, 'past');
             }
-            
-            if (type === 'task_cancelled') {
-                taskRunning = false;
-                taskPaused = false;
-                updateButtons();
+            if (type === 'verification_completed') {
+                lastVerification = { ok: !!data.ok, confidence: data.confidence ?? 0, expected: data.expected || '', detail: data.detail || '' };
+                currentActivity = data.ok ? `Verified: ${data.expected || 'result'}` : `Verification failed: ${data.expected || 'result'}`;
             }
-            
-            if (type === 'emergency_stop') {
-                taskRunning = false;
-                updateButtons();
+            if (type === 'state_changed') {
+                currentActivity = `Moving to ${data.next_state || data.state || 'next step'}`;
             }
-            
-            // Update world state
-            if (type === 'world_changed' && data.world) {
-                updateWorldState(data.world);
+            if (type === 'repair_started') {
+                currentActivity = 'Choosing a recovery strategy';
+                planChangedNote = { summary: data.summary || data.kind || 'Problem detected', failure: data.failure_reason || '' };
+                renderPlanChanged();
             }
-            
-            // Update status badge
-            updateStatusBadge();
-            
-            // Update stats display
-            updateStats();
-            
-            // Add to feed
-            addEventToFeed(event);
+            if (type === 'repair_completed') {
+                currentActivity = data.ok ? 'Recovered' : 'Recovery failed';
+            }
+
+            // world
+            if (type === 'world_changed' && data.world) { world = Object.assign({}, world, data.world); renderWorld(); renderVisionPanel(); }
+
+            // timeline
+            const step = humanizeEvent(type, data);
+            if (step) pushTimeline(step);
+
+            // raw events
+            rawEvents.unshift(event);
+            if (rawEvents.length > 120) rawEvents.pop();
+            renderRawEvents();
+
+            renderMissionControl();
+            renderGlobalStatus();
+            renderDiagnostics();
+            renderWhy();
+            updateButtons();
         }
-        
-        function addEventToFeed(event) {
-            const feed = document.getElementById('eventFeed');
-            const type = event.type;
-            const data = event.data || {};
-            
-            const iconInfo = eventIcons[type] || { icon: '📌', class: 'world' };
-            
-            const item = document.createElement('div');
-            item.className = 'event-item';
-            
-            let title = formatEventTitle(type);
-            let detail = formatEventDetail(type, data);
-            let time = event.ts ? new Date(event.ts).toLocaleTimeString() : '';
-            
-            item.innerHTML = `
-                <div class="event-icon ${iconInfo.class}">${iconInfo.icon}</div>
-                <div class="event-content">
-                    <div class="event-title">${title}</div>
-                    <div class="event-detail">${detail}</div>
-                    <div class="event-time">${time}</div>
-                </div>
-            `;
-            
-            // Insert at top
-            if (feed.firstChild && feed.firstChild.className !== 'event-item') {
-                feed.innerHTML = '';
+
+        // ============================= Humanize events (point 2) =============================
+        function kindOf(label) {
+            return String(label || '').trim().split(/\s+/)[0].toLowerCase();
+        }
+
+        function friendlyAction(label, tense) {
+            const s = String(label || '').trim();
+            if (!s) return 'Acting';
+            const parts = s.split(/\s+/);
+            const kind = parts[0].toLowerCase();
+            const rest = parts.slice(1).join(' ');
+            const verbs = {
+                click: ['Clicked', 'Clicking'], double_click: ['Double-clicked', 'Double-clicking'],
+                right_click: ['Right-clicked', 'Right-clicking'], type_text: ['Typed', 'Typing'],
+                press_key: ['Pressed', 'Pressing'], hotkey: ['Pressed', 'Pressing'],
+                scroll: ['Scrolled', 'Scrolling'], open_application: ['Opened', 'Opening'],
+                close_application: ['Closed', 'Closing'], focus_window: ['Focused', 'Focusing'],
+                move_mouse: ['Moved mouse', 'Moving mouse'], wait_until: ['Waiting for', 'Waiting for'],
+                click_target: ['Clicked', 'Clicking'], shell: ['Ran', 'Running'], install_application: ['Installed', 'Installing'],
+            };
+            const v = verbs[kind] || ['Did', 'Doing'];
+            const idx = tense === 'past' ? 0 : 1;
+            if (kind === 'type_text') {
+                const txt = rest.length > 24 ? rest.slice(0, 24) + '…' : rest;
+                return `${v[idx]} "${txt}"`;
             }
-            feed.insertBefore(item, feed.firstChild);
-            
-            // Keep only last 100 events
-            while (feed.children.length > 100) {
-                feed.removeChild(feed.lastChild);
-            }
-            
-            document.getElementById('eventCount').textContent = `${eventCount} events`;
+            if (kind === 'wait_until') return `${v[idx]} ${rest}`;
+            return rest ? `${v[idx]} ${rest}` : v[idx];
         }
-        
-        function formatEventTitle(type) {
-            return type
-                .replace(/_/g, ' ')
-                .replace(/\b\w/g, l => l.toUpperCase());
+
+        function humanizeEvent(type, data) {
+            const T = {
+                task_started:        { icon:'🚀', status:'done', text:'Started task', detail: data.task || '' },
+                plan_created:        { icon:'🧭', status:'done', text:'Plan ready', detail: `${data.nodes || 0} steps` },
+                state_changed:       { icon:'➡️', status:'done', text:'Advanced', detail: `${data.next_state || data.state || ''}` },
+                action_started:      { icon:'●',  status:'active', text: friendlyAction(data.action, 'ing'), detail: data.state || '' },
+                action_completed:    { icon: data.ok === false ? '⚠️' : '✅', status: data.ok === false ? 'warn' : 'done', text: friendlyAction(data.action, 'past'), detail: data.expected || '' },
+                verification_completed:{ icon: data.ok ? '✅' : '⚠️', status: data.ok ? 'done' : 'warn', text: data.ok ? 'Verified result' : 'Verification failed', detail: data.expected || data.detail || '' },
+                repair_started:      { icon:'⚠️', status:'warn', text:'Problem detected', detail: data.summary || data.kind || '' },
+                repair_completed:    { icon: data.ok ? '🛠️' : '❌', status: data.ok ? 'done' : 'fail', text: data.ok ? 'Recovered' : 'Recovery failed', detail: data.action || '' },
+                checkpoint_saved:    { icon:'💾', status:'done', text:'Saved checkpoint', detail: data.state || '' },
+                skill_recalled:      { icon:'📚', status:'done', text:'Applied learned skill', detail: data.skill || '' },
+                task_completed:      { icon:'🏁', status:'done', text:'Task complete', detail: `Finished in ${data.duration || 0}s` },
+                task_failed:         { icon:'❌', status:'fail', text:'Task failed', detail: data.error || '' },
+                task_interrupted:    { icon:'⏸️', status:'warn', text:'Interrupted', detail: data.reason || '' },
+                task_paused:         { icon:'⏸️', status:'warn', text:'Paused', detail: data.state || '' },
+                task_resumed:        { icon:'▶️', status:'done', text:'Resumed', detail: '' },
+                task_cancelled:      { icon:'🚫', status:'fail', text:'Cancelled', detail: data.reason || '' },
+                emergency_stop:      { icon:'🔴', status:'fail', text:'Emergency stop', detail: data.reason || '' },
+                world_changed:       null,
+                screen_event:        null,
+            };
+            return T[type] || null;
         }
-        
-        function formatEventDetail(type, data) {
-            switch(type) {
-                case 'task_started':
-                    return data.task || 'Task started';
-                case 'plan_created':
-                    return `${data.nodes || 0} states`;
-                case 'action_started':
-                case 'action_completed':
-                    return `${data.action || 'Action'} - ${data.state || ''}`;
-                case 'verification_completed':
-                    return data.ok ? '✓ Verified' : '✗ Failed';
-                case 'repair_started':
-                    return data.summary || data.kind || 'Repair';
-                case 'repair_completed':
-                    return data.ok ? '✓ Repaired' : '✗ Repair failed';
-                case 'checkpoint_saved':
-                    return `${data.state || 'Checkpoint'} - ${data.status || ''}`;
-                case 'world_changed':
-                    return data.world?.application || 'World updated';
-                case 'task_completed':
-                    return `✓ Success - ${data.duration || 0}s`;
-                case 'task_failed':
-                    return `✗ Failed - ${data.error || 'Unknown error'}`;
-                case 'task_paused':
-                    return `Paused at ${data.state || 'unknown'}`;
-                case 'task_resumed':
-                    return `Resume #${data.resume_count || 1}`;
-                case 'task_cancelled':
-                    return data.reason || 'Cancelled by user';
-                case 'emergency_stop':
-                    return data.reason || 'EMERGENCY STOP ACTIVATED';
-                default:
-                    return JSON.stringify(data).slice(0, 100);
-            }
+
+        function pushTimeline(step) {
+            // Merge repeated verifications/actions to keep the timeline readable.
+            const last = timeline[timeline.length - 1];
+            if (last && last.status === 'active' && step.status === 'active' && last.text === step.text) return;
+            timeline.push({ ...step, ts: Date.now(), key: step.text + step.detail });
+            if (timeline.length > 60) timeline.shift();
+            renderTimeline();
         }
-        
-        function updateWorldState(world) {
-            if (!world) return;
-            document.getElementById('wsApp').textContent = world.application || '—';
-            document.getElementById('wsWindow').textContent = world.window || '—';
-            document.getElementById('wsTaskState').textContent = world.task_state || '—';
-            document.getElementById('wsConfidence').textContent = world.confidence ? `${(world.confidence * 100).toFixed(0)}%` : '—';
-            document.getElementById('wsTargets').textContent = (world.visible_targets || []).slice(0, 5).join(', ') || '—';
-            document.getElementById('wsDialogs').textContent = (world.dialogs || []).join(', ') || 'None';
-        }
-        
-        function updateStats() {
-            document.getElementById('statActions').textContent = stats.actions;
-            document.getElementById('statRepairs').textContent = stats.repairs;
-            document.getElementById('statVerifications').textContent = stats.verifications;
-            
-            if (stats.startTime) {
-                const elapsed = Math.floor((Date.now() - stats.startTime) / 1000);
-                document.getElementById('statDuration').textContent = `${elapsed}s`;
-            }
-        }
-        
-        function updateStatusBadge() {
-            const badge = document.getElementById('statusBadge');
-            badge.className = 'status-badge';
-            
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                if (taskRunning && !taskPaused) {
-                    badge.textContent = 'RUNNING';
-                    badge.classList.add('running');
-                } else if (taskPaused) {
-                    badge.textContent = 'PAUSED';
-                    badge.classList.add('paused');
-                } else {
-                    badge.textContent = 'IDLE';
-                    badge.classList.add('idle');
-                }
-            } else {
-                badge.textContent = 'DISCONNECTED';
-                badge.classList.add('idle');
-            }
-        }
-        
-        function updateButtons() {
-            document.getElementById('btnRun').disabled = taskRunning;
-            document.getElementById('btnPause').disabled = !taskRunning || taskPaused;
-            document.getElementById('btnResume').disabled = !taskPaused;
-            document.getElementById('btnCancel').disabled = !taskRunning;
-        }
-        
-        // API calls
-        async function runTask() {
-            const task = document.getElementById('taskInput').value.trim();
-            if (!task) {
-                alert('Please enter a task');
+
+        function renderTimeline() {
+            const el = $('timeline');
+            if (!timeline.length) {
+                el.innerHTML = '<div style="text-align:center; padding:28px; color:var(--text-secondary);">No activity yet. Start a task to see progress here.</div>';
                 return;
             }
-            
+            const items = timeline.map(t => {
+                const icon = t.status === 'active' ? '●' : (t.status === 'done' ? '✓' : (t.status === 'warn' ? '⚠' : (t.status === 'fail' ? '✗' : '○')));
+                const time = new Date(t.ts).toLocaleTimeString();
+                return `<div class="tl-item tl-${t.status}">
+                    <div class="tl-marker">${icon}</div>
+                    <div class="tl-body">
+                        <div class="tl-text">${esc(t.text)}</div>
+                        ${t.detail ? `<div class="tl-detail">${esc(t.detail)}</div>` : ''}
+                        <div class="tl-time">${time}</div>
+                    </div>
+                </div>`;
+            }).join('');
+            el.innerHTML = items;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function renderRawEvents() {
+            const el = $('eventFeed');
+            if (!rawEvents.length) { el.innerHTML = '<div style="color:var(--text-secondary); padding:10px;">No raw events yet.</div>'; return; }
+            el.innerHTML = rawEvents.map(e => {
+                const t = new Date(e.ts).toLocaleTimeString();
+                const detail = JSON.stringify(e.data || {}).slice(0, 160);
+                return `<div class="event-item">
+                    <div class="event-icon">${rawIcon(e.type)}</div>
+                    <div class="event-content">
+                        <div class="event-title">${esc(e.type)}</div>
+                        <div class="event-detail">${esc(detail)}</div>
+                        <div class="event-time">${t}</div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function rawIcon(type) {
+            const map = { task_started:'🚀', plan_created:'🧭', state_changed:'➡️', action_started:'🖱️', action_completed:'✅',
+                verification_completed:'🔍', repair_started:'🔧', repair_completed:'🛠️', checkpoint_saved:'💾',
+                world_changed:'🌍', task_completed:'🏁', task_failed:'❌', skill_recalled:'📚', emergency_stop:'🔴' };
+            return map[type] || '📌';
+        }
+
+        // ============================= Global status (point 10) =============================
+        function renderGlobalStatus() {
+            const el = $('globalStatus');
+            el.className = 'global-status gs-ready';
+            let label = 'Ready', detail = 'Waiting for a task', cls = 'gs-ready';
+
+            if (halted) { label = 'Stopped'; detail = 'Computer control is halted'; cls = 'gs-stopped'; }
+            else if (approvals.some(p => p.state === 'pending')) { label = 'Attention required'; detail = 'Approval needed to continue'; cls = 'gs-attention'; }
+            else if (taskRunning && taskPaused) { label = 'Waiting'; detail = 'Paused'; cls = 'gs-waiting'; }
+            else if (taskRunning) {
+                const thinkingTypes = ['state_changed', 'repair_started', 'plan_created'];
+                if (thinkingTypes.includes(lastEventType) || /choosing|moving to/i.test(currentActivity)) {
+                    label = 'Thinking'; cls = 'gs-thinking';
+                } else if (/waiting for|wait_until/i.test(currentActivity)) {
+                    label = 'Waiting'; cls = 'gs-waiting';
+                } else {
+                    label = 'Working'; cls = 'gs-working';
+                }
+                detail = currentActivity;
+            }
+            el.className = 'global-status ' + cls;
+            $('gsLabel').textContent = label;
+            $('gsDetail').textContent = detail;
+        }
+
+        // ============================= Mission Control (point 1) =============================
+        function renderMissionControl() {
+            const running = taskRunning || (currentTask && currentTask.status === 'running');
+            $('missionCard').hidden = !running;
+            $('emptyCard').hidden = running;
+            if (!running) return;
+
+            const t = currentTask || {};
+            $('mcTask').textContent = t.task || currentActivity;
+            $('mcPct').textContent = Math.round(t.progress ?? 0) + '%';
+            $('mcProgress').style.width = Math.max(2, Math.round(t.progress ?? 0)) + '%';
+            $('mcCurrent').textContent = humanizeState(t.current_state || t.task_state) || currentActivity;
+            $('mcNext').textContent = nextStateName() || '—';
+            $('mcStatusText').textContent = taskPaused ? 'Hermus is paused' : (t.status === 'success' ? 'Completed' : 'Hermus is running');
+            $('mcDot').style.background = taskPaused ? 'var(--accent-yellow)' : (t.status === 'success' ? 'var(--accent-green)' : 'var(--accent-green)');
+        }
+
+        function humanizeState(s) {
+            if (!s) return '';
+            return String(s).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        function nextStateName() {
+            if (!plan) return null;
+            const names = (plan.graph?.nodes || []).map(n => n.name);
+            const cur = plan.current_state || currentTask?.current_state;
+            if (!cur) return names[0] || null;
+            const idx = names.indexOf(cur);
+            if (idx >= 0 && idx + 1 < names.length) return humanizeState(names[idx + 1]);
+            return null;
+        }
+
+        function updateButtons() {
+            $('btnPause').disabled = !taskRunning || taskPaused;
+            $('btnResume').disabled = !taskPaused;
+            $('btnCancel').disabled = !taskRunning;
+        }
+
+        // ============================= Why? (point 4) =============================
+        function renderWhy() {
+            const show = taskRunning || (currentTask && currentTask.status === 'running');
+            $('whyCard').hidden = !show;
+            if (!show) return;
+
+            const goal = currentTask?.task || 'Current task';
+            const node = currentPlanNode();
+            const kind = node?.action?.kind || lastAction?.kind || '';
+            const actionLabel = node ? friendlyAction(kind + ' ' + (node.action.target || node.action.text || node.action.name || node.action.key || ''), 'ing') : (lastAction ? friendlyAction(lastAction.label, 'ing') : currentActivity);
+            const risk = actionRisk(kind);
+            const conf = lastVerification?.confidence ?? world?.confidence ?? 0;
+            const confPct = conf != null ? Math.round(conf * 100) + '%' : '—';
+            const expected = node?.expected || lastAction?.expected || lastVerification?.expected || 'The intended visible result appears';
+
+            $('whyPanel').innerHTML = `
+                <div class="why-grid">
+                    <div class="why-cell"><label>Goal</label><div class="value">${esc(goal)}</div></div>
+                    <div class="why-cell"><label>Current state</label><div class="value">${esc(humanizeState(world?.task_state || node?.name || '—'))}</div></div>
+                    <div class="why-cell"><label>Action</label><div class="value">${esc(actionLabel)}</div></div>
+                    <div class="why-cell"><label>Confidence</label><div class="value">${confPct}</div></div>
+                    <div class="why-cell"><label>Risk</label><div class="value"><span class="risk-pill risk-${risk.level.toLowerCase()}">${risk.level}</span></div></div>
+                    <div class="why-cell"><label>Expected result</label><div class="value">${esc(expected)}</div></div>
+                </div>`;
+        }
+
+        function currentPlanNode() {
+            if (!plan) return null;
+            const cur = plan.current_state || currentTask?.current_state;
+            return (plan.graph?.nodes || []).find(n => n.name === cur) || null;
+        }
+
+        function actionRisk(kind) {
+            const k = String(kind || '').toLowerCase();
+            if (k.includes('shell') || k.includes('install') || k.includes('command')) return { level:'HIGH' };
+            if (k.includes('click') || k.includes('press') || k.includes('hotkey') || k.includes('type')) return { level:'MEDIUM' };
+            return { level:'LOW' };
+        }
+
+        // ============================= Live screen (point 3) =============================
+        function renderVisionPanel() {
+            const overlay = $('visionOverlay');
+            const target = (world.visible_targets || [])[0];
+            const conf = world.confidence != null ? Math.round(world.confidence * 100) + '%' : '—';
+            overlay.innerHTML = target
+                ? `<span class="chip">🎯 <b>${esc(target)}</b></span><span class="chip">Confidence <b>${conf}</b></span>`
+                : '';
+
+            if (visionMode !== 'advanced') return;
+            const node = currentPlanNode();
+            $('visionPanel').innerHTML = `
+                <div class="vision-item"><label>Detected target</label><div class="value">${esc(target || '—')}</div></div>
+                <div class="vision-item"><label>Confidence</label><div class="value">${conf}</div></div>
+                <div class="vision-item"><label>Current action</label><div class="value">${esc(lastAction ? friendlyAction(lastAction.label, 'ing') : (currentActivity || '—'))}</div></div>
+                <div class="vision-item"><label>Verification region</label><div class="value">${esc(lastVerification?.expected || node?.expected || '—')}</div></div>
+                <div class="vision-item"><label>Cursor position</label><div class="value">—</div></div>
+                <div class="vision-item"><label>Bounding box</label><div class="value">—</div></div>`;
+        }
+
+        // ============================= Approvals (point 7) =============================
+        function renderApprovals() {
+            const pending = approvals.filter(p => p.state === 'pending');
+            const card = $('approvalCard');
+            card.hidden = pending.length === 0;
+            if (!pending.length) { $('approvalList').innerHTML = ''; return; }
+            $('approvalCount').textContent = pending.length;
+
+            $('approvalList').innerHTML = pending.map(p => {
+                const risk = (p.risk || 'medium').toLowerCase();
+                const riskLabel = risk.toUpperCase();
+                const isHigh = risk === 'high';
+                const title = isHigh ? '🔴 High-risk action' : '🛡️ Hermus needs your permission';
+                const note = isHigh ? 'This can modify your system.' : 'This action was requested as part of your task.';
+                return `<div class="approval-item ${risk}">
+                    <div class="approval-head">${title}</div>
+                    <div class="approval-why">Hermus wants to:</div>
+                    <div class="approval-action">${esc(p.action)}</div>
+                    <div class="approval-why">${esc(p.description || '')}</div>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span class="risk-pill risk-${risk}">${riskLabel} risk</span>
+                        <span class="tiny">${note}</span>
+                    </div>
+                    <div class="approval-btns">
+                        <button class="control-btn run" onclick="decide('${p.prompt_id}', true)">✓ Allow once</button>
+                        <button class="control-btn pause" onclick="decide('${p.prompt_id}', true)">✓ Allow for this task</button>
+                        <button class="control-btn cancel" onclick="decide('${p.prompt_id}', false)">✗ Deny</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // ============================= World state (point 5) =============================
+        function renderWorld() {
+            const w = world || {};
+            const target = (w.visible_targets || [])[0] || '—';
+            const conf = w.confidence != null ? Math.round(w.confidence * 100) + '%' : '—';
+            $('wsApp').textContent = w.application || '—';
+            $('wsTarget').textContent = target;
+            $('wsConf').textContent = conf;
+            $('wsState').textContent = humanizeState(w.task_state) || '—';
+
+            $('waApp').textContent = w.application || '—';
+            $('waWindow').textContent = w.window || '—';
+            $('waDialogs').textContent = (w.dialogs || []).join(', ') || 'None';
+            $('waTargets').textContent = (w.visible_targets || []).slice(0, 6).join(', ') || '—';
+            $('waTaskState').textContent = humanizeState(w.task_state) || '—';
+            $('waConf').textContent = conf;
+            $('waExpected').textContent = currentPlanNode()?.expected || lastAction?.expected || '—';
+            $('waLastAction').textContent = lastAction ? friendlyAction(lastAction.label, 'past') : '—';
+            $('waUnknown').textContent = '—';
+        }
+
+        // ============================= Plan (point 9) =============================
+        function renderPlan() {
+            const nodes = plan?.graph?.nodes || [];
+            if (!nodes.length) {
+                $('planTitle').textContent = 'No plan yet';
+                $('planSimple').innerHTML = '<span class="muted">Start a task to see its plan.</span>';
+                $('planDag').innerHTML = '';
+                return;
+            }
+            $('planTitle').textContent = String(plan.task || 'Task').toUpperCase();
+            const completed = new Set(plan.completed || []);
+            const failed = new Set(plan.failed || []);
+            const cur = plan.current_state || currentTask?.current_state;
+
+            $('planSimple').innerHTML = nodes.map(n => {
+                let status = 'todo', icon = '○';
+                if (completed.has(n.name)) { status = 'done'; icon = '✓'; }
+                else if (failed.has(n.name)) { status = 'fail'; icon = '✗'; }
+                else if (n.name === cur) { status = 'current'; icon = '●'; }
+                return `<div class="plan-step">
+                    <div class="plan-marker ${status}">${icon}</div>
+                    <div>
+                        <div class="name">${esc(humanizeState(n.name))}</div>
+                        <div class="goal">${esc(n.goal || n.expected || '')}</div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            if (planExpanded) {
+                $('planDag').innerHTML = nodes.map(n => `
+                    <div class="dag-node">
+                        <div class="dn-name">${esc(n.name)}</div>
+                        <div class="dn-line">action: ${esc(n.action?.kind || '?')}${n.action?.target ? ' → ' + esc(n.action.target) : ''}</div>
+                        <div class="dn-line">expected: ${esc(n.expected || '')}</div>
+                        <div class="dn-line dn-arrow">✓ → ${esc(n.on_success || 'SUCCESS')} · ✗ → ${esc(n.on_failure || 'FAILURE')}</div>
+                        ${n.depends_on?.length ? `<div class="dn-line">depends_on: ${esc(n.depends_on.join(', '))}</div>` : ''}
+                    </div>`).join('');
+            } else {
+                $('planDag').innerHTML = '';
+            }
+        }
+
+        function renderPlanChanged() {
+            const el = $('planChanged');
+            if (!planChangedNote) { el.hidden = true; return; }
+            el.hidden = false;
+            el.innerHTML = `<b>⚠ Plan changed</b><br>Hermus encountered an unexpected state and created a recovery step.<br>
+                <span class="muted">${esc(planChangedNote.summary)}${planChangedNote.failure ? ' — ' + esc(planChangedNote.failure) : ''}</span>`;
+        }
+
+        // ============================= Diagnostics (point 6) =============================
+        function renderDiagnostics() {
+            $('dActions').textContent = stats.actions;
+            $('dRepairs').textContent = stats.repairs;
+            $('dVerified').textContent = stats.verifications;
+            $('dLlm').textContent = stats.llm;
+            $('dVision').textContent = stats.vision;
+            $('dReplans').textContent = stats.replans;
+            if (stats.startTime) {
+                $('dDuration').textContent = Math.floor((Date.now() - stats.startTime) / 1000) + 's';
+            }
+        }
+
+        // ============================= History (point 12) =============================
+        function renderHistory() {
+            const el = $('historyList');
+            if (!historyTasks.length) {
+                el.innerHTML = '<div style="padding:16px; color:var(--text-secondary);">No tasks yet.</div>';
+                return;
+            }
+            el.innerHTML = historyTasks.map(t => {
+                const icon = t.status === 'success' ? '✅' : (t.status === 'failed' ? '❌' : (t.status === 'running' ? '🔵' : '⚠️'));
+                const name = t.task || t.task_id;
+                const when = t.updated_at ? timeAgo(t.updated_at) : '';
+                return `<div class="hist-item ${t.task_id === currentTaskId ? 'active' : ''}" onclick="openTask('${t.task_id}')">
+                    <span class="hist-icon">${icon}</span>
+                    <div class="hist-body">
+                        <div class="hist-name">${esc(name)}</div>
+                        <div class="hist-meta">${when} · ${Math.round(t.progress || 0)}% · ${t.actions || 0} actions</div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function timeAgo(iso) {
+            try {
+                const s = (Date.now() - new Date(iso).getTime()) / 1000;
+                if (s < 60) return 'just now';
+                if (s < 3600) return Math.floor(s / 60) + 'm ago';
+                if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+                return Math.floor(s / 86400) + 'd ago';
+            } catch (e) { return ''; }
+        }
+
+        async function openTask(taskId) {
+            try {
+                const r = await fetch(`/computer/task/${taskId}`).then(r => r.json());
+                const done = (r.completed_states || []).length;
+                const pend = (r.pending_states || []).length;
+                const progress = r.progress != null ? r.progress : Math.round(done / Math.max(1, done + pend) * 100);
+                currentTaskId = taskId;
+                currentTask = {
+                    task: r.task, task_id: taskId, status: r.status,
+                    current_state: r.current_state, progress,
+                    completed: done, pending: pend,
+                    actions: (r.actions || []).length, repairs: ((r.repairs || {}).repairs || []).length,
+                };
+                // restore plan + world + timeline + repairs
+                plan = {
+                    task: r.task, current_state: r.current_state,
+                    completed: r.completed_states || [], failed: r.failed_states || [],
+                    graph: r.graph || { nodes: [] },
+                };
+                renderPlan();
+                world = Object.assign({}, world, {
+                    application: r.world_state?.active_application,
+                    window: r.world_state?.active_window,
+                    task_state: r.world_state?.task_state,
+                    confidence: r.world_state?.confidence,
+                    visible_targets: r.world_state?.visible_targets || [],
+                    dialogs: r.world_state?.dialogs || [],
+                });
+                renderWorld();
+                renderMissionControl();
+                renderWhy();
+                renderRepairs({ repairs: ((r.repairs || {}).repairs || []) });
+                // recording link
+                if (r.recording) {
+                    $('repairsBody').insertAdjacentHTML('afterbegin',
+                        `<div style="margin-bottom:8px;"><a href="${r.recording.url}" target="_blank" class="link">🎥 Watch recording (${r.recording.size_mb} MB)</a></div>`);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        // ============================= Repairs / Skills / Episodes / Delegation =============================
+        function renderRepairs(data) {
+            const reps = data.repairs || [];
+            if (!reps.length) { $('repairsBody').innerHTML = '<span class="muted">No repairs yet.</span>'; return; }
+            $('repairsBody').innerHTML = reps.slice(-8).reverse().map(r => {
+                const ok = !!r.success;
+                return `<div class="plan-step">
+                    <div class="plan-marker ${ok ? 'done' : 'fail'}">${ok ? '✓' : '✗'}</div>
+                    <div>
+                        <div class="name">${esc(r.kind || 'repair')}</div>
+                        <div class="goal">${esc(r.failure_reason || r.failure || '')}</div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function refreshSkills() {
+            try {
+                const r = await fetch('/computer/skills').then(r => r.json());
+                const skills = r.skills || [];
+                if (!skills.length) { $('skillsBody').innerHTML = '<span class="muted">No learned skills yet.</span>'; return; }
+                $('skillsBody').innerHTML = skills.slice(0, 8).map(s => {
+                    const sr = s.success_rate != null ? Math.round(s.success_rate * 100) : null;
+                    return `<div class="plan-step">
+                        <div class="plan-marker done">📚</div>
+                        <div><div class="name">${esc(s.name || 'skill')}</div>
+                        <div class="goal">${sr != null ? sr + '% success' : ''} · ${s.runs || 0} runs</div></div>
+                    </div>`;
+                }).join('');
+            } catch (e) {}
+        }
+
+        async function refreshEpisodes() {
+            try {
+                const r = await fetch('/computer/episodes?limit=8').then(r => r.json());
+                const eps = r.episodes || [];
+                if (!eps.length) { $('episodesBody').innerHTML = '<span class="muted">No recorded episodes.</span>'; return; }
+                $('episodesBody').innerHTML = eps.map(ep => `
+                    <div class="plan-step">
+                        <div class="plan-marker done">🎬</div>
+                        <div><div class="name">${esc(ep.task || ep.task_id || 'episode')}</div>
+                        <div class="goal">${esc(ep.outcome || '')}</div></div>
+                    </div>`).join('');
+            } catch (e) {}
+        }
+
+        async function refreshDelegations() {
+            try {
+                const r = await fetch('/computer/delegations').then(r => r.json());
+                const ds = r.delegations || [];
+                if (!ds.length) { $('delegationsBody').innerHTML = '<span class="muted">No delegations.</span>'; return; }
+                $('delegationsBody').innerHTML = ds.slice(0, 6).map(d => `
+                    <div class="plan-step">
+                        <div class="plan-marker done">🤝</div>
+                        <div><div class="name">${esc(d.task || 'delegation')}</div>
+                        <div class="goal">${(d.units || d.plan?.units || []).length || 0} work units</div></div>
+                    </div>`).join('');
+            } catch (e) {}
+        }
+
+        // ============================= API calls =============================
+        async function runTask() {
+            const task = $('taskInput').value.trim();
+            if (!task) { alert('Please enter a task'); return; }
             try {
                 const response = await fetch('/computer/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task, dry_run: false })
+                    body: JSON.stringify({ task, dry_run: !autonomous })
                 });
                 const result = await response.json();
-                
                 if (result.success) {
-                    currentTaskId = result.task_id;
-                    taskRunning = true;
-                    taskPaused = false;
-                    updateButtons();
+                    currentTaskId = result.task_id || null;
+                    taskRunning = true; taskPaused = false;
+                    currentActivity = `Starting: ${task}`;
+                    updateButtons(); renderMissionControl(); renderGlobalStatus();
+                    setTimeout(refreshStatus, 800);
                 }
-            } catch (e) {
-                console.error('Run error:', e);
-            }
+            } catch (e) { console.error(e); }
         }
-        
+
         async function pauseTask() {
             if (!currentTaskId) return;
-            
-            try {
-                await fetch(`/computer/control/pause/${currentTaskId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ reason: 'User requested pause' })
-                });
-            } catch (e) {
-                console.error('Pause error:', e);
-            }
+            await fetch(`/computer/control/pause/${currentTaskId}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: 'User requested pause' })
+            }).catch(console.error);
         }
-        
         async function resumeTask() {
             if (!currentTaskId) return;
-            
-            try {
-                await fetch(`/computer/control/resume/${currentTaskId}`, {
-                    method: 'POST'
-                });
-            } catch (e) {
-                console.error('Resume error:', e);
-            }
+            await fetch(`/computer/control/resume/${currentTaskId}`, { method: 'POST' }).catch(console.error);
         }
-        
         async function cancelTask() {
             if (!currentTaskId) return;
-            
-            try {
-                await fetch(`/computer/control/cancel/${currentTaskId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ reason: 'User requested cancellation' })
-                });
-            } catch (e) {
-                console.error('Cancel error:', e);
-            }
+            await fetch(`/computer/control/cancel/${currentTaskId}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: 'User requested cancellation' })
+            }).catch(console.error);
         }
-        
         async function emergencyStop() {
-            if (!confirm('⚠️ EMERGENCY STOP: This will immediately halt all computer actions. Continue?')) {
-                return;
-            }
-            
-            try {
-                await fetch('/computer/control/emergency-stop', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ reason: 'User emergency stop' })
-                });
-                taskRunning = false;
-                updateButtons();
-                updateStatusBadge();
-            } catch (e) {
-                console.error('Emergency stop error:', e);
-            }
+            if (!confirm('🔴 Stop Hermus: halt all computer actions now?')) return;
+            await fetch('/computer/control/emergency-stop', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: 'User stop from dashboard' })
+            }).catch(console.error);
+            halted = true; taskRunning = false;
+            updateButtons(); renderMissionControl(); renderGlobalStatus();
         }
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey || e.metaKey) {
-                switch(e.key) {
-                    case 'Enter':
-                        e.preventDefault();
-                        runTask();
-                        break;
-                    case ' ':
-                        e.preventDefault();
-                        if (taskPaused) resumeTask();
-                        else pauseTask();
-                        break;
-                    case 'Escape':
-                        e.preventDefault();
-                        emergencyStop();
-                        break;
+
+        async function decide(promptId, approve) {
+            await fetch(approve ? '/remote/approve' : '/remote/reject', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(approve
+                    ? { prompt_id: promptId, by: 'dashboard' }
+                    : { prompt_id: promptId, by: 'dashboard', reason: 'denied from dashboard' })
+            });
+            refreshApprovals();
+        }
+
+        // ============================= Polling =============================
+        async function refreshStatus() {
+            try {
+                const data = await fetch('/computer/status').then(r => r.json());
+                halted = !!data.halted;
+                if (data.current_task) {
+                    currentTask = data.current_task;
+                    currentTaskId = data.current_task.task_id;
+                    taskRunning = data.current_task.status === 'running';
+                    const w = data.current_task.world || data.world || {};
+                    world = Object.assign({}, world, {
+                        application: w.active_application ?? w.application,
+                        window: w.active_window ?? w.window,
+                        visible_targets: w.visible_targets || [],
+                        dialogs: w.dialogs || [],
+                        task_state: w.task_state,
+                        confidence: w.confidence,
+                    });
+                    renderMissionControl();
+                    renderWorld();
+                    renderWhy();
+                    if (data.current_task.task_id) loadPlan(data.current_task.task_id, { silent: true });
                 }
-            }
-        });
-        
-        // Phase C & D — live screen, approvals, resources
-        async function refreshLiveScreen() {
-            const img = document.getElementById('liveScreen');
-            const info = document.getElementById('liveFrameInfo');
+                if (data.repair_stats?.recent?.length) {
+                    renderRepairs({ repairs: data.repair_stats.recent });
+                }
+                renderGlobalStatus();
+            } catch (e) {}
+        }
+
+        async function loadPlan(taskId, opts = {}) {
+            try {
+                const r = await fetch(`/computer/plan/${taskId}`).then(r => r.json());
+                const sig = JSON.stringify((r.graph?.nodes || []).map(n => n.name));
+                if (sig && sig !== planSignature && planSignature !== '') {
+                    planChangedNote = { summary: 'The plan was updated during execution.', failure: '' };
+                    renderPlanChanged();
+                }
+                planSignature = sig;
+                plan = { task: r.task, current_state: r.current_state, completed: r.completed || [], failed: r.failed || [], graph: r.graph || { nodes: [] } };
+                renderPlan();
+                renderMissionControl();
+                renderWhy();
+            } catch (e) {}
+        }
+
+        async function refreshHistory() {
+            try {
+                const data = await fetch('/computer/tasks').then(r => r.json());
+                historyTasks = data.tasks || [];
+                renderHistory();
+            } catch (e) {}
+        }
+
+        function refreshLiveScreen() {
+            const img = $('liveScreen');
+            const info = $('liveFrameInfo');
             img.src = '/computer/live-frame?ts=' + Date.now();
-            img.onload = () => { info.textContent = 'live frame updated ' + new Date().toLocaleTimeString(); };
+            img.onload = () => { info.textContent = 'live · ' + new Date().toLocaleTimeString(); };
             img.onerror = () => { info.textContent = 'no live frame (recorder idle)'; };
         }
 
         async function refreshApprovals() {
             try {
                 const r = await fetch('/remote/approvals').then(r => r.json());
-                const st = r.status || {};
-                const count = st.pending_count || 0;
-                const card = document.getElementById('approvalCard');
-                if (count) {
-                    card.style.display = '';
-                    document.getElementById('approvalCount').textContent = count;
-                    document.getElementById('approvalList').innerHTML = st.pending.map(p => `
-                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:8px;margin-bottom:8px;">
-                            <div style="font-weight:600;">${p.action} <span style="color:var(--accent-blue);font-size:0.7rem;">${p.risk}</span></div>
-                            <div style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0;">${p.description || ''}</div>
-                            <div style="display:flex;gap:8px;">
-                                <button onclick="decide('${p.prompt_id}',true)" style="flex:1;padding:7px;border:none;border-radius:6px;background:var(--accent-green);color:#042;font-weight:700;cursor:pointer;">✓ Approve</button>
-                                <button onclick="decide('${p.prompt_id}',false)" style="flex:1;padding:7px;border:none;border-radius:6px;background:var(--accent-red);color:#fff;cursor:pointer;">✗ Reject</button>
-                            </div>
-                        </div>`).join('');
-                } else {
-                    card.style.display = 'none';
-                }
+                approvals = (r.status?.pending || []).concat();
+                renderApprovals();
+                renderGlobalStatus();
             } catch (e) {}
-        }
-
-        async function decide(promptId, approve) {
-            await fetch(approve ? '/remote/approve' : '/remote/reject', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(approve ? { prompt_id: promptId, by: 'dashboard' } : { prompt_id: promptId, by: 'dashboard', reason: 'rejected from dashboard' })
-            });
-            refreshApprovals();
         }
 
         async function refreshResources() {
             try {
                 const r = await fetch('/computer/resources').then(r => r.json());
-                document.getElementById('resCpu').textContent = r.cpu_percent != null ? r.cpu_percent + '%' : 'n/a';
+                $('dCpu').textContent = r.cpu_percent != null ? r.cpu_percent + '%' : '—';
                 const mb = r.memory_bytes != null ? Math.round(r.memory_bytes / 1048576) : null;
-                document.getElementById('resMem').textContent = mb != null ? mb + ' MB' : 'n/a';
-                document.getElementById('resThreads').textContent = r.threads != null ? r.threads : 'n/a';
-                const eb = (r.subsystems && r.subsystems.event_bus && r.subsystems.event_bus.recent_events) != null
-                    ? r.subsystems.event_bus.recent_events : null;
-                document.getElementById('resEvents').textContent = eb != null ? eb : 'n/a';
-                document.getElementById('resStamp').textContent = new Date(r.ts).toLocaleTimeString();
+                $('dMem').textContent = mb != null ? mb + ' MB' : '—';
+                $('dThreads').textContent = r.threads != null ? r.threads : '—';
+                const eb = r.subsystems?.event_bus?.recent_events;
+                $('dEvents').textContent = eb != null ? eb : '—';
+                $('resStamp').textContent = r.ts ? new Date(r.ts).toLocaleTimeString() : '—';
             } catch (e) {}
         }
 
-        refreshLiveScreen();
-        setInterval(refreshLiveScreen, 2000);
-        refreshApprovals();
-        setInterval(refreshApprovals, 2500);
-        refreshResources();
-        setInterval(refreshResources, 5000);
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
 
-        // Start
-        connect();
-        updateButtons();
-        
-        // Load initial status
-        fetch('/computer/status').then(r => r.json()).then(data => {
-            if (data.current_task) {
-                currentTaskId = data.current_task.task_id;
-                updateWorldState(data.world);
-            }
-            if (data.halted) {
-                document.getElementById('statusBadge').textContent = 'EMERGENCY';
-                document.getElementById('statusBadge').classList.add('emergency');
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'Enter') { e.preventDefault(); runTask(); }
+                else if (e.key === ' ') { e.preventDefault(); if (taskPaused) resumeTask(); else pauseTask(); }
+                else if (e.key === 'Escape') { e.preventDefault(); emergencyStop(); }
             }
         });
+
+        // ============================= Boot =============================
+        setMode(mode);
+        setVisionMode(visionMode);
+        setWorldView(worldView);
+        $('autoToggle').classList.toggle('on', autonomous);
+
+        connect();
+        refreshLiveScreen(); setInterval(refreshLiveScreen, 2000);
+        refreshApprovals(); setInterval(refreshApprovals, 2500);
+        refreshResources(); setInterval(refreshResources, 5000);
+        refreshStatus(); setInterval(refreshStatus, 2500);
+        refreshHistory(); setInterval(refreshHistory, 8000);
+        setInterval(renderDiagnostics, 1000);
+        setInterval(renderGlobalStatus, 1000);
+
+        // Persist autonomous gate to backend on load (honour saved preference)
+        fetch('/remote/approval/enable', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !autonomous, required_risk: 'medium' })
+        }).catch(() => {});
     </script>
 </body>
 </html>
