@@ -38,6 +38,7 @@ class ComputerActionController:
         frame_provider: Optional[Callable[[], Any]] = None,
         target_detector: Optional[TargetDetector] = None,
         scope: str = "default",
+        approval: Optional[Any] = None,
     ):
         self.mouse = mouse or default_mouse()
         self.keyboard = keyboard or default_keyboard()
@@ -48,6 +49,14 @@ class ComputerActionController:
         self.frame_provider = frame_provider
         self.target_detector = target_detector or TargetDetector()
         self.scope = scope
+        # Remote approval gate.  Defaults to the shared module singleton so the
+        # default ComputerAgent picks up remote approval automatically when the
+        # gateway enables it; it is a no-op until enabled.
+        if approval is None:
+            from .remote import remote_approval
+
+            approval = remote_approval
+        self.approval = approval
         self.history: List[Dict[str, Any]] = []
 
     # -- safety ---------------------------------------------------------
@@ -66,6 +75,16 @@ class ComputerActionController:
                     return {"allowed": False, "decision": "deny", "risk": policy["risk"], "reason": "permission policy denied"}
                 if gate.get("decision") == "ask":
                     decision = "ask"
+            except Exception:  # noqa: BLE001
+                pass
+        # Remote approval gate (no-op unless the gateway enables it).
+        approval = getattr(self, "approval", None)
+        if approval is not None:
+            try:
+                gate = approval.check(action, args, risk=policy.get("risk"))
+                if gate.get("pending"):
+                    return {"allowed": False, "decision": "ask", "risk": policy.get("risk"),
+                            "reason": gate.get("reason"), "prompt_id": gate.get("prompt_id")}
             except Exception:  # noqa: BLE001
                 pass
         return {"allowed": True, "decision": decision, "risk": policy["risk"], "reason": "ok"}
@@ -93,6 +112,9 @@ class ComputerActionController:
             "decision": gate.get("decision"),
             "detail": backend_result.get("detail") or backend_result.get("error") or error or "",
         }
+        if gate.get("prompt_id"):
+            record["prompt_id"] = gate["prompt_id"]
+            record["approval_required"] = True
         if error:
             record["error"] = error
         self.history.append(record)

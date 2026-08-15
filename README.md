@@ -186,6 +186,14 @@ inferring boundaries from an arbitrary time window. Gateway routes mirror these 
 `/screen/{start,stop,status,save,analyze,watch}` and
 `/screen/action/{before,after}`.
 
+**Phase C & D (power & polish):** live computer dashboard at
+`/computer/dashboard`, mobile remote control at `/remote` (live screen, action
+approval, pause/resume/cancel/emergency-stop), resource telemetry at
+`/computer/resources`, skill reliability profiles at
+`/computer/skills/{name}/profile`, multi-agent delegation at `/computer/delegate`,
+a plugin/MCP registry at `/plugins`, and an install health check via `hermus
+doctor`. See `PHASE_C_D.md`.
+
 #### Voice Memo Transcription Faster-Whisper Free
 - `transcribe_audio(audio_path, model="base", language)` - faster-whisper WhisperModel base/small/medium/large-v2 free local, no cloud, beam_size 5, segments start/end/text
 - `voice_available_models()` - tiny 39M, base 74M, small 244M, medium 769M, large-v2 1550M

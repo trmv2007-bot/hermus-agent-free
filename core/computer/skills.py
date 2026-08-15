@@ -327,3 +327,37 @@ class ComputerSkillStore:
     def known_repair(self, skill_name: str, failure: str) -> Optional[Dict[str, Any]]:
         skill = self.get_skill(skill_name)
         return skill.known_repair(failure) if skill else None
+
+    def profile(self, name: str) -> Optional[Dict[str, Any]]:
+        """Human-readable reliability profile for one skill.
+
+        Example::
+
+            Install Firefox — 28 runs / 26 success / 92.9% / avg 39.8s
+        """
+        skill = self.get_skill(name)
+        if skill is None:
+            return None
+        skill.normalize()
+        rate = (skill.success_rate * 100.0) if skill.runs else None
+        return {
+            "name": skill.name,
+            "task": skill.task,
+            "runs": skill.runs,
+            "successes": skill.successes,
+            "failures": skill.failures,
+            "success_rate": skill.success_rate,
+            "success_percent": round(rate, 1) if rate is not None else None,
+            "average_duration": skill.average_duration,
+            "total_duration": round(skill.total_duration, 1),
+            "steps": len(skill.procedure),
+            "known_failures": list(skill.typical_failures),
+            "known_repairs": len(skill.repairs),
+            "visual_states": list(skill.visual_states),
+            "updated": skill.updated,
+            "summary": (
+                f"{skill.task} — {skill.runs} runs / {skill.successes} success / "
+                f"{round(rate, 1) if rate is not None else 'n/a'}% / "
+                f"avg {round(skill.average_duration, 1)}s"
+            ),
+        }

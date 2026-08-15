@@ -125,6 +125,15 @@ from .window_manager import (
     WindowBackend,
     default_window_manager,
 )
+from .remote import (
+    ApprovalPrompt,
+    PromptState,
+    RemoteApprovalGate,
+    RemoteControlHub,
+    remote_approval,
+    remote_control,
+)
+from .resources import ResourceMonitor, get_resource_monitor, resource_monitor
 
 __all__ = [
     # v1 — recording / understanding / verification
@@ -257,4 +266,15 @@ __all__ = [
     "RichObservation",
     "GroundedTargetV2",
     "create_world_state",
+    # Phase C — Remote / approval control
+    "RemoteApprovalGate",
+    "RemoteControlHub",
+    "ApprovalPrompt",
+    "PromptState",
+    "remote_approval",
+    "remote_control",
+    # Phase D — Performance / resources
+    "ResourceMonitor",
+    "get_resource_monitor",
+    "resource_monitor",
 ]

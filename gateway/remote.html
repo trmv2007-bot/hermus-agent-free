@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0e1a">
+    <title>Hermus Remote</title>
+    <style>
+        :root {
+            --bg: #0a0e1a; --panel: #151a2d; --card: #1e2440; --border: #2a2f4a;
+            --text: #e8eaed; --muted: #9aa0a6;
+            --green: #34d399; --yellow: #fbbf24; --red: #ef4444; --blue: #4a9eff;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 84px;
+        }
+        header {
+            position: sticky; top: 0; z-index: 10;
+            background: linear-gradient(135deg,#1e3a5f,#0f1f3d);
+            padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        header h1 { font-size: 1.05rem; font-weight: 600; flex: 1; display:flex; align-items:center; gap:8px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; }
+        .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .dot.off { background: var(--red); }
+        .badge { font-size: 0.7rem; padding: 3px 8px; border-radius: 12px; font-weight: 600; }
+        .badge.running { background: rgba(52,211,153,.2); color: var(--green); }
+        .badge.paused { background: rgba(251,191,36,.2); color: var(--yellow); }
+        .badge.idle { background: rgba(154,160,166,.2); color: var(--muted); }
+        .badge.emergency { background: rgba(239,68,68,.2); color: var(--red); animation: pulse 1s infinite; }
+        .badge.approve { background: rgba(74,158,255,.2); color: var(--blue); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        main { padding: 12px; display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin: 0 auto; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card h3 { padding: 10px 14px; font-size: 0.85rem; border-bottom: 1px solid var(--border); display:flex; align-items:center; gap:8px; }
+        .card .body { padding: 12px 14px; }
+        #screen { width: 100%; aspect-ratio: 16/9; background: #0d1120 center/contain no-repeat; border-bottom:1px solid var(--border); object-fit: contain; display:block; }
+        #screen.off { background-image: linear-gradient(45deg,#101526,#0d1120); }
+        .prompt { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; background: var(--panel); }
+        .prompt .a { font-weight: 600; font-size: 0.95rem; }
+        .prompt .d { color: var(--muted); font-size: 0.8rem; margin: 4px 0; word-break: break-word; }
+        .prompt .r { display:inline-block; font-size:0.7rem; padding:1px 6px; border-radius:8px; background: rgba(74,158,255,.2); color: var(--blue); }
+        .prompt .btns { display:flex; gap:8px; margin-top:8px; }
+        .prompt .btns button { flex:1; }
+        .controls { display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; }
+        .controls button {
+            padding: 10px 4px; border-radius: 10px; border: 1px solid var(--border);
+            background: var(--panel); color: var(--text); font-size: 0.75rem; cursor: pointer;
+            display:flex; flex-direction:column; align-items:center; gap:4px; min-height:58px;
+        }
+        .controls button:disabled { opacity: .35; cursor: not-allowed; }
+        .controls button .icon { font-size: 1.3rem; }
+        .btn-emergency { grid-column: span 4; background: rgba(239,68,68,.15)!important; border-color: var(--red)!important; color: var(--red)!important; font-weight:700; padding:12px!important; min-height:48px!important; }
+        .kv { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+        .kv div { background: var(--panel); border:1px solid var(--border); border-radius:8px; padding:8px; }
+        .kv label { display:block; font-size:0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing:.04em; }
+        .kv .v { font-size:0.85rem; margin-top:3px; word-break:break-word; }
+        .targets { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+        .chip { background: var(--panel); border:1px solid var(--border); border-radius:14px; padding:3px 9px; font-size:0.72rem; }
+        .events { max-height: 240px; overflow-y:auto; }
+        .ev { padding: 6px 14px; border-bottom:1px solid var(--border); font-size:0.78rem; display:flex; gap:8px; align-items:flex-start; }
+        .ev .t { color: var(--muted); min-width: 48px; }
+        .dock {
+            position: fixed; bottom:0; left:0; right:0; z-index:20;
+            display:flex; gap:8px; padding:10px 12px; background: var(--panel); border-top:1px solid var(--border);
+            justify-content:center; max-width:620px; margin:0 auto;
+        }
+        .dock button { flex:1; padding:10px 6px; border-radius:10px; border:1px solid var(--border); background:#1e2440; color:var(--text); font-size:0.72rem; cursor:pointer; }
+        .dock button:disabled { opacity:.35; }
+        .dock .stop { background: rgba(239,68,68,.18); border-color: var(--red); color: var(--red); font-weight:700; }
+        .muted { color: var(--muted); }
+        .ta { width:100%; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:0.9rem; margin-bottom:8px; resize:vertical; }
+        .btn { width:100%; padding:11px; border:none; border-radius:10px; background: var(--blue); color:#fff; font-weight:600; font-size:0.9rem; cursor:pointer; }
+        .row { display:flex; gap:8px; align-items:center; }
+        .pill { font-size:0.7rem; padding:2px 8px; border-radius:10px; background: var(--panel); border:1px solid var(--border); color: var(--muted); }
+    </style>
+</head>
+<body>
+<header>
+    <h1><span class="dot" id="dot"></span> Hermus Remote</h1>
+    <span class="badge idle" id="statusBadge">IDLE</span>
+    <span class="badge approve" id="approveBadge" style="display:none">Approve</span>
+</header>
+<main>
+    <div class="card">
+        <img id="screen" class="off" alt="live screen">
+    </div>
+
+    <div class="card" id="approvalCard" style="display:none">
+        <h3>🛡️ Action Approval</h3>
+        <div class="body" id="approvalList"></div>
+    </div>
+
+    <div class="card">
+        <h3>🎛️ Task Controls</h3>
+        <div class="body">
+            <div class="row" style="margin-bottom:10px">
+                <input class="ta" id="taskInput" placeholder="e.g. Open Calculator and verify it works" style="margin-bottom:0">
+            </div>
+            <button class="btn" id="btnRun" onclick="runTask()">▶ Run Task</button>
+            <div class="controls" style="margin-top:10px">
+                <button id="btnPause" onclick="send('pause')" disabled><span class="icon">⏸</span>Pause</button>
+                <button id="btnResume" onclick="send('resume')" disabled><span class="icon">▶</span>Resume</button>
+                <button id="btnCancel" onclick="send('cancel')" disabled><span class="icon">⏹</span>Cancel</button>
+                <button id="btnRefresh" onclick="refreshStatus()"><span class="icon">🔄</span>Refresh</button>
+                <button class="btn-emergency" onclick="emergency()"><span class="icon">🔴</span> EMERGENCY STOP</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>🧠 World State</h3>
+        <div class="body">
+            <div class="kv">
+                <div><label>App</label><div class="v" id="wsApp">—</div></div>
+                <div><label>Window</label><div class="v" id="wsWindow">—</div></div>
+                <div><label>Task State</label><div class="v" id="wsState">—</div></div>
+                <div><label>Confidence</label><div class="v" id="wsConf">—</div></div>
+            </div>
+            <div class="targets" id="wsTargets"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>📡 Live Events</h3>
+        <div class="events" id="events"><div class="ev"><span class="muted">waiting for events…</span></div></div>
+    </div>
+</main>
+
+<div class="dock">
+    <button onclick="send('pause')" id="dPause">⏸ Pause</button>
+    <button onclick="send('resume')" id="dResume">▶ Resume</button>
+    <button onclick="send('cancel')" id="dCancel">⏹ Cancel</button>
+    <button class="stop" onclick="emergency()">🔴 Stop</button>
+</div>
+
+<script>
+    let ws = null, taskId = null, running = false, paused = false;
+    const $ = id => document.getElementById(id);
+
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${location.host}/computer/events`);
+        ws.onopen = () => { $('dot').className = 'dot on'; };
+        ws.onmessage = e => {
+            try {
+                const d = JSON.parse(e.data);
+                if (d.kind === 'snapshot') d.events.forEach(handleEvent);
+                else if (d.kind === 'ping') {}
+                else handleEvent(d);
+            } catch(err){}
+        };
+        ws.onclose = () => { $('dot').className = 'dot off'; setTimeout(connect, 2000); };
+    }
+
+    function handleEvent(ev) {
+        const t = ev.type, d = ev.data || {};
+        if (d.task_id) taskId = d.task_id;
+        if (t === 'task_started') { running = true; paused = false; }
+        if (t === 'task_completed' || t === 'task_failed' || t === 'task_cancelled') { running = false; paused = false; }
+        if (t === 'task_paused') { paused = true; }
+        if (t === 'task_resumed') { paused = false; }
+        if (t === 'emergency_stop') { running = false; }
+        if (t === 'world_changed' && d.world) updateWorld(d.world);
+        updateButtons();
+        addEvent(ev);
+        refreshApprovals();
+    }
+
+    function addEvent(ev) {
+        const box = $('events');
+        const row = document.createElement('div');
+        row.className = 'ev';
+        const label = t(ev.type).replace(/_/g,' ');
+        const detail = ev.data && (ev.data.task || ev.data.action || ev.data.state || ev.data.summary || '') || '';
+        row.innerHTML = `<span class="t">${new Date(ev.ts).toLocaleTimeString()}</span><div><b>${label}</b> ${detail}</div>`;
+        box.prepend(row);
+        while (box.children.length > 60) box.removeChild(box.lastChild);
+    }
+
+    function t(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
+    function updateWorld(w) {
+        $('wsApp').textContent = w.application || '—';
+        $('wsWindow').textContent = w.window || '—';
+        $('wsState').textContent = w.task_state || '—';
+        $('wsConf').textContent = w.confidence ? Math.round(w.confidence*100)+'%' : '—';
+        const tg = w.visible_targets || [];
+        $('wsTargets').innerHTML = tg.slice(0,8).map(x=>`<span class="chip">${x}</span>`).join('') || '<span class="muted">no targets</span>';
+    }
+
+    async function refreshStatus() {
+        const r = await fetch('/remote/status').then(r=>r.json());
+        if (r.emergency && r.emergency.halted) { setBadge('emergency','EMERGENCY'); }
+        else if (r.control) {
+            const c = r.control;
+            const active = c.active_task || (c.tasks && c.tasks.find(x=>x.status==='running'));
+            if (active) {
+                taskId = active.task_id || taskId;
+                running = c.active_task_status === 'running';
+                paused = c.active_task_status === 'paused';
+            }
+        }
+        refreshApprovals();
+        const tasks = await fetch('/computer/tasks').then(r=>r.json());
+        if (tasks.tasks && tasks.tasks.length) {
+            taskId = taskId || tasks.tasks[0].task_id;
+            const st = tasks.tasks[0].status;
+            if (st === 'running') running = true;
+            if (st === 'interrupted' || st === 'paused') paused = true;
+        }
+        updateButtons();
+        updateBadge();
+    }
+
+    async function refreshApprovals() {
+        const r = await fetch('/remote/approvals').then(r=>r.json());
+        const st = r.status;
+        $('approveBadge').style.display = st.pending_count ? '' : 'none';
+        if (st.pending_count) {
+            $('approvalCard').style.display = '';
+            $('approvalList').innerHTML = st.pending.map(p => `
+                <div class="prompt">
+                    <div class="a">${p.action} <span class="r">${p.risk}</span></div>
+                    <div class="d">${p.description || ''}</div>
+                    <div class="btns">
+                        <button style="background:var(--green);border:none;border-radius:8px;padding:8px;color:#042;font-weight:700" onclick="decide('${p.prompt_id}',true)">✓ Approve</button>
+                        <button style="background:var(--red);border:none;border-radius:8px;padding:8px;color:#fff" onclick="decide('${p.prompt_id}',false)">✗ Reject</button>
+                    </div>
+                </div>`).join('');
+        } else {
+            $('approvalCard').style.display = 'none';
+        }
+    }
+
+    async function decide(id, approve) {
+        await fetch(approve ? '/remote/approve' : '/remote/reject', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(approve ? {prompt_id:id, by:'remote'} : {prompt_id:id, by:'remote', reason:'rejected from remote'})
+        });
+        refreshApprovals();
+    }
+
+    function setBadge(cls, txt){ const b=$('statusBadge'); b.className='badge '+cls; b.textContent=txt; }
+    function updateBadge() {
+        if (running && !paused) setBadge('running','RUNNING');
+        else if (paused) setBadge('paused','PAUSED');
+        else setBadge('idle','IDLE');
+    }
+
+    function updateButtons() {
+        $('btnPause').disabled = !running || paused;
+        $('btnResume').disabled = !paused;
+        $('btnCancel').disabled = !running;
+        $('dPause').disabled = !running || paused;
+        $('dResume').disabled = !paused;
+        $('dCancel').disabled = !running;
+    }
+
+    async function runTask() {
+        const task = $('taskInput').value.trim();
+        if (!task) return alert('Enter a task');
+        const r = await fetch('/computer/run', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task, dry_run:false})}).then(r=>r.json());
+        if (r.success) { taskId = r.task_id; running = true; paused = false; updateButtons(); updateBadge(); }
+        else alert(r.error || 'failed to start');
+    }
+
+    async function send(action) {
+        if (!taskId) return alert('No task active');
+        const r = await fetch('/remote/control', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action, task_id:taskId, reason:'remote '+action})}).then(r=>r.json());
+        refreshStatus();
+    }
+
+    function emergency() {
+        if (!confirm('⚠️ EMERGENCY STOP: immediately halt ALL computer actions?')) return;
+        fetch('/remote/control', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'emergency-stop', reason:'remote emergency stop'})})
+            .then(()=>{ running=false; paused=false; updateButtons(); setBadge('emergency','EMERGENCY'); });
+    }
+
+    setInterval(() => {
+        const img = $('screen');
+        img.src = '/computer/live-frame?ts=' + Date.now();
+        img.onload = () => img.classList.remove('off');
+        img.onerror = () => img.classList.add('off');
+    }, 1500);
+
+    connect();
+    refreshStatus();
+    refreshApprovals();
+</script>
+</body>
+</html>

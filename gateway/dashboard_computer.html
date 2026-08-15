@@ -324,6 +324,20 @@
     
     <div class="main-container">
         <div class="left-panel">
+            <!-- Live Screen -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h2>🖥️ Live Screen</h2>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary);">Phase C remote view</span>
+                </div>
+                <div style="padding: 12px;">
+                    <img id="liveScreen" alt="live screen" style="width:100%; aspect-ratio:16/9; object-fit:contain; background:#0d1120; border-radius:8px; display:block;">
+                    <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+                        <span id="liveFrameInfo" style="font-size:0.72rem; color:var(--text-secondary);">waiting for a live frame…</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Stats -->
             <div class="card" style="margin-bottom: 20px;">
                 <div class="card-body">
@@ -393,6 +407,17 @@
                 </div>
             </div>
             
+            <!-- Approval Prompts -->
+            <div class="card" style="margin-bottom: 20px; display:none;" id="approvalCard">
+                <div class="card-header">
+                    <h2>🛡️ Approval Needed</h2>
+                    <span id="approvalCount" style="font-size: 0.75rem; color: var(--accent-yellow);">0</span>
+                </div>
+                <div class="card-body" id="approvalList">
+                    <div style="color: var(--text-secondary); font-size:0.8rem;">No actions awaiting approval.</div>
+                </div>
+            </div>
+
             <!-- World State -->
             <div class="card">
                 <div class="card-header">
@@ -425,6 +450,34 @@
                         <div class="world-state-item">
                             <label>Dialogs</label>
                             <div class="value" id="wsDialogs">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resources -->
+            <div class="card" style="margin-top: 20px;">
+                <div class="card-header">
+                    <h2>📈 Resources</h2>
+                    <span id="resStamp" style="font-size:0.72rem; color:var(--text-secondary);">—</span>
+                </div>
+                <div class="card-body">
+                    <div class="world-state-grid">
+                        <div class="world-state-item">
+                            <label>CPU</label>
+                            <div class="value" id="resCpu">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Memory</label>
+                            <div class="value" id="resMem">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Threads</label>
+                            <div class="value" id="resThreads">—</div>
+                        </div>
+                        <div class="world-state-item">
+                            <label>Events Buffered</label>
+                            <div class="value" id="resEvents">—</div>
                         </div>
                     </div>
                 </div>
@@ -801,6 +854,68 @@
             }
         });
         
+        // Phase C & D — live screen, approvals, resources
+        async function refreshLiveScreen() {
+            const img = document.getElementById('liveScreen');
+            const info = document.getElementById('liveFrameInfo');
+            img.src = '/computer/live-frame?ts=' + Date.now();
+            img.onload = () => { info.textContent = 'live frame updated ' + new Date().toLocaleTimeString(); };
+            img.onerror = () => { info.textContent = 'no live frame (recorder idle)'; };
+        }
+
+        async function refreshApprovals() {
+            try {
+                const r = await fetch('/remote/approvals').then(r => r.json());
+                const st = r.status || {};
+                const count = st.pending_count || 0;
+                const card = document.getElementById('approvalCard');
+                if (count) {
+                    card.style.display = '';
+                    document.getElementById('approvalCount').textContent = count;
+                    document.getElementById('approvalList').innerHTML = st.pending.map(p => `
+                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:8px;margin-bottom:8px;">
+                            <div style="font-weight:600;">${p.action} <span style="color:var(--accent-blue);font-size:0.7rem;">${p.risk}</span></div>
+                            <div style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0;">${p.description || ''}</div>
+                            <div style="display:flex;gap:8px;">
+                                <button onclick="decide('${p.prompt_id}',true)" style="flex:1;padding:7px;border:none;border-radius:6px;background:var(--accent-green);color:#042;font-weight:700;cursor:pointer;">✓ Approve</button>
+                                <button onclick="decide('${p.prompt_id}',false)" style="flex:1;padding:7px;border:none;border-radius:6px;background:var(--accent-red);color:#fff;cursor:pointer;">✗ Reject</button>
+                            </div>
+                        </div>`).join('');
+                } else {
+                    card.style.display = 'none';
+                }
+            } catch (e) {}
+        }
+
+        async function decide(promptId, approve) {
+            await fetch(approve ? '/remote/approve' : '/remote/reject', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(approve ? { prompt_id: promptId, by: 'dashboard' } : { prompt_id: promptId, by: 'dashboard', reason: 'rejected from dashboard' })
+            });
+            refreshApprovals();
+        }
+
+        async function refreshResources() {
+            try {
+                const r = await fetch('/computer/resources').then(r => r.json());
+                document.getElementById('resCpu').textContent = r.cpu_percent != null ? r.cpu_percent + '%' : 'n/a';
+                const mb = r.memory_bytes != null ? Math.round(r.memory_bytes / 1048576) : null;
+                document.getElementById('resMem').textContent = mb != null ? mb + ' MB' : 'n/a';
+                document.getElementById('resThreads').textContent = r.threads != null ? r.threads : 'n/a';
+                const eb = (r.subsystems && r.subsystems.event_bus && r.subsystems.event_bus.recent_events) != null
+                    ? r.subsystems.event_bus.recent_events : null;
+                document.getElementById('resEvents').textContent = eb != null ? eb : 'n/a';
+                document.getElementById('resStamp').textContent = new Date(r.ts).toLocaleTimeString();
+            } catch (e) {}
+        }
+
+        refreshLiveScreen();
+        setInterval(refreshLiveScreen, 2000);
+        refreshApprovals();
+        setInterval(refreshApprovals, 2500);
+        refreshResources();
+        setInterval(refreshResources, 5000);
+
         // Start
         connect();
         updateButtons();

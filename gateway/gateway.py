@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 from fastapi import FastAPI, Request, Header, WebSocket
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -142,6 +142,11 @@ async def root():
             "research_pipeline",
             "computer_control_screen",
             "computer_agent_dashboard",
+            "remote_control_approval",
+            "plugin_ecosystem",
+            "resource_monitoring",
+            "skill_optimization",
+            "multi_agent_delegation",
             "self_healing_watchdog",
             "workspace_projects",
             "profiles_personas",
@@ -1746,6 +1751,234 @@ async def computer_control_task(task_id: str):
     }
 
 
+# ===========================================================================
+# Phase C & D — remote control, resources, delegation, skill profiles, plugins
+# ===========================================================================
+
+@app.get("/computer/dashboard", response_class=HTMLResponse)
+async def computer_dashboard_page():
+    """Serve the live computer-agent dashboard (Phase A UI)."""
+    html_path = Path(__file__).parent / "dashboard_computer.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store, max-age=0"})
+    return HTMLResponse("<!DOCTYPE html><html><body><h1>dashboard_computer.html missing</h1></body></html>")
+
+
+@app.get("/remote", response_class=HTMLResponse)
+async def remote_control_page():
+    """Mobile-friendly remote control page (Phase C remote Android/web)."""
+    html_path = Path(__file__).parent / "remote.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store, max-age=0"})
+    return HTMLResponse("<!DOCTYPE html><html><body><h1>remote.html missing</h1></body></html>")
+
+
+@app.get("/computer/live-frame")
+async def computer_live_frame():
+    """Latest screen frame as JPEG (live screen for remote/dashboard panes)."""
+    try:
+        from core.integrations import _screen_recorder
+
+        frame = _screen_recorder().latest()
+    except Exception:  # noqa: BLE001
+        frame = None
+    if frame is None:
+        return JSONResponse({"error": "no live frame available"}, status_code=404)
+    data = frame.get("data")
+    if not data:
+        return JSONResponse({"error": "live frame empty"}, status_code=404)
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@app.get("/computer/resources")
+async def computer_resources():
+    """Performance / resource telemetry for the dashboard (Phase D)."""
+    from core.computer import get_resource_monitor
+
+    return get_resource_monitor().sample()
+
+
+@app.get("/computer/skills/{skill_name}/profile")
+async def computer_skill_profile(skill_name: str):
+    """Reliability profile for one skill (Phase C skill optimization)."""
+    from core.computer import ComputerSkillStore
+
+    profile = ComputerSkillStore().profile(skill_name)
+    if profile is None:
+        return JSONResponse({"success": False, "error": f"skill '{skill_name}' not found"}, status_code=404)
+    return profile
+
+
+@app.post("/computer/delegate")
+async def computer_delegate(payload: Dict = None):
+    """Delegate a task across persistent agents (Phase C multi-agent delegation).
+
+    Accepts either a free-form ``task`` (decomposed heuristically) or a custom
+    ``plan`` dict with ``units`` (WorkUnit records) for full control.
+    """
+    payload = payload or {}
+    from core.computer import MultiAgentDelegator, DelegationPlan, WorkUnit
+
+    delegator = MultiAgentDelegator()
+    dry_run = bool(payload.get("dry_run", False))
+    wait = not bool(payload.get("no_wait", False))
+    if payload.get("plan") is not None:
+        units = [
+            WorkUnit(
+                unit_id=str(u.get("unit_id")),
+                role=str(u.get("role", "generic")),
+                task=str(u.get("task", "")),
+                depends_on=list(u.get("depends_on") or []),
+                agent=u.get("agent"),
+                payload=dict(u.get("payload") or {}),
+            )
+            for u in (payload["plan"].get("units") or [])
+        ]
+        plan = DelegationPlan(task=str(payload.get("task", "")), units=units)
+    else:
+        plan = delegator.plan(str(payload.get("task", "")))
+    return delegator.execute(
+        plan,
+        wait=wait,
+        timeout_per_unit=float(payload.get("timeout", 180.0)),
+        dry_run=dry_run,
+    )
+
+
+@app.get("/computer/delegations")
+async def computer_delegations():
+    """Persisted delegation plans/results (Phase C)."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "data" / "delegations"
+    entries = []
+    if root.is_dir():
+        for path in sorted(root.glob("*.json"), reverse=True):
+            try:
+                entries.append(json.loads(path.read_text(encoding="utf-8")))
+            except Exception:  # noqa: BLE001
+                continue
+    return {"delegations": entries[:50], "total": len(entries)}
+
+
+# -- Remote / approval control (Phase C) --------------------------------------
+
+@app.get("/remote/status")
+async def remote_status():
+    """Consolidated remote view: approval gate, control state, events, emergency."""
+    from core.computer import remote_control
+
+    return remote_control.snapshot()
+
+
+@app.get("/remote/approvals")
+async def remote_approvals():
+    """Pending + recent approval prompts."""
+    from core.computer import remote_approval
+
+    return {"status": remote_approval.status(), "history": remote_approval.history(20)}
+
+
+@app.post("/remote/approval/enable")
+async def remote_approval_enable(payload: Dict = None):
+    """Enable/disable the remote approval gate (per-action human approval)."""
+    payload = payload or {}
+    from core.computer import remote_approval
+    from core.computer.permissions import RiskLevel
+
+    try:
+        risk = RiskLevel(str(payload.get("required_risk", "medium")).lower())
+    except ValueError:
+        risk = RiskLevel.MEDIUM
+    return remote_approval.set_enabled(bool(payload.get("enabled", True)), required_risk=risk)
+
+
+@app.post("/remote/approve")
+async def remote_approve(payload: Dict = None):
+    """Approve a pending action prompt (by prompt_id)."""
+    payload = payload or {}
+    from core.computer import remote_approval
+
+    return remote_approval.approve(str(payload.get("prompt_id", "")), by=str(payload.get("by") or "remote"))
+
+
+@app.post("/remote/reject")
+async def remote_reject(payload: Dict = None):
+    """Reject a pending action prompt."""
+    payload = payload or {}
+    from core.computer import remote_approval
+
+    return remote_approval.reject(
+        str(payload.get("prompt_id", "")),
+        reason=str(payload.get("reason", "") or ""),
+        by=str(payload.get("by") or "remote"),
+    )
+
+
+@app.post("/remote/control")
+async def remote_control_action(payload: Dict = None):
+    """Remote lifecycle control: pause / resume / cancel / emergency-stop / release."""
+    payload = payload or {}
+    from core.computer import remote_control
+
+    action = str(payload.get("action", "")).lower()
+    task_id = str(payload.get("task_id", "") or "")
+    reason = str(payload.get("reason", "")) or f"remote {action}"
+    if action == "pause":
+        return remote_control.pause(task_id, reason)
+    if action == "resume":
+        return remote_control.resume(task_id)
+    if action == "cancel":
+        return remote_control.cancel(task_id, reason)
+    if action in ("emergency-stop", "stop"):
+        return remote_control.emergency_stop(reason)
+    if action == "release":
+        return remote_control.release()
+    return JSONResponse({"success": False, "error": f"unknown remote action '{action}'"}, status_code=400)
+
+
+# -- Plugin / MCP ecosystem (Phase D) -----------------------------------------
+
+@app.get("/plugins")
+async def plugins_list():
+    """Discover + list loaded plugins and their registered tools."""
+    from core.plugins import plugin_registry
+
+    plugin_registry.load_all()
+    return {
+        "plugins": plugin_registry.list(),
+        "tools": plugin_registry.tools(),
+        "logs": plugin_registry.logs(20),
+    }
+
+
+@app.post("/plugins/reload")
+async def plugins_reload():
+    """Reload all plugins (re-discovers modules and re-runs register())."""
+    from core.plugins import plugin_registry
+
+    return {"result": plugin_registry.load_all(reload=True), "tools": plugin_registry.tools()}
+
+
+@app.post("/plugins/invoke")
+async def plugins_invoke(payload: Dict = None):
+    """Invoke a plugin-registered tool by name with keyword arguments."""
+    payload = payload or {}
+    from core.plugins import plugin_registry, PluginError
+
+    name = str(payload.get("tool", ""))
+    kwargs = dict(payload.get("args") or {})
+    try:
+        return {"success": True, "tool": name, "result": plugin_registry.invoke_tool(name, **kwargs)}
+    except PluginError as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=404)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+
+
 @app.websocket("/computer/events")
 async def computer_events_ws(websocket: WebSocket):
     """Live event stream: task_started, state_changed, action_*, verification,
@@ -1868,6 +2101,9 @@ def start(port: int = None):
     print(f"Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
     print(f"Docs: http://localhost:{port}/docs")
     print(f"Dashboard: http://localhost:{port}/dashboard")
+    print(f"Computer dashboard: http://localhost:{port}/computer/dashboard")
+    print(f"Remote control (mobile): http://localhost:{port}/remote")
+    print(f"Plugins: /plugins | Resources: /computer/resources | Delegation: /computer/delegate")
     print(f"Telegram mode={getattr(config,'telegram_mode','auto')} | auto_channels={getattr(config,'auto_start_channels',True)}")
     print(f"Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
     uvicorn.run(app, host="0.0.0.0", port=port)
