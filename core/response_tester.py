@@ -273,7 +273,7 @@ TOOLS = [
                 "properties": {
                     "provider": {"type": "string", "enum": ["groq", "hf", "openai", "custom"], "description": "Provider"},
                     "api_key": {"type": "string", "description": "API key to test (or will test all keys for provider if not provided)"},
-                    "model": {"type": "string", "description": "Model name e.g., llama-3.1-8b-instant, mistralai/Mistral-7B-Instruct-v0.3"},
+                    "model": {"type": "string", "description": "Model name e.g., openai/gpt-oss-20b, mistralai/Mistral-7B-Instruct-v0.3"},
                     "prompt": {"type": "string", "description": "Test prompt", "default": "Hello, what is Python async?"}
                 },
                 "required": ["provider"]

@@ -94,7 +94,7 @@ def fleet_distribute_task(
     """
     Give tasks to multiple AI models/keys in parallel.
     strategy: auto | fanout | map | race
-    models: comma-separated provider/model e.g. groq/llama-3.1-8b-instant,openai/gpt-4o-mini
+    models: comma-separated provider/model e.g. groq/openai/gpt-oss-20b,openai/gpt-4o-mini
     """
     from core.model_fleet import model_fleet
 
@@ -247,7 +247,7 @@ TOOLS = [
                         "enum": ["auto", "fanout", "map", "race"],
                         "default": "auto",
                     },
-                    "models": {"type": "string", "description": "comma-separated e.g. groq/llama-3.1-8b-instant,openai/gpt-4o-mini"},
+                    "models": {"type": "string", "description": "comma-separated e.g. groq/openai/gpt-oss-20b,openai/gpt-4o-mini"},
                     "providers": {"type": "string"},
                     "max_workers": {"type": "integer", "default": 4},
                 },

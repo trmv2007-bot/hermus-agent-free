@@ -30,7 +30,7 @@ PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
         "auth_prefix": "Bearer ",
         "models_path": "/models",
         "chat_path": "/chat/completions",
-        "default_model": "llama-3.1-8b-instant",
+        "default_model": "openai/gpt-oss-20b",
         "supports_tools": True,
         "env_key": "GROQ_API_KEY",
         "notes": "Free tier ~30 RPM — very fast",

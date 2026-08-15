@@ -467,6 +467,26 @@ def _anthropic_messages(
     return CompatResponse(content=content, usage=usage, raw=data, model=model, latency_ms=latency_ms, headers=rate)
 
 
+def _is_model_error(msg: str, status_code: int) -> bool:
+    """Detect model-not-found / deprecated model errors."""
+    if status_code == 404:
+        return True
+    m = (msg or "").lower()
+    return any(
+        phrase in m
+        for phrase in (
+            "model not found",
+            "model does not exist",
+            "model has been deprecated",
+            "deprecated",
+            "invalid model",
+            "unknown model",
+            "no such model",
+            "not support this model",
+        )
+    )
+
+
 def health_ping(
     provider: str,
     api_key: str = None,
@@ -477,11 +497,12 @@ def health_ping(
     """
     Lightweight health check:
     1) list models if possible
-    2) tiny chat completion
+    2) tiny chat completion (with fallback to other discovered models)
     Returns health, latency, rate limits, usable models sample.
     """
     preset = get_provider(provider)
-    model = model or preset.get("default_model") or "gpt-3.5-turbo"
+    original_model = model or preset.get("default_model") or "gpt-3.5-turbo"
+    model = original_model
     result: Dict[str, Any] = {
         "provider": provider,
         "base_url": base_url or preset.get("base_url"),
@@ -499,58 +520,101 @@ def health_ping(
         "sample": [m.get("id") for m in (models_info.get("models") or [])[:15]],
         "rate_limit": models_info.get("rate_limit"),
     }
-    # If models listed and requested model missing, try first chat-like model
-    if models_info.get("success") and models_info.get("models"):
-        ids = [m["id"] for m in models_info["models"]]
-        if model not in ids:
-            # pick first non-embed
-            for mid in ids:
-                low = mid.lower()
-                if not any(x in low for x in ("embed", "whisper", "tts", "moderation", "dall")):
-                    model = mid
-                    result["model_tested"] = model
-                    break
 
-    try:
-        resp = chat_completions(
-            provider=provider,
-            model=model,
-            messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-            api_key=api_key,
-            base_url=base_url,
-            tools=None,
-            temperature=0,
-            max_tokens=16,
-            timeout=timeout,
-        )
-        result["success"] = True
-        result["healthy"] = True
-        result["latency_ms"] = resp.latency_ms
-        result["response_preview"] = (resp.content or "")[:120]
-        result["usage"] = resp.usage
-        result["rate_limit"] = resp.headers or resp.usage.get("rate_limit")
-        result["status"] = "ok"
-    except CompatAPIError as e:
-        result["success"] = False
-        result["healthy"] = False
-        result["latency_ms"] = e.latency_ms
-        result["error"] = e.message
-        result["status_code"] = e.status_code
-        result["rate_limit"] = e.rate_limit
-        result["is_rate_limit"] = e.is_rate_limit
-        result["is_auth_error"] = e.is_auth_error
-        if e.is_auth_error:
+    # Build a candidate model list: preferred model first, then chat-like models from discovery
+    candidate_models = [model]
+    if models_info.get("success") and models_info.get("models"):
+        ids = [m["id"] for m in models_info["models"] if m.get("id")]
+        # If preferred model missing from catalog, prepend discovered chat-like models
+        chat_like = []
+        for mid in ids:
+            low = mid.lower()
+            if any(x in low for x in ("embed", "whisper", "tts", "moderation", "dall", "image", "vision")):
+                continue
+            chat_like.append(mid)
+        # Move chat-like discovered models to the front when the preset model isn't in the list
+        if model not in ids and chat_like:
+            candidate_models = chat_like + candidate_models
+        else:
+            # Still append other chat-like models as fallbacks
+            for mid in chat_like:
+                if mid not in candidate_models:
+                    candidate_models.append(mid)
+
+    last_error = None
+    for try_model in candidate_models[:5]:
+        model = try_model
+        result["model_tested"] = model
+        try:
+            resp = chat_completions(
+                provider=provider,
+                model=model,
+                messages=[{"role": "user", "content": "Reply with exactly: OK"}],
+                api_key=api_key,
+                base_url=base_url,
+                tools=None,
+                temperature=0,
+                max_tokens=16,
+                timeout=timeout,
+            )
+            result["success"] = True
+            result["healthy"] = True
+            result["latency_ms"] = resp.latency_ms
+            result["response_preview"] = (resp.content or "")[:120]
+            result["usage"] = resp.usage
+            result["rate_limit"] = resp.headers or resp.usage.get("rate_limit")
+            result["status"] = "ok"
+            if try_model != original_model:
+                result["note"] = f"Default model '{original_model}' unavailable; used fallback '{try_model}'"
+            return result
+        except CompatAPIError as e:
+            last_error = e
+            # If it's a model error, try next candidate
+            if _is_model_error(e.message, e.status_code):
+                continue
+            # Otherwise record and stop
+            result["success"] = False
+            result["healthy"] = False
+            result["latency_ms"] = e.latency_ms
+            result["error"] = e.message
+            result["status_code"] = e.status_code
+            result["rate_limit"] = e.rate_limit
+            result["is_rate_limit"] = e.is_rate_limit
+            result["is_auth_error"] = e.is_auth_error
+            if e.is_auth_error:
+                result["status"] = "auth_failed"
+            elif e.is_rate_limit:
+                result["status"] = "rate_limited"
+            else:
+                result["status"] = "error"
+            # Models list alone can still be useful
+            if models_info.get("success") and not e.is_auth_error:
+                result["partial"] = True
+                result["note"] = "Models listable but chat failed — check default model id"
+            return result
+        except Exception as e:
+            last_error = e
+            result["error"] = str(e)
+            result["status"] = "error"
+            return result
+
+    # All candidates exhausted — most likely model-not-found for every candidate
+    if last_error and isinstance(last_error, CompatAPIError):
+        result["latency_ms"] = last_error.latency_ms
+        result["error"] = last_error.message
+        result["status_code"] = last_error.status_code
+        result["rate_limit"] = last_error.rate_limit
+        if _is_model_error(last_error.message, last_error.status_code):
+            result["status"] = "model_not_found"
+            result["note"] = f"Tried {len(candidate_models[:5])} models including '{original_model}'; all returned model-not-found. The provider may have deprecated this model."
+        elif last_error.is_auth_error:
             result["status"] = "auth_failed"
-        elif e.is_rate_limit:
+        elif last_error.is_rate_limit:
             result["status"] = "rate_limited"
         else:
             result["status"] = "error"
-        # Models list alone can still be useful
-        if models_info.get("success") and not e.is_auth_error:
-            result["partial"] = True
-            result["note"] = "Models listable but chat failed — check default model id"
-    except Exception as e:
-        result["error"] = str(e)
+    else:
+        result["error"] = str(last_error) if last_error else "All model candidates failed"
         result["status"] = "error"
 
     return result
