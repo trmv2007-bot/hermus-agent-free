@@ -38,6 +38,10 @@ def main():
     gateway_start = gateway_sub.add_parser("start", help="Start gateway")
     gateway_start.add_argument("--port", type=int, default=config.gateway_port)
 
+    # doctor subcommand - install/health wizard (Phase D)
+    doctor_parser = subparsers.add_parser("doctor", help="Health/installation check for Hermus")
+    doctor_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     # cron subcommand
     cron_parser = subparsers.add_parser("cron", help="Cron scheduler - natural language")
     cron_sub = cron_parser.add_subparsers(dest="cron_action")
@@ -444,6 +448,15 @@ def main():
     profile_use.add_argument("name")
 
     args = parser.parse_args()
+
+    if args.command == "doctor":
+        from core.diagnostics import run_diagnostics, print_diagnostics
+        report = run_diagnostics()
+        if getattr(args, "json", False):
+            print(__import__("json").dumps(report, indent=2, default=str))
+        else:
+            print_diagnostics(report)
+        raise SystemExit(0 if report["overall"]["ok"] else 1)
 
     if args.command == "gateway":
         if args.gateway_action == "setup":
