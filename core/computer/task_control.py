@@ -432,7 +432,15 @@ class TaskControlManager:
             if task_id in self._task_contexts:
                 return self._task_contexts[task_id].cancel_requested
             return False
-    
+
+    def is_cancelled(self) -> bool:
+        """Check if any task has been cancelled."""
+        with self._lock:
+            return any(
+                ctx.control_state == TaskControlState.CANCELLED
+                for ctx in self._task_contexts.values()
+            )
+
     def is_emergency_stop_active(self) -> bool:
         """Check if emergency stop is active."""
         return self._emergency_stop_active
