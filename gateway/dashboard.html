@@ -2272,6 +2272,9 @@ function connectComputerWs(){
       try{
         const msg = JSON.parse(e.data);
         if(msg.kind === 'snapshot') { seedActivityFeed(msg.events || []); return; }
+        // Keepalive frames hold the connection open through proxies; they are
+        // not activity, so they must never reach the feed or trigger a reload.
+        if(msg.kind === 'ping') { computer.lastPing = Date.now(); return; }
         handleComputerEvent(msg);
       }catch(err){}
     };

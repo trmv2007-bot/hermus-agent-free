@@ -158,6 +158,58 @@ class ComputerEventBus:
         except OSError:
             return []
 
+    def journal_offset(self) -> int:
+        """Current end-of-journal byte offset (a cursor for :meth:`tail`)."""
+        try:
+            return self.journal_path.stat().st_size
+        except OSError:
+            return 0
+
+    def tail(self, offset: int = 0) -> tuple:
+        """Read only journal bytes written after ``offset``.
+
+        Returns ``(events, next_offset)``. This is the incremental counterpart
+        to :meth:`read_journal`: a live tailer keeps the returned cursor and
+        never re-reads or re-parses the whole file, so streaming cost stays
+        proportional to *new* activity instead of total journal size.
+
+        Handles the two edge cases a naive ``seek`` would corrupt:
+        * **rotation/truncation** - if the file shrank below ``offset`` the
+          cursor is stale, so we restart from the beginning of the new file.
+        * **partial lines** - a writer may be mid-``write``; a trailing chunk
+          without a newline is left unconsumed so it is read intact next time.
+        """
+        try:
+            if not self.journal_path.exists():
+                return [], 0
+            size = self.journal_path.stat().st_size
+            start = int(offset or 0)
+            if start > size:
+                start = 0  # journal rotated or truncated - resync
+            if start == size:
+                return [], size
+            with self.journal_path.open("rb") as handle:
+                handle.seek(start)
+                chunk = handle.read(size - start)
+        except OSError:
+            return [], int(offset or 0)
+
+        consumed = chunk.rfind(b"\n")
+        if consumed == -1:
+            return [], start  # no complete line yet
+        complete, next_offset = chunk[: consumed + 1], start + consumed + 1
+        events: List[Dict[str, Any]] = []
+        for line in complete.decode("utf-8", "replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(event, dict) and event.get("type"):
+                events.append(event)
+        return events, next_offset
+
     def journal_lines(self) -> List[str]:
         try:
             if not self.journal_path.exists():
