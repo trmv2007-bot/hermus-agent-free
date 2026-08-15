@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .controller import ComputerActionController
+from .events import machine_event, publish
 from .permissions import RecordingPolicy, recording_policy
 from .planner import ComputerPlanner
 from .repair import RepairEngine
@@ -196,6 +197,13 @@ class ComputerAgent:
             resume=resume,
         )
         start_state = start_state or (self.task_store.next_state(checkpoint) if resume else None)
+        publish("task_started", {
+            "task_id": task_id,
+            "task": task,
+            "resume": bool(resume),
+            "states": [str(step.get("name") or f"STATE_{index}") for index, step in enumerate(plan)],
+            "source": str((graph or {}).get("source") or "planner"),
+        })
 
         generation = checkpoint.resume_count if resume else 0
         recording_name = "recording.mp4" if generation == 0 else f"recording-resume-{generation}.mp4"
@@ -246,6 +254,23 @@ class ComputerAgent:
 
         def checkpoint_event(event: Dict[str, Any]) -> None:
             self.task_store.checkpoint_event(checkpoint, event, self.world_state)
+            machine_event(event, task_id=task_id, task=task)
+            try:
+                world = self.world_state.to_dict(include_history=False)
+                publish("world_changed", {
+                    "task_id": task_id,
+                    "task": task,
+                    "world": {
+                        "application": world.get("active_application"),
+                        "window": world.get("active_window"),
+                        "task_state": world.get("task_state"),
+                        "confidence": world.get("confidence"),
+                        "visible_targets": list(world.get("visible_targets") or []),
+                        "dialogs": list(world.get("dialogs") or []),
+                    },
+                })
+            except Exception:  # noqa: BLE001
+                pass
 
         machine = VisualStateMachine(
             controller=self.controller,
@@ -266,6 +291,7 @@ class ComputerAgent:
         except (KeyboardInterrupt, SystemExit):
             self.recorder.stop()
             self.task_store.mark_interrupted(task_id, "task interrupted by user")
+            publish("task_interrupted", {"task_id": task_id, "task": task, "reason": "task interrupted by user"})
             raise
         except Exception as exc:  # noqa: BLE001
             report = {
@@ -276,6 +302,7 @@ class ComputerAgent:
                 "failure": {"state": start_state, "category": "agent_exception", "reason": str(exc)},
             }
             self.task_store.mark_interrupted(task_id, report["error"])
+            publish("task_interrupted", {"task_id": task_id, "task": task, "reason": report["error"]})
 
         # Collect structured evidence from the current generation's trace.
         actions: List[Dict[str, Any]] = list(previous_actions) if isinstance(previous_actions, list) else []
@@ -471,6 +498,19 @@ class ComputerAgent:
             "error": report.get("error"),
         }
         self.task_store.complete(checkpoint, success, final_result, self.world_state, recording)
+        publish("task_completed" if success else "task_failed", {
+            "task_id": task_id,
+            "task": task,
+            "success": success,
+            "result": "SUCCESS" if success else "FAILURE",
+            "duration": round(duration, 2),
+            "actions": len(actions),
+            "retries": retries,
+            "repairs": len(repairs),
+            "verifications": len(verifications),
+            "error": report.get("error"),
+            "recording": recording,
+        })
         final_result["checkpoint"] = self.task_store.load(task_id).to_dict()
         return final_result
 

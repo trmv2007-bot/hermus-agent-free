@@ -174,6 +174,58 @@ def test_gateway_endpoints():
     assert r.status_code == 200 and "running" in r.json()
 
 
+# --------------------------------------------------------------------------
+# Computer Agent dashboard API
+# --------------------------------------------------------------------------
+def test_computer_dashboard_endpoints():
+    """The /computer/* endpoints the dashboard uses must be available and
+    return a coherent live view even with an empty task store."""
+    from fastapi.testclient import TestClient
+
+    from gateway.gateway import app
+
+    client = TestClient(app)
+
+    # status / tasks / world degrade gracefully (empty store → null task)
+    r = client.get("/computer/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert "halted" in body and "current_task" in body
+    assert body["current_task"] is None or isinstance(body["current_task"], dict)
+    assert isinstance(body["repair_stats"], dict)
+    assert isinstance(body["recent_events"], list)
+
+    r = client.get("/computer/tasks")
+    assert r.status_code == 200 and "tasks" in r.json() and "stats" in r.json()
+
+    r = client.get("/computer/world")
+    assert r.status_code == 200 and (r.json()["world"] is None or isinstance(r.json()["world"], dict))
+
+    r = client.get("/computer/repairs")
+    assert r.status_code == 200 and isinstance(r.json()["total"], int)
+
+    r = client.get("/computer/skills")
+    assert r.status_code == 200 and "skills" in r.json() and "stats" in r.json()
+
+    # emergency stop / release round-trip
+    r = client.post("/computer/stop", json={"reason": "integration test"})
+    assert r.status_code == 200 and r.json().get("halted") is True
+    assert client.get("/computer/status").json()["halted"] is True
+    r = client.post("/computer/release")
+    assert r.status_code == 200 and r.json().get("halted") is False
+
+    # unknown resources return 404 JSON, not server errors
+    for path in ("/computer/task/nope", "/computer/plan/nope",
+                 "/computer/repairs/nope", "/computer/recording/nope"):
+        assert client.get(path).status_code == 404
+    assert client.get("/computer/recording/nope/video").status_code == 404
+
+    # websocket stream is reachable and delivers a snapshot
+    with client.websocket_connect("/computer/events") as ws:
+        first = ws.receive_json()
+        assert first["kind"] == "snapshot" and isinstance(first["events"], list)
+
+
 if __name__ == "__main__":
     import traceback
 
