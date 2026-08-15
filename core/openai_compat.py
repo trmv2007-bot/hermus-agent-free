@@ -288,6 +288,42 @@ class CompatAPIError(Exception):
         return "invalid api key" in msg or "unauthorized" in msg or "authentication" in msg
 
 
+# NVIDIA's /models catalog also contains downloadable-only and non-chat NIMs.
+# These are the hosted chat models marked "Free Endpoint" in the NVIDIA API
+# Catalog. Keep this allowlist deliberately strict: an unknown/new model is not
+# exposed until it is confirmed as a free hosted endpoint.
+# Catalog: https://build.nvidia.com/models?filters=free_api
+NVIDIA_FREE_CHAT_MODELS = frozenset(
+    {
+        "deepseek-ai/deepseek-v4-flash",
+        "deepseek-ai/deepseek-v4-pro",
+        "meta/llama-3.1-70b-instruct",
+        "meta/llama-3.2-11b-vision-instruct",
+        "meta/llama-3.2-1b-instruct",
+        "meta/llama-3.2-3b-instruct",
+        "meta/llama-guard-4-12b",
+        "minimaxai/minimax-m2.7",
+        "mistralai/mistral-large-2-instruct",
+        "moonshotai/kimi-k2.6",
+        "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "qwen/qwen3.5-122b-a10b",
+        "qwen/qwen3.5-397b-a17b",
+        "stepfun-ai/step-3.5-flash",
+        "z-ai/glm-5.1",
+    }
+)
+
+
+def _is_nvidia_catalog(provider: str, base_url: str = None) -> bool:
+    return (provider or "").lower() == "nvidia" or "integrate.api.nvidia.com" in (base_url or "").lower()
+
+
+def _filter_nvidia_free_chat_models(models: List[Dict]) -> List[Dict]:
+    """Keep only NVIDIA API Catalog models with hosted free chat endpoints."""
+    return [m for m in models if (m.get("id") or "").lower() in NVIDIA_FREE_CHAT_MODELS]
+
+
 def list_models(
     provider: str,
     api_key: str = None,
@@ -328,12 +364,18 @@ def list_models(
             }
 
         models = _normalize_models_list(data, provider)
+        nvidia_free_only = _is_nvidia_catalog(provider, base_url or preset.get("base_url"))
+        catalog_count = len(models)
+        if nvidia_free_only:
+            models = _filter_nvidia_free_chat_models(models)
         return {
             "success": True,
             "provider": provider,
             "base_url": (base_url or preset.get("base_url")),
             "models": models,
             "count": len(models),
+            "catalog_count": catalog_count,
+            "filter": "nvidia_free_chat_endpoints" if nvidia_free_only else None,
             "rate_limit": rate,
             "latency_ms": latency_ms,
             "default_model": preset.get("default_model"),
@@ -555,6 +597,8 @@ def health_ping(
     result["models_probe"] = {
         "success": models_info.get("success"),
         "count": models_info.get("count", 0),
+        "catalog_count": models_info.get("catalog_count"),
+        "filter": models_info.get("filter"),
         "error": models_info.get("error"),
         "sample": [m.get("id") for m in (models_info.get("models") or [])[:15]],
         "rate_limit": models_info.get("rate_limit"),

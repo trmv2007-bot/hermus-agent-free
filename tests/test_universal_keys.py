@@ -87,15 +87,18 @@ def test_providers_list():
 
     providers = list_providers()
     ids = {p["id"] for p in providers}
-    for need in ("openai", "groq", "openrouter", "gemini", "custom", "ollama"):
+    for need in ("openai", "groq", "nvidia", "openrouter", "gemini", "custom", "ollama"):
         assert need in ids
     g = get_provider("groq")
     assert "groq.com" in g["base_url"]
+    nvidia = get_provider("nvidia")
+    assert nvidia["base_url"] == "https://integrate.api.nvidia.com/v1"
+    assert "free" in nvidia["notes"].lower()
 
 
 def test_provider_tool_limit_and_chat_model_ranking():
     from core.llm import FreeLLM
-    from core.openai_compat import _rank_chat_models
+    from core.openai_compat import _filter_nvidia_free_chat_models, _rank_chat_models
 
     tools = [
         {"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}}
@@ -120,6 +123,17 @@ def test_provider_tool_limit_and_chat_model_ranking():
     }
     assert "baai/bge-m3" not in ranked
     assert "adept/fuyu-8b" not in ranked
+
+    filtered = _filter_nvidia_free_chat_models([
+        {"id": "baai/bge-m3"},
+        {"id": "meta/llama-3.1-70b-instruct"},
+        {"id": "nvidia/llama-3.3-nemotron-super-49b-v1.5"},
+        {"id": "downloadable/paid-model"},
+    ])
+    assert [m["id"] for m in filtered] == [
+        "meta/llama-3.1-70b-instruct",
+        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    ]
 
 
 def test_openai_compat_models_and_chat():
