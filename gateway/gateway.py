@@ -1478,6 +1478,159 @@ async def computer_release():
     return {"success": True, "halted": False}
 
 
+# ---- Task Control Endpoints (Pause/Resume/Cancel) ---------------------------
+
+@app.get("/computer/control/status")
+async def computer_control_status():
+    """Get overall task control status - all running/paused tasks and control state."""
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    return control.get_status()
+
+
+@app.post("/computer/control/pause/{task_id}")
+async def computer_control_pause(task_id: str, payload: Dict = None):
+    """Request pause for a task at next safe boundary.
+    
+    The task will pause after completing its current action.
+    Use /computer/control/resume/{task_id} to continue.
+    """
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    reason = (payload or {}).get("reason", "")
+    success = control.request_pause(task_id, reason)
+    
+    if success:
+        return {
+            "success": True,
+            "task_id": task_id,
+            "action": "pause_requested",
+            "note": "Task will pause at next safe boundary",
+            "reason": reason,
+        }
+    else:
+        ctx = control.get_task_context(task_id)
+        return {
+            "success": False,
+            "task_id": task_id,
+            "error": f"Cannot pause: task is {ctx.control_state.value if ctx else 'not found'}",
+        }
+
+
+@app.post("/computer/control/resume/{task_id}")
+async def computer_control_resume(task_id: str):
+    """Resume a paused task from its saved state."""
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    success = control.resume(task_id)
+    
+    if success:
+        ctx = control.get_task_context(task_id)
+        return {
+            "success": True,
+            "task_id": task_id,
+            "action": "resumed",
+            "resume_count": ctx.resume_count if ctx else 0,
+            "note": "Task resumed from paused state",
+        }
+    else:
+        ctx = control.get_task_context(task_id)
+        return {
+            "success": False,
+            "task_id": task_id,
+            "error": f"Cannot resume: task is {ctx.control_state.value if ctx else 'not found'}",
+        }
+
+
+@app.post("/computer/control/cancel/{task_id}")
+async def computer_control_cancel(task_id: str, payload: Dict = None):
+    """Request cancellation of a task.
+    
+    The task will be marked as cancelled and terminated.
+    This is different from pause - cancelled tasks cannot be resumed.
+    """
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    reason = (payload or {}).get("reason", "")
+    success = control.request_cancel(task_id, reason)
+    
+    if success:
+        return {
+            "success": True,
+            "task_id": task_id,
+            "action": "cancel_requested",
+            "note": "Task cancellation requested",
+            "reason": reason,
+        }
+    else:
+        ctx = control.get_task_context(task_id)
+        return {
+            "success": False,
+            "task_id": task_id,
+            "error": f"Cannot cancel: task is {ctx.control_state.value if ctx else 'not found'}",
+        }
+
+
+@app.post("/computer/control/emergency-stop")
+async def computer_emergency_stop(payload: Dict = None):
+    """EMERGENCY STOP - immediately block all computer actions.
+    
+    This is the safety override that stops ALL computer control instantly.
+    Use /computer/control/emergency-release to re-enable control.
+    """
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    reason = (payload or {}).get("reason", "")
+    control.emergency_stop(reason)
+    
+    return {
+        "success": True,
+        "action": "emergency_stop_activated",
+        "reason": reason,
+        "note": "All computer actions blocked. Use POST /computer/control/emergency-release to restore.",
+    }
+
+
+@app.post("/computer/control/emergency-release")
+async def computer_emergency_release():
+    """Release emergency stop - re-enable computer control.
+    
+    After calling this, computer actions can resume normally.
+    """
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    success = control.release_emergency_stop()
+    
+    return {
+        "success": success,
+        "action": "emergency_stop_released" if success else "emergency_stop_not_active",
+        "note": "Computer control restored" if success else "Emergency stop was not active",
+    }
+
+
+@app.get("/computer/control/{task_id}")
+async def computer_control_task(task_id: str):
+    """Get control context for a specific task."""
+    from core.computer.task_control import get_task_control
+
+    control = get_task_control()
+    ctx = control.get_task_context(task_id)
+    
+    if ctx is None:
+        return {"success": False, "error": f"Task '{task_id}' not found"}
+    
+    return {
+        "success": True,
+        **ctx.to_dict(),
+    }
+
+
 @app.websocket("/computer/events")
 async def computer_events_ws(websocket: WebSocket):
     """Live event stream: task_started, state_changed, action_*, verification,
