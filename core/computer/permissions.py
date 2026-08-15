@@ -229,6 +229,12 @@ class EmergencyStop:
             temporary.replace(self.halt_path)
         except OSError:
             pass
+        try:
+            from .events import publish
+
+            publish("emergency_stop", {"halted": True, "reason": reason})
+        except Exception:  # noqa: BLE001
+            pass
 
     def release(self) -> None:
         with self._lock:
@@ -237,6 +243,12 @@ class EmergencyStop:
         try:
             self.halt_path.unlink(missing_ok=True)
         except OSError:
+            pass
+        try:
+            from .events import publish
+
+            publish("emergency_stop", {"halted": False, "reason": "released"})
+        except Exception:  # noqa: BLE001
             pass
 
     def check(self) -> Dict[str, Any]:

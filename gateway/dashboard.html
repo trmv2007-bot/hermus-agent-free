@@ -77,6 +77,81 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media(max-width:1000px){.two{grid-template-columns:1fr}.sidebar{display:none}}
 .footer-note{padding:10px;border-top:1px solid var(--border);font-size:.68em;color:var(--text-muted);font-family:"JetBrains Mono",monospace}
+
+/* ---- Computer agent dashboard ---- */
+.estop{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.55);color:#ff6b6b;font-weight:600}
+.estop:hover{background:rgba(239,68,68,.25)}
+.estop.halted{background:var(--bad);color:#fff;border-color:var(--bad)}
+.estop.release{background:rgba(34,197,94,.15);color:var(--ok);border-color:rgba(34,197,94,.5)}
+.progress{background:rgba(255,255,255,.07);border-radius:10px;height:10px;overflow:hidden;border:1px solid var(--border)}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:10px;transition:width .5s ease}
+.progress-fill.ok{background:linear-gradient(90deg,#16a34a,#22c55e)}
+.progress-fill.bad{background:linear-gradient(90deg,#b91c1c,#ef4444)}
+.progress-label{font-size:.72em;color:var(--text-muted);font-family:"JetBrains Mono",monospace;margin-top:3px}
+.live-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ok);margin-right:6px;animation:pulse 1.6s infinite}
+.live-dot.halted{background:var(--bad);animation:none}
+.live-dot.idle{background:var(--text-muted);animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 7px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.tab{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text-dim);cursor:pointer;font-size:.78em;font-family:"JetBrains Mono",monospace}
+.tab:hover{color:var(--text)}
+.tab.active{background:rgba(218,165,32,.16);border-color:rgba(218,165,32,.45);color:var(--gold)}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:12px 0}
+.kpi{background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
+.kpi b{display:block;font-size:1.35em;font-family:"JetBrains Mono",monospace;color:var(--gold)}
+.kpi span{font-size:.66em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.kpi .warn-v{color:var(--warn)} .kpi .bad-v{color:var(--bad)} .kpi .ok-v{color:var(--ok)}
+.world-row{display:flex;gap:8px;align-items:baseline;justify-content:space-between;padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:.82em}
+.world-row b{color:var(--text-muted);font-weight:400;font-family:"JetBrains Mono",monospace}
+.feed{max-height:340px;overflow:auto;font-family:"JetBrains Mono",monospace;font-size:.76em}
+.feed-item{display:flex;gap:8px;padding:5px 4px;border-bottom:1px dashed rgba(255,255,255,.06);cursor:pointer;border-radius:6px}
+.feed-item:hover{background:rgba(255,255,255,.04)}
+.feed-time{color:var(--text-muted);white-space:nowrap}
+.feed-ico{flex:0 0 18px;text-align:center}
+.feed-type{color:var(--gold);white-space:nowrap}
+.feed-msg{color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feed-msg.ok{color:var(--ok)} .feed-msg.bad{color:var(--bad)}
+.timeline-list{font-family:"JetBrains Mono",monospace;font-size:.8em;max-height:520px;overflow:auto}
+.tl-item{display:flex;gap:10px;padding:7px 6px;border-radius:8px;border-left:2px solid var(--border);margin-bottom:2px;cursor:pointer}
+.tl-item:hover{background:rgba(255,255,255,.05)}
+.tl-item.ok{border-left-color:var(--ok)} .tl-item.bad{border-left-color:var(--bad)} .tl-item.warn{border-left-color:var(--warn)} .tl-item.neutral{border-left-color:var(--gold)}
+.tl-time{color:var(--text-muted);white-space:nowrap;min-width:52px}
+.tl-ico{flex:0 0 22px}
+.tl-desc{flex:1;color:var(--text-dim);word-break:break-word}
+.tl-ev{color:var(--text-muted);cursor:pointer;white-space:nowrap;font-size:.75em}
+.tl-ev:hover{color:var(--gold)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:1000}
+.modal.open{display:flex}
+.modal-box{background:#141226;border:1px solid var(--border);border-radius:14px;max-width:860px;width:100%;max-height:80vh;overflow:auto;padding:16px}
+.modal-box h4{margin-bottom:8px}
+.graph{display:flex;flex-direction:column;gap:0;align-items:flex-start}
+.graph-col{display:flex;flex-direction:column;gap:6px;align-items:center}
+.gnode{background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:10px;padding:9px 12px;min-width:240px;max-width:340px}
+.gnode .gn-name{font-family:"JetBrains Mono",monospace;font-size:.8em;color:var(--gold);font-weight:600}
+.gnode .gn-action{font-size:.72em;color:var(--text-dim);margin-top:3px}
+.gnode .gn-expected{font-size:.68em;color:var(--text-muted);margin-top:3px}
+.gnode.ok{border-color:rgba(34,197,94,.5);background:rgba(34,197,94,.07)}
+.gnode.bad{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.07)}
+.gnode.current{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold),0 0 18px rgba(218,165,32,.25)}
+.gnode.terminal{border-style:dashed;text-align:center;min-width:160px}
+.gedge{color:var(--text-muted);font-size:.72em;font-family:"JetBrains Mono",monospace;display:flex;align-items:center;gap:6px;padding:1px 0}
+.gedge .arrow{font-size:1em}
+.gedge.ok{color:var(--ok)} .gedge.bad{color:var(--bad)}
+.graph-side{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.video-box{width:100%;max-width:640px;border-radius:10px;border:1px solid var(--border);background:#000}
+.chip{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.68em;font-family:"JetBrains Mono",monospace;border:1px solid var(--border)}
+.chip.ok{color:var(--ok);border-color:rgba(34,197,94,.4)}
+.chip.bad{color:var(--bad);border-color:rgba(239,68,68,.4)}
+.chip.warn{color:var(--warn);border-color:rgba(245,158,11,.4)}
+.chip.muted{color:var(--text-muted)}
+.skill-row{cursor:pointer}
+.skill-row:hover td{background:rgba(255,255,255,.03)}
+.task-row td{vertical-align:middle}
+.task-progress{min-width:130px}
+.rec-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.halted-banner{background:linear-gradient(90deg,rgba(239,68,68,.18),transparent);border:1px solid rgba(239,68,68,.5);border-left:4px solid var(--bad);border-radius:10px;padding:12px;margin-bottom:12px;display:none}
+.halted-banner.show{display:block}
+.terminal-note{font-family:"JetBrains Mono",monospace;font-size:.7em;color:var(--text-muted);margin-top:6px}
 </style>
 </head>
 <body>
@@ -96,7 +171,6 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
         <div class="nav-group-title">Home</div>
         <div class="nav-item active" data-pane="overview" onclick="switchPane('overview')"><span>📊</span> Overview</div>
         <div class="nav-item" data-pane="chat" onclick="switchPane('chat')"><span>💬</span> Chat</div>
-        <div class="nav-item" data-pane="agents" onclick="switchPane('agents')"><span>🤖</span> Agents <span class="badge" id="navAgents">0</span></div>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">AI Keys & Fleet</div>
@@ -107,11 +181,13 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
       </div>
       <div class="nav-group">
         <div class="nav-group-title">System</div>
-        <div class="nav-item" data-pane="tools" onclick="switchPane('tools')"><span>🛠️</span> Tools <span class="badge" id="navTools">0</span></div>
-        <div class="nav-item" data-pane="channels" onclick="switchPane('channels')"><span>📡</span> Channels</div>
+        <div class="nav-item" data-pane="computer" onclick="switchPane('computer')"><span>🖥️</span> Computer <span class="badge" id="navComputer">—</span></div>
+        <div class="nav-item" data-pane="agents" onclick="switchPane('agents')"><span>🤖</span> Agents <span class="badge" id="navAgents">0</span></div>
         <div class="nav-item" data-pane="memory" onclick="switchPane('memory')"><span>🧠</span> Memory / RAG</div>
         <div class="nav-item" data-pane="mcp" onclick="switchPane('mcp')"><span>🔌</span> MCP</div>
         <div class="nav-item" data-pane="reasoning" onclick="switchPane('reasoning')"><span>🧭</span> Reasoning</div>
+        <div class="nav-item" data-pane="tools" onclick="switchPane('tools')"><span>🛠️</span> Tools <span class="badge" id="navTools">0</span></div>
+        <div class="nav-item" data-pane="channels" onclick="switchPane('channels')"><span>📡</span> Channels</div>
         <div class="nav-item" data-pane="settings" onclick="switchPane('settings')"><span>⚙️</span> Settings</div>
       </div>
     </nav>
@@ -132,6 +208,7 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
           <option value="multi-agent">👥 Multi-Agent</option>
           <option value="multi-chat">💭 Multi-Chat</option>
         </select>
+        <button class="btn estop sm" id="estopBtn" onclick="computerStop()">🔴 EMERGENCY STOP</button>
         <button class="btn primary sm" onclick="togglePanel()">👁️ Agents</button>
         <button class="btn sm" onclick="refreshAll()">↻</button>
       </div>
@@ -143,14 +220,37 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
         <!-- OVERVIEW -->
         <div class="pane active" id="pane-overview">
           <div class="banner update" id="updateBanner" style="display:none"></div>
-          <div class="banner">Add any AI API key → check health & models → run multi-model fleet tasks. Everything stays on your machine.</div>
           <div class="grid">
             <div class="stat"><h3 id="sAgents">0</h3><p>Active agents</p></div>
-            <div class="stat"><h3 id="sTasks">0</h3><p>Active tasks</p></div>
+            <div class="stat"><h3 id="sComputerRunning">0</h3><p>Computer tasks running</p></div>
+            <div class="stat"><h3 id="sHealthy">—</h3><p>Healthy keys</p></div>
+          </div>
+
+          <div class="card" id="overviewComputerCard">
+            <div class="row" style="justify-content:space-between">
+              <h3>🖥️ Current computer task</h3>
+              <button class="btn sm" onclick="switchPane('computer')">Open Computer →</button>
+            </div>
+            <div id="overviewComputerBody" class="muted">No computer task yet — run one from the <a href="#" onclick="switchPane('computer');return false;">Computer</a> page.</div>
+          </div>
+
+          <div class="two">
+            <div class="card">
+              <h3>📡 Recent computer activity</h3>
+              <div id="overviewActivity" class="feed"><span class="muted">Loading…</span></div>
+            </div>
+            <div class="card">
+              <h3>🤖 Live agents / models</h3>
+              <div id="overviewAgents" class="muted">Loading…</div>
+            </div>
+          </div>
+
+          <div class="banner">Add any AI API key → check health & models → run multi-model fleet tasks. Everything stays on your machine.</div>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
             <div class="stat"><h3 id="sKeys">0</h3><p>API keys</p></div>
             <div class="stat"><h3 id="sTools">0</h3><p>Tools</p></div>
             <div class="stat"><h3 id="sWorkers">0</h3><p>Fleet workers</p></div>
-            <div class="stat"><h3 id="sHealthy">—</h3><p>Healthy keys</p></div>
+            <div class="stat"><h3 id="sTasks">0</h3><p>Gateway tasks</p></div>
           </div>
           <div class="two">
             <div class="card">
@@ -168,9 +268,67 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
               <div id="overviewChannels" class="muted">Loading…</div>
             </div>
           </div>
+        </div>
+
+        <!-- COMPUTER -->
+        <div class="pane" id="pane-computer">
+          <div class="row" style="justify-content:space-between">
+            <h3>🖥️ Hermus Computer <span class="chip" id="computerStatusChip">…</span></h3>
+            <div class="rec-actions">
+              <button class="btn sm" onclick="loadComputerStatus()">↻ Refresh</button>
+              <button class="btn sm primary" onclick="toggleComputerRun()">▶ New task</button>
+            </div>
+          </div>
+          <div class="halted-banner" id="haltedBanner">
+            <b>🔴 EMERGENCY STOP ENGAGED</b> — all mouse / keyboard / autonomous actions are halted. <span id="haltedReason" class="mono"></span>
+            <button class="btn sm" onclick="computerRelease()" style="margin-left:10px">Release control</button>
+          </div>
+          <div class="card" id="computerRunBox" style="display:none">
+            <h4>▶ Run a computer task (background)</h4>
+            <div class="row">
+              <input id="computerRunTask" placeholder="e.g. Open Chrome and download the latest Firefox installer" style="flex:1;min-width:240px"/>
+              <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="computerRunReal" style="min-width:auto"/> real actions</label>
+              <button class="btn primary" onclick="startComputerRun()">Run task</button>
+            </div>
+            <p class="subtle">Dry-run by default — prints the plan without touching mouse/keyboard. Check “real actions” only if you want Hermus to actually operate this machine.</p>
+          </div>
+
           <div class="card">
-            <h3>🤖 Live agents / models</h3>
-            <div id="overviewAgents" class="muted">Loading…</div>
+            <div class="row" style="justify-content:space-between">
+              <h3 id="computerHeroTitle">Status</h3>
+              <div id="computerHeroBadges" class="rec-actions"></div>
+            </div>
+            <div id="computerHero" class="muted">Loading…</div>
+            <div class="kpi-grid" id="computerKpis"></div>
+          </div>
+
+          <div class="two">
+            <div class="card">
+              <h3>🌍 World state</h3>
+              <div id="computerWorld" class="muted">Loading…</div>
+            </div>
+            <div class="card">
+              <h3>🎬 Screen / recording</h3>
+              <div id="computerRecordingPanel" class="muted">Loading…</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="tabs">
+              <div class="tab active" data-ctab="timeline" onclick="switchComputerTab('timeline')">⏱️ Timeline</div>
+              <div class="tab" data-ctab="screen" onclick="switchComputerTab('screen')">🎬 Screen</div>
+              <div class="tab" data-ctab="plan" onclick="switchComputerTab('plan')">🗺️ Plan graph</div>
+              <div class="tab" data-ctab="repairs" onclick="switchComputerTab('repairs')">🛠️ Repairs</div>
+              <div class="tab" data-ctab="skills" onclick="switchComputerTab('skills')">📈 Skills</div>
+              <div class="tab" data-ctab="tasks" onclick="switchComputerTab('tasks')">🗃️ Tasks</div>
+              <div class="rec-actions" style="margin-left:auto">
+                <span class="subtle">task:</span>
+                <select id="computerTaskSel" onchange="onComputerTaskChange()" style="min-width:190px"><option value="">—</option></select>
+              </div>
+            </div>
+            <div id="computerTabBody">
+              <div class="subtle" id="computerTabEmpty">Loading…</div>
+            </div>
           </div>
         </div>
 
@@ -468,6 +626,10 @@ label{font-size:.75em;color:var(--text-muted);display:block;margin-bottom:3px}
 
       </div>
 
+      <div class="modal" id="modalBox" onclick="if(event.target===this)closeModal()">
+        <div class="modal-box" id="modalContent"></div>
+      </div>
+
       <aside class="sidebar-panel" id="rightSidebar">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <h3>🔍 Live agents</h3>
@@ -492,6 +654,7 @@ function switchPane(pane){
   document.querySelectorAll(`[data-pane="${pane}"]`).forEach(n => n.classList.add('active'));
   const titles = {
     overview:['Overview','Status at a glance'],
+    computer:['Computer','Autonomous desktop agent'],
     chat:['Chat','Talk to Hermus'],
     agents:['Agents','What is running'],
     keys:['API Keys','Any provider'],
@@ -502,6 +665,7 @@ function switchPane(pane){
     channels:['Channels','Telegram / Discord'],
     memory:['Memory','Semantic RAG'],
     mcp:['MCP','External tools'],
+    reasoning:['Reasoning','DeepThink, Council & Lessons'],
     settings:['Settings','Cache & updates'],
   };
   const meta = titles[pane] || [pane,''];
@@ -519,6 +683,7 @@ function switchPane(pane){
   if(pane==='mcp') loadMcp();
   if(pane==='agents') loadAgents();
   if(pane==='reasoning') loadReasoning();
+  if(pane==='computer') loadComputerStatus();
   if(pane==='settings'){ loadCache(); checkUpdate(); loadRoot(); loadCustomApis(); }
 }
 
@@ -545,7 +710,7 @@ function esc(s){
 }
 
 async function refreshAll(){
-  await Promise.allSettled([loadRoot(), loadAgents(), loadKeys(true), loadTools(true), loadWorkers(true), loadChannels(true), checkUpdate(true)]);
+  await Promise.allSettled([loadRoot(), loadAgents(), loadKeys(true), loadTools(true), loadWorkers(true), loadChannels(true), checkUpdate(true), loadComputerStatus()]);
 }
 
 async function loadRoot(){
@@ -1309,6 +1474,796 @@ async function testCustomApi(name){
   }catch(e){ box.innerHTML = `<span class="bad-text">❌ ${esc(String(e))}</span>`; }
 }
 
+// ====================== Computer agent dashboard ======================
+const computer = { status:null, tab:'timeline', taskId:null, ws:null, wsClosed:false, taskCache:{}, pendingJump:null };
+let compEventDebounce = null;
+let activitySeeded = false;
+
+function fmtTs(ts){
+  if(!ts) return '';
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return String(ts).slice(0,19);
+  return d.toLocaleTimeString();
+}
+function fmtOffset(offset){
+  const s = Math.max(0, Number(offset)||0);
+  const m = Math.floor(s/60), sec = Math.floor(s%60);
+  return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+async function loadComputerStatus(){
+  try{
+    const d = await jget('/computer/status');
+    computer.status = d;
+    renderComputerHero(d);
+    renderComputerWorld(d);
+    renderComputerRecordingPanel(d);
+    renderComputerNav(d);
+    renderOverviewComputer(d);
+    updateEstop(d.halted, d.halt_reason);
+    renderTaskSel(d);
+    seedActivityFeed(d.recent_events);
+    refreshComputerTab();
+  }catch(e){
+    if($('computerHero')) $('computerHero').textContent = 'Error: '+e;
+  }
+}
+
+function renderComputerNav(d){
+  const running = (d.task_stats && d.task_stats.running) || 0;
+  $('navComputer').textContent = d.halted ? 'STOP' : (running>0 ? running : (d.current_task ? 'idle' : '0'));
+  if($('sComputerRunning')) $('sComputerRunning').textContent = running;
+}
+
+function renderComputerHero(d){
+  const cur = d.current_task;
+  const halted = d.halted;
+  const chip = $('computerStatusChip');
+  if(chip){
+    chip.textContent = halted ? 'HALTED' : (cur && cur.status==='running' ? 'ACTIVE' : (cur ? cur.status.toUpperCase() : 'IDLE'));
+    chip.className = 'chip ' + (halted ? 'bad' : (cur && cur.status==='running' ? 'ok' : 'muted'));
+  }
+  let badges = '';
+  if(cur || halted){
+    const dotCls = halted ? 'halted' : (cur && cur.status==='running' ? '' : 'idle');
+    const label = halted ? 'HALTED' : (cur && cur.status==='running' ? 'RUNNING' : (cur ? 'LAST TASK: '+cur.status.toUpperCase() : 'IDLE'));
+    badges = `<span class="chip ${halted?'bad':(cur&&cur.status==='running'?'ok':'muted')}"><span class="live-dot ${dotCls}"></span>${esc(label)}</span>`;
+  }
+  if(d.recording && d.recording.running) badges += '<span class="chip ok"><span class="live-dot"></span>REC</span>';
+  if(d.recording && d.recording.elapsed) badges += `<span class="chip">⏱ ${fmtOffset(d.recording.elapsed)}</span>`;
+  $('computerHeroBadges').innerHTML = badges;
+
+  if(halted){
+    $('haltedBanner').classList.add('show');
+    $('haltedReason').textContent = d.halt_reason ? '· '+esc(d.halt_reason) : '';
+  } else $('haltedBanner').classList.remove('show');
+
+  let html;
+  if(!cur){
+    html = '<p class="muted">No computer task yet. Type one in “▶ New task”, or run <span class="mono">hermus computer run "…"</span> in a terminal — the dashboard shows it live.</p>';
+  } else {
+    const state = cur.task_state || cur.current_state || '—';
+    const conf = cur.confidence != null ? Math.round(Number(cur.confidence)*100)+'%' : '—';
+    html = `<div class="kv" style="margin-bottom:8px">
+      <b>Status</b><span>${statusChip(cur.status)}</span>
+      <b>Task</b><span>${esc(cur.task||'')}</span>
+      <b>Current state</b><span class="mono">${esc(state)}</span>
+      <b>Confidence</b><span class="mono">${conf}</span>
+    </div>
+    <div class="progress"><div class="progress-fill ${cur.status==='success'?'ok':(cur.status==='failed'?'bad':'')}" style="width:${Math.max(0,Math.min(100,cur.progress||0))}%"></div></div>
+    <div class="progress-label">${esc(cur.completed)}/${esc((cur.completed||0)+(cur.pending||0))} states · ${esc(cur.progress)}% · updated ${fmtTs(cur.updated_at)}</div>`;
+    if(cur.error) html += `<div class="bad-text" style="margin-top:6px">⚠️ ${esc(String(cur.error).slice(0,220))}</div>`;
+  }
+  $('computerHeroTitle').textContent = halted ? '🛑 Status — EMERGENCY STOP' : '🖥️ Status';
+  $('computerHero').innerHTML = html;
+
+  const rate = d.repair_stats && d.repair_stats.success_rate;
+  const sk = d.skills && d.skills.stats;
+  const kpis = [
+    ['Actions', cur ? cur.actions : '—', ''],
+    ['Repairs', cur ? cur.repairs : '—', ''],
+    ['Retries', cur ? cur.retries : '—', cur && cur.retries>0 ? 'warn-v' : ''],
+    ['Verifications', cur ? cur.verifications : '—', ''],
+    ['Confidence', cur && cur.confidence!=null ? Math.round(Number(cur.confidence)*100)+'%' : '—', ''],
+    ['Repair success', rate!=null ? rate+'%' : '—', rate!=null && rate<70 ? 'warn-v' : (rate!=null?'ok-v':'')],
+    ['Skills', sk ? sk.count : '—', ''],
+    ['Skill rate', sk && sk.avg_success_rate!=null ? sk.avg_success_rate+'%' : '—', sk && sk.avg_success_rate!=null && sk.avg_success_rate<70 ? 'warn-v' : ''],
+  ];
+  $('computerKpis').innerHTML = kpis.map(([l,v,cls])=>`<div class="kpi"><b class="${cls}">${esc(String(v))}</b><span>${esc(l)}</span></div>`).join('');
+}
+
+function renderComputerWorld(d){
+  const w = d.world || (d.current_task && d.current_task.world) || {};
+  if(!w || !Object.keys(w).length){
+    $('computerWorld').innerHTML = '<p class="muted">No world state yet — appears once a task starts observing the screen.</p>';
+    return;
+  }
+  const targets = (w.visible_targets||[]).map(t=>`<li>${esc(t)}</li>`).join('');
+  const dialogs = (w.dialogs||[]).length ? (w.dialogs||[]).map(t=>`<li class="warn-text">${esc(t)}</li>`).join('') : '<li class="muted">None</li>';
+  $('computerWorld').innerHTML =
+    `<div class="world-row"><b>Application</b><span>${esc(w.active_application||w.application||'—')}</span></div>` +
+    `<div class="world-row"><b>Window</b><span>${esc(w.active_window||w.window||'—')}</span></div>` +
+    `<div class="world-row"><b>State</b><span class="mono">${esc(w.task_state||w.current_state||'—')}</span></div>` +
+    `<div class="world-row"><b>Confidence</b><span class="mono">${w.confidence!=null ? Math.round(Number(w.confidence)*100)+'%' : '—'}</span></div>` +
+    `<div style="margin-top:8px"><b class="muted" style="font-size:.72em;letter-spacing:.05em">VISIBLE</b></div>` +
+    `<ul style="margin:4px 0 0 16px;font-size:.78em;color:var(--text-dim)">${targets||'<li class="muted">None</li>'}</ul>` +
+    `<div style="margin-top:8px"><b class="muted" style="font-size:.72em;letter-spacing:.05em">DIALOGS</b></div>` +
+    `<ul style="margin:4px 0 0 16px;font-size:.78em">${dialogs}</ul>`;
+}
+
+function renderComputerRecordingPanel(d){
+  const cur = d.current_task;
+  const rec = (cur && cur.recording) || null;
+  const screen = d.recording || {};
+  let html = '';
+  if(screen.running){
+    html += `<div class="world-row"><b>Recorder</b><span class="ok-text"><span class="live-dot"></span>LIVE ${fmtOffset(screen.elapsed||0)}</span></div>` +
+      `<div class="world-row"><b>Frames</b><span class="mono">${screen.frames_captured||0} · ${screen.buffer_mb||0}MB buffer</span></div>`;
+  } else {
+    html += '<div class="world-row"><b>Recorder</b><span class="muted">idle</span></div>';
+  }
+  if(rec){
+    html += `<div class="world-row"><b>Video</b><span class="ok-text">${esc(rec.filename||'')}${rec.size_mb!=null ? ' · '+esc(rec.size_mb)+'MB' : ''}</span></div>` +
+      `<div class="rec-actions" style="margin-top:8px"><button class="btn sm primary" onclick="switchComputerTab('screen')">▶ Play</button>` +
+      `<button class="btn sm" onclick="switchComputerTab('timeline')">Timeline</button></div>`;
+  } else if(!screen.running){
+    html += '<p class="muted" style="margin-top:8px">No recording yet — tasks attach MP4/WebM automatically when FFmpeg is available.</p>';
+  }
+  $('computerRecordingPanel').innerHTML = html;
+}
+
+function renderOverviewComputer(d){
+  const cur = d.current_task;
+  const body = $('overviewComputerBody');
+  if(!cur){
+    if(body) body.innerHTML = 'No computer task yet — run one from the <a href="#" onclick="switchPane(\'computer\');return false;">Computer</a> page.';
+    return;
+  }
+  const state = cur.task_state || cur.current_state || '—';
+  const conf = cur.confidence != null ? Math.round(Number(cur.confidence)*100)+'%' : '—';
+  if(body) body.innerHTML =
+    `<div style="margin-bottom:6px"><b>${esc(cur.task||'')}</b> ${statusChip(cur.status)}</div>` +
+    `<div class="progress"><div class="progress-fill ${cur.status==='success'?'ok':(cur.status==='failed'?'bad':'')}" style="width:${Math.max(0,Math.min(100,cur.progress||0))}%"></div></div>` +
+    `<div class="progress-label">State: <span class="mono">${esc(state)}</span> · Repairs: ${esc(cur.repairs)} · Confidence: ${conf} · ${esc(cur.completed)}/${esc((cur.completed||0)+(cur.pending||0))} states</div>`;
+}
+
+function updateEstop(halted, reason){
+  const btn = $('estopBtn');
+  if(halted){
+    btn.textContent = '🔴 STOPPED · all computer actions halted';
+    btn.className = 'btn estop halted sm';
+    btn.title = reason || 'emergency stop engaged';
+  } else {
+    btn.textContent = '🔴 EMERGENCY STOP';
+    btn.className = 'btn estop sm';
+    btn.title = 'Halt all computer mouse/keyboard actions';
+  }
+}
+async function computerStop(){
+  if(!confirm('EMERGENCY STOP — halt all computer mouse/keyboard/autonomous actions?')) return;
+  try{
+    const d = await jpost('/computer/stop', {reason:'emergency stop from dashboard'});
+    updateEstop(true, d.reason || 'emergency stop');
+    loadComputerStatus();
+  }catch(e){ alert(e); }
+}
+async function computerRelease(){
+  if(!confirm('Release the emergency stop? Computer control will be re-enabled.')) return;
+  try{
+    await jpost('/computer/release', {});
+    updateEstop(false);
+    loadComputerStatus();
+  }catch(e){ alert(e); }
+}
+
+function toggleComputerRun(){
+  const box = $('computerRunBox');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  if(box.style.display === 'block') $('computerRunTask').focus();
+}
+async function startComputerRun(){
+  const task = $('computerRunTask').value.trim();
+  if(!task){ alert('Describe the task to run'); return; }
+  const dry_run = !$('computerRunReal').checked;
+  const note = document.createElement('div');
+  note.className = 'subtle';
+  note.style.marginTop = '6px';
+  note.textContent = `⏳ Starting (${dry_run ? 'dry-run' : 'REAL actions'}) in background: ${task}…`;
+  $('computerRunBox').appendChild(note);
+  try{
+    const d = await jpost('/computer/run', {task, dry_run});
+    note.className = 'subtle ' + (d.success ? 'ok-text' : 'bad-text');
+    note.textContent = d.success
+      ? `✅ Started ${d.task_id ? '— '+d.task_id : ''}. Watch the Timeline for live progress.`
+      : '❌ ' + (d.error || 'could not start');
+    setTimeout(()=>{ note.remove(); }, 8000);
+    if(d.success){ $('computerRunTask').value = ''; computer.taskId = d.task_id || computer.taskId; loadComputerStatus(); }
+  }catch(e){
+    note.textContent = '❌ ' + e;
+  }
+}
+
+// ---- tab machinery ----
+function renderTaskSel(d){
+  const sel = $('computerTaskSel'); if(!sel) return;
+  const tasks = (d.tasks || []).filter(t => t && t.task_id);
+  const prev = computer.taskId;
+  let opts = '<option value="">— no task —</option>';
+  tasks.forEach(t => {
+    const live = t.status === 'running' ? ' ●' : '';
+    opts += `<option value="${esc(t.task_id)}">${esc((t.task||'').slice(0,42))} [${esc(t.status)}]${live}</option>`;
+  });
+  sel.innerHTML = opts;
+  if(prev && [...sel.options].some(o => o.value === prev)){ sel.value = prev; }
+  else if(tasks.length){ computer.taskId = tasks[0].task_id; sel.value = computer.taskId; }
+  else computer.taskId = null;
+}
+function onComputerTaskChange(){
+  computer.taskId = $('computerTaskSel').value || null;
+  refreshComputerTab();
+}
+function currentTaskId(){
+  return computer.taskId || (computer.status && computer.status.current_task && computer.status.current_task.task_id) || null;
+}
+function refreshComputerTab(force){
+  if(!document.querySelector('#pane-computer.active')) return;
+  const now = Date.now();
+  if(!force && now - (computer.lastTabRefresh||0) < 2500) return;
+  computer.lastTabRefresh = now;
+  const tab = computer.tab;
+  if(tab==='timeline') loadComputerTimeline();
+  else if(tab==='screen') loadComputerScreen();
+  else if(tab==='plan') loadComputerPlan();
+  else if(tab==='repairs') loadComputerRepairs();
+  else if(tab==='skills') loadComputerSkills();
+  else if(tab==='tasks') loadComputerTasks();
+}
+function switchComputerTab(tab){
+  computer.tab = tab;
+  document.querySelectorAll('.tab[data-ctab]').forEach(t => t.classList.toggle('active', t.getAttribute('data-ctab') === tab));
+  refreshComputerTab(true);
+}
+
+// ---- timeline ----
+async function loadComputerTimeline(){
+  const id = currentTaskId();
+  const body = $('computerTabBody');
+  if(!id){ body.innerHTML = '<span class="muted">No task selected — choose one in the dropdown above.</span>'; return; }
+  body.innerHTML = '<span class="muted">Loading timeline…</span>';
+  try{
+    const d = await jget('/computer/task/' + encodeURIComponent(id));
+    computer.taskCache[id] = d;
+    renderTimeline(d);
+  }catch(e){ body.innerHTML = '<span class="bad-text">Error: '+esc(String(e))+'</span>'; }
+}
+function timelineIcon(type, ev){
+  if(!type) return '•';
+  if(type==='task_start' || type==='task_resume') return '🧠';
+  if(type==='verify' || type==='verify_repair') return (ev && ev.evidence && ev.evidence.ok === false) ? '❌' : '✅';
+  if(type==='task_end') return '🏁';
+  if(type==='visual_event') return '👁️';
+  if(String(type).startsWith('repair:')) return '🛠️';
+  const kinds = {click_target:'🖱️',click:'🖱️',double_click:'🖱️',right_click:'🖱️',move_mouse:'🖱️',scroll:'🖱️',
+    type_text:'⌨️',press_key:'⌨️',hotkey:'⌨️',open_application:'🪟',close_application:'🪟',focus_window:'🪟',wait_until:'👁️'};
+  return kinds[type] || '•';
+}
+function renderTimeline(d){
+  const events = (d.timeline && d.timeline.events) || [];
+  const actions = d.actions || [], verifications = d.verifications || [];
+  const body = $('computerTabBody');
+  if(!events.length){
+    body.innerHTML = `<p class="muted">No timeline events for this task yet.</p>` +
+      `<div class="pre" style="margin-top:8px">${esc(JSON.stringify({task:d.task, status:d.status, current_state:d.current_state}, null, 2))}</div>`;
+    return;
+  }
+  let html = `<p class="subtle" style="margin-bottom:6px">Task: <b>${esc(d.task||'')}</b> · ${events.length} events · ${actions.length} actions · ${verifications.length} verifications</p>`;
+  html += '<div class="timeline-list">';
+  events.forEach((ev, i) => {
+    const ok = ev.evidence && ev.evidence.ok;
+    let cls = 'neutral';
+    if(ok === false || (ev.type==='verify' && ok === false) || String(ev.type).startsWith('repair:') && ok === false) cls = 'bad';
+    else if(ok === true || ev.type==='verify' || ev.type==='verify_repair' || ev.type==='task_end') cls = 'ok';
+    html += `<div class="tl-item ${cls}" onclick="showTimelineEvidence(${i}, '${esc(d.task_id)}')">
+      <span class="tl-time">${fmtOffset(ev.offset)}</span>
+      <span class="tl-ico">${timelineIcon(ev.type, ev)}</span>
+      <span class="tl-desc">${esc(ev.description || ev.type || '')}</span>
+      <span class="tl-ev">${ev.confidence!=null ? Math.round(Number(ev.confidence)*100)+'%' : '—'}</span>
+      <span class="tl-ev">🔍</span></div>`;
+  });
+  html += '</div>';
+  body.innerHTML = html;
+}
+function showTimelineEvidence(index, taskId){
+  const d = computer.taskCache[taskId];
+  const ev = d && d.timeline && d.timeline.events[index];
+  if(!ev) return;
+  let html = `<div class="row" style="justify-content:space-between">
+    <h4>${timelineIcon(ev.type, ev)} ${esc(ev.description || ev.type || '')} <span class="chip mono">${fmtOffset(ev.offset)}</span></h4>
+    <button class="btn sm" onclick="closeModal()">✕</button></div>`;
+  html += `<div class="kv" style="margin:8px 0">
+    <b>Type</b><span class="mono">${esc(ev.type||'—')}</span>
+    <b>Offset</b><span class="mono">${fmtOffset(ev.offset)}</span>
+    <b>Confidence</b><span>${ev.confidence!=null ? Math.round(Number(ev.confidence)*100)+'%' : '—'}</span>
+    <b>Timestamp</b><span class="mono">${esc(ev.timestamp||'—')}</span>
+  </div>`;
+  if(d && d.recording && d.recording.url){
+    html += `<div class="row"><button class="btn primary sm" onclick="jumpToRecording('${esc(taskId)}', ${Number(ev.offset)||0})">▶ Jump to recording @ ${fmtOffset(ev.offset)}</button></div>`;
+  }
+  const evdata = ev.evidence || {};
+  html += '<h4 style="margin-top:10px">Evidence</h4><div class="pre">' + esc(JSON.stringify(evdata, null, 2)) + '</div>';
+  const state = evdata.state || evdata.task_state;
+  const related = [];
+  (d.actions||[]).forEach(a => { if(a && (a.state===state || a.action===ev.type)) related.push({kind:'action', record:a}); });
+  (d.verifications||[]).forEach(v => { if(v && v.state===state) related.push({kind:'verification', record:v}); });
+  if(related.length){
+    html += '<h4 style="margin-top:10px">Related action / verification records</h4><div class="pre">' + esc(JSON.stringify(related, null, 2).slice(0,4000)) + '</div>';
+  }
+  openModal(html);
+}
+function jumpToRecording(taskId, offset){
+  closeModal();
+  switchComputerTab('screen');
+  computer.pendingJump = {url: '/computer/recording/' + encodeURIComponent(taskId) + '/video', offset: Number(offset)||0};
+  const existing = $('computerVideo');
+  if(existing){
+    if(existing.src && existing.src.indexOf(encodeURIComponent(taskId)) < 0) existing.src = computer.pendingJump.url;
+    existing.currentTime = computer.pendingJump.offset;
+    existing.play().catch(()=>{});
+    computer.pendingJump = null;
+  }
+}
+
+// ---- screen / recording ----
+async function loadComputerScreen(){
+  const id = currentTaskId();
+  const body = $('computerTabBody');
+  if(!id){ body.innerHTML = '<span class="muted">No task selected — choose one in the dropdown above.</span>'; return; }
+  body.innerHTML = '<span class="muted">Loading screen / recording…</span>';
+  try{
+    const [d, rec] = await Promise.all([
+      jget('/computer/task/' + encodeURIComponent(id)),
+      jget('/computer/recording/' + encodeURIComponent(id)),
+    ]);
+    computer.taskCache[id] = d;
+    renderComputerScreen(id, d, rec);
+  }catch(e){ body.innerHTML = '<span class="bad-text">Error: '+esc(String(e))+'</span>'; }
+}
+function renderComputerScreen(id, d, rec){
+  let html = '';
+  if(rec.recording){
+    html += `<video class="video-box" id="computerVideo" controls preload="metadata" src="${esc(rec.recording.url)}"></video>` +
+      `<p class="subtle" style="margin-top:4px">${esc(rec.recording.filename||'')} · ${rec.recording.size_mb!=null ? rec.recording.size_mb+'MB' : ''} · <a href="${esc(rec.recording.url)}" target="_blank" rel="noopener">open fullscreen ↗</a></p>`;
+  } else {
+    html += '<div class="card" style="border-style:dashed"><p class="muted">No video recorded for this task. When FFmpeg is available, tasks attach an MP4/WebM and every timeline event gets a jump-to-recording button.</p></div>';
+  }
+  html += `<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+    <div class="kpi"><b>${rec.timeline_events}</b><span>Timeline events</span></div>
+    <div class="kpi"><b>${rec.detected_events}</b><span>Detected</span></div>
+    <div class="kpi"><b>${rec.verified}</b><span>Verified</span></div>
+    <div class="kpi"><b>${rec.actions}</b><span>Actions</span></div></div>`;
+  const events = (d.timeline && d.timeline.events) || [];
+  if(events.length){
+    html += '<h4 style="margin:10px 0 6px">⏱️ Timeline — click to jump</h4><div class="timeline-list" style="max-height:300px">';
+    events.forEach((ev, i) => {
+      html += `<div class="tl-item neutral" onclick="${rec.recording ? `jumpToRecording('${esc(id)}', ${Number(ev.offset)||0})` : `showTimelineEvidence(${i}, '${esc(id)}')`}">
+        <span class="tl-time">${fmtOffset(ev.offset)}</span>
+        <span class="tl-ico">${timelineIcon(ev.type, ev)}</span>
+        <span class="tl-desc">${esc(ev.description || ev.type || '')}</span>
+        <span class="tl-ev">${rec.recording ? '▶ jump' : '🔍'}</span></div>`;
+    });
+    html += '</div>';
+  }
+  $('computerTabBody').innerHTML = html;
+  if(computer.pendingJump){
+    const v = $('computerVideo');
+    if(v){ v.currentTime = computer.pendingJump.offset; v.play().catch(()=>{}); }
+    computer.pendingJump = null;
+  }
+}
+
+// ---- plan graph ----
+async function loadComputerPlan(){
+  const id = currentTaskId();
+  const body = $('computerTabBody');
+  if(!id){ body.innerHTML = '<span class="muted">No task selected — choose one in the dropdown above.</span>'; return; }
+  body.innerHTML = '<span class="muted">Loading plan graph…</span>';
+  try{
+    const d = await jget('/computer/plan/' + encodeURIComponent(id));
+    renderPlanGraph(d);
+  }catch(e){ body.innerHTML = '<span class="bad-text">Error: '+esc(String(e))+'</span>'; }
+}
+function actionLabel(node){
+  const a = node.action || {};
+  const kind = a.kind || a.action || 'wait_until';
+  const target = a.target || a.name || a.text || a.condition || a.key || (a.keys||[]).join('+') || '';
+  const extras = Object.entries(a).filter(([k])=>!['kind','action','target','name','text','condition','key','keys'].includes(k))
+    .map(([k,v])=> k + '=' + (typeof v==='object' ? JSON.stringify(v) : v)).join(' ');
+  return `${kind}${target ? ' '+target : ''}${extras ? ' · '+extras : ''}`;
+}
+function graphNodeHtml(n, completed, failed, current){
+  const isSuccess = n.name === 'SUCCESS', isFailure = n.name === 'FAILURE';
+  let cls = '';
+  if(isSuccess) cls = 'terminal ok';
+  else if(isFailure) cls = 'terminal bad';
+  else if(completed.has(n.name)) cls = 'ok';
+  else if(failed.has(n.name)) cls = 'bad';
+  else if(n.name === current) cls = 'current';
+  const icon = isSuccess ? '✅' : isFailure ? '❌' : '';
+  let badge = '';
+  if(completed.has(n.name)) badge = '<div class="gn-expected ok-text">✓ completed</div>';
+  else if(failed.has(n.name)) badge = '<div class="gn-expected bad-text">✗ failed</div>';
+  else if(n.name === current) badge = '<div class="gn-expected warn-text">● current</div>';
+  return `<div class="gnode ${cls.trim()}">
+    <div class="gn-name">${icon} ${esc(n.name)}</div>
+    ${n.action ? `<div class="gn-action">${esc(actionLabel(n))}</div>` : ''}
+    ${n.goal ? `<div class="gn-expected">🎯 ${esc(n.goal)}</div>` : ''}
+    ${n.expected ? `<div class="gn-expected">👁 ${esc(n.expected)}</div>` : ''}
+    ${n.precondition ? `<div class="gn-expected">🚧 ${esc(n.precondition)}</div>` : ''}
+    ${badge}</div>`;
+}
+function renderPlanGraph(d){
+  const graph = d.graph || {};
+  const nodes = (graph.nodes || []).filter(n => n && n.name);
+  const byName = {}; nodes.forEach(n => byName[n.name] = n);
+  const completed = new Set(d.completed || []), failed = new Set(d.failed || []);
+  const current = d.current_state;
+  const body = $('computerTabBody');
+  if(!nodes.length){
+    body.innerHTML = '<p class="muted">No plan graph for this task.</p>';
+    return;
+  }
+  const start = graph.start || nodes[0].name;
+  const chain = [];
+  const seen = new Set();
+  let cur = byName[start];
+  while(cur && !seen.has(cur.name)){
+    chain.push(cur); seen.add(cur.name);
+    cur = cur.on_success ? byName[cur.on_success] : null;
+  }
+  const branches = [];
+  nodes.forEach(n => {
+    if(n.on_failure && byName[n.on_failure] && !seen.has(n.on_failure)) branches.push({from:n.name, node: byName[n.on_failure]});
+  });
+  const leftover = nodes.filter(n => !seen.has(n.name) && !branches.some(b => b.node.name === n.name));
+  const hasFailure = nodes.some(n => n.on_failure === 'FAILURE') || graph.failure_terminal === 'FAILURE';
+
+  let chainHtml = '';
+  chain.forEach((n, i) => {
+    chainHtml += graphNodeHtml(n, completed, failed, current);
+    const nxt = chain[i+1];
+    if(nxt){
+      chainHtml += `<div class="gedge ${n.on_success===nxt.name ? 'ok' : ''}"><span class="arrow">▼</span> ${esc(nxt.name)}</div>`;
+    } else if(n.on_success === 'SUCCESS'){
+      chainHtml += '<div class="gedge ok"><span class="arrow">▼</span> SUCCESS</div>';
+    }
+  });
+  if(chain.length && chain[chain.length-1].on_success === 'SUCCESS'){
+    chainHtml += '<div class="gnode terminal ok"><div class="gn-name">✅ SUCCESS</div></div>';
+  }
+  let sideHtml = '';
+  branches.forEach(b => {
+    sideHtml += `<div class="graph-col">
+      <div class="gedge bad" style="flex-direction:column"><span>✗ ${esc(b.from)} fails</span><span class="arrow">▼</span></div>
+      ${graphNodeHtml(b.node, completed, failed, current)}</div>`;
+  });
+  if(hasFailure){
+    sideHtml += `<div class="graph-col"><div class="gedge bad" style="flex-direction:column"><span>unrecoverable</span><span class="arrow">▼</span></div><div class="gnode terminal bad"><div class="gn-name">❌ FAILURE</div></div></div>`;
+  }
+  leftover.forEach(n => { sideHtml += `<div class="graph-col">${graphNodeHtml(n, completed, failed, current)}</div>`; });
+
+  let html = `<div class="graph"><div class="graph-col">${chainHtml}</div>`;
+  if(sideHtml) html += `<div class="graph-side">${sideHtml}</div>`;
+  html += '</div>';
+  const goal = graph.goal && (graph.goal.success_condition || graph.goal.objective);
+  html += `<p class="terminal-note">Source: ${esc(graph.source||'—')} · current state: <b class="mono">${esc(current||'—')}</b>${goal ? ' · success condition: '+esc(goal) : ''}</p>`;
+  body.innerHTML = html;
+}
+
+// ---- repairs ----
+async function loadComputerRepairs(){
+  const body = $('computerTabBody');
+  body.innerHTML = '<span class="muted">Loading repairs…</span>';
+  try{
+    const all = await jget('/computer/repairs');
+    renderRepairs(all);
+  }catch(e){ body.innerHTML = '<span class="bad-text">Error: '+esc(String(e))+'</span>'; }
+}
+function renderRepairs(all){
+  const rate = all.success_rate;
+  let html = `<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+    <div class="kpi"><b>${all.total}</b><span>Repairs</span></div>
+    <div class="kpi"><b class="${rate==null?'':(rate<70?'warn-v':'ok-v')}">${rate!=null ? rate+'%' : '—'}</b><span>Success rate</span></div>
+    <div class="kpi"><b>${all.successes}</b><span>Succeeded</span></div></div>`;
+  const kinds = Object.entries(all.by_kind || {});
+  if(kinds.length){
+    html += '<h4 style="margin:10px 0 6px">⚠️ By failure category</h4><div class="feed">';
+    kinds.sort((a,b)=>b[1].count-a[1].count).forEach(([kind, v]) => {
+      html += `<div class="feed-item" style="cursor:default"><span class="feed-ico">⚠️</span><span class="feed-type">${esc(kind)}</span><span class="feed-msg">${v.count} repairs · ${v.success_rate}% success</span></div>`;
+    });
+    html += '</div>';
+  }
+  html += '<h4 style="margin:10px 0 6px">Repair history</h4>';
+  const list = all.recent || [];
+  if(!list.length){
+    html += '<p class="muted">No repairs yet — diagnosed failures and their fixes appear here, along with the overall repair success rate.</p>';
+  } else {
+    html += '<div class="timeline-list" style="max-height:360px">';
+    list.forEach(r => {
+      html += `<div class="tl-item ${r.success ? 'ok' : 'bad'}" onclick="inspectTask('${esc(r.task_id)}')">
+        <span class="tl-time">${esc(r.kind||'?')}</span>
+        <span class="tl-ico">${r.success ? '✅' : '❌'}</span>
+        <span class="tl-desc"><b>${esc((r.task||'').slice(0,50))}</b><br/><span class="muted">${esc(r.action || '—')} · ${esc(String(r.failure_reason||'').slice(0,90))}</span></span>
+        <span class="tl-ev">🔍</span></div>`;
+    });
+    html += '</div>';
+  }
+  $('computerTabBody').innerHTML = html;
+}
+
+// ---- skills ----
+async function loadComputerSkills(){
+  const body = $('computerTabBody');
+  body.innerHTML = '<span class="muted">Loading skills…</span>';
+  try{
+    const d = await jget('/computer/skills');
+    renderSkills(d);
+  }catch(e){ body.innerHTML = '<span class="bad-text">Error: '+esc(String(e))+'</span>'; }
+}
+function renderSkills(d){
+  const s = d.stats || {};
+  let html = `<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+    <div class="kpi"><b>${s.count||0}</b><span>Skills</span></div>
+    <div class="kpi"><b>${s.total_runs||0}</b><span>Runs</span></div>
+    <div class="kpi"><b class="${s.avg_success_rate==null?'':(s.avg_success_rate<70?'warn-v':'ok-v')}">${s.avg_success_rate!=null ? s.avg_success_rate+'%' : '—'}</b><span>Avg success</span></div></div>`;
+  const skills = d.skills || [];
+  if(!skills.length){
+    html += '<p class="muted">No learned skills yet. When a computer task succeeds, Hermus saves the verified procedure as a skill and reuses it for similar requests.</p>';
+    $('computerTabBody').innerHTML = html;
+    return;
+  }
+  html += '<table class="table"><tr><th>Skill</th><th>Task</th><th>Runs</th><th>Success</th><th>Rate</th><th>Avg</th><th>Known failures</th><th>Known repairs</th></tr>';
+  skills.forEach(sk => {
+    const rate = Math.round(Number(sk.success_rate || 0) * 1000) / 10;
+    html += `<tr class="skill-row" onclick="openSkill('${esc(sk.name)}')">
+      <td class="mono">${esc(sk.name)}</td>
+      <td class="muted">${esc(String(sk.task||'').slice(0,40))}</td>
+      <td>${esc(sk.runs)}</td><td>${esc(sk.successes)}</td>
+      <td>${rate}% ${rate < 70 ? '<span class="warn-text">⚠</span>' : ''}</td>
+      <td>${sk.average_duration!=null ? Number(sk.average_duration).toFixed(1)+'s' : '—'}</td>
+      <td>${esc(sk.known_failures)}</td><td>${esc(sk.known_repairs)}</td></tr>`;
+  });
+  html += '</table>';
+  html += '<p class="terminal-note">Click a skill to inspect its procedure, known failures/repairs, and success history.</p>';
+  $('computerTabBody').innerHTML = html;
+}
+async function openSkill(name){
+  try{
+    const sk = await jget('/computer/skills/' + encodeURIComponent(name));
+    let html = `<div class="row" style="justify-content:space-between"><h4>📈 ${esc(sk.name)}</h4><button class="btn sm" onclick="closeModal()">✕</button></div>`;
+    html += `<div class="kv" style="margin:8px 0">
+      <b>Task</b><span>${esc(sk.task||'—')}</span>
+      <b>Runs</b><span>${esc(sk.runs)}</span>
+      <b>Success</b><span>${esc(sk.successes)}/${esc(sk.runs)} (${Math.round(Number(sk.success_rate||0)*1000)/10}%)</span>
+      <b>Avg duration</b><span>${sk.average_duration!=null ? Number(sk.average_duration).toFixed(1)+'s' : '—'}</span>
+      <b>Created</b><span>${esc(String(sk.created||'').slice(0,16))}</span>
+      <b>Updated</b><span>${esc(String(sk.updated||'').slice(0,16))}</span>
+    </div>`;
+    html += '<h4 style="margin-top:8px">Procedure</h4>';
+    if((sk.procedure||[]).length){
+      html += '<div class="timeline-list" style="max-height:240px">';
+      sk.procedure.forEach((step, i) => {
+        const a = step.action || {};
+        const target = a.target || a.text || a.condition || a.name || a.key || '';
+        html += `<div class="tl-item neutral"><span class="tl-time">#${i+1}</span><span class="tl-ico">${timelineIcon(a.kind||a.action, null)}</span>
+          <span class="tl-desc"><b>${esc(step.name||'STEP')}</b><br/><span class="muted">${esc((a.kind||a.action||'')+(target ? ' '+target : ''))} · expect: ${esc(step.expected||'')}</span></span></div>`;
+      });
+      html += '</div>';
+    } else html += '<p class="muted">No procedure stored.</p>';
+    html += '<h4 style="margin-top:10px">Known failures</h4><div>' + ((sk.typical_failures||[]).map(f => `<span class="tag warn">${esc(f)}</span>`).join(' ') || '<span class="muted">none</span>') + '</div>';
+    html += '<h4 style="margin-top:10px">Known repairs</h4>';
+    html += (sk.repairs||[]).length ? '<div class="pre">' + esc(JSON.stringify(sk.repairs, null, 2).slice(0,3500)) + '</div>' : '<p class="muted">none</p>';
+    html += '<h4 style="margin-top:10px">Success history</h4>';
+    if((sk.history||[]).length){
+      html += '<div class="timeline-list" style="max-height:180px">';
+      sk.history.slice().reverse().forEach(r => {
+        const ok = r && r.success !== false;
+        html += `<div class="tl-item ${ok ? 'ok' : 'bad'}"><span class="tl-time">${esc(String(r.task_id||r.ts||'').slice(0,16))}</span>
+          <span class="tl-ico">${ok ? '✅' : '❌'}</span><span class="tl-desc">${esc(r.task_id||'')}${r.recording ? ' · 📹 recording' : ''}</span></div>`;
+      });
+      html += '</div>';
+    } else html += '<p class="muted">no recorded runs</p>';
+    openModal(html);
+  }catch(e){ alert(e); }
+}
+
+// ---- tasks ----
+async function loadComputerTasks(){
+  const body = $('computerTabBody');
+  body.innerHTML = '<span class="muted">Loading tasks…</span>';
+  try{
+    const d = await jget('/computer/tasks');
+    renderComputerTasks(d);
+  }catch(e){ body.innerHTML = '<span class="bad-text">Error: '+esc(String(e))+'</span>'; }
+}
+function statusChip(status){
+  if(status==='running') return '<span class="chip ok">● running</span>';
+  if(status==='success') return '<span class="chip ok">✅ completed</span>';
+  if(status==='failed') return '<span class="chip bad">❌ failed</span>';
+  if(status==='interrupted') return '<span class="chip warn">⏸ paused</span>';
+  if(status==='cancelled') return '<span class="chip muted">✕ cancelled</span>';
+  return '<span class="chip muted">'+esc(status||'')+'</span>';
+}
+function renderComputerTasks(d){
+  const tasks = d.tasks || [];
+  const stats = d.stats || {};
+  let html = `<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+    <div class="kpi"><b>${stats.total||0}</b><span>Tasks</span></div>
+    <div class="kpi"><b class="ok-v">${stats.running||0}</b><span>Running</span></div>
+    <div class="kpi"><b class="warn-v">${stats.interrupted||0}</b><span>Paused</span></div>
+    <div class="kpi"><b class="bad-v">${stats.failed||0}</b><span>Failed</span></div>
+    <div class="kpi"><b>${stats.success||0}</b><span>Completed</span></div></div>`;
+  if(!tasks.length){
+    html += '<p class="muted">No tasks yet. Start one with “▶ New task” above or <span class="mono">hermus computer run "…"</span> in a terminal.</p>';
+    $('computerTabBody').innerHTML = html;
+    return;
+  }
+  html += '<table class="table"><tr><th>Status</th><th>Task</th><th>Progress</th><th>State</th><th>Repairs</th><th>Updated</th><th></th></tr>';
+  tasks.forEach(t => {
+    const p = Math.max(0, Math.min(100, Number(t.progress)||0));
+    const fillCls = t.status==='failed' ? 'bad' : (t.status==='success' ? 'ok' : '');
+    html += `<tr class="task-row">
+      <td>${statusChip(t.status)}</td>
+      <td><b>${esc(t.task||'')}</b><div class="muted mono" style="font-size:.7em">${esc(t.task_id||'')}</div></td>
+      <td class="task-progress"><div class="progress" style="height:7px"><div class="progress-fill ${fillCls}" style="width:${p}%"></div></div>
+        <div class="progress-label">${esc(t.completed)}/${esc((t.completed||0)+(t.pending||0))} · ${p}%</div></td>
+      <td class="mono" style="font-size:.72em">${esc(t.current_state||'—')}</td>
+      <td>${esc(t.repairs)}</td>
+      <td class="subtle">${fmtTs(t.updated_at)}</td>
+      <td><div class="rec-actions">
+        ${t.status==='interrupted' ? `<button class="btn sm primary" onclick="resumeTask('${esc(t.task_id)}')">Resume</button>` : ''}
+        <button class="btn sm" onclick="inspectTask('${esc(t.task_id)}')">Inspect</button>
+        <button class="btn sm" onclick="deleteTask('${esc(t.task_id)}')">Delete</button>
+      </div></td></tr>`;
+  });
+  html += '</table>';
+  html += '<p class="terminal-note">Paused tasks keep a crash-safe checkpoint — Resume continues from the last verified state. Resume runs in the background (dry-run) and can be turned into real actions from the CLI.</p>';
+  $('computerTabBody').innerHTML = html;
+}
+async function resumeTask(taskId){
+  if(!confirm('Resume task "' + taskId + '" in the background? (dry-run — no real mouse/keyboard actions)')) return;
+  try{
+    const d = await jpost('/computer/resume/' + encodeURIComponent(taskId), {dry_run:true});
+    loadComputerTasks();
+    setTimeout(loadComputerStatus, 600);
+  }catch(e){ alert(e); }
+}
+async function deleteTask(taskId){
+  if(!confirm('Delete task "' + taskId + '" and all its artifacts (timeline, recording, state)?')) return;
+  try{
+    const r = await fetch('/computer/task/' + encodeURIComponent(taskId), {method:'DELETE'});
+    const d = await r.json();
+    if(d && d.success){ if(computer.taskId === taskId) computer.taskId = null; }
+    else alert(d && d.error ? d.error : 'delete failed');
+    loadComputerTasks(); loadComputerStatus();
+  }catch(e){ alert(e); }
+}
+async function inspectTask(taskId){
+  try{
+    const d = await jget('/computer/task/' + encodeURIComponent(taskId));
+    computer.taskCache[taskId] = d;
+    let html = `<div class="row" style="justify-content:space-between"><h4>🗃️ ${esc(d.task||'')}</h4><button class="btn sm" onclick="closeModal()">✕</button></div>`;
+    html += `<div class="kv" style="margin:8px 0">
+      <b>Task ID</b><span class="mono">${esc(d.task_id)}</span>
+      <b>Status</b><span>${statusChip(d.status)}</span>
+      <b>Current state</b><span class="mono">${esc(d.current_state||'—')}</span>
+      <b>States</b><span>${(d.completed_states||[]).length} done · ${(d.pending_states||[]).length} pending · ${(d.failed_states||[]).length} failed</span>
+      <b>Attempts</b><span>${esc(d.attempts||0)} · resumes: ${esc(d.resume_count||0)}</span>
+      <b>Recordings</b><span>${esc((d.recordings||[]).length)}</span>
+      <b>Created</b><span>${esc(String(d.created_at||'').slice(0,19))}</span>
+      <b>Updated</b><span>${esc(String(d.updated_at||'').slice(0,19))}</span>
+    </div>`;
+    if(d.error) html += `<div class="bad-text" style="margin-top:6px">⚠️ ${esc(String(d.error).slice(0,300))}</div>`;
+    if(d.recording && d.recording.url) html += `<div class="row" style="margin-top:8px"><button class="btn primary sm" onclick="jumpToRecording('${esc(d.task_id)}', 0)">▶ Play recording</button><button class="btn sm" onclick="showTimelineEvidence(0,'${esc(d.task_id)}')" ${(d.timeline&&d.timeline.events&&d.timeline.events.length)?'':'disabled'}>Timeline</button></div>`;
+    if(d.result) html += '<h4 style="margin-top:10px">Result</h4><div class="pre">' + esc(JSON.stringify(d.result, null, 2).slice(0,1500)) + '</div>';
+    if(d.summary) html += '<h4 style="margin-top:10px">Summary</h4><div class="pre">' + esc(d.summary.slice(0,2200)) + '</div>';
+    openModal(html);
+  }catch(e){ alert(e); }
+}
+
+// ---- modal + activity feed + websocket ----
+function openModal(html){ $('modalContent').innerHTML = html; $('modalBox').classList.add('open'); }
+function closeModal(){ $('modalBox').classList.remove('open'); }
+
+function activityIcon(t){
+  const map = {task_started:'🧠', state_changed:'🧭', action_started:'🖱️', action_completed:'✅', verification:'👁️',
+    repair_started:'🛠️', repair_completed:'🛠️', task_completed:'🏁', task_failed:'❌', task_interrupted:'⏸',
+    emergency_stop:'🔴', world_changed:'🌍'};
+  return map[t] || '•';
+}
+function activityMessage(ev){
+  const t = ev.type, d = ev.data || {};
+  if(t==='task_started') return d.task ? 'Task: ' + d.task : 'Task started';
+  if(t==='state_changed') return '→ ' + (d.next_state || '?');
+  if(t==='action_started') return (d.action || 'action') + ' @ ' + (d.state || '');
+  if(t==='action_completed') return (d.outcome === 'success' ? '✓ ' : '✗ ') + (d.action || '') + ' @ ' + (d.state || '');
+  if(t==='verification') return (d.ok ? 'Verified ' : 'Verification failed ') + (d.state || '') + (d.confidence != null ? ' (' + Math.round(Number(d.confidence)*100) + '%)' : '');
+  if(t==='repair_started') return (d.kind || 'repair') + ': ' + (d.summary || '');
+  if(t==='repair_completed') return (d.ok ? 'Repair ok: ' : 'Repair failed: ') + (d.action || '');
+  if(t==='task_completed') return (d.task || 'Task') + ' — SUCCESS' + (d.duration ? ' in ' + d.duration + 's' : '');
+  if(t==='task_failed') return (d.task || 'Task') + ' — FAILED';
+  if(t==='task_interrupted') return (d.task || 'Task') + ' — interrupted';
+  if(t==='emergency_stop') return d.halted ? 'EMERGENCY STOP engaged' : 'Emergency stop released';
+  if(t==='world_changed'){
+    const w = d.world || {};
+    return [w.application ? 'App: ' + w.application : '', w.task_state ? '· ' + w.task_state : ''].filter(Boolean).join(' ') || 'world changed';
+  }
+  return '';
+}
+function prependActivity(ev){
+  const feed = $('overviewActivity');
+  if(!feed) return;
+  const t = ev.type || '';
+  // world_changed fires on every state-machine step; the World State card
+  // already reflects it, so keep it out of the activity feed.
+  if(t === 'world_changed') return;
+  const msg = activityMessage(ev);
+  const time = String(ev.ts || '').slice(11,19) || '--:--:--';
+  const data = ev.data || {};
+  let cls = '';
+  if(t==='task_failed' || t==='emergency_stop') cls = 'bad';
+  else if(t==='verification' || t==='action_completed') cls = data.ok ? 'ok' : 'bad';
+  const node = document.createElement('div');
+  node.className = 'feed-item';
+  node.innerHTML = `<span class="feed-time">${time}</span><span class="feed-ico">${activityIcon(t)}</span><span class="feed-type">${esc(t)}</span><span class="feed-msg ${cls}">${esc(msg)}</span>`;
+  node.onclick = () => showComputerEventModal(ev);
+  feed.prepend(node);
+  while(feed.children.length > 60) feed.removeChild(feed.lastChild);
+}
+function seedActivityFeed(events){
+  const feed = $('overviewActivity');
+  if(!feed || activitySeeded) return;
+  activitySeeded = true;
+  feed.innerHTML = '';
+  if(!events || !events.length){ feed.innerHTML = '<span class="muted">No computer activity yet.</span>'; return; }
+  events.slice().reverse().forEach(ev => prependActivity(ev));
+  if(!feed.children.length) feed.innerHTML = '<span class="muted">No computer activity yet.</span>';
+}
+function showComputerEventModal(ev){
+  const data = ev.data || {};
+  openModal(`<div class="row" style="justify-content:space-between"><h4>${activityIcon(ev.type)} ${esc(ev.type)}</h4><button class="btn sm" onclick="closeModal()">✕</button></div>
+    <div class="kv" style="margin:8px 0"><b>Time</b><span class="mono">${esc(ev.ts||'')}</span><b>Task</b><span>${esc(data.task||data.task_id||'—')}</span></div>
+    <div class="pre">${esc(JSON.stringify(ev, null, 2))}</div>`);
+}
+function connectComputerWs(){
+  if(computer.wsClosed) return;
+  try{
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(proto + location.host + '/computer/events');
+    computer.ws = ws;
+    ws.onmessage = (e) => {
+      try{
+        const msg = JSON.parse(e.data);
+        if(msg.kind === 'snapshot') return;
+        handleComputerEvent(msg);
+      }catch(err){}
+    };
+    ws.onclose = () => { if(!computer.wsClosed) setTimeout(connectComputerWs, 3000); };
+    ws.onerror = () => { try{ ws.close(); }catch(err){} };
+  }catch(err){ setTimeout(connectComputerWs, 5000); }
+}
+function handleComputerEvent(ev){
+  const t = ev.type || '';
+  const data = ev.data || {};
+  if(t === 'emergency_stop') updateEstop(!!data.halted, data.reason || '');
+  if(!compEventDebounce){
+    compEventDebounce = setTimeout(() => {
+      compEventDebounce = null;
+      loadComputerStatus();
+    }, 700);
+  }
+  prependActivity(ev);
+}
+
 // boot
 (function init(){
   const mode = localStorage.getItem('hermus_mode') || 'agent';
@@ -1316,7 +2271,10 @@ async function testCustomApi(name){
   fillProvidersSelects();
   loadChatKeys();
   refreshAll();
+  connectComputerWs();
+  loadComputerStatus();
   setInterval(()=>{ loadAgents(); if(panelOpen) loadPanel(); }, 3000);
+  setInterval(()=>{ if(document.querySelector('#pane-computer.active') || document.querySelector('#pane-overview.active')) loadComputerStatus(); }, 5000);
   setInterval(()=>checkUpdate(true), 60000);
 })();
 </script>
