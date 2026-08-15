@@ -221,13 +221,24 @@ def test_computer_dashboard_endpoints():
     assert client.get("/computer/recording/nope/video").status_code == 404
 
     # websocket stream is reachable and delivers a snapshot
+    from core.computer.events import publish
+
+    # Pre-existing history must arrive in the snapshot only - never replayed
+    # afterwards as fake "live" activity on every page load / reconnect.
+    stale = publish("action_completed", {"task_id": "integration-stale", "ok": True})
     with client.websocket_connect("/computer/events") as ws:
         first = ws.receive_json()
         assert first["kind"] == "snapshot" and isinstance(first["events"], list)
-        from core.computer.events import publish
+        assert any(e.get("id") == stale["id"] for e in first["events"])
+
         sent = publish("screen_event", {"task_id": "integration-live", "stage": "after_action"})
         live = ws.receive_json()
         assert live["id"] == sent["id"] and live["type"] == "screen_event"
+
+        # the only frame after the snapshot was the new event, not the backlog
+        fresh = publish("task_completed", {"task_id": "integration-live"})
+        nxt = ws.receive_json()
+        assert nxt["id"] == fresh["id"], f"stale event replayed as live: {nxt}"
 
 
 if __name__ == "__main__":

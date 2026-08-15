@@ -4,6 +4,8 @@ import os
 import shutil
 import threading
 import asyncio
+import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -1503,35 +1505,58 @@ async def computer_events_ws(websocket: WebSocket):
         loop.call_soon_threadsafe(put)
 
     unsubscribe = computer_event_bus.subscribe(enqueue)
-    seen = set()
+
+    # Snapshot first, then stream. The cursor is taken *before* the snapshot is
+    # rendered so nothing written in between is skipped; ids already shown in
+    # the snapshot are suppressed once so they are not replayed as live.
+    cursor = computer_event_bus.journal_offset()
+    snapshot = computer_event_bus.recent(100)
+    seen = deque(maxlen=4096)
+    seen_ids = {str(event.get("id")) for event in snapshot if event.get("id")}
+    seen.extend(seen_ids)
+
+    def remember(event_id: str) -> bool:
+        """Record an id; return True if it is new (not already delivered)."""
+        if not event_id:
+            return True
+        if event_id in seen_ids:
+            return False
+        if len(seen) == seen.maxlen:
+            seen_ids.discard(seen[0])
+        seen.append(event_id)
+        seen_ids.add(event_id)
+        return True
+
     try:
-        snapshot = computer_event_bus.recent(100)
-        seen.update(str(event.get("id")) for event in snapshot if event.get("id"))
         await websocket.send_json({"kind": "snapshot", "events": snapshot})
+        last_send = time.monotonic()
         while True:
-            # In-process events arrive instantly through the subscriber. The
-            # bounded journal tail also captures events from a separate Hermus
-            # CLI process and remains correct when the journal rotates.
+            # In-process events arrive instantly via the subscriber queue.
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=0.25)
-                event_id = str(event.get("id") or "")
-                if not event_id or event_id not in seen:
-                    if event_id:
-                        seen.add(event_id)
+                if remember(str(event.get("id") or "")):
                     await websocket.send_json(event)
+                    last_send = time.monotonic()
             except asyncio.TimeoutError:
                 pass
 
-            for event in computer_event_bus.read_journal(limit=250):
-                event_id = str(event.get("id") or "")
-                if event_id and event_id in seen:
-                    continue
-                if event_id:
-                    seen.add(event_id)
-                await websocket.send_json(event)
-            if len(seen) > 5000:
-                # IDs only deduplicate a short cross-process overlap window.
-                seen = {str(event.get("id")) for event in computer_event_bus.read_journal(limit=500) if event.get("id")}
+            # Cross-process events (e.g. `hermus computer run` in a terminal)
+            # arrive through the journal. Tail only the bytes appended since
+            # the last cursor, so cost tracks new activity - not journal size -
+            # and old rows are never replayed as live activity.
+            events, cursor = computer_event_bus.tail(cursor)
+            for event in events:
+                if remember(str(event.get("id") or "")):
+                    await websocket.send_json(event)
+                    last_send = time.monotonic()
+
+            # Keepalive: idle connections send nothing, and reverse proxies
+            # drop silent WebSockets (commonly after 30-60s). A periodic ping
+            # keeps the live stream alive through them.
+            now = time.monotonic()
+            if now - last_send >= 20:
+                await websocket.send_json({"kind": "ping", "ts": datetime.now().astimezone().isoformat()})
+                last_send = now
     except Exception:
         pass
     finally:
