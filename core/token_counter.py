@@ -82,6 +82,8 @@ class TokenCounter:
             "mock": {"prompt": 0.0, "completion": 0.0},
             "groq/llama-3.1-70b-versatile": {"prompt": 0.59, "completion": 0.79},  # Groq pricing per 1M
             "groq/llama-3.1-8b-instant": {"prompt": 0.05, "completion": 0.08},
+            "groq/openai/gpt-oss-20b": {"prompt": 0.0, "completion": 0.0},  # Groq OSS free tier
+            "groq/openai/gpt-oss-120b": {"prompt": 0.0, "completion": 0.0},  # Groq OSS free tier
             "hf/mistralai/Mistral-7B-Instruct-v0.3": {"prompt": 0.0, "completion": 0.0},  # HF free
         }
 

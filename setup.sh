@@ -518,7 +518,7 @@ print_next_steps() {
   if have ollama && curl -fsS --max-time 1 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
     default_model="ollama/${PULL_MODEL}"
   elif [[ -n "$GROQ_KEY" ]]; then
-    default_model="groq/llama-3.1-8b-instant"
+    default_model="groq/openai/gpt-oss-20b"
   elif [[ -n "$OPENROUTER_KEY" ]]; then
     default_model="openrouter/auto"
   elif [[ -n "$OPENAI_KEY" ]]; then
