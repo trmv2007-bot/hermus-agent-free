@@ -165,7 +165,7 @@ install_system_deps() {
             git curl ca-certificates \
             python3 python3-venv python3-pip python3-dev \
             build-essential \
-            ffmpeg \
+            ffmpeg espeak-ng \
             || warn "Some apt packages failed — continuing if Python works"
         fi
       elif have dnf; then
@@ -178,8 +178,8 @@ install_system_deps() {
       if ! have brew; then
         warn "Homebrew not found. Install from https://brew.sh if setup fails."
       else
-        if confirm "Install/update git, python, ffmpeg via Homebrew?"; then
-          brew install git python ffmpeg || warn "brew install had issues — continuing"
+        if confirm "Install/update git, python, ffmpeg and local speech via Homebrew?"; then
+          brew install git python ffmpeg espeak || warn "brew install had issues — continuing"
         fi
       fi
       ;;

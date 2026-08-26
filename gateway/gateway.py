@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 from fastapi import FastAPI, Request, Header, WebSocket
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response, RedirectResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -44,6 +44,12 @@ app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all p
 
 # Add GZip compression for faster dashboard - optimized
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# The dashboard is intentionally shipped as local static assets (no CDN) so it
+# stays usable offline and inside the self-hosted gateway.
+_DASHBOARD_STATIC = Path(__file__).parent / "static"
+_DASHBOARD_STATIC.mkdir(parents=True, exist_ok=True)
+app.mount("/dashboard-assets", StaticFiles(directory=str(_DASHBOARD_STATIC)), name="dashboard-assets")
 
 # Store agents per user/platform for continuity
 AGENTS: Dict[str, HermusAgent] = {}
@@ -118,6 +124,13 @@ async def _background_agent_watchdog():
 
 @app.get("/")
 async def root():
+    """Open the Living Agent Control Room for browsers and live previews."""
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/api/status")
+async def api_status():
+    """Machine-readable gateway status previously served from the root path."""
     from core.cache import get_cache_stats
     return {
         "message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI - Optimized",
@@ -153,6 +166,18 @@ async def root():
         ],
         "version": "2.2-free-architecture"
     }
+
+@app.get("/dashboard/legacy", response_class=HTMLResponse)
+async def dashboard_legacy():
+    """Previous all-in-one dashboard, kept as a compatibility escape hatch."""
+    html_path = Path(__file__).parent / "dashboard_legacy.html"
+    if not html_path.exists():
+        return HTMLResponse("Legacy dashboard not found", status_code=404)
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
 
 @app.get("/cache/stats")
 async def cache_stats():
@@ -482,10 +507,20 @@ async def embeddings_search(payload: Dict):
 
 @app.post("/command")
 async def command_endpoint(payload: Dict):
-    """Generic command endpoint for CLI, Discord, etc. - free - now supports modes"""
+    """Run an agent command, optionally producing local Talking Mode audio.
+
+    ``talking``/``speak`` is additive: every existing CLI/channel caller keeps
+    the original JSON contract, while the dashboard receives lifecycle events
+    and (when a local TTS backend is configured) an ``audio_url``.
+    """
+    from core.dashboard_events import dashboard_event_bus
+
+    payload = payload or {}
     platform = payload.get("platform", "cli")
     user_id = payload.get("user_id", "cli_user")
-    text = payload.get("text", "")
+    text = str(payload.get("text", ""))
+    if not text.strip():
+        return JSONResponse({"error": "text required"}, status_code=400)
     model = payload.get("model")
     mode = payload.get("mode", "agent")
     api_key = payload.get("api_key")
@@ -494,6 +529,8 @@ async def command_endpoint(payload: Dict):
     key_name = payload.get("key_name")
     autonomous = bool(payload.get("autonomous", False))
     profile = payload.get("profile") or ""
+    talking = bool(payload.get("talking", payload.get("speak", False)))
+    run_id = str(payload.get("run_id") or f"run_{os.urandom(5).hex()}")
 
     # Allow selecting a stored key by provider + key name (dashboard chat).
     # The key itself is looked up server-side — never sent from the browser.
@@ -515,20 +552,32 @@ async def command_endpoint(payload: Dict):
     )
     if profile:
         agent.profile = profile
-    if autonomous:
-        result = agent.autonomous(text)
-        result["autonomous"] = True
-    else:
-        result = agent.chat(text)
-        # Self-healing watchdog (architecture upgrade)
-        from core.integrations import maybe_self_heal
 
-        result = maybe_self_heal(result)
+    dashboard_event_bus.publish("session_started", {
+        "run_id": run_id, "text": text[:1000], "mode": mode,
+        "model": model or agent.model_name, "talking": talking,
+        "platform": platform,
+    })
+    try:
+        if autonomous:
+            result = await asyncio.to_thread(agent.autonomous, text)
+            result["autonomous"] = True
+        else:
+            result = await asyncio.to_thread(agent.chat, text)
+            # Self-healing watchdog (architecture upgrade)
+            from core.integrations import maybe_self_heal
+
+            result = maybe_self_heal(result)
+    except Exception as exc:
+        dashboard_event_bus.publish("session_failed", {"run_id": run_id, "error": str(exc)})
+        return JSONResponse({"error": str(exc), "run_id": run_id}, status_code=500)
+
     # Include mode in response
     result["mode"] = agent.mode.value
     result["mode_config"] = {"name": agent.mode_config.name, "description": agent.mode_config.description[:200]}
-    # Tell the UI which model/key/base_url was actually used
     result["model"] = agent.model_name
+    result["run_id"] = run_id
+    result["talking"] = talking
     try:
         bundle = agent.llm._resolve_bundle()
         result["resolved"] = {
@@ -538,6 +587,47 @@ async def command_endpoint(payload: Dict):
         }
     except Exception:
         pass
+
+    answer = str(result.get("response") or "")
+    dashboard_event_bus.publish("agent_response", {
+        "run_id": run_id,
+        "text": answer[:12000],
+        "model": result.get("model"),
+        "mode": result.get("mode"),
+        "steps": result.get("steps"),
+        "tool_calls": list(result.get("tool_calls") or [])[:30],
+    })
+
+    if talking and answer:
+        from core.speech import speech_engine
+
+        speech = await asyncio.to_thread(
+            speech_engine.synthesize,
+            answer,
+            payload.get("voice"),
+            int(payload.get("speech_rate") or 165),
+        )
+        speech.pop("path", None)
+        if speech.get("success"):
+            speech["audio_url"] = f"/speech/audio/{speech['audio_id']}"
+            dashboard_event_bus.publish("speech_ready", {
+                "run_id": run_id,
+                "text": answer[:12000],
+                "audio_url": speech["audio_url"],
+                "audio_id": speech["audio_id"],
+                "backend": speech.get("backend"),
+                "estimated_duration": speech.get("estimated_duration"),
+            })
+        else:
+            dashboard_event_bus.publish("speech_unavailable", {
+                "run_id": run_id, "error": speech.get("error"), "text": answer[:12000],
+            })
+        result["speech"] = speech
+
+    dashboard_event_bus.publish("session_finished", {
+        "run_id": run_id, "success": True, "talking": talking,
+        "model": result.get("model"), "steps": result.get("steps"),
+    })
     return result
 
 @app.get("/platforms")
@@ -1938,6 +2028,160 @@ async def remote_control_action(payload: Dict = None):
     if action == "release":
         return remote_control.release()
     return JSONResponse({"success": False, "error": f"unknown remote action '{action}'"}, status_code=400)
+
+
+# -- Dashboard live events + local Talking Mode speech -----------------------
+
+@app.get("/dashboard/status")
+async def dashboard_status():
+    """Small, fast status aggregate used by the futuristic command deck."""
+    from core.speech import speech_engine
+
+    return {
+        "gateway": "online",
+        "version": "2.3-living-control",
+        "timestamp": datetime.now().astimezone().isoformat(),
+        "agents": len(AGENTS),
+        "tasks": task_tracker.get_status(),
+        "channels": get_channel_status(),
+        "speech": speech_engine.status(),
+        "local": True,
+    }
+
+
+@app.get("/speech/status")
+async def speech_status():
+    """Report the selected local TTS backend for Talking Mode."""
+    from core.speech import speech_engine
+
+    return speech_engine.status()
+
+
+@app.post("/speech/synthesize")
+async def speech_synthesize(payload: Dict):
+    """Generate local WAV speech and return a gateway URL, never a host path."""
+    from core.dashboard_events import dashboard_event_bus
+    from core.speech import speech_engine
+
+    text = str((payload or {}).get("text") or "")
+    if not text.strip():
+        return JSONResponse({"success": False, "error": "text required"}, status_code=400)
+    result = await asyncio.to_thread(
+        speech_engine.synthesize,
+        text,
+        (payload or {}).get("voice"),
+        int((payload or {}).get("rate") or 165),
+    )
+    if not result.get("success"):
+        return JSONResponse(result, status_code=503)
+    result.pop("path", None)
+    result["audio_url"] = f"/speech/audio/{result['audio_id']}"
+    dashboard_event_bus.publish("speech_ready", {
+        "audio_url": result["audio_url"],
+        "audio_id": result["audio_id"],
+        "backend": result.get("backend"),
+        "estimated_duration": result.get("estimated_duration"),
+        "session_id": (payload or {}).get("session_id"),
+    })
+    return result
+
+
+@app.get("/speech/audio/{audio_id}")
+async def speech_audio(audio_id: str):
+    """Serve one generated local speech clip with traversal-safe lookup."""
+    from core.speech import speech_engine
+
+    path = speech_engine.audio_path(audio_id)
+    if path is None:
+        return JSONResponse({"success": False, "error": "audio not found"}, status_code=404)
+    return FileResponse(
+        str(path), media_type="audio/wav", filename=f"hermus-{audio_id[:8]}.wav",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.post("/speech/transcribe")
+async def speech_transcribe(request: Request, model: str = "base", language: str = None):
+    """Transcribe raw browser microphone audio with local faster-whisper.
+
+    The browser sends the recorded Blob directly (not multipart), avoiding an
+    additional python-multipart dependency.  Input is capped and deleted after
+    transcription.
+    """
+    from core.dashboard_events import dashboard_event_bus
+    from core.speech import speech_root
+    from tools.voice import transcribe_audio
+
+    body = await request.body()
+    if not body:
+        return JSONResponse({"success": False, "error": "audio body required"}, status_code=400)
+    if len(body) > 25 * 1024 * 1024:
+        return JSONResponse({"success": False, "error": "audio exceeds 25 MB limit"}, status_code=413)
+    content_type = (request.headers.get("content-type") or "audio/webm").split(";", 1)[0].lower()
+    suffix = {
+        "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/wav": ".wav",
+        "audio/x-wav": ".wav", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+    }.get(content_type, ".webm")
+    input_dir = speech_root() / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    path = input_dir / f"mic_{os.urandom(8).hex()}{suffix}"
+    path.write_bytes(body)
+    try:
+        result = await asyncio.to_thread(transcribe_audio, str(path), model, language)
+    finally:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    if result.get("success"):
+        result.pop("audio_path", None)
+        dashboard_event_bus.publish("user_transcript", {"text": result.get("text", "")})
+        return result
+    return JSONResponse(result, status_code=503)
+
+
+@app.websocket("/dashboard/events")
+async def dashboard_events_ws(websocket: WebSocket):
+    """Live chat/speech lifecycle stream used by fullscreen Talking Mode."""
+    from core.dashboard_events import dashboard_event_bus
+
+    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
+    if expected and provided != expected:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+
+    def enqueue(event: Dict) -> None:
+        def put() -> None:
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            queue.put_nowait(event)
+        loop.call_soon_threadsafe(put)
+
+    unsubscribe = dashboard_event_bus.subscribe(enqueue)
+    try:
+        await websocket.send_json({"kind": "snapshot", "events": dashboard_event_bus.recent(100)})
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=20)
+                await websocket.send_json(event)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"kind": "ping", "ts": datetime.now().astimezone().isoformat()})
+    except Exception:
+        pass
+    finally:
+        unsubscribe()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # -- Plugin / MCP ecosystem (Phase D) -----------------------------------------
