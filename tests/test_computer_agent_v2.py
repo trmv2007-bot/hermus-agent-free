@@ -152,6 +152,38 @@ def test_state_machine_runs_plan_to_success():
     assert report["success"] is True and report["final_state"] == "SUCCESS"
 
 
+def test_repair_engine_popup_heuristic():
+    from core.computer.repair import RepairEngine
+
+    engine = RepairEngine(use_llm=False)
+    plan = engine.repair("Unexpected popup detected", "YouTube loaded", {"description": "click address bar"})
+    kinds = [s["action"]["kind"] for s in plan]
+    assert "click_target" in kinds
+    assert any("Close" in (s["action"].get("target") or "") for s in plan)
+    diag = engine.diagnose("cookie banner blocking the page", "home page visible")
+    assert diag.source == "heuristic"
+    assert diag.plan[0]["action"]["target"] == "Accept all"
+
+
+def test_state_machine_fails_explicitly_when_retries_exhausted():
+    controller = _FreshController.make()
+    plan = [{"name": "click", "expected": "ok", "action": {"kind": "type_text", "text": "hi"}}]
+    states = VisualStateMachine.plan_to_states(plan)
+    machine = VisualStateMachine(
+        controller=controller,
+        execute=lambda spec: dispatch_action(controller, spec),
+        verify=lambda b, a, e: {"ok": False, "detail": "still on desktop"},
+        repair=None,
+        max_retries=1,
+    )
+    report = machine.run(states)
+    assert report["success"] is False
+    assert "still on desktop" in report["error"]
+    assert report.get("reason") == "still on desktop"
+    decisions = [v.get("decision") for v in report["states_visited"] if v.get("failure")]
+    assert decisions == ["fail_task"]
+
+
 def test_state_machine_repairs_on_failure():
     calls = {"n": 0}
     controller = _FreshController.make()
@@ -349,6 +381,42 @@ def test_plan_preserves_explicit_failure_transition():
     assert report["success"] is False
     assert report["final_state"] == "FAILURE"
     assert any(event.get("outcome") == "failure_transition" for event in report["states_visited"])
+
+
+def test_state_machine_invokes_repair_then_retries_original():
+    order = []
+    controller = _FreshController.make()
+
+    def execute(spec):
+        order.append(spec.get("kind") or spec.get("target"))
+        return dispatch_action(controller, spec)
+
+    def verify(before, after, expected):
+        # Original action fails until a repair click has run.
+        if expected == "page ready":
+            return {"ok": "click_target" in order, "detail": "Unexpected popup detected"}
+        return {"ok": True, "detail": "repaired"}
+
+    def repair(detail, expected, last):
+        assert "popup" in detail.lower()
+        return [{"name": "close_popup", "expected": "popup gone",
+                 "action": {"kind": "click_target", "target": "Close"}}]
+
+    plan = [{"name": "go", "expected": "page ready", "action": {"kind": "type_text", "text": "youtube.com"}}]
+    states = VisualStateMachine.plan_to_states(plan)
+    machine = VisualStateMachine(
+        controller=controller,
+        execute=execute,
+        verify=verify,
+        repair=repair,
+        max_retries=2,
+        wait_until=lambda c, t: {"matched": True},
+    )
+    report = machine.run(states)
+    assert report["success"] is True
+    diagnoses = [v for v in report["states_visited"] if str(v.get("state", "")).startswith("DIAGNOSE:")]
+    repairs = [v for v in report["states_visited"] if str(v.get("state", "")).startswith("REPAIR:")]
+    assert diagnoses and repairs
 
 
 # -- skill store --------------------------------------------------------

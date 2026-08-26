@@ -439,6 +439,15 @@ Rules:
                 + (f"\n\nRelevant memory:\n{memory_summary}" if memory_summary else ""),
             },
         ]
+        try:
+            from .harness import harness as _harness
+
+            _prep = _harness.prepare_turn(
+                self.session_id, user_message, messages, project=str(self.project or "")
+            )
+            messages = _prep.get("messages") or messages
+        except Exception:
+            pass
         # Recent trajectory context
         for turn in self.trajectory[-12:]:
             role = turn.get("role") or "user"
@@ -504,6 +513,12 @@ Rules:
                         tool_args = {}
                 print(f"[Tool step {steps}] {tool_name}({tool_args})")
                 result = self._execute_tool(tool_name, tool_args)
+                try:
+                    from .harness import harness as _harness
+
+                    _harness.observe_tool(self.session_id, tool_name, tool_args)
+                except Exception:
+                    pass
                 all_tool_results.append(
                     {"tool": tool_name, "args": tool_args, "result": result, "step": steps}
                 )
