@@ -34,6 +34,7 @@ DISCOVER_MODULES = [
     "tools.mcp_tools",
     "tools.embeddings_tools",
     "tools.fleet_tools",
+    "tools.harness_tools",
     "core.trajectory",
     "core.response_tester",
     "backends.backend_manager",
