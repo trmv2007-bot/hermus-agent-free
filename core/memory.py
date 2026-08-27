@@ -1,6 +1,8 @@
 """Memory - SQLite FTS5 free, no vector DB cost, plus curated memory, nudges, user modeling (free Honcho alternative)"""
 import sqlite3
 import json
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any
@@ -12,17 +14,72 @@ class Memory:
     def __init__(self, db_path: str = None):
         self.db_path = Path(db_path or config.resolve_path(config.memory_db_path))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()
         self._init_db()
 
+    # ------------------------------------------------------------- connections
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Long-lived thread-local connection.
+
+        sqlite3 connections must not cross threads, and the gateway serves
+        requests from several worker threads. Instead of paying a
+        connect/PRAGMA/close cycle per operation, every thread keeps one
+        connection. WAL (set once in ``_init_db``) lets readers proceed while
+        a writer commits; ``busy_timeout`` makes concurrent writers wait
+        briefly instead of raising 'database is locked'.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("PRAGMA busy_timeout=10000;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn.execute("PRAGMA temp_store=MEMORY;")
+            except sqlite3.Error:
+                pass
+            self._local.conn = conn
+        return conn
+
+    def close(self) -> None:
+        """Close this thread's cached connection (safe to call repeatedly)."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            self._local.conn = None
+
+    @contextmanager
+    def _write_txn(self):
+        """Commit on success, roll back on failure.
+
+        With persistent connections a failed write must not leave an open
+        transaction pinned to the thread (it would hold locks and leak
+        phantom state into later reads on the same connection).
+        """
+        conn = self._conn
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            raise
+
     def _init_db(self):
-        conn = sqlite3.connect(str(self.db_path))
+        conn = self._conn
         cur = conn.cursor()
         # Optimized: WAL mode for better concurrency + faster writes
+        # (journal_mode persists in the DB file; the per-connection pragmas
+        # live in Memory._conn).
         try:
             cur.execute("PRAGMA journal_mode=WAL;")
-            cur.execute("PRAGMA synchronous=NORMAL;")
             cur.execute("PRAGMA cache_size=-64000;")  # 64MB cache
-            cur.execute("PRAGMA temp_store=MEMORY;")
         except sqlite3.Error:
             pass
 
@@ -97,7 +154,6 @@ class Memory:
             )
         """)
         conn.commit()
-        conn.close()
 
     def add_session_message(self, session_id: str, role: str, content: str, tool_calls: list[dict] = None, metadata: dict = None, project: str = None, tag: dict = None):
         """Add message to session + FTS index.
@@ -106,18 +162,16 @@ class Memory:
         reasoning metadata (strategy/difficulty/plan) to the trajectory line (P6).
         """
         project = project or getattr(config, "project", "default")
-        conn = sqlite3.connect(str(self.db_path))
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO sessions (session_id, timestamp, role, content, tool_calls, metadata, project)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (session_id, datetime.now().isoformat(), role, content, json.dumps(tool_calls or []), json.dumps(metadata or {}), project))
-        # Add to FTS
-        cur.execute("""
-            INSERT INTO sessions_fts (content, session_id, role) VALUES (?, ?, ?)
-        """, (content, session_id, role))
-        conn.commit()
-        conn.close()
+        with self._write_txn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO sessions (session_id, timestamp, role, content, tool_calls, metadata, project)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, datetime.now().isoformat(), role, content, json.dumps(tool_calls or []), json.dumps(metadata or {}), project))
+            # Add to FTS
+            cur.execute("""
+                INSERT INTO sessions_fts (content, session_id, role) VALUES (?, ?, ?)
+            """, (content, session_id, role))
 
         # Also log to trajectory file for batch generation (+ Phase 4 tag)
         try:
@@ -139,8 +193,7 @@ class Memory:
 
     def search_sessions(self, query: str, limit: int = 5, project: str = None) -> list[dict]:
         """Free FTS5 search - no vector DB needed. Phase 4: project filter."""
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
+        conn = self._conn
         cur = conn.cursor()
         try:
             # FTS5 search with ranking
@@ -162,8 +215,8 @@ class Memory:
                 """, (query, limit))
             rows = cur.fetchall()
             result = [dict(r) for r in rows]
-        except Exception as e:
-            # Fallback LIKE search if FTS fails
+        except sqlite3.Error:
+            # Fallback LIKE search if FTS fails (bad MATCH syntax etc.)
             if project:
                 cur.execute("""
                     SELECT * FROM sessions WHERE content LIKE ? AND project = ? ORDER BY id DESC LIMIT ?
@@ -174,7 +227,6 @@ class Memory:
                 """, (f"%{query}%", limit))
             rows = cur.fetchall()
             result = [dict(r) for r in rows]
-        conn.close()
         return result
 
     def summarize_search_results(self, query: str, results: list[dict]) -> str:
@@ -198,34 +250,26 @@ class Memory:
 
     def curate_memory(self, key: str, value: str, source_session: str = "", importance: int = 5):
         """Agent-curated memory - agent decides what to remember"""
-        conn = sqlite3.connect(str(self.db_path))
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT OR REPLACE INTO curated_memory (timestamp, key, value, source_session, importance)
-            VALUES (?, ?, ?, ?, ?)
-        """, (datetime.now().isoformat(), key, value, source_session, importance))
-        conn.commit()
-        conn.close()
+        with self._write_txn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT OR REPLACE INTO curated_memory (timestamp, key, value, source_session, importance)
+                VALUES (?, ?, ?, ?, ?)
+            """, (datetime.now().isoformat(), key, value, source_session, importance))
 
     def get_curated_memory(self, limit: int = 20) -> list[dict]:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+        cur = self._conn.cursor()
         cur.execute("SELECT * FROM curated_memory ORDER BY importance DESC, timestamp DESC LIMIT ?", (limit,))
         rows = cur.fetchall()
-        conn.close()
         return [dict(r) for r in rows]
 
     def periodic_nudges(self) -> list[str]:
         """Periodic nudges - agent asks itself what to persist"""
         # Find sessions from yesterday that were important but not yet curated
         yesterday = (datetime.now() - timedelta(days=1)).isoformat()
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+        cur = self._conn.cursor()
         cur.execute("SELECT * FROM sessions WHERE timestamp > ? AND role='user' ORDER BY id DESC LIMIT 5", (yesterday,))
         recent = cur.fetchall()
-        conn.close()
 
         nudges = []
         for row in recent:
@@ -310,30 +354,27 @@ class Memory:
     def add_token_usage(self, session_id: str, usage: dict):
         """Add token usage - free tracking"""
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO token_usage (session_id, timestamp, model, prompt_tokens, completion_tokens, total_tokens, cost, is_free)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                datetime.now().isoformat(),
-                usage.get("model",""),
-                usage.get("prompt_tokens",0),
-                usage.get("completion_tokens",0),
-                usage.get("total_tokens",0),
-                usage.get("total_cost",0.0),
-                usage.get("is_free",True)
-            ))
-            conn.commit()
-            conn.close()
+            with self._write_txn() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO token_usage (session_id, timestamp, model, prompt_tokens, completion_tokens, total_tokens, cost, is_free)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    session_id,
+                    datetime.now().isoformat(),
+                    usage.get("model",""),
+                    usage.get("prompt_tokens",0),
+                    usage.get("completion_tokens",0),
+                    usage.get("total_tokens",0),
+                    usage.get("total_cost",0.0),
+                    usage.get("is_free",True)
+                ))
         except Exception as e:
             print(f"Token usage tracking failed: {e}")
 
     def get_token_usage(self, session_id: str = None, limit: int = 100) -> dict:
         """Get token usage stats - free"""
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
+        conn = self._conn
         cur = conn.cursor()
         try:
             if session_id:
@@ -344,7 +385,6 @@ class Memory:
             # Sum totals
             cur.execute("SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t, SUM(cost) as cost FROM token_usage" + (" WHERE session_id=?" if session_id else ""), (session_id,) if session_id else ())
             totals = cur.fetchone()
-            conn.close()
             return {
                 "recent": [dict(r) for r in rows],
                 "totals": {
@@ -356,7 +396,6 @@ class Memory:
                 "count": len(rows)
             }
         except Exception as e:
-            conn.close()
             return {"error": str(e), "recent": [], "totals": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"total_cost":0.0}}
 
 # Global memory instance

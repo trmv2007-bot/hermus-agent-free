@@ -385,3 +385,34 @@ def test_map_goal_executes_each_subtask_once():
         fleet_mod.multi_key_manager = old
         server.shutdown()
         server.server_close()
+
+
+# ------------------------------------------------------------------- memory db
+def test_memory_concurrent_thread_access(tmp_path):
+    """Thread-local SQLite connections must survive concurrent gateway-style use.
+
+    Every thread gets its own long-lived connection (WAL + busy_timeout);
+    concurrent writers must all land and no 'database is locked' may escape.
+    """
+    import threading
+
+    mem = Memory(db_path=str(tmp_path / "memory.db"))
+
+    def writer(n: int) -> None:
+        for i in range(25):
+            mem.add_session_message(f"s{n}", "user", f"thread {n} message {i}")
+            mem.add_token_usage(f"s{n}", {"model": "m", "total_tokens": 10})
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    rows = mem.search_sessions("thread", limit=1000)
+    assert len(rows) == 6 * 25, f"all concurrent writes must persist, got {len(rows)}"
+    usage = mem.get_token_usage(limit=1000)
+    assert usage["count"] == 6 * 25
+    # Nudges still work over the shared schema.
+    mem.add_session_message("sx", "user", "please remember " + "y" * 200)
+    assert mem.periodic_nudges()
