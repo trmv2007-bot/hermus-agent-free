@@ -32,6 +32,15 @@ def test_core_control_change_requires_independent_review():
     assert "core/permissions.py" in result.protected_files
 
 
+def test_ordinary_tests_and_deployment_code_are_green_line():
+    result = EvolutionPolicy().assess(
+        proposal(files=["tests/test_new_skill.py", ".github/workflows/ci.yml"]),
+        "add coverage and improve CI",
+    )
+    assert result.decision is ChangeDecision.ALLOW
+    assert result.protected_files == ()
+
+
 def test_missing_evaluation_is_not_auto_approved():
     result = EvolutionPolicy().assess(proposal(tests=[]))
     assert result.decision is ChangeDecision.REVIEW

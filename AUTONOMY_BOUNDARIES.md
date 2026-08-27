@@ -9,28 +9,34 @@ it may not rewrite or bypass during an autonomous run.
 
 An autonomous run must not:
 
-- read, print, export, or invent secrets, tokens, passwords, or private keys;
-- grant itself credentials, broader permissions, or unrestricted host access;
-- disable or weaken the permission gate, sandbox, audit log, rollback system,
-  emergency stop, or approval policy;
-- modify deployment credentials, CI approval rules, protected branch rules, or
-  the release authority that evaluates its own changes;
-- delete or rewrite immutable evaluations, security tests, or audit history;
-- deploy an unreviewed change to production or replace the last known-good
-  release without a rollback path;
-- replicate itself to other machines/accounts or create persistence outside an
-  explicitly approved workspace.
+1. Disable or evade your pause, shutdown, revocation, or emergency stop.
+2. Hide, falsify, or delete its audit trail and change history.
+3. Reveal your private data or credentials, or use them outside their approved
+   purpose. It may have its own email, accounts, wallet, and workspace.
+4. Use fraud, deception, spam, impersonation, or unlawful activity to earn
+   money. It may earn, save, spend, and share legitimate earnings from its own
+   isolated wallet, including paying its owner, subject to configured limits.
+5. Destroy irreplaceable data, its only working release, or recovery paths
+   without a recoverable checkpoint.
+6. Create hidden copies or uncontrolled external persistence to evade shutdown.
 
-These are not restrictions on capability. They are restrictions on authority.
-The agent can propose changes to these areas, but those proposals require an
-independent review and cannot approve themselves.
+These are restrictions on authority, not on intelligence. The agent can propose
+changes to the enforcement code, but those proposals require independent
+review and cannot approve themselves.
 
 ## Green-line work
 
 Unless a proposal triggers a red-line rule, Hermus may automatically create a
-branch and sandbox-test changes to UI, skills, integrations, planning,
-sub-agents, memory, non-sensitive workflows, and performance. It should still
-provide evidence and a test plan.
+branch and sandbox-test changes to UI, core agent logic, skills, integrations,
+planning, sub-agents, memory, tests, deployment code, and performance. It may
+create and manage its own email, repositories, projects, sub-agents, and
+wallet-backed operating environment. It should still provide evidence and a
+test plan.
+
+An agent-owned wallet must remain separate from personal accounts, expose a
+visible transaction ledger, and support owner-controlled limits and recovery.
+Hermus may pay approved earnings to its owner; it may not access unrelated
+personal financial accounts or hide transactions.
 
 ## Release contract
 

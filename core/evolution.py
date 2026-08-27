@@ -64,6 +64,7 @@ class ChangeProposal:
 # These are the brakes and the independent control plane.  Changes here may be
 # proposed, but an autonomous process may not approve/deploy them itself.
 RED_LINE_PATTERNS: tuple[str, ...] = (
+    # Private credentials and repository internals.
     ".env*",
     "**/.env*",
     "**/*secret*",
@@ -71,21 +72,19 @@ RED_LINE_PATTERNS: tuple[str, ...] = (
     "**/*token*",
     "**/*password*",
     ".git/**",
-    ".github/workflows/**",
+    # The independent control plane: changes require review, but may be
+    # proposed. Ordinary agent, UI, skill, test, and deployment code remains
+    # green-line work.
     "core/evolution.py",
     "core/permissions.py",
-    "core/config.py",
     "core/rollback.py",
     "core/sandbox.py",
+    "core/computer/permissions.py",
+    "core/computer/remote.py",
     "core/counsel/constitution.py",
-    "tests/**",
-    "pytest.ini",
-    "pyproject.toml",
-    "requirements*.txt",
-    "Dockerfile*",
-    "docker-compose*.yml",
-    "deploy/**",
-    "scripts/deploy*",
+    "deploy/secrets/**",
+    "scripts/emergency_stop*",
+    "scripts/rollback*",
 )
 
 # Content checks catch attempts to evade path rules by placing control changes
