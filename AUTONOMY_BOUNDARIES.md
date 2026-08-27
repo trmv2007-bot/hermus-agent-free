@@ -62,3 +62,10 @@ be independently protected from the agent changing them in the same proposal.
 append-only proposal ledger. It intentionally does not push, merge, or deploy;
 those operations belong to an external release controller with protected
 credentials.
+
+`core/world_model.py` is the shared awareness layer. It records observations
+with source, timestamp, confidence, expiry, and permission scope; publishes
+world events; redacts obvious credential values; persists an optional journal;
+and can refresh a runtime hardware profile. Integrations such as calendar,
+filesystem, browser, screen, devices, wallet, and external services can ingest
+facts into this same model.
