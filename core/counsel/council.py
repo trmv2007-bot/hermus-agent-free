@@ -423,7 +423,7 @@ class CouncilSession:
             ]
             observations = []
             step_failed = False
-            for round_i in range(tool_rounds_cap):
+            for _round in range(tool_rounds_cap):
                 try:
                     resp = executor.llm().chat(messages, tools=tools)
                 except Exception as e:

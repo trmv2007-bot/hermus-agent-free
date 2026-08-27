@@ -538,7 +538,7 @@ class MemoryScorer:
             success_signal = 1.0 if bool(success) else 0.2
         pref = 0.0
         if user_preferences:
-            for k, v in (user_preferences or {}).items():
+            for _k, v in (user_preferences or {}).items():
                 if isinstance(v, str) and _overlap(query, v) > 0.3:
                     pref += self.preference_bonus / 10.0
                 elif isinstance(v, list):

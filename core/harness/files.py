@@ -66,7 +66,7 @@ def note_write(file_path: str, writer: str = "") -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     with _LOCK:
         data = _load()
-        for key, rec in list(data.get("reads", {}).items()):
+        for _key, rec in list(data.get("reads", {}).items()):
             if rec.get("path") != resolved:
                 continue
             if rec.get("session_id") == writer:

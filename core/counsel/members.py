@@ -107,7 +107,7 @@ def build_roster(
 
     assigned = _assign_models(ordered, model=model)
     members = []
-    for i, s in enumerate(assigned):
+    for s in assigned:
         role = s["role"]
         name = s.get("name") or role
         members.append(

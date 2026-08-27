@@ -187,7 +187,7 @@ def test_lane_serialises_one_session_and_parallelises_others():
     a = sorted([w for w in windows if w["session"] == "same"], key=lambda w: w["start"])
     assert len(a) == 3
     # same lane ⇒ strictly one at a time
-    for prev, nxt in zip(a, a[1:]):
+    for prev, nxt in zip(a, a[1:], strict=False):
         assert nxt["start"] >= prev["end"] - 0.005, (prev, nxt)
     b = [w for w in windows if w["session"] == "other"]
     assert any(o["start"] < x["end"] and x["start"] < o["end"]

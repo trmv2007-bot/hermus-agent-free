@@ -377,7 +377,7 @@ class TaskControlManager:
             self._emergency_stop_time = datetime.now().astimezone().isoformat()
             
             # Cancel all running tasks
-            for task_id, ctx in self._task_contexts.items():
+            for _task_id, ctx in self._task_contexts.items():
                 if ctx.control_state == TaskControlState.RUNNING:
                     ctx.control_state = TaskControlState.INTERRUPTED
             

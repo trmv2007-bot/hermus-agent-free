@@ -249,12 +249,12 @@ def chat_completions(
         )
     except CompatAPIError:
         raise
-    except requests.exceptions.Timeout:
-        raise CompatAPIError("Request timeout", status_code=408, latency_ms=int((time.time() - start) * 1000))
+    except requests.exceptions.Timeout as e:
+        raise CompatAPIError("Request timeout", status_code=408, latency_ms=int((time.time() - start) * 1000)) from e
     except requests.exceptions.ConnectionError as e:
-        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - start) * 1000))
+        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
     except Exception as e:
-        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000))
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
 
 
 def stream_chat_completions(
@@ -399,12 +399,12 @@ def stream_chat_completions(
         )
     except CompatAPIError:
         raise
-    except requests.exceptions.Timeout:
-        raise CompatAPIError("Stream timeout", status_code=408, latency_ms=int((time.time() - started) * 1000))
+    except requests.exceptions.Timeout as e:
+        raise CompatAPIError("Stream timeout", status_code=408, latency_ms=int((time.time() - started) * 1000)) from e
     except requests.exceptions.ConnectionError as e:
-        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - started) * 1000))
+        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - started) * 1000)) from e
     except Exception as e:
-        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - started) * 1000))
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - started) * 1000)) from e
 
 
 class CompatAPIError(Exception):

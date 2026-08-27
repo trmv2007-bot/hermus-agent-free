@@ -455,13 +455,13 @@ class RpcClient:
         except Exception as e:
             with self._lock:
                 self._pending.pop(req_id, None)
-            raise RpcError(f"worker stdin closed: {e}", ERR_INTERNAL)
+            raise RpcError(f"worker stdin closed: {e}", ERR_INTERNAL) from e
         try:
             msg = box.get(timeout=timeout)
         except queue.Empty:
             with self._lock:
                 self._pending.pop(req_id, None)
-            raise RpcError(f"timeout waiting for '{method}' after {timeout}s", ERR_TIMEOUT)
+            raise RpcError(f"timeout waiting for '{method}' after {timeout}s", ERR_TIMEOUT) from None
         if "error" in msg:
             err = msg.get("error") or {}
             raise RpcError(str(err.get("message"))[:600], int(err.get("code") or ERR_INTERNAL), err.get("data"))

@@ -367,7 +367,7 @@ class JobQueue:
                         except Exception as inner:
                             raise TimeoutError(
                                 f"job exceeded {job.timeout}s and stopped with: {type(inner).__name__}: {inner}"
-                            )
+                            ) from inner
                 else:
                     result = await fut
             if not isinstance(result, dict):

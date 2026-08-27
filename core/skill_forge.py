@@ -266,7 +266,7 @@ def extract_steps(
 
     steps: List[DistilledStep] = []
     seen: set = set()
-    for turn_idx, turn in enumerate(traj):
+    for turn in traj:
         for tc in turn.get("tool_calls") or []:
             if not isinstance(tc, dict):
                 continue

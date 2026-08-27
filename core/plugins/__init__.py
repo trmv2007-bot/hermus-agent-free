@@ -159,7 +159,7 @@ class PluginRegistry:
             }
 
     def subscribe(self, plugin: str, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
-        setattr(handler, "__plugin__", plugin)
+        handler.__plugin__ = plugin
         with self._sync():
             self._event_handlers.setdefault(event_type, []).append(handler)
 
