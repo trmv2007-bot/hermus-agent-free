@@ -416,3 +416,89 @@ def test_memory_concurrent_thread_access(tmp_path):
     # Nudges still work over the shared schema.
     mem.add_session_message("sx", "user", "please remember " + "y" * 200)
     assert mem.periodic_nudges()
+
+
+# ----------------------------------------------------------------- gateway split
+def test_gateway_router_split_surface():
+    """The gateway monolith split into per-concern routers must preserve the
+    HTTP surface and the legacy import/monkeypatch contract."""
+    import os as _os
+
+    import gateway.gateway as gw
+
+    # 1. Compatibility imports keep working.
+    assert callable(gw.get_agent_for_user)
+    assert callable(gw.setup)
+    assert callable(gw.start)
+    assert callable(gw._token_matches)
+    assert callable(gw._agent_chat)
+    assert isinstance(gw.AGENTS, dict)
+
+    # 2. Monkeypatching gateway.gateway.get_agent_for_user still affects
+    #    request handling (/command resolves it through this module).
+    sentinel = []
+    gw_orig = gw.get_agent_for_user
+
+    class _FakeAgent:
+        model_name = "mock/mock"
+        mode = type("M", (), {"value": "agent"})()
+        mode_config = type("C", (), {"name": "agent", "description": "agent"})()
+
+        def chat(self, text):
+            sentinel.append(text)
+            return {"response": "patched", "steps": 1, "tool_calls": []}
+
+    gw.get_agent_for_user = lambda *a, **k: _FakeAgent()
+    try:
+        from fastapi.testclient import TestClient
+
+        with TestClient(gw.app) as client:
+            r = client.post("/command", json={"text": "ping", "platform": "web",
+                                              "user_id": "split_check", "stream": False})
+            assert r.status_code == 200
+            assert r.json()["response"] == "patched"
+            assert sentinel == ["ping"]
+    finally:
+        gw.get_agent_for_user = gw_orig
+
+    # 3. Route surface: every router family is mounted.
+    def collect(routes, out):
+        for r in routes:
+            inner = getattr(r, "original_router", None)  # _IncludedRouter wrapper
+            if inner is not None:
+                collect(inner.routes, out)
+                continue
+            path = getattr(r, "path", None)
+            if path is None:
+                continue
+            out.append((path, frozenset(getattr(r, "methods", None) or [])))
+
+    paths = set()
+    methods_by_path = {}
+    collect(gw.app.routes, [])
+    out = []
+    collect(gw.app.routes, out)
+    for path, methods in out:
+        paths.add(path)
+        methods_by_path.setdefault(path, set()).update(methods)
+
+    expected = {
+        ("/command", "POST"), ("/platforms", "GET"), ("/api/status", "GET"),
+        ("/dashboard", "GET"), ("/webhook/telegram", "POST"),
+        ("/channels/status", "GET"), ("/telegram/send", "POST"),
+        ("/tools", "GET"), ("/mcp/servers", "GET"), ("/fleet/run", "POST"),
+        ("/keys/list", "GET"), ("/keys/add", "POST"), ("/custom-apis/add", "POST"),
+        ("/update/check", "GET"), ("/plugins", "GET"),
+        ("/agents", "GET"), ("/workspace", "GET"), ("/memory2/remember", "POST"),
+        ("/permissions/set", "POST"), ("/research", "POST"), ("/screen/status", "GET"),
+        ("/profiles", "GET"), ("/computer/status", "GET"), ("/computer/tasks", "GET"),
+        ("/computer/episodes", "GET"), ("/computer/run", "POST"),
+        ("/remote/status", "GET"), ("/remote/approve", "POST"),
+        ("/speech/status", "GET"), ("/speech/synthesize", "POST"),
+        ("/dashboard/status", "GET"), ("/dashboard/events", "WS"),
+        ("/computer/events", "WS"), ("/queue/status", "GET"), ("/jobs", "POST"),
+    }
+    missing = [(p, m) for p, m in expected if p not in paths or (m != "WS" and {"GET", "POST", "DELETE"} & {m} and m not in methods_by_path.get(p, set()))]
+    assert not missing, f"routes lost in the gateway split: {missing}"
+    # Sanity: the surface is substantial, not just the composition root.
+    assert len(paths) >= 120, f"expected the full gateway surface, got {len(paths)} routes"
