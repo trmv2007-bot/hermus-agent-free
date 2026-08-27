@@ -528,8 +528,76 @@
     try {
       let content = '';
       if (view === 'missions') {
-        const [tasks, computer] = await Promise.all([api('/agents/status'), api('/computer/tasks')]);
-        content = rawCard('Gateway missions', tasks) + rawCard('Computer missions', computer);
+        const [missionsData, artsData, rbData] = await Promise.all([
+          settled('/missions'), settled('/artifacts'), settled('/rollback/checkpoints')
+        ]);
+        const missions = (missionsData.ok && missionsData.data && missionsData.data.missions) ? missionsData.data.missions : [];
+        const artifacts = (artsData.ok && artsData.data && artsData.data.artifacts) ? artsData.data.artifacts : [];
+        const checkpoints = (rbData.ok && rbData.data && rbData.data.checkpoints) ? rbData.data.checkpoints : [];
+
+        let missionCards = '';
+        if (missions.length === 0) {
+          missionCards = card('MISSION STATUS', '<p style="color:var(--text-dim);font-size:13px;">No active missions in workspace. Start one via CLI (<code>hermus mission start "goal"</code>) or API (<code>POST /missions</code>).</p>');
+        } else {
+          for (const m of missions) {
+            let stepsHtml = '<ul style="list-style:none;padding:0;margin:8px 0;font-size:12px;">';
+            for (const sg of (m.subgoals || [])) {
+              let icon = '■';
+              let color = '#8892b0';
+              if (sg.status === 'completed' || sg.status === 'done') { icon = '✓'; color = '#00f5a0'; }
+              else if (sg.status === 'running') { icon = '→'; color = '#00e5ff'; }
+              else if (sg.status === 'failed') { icon = '✕'; color = '#ff0055'; }
+              else if (sg.status === 'blocked') { icon = '⚠'; color = '#ffaa00'; }
+              stepsHtml += `<li style="color:${color};margin:4px 0;">${icon} <b>${escapeHtml(sg.goal)}</b> <span style="opacity:0.7;">(${sg.status})</span></li>`;
+            }
+            stepsHtml += '</ul>';
+
+            let evidenceHtml = '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">';
+            evidenceHtml += `<div>Evidence items: <b>${(m.evidence || []).length}</b> | Artifacts: <b>${(m.artifacts || []).length}</b></div>`;
+            evidenceHtml += `<div>Confidence score: <b>${Math.round((m.confidence_score || 0) * 100)}%</b> | Domain: <b>${escapeHtml(m.domain || 'generic')}</b></div>`;
+            if (m.blocker_reason) {
+              evidenceHtml += `<div style="color:#ffaa00;margin-top:4px;">⚠ Blocker: ${escapeHtml(m.blocker_reason)}</div>`;
+            }
+            evidenceHtml += '</div>';
+
+            const mBody = `
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-weight:700;font-size:14px;color:#fff;">${escapeHtml(m.goal)}</span>
+                <span class="badge" style="background:${m.state === 'completed' ? '#00f5a022' : (m.state === 'blocked' ? '#ffaa0022' : '#00e5ff22')};color:${m.state === 'completed' ? '#00f5a0' : (m.state === 'blocked' ? '#ffaa00' : '#00e5ff')};border:1px solid currentColor;">${escapeHtml((m.state || 'pending').toUpperCase())} ${m.progress_pct || 0}%</span>
+              </div>
+              <div style="background:rgba(255,255,255,0.08);height:6px;border-radius:3px;overflow:hidden;margin-bottom:10px;">
+                <div style="background:linear-gradient(90deg,#00e5ff,#00f5a0);height:100%;width:${m.progress_pct || 0}%;"></div>
+              </div>
+              ${stepsHtml}
+              ${evidenceHtml}
+            `;
+            missionCards += card(`MISSION [${m.mission_id}]`, mBody);
+          }
+        }
+
+        let artHtml = '';
+        if (artifacts.length === 0) {
+          artHtml = '<p style="color:var(--text-dim);font-size:12px;">No build deliverables or artifacts produced yet.</p>';
+        } else {
+          artHtml = '<table style="width:100%;font-size:11px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--text-dim);border-bottom:1px solid rgba(255,255,255,0.1);"><th>NAME</th><th>TYPE</th><th>SIZE</th></tr></thead><tbody>';
+          for (const a of artifacts) {
+            artHtml += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td><b>${escapeHtml(a.name)}</b></td><td><span class="badge">${escapeHtml(a.artifact_type)}</span></td><td>${a.size_bytes} B</td></tr>`;
+          }
+          artHtml += '</tbody></table>';
+        }
+
+        let chkHtml = '';
+        if (checkpoints.length === 0) {
+          chkHtml = '<p style="color:var(--text-dim);font-size:12px;">No recovery checkpoints created.</p>';
+        } else {
+          chkHtml = '<ul style="list-style:none;padding:0;font-size:11px;">';
+          for (const c of checkpoints.slice(0, 5)) {
+            chkHtml += `<li style="margin:4px 0;"><span style="color:#00e5ff;">${c.id}</span>: ${escapeHtml(c.label)} <span style="color:var(--text-dim);">(${c.timestamp})</span></li>`;
+          }
+          chkHtml += '</ul>';
+        }
+
+        content = missionCards + card('ARTIFACTS & DELIVERABLES', artHtml) + card('RECOVERY CHECKPOINTS', chkHtml);
       } else if (view === 'computer') {
         const [status, control, resources] = await Promise.all([api('/computer/status'), api('/computer/control/status'), settled('/computer/resources')]);
         $('moduleActions').innerHTML += '<button class="action-btn" id="openComputer">OPEN FULL COMPUTER CONTROL</button>';

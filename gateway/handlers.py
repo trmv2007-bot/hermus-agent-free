@@ -116,6 +116,49 @@ def make_autonomous_handler(agent_getter: Callable[..., Any]):
     return autonomous
 
 
+def make_mission_start_handler(agent_getter: Callable[..., Any]):
+    def mission_start(ctx) -> Dict[str, Any]:
+        payload = dict(ctx.payload)
+        goal = str(payload.get("goal") or payload.get("text") or "")
+        if not goal:
+            return {"error": "goal required"}
+        from core.mission import mission_engine
+
+        ctx.emit("mission_started", {"goal": goal[:200]})
+        report = mission_engine.start_mission(
+            goal=goal,
+            requirements=payload.get("requirements"),
+            domain=payload.get("domain"),
+            subgoals=payload.get("subgoals"),
+            budget_steps=int(payload.get("budget_steps", 20)),
+        )
+        out = report.to_dict()
+        out["job_id"] = ctx.id
+        return out
+
+    return mission_start
+
+
+def make_swe_develop_handler():
+    def swe_develop(ctx) -> Dict[str, Any]:
+        payload = dict(ctx.payload)
+        task = str(payload.get("task") or payload.get("text") or "")
+        if not task:
+            return {"error": "task required"}
+        from core.swe_mode import swe_mode
+
+        ctx.emit("swe_started", {"task": task[:200]})
+        res = swe_mode.execute(
+            task=task,
+            max_repairs=int(payload.get("max_repairs", 3)),
+        )
+        out = res.to_dict()
+        out["job_id"] = ctx.id
+        return out
+
+    return swe_develop
+
+
 def make_research_handler():
     def research(ctx) -> Dict[str, Any]:
         payload = dict(ctx.payload)
@@ -200,8 +243,6 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
                 from gateway.channels import telegram_send_message
 
                 raw = telegram_send_message(int(payload["chat_id"]), answer)
-                # the channel API answers with a dict ({"ok": false, "error": …});
-                # bool(dict) would be True even on failure, so read the verdict
                 if isinstance(raw, dict):
                     ok = bool(raw.get("ok") or raw.get("delivered") or raw.get("message_id"))
                     sent = {"delivered": ok, "detail": {k: v for k, v in raw.items()
@@ -260,6 +301,8 @@ def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: boo
     kinds = {
         "agent.chat": (make_chat_handler(agent_getter), "run one agent turn (ReAct loop, streamed events)"),
         "agent.autonomous": (make_autonomous_handler(agent_getter), "plan→act→verify→repair loop for a goal"),
+        "mission.start": (make_mission_start_handler(agent_getter), "objective-driven mission with verifiers & dynamic budgets"),
+        "swe.develop": (make_swe_develop_handler(), "repository-level software engineering lifecycle"),
         "research.deep": (make_research_handler(), "multi-source research pipeline with citations"),
         "subagent.delegate": (make_delegate_handler(), "hierarchical sub-agent fan-out + aggregation"),
         "memory.sweep": (make_memory_sweep_handler(), "decay/archive/purge pass over typed memory"),

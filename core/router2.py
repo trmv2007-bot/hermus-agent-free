@@ -1,22 +1,17 @@
-"""Model Router 2.0 — per-step model selection.
+"""Model Router 2.0 — Task-Aware and Capability-Aware Model Routing.
 
-Routes each call to the best available model for that specific step, rather
-than assuming a single provider for the whole session.
-
-Signals considered:
-- task type      (chat / code / reasoning / vision / research / summary / tooling / longcontext)
-- reasoning difficulty (1..5)
-- context size   (estimated token length)
-- tool-calling   (does this step need reliable function calling?)
-- provider health / latency (from the multi-key manager)
-- free-first ordering: Ollama → free cloud → other local/cloud
-
-Falls back gracefully to the configured default model when no workers are
-discovered, so it never breaks an offline environment.
+Routes each call to the best available model for that specific step, role, and task type:
+- Coding tasks → coding-specialized models (Coder, DeepSeek-Coder, Qwen-Coder)
+- Difficult reasoning & architecture → reasoning models (R1, o1/o3, QwQ, large reasoning)
+- Visual tasks → vision-capable models (Llava, Bakllava, Vision)
+- Critic & Verification → independent models distinct from generator
+- Historical provider reliability & cooldown tracking
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import config
 
@@ -30,6 +25,8 @@ TASK_PROFILES: Dict[str, Dict[str, Any]] = {
     "summary":     {"keywords": ("8b", "7b", "small", "mini", "instruct"), "tools": False, "vision": False},
     "tooling":     {"keywords": ("function", "tool", "instruct", "qwen", "8b"), "tools": True, "vision": False},
     "longcontext": {"keywords": ("context", "128k", "long", "qwen", "llama3.1"), "tools": False, "vision": False},
+    "critic":      {"keywords": ("critic", "reviewer", "eval", "70b", "r1", "claude", "gpt", "deepseek"), "tools": False, "vision": False},
+    "verifier":    {"keywords": ("verifier", "check", "coder", "deepseek", "qwen", "instruct"), "tools": True, "vision": False},
 }
 
 CODE_HINTS = ("def ", "class ", "import ", "function", "code", "bug", "fix", "refactor", "python", "javascript",
@@ -43,12 +40,28 @@ RESEARCH_HINTS = ("research", "find", "search", "sources", "cite", "latest", "ne
 class ModelRouter:
     def __init__(self, ollama_base_url: Optional[str] = None):
         self.ollama_base_url = ollama_base_url or config.ollama_base_url
+        self._provider_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"successes": 0, "failures": 0, "consecutive_failures": 0, "last_failure_ts": 0.0})
+
+    def record_outcome(self, provider: str, model: str, success: bool, latency_ms: Optional[float] = None) -> None:
+        key = f"{provider}:{model}".lower()
+        stats = self._provider_stats[key]
+        if success:
+            stats["successes"] += 1
+            stats["consecutive_failures"] = 0
+        else:
+            stats["failures"] += 1
+            stats["consecutive_failures"] += 1
+            stats["last_failure_ts"] = time.time()
 
     # -- classification -------------------------------------------------
     def classify_task(self, text: str) -> str:
         t = (text or "").lower()
         if any(h in t for h in VISION_HINTS):
             return "vision"
+        if any(h in t for h in ("review code", "audit security", "critique", "critic")):
+            return "critic"
+        if any(h in t for h in ("verify outcome", "verifier", "test proof")):
+            return "verifier"
         if any(h in t for h in RESEARCH_HINTS) or len(t) > 800:
             return "research" if len(t) > 200 else "research"
         if any(h in t for h in CODE_HINTS):
@@ -58,7 +71,6 @@ class ModelRouter:
         return "chat"
 
     def estimate_context_tokens(self, text: str) -> int:
-        # ~4 chars/token rough heuristic
         return max(1, len(text or "") // 4)
 
     def classify_difficulty(self, text: str) -> int:
@@ -78,7 +90,6 @@ class ModelRouter:
         workers: List[Dict[str, Any]] = []
         try:
             from .model_fleet import _available_workers
-
             workers = _available_workers(limit=32)
         except Exception:
             workers = []
@@ -88,7 +99,8 @@ class ModelRouter:
                       wants_vision: bool, context_tokens: int) -> Tuple[float, str]:
         provider = (w.get("provider") or "").lower()
         model = (w.get("model") or "").lower()
-        keywords = TASK_PROFILES[task_type]["keywords"]
+        profile = TASK_PROFILES.get(task_type, TASK_PROFILES["chat"])
+        keywords = profile["keywords"]
         score = 0.0
         reasons: List[str] = []
 
@@ -108,11 +120,21 @@ class ModelRouter:
         if task_type == "longcontext" and any(k in model for k in ("128k", "long", "1m")):
             score += 3.0
         # size heuristic for reasoning/research
-        if task_type in ("reasoning", "research") and any(k in model for k in ("70b", "large", "r1", "deepseek", "o3")):
+        if task_type in ("reasoning", "research", "critic") and any(k in model for k in ("70b", "large", "r1", "deepseek", "o3")):
             score += 3.0
         # small/fast for chat/summary
         if task_type in ("chat", "summary") and any(k in model for k in ("8b", "7b", "3b", "small", "mini")):
             score += 1.5
+
+        # historical reliability / failure tracking
+        key = f"{provider}:{model}".lower()
+        stats = self._provider_stats.get(key)
+        if stats:
+            consec = stats.get("consecutive_failures", 0)
+            if consec > 0:
+                cooldown_penalty = min(15.0, consec * 4.0)
+                score -= cooldown_penalty
+                reasons.append(f"consec-fails={consec}")
 
         # health/latency penalty
         if w.get("healthy") is False:
@@ -147,11 +169,18 @@ class ModelRouter:
         return ranked
 
     def select(self, text: str, context_tokens: Optional[int] = None,
-               needs_tools: bool = False, wants_vision: bool = False) -> Dict[str, Any]:
+               needs_tools: bool = False, wants_vision: bool = False,
+               exclude_models: Optional[List[str]] = None,
+               task_type: Optional[str] = None) -> Dict[str, Any]:
         """Choose the best model for a single step from the given text."""
-        task_type = self.classify_task(text)
+        task_type = task_type or self.classify_task(text)
         ctx = context_tokens or self.estimate_context_tokens(text)
         ranked = self.rank(task_type, context_tokens=ctx, needs_tools=needs_tools, wants_vision=wants_vision)
+
+        if exclude_models:
+            exclude_set = {m.lower() for m in exclude_models}
+            ranked = [r for r in ranked if f"{r.get('provider')}/{r.get('model')}".lower() not in exclude_set and r.get("model", "").lower() not in exclude_set]
+
         if ranked:
             top = ranked[0]
             return {
@@ -177,6 +206,20 @@ class ModelRouter:
             "reason": "no workers discovered; using configured default",
             "alternatives": [],
         }
+
+    def select_for_role(self, role: str, text: str, exclude_models: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Select a capability-appropriate model for specific roles (coder, critic, verifier, architect)."""
+        role_map = {
+            "coder": "code",
+            "architect": "reasoning",
+            "reviewer": "critic",
+            "critic": "critic",
+            "security_auditor": "critic",
+            "verifier": "verifier",
+            "researcher": "research",
+        }
+        task_type = role_map.get(role.lower(), "chat")
+        return self.select(text, task_type=task_type, needs_tools=(task_type in ("code", "verifier", "research")), exclude_models=exclude_models)
 
 
 router2 = ModelRouter()

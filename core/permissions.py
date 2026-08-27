@@ -1,23 +1,12 @@
 """Permission & risk manager — ALLOW / ASK / DENY gate for tool execution.
 
 Security as a first-class subsystem. Every tool request is classified into a
-risk category (READ / WRITE / EXECUTE / NETWORK / GUI / ADMIN), mapped to a
-policy decision, with per-agent overrides, allow/deny lists, and an append-only
-audit log.
+capability and risk category (READ, WRITE_WORKSPACE, WRITE_SYSTEM, EXECUTE_SANDBOX,
+EXECUTE_HOST, NETWORK, CREDENTIALS, GUI, ADMIN), mapped to a policy decision,
+with per-agent overrides, allow/deny lists, and an append-only audit log.
 
-Default posture (overridable):
-
-    read / web lookup   → ALLOW
-    create file         → ALLOW
-    delete / modify     → ASK
-    shell / sudo        → ASK
-    network scan        → ASK
-    credentials         → DENY
-    admin / GUI         → DENY (until explicitly enabled)
-
-This module is a decision engine: it does not enforce anything by itself. Wire
-it into ``tool_registry.execute`` / the computer-control layer so every risky
-action is gated.
+Unified execution path:
+  LLM Request → Policy Classifier → Capability Check → Permission/Sandbox Gate → Execution → Audit
 """
 from __future__ import annotations
 
@@ -25,7 +14,7 @@ import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from .workspace import workspace
 
@@ -45,92 +34,100 @@ class Risk(str, Enum):
     ADMIN = "admin"
 
 
-# tool name (or substring) -> (risk, default decision)
+class Capability(str, Enum):
+    READ = "read"
+    WRITE_WORKSPACE = "write_workspace"
+    WRITE_SYSTEM = "write_system"
+    EXECUTE_SANDBOX = "execute_sandbox"
+    EXECUTE_HOST = "execute_host"
+    NETWORK = "network"
+    CREDENTIALS = "credentials"
+    GUI = "gui"
+    ADMIN = "admin"
+
+
+# tool name (or substring) -> (risk, default decision, required capabilities)
 DEFAULT_POLICY: Dict[str, tuple] = {
     # READ — safe
-    "read_file": (Risk.READ, Decision.ALLOW),
-    "list_files": (Risk.READ, Decision.ALLOW),
-    "memory_search": (Risk.READ, Decision.ALLOW),
-    "memory2": (Risk.READ, Decision.ALLOW),
-    "web_search": (Risk.NETWORK, Decision.ALLOW),
-    "web_read": (Risk.NETWORK, Decision.ALLOW),
-    "browser_navigate": (Risk.NETWORK, Decision.ALLOW),
-    "browser_screenshot": (Risk.NETWORK, Decision.ALLOW),
-    "vision_analyze": (Risk.READ, Decision.ALLOW),
+    "read_file": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "list_files": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "memory_search": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "memory2": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "web_search": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "web_read": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "browser_navigate": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "browser_screenshot": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "vision_analyze": (Risk.READ, Decision.ALLOW, [Capability.READ]),
     # WRITE — creating is fine
-    "write_file": (Risk.WRITE, Decision.ALLOW),
-    "create_file": (Risk.WRITE, Decision.ALLOW),
-    "append_file": (Risk.WRITE, Decision.ALLOW),
-    "curate_memory": (Risk.WRITE, Decision.ALLOW),
-    "embeddings_ingest": (Risk.WRITE, Decision.ALLOW),
+    "write_file": (Risk.WRITE, Decision.ALLOW, [Capability.WRITE_WORKSPACE]),
+    "create_file": (Risk.WRITE, Decision.ALLOW, [Capability.WRITE_WORKSPACE]),
+    "append_file": (Risk.WRITE, Decision.ALLOW, [Capability.WRITE_WORKSPACE]),
+    "curate_memory": (Risk.WRITE, Decision.ALLOW, [Capability.WRITE_WORKSPACE]),
+    "embeddings_ingest": (Risk.WRITE, Decision.ALLOW, [Capability.WRITE_WORKSPACE]),
     # WRITE — destructive needs consent
-    "delete_file": (Risk.WRITE, Decision.ASK),
-    "move_file": (Risk.WRITE, Decision.ASK),
-    "overwrite_file": (Risk.WRITE, Decision.ASK),
+    "delete_file": (Risk.WRITE, Decision.ASK, [Capability.WRITE_WORKSPACE]),
+    "move_file": (Risk.WRITE, Decision.ASK, [Capability.WRITE_WORKSPACE]),
+    "overwrite_file": (Risk.WRITE, Decision.ASK, [Capability.WRITE_WORKSPACE]),
     # EXECUTE
-    "shell_execute": (Risk.EXECUTE, Decision.ASK),
-    "shell": (Risk.EXECUTE, Decision.ASK),
-    "run_backend": (Risk.EXECUTE, Decision.ASK),
-    "sudo": (Risk.ADMIN, Decision.ASK),
+    "shell_execute": (Risk.EXECUTE, Decision.ASK, [Capability.EXECUTE_HOST]),
+    "shell": (Risk.EXECUTE, Decision.ASK, [Capability.EXECUTE_HOST]),
+    "run_backend": (Risk.EXECUTE, Decision.ASK, [Capability.EXECUTE_HOST]),
+    "sudo": (Risk.ADMIN, Decision.ASK, [Capability.ADMIN]),
     # NETWORK — riskier
-    "network_scan": (Risk.NETWORK, Decision.ASK),
-    "http_request": (Risk.NETWORK, Decision.ASK),
-    "port_scan": (Risk.NETWORK, Decision.ASK),
+    "network_scan": (Risk.NETWORK, Decision.ASK, [Capability.NETWORK]),
+    "http_request": (Risk.NETWORK, Decision.ASK, [Capability.NETWORK]),
+    "port_scan": (Risk.NETWORK, Decision.ASK, [Capability.NETWORK]),
     # GUI / ADMIN
-    "click": (Risk.GUI, Decision.DENY),
-    "type_text": (Risk.GUI, Decision.DENY),
-    "keyboard": (Risk.GUI, Decision.DENY),
-    "mouse": (Risk.GUI, Decision.DENY),
-    # screen recording: capturing the display is sensitive (DENY), but
-    # read-only inspection of the recorder state is safe (ALLOW).
-    "screen_record_start": (Risk.GUI, Decision.DENY),
-    "screen_record_stop": (Risk.GUI, Decision.ALLOW),
-    "screen_record_status": (Risk.READ, Decision.ALLOW),
-    "screen_record_save": (Risk.GUI, Decision.ASK),
-    "screen_get_recent": (Risk.READ, Decision.ALLOW),
-    "screen_analyze": (Risk.READ, Decision.ALLOW),
-    "screen_understand": (Risk.READ, Decision.ALLOW),
-    "screen_verify": (Risk.READ, Decision.ALLOW),
-    "screen_action_before": (Risk.GUI, Decision.DENY),
-    "screen_action_after": (Risk.GUI, Decision.DENY),
-    "screen_watch": (Risk.GUI, Decision.DENY),
-    # computer action engine (v2) — delegated to core.computer.ComputerPolicy,
-    # but registered here so the tool registry can gate them as well.
-    "computer_move_mouse": (Risk.GUI, Decision.DENY),
-    "computer_click": (Risk.GUI, Decision.DENY),
-    "computer_double_click": (Risk.GUI, Decision.DENY),
-    "computer_right_click": (Risk.GUI, Decision.DENY),
-    "computer_click_target": (Risk.GUI, Decision.DENY),
-    "computer_find_on_screen": (Risk.READ, Decision.ALLOW),
-    "computer_type_text": (Risk.GUI, Decision.DENY),
-    "computer_press_key": (Risk.GUI, Decision.DENY),
-    "computer_hotkey": (Risk.GUI, Decision.DENY),
-    "computer_scroll": (Risk.GUI, Decision.DENY),
-    "computer_open_application": (Risk.GUI, Decision.DENY),
-    "computer_close_application": (Risk.GUI, Decision.DENY),
-    "computer_focus_window": (Risk.GUI, Decision.DENY),
-    "computer_task": (Risk.GUI, Decision.ASK),
-    "computer_stop": (Risk.GUI, Decision.ALLOW),
+    "click": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "type_text": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "keyboard": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "mouse": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "screen_record_start": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "screen_record_stop": (Risk.GUI, Decision.ALLOW, [Capability.GUI]),
+    "screen_record_status": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "screen_record_save": (Risk.GUI, Decision.ASK, [Capability.GUI]),
+    "screen_get_recent": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "screen_analyze": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "screen_understand": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "screen_verify": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "screen_action_before": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "screen_action_after": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "screen_watch": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    # computer action engine (v2)
+    "computer_move_mouse": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_click": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_double_click": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_right_click": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_click_target": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_find_on_screen": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "computer_type_text": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_press_key": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_hotkey": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_scroll": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_open_application": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_close_application": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_focus_window": (Risk.GUI, Decision.DENY, [Capability.GUI]),
+    "computer_task": (Risk.GUI, Decision.ASK, [Capability.GUI]),
+    "computer_stop": (Risk.GUI, Decision.ALLOW, [Capability.GUI]),
     # ---- upgrades: hybrid memory, sandbox, delegation, skill forge --------
-    "memory_hybrid_search": (Risk.READ, Decision.ALLOW),
-    "memory2_recall": (Risk.READ, Decision.ALLOW),
-    "memory_sweep": (Risk.WRITE, Decision.ASK),      # archives/purges typed memory
-    "skill_harvest": (Risk.WRITE, Decision.ALLOW),   # writes a validated skill file
-    "skill_forge_stats": (Risk.READ, Decision.ALLOW),
-    "delegate_tasks": (Risk.EXECUTE, Decision.ALLOW),  # spawns sandboxed worker procs
-    "subagent_spawn": (Risk.EXECUTE, Decision.ALLOW),
-    # A sandboxed command is strictly safer than the raw shell tool, so it stays
-    # ASK (audited) rather than DENY — but escalation inside it is still admin.
-    "sandbox_run": (Risk.EXECUTE, Decision.ASK),
-    "sandbox_status": (Risk.READ, Decision.ALLOW),
-    "credential_access": (Risk.ADMIN, Decision.DENY),
-    "get_credential": (Risk.ADMIN, Decision.DENY),
-    "install_package": (Risk.ADMIN, Decision.ASK),
-    "system_config": (Risk.ADMIN, Decision.ASK),
+    "memory_hybrid_search": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "memory2_recall": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "memory_sweep": (Risk.WRITE, Decision.ASK, [Capability.WRITE_WORKSPACE]),
+    "skill_harvest": (Risk.WRITE, Decision.ALLOW, [Capability.WRITE_WORKSPACE]),
+    "skill_forge_stats": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "delegate_tasks": (Risk.EXECUTE, Decision.ALLOW, [Capability.EXECUTE_SANDBOX]),
+    "subagent_spawn": (Risk.EXECUTE, Decision.ALLOW, [Capability.EXECUTE_SANDBOX]),
+    "sandbox_run": (Risk.EXECUTE, Decision.ASK, [Capability.EXECUTE_SANDBOX]),
+    "sandbox_status": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "credential_access": (Risk.ADMIN, Decision.DENY, [Capability.CREDENTIALS]),
+    "get_credential": (Risk.ADMIN, Decision.DENY, [Capability.CREDENTIALS]),
+    "install_package": (Risk.ADMIN, Decision.ASK, [Capability.ADMIN]),
+    "system_config": (Risk.ADMIN, Decision.ASK, [Capability.ADMIN]),
 }
 
 DEFAULT_DECISION = Decision.ASK
 DEFAULT_RISK = Risk.READ
+DEFAULT_CAPS = [Capability.READ]
 
 
 class PermissionManager:
@@ -154,37 +151,57 @@ class PermissionManager:
         args = args or {}
         risk = DEFAULT_RISK
         decision = DEFAULT_DECISION
+        caps = list(DEFAULT_CAPS)
+
         # longest matching policy key wins
         matched = None
-        for key, (r, d) in DEFAULT_POLICY.items():
+        for key, entry in DEFAULT_POLICY.items():
+            r = entry[0]
+            d = entry[1]
+            c = entry[2] if len(entry) > 2 else [Capability.READ]
             if tool_name == key or (len(key) > 3 and key in tool_name):
                 if matched is None or len(key) > len(matched):
                     matched = key
-                    risk, decision = r, d
+                    risk, decision, caps = r, d, c
+
         # args can escalate risk (e.g. shell with sudo, write to sensitive path)
         if tool_name in ("shell_execute", "shell", "sandbox_run", "backend_execute", "computer_task"):
             cmd = " ".join(str(v) for v in args.values()).lower()
-            # Privilege escalation is admin regardless of what the sandbox screen thinks.
             dangerous = any(m in cmd for m in ("sudo ", " sudo", "rm -rf /", "dd if=", "mkfs", ":(){"))
             if not dangerous:
-                try:  # agree with the sandbox's own screen — one list to maintain
+                try:
                     from .sandbox import scan_command
-
                     dangerous = bool(scan_command(cmd))
                 except Exception:
                     pass
             if dangerous:
                 risk, decision = Risk.ADMIN, Decision.ASK
+                caps = [Capability.ADMIN, Capability.EXECUTE_HOST]
             elif args.get("network") or "curl " in cmd or "wget " in cmd:
                 risk, decision = Risk.NETWORK, Decision.ASK
+                caps = [Capability.NETWORK, Capability.EXECUTE_HOST]
+
         if tool_name in ("write_file", "create_file", "append_file"):
             target = str(args.get("path") or args.get("file") or "").lower()
             if any(s in target for s in ("/etc/", "~/.ssh", ".env", "credentials", "id_rsa")):
                 risk, decision = Risk.ADMIN, Decision.ASK
-        return {"tool": tool_name, "risk": risk.value, "default": decision.value}
+                caps = [Capability.WRITE_SYSTEM, Capability.CREDENTIALS]
+            else:
+                caps = [Capability.WRITE_WORKSPACE]
 
-    def check(self, tool_name: str, agent: Optional[str] = None,
-              args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return {
+            "tool": tool_name,
+            "risk": risk.value,
+            "default": decision.value,
+            "capabilities": [c.value if isinstance(c, Capability) else str(c) for c in caps],
+        }
+
+    def check(
+        self,
+        tool_name: str,
+        agent: Optional[str] = None,
+        args: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         info = self.classify(tool_name, args)
         decision = Decision(info["default"])
 
@@ -207,8 +224,12 @@ class PermissionManager:
         self.audit(tool_name, decision.value, agent, info["risk"])
         return info
 
-    def set_policy(self, tool_name: str, decision: str,
-                   agent: Optional[str] = None) -> Dict[str, Any]:
+    def set_policy(
+        self,
+        tool_name: str,
+        decision: str,
+        agent: Optional[str] = None,
+    ) -> Dict[str, Any]:
         if decision not in (Decision.ALLOW.value, Decision.ASK.value, Decision.DENY.value):
             return {"success": False, "error": f"decision must be allow/ask/deny, got '{decision}'"}
         if agent:
@@ -218,10 +239,14 @@ class PermissionManager:
         self._save_overrides()
         return {"success": True, "tool": tool_name, "decision": decision, "agent": agent}
 
-    def audit(self, tool_name: str, decision: str, agent: Optional[str],
-              risk: Optional[str] = None) -> Path:
-        # Append a structured JSONL entry directly (workspace.log wraps strings
-        # as {"ts", "line"}, which would double-encode the fields we need).
+    def audit(
+        self,
+        tool_name: str,
+        decision: str,
+        agent: Optional[str],
+        risk: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Path:
         path = workspace.dirs["logs"] / "permissions.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
@@ -230,6 +255,7 @@ class PermissionManager:
             "decision": decision,
             "agent": agent,
             "risk": risk,
+            "extra": extra or {},
         }
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
@@ -249,4 +275,48 @@ class PermissionManager:
         return out
 
 
+class PolicyGate:
+    """Unified policy enforcement layer guaranteeing no tool call bypasses security."""
+
+    def __init__(self, manager: Optional[PermissionManager] = None):
+        self.manager = manager or permission_manager
+
+    def enforce(
+        self,
+        tool_name: str,
+        args: Optional[Dict[str, Any]] = None,
+        agent: Optional[str] = None,
+        granted_capabilities: Optional[Set[str]] = None,
+        strict: bool = False,
+    ) -> Dict[str, Any]:
+        check_res = self.manager.check(tool_name, agent=agent, args=args)
+        decision = check_res.get("decision")
+        req_caps = set(check_res.get("capabilities", []))
+
+        # Check explicit capabilities if specified
+        if granted_capabilities is not None:
+            missing_caps = req_caps - granted_capabilities
+            if missing_caps:
+                reason = f"Missing required capabilities: {', '.join(missing_caps)}"
+                self.manager.audit(tool_name, Decision.DENY.value, agent, check_res.get("risk"), extra={"missing": list(missing_caps)})
+                if strict:
+                    raise PermissionError(f"Permission Denied for tool '{tool_name}': {reason}")
+                return {"allowed": False, "decision": Decision.DENY.value, "reason": reason, "tool": tool_name}
+
+        if decision == Decision.DENY.value:
+            reason = f"Tool '{tool_name}' is blocked by security policy"
+            if strict:
+                raise PermissionError(reason)
+            return {"allowed": False, "decision": Decision.DENY.value, "reason": reason, "tool": tool_name}
+
+        return {
+            "allowed": True,
+            "decision": decision,
+            "tool": tool_name,
+            "risk": check_res.get("risk"),
+            "capabilities": check_res.get("capabilities"),
+        }
+
+
 permission_manager = PermissionManager()
+policy_gate = PolicyGate(permission_manager)

@@ -143,6 +143,10 @@ class Project:
 
 
 class Workspace:
+    @property
+    def root(self) -> Path:
+        return self.base_dir
+
     def __init__(self, base_dir: Optional[str] = None):
         raw = base_dir or os.environ.get("HERMUS_HOME") or getattr(config, "workspace_dir", "~/.hermus")
         self.base_dir = Path(raw).expanduser()
@@ -152,7 +156,11 @@ class Workspace:
     @property
     def dirs(self) -> Dict[str, Path]:
         return {
+            "root": self.base_dir,
             "agents": self.base_dir / "agents",
+            "checkpoints": self.base_dir / "checkpoints",
+            "artifacts": self.base_dir / "artifacts",
+            "missions": self.base_dir / "missions",
             "projects": self.base_dir / "projects",
             "memory": self.base_dir / "memory",
             "skills": self.base_dir / "skills",

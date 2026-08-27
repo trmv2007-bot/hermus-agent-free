@@ -545,6 +545,58 @@ def main():
     profile_use = profile_sub.add_parser("use", help="Show a profile's system prompt")
     profile_use.add_argument("name")
 
+    
+    # mission engine (roadmap P0)
+    mission_parser = subparsers.add_parser('mission', help='Mission Engine — objective-driven lifecycle with verification')
+    mission_sub = mission_parser.add_subparsers(dest='mission_action')
+    m_start = mission_sub.add_parser('start', help='Start a new goal-driven mission')
+    m_start.add_argument('goal', help='Mission goal')
+    m_start.add_argument('--domain', default='auto', help='Domain verifier (python, android, web, git, linux, research, file, auto)')
+    m_start.add_argument('--budget', type=int, default=20, help='Dynamic step budget')
+    m_start.add_argument('--req', action='append', default=None, help='Specific requirement (can be repeated)')
+    m_resume = mission_sub.add_parser('resume', help='Resume a mission by ID')
+    m_resume.add_argument('mission_id')
+    m_status = mission_sub.add_parser('status', help='Check status of a mission')
+    m_status.add_argument('mission_id')
+    mission_sub.add_parser('list', help='List all missions')
+
+    # swe mode (roadmap P0)
+    swe_parser = subparsers.add_parser('swe', help='Software Engineer Mode — full repo development & test loop')
+    swe_sub = swe_parser.add_subparsers(dest='swe_action')
+    swe_run = swe_sub.add_parser('run', help='Execute an engineering task')
+    swe_run.add_argument('task', help='Task description')
+    swe_run.add_argument('--repairs', type=int, default=3, help='Max repair rounds')
+
+    # verifiers (roadmap P0)
+    verify_parser = subparsers.add_parser('verify', help='Domain Verification Subsystem')
+    verify_sub = verify_parser.add_subparsers(dest='verify_action')
+    v_run = verify_sub.add_parser('run', help='Run domain verification')
+    v_run.add_argument('--domain', default='auto', help='Domain name')
+    v_run.add_argument('--path', default=None, help='Target path or file')
+    v_run.add_argument('--task', default='', help='Original task description')
+    v_run.add_argument('--output', default='', help='Execution output')
+    verify_sub.add_parser('domains', help='List available domain verifiers')
+
+    # artifacts (roadmap P1)
+    art_parser = subparsers.add_parser('artifacts', help='Artifact-Centric Workspace Explorer')
+    art_sub = art_parser.add_subparsers(dest='artifact_action')
+    art_list = art_sub.add_parser('list', help='List registered artifacts')
+    art_list.add_argument('--mission', default=None, help='Filter by mission ID')
+    art_export = art_sub.add_parser('export', help='Export artifacts to ZIP bundle')
+    art_export.add_argument('output_zip', help='Destination ZIP file')
+    art_export.add_argument('--mission', default=None)
+
+    # rollback & checkpoints (roadmap P0)
+    rb_parser = subparsers.add_parser('rollback', help='Transactional Rollback & Checkpoint Manager')
+    rb_sub = rb_parser.add_subparsers(dest='rollback_action')
+    rb_chk = rb_sub.add_parser('checkpoint', help='Create a workspace snapshot checkpoint')
+    rb_chk.add_argument('label', help='Checkpoint description/label')
+    rb_res = rb_sub.add_parser('restore', help='Restore workspace to checkpoint state')
+    rb_res.add_argument('checkpoint_id', help='Checkpoint ID')
+    rb_diff = rb_sub.add_parser('diff', help='Compare workspace state against checkpoint')
+    rb_diff.add_argument('checkpoint_id')
+    rb_sub.add_parser('list', help='List saved checkpoints')
+
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -601,6 +653,92 @@ def main():
             else:
                 result = skill_manager.improve_skill(args.name)
                 print(f"Improve result: {result}")
+
+    
+    elif args.command == 'mission':
+        from core.mission import mission_engine
+        import json as json_lib
+        if args.mission_action == 'start':
+            report = mission_engine.start_mission(
+                goal=args.goal,
+                requirements=args.req,
+                domain=None if args.domain == 'auto' else args.domain,
+                budget_steps=args.budget,
+            )
+            print(json_lib.dumps(report.to_dict(), indent=2))
+        elif args.mission_action == 'resume':
+            report = mission_engine.resume_mission(args.mission_id)
+            print(json_lib.dumps(report.to_dict(), indent=2))
+        elif args.mission_action == 'status':
+            report = mission_engine.get_mission(args.mission_id)
+            if report:
+                print(json_lib.dumps(report.to_dict(), indent=2))
+            else:
+                print(f"Mission '{args.mission_id}' not found")
+        elif args.mission_action == 'list':
+            missions = mission_engine.list_missions()
+            print(f"Missions ({len(missions)}):")
+            for m in missions:
+                print(f" - [{m.state.upper()}] {m.mission_id}: {m.goal[:60]} (Progress: {m.progress_pct}%)")
+        else:
+            parser.parse_args(['mission', '--help'])
+
+    elif args.command == 'swe':
+        from core.swe_mode import swe_mode
+        import json as json_lib
+        if args.swe_action == 'run':
+            res = swe_mode.execute(task=args.task, max_repairs=args.repairs)
+            print(json_lib.dumps(res.to_dict(), indent=2))
+        else:
+            parser.parse_args(['swe', '--help'])
+
+    elif args.command == 'verify':
+        from core.verifier_registry import verifier_registry
+        import json as json_lib
+        if args.verify_action == 'run':
+            res = verifier_registry.verify(
+                domain_or_auto=args.domain,
+                context={'task': args.task, 'target_path': args.path, 'output': args.output},
+            )
+            print(json_lib.dumps(res.to_dict(), indent=2))
+        elif args.verify_action == 'domains':
+            print("Registered Domain Verifiers:", verifier_registry.list_domains())
+        else:
+            parser.parse_args(['verify', '--help'])
+
+    elif args.command == 'artifacts':
+        from core.artifact_manager import artifact_manager
+        import json as json_lib
+        if args.artifact_action == 'list':
+            arts = artifact_manager.list_artifacts(mission_id=args.mission)
+            print(f"Artifacts ({len(arts)}):")
+            for a in arts:
+                print(f" - [{a.artifact_type}] {a.name} ({a.size_bytes} B) -> {a.path}")
+        elif args.artifact_action == 'export':
+            p = artifact_manager.export_bundle(args.output_zip, mission_id=args.mission)
+            print(f"Exported bundle to: {p}")
+        else:
+            parser.parse_args(['artifacts', '--help'])
+
+    elif args.command == 'rollback':
+        from core.rollback import rollback_manager
+        import json as json_lib
+        if args.rollback_action == 'checkpoint':
+            cp = rollback_manager.checkpoint(label=args.label)
+            print(f"Checkpoint created: {cp.id} ('{cp.label}')")
+        elif args.rollback_action == 'restore':
+            res = rollback_manager.restore(args.checkpoint_id)
+            print(json_lib.dumps(res, indent=2))
+        elif args.rollback_action == 'diff':
+            res = rollback_manager.diff(args.checkpoint_id)
+            print(json_lib.dumps(res, indent=2))
+        elif args.rollback_action == 'list':
+            cps = rollback_manager.list_checkpoints()
+            print(f"Checkpoints ({len(cps)}):")
+            for c in cps:
+                print(f" - {c.id} [{c.timestamp}] {c.label} ({len(c.files)} files)")
+        else:
+            parser.parse_args(['rollback', '--help'])
 
     elif args.command == "multikey":
         from core.multi_key import multi_key_manager

@@ -481,3 +481,68 @@ with `mock/mock`, so no API keys, Docker or Redis are required — the degraded 
   coarser, never wrong.
 * Delegation children inherit the parent's tool permissions; `max_depth=2` and
   `max_workers=4` are the blast-radius knobs, and there is no cross-machine child (yet).
+
+---
+
+# Part III — Mission Engine, SWE Mode, Domain Verifiers, Artifacts, DAG, and Rollback
+
+Consolidated architecture upgrades transforming Hermus into an objective-driven, reliable autonomous coding platform based on the 12 Upgrade Recommendations.
+
+## 1. True Mission Engine (`core/mission.py`)
+- **Objective Lifecycle**: Goal → Requirements → Subgoals (DAG) → Execute → Observe → Verify → Repair → Continue → Final Proof.
+- **Dynamic Step Budget**: Adapts step limits dynamically based on verified progress rather than rigid turn counts.
+- **Checkpoint & Resume**: Checkpoints persisted to `~/.hermus/missions/<id>.json` with full state resumption via `hermus mission resume <id>`.
+- **Explicit Blocked State**: Distinguishes between task failures and environmental/permission blockers (`BLOCKED`) with actionable instructions.
+
+## 2. Domain-Specific Verification Subsystem (`core/verifier_registry.py`)
+- **Modular Domain Verifiers**:
+  - `PythonVerifier`: AST syntax validation, automated test execution (`pytest`/`unittest`), runtime exception & traceback detection.
+  - `AndroidVerifier`: Android project structure (`AndroidManifest.xml`, Gradle build configurations), APK/AAB container integrity & DEX inspection.
+  - `WebVerifier`: HTML5 entrypoint, CSS/JS/TS asset checks, node configuration, live port HTTP endpoint verification.
+  - `GitVerifier`: Working tree clean status, branch consistency, and commit history.
+  - `LinuxVerifier`: Executable file permissions (`+x`), daemon process status, TCP port listening checks.
+  - `ResearchVerifier`: Synthesis depth, word-count substance, source citation & URL validation.
+  - `FileVerifier`: Schema & format integrity (JSON parsing, non-empty guarantees).
+- **Auto-Detection & Composite Verification**: Auto-detects domain from task requirements or combines multi-domain verification pipelines.
+
+## 3. Dedicated Software Engineer Mode (`core/swe_mode.py`)
+- **8-Phase Engineering Lifecycle**: `INSPECT` → `PLAN` → `EDIT` → `BUILD` → `TEST` → `DEBUG/REPAIR` → `REVIEW_DIFF` → `PACKAGE_REPORT`.
+- **Toolchain Auto-Detection**: Python, Node/TypeScript, React/Next.js, Rust (Cargo), Go, Kotlin/Android.
+- **Automated Repair Loop**: Feeds compiler outputs and pytest tracebacks directly back into the repair prompt with automated checkpoint rollback on unrecoverable failures.
+- **Unified Diff & Change Reports**: Generates full unified diffs and human-readable engineering change summaries.
+
+## 4. Artifact-Centric Workspace (`core/artifact_manager.py`)
+- **Deliverables as First-Class Entities**: Tracks APKs, ZIP bundles, build binaries, diffs, and test reports.
+- **Metadata & Fingerprinting**: Records SHA256 hashes, byte sizes, preview capabilities, and mission linkage.
+- **ZIP Bundle Exporter**: Package mission deliverables with an embedded `artifacts_manifest.json` in one command.
+
+## 5. Dependency-Aware Agent DAG (`core/agent_dag.py`)
+- **Directed Acyclic Graph Orchestration**: Defines stage dependencies across specialized agents (Researcher, Architect, Coder, Tester, Reviewer, Verifier).
+- **Parallel Stage Execution**: Dispatches independent nodes simultaneously while enforcing dependency barriers.
+- **Cycle Prevention**: Topological sort with Kahn's algorithm and cycle detection.
+
+## 6. Task-Aware Model Routing (`core/router2.py`)
+- **Capability-Based Routing**: Dynamically maps coding tasks to code-specialized models, complex architecture to deep reasoning models, visual tasks to vision models, and review to independent critic models.
+- **Reliability & Cooldown Tracking**: Penalizes providers with consecutive errors/rate-limits and automatically routes to resilient alternatives.
+
+## 7. Independent Critic & Verifier Panel (`core/critic.py`)
+- **Tripartite Evaluation**:
+  - `CodeReviewer`: Identifies syntax errors, unimplemented stubs, and maintainability concerns.
+  - `SecurityAuditor`: Screens for hardcoded credentials, unsanitized `eval`/`exec`, shell injection risks, and root operations.
+  - `OutcomeVerifier`: Proves that user objectives and requirements are demonstrably satisfied by artifacts and test outputs.
+
+## 8 & 9. Self-Improvement, Reliability Scoring, and Skill Hardening (`core/skill_manager.py`)
+- **Automated Regression Testing**: Automatically runs `test_skill.py` across all installed skills to detect regressions.
+- **Skill Reliability Scoring**: Calculates historical success rate and verification bonuses.
+- **Capability Declarations**: Validates declared permissions (`read`, `network`, `write_workspace`, `execute_sandbox`) before execution.
+
+## 10. Unified Permission Enforcement (`core/permissions.py`)
+- **Capability Architecture**: `READ`, `WRITE_WORKSPACE`, `WRITE_SYSTEM`, `EXECUTE_SANDBOX`, `EXECUTE_HOST`, `NETWORK`, `CREDENTIALS`, `GUI`, `ADMIN`.
+- **PolicyGate Interceptor**: Guarantees all tool calls, subagents, and sandbox executions pass through centralized policy checks with append-only JSONL audit logging.
+
+## 11 & 12. Transactional Rollback & Checkpoints (`core/rollback.py`)
+- **Workspace Snapshots**: Checkpoint entire directories before risky tasks, compute diffs, and restore cleanly.
+- **Git Branch Transactions**: Automatically isolate development in temporary `hermus/tx-<id>` branches with commit on verified success or clean rollback on failure.
+
+## 13. Mission-Centric Control Room Dashboard
+- Visualizes active missions, dynamic progress bars %, sub-goals with live state icons (✓, →, ■, ✕, ⚠), evidence metrics, generated artifacts, and recovery checkpoints.

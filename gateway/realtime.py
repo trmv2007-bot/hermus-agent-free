@@ -661,6 +661,137 @@ async def get_run(run_id: str, limit: int = 200):
     return snap
 
 
+
+
+# ---- missions & DAG -----------------------------------------------------------
+@router.post("/missions")
+async def mission_start_api(payload: Dict[str, Any] = None):
+    payload = payload or {}
+    goal = str(payload.get("goal") or payload.get("text") or "")
+    if not goal:
+        return JSONResponse({"error": "goal is required"}, status_code=400)
+    from core.mission import mission_engine
+    report = await asyncio.to_thread(
+        mission_engine.start_mission,
+        goal=goal,
+        requirements=payload.get("requirements"),
+        domain=payload.get("domain"),
+        subgoals=payload.get("subgoals"),
+        budget_steps=int(payload.get("budget_steps", 20)),
+    )
+    return report.to_dict()
+
+@router.get("/missions")
+async def mission_list_api():
+    from core.mission import mission_engine
+    missions = await asyncio.to_thread(mission_engine.list_missions)
+    return {"missions": [m.to_dict() for m in missions]}
+
+@router.get("/missions/{mission_id}")
+async def mission_get_api(mission_id: str):
+    from core.mission import mission_engine
+    report = await asyncio.to_thread(mission_engine.get_mission, mission_id)
+    if not report:
+        return JSONResponse({"error": f"Mission {mission_id} not found"}, status_code=404)
+    return report.to_dict()
+
+@router.post("/missions/{mission_id}/resume")
+async def mission_resume_api(mission_id: str):
+    from core.mission import mission_engine
+    try:
+        report = await asyncio.to_thread(mission_engine.resume_mission, mission_id)
+        return report.to_dict()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+# ---- artifacts ----------------------------------------------------------------
+@router.get("/artifacts")
+async def artifacts_list_api(mission_id: Optional[str] = None, artifact_type: Optional[str] = None):
+    from core.artifact_manager import artifact_manager
+    arts = await asyncio.to_thread(artifact_manager.list_artifacts, mission_id=mission_id, artifact_type=artifact_type)
+    return {"count": len(arts), "artifacts": [a.to_dict() for a in arts]}
+
+@router.get("/artifacts/{artifact_id}")
+async def artifact_get_api(artifact_id: str):
+    from core.artifact_manager import artifact_manager
+    art = await asyncio.to_thread(artifact_manager.get_artifact, artifact_id)
+    if not art:
+        return JSONResponse({"error": f"Artifact {artifact_id} not found"}, status_code=404)
+    return art.to_dict()
+
+@router.post("/artifacts/export")
+async def artifact_export_api(payload: Dict[str, Any] = None):
+    payload = payload or {}
+    output_path = payload.get("output_path", "artifacts_bundle.zip")
+    from core.artifact_manager import artifact_manager
+    try:
+        p = await asyncio.to_thread(
+            artifact_manager.export_bundle,
+            output_zip_path=output_path,
+            mission_id=payload.get("mission_id"),
+            artifact_ids=payload.get("artifact_ids"),
+        )
+        return {"success": True, "bundle_path": p}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ---- verifiers & SWE ----------------------------------------------------------
+@router.get("/verifiers/domains")
+async def verifiers_list_domains():
+    from core.verifier_registry import verifier_registry
+    return {"domains": verifier_registry.list_domains()}
+
+@router.post("/verifiers/verify")
+async def verifiers_verify_api(payload: Dict[str, Any] = None):
+    payload = payload or {}
+    from core.verifier_registry import verifier_registry
+    res = await asyncio.to_thread(
+        verifier_registry.verify,
+        domain_or_auto=payload.get("domain", "auto"),
+        context=payload.get("context", payload),
+    )
+    return res.to_dict()
+
+@router.post("/swe/run")
+async def swe_run_api(payload: Dict[str, Any] = None):
+    payload = payload or {}
+    task = str(payload.get("task") or payload.get("text") or "")
+    if not task:
+        return JSONResponse({"error": "task is required"}, status_code=400)
+    from core.swe_mode import swe_mode
+    res = await asyncio.to_thread(
+        swe_mode.execute,
+        task=task,
+        max_repairs=int(payload.get("max_repairs", 3)),
+    )
+    return res.to_dict()
+
+# ---- rollback & checkpoints ---------------------------------------------------
+@router.get("/rollback/checkpoints")
+async def rollback_list_api():
+    from core.rollback import rollback_manager
+    cps = await asyncio.to_thread(rollback_manager.list_checkpoints)
+    return {"count": len(cps), "checkpoints": [c.to_dict() for c in cps]}
+
+@router.post("/rollback/checkpoint")
+async def rollback_create_api(payload: Dict[str, Any] = None):
+    payload = payload or {}
+    label = str(payload.get("label") or "manual_checkpoint")
+    from core.rollback import rollback_manager
+    cp = await asyncio.to_thread(rollback_manager.checkpoint, label=label, metadata=payload.get("metadata"))
+    return {"success": True, "checkpoint": cp.to_dict()}
+
+@router.post("/rollback/restore")
+async def rollback_restore_api(payload: Dict[str, Any] = None):
+    payload = payload or {}
+    cid = str(payload.get("checkpoint_id") or "")
+    if not cid:
+        return JSONResponse({"error": "checkpoint_id is required"}, status_code=400)
+    from core.rollback import rollback_manager
+    res = await asyncio.to_thread(rollback_manager.restore, checkpoint_id=cid)
+    return res
+
+
 # ------------------------------------------------------------------ lifespan glue
 async def startup(app=None, *, agent_getter: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
     """Start the queue workers + register handlers + schedule maintenance."""

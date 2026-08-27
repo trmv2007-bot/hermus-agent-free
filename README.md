@@ -27,6 +27,23 @@ Original Hermes / Strix / Agent Reach use some paid services:
 
 ---
 
+
+## New in 3.0 — Autonomous Mission Engine & SWE Platform
+
+Comprehensive upgrade turning Hermus into a dependable autonomous coding platform with objective-driven lifecycle management, executable proofs, and transactional recovery:
+
+1. **True Mission Engine (`hermus mission start <goal>`)**: Goal → Requirements → Plan (DAG) → Execute → Verify → Repair → Continue → Proof. Includes dynamic step budgets, structured evidence collection, and explicit `BLOCKED` states.
+2. **Domain-Specific Verifiers (`hermus verify run --domain <domain>`)**: Python AST & pytest checks, Android APK/AAB container and manifest checks, Web HTML/CSS/route verification, Git branch & tree verification, Linux permissions & ports, Research citation validation.
+3. **Dedicated Software Engineer Mode (`hermus swe run <task>`)**: 8-phase development loop (Inspect → Understand → Plan → Edit → Build → Test → Debug/Repair → Review Diff → Package) with automated toolchain detection and repair iterations.
+4. **Artifact-Centric Workspace (`hermus artifacts list|export`)**: Tracks deliverables (APKs, ZIPs, wheels, reports, diffs) with SHA256 hashes, metadata, and one-command ZIP bundling.
+5. **Dependency-Aware Agent DAG**: Kahn-topological sort, parallel multi-agent stage execution (Researcher, Architect, Coder, Tester, Reviewer, Verifier), and cycle prevention.
+6. **Independent Critic & Verifier Panel**: Tripartite evaluation with Code Reviewer, Security Auditor, and Outcome Verifier to prevent LLM self-confirmation bias.
+7. **Transactional Rollback & Git Transactions (`hermus rollback checkpoint|restore`)**: Snapshot workspace directories before risky changes, diff states, and isolate changes in temporary git transaction branches.
+8. **Unified Capability Gate**: Explicit capability architecture (`READ`, `WRITE_WORKSPACE`, `EXECUTE_SANDBOX`, `ADMIN`, etc.) with append-only JSONL audit trails.
+9. **Skill Regression Testing & Reliability Scoring**: Automatically tests all installed skills for regression and computes reliability scores.
+10. **Mission-Centric Control Room Dashboard**: Real-time progress bars %, sub-goals state indicators (✓, →, ■, ✕, ⚠), evidence metrics, and artifact explorer.
+
+
 ## Features — Everything Organized (What It Can Do Right Now)
 
 ### 1. Real Terminal Interface — `hermus` CLI — Gold and Kawaii Default Skin #DAA520 / Cornsilk #FFF8DC
