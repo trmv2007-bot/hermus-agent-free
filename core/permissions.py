@@ -182,17 +182,34 @@ class PermissionManager:
                 caps = [Capability.NETWORK, Capability.EXECUTE_HOST]
 
         if tool_name in ("write_file", "create_file", "append_file"):
-            target = str(args.get("path") or args.get("file") or "").lower()
-            if any(s in target for s in ("/etc/", "~/.ssh", ".env", "credentials", "id_rsa")):
+            target = str(args.get("path") or args.get("file") or "").replace("\\", "/")
+            lowered = target.lower()
+            if any(s in lowered for s in ("/etc/", "~/.ssh", ".env", "credentials", "id_rsa")):
                 risk, decision = Risk.ADMIN, Decision.ASK
                 caps = [Capability.WRITE_SYSTEM, Capability.CREDENTIALS]
             else:
                 caps = [Capability.WRITE_WORKSPACE]
 
+            # Direct tool calls may write ordinary workspace files, but the
+            # evolution control plane is immutable to an autonomous writer.
+            # A protected change can still be proposed through core.evolution
+            # and reviewed independently.
+            try:
+                from .evolution import EvolutionPolicy
+                if target and EvolutionPolicy().protected_files([target]):
+                    risk, decision = Risk.ADMIN, Decision.DENY
+                    caps = [Capability.ADMIN]
+            except Exception:
+                # Fail closed if the control-plane policy cannot be loaded.
+                if target and any(part in lowered for part in ("permissions.py", "rollback.py", "sandbox.py")):
+                    risk, decision = Risk.ADMIN, Decision.DENY
+                    caps = [Capability.ADMIN]
+
         return {
             "tool": tool_name,
             "risk": risk.value,
             "default": decision.value,
+            "immutable": bool(tool_name in ("write_file", "create_file", "append_file") and decision == Decision.DENY and risk == Risk.ADMIN),
             "capabilities": [c.value if isinstance(c, Capability) else str(c) for c in caps],
         }
 
@@ -218,6 +235,12 @@ class PermissionManager:
         # per-tool override
         if tool_name in self.overrides.get("tools", {}):
             decision = Decision(str(self.overrides["tools"][tool_name]))
+
+        # Immutable red-line paths cannot be re-enabled by an allowlist or
+        # per-agent override. They must go through the evolution proposal and
+        # independent review path instead.
+        if info.get("immutable"):
+            decision = Decision.DENY
 
         info["decision"] = decision.value
         info["agent"] = agent
