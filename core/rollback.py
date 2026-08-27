@@ -1,8 +1,9 @@
 """Transactional Rollback & Checkpoint Manager for Hermus.
 
 Provides deterministic recovery points and transaction boundaries for agent development,
-refactoring, and autonomous tasks. Supports both file-tree snapshotting and isolated
-Git branch transactions.
+refactoring, and autonomous tasks. Features an explicit Git transaction state machine
+(CREATED → ACTIVE → TESTING → VERIFIED → COMMITTING → MERGING → COMMITTED)
+with crash recovery and automatic rollback on abort.
 """
 from __future__ import annotations
 
@@ -14,10 +15,23 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from .workspace import workspace
+
+
+class GitTxState(str, Enum):
+    CREATED = "created"
+    ACTIVE = "active"
+    TESTING = "testing"
+    VERIFIED = "verified"
+    COMMITTING = "committing"
+    MERGING = "merging"
+    COMMITTED = "committed"
+    ABORTING = "aborting"
+    ABORTED = "aborted"
 
 
 def _compute_sha256(path: Path) -> str:
@@ -62,14 +76,46 @@ class RollbackManager:
         self.storage_dir = storage_dir or (workspace.root / "checkpoints")
         self.workspace_dir = workspace_dir or workspace.root
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        self._active_git_tx: Optional[Dict[str, Any]] = None
+        self._active_tx_file = self.storage_dir / "git_tx_active.json"
+        self._active_git_tx: Optional[Dict[str, Any]] = self._load_active_tx()
+
+    def _load_active_tx(self) -> Optional[Dict[str, Any]]:
+        if self._active_tx_file.exists():
+            try:
+                return json.loads(self._active_tx_file.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
+    def _save_active_tx(self, tx: Optional[Dict[str, Any]]) -> None:
+        if tx is None:
+            if self._active_tx_file.exists():
+                try:
+                    self._active_tx_file.unlink()
+                except Exception:
+                    pass
+        else:
+            self.storage_dir.mkdir(parents=True, exist_ok=True)
+            self._active_tx_file.write_text(json.dumps(tx, indent=2), encoding="utf-8")
+
+    def _ensure_git_exclude(self, root: Path) -> None:
+        exclude_file = root / ".git" / "info" / "exclude"
+        if exclude_file.parent.exists():
+            try:
+                existing = exclude_file.read_text(encoding="utf-8") if exclude_file.exists() else ""
+                needed = ["checkpoints/", "git_tx_active.json", "artifacts/", "missions/", ".hermus/"]
+                to_add = [item for item in needed if item not in existing]
+                if to_add:
+                    exclude_file.write_text(existing.rstrip() + "\n" + "\n".join(to_add) + "\n", encoding="utf-8")
+            except Exception:
+                pass
 
     def _ignore_file(self, rel_path: Path) -> bool:
         parts = rel_path.parts
         ignored_names = {
             ".git", "__pycache__", ".venv", "venv", "node_modules",
             ".mypy_cache", ".pytest_cache", ".tox", "dist", "build",
-            ".hermus", "checkpoints", "artifacts"
+            ".hermus", "checkpoints", "artifacts", "missions"
         }
         return any(p in ignored_names or p.endswith(".pyc") for p in parts)
 
@@ -79,7 +125,6 @@ class RollbackManager:
         target_dir: Optional[Path] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Checkpoint:
-        """Create a file-level snapshot of the target directory / workspace."""
         root = target_dir or self.workspace_dir
         cid = f"chk_{int(time.time())}_{os.urandom(3).hex()}"
         snapshot_path = self.storage_dir / cid
@@ -96,7 +141,6 @@ class RollbackManager:
                         sha = _compute_sha256(p)
                         files_map[str(rel)] = sha
 
-                        # Copy file to snapshot store
                         dest = snapshot_path / "files" / rel
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(p, dest)
@@ -144,7 +188,6 @@ class RollbackManager:
         return cp
 
     def list_checkpoints(self) -> List[Checkpoint]:
-        """List all saved checkpoints ordered by timestamp descending."""
         checkpoints: List[Checkpoint] = []
         if not self.storage_dir.exists():
             return checkpoints
@@ -171,7 +214,6 @@ class RollbackManager:
             return None
 
     def diff(self, checkpoint_id: str) -> Dict[str, Any]:
-        """Compare current workspace state with checkpoint state."""
         cp = self.get_checkpoint(checkpoint_id)
         if not cp:
             return {"success": False, "error": f"Checkpoint {checkpoint_id} not found"}
@@ -215,7 +257,6 @@ class RollbackManager:
         }
 
     def restore(self, checkpoint_id: str) -> Dict[str, Any]:
-        """Restore the workspace files to the exact state saved in the checkpoint."""
         cp = self.get_checkpoint(checkpoint_id)
         if not cp:
             return {"success": False, "error": f"Checkpoint {checkpoint_id} not found"}
@@ -229,7 +270,6 @@ class RollbackManager:
         restored_files = []
         deleted_files = []
 
-        # Remove files added since checkpoint
         for rel in diff_info.get("added", []):
             target = root / rel
             if target.exists():
@@ -239,7 +279,6 @@ class RollbackManager:
                 except Exception:
                     pass
 
-        # Restore modified and deleted files from snapshot
         for rel in list(cp.files.keys()):
             source = snapshot_files_dir / rel
             dest = root / rel
@@ -271,19 +310,18 @@ class RollbackManager:
                 return False
         return False
 
-    # -- Git-aware transactional branch workflow ------------------------
+    # -- Hardened Git-aware transactional state machine -----------------
     def start_git_transaction(
         self,
         repo_dir: Optional[Path] = None,
         transaction_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create a dedicated working branch to isolate experimental modifications."""
         root = repo_dir or self.workspace_dir
+        self._ensure_git_exclude(root)
         tx_id = transaction_name or f"tx_{int(time.time())}_{os.urandom(2).hex()}"
         branch_name = f"hermus/{tx_id}"
 
         try:
-            # Get current branch
             res = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=str(root),
@@ -294,7 +332,6 @@ class RollbackManager:
             )
             original_branch = res.stdout.strip()
 
-            # Create and switch to new transaction branch
             subprocess.run(
                 ["git", "checkout", "-b", branch_name],
                 cwd=str(root),
@@ -306,20 +343,26 @@ class RollbackManager:
 
             self._active_git_tx = {
                 "id": tx_id,
+                "state": GitTxState.ACTIVE.value,
                 "branch": branch_name,
                 "original_branch": original_branch,
                 "repo_dir": str(root),
                 "started_at": datetime.now().isoformat(),
             }
+            self._save_active_tx(self._active_git_tx)
             return {"success": True, "transaction": self._active_git_tx}
         except Exception as e:
             return {"success": False, "error": f"Failed to start git transaction: {e}"}
+
+    def transition_state(self, new_state: GitTxState) -> None:
+        if self._active_git_tx:
+            self._active_git_tx["state"] = new_state.value
+            self._save_active_tx(self._active_git_tx)
 
     def commit_git_transaction(
         self,
         message: str = "Apply verified changes from Hermus agent",
     ) -> Dict[str, Any]:
-        """Commit current changes and merge transaction branch into original branch."""
         if not self._active_git_tx:
             return {"success": False, "error": "No active git transaction"}
 
@@ -327,11 +370,11 @@ class RollbackManager:
         root = Path(tx["repo_dir"])
         tx_branch = tx["branch"]
         target_branch = tx["original_branch"]
+        self._ensure_git_exclude(root)
 
         try:
-            # Stage all changes
+            self.transition_state(GitTxState.COMMITTING)
             subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, timeout=10)
-            # Commit if changes exist
             subprocess.run(
                 ["git", "commit", "-m", message],
                 cwd=str(root),
@@ -339,9 +382,9 @@ class RollbackManager:
                 text=True,
                 timeout=10,
             )
-            # Switch back to original branch
+
+            self.transition_state(GitTxState.MERGING)
             subprocess.run(["git", "checkout", target_branch], cwd=str(root), check=True, timeout=10)
-            # Merge transaction branch
             res_merge = subprocess.run(
                 ["git", "merge", "--no-ff", tx_branch, "-m", f"Merge {tx_branch}: {message}"],
                 cwd=str(root),
@@ -349,10 +392,12 @@ class RollbackManager:
                 text=True,
                 timeout=15,
             )
-            # Delete transaction branch
             subprocess.run(["git", "branch", "-D", tx_branch], cwd=str(root), capture_output=True)
 
+            self.transition_state(GitTxState.COMMITTED)
             self._active_git_tx = None
+            self._save_active_tx(None)
+
             return {
                 "success": res_merge.returncode == 0,
                 "target_branch": target_branch,
@@ -360,10 +405,10 @@ class RollbackManager:
                 "output": res_merge.stdout + res_merge.stderr,
             }
         except Exception as e:
+            self.abort_git_transaction()
             return {"success": False, "error": f"Failed to commit git transaction: {e}"}
 
     def abort_git_transaction(self) -> Dict[str, Any]:
-        """Discard changes on transaction branch and return to original branch."""
         if not self._active_git_tx:
             return {"success": False, "error": "No active git transaction"}
 
@@ -371,20 +416,25 @@ class RollbackManager:
         root = Path(tx["repo_dir"])
         tx_branch = tx["branch"]
         target_branch = tx["original_branch"]
+        self._ensure_git_exclude(root)
 
         try:
-            # Switch back to original branch
+            self.transition_state(GitTxState.ABORTING)
             subprocess.run(["git", "checkout", target_branch], cwd=str(root), check=True, timeout=10)
-            # Force delete transaction branch
             subprocess.run(["git", "branch", "-D", tx_branch], cwd=str(root), capture_output=True)
 
+            self.transition_state(GitTxState.ABORTED)
             self._active_git_tx = None
+            self._save_active_tx(None)
+
             return {
                 "success": True,
                 "restored_branch": target_branch,
                 "discarded_branch": tx_branch,
             }
         except Exception as e:
+            self._active_git_tx = None
+            self._save_active_tx(None)
             return {"success": False, "error": f"Failed to abort git transaction: {e}"}
 
 

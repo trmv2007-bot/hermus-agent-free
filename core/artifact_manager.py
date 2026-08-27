@@ -2,7 +2,7 @@
 
 Treats tangible work products (APKs, ZIPs, wheels, binaries, test reports,
 diffs, documentation, builds) as first-class objects tracked across mission
-lifecycles, verifiable by domain engines, and surfaced to the UI.
+lifecycles with mission-aware attribution (time, diff, and ID scoping).
 """
 from __future__ import annotations
 
@@ -169,8 +169,11 @@ class ArtifactManager:
         self,
         target_dir: Optional[Path] = None,
         mission_id: Optional[str] = None,
+        since_timestamp: Optional[float] = None,
     ) -> List[Artifact]:
-        """Scan workspace for build outputs, deliverables, and reports."""
+        """Scan workspace for build outputs, deliverables, and reports.
+        Scopes attribution to files modified since mission start when `since_timestamp` is given.
+        """
         root = target_dir or self.workspace_root
         discovered: List[Artifact] = []
 
@@ -182,6 +185,12 @@ class ArtifactManager:
                 if p.is_file() and p.suffix.lower() in KNOWN_EXTENSIONS:
                     if ".git" in p.parts or "node_modules" in p.parts or "__pycache__" in p.parts:
                         continue
+                    if since_timestamp is not None:
+                        try:
+                            if p.stat().st_mtime < since_timestamp:
+                                continue
+                        except Exception:
+                            continue
                     try:
                         art = self.register_artifact(p, mission_id=mission_id)
                         discovered.append(art)
@@ -195,7 +204,6 @@ class ArtifactManager:
         mission_id: Optional[str] = None,
         artifact_ids: Optional[List[str]] = None,
     ) -> str:
-        """Bundle mission artifacts into a single ZIP archive."""
         out_p = Path(output_zip_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -208,7 +216,6 @@ class ArtifactManager:
                 src = Path(art.path)
                 if src.exists():
                     zf.write(src, arcname=art.name)
-            # write manifest inside zip
             manifest_json = json.dumps([a.to_dict() for a in arts], indent=2)
             zf.writestr("artifacts_manifest.json", manifest_json)
 

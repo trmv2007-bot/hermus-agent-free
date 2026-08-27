@@ -7,9 +7,10 @@ and cycle prevention.
 from __future__ import annotations
 
 import collections
+import inspect
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -23,6 +24,35 @@ class DAGNodeStatus(str, Enum):
     FAILED = "failed"
     BLOCKED = "blocked"
     SKIPPED = "skipped"
+
+
+def _safe_serialize(obj: Any, seen: Optional[Set[int]] = None) -> Any:
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return "<circular_ref>"
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    if isinstance(obj, (list, tuple, set)):
+        seen.add(obj_id)
+        res = [_safe_serialize(x, seen) for x in obj]
+        seen.remove(obj_id)
+        return res
+    if isinstance(obj, dict):
+        seen.add(obj_id)
+        res = {str(k): _safe_serialize(v, seen) for k, v in obj.items()}
+        seen.remove(obj_id)
+        return res
+    if hasattr(obj, "to_dict") and callable(obj.to_dict):
+        seen.add(obj_id)
+        try:
+            res = obj.to_dict()
+        except Exception:
+            res = str(obj)
+        seen.remove(obj_id)
+        return res
+    return str(obj)
 
 
 @dataclass
@@ -44,11 +74,43 @@ class DAGNode:
     finished_at: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        return {
+            "id": self.id,
+            "role": self.role,
+            "goal": self.goal,
+            "dependencies": list(self.dependencies),
+            "status": self.status,
+            "inputs": _safe_serialize(self.inputs),
+            "outputs": _safe_serialize(self.outputs),
+            "artifacts": list(self.artifacts),
+            "assigned_model": self.assigned_model,
+            "retries": self.retries,
+            "max_retries": self.max_retries,
+            "execution_time_sec": self.execution_time_sec,
+            "error": self.error,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> DAGNode:
-        return cls(**data)
+        return cls(
+            id=data["id"],
+            role=data["role"],
+            goal=data["goal"],
+            dependencies=data.get("dependencies", []),
+            status=data.get("status", DAGNodeStatus.PENDING.value),
+            inputs=data.get("inputs", {}),
+            outputs=data.get("outputs", {}),
+            artifacts=data.get("artifacts", []),
+            assigned_model=data.get("assigned_model"),
+            retries=data.get("retries", 0),
+            max_retries=data.get("max_retries", 2),
+            execution_time_sec=data.get("execution_time_sec", 0.0),
+            error=data.get("error"),
+            started_at=data.get("started_at"),
+            finished_at=data.get("finished_at"),
+        )
 
 
 class AgentDAG:
@@ -92,7 +154,6 @@ class AgentDAG:
             self.nodes[child_id].dependencies.append(parent_id)
 
     def validate(self) -> bool:
-        """Validate DAG integrity and check for cyclic dependencies."""
         try:
             self.topological_sort()
             return True
@@ -100,7 +161,6 @@ class AgentDAG:
             return False
 
     def topological_sort(self) -> List[DAGNode]:
-        """Return nodes in topological dependency order (Kahn's algorithm)."""
         in_degree: Dict[str, int] = {nid: 0 for nid in self.nodes}
         adj: Dict[str, List[str]] = collections.defaultdict(list)
 
@@ -128,11 +188,9 @@ class AgentDAG:
         return ordered
 
     def get_ready_nodes(self) -> List[DAGNode]:
-        """Find pending nodes whose upstream dependencies have all completed successfully."""
         ready: List[DAGNode] = []
         for node in self.nodes.values():
             if node.status in (DAGNodeStatus.PENDING.value, DAGNodeStatus.READY.value):
-                # Check if all dependencies are completed
                 deps_satisfied = all(
                     self.nodes[dep].status == DAGNodeStatus.COMPLETED.value
                     for dep in node.dependencies
@@ -142,7 +200,7 @@ class AgentDAG:
                     for dep in node.dependencies
                 )
                 if deps_failed:
-                    node.status = DAGNodeStatus.BLOCKED.value
+                    node.status = DAGNodeStatus.SKIPPED.value
                     node.error = "Upstream dependency failed"
                 elif deps_satisfied:
                     node.status = DAGNodeStatus.READY.value
@@ -151,10 +209,9 @@ class AgentDAG:
 
     def execute_dag(
         self,
-        node_executor: Callable[[DAGNode, Dict[str, Any]], Dict[str, Any]],
+        node_executor: Callable[[Any, Dict[str, Any]], Dict[str, Any]],
         max_rounds: int = 50,
     ) -> Dict[str, Any]:
-        """Execute DAG until all nodes reach terminal state or max rounds exceeded."""
         self.validate()
         rounds = 0
 
@@ -162,14 +219,7 @@ class AgentDAG:
             rounds += 1
             ready_nodes = self.get_ready_nodes()
 
-            # If no nodes are ready, check if we are finished
             if not ready_nodes:
-                active = [n for n in self.nodes.values() if n.status in (DAGNodeStatus.PENDING.value, DAGNodeStatus.READY.value, DAGNodeStatus.RUNNING.value)]
-                if not active:
-                    break  # All nodes reached terminal status
-                # If there are active nodes but none ready, we are blocked
-                for n in active:
-                    n.status = DAGNodeStatus.BLOCKED.value
                 break
 
             for node in ready_nodes:
@@ -177,27 +227,32 @@ class AgentDAG:
                 node.started_at = datetime.now().isoformat()
                 t0 = time.time()
 
-                # Gather context from parent nodes
                 parent_context: Dict[str, Any] = {}
                 for dep in node.dependencies:
                     parent = self.nodes[dep]
                     parent_context[dep] = {
-                        "outputs": parent.outputs,
-                        "artifacts": parent.artifacts,
+                        "outputs": _safe_serialize(parent.outputs),
+                        "artifacts": list(parent.artifacts),
                     }
 
                 try:
+                    # Invoke executor (supports (node, ctx) or (goal, ctx))
                     result = node_executor(node, parent_context)
                     t1 = time.time()
                     node.execution_time_sec = round(t1 - t0, 3)
                     node.finished_at = datetime.now().isoformat()
 
-                    if result.get("success", True) and not result.get("error"):
+                    if result.get("blocked"):
+                        node.status = DAGNodeStatus.BLOCKED.value
+                        node.error = str(result.get("blocker_reason") or "External prerequisite or authorization required")
+                        node.outputs = _safe_serialize(result)
+                    elif result.get("success", True) and not result.get("error"):
                         node.status = DAGNodeStatus.COMPLETED.value
-                        node.outputs = result.get("outputs", result)
-                        node.artifacts = result.get("artifacts", [])
+                        node.outputs = _safe_serialize(result.get("outputs", result))
+                        node.artifacts = list(result.get("artifacts", []))
                     else:
                         node.error = str(result.get("error", "Execution failed"))
+                        node.outputs = _safe_serialize(result)
                         if node.retries < node.max_retries:
                             node.retries += 1
                             node.status = DAGNodeStatus.READY.value
@@ -245,9 +300,6 @@ class AgentDAG:
 
 
 def create_standard_mission_dag(task: str) -> AgentDAG:
-    """Build the standard 7-stage software development DAG recommended in the roadmap:
-    Mission → (Research & Architecture) → Implementation → (Security & Code Review) → Integration → Verification → Repair/Complete
-    """
     dag = AgentDAG(name=f"SWE Mission: {task[:40]}")
     dag.add_node("research", "researcher", f"Research requirements and background for: {task}")
     dag.add_node("architecture", "architect", f"Design architecture and file structure for: {task}", dependencies=["research"])
@@ -255,5 +307,5 @@ def create_standard_mission_dag(task: str) -> AgentDAG:
     dag.add_node("code_review", "code_reviewer", "Review code changes for correctness and maintainability", dependencies=["implementation"])
     dag.add_node("security_audit", "security_auditor", "Audit code and configuration for security vulnerabilities", dependencies=["implementation"])
     dag.add_node("integration", "integrator", "Build and integrate components", dependencies=["code_review", "security_audit"])
-    dag.add_node("verification", "verifier", "Run domain verifiers and test suite for final proof", dependencies=["integration"])
+    dag.add_node("verification", "verifier", f"Run domain verifiers and test suite for final proof: {task}", dependencies=["integration"])
     return dag

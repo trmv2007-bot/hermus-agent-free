@@ -1,12 +1,13 @@
 """Mission Engine for Hermus.
 
-Implements the objective-driven mission lifecycle:
-Goal → Requirements → Plan (DAG) → Execute → Observe → Verify → Repair → Continue → Final Proof.
-Features dynamic step budgets, structured evidence collection, checkpointing, auto-resumption,
-domain verification, and explicit BLOCKED states.
+Unifies the Mission Lifecycle directly with the Agent DAG and executes the full
+autonomous repair and replan loop:
+Goal → Requirements → DAG Plan → Execute → Observe → Verify (Structural + Behavioral) → Critic Panel →
+If verification fails: Diagnose → Repair → Re-plan → Re-execute → Repeat until success, blocked, or budget exhausted.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import time
@@ -16,11 +17,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from .agent_dag import AgentDAG, DAGNodeStatus
+from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
 from .critic import critic_manager
 from .rollback import rollback_manager
-from .verifier_registry import verifier_registry
+from .verifier_registry import VerificationResult, verifier_registry
 from .workspace import workspace
 
 
@@ -52,16 +53,12 @@ class MissionRequirement:
 
 
 @dataclass
-class MissionSubGoal:
+class SubGoal:
     id: str
     goal: str
-    dependencies: List[str] = field(default_factory=list)
+    role: str = "specialist"
     status: str = DAGNodeStatus.PENDING.value
-    attempts: int = 0
-    result: Optional[str] = None
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
-    repair_hints: List[str] = field(default_factory=list)
-    artifacts: List[str] = field(default_factory=list)
+    error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -69,11 +66,11 @@ class MissionSubGoal:
 
 @dataclass
 class MissionBudget:
-    initial_steps: int = 20
+    initial_steps: int = 25
     consumed_steps: int = 0
     max_repairs: int = 3
     repairs_used: int = 0
-    max_extensions: int = 3
+    max_extensions: int = 2
     extensions_used: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -89,7 +86,8 @@ class MissionReport:
     confidence_score: float = 0.0
     progress_pct: int = 0
     requirements: List[MissionRequirement] = field(default_factory=list)
-    subgoals: List[MissionSubGoal] = field(default_factory=list)
+    dag_state: Dict[str, Any] = field(default_factory=dict)
+    subgoals: List[SubGoal] = field(default_factory=list)
     evidence: List[Dict[str, Any]] = field(default_factory=list)
     artifacts: List[str] = field(default_factory=list)
     blocker_reason: Optional[str] = None
@@ -99,6 +97,7 @@ class MissionReport:
     finished_at: Optional[str] = None
     final_proof: str = ""
     budget: MissionBudget = field(default_factory=MissionBudget)
+    repair_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -109,6 +108,7 @@ class MissionReport:
             "confidence_score": self.confidence_score,
             "progress_pct": self.progress_pct,
             "requirements": [r.to_dict() for r in self.requirements],
+            "dag_state": self.dag_state,
             "subgoals": [s.to_dict() for s in self.subgoals],
             "evidence": self.evidence,
             "artifacts": self.artifacts,
@@ -119,12 +119,13 @@ class MissionReport:
             "finished_at": self.finished_at,
             "final_proof": self.final_proof,
             "budget": self.budget.to_dict(),
+            "repair_history": self.repair_history,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> MissionReport:
         reqs = [MissionRequirement(**r) for r in data.get("requirements", [])]
-        subgoals = [MissionSubGoal(**s) for s in data.get("subgoals", [])]
+        subgoals = [SubGoal(**s) if isinstance(s, dict) else s for s in data.get("subgoals", [])]
         budget = MissionBudget(**data.get("budget", {})) if "budget" in data else MissionBudget()
         return cls(
             mission_id=data["mission_id"],
@@ -134,6 +135,7 @@ class MissionReport:
             confidence_score=data.get("confidence_score", 0.0),
             progress_pct=data.get("progress_pct", 0),
             requirements=reqs,
+            dag_state=data.get("dag_state", {}),
             subgoals=subgoals,
             evidence=data.get("evidence", []),
             artifacts=data.get("artifacts", []),
@@ -144,28 +146,38 @@ class MissionReport:
             finished_at=data.get("finished_at"),
             final_proof=data.get("final_proof", ""),
             budget=budget,
+            repair_history=data.get("repair_history", []),
         )
 
 
 class MissionEngine:
-    """Mission Lifecycle Orchestrator."""
+    """Unified Mission Lifecycle & DAG Controller with Autonomous Repair Loop."""
 
     def __init__(
         self,
-        executor: Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]] = None,
+        executor: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None,
         storage_dir: Optional[Path] = None,
     ):
-        self.executor = executor or self._default_executor
+        self._raw_executor = executor or self._default_node_executor
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    def _default_executor(self, goal: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Default mock/deterministic step executor."""
+    def _default_node_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "success": True,
-            "output": f"Executed step: {goal}",
-            "evidence": [{"step": goal, "status": "completed"}],
+            "output": f"Executed stage '{node.role}': {node.goal}",
+            "evidence": [{"stage": node.role, "goal": node.goal, "status": "completed"}],
         }
+
+    def _call_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            sig = inspect.signature(self._raw_executor)
+            params = list(sig.parameters.keys())
+            if params and params[0] in ("goal", "task", "prompt", "subgoal"):
+                return self._raw_executor(node.goal, parent_ctx)
+        except Exception:
+            pass
+        return self._raw_executor(node, parent_ctx)
 
     def _save_mission(self, report: MissionReport) -> None:
         p = self.storage_dir / f"{report.mission_id}.json"
@@ -192,18 +204,30 @@ class MissionEngine:
         missions.sort(key=lambda m: m.started_at, reverse=True)
         return missions
 
+    def _build_mission_dag(self, goal: str, domain: str, subgoals: Optional[List[str]] = None) -> AgentDAG:
+        dag = AgentDAG(name=f"Mission: {goal[:50]}")
+        if subgoals:
+            for idx, sg in enumerate(subgoals, start=1):
+                deps = [f"node_{idx-1}"] if idx > 1 else []
+                dag.add_node(f"node_{idx}", "specialist", sg, dependencies=deps, max_retries=0)
+        else:
+            dag.add_node("spec", "architect", f"Analyze requirements and design architecture for: {goal}", max_retries=0)
+            dag.add_node("impl", "coder", f"Implement components, logic, and tests for: {goal}", dependencies=["spec"], max_retries=0)
+            dag.add_node("review", "reviewer", "Review code changes and security adherence", dependencies=["impl"], max_retries=0)
+            dag.add_node("verify", "verifier", f"Execute domain tests and verify deliverables for: {goal}", dependencies=["review"], max_retries=0)
+        return dag
+
     def start_mission(
         self,
         goal: str,
         requirements: Optional[List[str]] = None,
         domain: Optional[str] = None,
         subgoals: Optional[List[str]] = None,
-        budget_steps: int = 20,
+        budget_steps: int = 25,
     ) -> MissionReport:
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
         detected_domain = domain or verifier_registry.auto_detect_domain(goal)
 
-        # 1. Establish Requirements
         req_objs = []
         raw_reqs = requirements or [f"Complete: {goal}"]
         for idx, r in enumerate(raw_reqs, start=1):
@@ -213,22 +237,8 @@ class MissionEngine:
                 verifier_domain=detected_domain,
             ))
 
-        # Checkpoint workspace before starting
         cp = rollback_manager.checkpoint(label=f"mission_start_{mid}")
-
-        # 2. Plan Sub-goals
-        subgoal_objs = []
-        if subgoals:
-            for idx, sg in enumerate(subgoals, start=1):
-                deps = [f"sg_{idx-1}"] if idx > 1 else []
-                subgoal_objs.append(MissionSubGoal(id=f"sg_{idx}", goal=sg, dependencies=deps))
-        else:
-            # Generate default plan steps
-            subgoal_objs = [
-                MissionSubGoal(id="sg_1", goal=f"Analyze and design solution for {goal}"),
-                MissionSubGoal(id="sg_2", goal=f"Implement components and deliverables for {goal}", dependencies=["sg_1"]),
-                MissionSubGoal(id="sg_3", goal=f"Verify outputs, execute tests, and package deliverables", dependencies=["sg_2"]),
-            ]
+        dag = self._build_mission_dag(goal, detected_domain, subgoals)
 
         report = MissionReport(
             mission_id=mid,
@@ -236,125 +246,139 @@ class MissionEngine:
             domain=detected_domain,
             state=MissionState.PLANNING.value,
             requirements=req_objs,
-            subgoals=subgoal_objs,
+            dag_state=dag.to_dict(),
+            subgoals=[SubGoal(id=nid, role=n.role, goal=n.goal, status=n.status) for nid, n in dag.nodes.items()],
             checkpoint_id=cp.id,
             budget=MissionBudget(initial_steps=budget_steps),
         )
         self._save_mission(report)
 
-        # Run Mission Loop
-        return self._run_mission_lifecycle(report)
+        return self._run_autonomous_loop(report, dag)
 
-    def _run_mission_lifecycle(self, report: MissionReport) -> MissionReport:
+    def _run_autonomous_loop(self, report: MissionReport, dag: AgentDAG) -> MissionReport:
         budget = report.budget
+        mission_start_ts = datetime.fromisoformat(report.started_at).timestamp()
 
         while budget.consumed_steps < (budget.initial_steps + (budget.extensions_used * 10)):
-            # Check for uncompleted subgoals
-            pending_subgoals = [sg for sg in report.subgoals if sg.status in (DAGNodeStatus.PENDING.value, DAGNodeStatus.READY.value)]
-            if not pending_subgoals:
+            report.state = MissionState.EXECUTING.value
+            self._save_mission(report)
+
+            # A. EXECUTE DAG STAGES
+            dag_round_res = dag.execute_dag(
+                node_executor=self._call_executor,
+                max_rounds=15,
+            )
+            budget.consumed_steps += dag_round_res.get("completed", 1)
+            report.dag_state = dag.to_dict()
+            report.subgoals = [SubGoal(id=nid, role=n.role, goal=n.goal, status=n.status) for nid, n in dag.nodes.items()]
+
+            # Check for explicit external blockers
+            blocked_nodes = [n for n in dag.nodes.values() if n.status == DAGNodeStatus.BLOCKED.value]
+            if blocked_nodes:
+                report.state = MissionState.BLOCKED.value
+                report.blocker_reason = blocked_nodes[0].error or "External prerequisite or authorization required"
+                report.blocker_instructions = "Please resolve the blocker and call `hermus mission resume <mission_id>`"
+                self._save_mission(report)
+                return report
+
+            # B. OBSERVE & GATHER EVIDENCE
+            report.state = MissionState.OBSERVING.value
+            all_node_outputs = []
+            for n in dag.nodes.values():
+                if n.outputs:
+                    out = n.outputs.get("output", n.outputs)
+                    all_node_outputs.append(str(out))
+                    # Also include any structured evidence emitted by nodes
+                    if isinstance(n.outputs, dict) and "evidence" in n.outputs:
+                        for ev in n.outputs["evidence"]:
+                            if ev not in report.evidence:
+                                report.evidence.append(ev)
+            combined_log = "\n".join(all_node_outputs)
+
+            artifacts = artifact_manager.scan_workspace(
+                mission_id=report.mission_id,
+                since_timestamp=mission_start_ts,
+            )
+            report.artifacts = [a.path for a in artifacts]
+
+            # C. VERIFY (STRUCTURAL + BEHAVIORAL + CRITIC)
+            report.state = MissionState.VERIFYING.value
+            v_res = verifier_registry.verify(
+                domain_or_auto=report.domain,
+                context={
+                    "task": report.goal,
+                    "output": combined_log,
+                    "artifacts": report.artifacts,
+                },
+            )
+            for ev in v_res.evidence:
+                if ev not in report.evidence:
+                    report.evidence.append(ev)
+            report.confidence_score = v_res.score
+
+            files_content = {
+                Path(a).name: Path(a).read_text(errors="ignore")
+                for a in report.artifacts
+                if Path(a).suffix in (".py", ".js", ".ts", ".html", ".json") and Path(a).exists()
+            }
+
+            critic_res = critic_manager.run_full_review(
+                task=report.goal,
+                files_content=files_content,
+                execution_log=combined_log,
+                artifacts=report.artifacts,
+                requirements=[r.description for r in report.requirements],
+                verification_evidence=v_res.evidence,
+            )
+
+            # Success condition
+            all_dag_completed = all(n.status == DAGNodeStatus.COMPLETED.value for n in dag.nodes.values())
+            if all_dag_completed and v_res.verified and critic_res.get("approved"):
+                for req in report.requirements:
+                    req.satisfied = True
+                    req.evidence = [str(e) for e in v_res.evidence]
+
+                report.state = MissionState.COMPLETED.value
+                report.progress_pct = 100
+                report.finished_at = datetime.now().isoformat()
+                report.final_proof = (
+                    f"Mission successfully verified with domain '{report.domain}' verifier "
+                    f"(Structural: {int(v_res.structural_score*100)}%, Behavioral: {int(v_res.behavioral_score*100)}%, "
+                    f"Critic Score: {critic_res['overall_score']}/100). "
+                    f"Produced {len(report.artifacts)} verified deliverables."
+                )
+                self._save_mission(report)
+                return report
+
+            # D. DIAGNOSE & REPAIR LOOP
+            if budget.repairs_used < budget.max_repairs:
+                budget.repairs_used += 1
+                report.state = MissionState.DIAGNOSING.value
+
+                diagnosis = {
+                    "repair_round": budget.repairs_used,
+                    "verifier_errors": v_res.errors,
+                    "critic_directives": critic_res.get("repair_directives", []),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                report.repair_history.append(diagnosis)
+
+                report.state = MissionState.REPAIRING.value
+                repair_hints = v_res.errors + critic_res.get("repair_directives", [])
+                for node in dag.nodes.values():
+                    node.status = DAGNodeStatus.READY.value
+                    node.inputs["repair_hints"] = repair_hints
+                    node.retries = 0
+
+                report.state = MissionState.PLANNING.value
+                self._save_mission(report)
+                continue
+            else:
                 break
 
-            for sg in pending_subgoals:
-                # Check dependencies
-                deps_ok = all(
-                    any(s.id == dep and s.status == DAGNodeStatus.COMPLETED.value for s in report.subgoals)
-                    for dep in sg.dependencies
-                )
-                if not deps_ok:
-                    continue
-
-                report.state = MissionState.EXECUTING.value
-                sg.status = DAGNodeStatus.RUNNING.value
-                sg.attempts += 1
-                budget.consumed_steps += 1
-                self._save_mission(report)
-
-                # Execute subgoal
-                try:
-                    ctx = {
-                        "mission_id": report.mission_id,
-                        "goal": report.goal,
-                        "subgoal": sg.goal,
-                        "repair_hints": sg.repair_hints,
-                        "evidence": report.evidence,
-                    }
-                    res = self.executor(sg.goal, ctx)
-                    sg.result = str(res.get("output", res))
-                    if res.get("evidence"):
-                        sg.evidence.extend(res["evidence"])
-                        report.evidence.extend(res["evidence"])
-
-                    # Observe & Verify Subgoal
-                    report.state = MissionState.VERIFYING.value
-                    if res.get("blocked"):
-                        report.state = MissionState.BLOCKED.value
-                        report.blocker_reason = res.get("blocker_reason", "External blocker encountered")
-                        report.blocker_instructions = res.get("blocker_instructions", "Please provide required permissions or resources")
-                        sg.status = DAGNodeStatus.BLOCKED.value
-                        self._save_mission(report)
-                        return report
-
-                    if res.get("success", True) and not res.get("error"):
-                        sg.status = DAGNodeStatus.COMPLETED.value
-                    else:
-                        sg.status = DAGNodeStatus.FAILED.value
-                        # Auto-repair loop
-                        if budget.repairs_used < budget.max_repairs:
-                            budget.repairs_used += 1
-                            report.state = MissionState.REPAIRING.value
-                            sg.repair_hints.append(f"Attempt {sg.attempts} failed: {res.get('error', 'Unsatisfactory result')}")
-                            sg.status = DAGNodeStatus.READY.value
-
-                except Exception as e:
-                    sg.status = DAGNodeStatus.FAILED.value
-                    sg.result = f"Error: {e}"
-                    if budget.repairs_used < budget.max_repairs:
-                        budget.repairs_used += 1
-                        sg.repair_hints.append(f"Exception encountered: {e}")
-                        sg.status = DAGNodeStatus.READY.value
-
-                # Update progress percentage
-                completed_count = sum(1 for s in report.subgoals if s.status == DAGNodeStatus.COMPLETED.value)
-                report.progress_pct = int((completed_count / max(1, len(report.subgoals))) * 80)
-                self._save_mission(report)
-
-        # Final Verification Phase (Domain Verifier + Critic Review)
-        report.state = MissionState.VERIFYING.value
-        all_artifacts = artifact_manager.scan_workspace(mission_id=report.mission_id)
-        report.artifacts = [a.path for a in all_artifacts]
-
-        v_res = verifier_registry.verify(
-            domain_or_auto=report.domain,
-            context={
-                "task": report.goal,
-                "output": "\n".join(str(s.result or "") for s in report.subgoals),
-                "artifacts": report.artifacts,
-            },
-        )
-        report.evidence.extend(v_res.evidence)
-
-        # Mark requirements satisfied
-        for req in report.requirements:
-            req.satisfied = v_res.verified
-            req.evidence = [str(e) for e in v_res.evidence]
-
-        report.confidence_score = v_res.score
-
-        if v_res.verified:
-            report.state = MissionState.COMPLETED.value
-            report.progress_pct = 100
-            report.finished_at = datetime.now().isoformat()
-            report.final_proof = f"Mission successfully verified with domain '{report.domain}' verifier (Confidence: {int(v_res.score*100)}%). Artifacts: {len(report.artifacts)}."
-        else:
-            if budget.extensions_used < budget.max_extensions:
-                budget.extensions_used += 1
-                report.state = MissionState.CONTINUING.value
-                # Dynamic budget extension when partial verification is observed
-            else:
-                report.state = MissionState.FAILED.value
-                report.finished_at = datetime.now().isoformat()
-                report.final_proof = f"Verification failed after {budget.consumed_steps} steps and {budget.repairs_used} repairs. Errors: {'; '.join(v_res.errors)}"
-
+        report.state = MissionState.FAILED.value
+        report.finished_at = datetime.now().isoformat()
+        report.final_proof = f"Mission failed to achieve verifiable behavioral completion after {budget.consumed_steps} steps and {budget.repairs_used} repair attempts."
         self._save_mission(report)
         return report
 
@@ -366,15 +390,17 @@ class MissionEngine:
         if report.state in (MissionState.COMPLETED.value, MissionState.FAILED.value):
             return report
 
-        # Reopen blocked / failed subgoals if unblocked
-        for sg in report.subgoals:
-            if sg.status in (DAGNodeStatus.BLOCKED.value, DAGNodeStatus.FAILED.value):
-                sg.status = DAGNodeStatus.READY.value
+        dag = AgentDAG.from_dict(report.dag_state) if report.dag_state else self._build_mission_dag(report.goal, report.domain)
+
+        for node in dag.nodes.values():
+            if node.status in (DAGNodeStatus.BLOCKED.value, DAGNodeStatus.FAILED.value, DAGNodeStatus.SKIPPED.value):
+                node.status = DAGNodeStatus.READY.value
+                node.retries = 0
 
         report.state = MissionState.CONTINUING.value
         report.blocker_reason = None
         report.blocker_instructions = None
-        return self._run_mission_lifecycle(report)
+        return self._run_autonomous_loop(report, dag)
 
 
 mission_engine = MissionEngine()

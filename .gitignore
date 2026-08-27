@@ -52,3 +52,8 @@ data/memory2.db*
 skills/registry.json
 skills/forge_log.jsonl
 skills/.quarantine/
+checkpoints/
+artifacts/
+missions/
+.hermus/
+
