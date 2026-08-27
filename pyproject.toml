@@ -1,0 +1,16 @@
+[tool.ruff]
+# Hermus requires Python 3.10+ (see README); declaring it lets ruff apply
+# PEP 585 (dict[str, x]) / PEP 604 (x | None) rewrites safely.
+target-version = "py310"
+line-length = 130
+extend-exclude = ["data", "skills"]
+
+[tool.ruff.lint]
+# Error-class rules only — style-only findings do not gate merges (same
+# selection the CI lint job enforces).
+select = ["E9", "F63", "F7", "F82", "B", "PLE"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use loop counters for clarity and blind-ish assertions
+# in a few places; keep the gate strict for production code only.
+"tests/*" = ["B011", "B017"]

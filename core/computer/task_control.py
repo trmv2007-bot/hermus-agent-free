@@ -15,12 +15,10 @@ The distinction:
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .events import publish
 
@@ -57,9 +55,9 @@ class ControlEvent:
     task_id: str = ""
     previous_state: TaskControlState = TaskControlState.IDLE
     new_state: TaskControlState = TaskControlState.IDLE
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "action": self.action.value,
             "timestamp": self.timestamp,
@@ -86,7 +84,7 @@ class TaskControlContext:
     last_action: Optional[str] = None
     last_action_time: Optional[str] = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "task": self.task,
@@ -125,9 +123,9 @@ class TaskControlManager:
             return
         self._initialized = True
         
-        self._task_contexts: Dict[str, TaskControlContext] = {}
-        self._control_events: List[ControlEvent] = []
-        self._event_log: List[Dict[str, Any]] = []
+        self._task_contexts: dict[str, TaskControlContext] = {}
+        self._control_events: list[ControlEvent] = []
+        self._event_log: list[dict[str, Any]] = []
         self._emergency_stop_active = False
         self._emergency_stop_reason = ""
         self._emergency_stop_time: Optional[str] = None
@@ -377,7 +375,7 @@ class TaskControlManager:
             self._emergency_stop_time = datetime.now().astimezone().isoformat()
             
             # Cancel all running tasks
-            for task_id, ctx in self._task_contexts.items():
+            for _task_id, ctx in self._task_contexts.items():
                 if ctx.control_state == TaskControlState.RUNNING:
                     ctx.control_state = TaskControlState.INTERRUPTED
             
@@ -475,7 +473,7 @@ class TaskControlManager:
                 return self._task_contexts[task_id].control_state
             return None
     
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get overall task control status."""
         with self._lock:
             running = sum(1 for ctx in self._task_contexts.values() 

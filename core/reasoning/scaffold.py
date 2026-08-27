@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from ..config import config
 
@@ -29,13 +29,13 @@ class PlanStep:
     action: str = "investigate"
     verify: str = ""
     status: str = "pending"  # pending | active | done | failed | skipped
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "PlanStep":
+    def from_dict(cls, d: dict) -> "PlanStep":
         return cls(
             goal=str(d.get("goal", "")),
             action=str(d.get("action", "investigate")),
@@ -48,14 +48,14 @@ class PlanStep:
 @dataclass
 class Plan:
     goal: str
-    steps: List[PlanStep] = field(default_factory=list)
+    steps: list[PlanStep] = field(default_factory=list)
     strategy: str = "react"
     difficulty: int = 3
     status: str = "drafted"  # drafted | active | done | aborted
     session_id: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "goal": self.goal,
             "steps": [s.to_dict() for s in self.steps],
@@ -67,7 +67,7 @@ class Plan:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "Plan":
+    def from_dict(cls, d: dict) -> "Plan":
         return cls(
             goal=str(d.get("goal", "")),
             steps=[PlanStep.from_dict(s) for s in d.get("steps") or []],
@@ -148,7 +148,7 @@ class PlanBuilder:
         return plan
 
     @staticmethod
-    def _parse_steps(content: str) -> Optional[List[PlanStep]]:
+    def _parse_steps(content: str) -> Optional[list[PlanStep]]:
         text = content.strip()
         # Strip code fences if present
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -181,7 +181,7 @@ class PlanBuilder:
         return steps[:8] if steps else None
 
     @staticmethod
-    def _heuristic_steps(goal: str) -> List[PlanStep]:
+    def _heuristic_steps(goal: str) -> list[PlanStep]:
         lines = [ln.strip(" -*\t") for ln in goal.splitlines() if ln.strip()]
         bullets = [
             re.sub(r"^(\d+[\.\):])\s+", "", ln).strip()
@@ -210,7 +210,7 @@ plan_builder = PlanBuilder()
 # ---------------------------------------------------------------- Phase 4: plan persistence & resume (P1)
 
 
-def list_plans(limit: int = 10) -> List[Dict]:
+def list_plans(limit: int = 10) -> list[dict]:
     """List saved plans from data/plans/."""
     d = config.resolve_path("data/plans")
     if not d.exists():
@@ -244,7 +244,7 @@ def show_plan(session_id: str) -> Optional[Plan]:
     return Plan.load(str(p))
 
 
-def resume_plan(session_id: str, model: Optional[str] = None) -> Dict:
+def resume_plan(session_id: str, model: Optional[str] = None) -> dict:
     """Resume a saved plan: mark failed steps pending, run remaining steps with the agent."""
     plan = show_plan(session_id)
     if not plan:

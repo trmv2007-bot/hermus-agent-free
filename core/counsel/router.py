@@ -7,7 +7,6 @@ strategy (fanout | race | map | auto). Zero LLM calls, fully deterministic.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
 
 from ..config import config
 
@@ -69,12 +68,12 @@ class Router:
             return "map"
         return _FLEET_BY_TYPE.get(t, "auto")
 
-    def route(self, goal: str, mode: str = "agent", workers: int = 0) -> Dict:
+    def route(self, goal: str, mode: str = "agent", workers: int = 0) -> dict:
         """Decide: single | council | fleet | subagents, with params."""
         t = self.classify(goal)
         multi = str(mode).startswith("multi")
         decision = "single"
-        params: Dict = {}
+        params: dict = {}
         if config.counsel_enabled and not multi and len((goal or "").strip()) >= 40:
             from ..reasoning.governor import governor
 

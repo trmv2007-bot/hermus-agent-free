@@ -15,7 +15,7 @@ import json
 import re
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 from ..config import config
 from .constitution import constitution
@@ -52,20 +52,20 @@ class MetaCounsel:
         if not self.log_path.exists():
             self.log_path.write_text("[]")
 
-    def _load_log(self) -> List[Dict]:
+    def _load_log(self) -> list[dict]:
         try:
             return json.loads(self.log_path.read_text())
         except Exception:
             return []
 
-    def _append_log(self, entry: Dict):
+    def _append_log(self, entry: dict):
         log = self._load_log()
         log.append(entry)
         self.log_path.write_text(json.dumps(log[-100:], indent=2))
 
     # ------------------------------------------------------------ session review
 
-    def review_session(self, session_summary: Dict) -> Dict:
+    def review_session(self, session_summary: dict) -> dict:
         """1 free LLM call: read the transcript tail + outcome -> propose amendments."""
         if not session_summary:
             return {"proposed": 0, "message": "no session to review"}
@@ -116,7 +116,7 @@ class MetaCounsel:
                   f"{sum(1 for r in results if r.get('status') == 'pending')} pending approval")
         return {"proposed": len(results), "results": results, "entry": entry}
 
-    def _load_transcript(self, session_id: str) -> List[Dict]:
+    def _load_transcript(self, session_id: str) -> list[dict]:
         if not session_id:
             return []
         path = config.resolve_path(f"data/counsel/transcripts/{session_id}.jsonl")
@@ -125,7 +125,7 @@ class MetaCounsel:
         except Exception:
             return []
 
-    def _parse_amendments(self, content: str) -> List[Dict]:
+    def _parse_amendments(self, content: str) -> list[dict]:
         text = content.strip()
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
@@ -156,7 +156,7 @@ class MetaCounsel:
 
     # ------------------------------------------------------------ reflection hook
 
-    def propose_from_reflection(self, reflection: Dict, improvements: Optional[Dict] = None) -> Dict:
+    def propose_from_reflection(self, reflection: dict, improvements: Optional[dict] = None) -> dict:
         """Self-improvement loop -> amendment proposals (no extra LLM call).
 
         Converts detected mistakes into concrete, deduped amendment candidates:
@@ -206,7 +206,7 @@ class MetaCounsel:
 
     # ------------------------------------------------------------ CLI support
 
-    def status(self) -> Dict:
+    def status(self) -> dict:
         return {
             "reviews_logged": len(self._load_log()),
             "constitution": constitution.status(),

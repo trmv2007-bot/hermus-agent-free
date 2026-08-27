@@ -7,13 +7,16 @@ Multi-API Keys — any AI API key works.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import threading
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
+from collections.abc import Callable
 
 from .config import config
 from .providers import get_provider, list_providers
@@ -29,36 +32,67 @@ class MultiKeyManager:
         self.db_path = Path(db_path or config.resolve_path("data/api_keys.json"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.db_path.exists():
-            self.db_path.write_text(
-                json.dumps({"groq": [], "hf": [], "openai": [], "custom": []}, indent=2)
-            )
+            self._save({"groq": [], "hf": [], "openai": [], "custom": []})
 
-        self.key_queues: Dict[str, deque] = defaultdict(deque)
-        self.key_failures: Dict[str, Dict[str, int]] = defaultdict(dict)
-        self.key_last_used: Dict[str, Dict[str, datetime]] = defaultdict(dict)
+        self.key_queues: dict[str, deque] = defaultdict(deque)
+        self.key_failures: dict[str, dict[str, int]] = defaultdict(dict)
+        self.key_last_used: dict[str, dict[str, datetime]] = defaultdict(dict)
         # Live rate windows: provider -> key -> list of timestamps
-        self._rpm_hits: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
-        self._tpm_hits: Dict[str, Dict[str, List[tuple]]] = defaultdict(lambda: defaultdict(list))
+        self._rpm_hits: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        self._tpm_hits: dict[str, dict[str, list[tuple]]] = defaultdict(lambda: defaultdict(list))
         self._lock = threading.Lock()
+        # Serializes load→mutate→save cycles over the JSON key store. Fleet
+        # workers report success/failure from several threads at once; without
+        # this, interleaved writes could hand a reader a half-written file,
+        # whose parse failure fell back to the empty template and was then
+        # saved back — silently wiping every stored API key.
+        self._persist_lock = threading.RLock()
         self._load_queues()
 
     # ---------- persistence ----------
 
-    def _load(self) -> Dict:
+    def _load(self) -> dict:
         try:
             return json.loads(self.db_path.read_text())
+        except FileNotFoundError:
+            return {"groq": [], "hf": [], "openai": [], "custom": []}
         except Exception:
+            # Corrupt/unreadable store: preserve the bad file for manual
+            # recovery instead of letting the next _save() overwrite it.
+            try:
+                backup = self.db_path.with_name(
+                    self.db_path.name + f".corrupt-{int(time.time())}"
+                )
+                if self.db_path.exists() and not backup.exists():
+                    shutil.copy2(self.db_path, backup)
+            except Exception:
+                pass
             return {"groq": [], "hf": [], "openai": [], "custom": []}
 
-    def _save(self, data: Dict):
-        self.db_path.write_text(json.dumps(data, indent=2))
+    def _save(self, data: dict):
+        """Atomically replace the key store.
+
+        Writes go to a sibling temp file followed by ``os.replace`` so a
+        concurrent reader can never observe a truncated/partial JSON file.
+        """
+        tmp = self.db_path.parent / (self.db_path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(tmp, self.db_path)
+
+    def _update(self, mutator: Callable[[dict], None]) -> dict:
+        """Thread-safe read-modify-write cycle over the persisted key store."""
+        with self._persist_lock:
+            data = self._load()
+            mutator(data)
+            self._save(data)
+            return data
 
     def _entry_key(self, entry) -> str:
         if isinstance(entry, str):
             return entry
         return entry.get("key") or entry.get("token") or ""
 
-    def _normalize_entry(self, entry, provider: str, idx: int = 0) -> Dict:
+    def _normalize_entry(self, entry, provider: str, idx: int = 0) -> dict:
         if isinstance(entry, str):
             preset = get_provider(provider)
             return {
@@ -104,7 +138,7 @@ class MultiKeyManager:
 
     # ---------- CRUD ----------
 
-    def list_keys(self, provider: str = None, redact: bool = False) -> Dict:
+    def list_keys(self, provider: str = None, redact: bool = False) -> dict:
         data = self._load()
         if provider:
             data = {provider: data.get(provider, [])}
@@ -150,49 +184,50 @@ class MultiKeyManager:
         rpm_limit: int = None,
         tpm_limit: int = None,
         auto_discover: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Add any API key. Works with openai/groq/openrouter/custom/etc."""
         provider = (provider or "custom").lower().strip()
-        data = self._load()
-        if provider not in data:
-            data[provider] = []
+        with self._persist_lock:
+            data = self._load()
+            if provider not in data:
+                data[provider] = []
 
-        max_keys = (
-            self.MAX_KEYS_PER_CUSTOM_API
-            if provider.startswith("custom")
-            else self.MAX_KEYS_PER_PROVIDER
-        )
-        if len(data[provider]) >= max_keys:
-            return {
-                "success": False,
-                "error": f"Max {max_keys} keys for {provider}. Remove old keys first.",
+            max_keys = (
+                self.MAX_KEYS_PER_CUSTOM_API
+                if provider.startswith("custom")
+                else self.MAX_KEYS_PER_PROVIDER
+            )
+            if len(data[provider]) >= max_keys:
+                return {
+                    "success": False,
+                    "error": f"Max {max_keys} keys for {provider}. Remove old keys first.",
+                }
+
+            existing = [self._entry_key(k) for k in data[provider]]
+            if api_key and api_key in existing:
+                return {"success": False, "error": f"Key already exists for {provider}"}
+
+            preset = get_provider(provider)
+            key_entry = {
+                "key": api_key or "",
+                "name": name or f"{provider}_key_{len(data[provider])+1}",
+                "provider": provider,
+                "base_url": base_url or preset.get("base_url") or "",
+                "default_model": default_model or preset.get("default_model"),
+                "added": datetime.now().isoformat(),
+                "usage_count": 0,
+                "healthy": None,
+                "models": [],
+                "rpm_limit": rpm_limit if rpm_limit is not None else preset.get("default_rpm"),
+                "tpm_limit": tpm_limit if tpm_limit is not None else preset.get("default_tpm"),
             }
+            if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
+                # custom without base_url is ok if they set later — warn
+                if provider in ("custom", "vllm", "azure"):
+                    key_entry["warning"] = "base_url empty — set with --base-url for this provider"
 
-        existing = [self._entry_key(k) for k in data[provider]]
-        if api_key and api_key in existing:
-            return {"success": False, "error": f"Key already exists for {provider}"}
-
-        preset = get_provider(provider)
-        key_entry = {
-            "key": api_key or "",
-            "name": name or f"{provider}_key_{len(data[provider])+1}",
-            "provider": provider,
-            "base_url": base_url or preset.get("base_url") or "",
-            "default_model": default_model or preset.get("default_model"),
-            "added": datetime.now().isoformat(),
-            "usage_count": 0,
-            "healthy": None,
-            "models": [],
-            "rpm_limit": rpm_limit if rpm_limit is not None else preset.get("default_rpm"),
-            "tpm_limit": tpm_limit if tpm_limit is not None else preset.get("default_tpm"),
-        }
-        if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
-            # custom without base_url is ok if they set later — warn
-            if provider in ("custom", "vllm", "azure"):
-                key_entry["warning"] = "base_url empty — set with --base-url for this provider"
-
-        data[provider].append(key_entry)
-        self._save(data)
+            data[provider].append(key_entry)
+            self._save(data)
         self._load_queues()
 
         result = {
@@ -222,24 +257,25 @@ class MultiKeyManager:
 
         return result
 
-    def remove_key(self, provider: str, key_or_name: str) -> Dict:
-        data = self._load()
-        if provider not in data:
-            return {"success": False, "error": f"Provider {provider} not found"}
-        original_len = len(data[provider])
-        data[provider] = [
-            k
-            for k in data[provider]
-            if self._entry_key(k) != key_or_name
-            and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
-        ]
-        if len(data[provider]) == original_len:
-            return {"success": False, "error": f"Key {key_or_name} not found for {provider}"}
-        self._save(data)
+    def remove_key(self, provider: str, key_or_name: str) -> dict:
+        with self._persist_lock:
+            data = self._load()
+            if provider not in data:
+                return {"success": False, "error": f"Provider {provider} not found"}
+            original_len = len(data[provider])
+            data[provider] = [
+                k
+                for k in data[provider]
+                if self._entry_key(k) != key_or_name
+                and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
+            ]
+            if len(data[provider]) == original_len:
+                return {"success": False, "error": f"Key {key_or_name} not found for {provider}"}
+            self._save(data)
         self._load_queues()
         return {"success": True, "provider": provider, "remaining": len(data[provider])}
 
-    def get_entry(self, provider: str, api_key: str = None) -> Optional[Dict]:
+    def get_entry(self, provider: str, api_key: str = None) -> Optional[dict]:
         data = self._load()
         keys = data.get(provider, [])
         if api_key:
@@ -255,7 +291,7 @@ class MultiKeyManager:
                 return e
         return self._normalize_entry(keys[0], provider) if keys else None
 
-    def get_all_entries(self, provider: str = None) -> List[Dict]:
+    def get_all_entries(self, provider: str = None) -> list[dict]:
         data = self._load()
         out = []
         providers = [provider] if provider else list(data.keys())
@@ -347,7 +383,7 @@ class MultiKeyManager:
             "" if queue else None
         )
 
-    def get_key_bundle(self, provider: str) -> Optional[Dict]:
+    def get_key_bundle(self, provider: str) -> Optional[dict]:
         """Return key + base_url + default_model for LLM calls."""
         key = self.get_key(provider)
         if key is None and not get_provider(provider).get("no_auth"):
@@ -382,7 +418,7 @@ class MultiKeyManager:
             "tpm_limit": entry.get("tpm_limit"),
         }
 
-    def first_available_bundle(self, prefer: Optional[List[str]] = None) -> Optional[Dict]:
+    def first_available_bundle(self, prefer: Optional[list[str]] = None) -> Optional[dict]:
         """
         First usable key bundle across all providers (used as a fallback when
         the requested provider has no key, e.g. Ollama not running but a
@@ -414,14 +450,14 @@ class MultiKeyManager:
                 return bundle
         return None
 
-    def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: Dict = None):
+    def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: dict = None):
         if not key:
             return
         if provider in self.key_failures and key in self.key_failures[provider]:
             self.key_failures[provider][key] = max(0, self.key_failures[provider][key] - 1)
         self._record_use(provider, key, tokens=tokens or 0)
-        try:
-            data = self._load()
+
+        def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["usage_count"] = k.get("usage_count", 0) + 1
@@ -447,11 +483,13 @@ class MultiKeyManager:
                                 k["tpm_limit"] = int(rate_limit["limit_tokens"])
                             except Exception:
                                 pass
-            self._save(data)
+
+        try:
+            self._update(_mutate)
         except Exception:
             pass
 
-    def mark_key_failed(self, provider: str, key: str, error: str = "", rate_limit: Dict = None):
+    def mark_key_failed(self, provider: str, key: str, error: str = "", rate_limit: dict = None):
         if not key:
             return
         if provider in self.key_failures:
@@ -460,8 +498,8 @@ class MultiKeyManager:
             f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), "
             f"failures: {self.key_failures[provider].get(key, 0)}"
         )
-        try:
-            data = self._load()
+
+        def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["last_error"] = str(error)[:300]
@@ -474,13 +512,15 @@ class MultiKeyManager:
                     elif "401" in err_l or "403" in err_l or "auth" in err_l:
                         k["healthy"] = False
                         k["health_status"] = "auth_failed"
-            self._save(data)
+
+        try:
+            self._update(_mutate)
         except Exception:
             pass
 
     # ---------- health + models ----------
 
-    def discover_models(self, provider: str, api_key: str = None, base_url: str = None) -> Dict:
+    def discover_models(self, provider: str, api_key: str = None, base_url: str = None) -> dict:
         from .openai_compat import list_models
 
         if api_key is None:
@@ -492,8 +532,7 @@ class MultiKeyManager:
         result = list_models(provider, api_key=api_key, base_url=base_url)
         if result.get("success") and api_key is not None:
             # persist models onto matching key entry
-            try:
-                data = self._load()
+            def _mutate(data: dict) -> None:
                 ids = [m.get("id") for m in result.get("models") or [] if m.get("id")]
                 for k in data.get(provider, []):
                     if isinstance(k, dict) and (not api_key or k.get("key") == api_key):
@@ -503,7 +542,9 @@ class MultiKeyManager:
                             k["default_model"] = ids[0]
                         if result.get("rate_limit"):
                             k["last_rate_limit"] = result["rate_limit"]
-                self._save(data)
+
+            try:
+                self._update(_mutate)
             except Exception:
                 pass
         return result
@@ -514,7 +555,7 @@ class MultiKeyManager:
         api_key: str = None,
         base_url: str = None,
         model: str = None,
-    ) -> Dict:
+    ) -> dict:
         from .openai_compat import health_ping
 
         entry = None
@@ -530,8 +571,7 @@ class MultiKeyManager:
         result = health_ping(provider, api_key=api_key, base_url=base_url, model=model)
 
         # persist
-        try:
-            data = self._load()
+        def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
                 if not isinstance(k, dict):
                     continue
@@ -568,12 +608,14 @@ class MultiKeyManager:
                     k["last_response_time"] = result["latency_ms"] / 1000.0
                 if api_key:
                     break  # only one
-            self._save(data)
+
+        try:
+            self._update(_mutate)
         except Exception as e:
             result["persist_error"] = str(e)
         return result
 
-    def check_all_health(self, provider: str = None) -> List[Dict]:
+    def check_all_health(self, provider: str = None) -> list[dict]:
         entries = self.get_all_entries(provider)
         results = []
         # Also probe no-key local providers
@@ -595,7 +637,7 @@ class MultiKeyManager:
             results.append(r)
         return results
 
-    def rate_status(self, provider: str = None) -> Dict:
+    def rate_status(self, provider: str = None) -> dict:
         """Snapshot of RPM/TPM usage vs limits for all keys."""
         entries = self.get_all_entries(provider)
         out = []
@@ -628,7 +670,7 @@ class MultiKeyManager:
 
     # ---------- parallel execution ----------
 
-    def execute_parallel_with_keys(self, provider: str, tasks: List[Dict]) -> List[Dict]:
+    def execute_parallel_with_keys(self, provider: str, tasks: list[dict]) -> list[dict]:
         """Execute tasks in parallel using different API keys (thread pool)."""
         entries = self.get_all_entries(provider)
         if not entries:
@@ -641,7 +683,7 @@ class MultiKeyManager:
             f"[MultiKey] Parallel execution with {len(entries)} keys for {len(tasks)} tasks"
         )
 
-        def run_one(task_id: int, task_data: Dict, entry: Dict) -> Dict:
+        def run_one(task_id: int, task_data: dict, entry: dict) -> dict:
             try:
                 from .llm import FreeLLM
 

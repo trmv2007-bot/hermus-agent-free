@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import json
 import re
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from ..config import config
 from ..llm import FreeLLM
@@ -30,7 +29,7 @@ def _chat(llm: FreeLLM, system: str, user: str) -> str:
     return (resp.content or "").strip()
 
 
-def _evidence_text(evidence: List[Dict], limit: int = 1800) -> str:
+def _evidence_text(evidence: list[dict], limit: int = 1800) -> str:
     if not evidence:
         return "(no tool evidence gathered)"
     lines = []
@@ -47,10 +46,10 @@ def _evidence_text(evidence: List[Dict], limit: int = 1800) -> str:
 
 def reflexion_in_loop(
     user_message: str,
-    evidence: List[Dict],
+    evidence: list[dict],
     draft: str,
     model: Optional[str] = None,
-) -> Tuple[str, Dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """Critique the draft, then revise it. 2 extra calls max."""
     llm = FreeLLM(model or config.model)
     ev = _evidence_text(evidence)
@@ -83,11 +82,11 @@ def reflexion_in_loop(
 
 def self_consistency(
     user_message: str,
-    evidence: List[Dict],
+    evidence: list[dict],
     draft: str,
     model: Optional[str] = None,
     k: Optional[int] = None,
-) -> Tuple[str, Dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """k parallel drafts + one merge/consensus call. k extra LLM calls total."""
     k = k or getattr(config, "self_consistency_k", 3)
     k = max(2, min(5, int(k)))
@@ -142,10 +141,10 @@ def self_consistency(
 
 def verify_with_tools(
     user_message: str,
-    evidence: List[Dict],
+    evidence: list[dict],
     draft: str,
     model: Optional[str] = None,
-) -> Tuple[str, Dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """Extract key claims, verify each with a web search, then revise. Bounded.
 
     Max cost: 1 claims call + up to 3 searches + 1 revise call. Any failure in a
@@ -153,7 +152,7 @@ def verify_with_tools(
     """
     llm = FreeLLM(model or config.model)
     ev = _evidence_text(evidence)
-    claims: List[str] = []
+    claims: list[str] = []
     try:
         claims_text = _chat(
             llm,
@@ -215,11 +214,11 @@ STRATEGIES = {
 def apply_strategy(
     strategy: str,
     user_message: str,
-    evidence: List[Dict],
+    evidence: list[dict],
     draft: str,
     model: Optional[str] = None,
     k: Optional[int] = None,
-) -> Tuple[str, Dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """Run one strategy safely; returns (content, meta). Never raises."""
     fn = STRATEGIES.get(strategy)
     if not fn:

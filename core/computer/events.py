@@ -31,12 +31,12 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Deque, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 _EVENT_TYPES = {
     "task_started", "plan_created", "state_changed", "screen_event",
@@ -64,15 +64,15 @@ class ComputerEventBus:
         self.journal_path = Path(journal_path).expanduser().resolve() if journal_path else _default_journal_path()
         self.max_journal_bytes = int(max_journal_bytes)
         self._lock = threading.RLock()
-        self._subscribers: List[Callable[[Dict[str, Any]], None]] = []
-        self._recent: Deque[Dict[str, Any]] = deque(maxlen=500)
+        self._subscribers: list[Callable[[dict[str, Any]], None]] = []
+        self._recent: deque[dict[str, Any]] = deque(maxlen=500)
         try:
             self.journal_path.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
 
     # -- publishing -----------------------------------------------------
-    def publish(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def publish(self, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         event = {
             "id": uuid.uuid4().hex,
             "type": event_type,
@@ -91,7 +91,7 @@ class ComputerEventBus:
         self._append_journal(event)
         return event
 
-    def _append_journal(self, event: Dict[str, Any]) -> None:
+    def _append_journal(self, event: dict[str, Any]) -> None:
         try:
             self.journal_path.parent.mkdir(parents=True, exist_ok=True)
             if self.journal_path.exists() and self.journal_path.stat().st_size > self.max_journal_bytes:
@@ -114,7 +114,7 @@ class ComputerEventBus:
         except OSError:
             pass
 
-    def subscribe(self, callback: Callable[[Dict[str, Any]], None]) -> Callable[[], None]:
+    def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
         with self._lock:
             self._subscribers.append(callback)
 
@@ -128,7 +128,7 @@ class ComputerEventBus:
         return unsubscribe
 
     # -- reading --------------------------------------------------------
-    def recent(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         """Most recent events, newest first. Falls back to memory if journaling is off."""
         with self._lock:
             memory = list(self._recent)
@@ -137,14 +137,14 @@ class ComputerEventBus:
             return journal
         return list(reversed(memory))[: limit]
 
-    def read_journal(self, limit: int = 200, reverse: bool = False) -> List[Dict[str, Any]]:
+    def read_journal(self, limit: int = 200, reverse: bool = False) -> list[dict[str, Any]]:
         """Read events from the journal file (oldest first by default)."""
         try:
             if not self.journal_path.exists():
                 return []
             lines = self.journal_path.read_text(encoding="utf-8").splitlines()
             lines = lines[-int(limit):]
-            events: List[Dict[str, Any]] = []
+            events: list[dict[str, Any]] = []
             for line in lines:
                 try:
                     event = json.loads(line)
@@ -198,7 +198,7 @@ class ComputerEventBus:
         if consumed == -1:
             return [], start  # no complete line yet
         complete, next_offset = chunk[: consumed + 1], start + consumed + 1
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         for line in complete.decode("utf-8", "replace").splitlines():
             if not line.strip():
                 continue
@@ -210,7 +210,7 @@ class ComputerEventBus:
                 events.append(event)
         return events, next_offset
 
-    def journal_lines(self) -> List[str]:
+    def journal_lines(self) -> list[str]:
         try:
             if not self.journal_path.exists():
                 return []
@@ -222,7 +222,7 @@ class ComputerEventBus:
 computer_event_bus = ComputerEventBus()
 
 
-def publish(event_type: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def publish(event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Publish an event on the global computer event bus."""
     return computer_event_bus.publish(event_type, data)
 
@@ -243,11 +243,11 @@ def _action_label(action: Any) -> str:
 
 
 def machine_event(
-    event: Dict[str, Any],
+    event: dict[str, Any],
     task_id: str = "",
     task: str = "",
     emit_lifecycle_starts: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Translate one durable state-machine trace event into public bus events.
 
     ``ComputerAgent`` emits true before-action/before-verification lifecycle
@@ -259,7 +259,7 @@ def machine_event(
     phase = str(event.get("phase") or "")
     state = str(event.get("state") or "")
     context = {"task_id": task_id, "task": task, "state": state, "phase": phase}
-    published: List[Dict[str, Any]] = []
+    published: list[dict[str, Any]] = []
 
     if phase == "transition":
         published.append(publish("state_changed", {

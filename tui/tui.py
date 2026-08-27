@@ -2,7 +2,6 @@
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
 
 try:
     from prompt_toolkit import PromptSession
@@ -74,7 +73,7 @@ class HermusTUI:
             from core.task_tracker import task_tracker
             status = task_tracker.get_status()
             return f" Mode: {self.mode} | Agents: {status['active_agents_count']} | Tasks: {status['active_tasks_count']} | Models: {','.join(status['models_in_use'][:2]) or 'none'} | /mode for agent/chat/multi-agent/multi-chat | /panel slide open | /help "
-        except:
+        except Exception:
             return f" Mode: {self.mode} | /mode for agent/chat/multi-agent/multi-chat | /panel slide open | /help "
 
     def _print_banner(self):
@@ -145,7 +144,7 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
 
         if cmd == "/plan":
             # DeepThink plan persistence (Phase 4, P1)
-            from core.reasoning.scaffold import list_plans, show_plan
+            from core.reasoning.scaffold import list_plans
             plans = list_plans(limit=5)
             if not plans:
                 print("No saved plans yet. Multi-step tasks auto-draft plans (data/plans/).")
@@ -246,7 +245,7 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                     from core.skin_engine import skin_engine
                     persisted = skin_engine.get_persisted_mode()
                     print(f"\nPersisted mode: {persisted} (from user_model.json) - will load on next startup")
-                except:
+                except Exception:
                     pass
             return True
 

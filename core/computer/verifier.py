@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import threading
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .frame_sampler import _image_diff
 from .recorder import decode_frame
@@ -12,9 +13,9 @@ from .recorder import decode_frame
 class ScreenVerifier:
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+        vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
         change_threshold: float = 0.02,
-        transition_model: Optional[Callable[[Any, Any, str], Dict[str, Any]]] = None,
+        transition_model: Optional[Callable[[Any, Any, str], dict[str, Any]]] = None,
     ):
         # vision_model(after, expected) -> matched/detail/confidence
         # transition_model(before, after, expected) compares both boundaries.
@@ -22,7 +23,7 @@ class ScreenVerifier:
         self.transition_model = transition_model
         self.change_threshold = max(0.0, min(float(change_threshold), 1.0))
 
-    def screen_changed(self, before: Any, after: Any) -> Dict[str, Any]:
+    def screen_changed(self, before: Any, after: Any) -> dict[str, Any]:
         diff = _image_diff(before, after)
         return {"changed": diff >= self.change_threshold, "diff": round(diff, 4)}
 
@@ -32,11 +33,11 @@ class ScreenVerifier:
         after: Any,
         expected_state: str = "",
         action: str = "",
-        evidence: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        evidence: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """Confirm the screen reached ``expected_state`` after an action."""
         change = self.screen_changed(before, after)
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "action": action,
             "changed": change["changed"],
             "diff": change["diff"],
@@ -78,9 +79,9 @@ class ScreenVerifier:
         expected_state: str,
         recording: Optional[str] = None,
         offset: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Return an agent-memory-ready ACTION/VISUAL RESULT evidence record."""
-        evidence: Dict[str, Any] = {}
+        evidence: dict[str, Any] = {}
         if recording:
             evidence["recording"] = recording
         if offset is not None:
@@ -99,11 +100,11 @@ class ScreenVerifier:
 
     def verify_sequence(
         self,
-        frames: List[Dict[str, Any]],
+        frames: list[dict[str, Any]],
         expected_state: str = "",
         action: str = "",
         recording: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not frames:
             return {"ok": False, "detail": "no frames", "confidence": 0.0}
         available = [frame for frame in frames if decode_frame(frame) is not None]
@@ -130,10 +131,10 @@ class ActionVerificationManager:
 
     def __init__(self, recorder: Any):
         self.recorder = recorder
-        self._pending: Dict[str, Dict[str, Any]] = {}
+        self._pending: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def before(self, action: str, expected_state: str = "") -> Dict[str, Any]:
+    def before(self, action: str, expected_state: str = "") -> dict[str, Any]:
         if not self.recorder.running:
             return {"success": False, "error": "screen recorder is not running"}
         frame = self.recorder.capture_now(store=True)
@@ -163,7 +164,7 @@ class ActionVerificationManager:
             },
         }
 
-    def after(self, action_id: str, verifier: Optional[ScreenVerifier] = None) -> Dict[str, Any]:
+    def after(self, action_id: str, verifier: Optional[ScreenVerifier] = None) -> dict[str, Any]:
         with self._lock:
             item = self._pending.pop(action_id, None)
         if item is None:
@@ -185,7 +186,7 @@ class ActionVerificationManager:
         )
         return {"success": True, "action_id": action_id, "marker": marker, "verification": result}
 
-    def pending(self) -> List[Dict[str, Any]]:
+    def pending(self) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 {key: value for key, value in item.items() if key != "before"}

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from ..llm import FreeLLM, free_llm
@@ -33,27 +33,27 @@ SUPPORTED_ACTIONS = {
 class TaskGoal:
     objective: str
     success_condition: str
-    constraints: List[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class PlanNode:
     name: str
-    action: Dict[str, Any]
+    action: dict[str, Any]
     expected: str
     precondition: str = ""
     goal: str = ""
     on_success: Optional[str] = None
     on_failure: Optional[str] = None
-    fallbacks: List[Dict[str, Any]] = field(default_factory=list)
-    depends_on: List[str] = field(default_factory=list)
+    fallbacks: list[dict[str, Any]] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
     agent: str = "computer-operator"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -61,22 +61,22 @@ class PlanNode:
 class TaskGraph:
     task: str
     goal: TaskGoal
-    nodes: List[PlanNode]
+    nodes: list[PlanNode]
     start: Optional[str] = None
     success_terminal: str = "SUCCESS"
     failure_terminal: str = "FAILURE"
     source: str = "planner"
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.start is None and self.nodes:
             self.start = self.nodes[0].name
 
-    def validate(self) -> Dict[str, Any]:
+    def validate(self) -> dict[str, Any]:
         names = [node.name for node in self.nodes]
         duplicates = sorted({name for name in names if names.count(name) > 1})
         known = set(names) | {self.success_terminal, self.failure_terminal}
-        errors: List[str] = []
+        errors: list[str] = []
         if not self.nodes:
             errors.append("graph has no executable nodes")
         if duplicates:
@@ -101,7 +101,7 @@ class TaskGraph:
         # state machine's transition guard.
         transitions = {node.name: node.on_success for node in self.nodes if node.on_success in set(names)}
         for origin in names:
-            seen: Set[str] = set()
+            seen: set[str] = set()
             cursor: Optional[str] = origin
             while cursor in transitions:
                 if cursor in seen:
@@ -111,10 +111,10 @@ class TaskGraph:
                 cursor = transitions.get(cursor)
         return {"ok": not errors, "errors": list(dict.fromkeys(errors)), "warnings": self.warnings}
 
-    def to_plan(self) -> List[Dict[str, Any]]:
+    def to_plan(self) -> list[dict[str, Any]]:
         return [node.to_dict() for node in self.nodes]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "goal": self.goal.to_dict(),
@@ -128,7 +128,7 @@ class TaskGraph:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TaskGraph":
+    def from_dict(cls, data: dict[str, Any]) -> "TaskGraph":
         goal_data = data.get("goal") if isinstance(data.get("goal"), dict) else {}
         nodes = []
         for raw in data.get("nodes", data.get("plan", [])) or []:
@@ -177,7 +177,7 @@ class ComputerPlanner:
         self.world_state = world_state
         self.last_graph: Optional[TaskGraph] = None
 
-    def plan(self, task: str) -> List[Dict[str, Any]]:
+    def plan(self, task: str) -> list[dict[str, Any]]:
         """Compatibility API returning planner step dictionaries."""
         return self.plan_graph(task).to_plan()
 
@@ -200,14 +200,14 @@ class ComputerPlanner:
         return graph
 
     @staticmethod
-    def _normalize_skill_action(step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _normalize_skill_action(step: dict[str, Any]) -> Optional[dict[str, Any]]:
         action = step.get("action")
         if isinstance(action, str):
             action = {"kind": action, **(step.get("args") or {})}
         return dict(action) if isinstance(action, dict) else None
 
     def _skill_graph(self, task: str, skill: ComputerSkill) -> TaskGraph:
-        nodes: List[PlanNode] = []
+        nodes: list[PlanNode] = []
         procedure = [step for step in skill.procedure if isinstance(step, dict)]
         for index, step in enumerate(procedure):
             action = self._normalize_skill_action(step)
@@ -258,7 +258,7 @@ class ComputerPlanner:
         return None
 
     @staticmethod
-    def _sanitize_action(raw: Any) -> Optional[Dict[str, Any]]:
+    def _sanitize_action(raw: Any) -> Optional[dict[str, Any]]:
         if not isinstance(raw, dict):
             return None
         kind = str(raw.get("kind") or raw.get("action") or "").strip()
@@ -342,7 +342,7 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
 
         raw_goal = parsed.get("goal") if isinstance(parsed.get("goal"), dict) else {}
         raw_nodes = parsed.get("nodes") if isinstance(parsed.get("nodes"), list) else []
-        nodes: List[PlanNode] = []
+        nodes: list[PlanNode] = []
         for index, raw in enumerate(raw_nodes):
             if not isinstance(raw, dict):
                 continue
@@ -384,9 +384,9 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
         """Safe deterministic decomposition; never clicks the entire request."""
         text = str(task or "").strip()
         lowered = text.lower()
-        nodes: List[PlanNode] = []
+        nodes: list[PlanNode] = []
 
-        def add(prefix: str, action: Dict[str, Any], expected: str, goal: str, precondition: str = "") -> None:
+        def add(prefix: str, action: dict[str, Any], expected: str, goal: str, precondition: str = "") -> None:
             name = self._step_name(prefix, len(nodes))
             if nodes:
                 nodes[-1].on_success = name
@@ -458,7 +458,7 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
             add("VERIFY_RESULT", {"kind": "wait_until", "condition": "The program is open and visibly responsive"},
                 "The program is open and visibly responsive without an error dialog", "Verify the program works")
 
-        warnings: List[str] = []
+        warnings: list[str] = []
         if not nodes:
             # Safe fail-closed fallback: observe a concrete condition rather
             # than blindly clicking the entire natural-language request.

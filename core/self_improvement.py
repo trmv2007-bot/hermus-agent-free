@@ -4,9 +4,6 @@ import json
 import time
 import threading
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from collections import deque
 
 from .config import config
 
@@ -16,8 +13,8 @@ class SelfImprovement:
     def __init__(self):
         self.is_reflecting = False
         self.last_reflection = None
-        self.reflection_history: List[Dict] = []
-        self.current_reflection: Dict = {}
+        self.reflection_history: list[dict] = []
+        self.current_reflection: dict = {}
         self.reflection_log_path = config.resolve_path("data/self_improvement.json")
         self.reflection_log_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.reflection_log_path.exists():
@@ -29,19 +26,19 @@ class SelfImprovement:
         self.background_thread = None
         self.should_stop = False
 
-    def _load_history(self) -> List[Dict]:
+    def _load_history(self) -> list[dict]:
         try:
             return json.loads(self.reflection_log_path.read_text())
-        except:
+        except Exception:
             return []
 
-    def _save_history(self, history: List[Dict]):
+    def _save_history(self, history: list[dict]):
         try:
             self.reflection_log_path.write_text(json.dumps(history[-20:], indent=2))  # Keep last 20
-        except:
+        except Exception:
             pass
 
-    def reflect_on_trajectory(self, trajectory: List[Dict]) -> Dict:
+    def reflect_on_trajectory(self, trajectory: list[dict]) -> dict:
         """Go through reflections and see what mistakes it did during the work"""
         mistakes = []
         successes = []
@@ -95,7 +92,7 @@ class SelfImprovement:
 
         return reflection
 
-    def search_how_to_improve(self, reflection: Dict) -> Dict:
+    def search_how_to_improve(self, reflection: dict) -> dict:
         """Search how to improve itself based on mistakes - free via web_search + LLM"""
         mistakes = reflection.get("mistakes", [])
         if not mistakes:
@@ -112,7 +109,7 @@ class SelfImprovement:
                 try:
                     search_results = web_search(query, max_results=2)
                     search_text = " ".join([r.get("body","")[:200] for r in search_results[:2]])
-                except:
+                except Exception:
                     search_text = "No search results"
 
                 # Ask free LLM how to improve
@@ -147,7 +144,7 @@ class SelfImprovement:
             "message": f"Searched how to improve {len(mistakes)} mistakes, found {len(improvements)} improvements"
         }
 
-    def fix_itself_in_background(self, improvements: List[Dict], task_id: str = None) -> Dict:
+    def fix_itself_in_background(self, improvements: list[dict], task_id: str = None) -> dict:
         """Fix itself in background based on improvements searched"""
         fixes_applied = []
 
@@ -220,7 +217,7 @@ class SelfImprovement:
             "message": f"Fixed {len(fixes_applied)} mistakes in background"
         }
 
-    def run_idle_reflection(self, trajectory: List[Dict] = None, force: bool = False) -> Dict:
+    def run_idle_reflection(self, trajectory: list[dict] = None, force: bool = False) -> dict:
         """Run reflection when idle - goes through reflections, sees mistakes, searches how to improve, fixes in background"""
         if self.is_reflecting and not force:
             return {"status": "already_reflecting", "message": "Already reflecting, please wait"}
@@ -266,7 +263,7 @@ class SelfImprovement:
                     trajectory = [{"role": "user", "content": f"Recent memory: {m['key']}: {m['value'][:100]}"} for m in recent_sessions]
                     if not trajectory:
                         trajectory = [{"role": "user", "content": "No recent trajectory, checking recent tool failures"}, {"role": "tool", "content": "Tool web_search failed: timeout", "tool": "web_search"}]
-                except:
+                except Exception:
                     trajectory = [{"role": "user", "content": "Test trajectory for reflection"}]
 
             reflection = self.reflect_on_trajectory(trajectory)
@@ -364,7 +361,7 @@ class SelfImprovement:
                     from core.task_tracker import task_tracker
                     task_tracker.complete_task(task_id, status="failed", result=str(e)[:200])
                     task_tracker.remove_agent(task_id, final_status="failed")
-                except:
+                except Exception:
                     pass
             return error_result
         finally:
@@ -388,7 +385,7 @@ class SelfImprovement:
                 if self.last_reflection:
                     try:
                         last_reflection_time = datetime.fromisoformat(self.last_reflection.get("timestamp",""))
-                    except:
+                    except Exception:
                         pass
 
                 should_reflect = False
@@ -434,7 +431,7 @@ class SelfImprovement:
         self.should_stop = True
         return {"status": "stopped"}
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get status for hideable panel to show what it is doing"""
         history = self._load_history()
         return {

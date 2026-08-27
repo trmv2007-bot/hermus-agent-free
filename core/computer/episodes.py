@@ -30,10 +30,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+import builtins
 
 
 def _now() -> str:
@@ -51,20 +52,20 @@ class Episode:
     ended: Optional[str] = None
     duration: float = 0.0
     recording: Optional[str] = None
-    plan: List[Dict[str, Any]] = field(default_factory=list)
-    actions: List[Dict[str, Any]] = field(default_factory=list)
-    verifications: List[Dict[str, Any]] = field(default_factory=list)
-    repairs: List[Dict[str, Any]] = field(default_factory=list)
-    diagnoses: List[Dict[str, Any]] = field(default_factory=list)
-    timeline: List[Dict[str, Any]] = field(default_factory=list)
-    world_states: List[Dict[str, Any]] = field(default_factory=list)
+    plan: list[dict[str, Any]] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    verifications: list[dict[str, Any]] = field(default_factory=list)
+    repairs: list[dict[str, Any]] = field(default_factory=list)
+    diagnoses: list[dict[str, Any]] = field(default_factory=list)
+    timeline: list[dict[str, Any]] = field(default_factory=list)
+    world_states: list[dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
-    failure: Optional[Dict[str, Any]] = None
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    tags: List[str] = field(default_factory=list)
+    failure: Optional[dict[str, Any]] = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
     version: int = 2
 
-    def compute_metrics(self) -> Dict[str, Any]:
+    def compute_metrics(self) -> dict[str, Any]:
         """Auto-compute metrics from recorded data."""
         actions_ok = sum(
             1 for a in self.actions
@@ -95,7 +96,7 @@ class Episode:
         }
         return self.metrics
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "task": self.task,
@@ -119,7 +120,7 @@ class Episode:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Episode":
+    def from_dict(cls, data: dict[str, Any]) -> "Episode":
         return cls(
             task_id=str(data.get("task_id", "")),
             task=str(data.get("task", "")),
@@ -143,7 +144,7 @@ class Episode:
         )
 
     @classmethod
-    def from_task_result(cls, task_id: str, task: str, result: Dict[str, Any]) -> "Episode":
+    def from_task_result(cls, task_id: str, task: str, result: dict[str, Any]) -> "Episode":
         """Build an Episode from a ComputerAgent.run() result dict."""
         started = result.get("checkpoint", {}).get("created_at") or result.get("started", _now())
         timeline_raw = result.get("timeline", {}).get("events", []) if isinstance(
@@ -207,7 +208,7 @@ class EpisodeStore:
         temporary.replace(path)
         return str(path)
 
-    def save_from_result(self, task_id: str, task: str, result: Dict[str, Any]) -> str:
+    def save_from_result(self, task_id: str, task: str, result: dict[str, Any]) -> str:
         """Convenience: build and save an episode from a run result."""
         episode = Episode.from_task_result(task_id, task, result)
         return self.save(episode)
@@ -227,7 +228,7 @@ class EpisodeStore:
         limit: int = 50,
         outcome: Optional[str] = None,
         tag: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """List episodes as summaries, newest first.
 
         Args:
@@ -235,7 +236,7 @@ class EpisodeStore:
             outcome: filter by outcome (SUCCESS/FAILURE/CANCELLED)
             tag: filter by tag
         """
-        episodes: List[Episode] = []
+        episodes: list[Episode] = []
         for path in sorted(self.root.glob("*.json"), reverse=True):
             try:
                 ep = Episode.from_dict(json.loads(path.read_text(encoding="utf-8")))
@@ -267,10 +268,10 @@ class EpisodeStore:
             for ep in episodes
         ]
 
-    def search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 10) -> builtins.list[dict[str, Any]]:
         """Search episodes by task description text."""
         words = set(re.findall(r"[a-z0-9]+", query.lower()))
-        scored: List[tuple] = []
+        scored: list[tuple] = []
         for path in self.root.glob("*.json"):
             try:
                 ep = Episode.from_dict(json.loads(path.read_text(encoding="utf-8")))
@@ -306,7 +307,7 @@ class EpisodeStore:
                 return ep
         return None
 
-    def recall_trajectory(self, task: str) -> Optional[Dict[str, Any]]:
+    def recall_trajectory(self, task: str) -> Optional[dict[str, Any]]:
         """Recall just the visual/action trajectory (for replay).
 
         Returns a minimal dict with just the essential replay data:
@@ -325,7 +326,7 @@ class EpisodeStore:
             "duration": ep.duration,
         }
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Aggregate statistics across all episodes."""
         episodes = []
         for path in self.root.glob("*.json"):
@@ -401,6 +402,6 @@ def get_episode_store() -> EpisodeStore:
     return _episode_store
 
 
-def record_episode(task_id: str, task: str, result: Dict[str, Any]) -> str:
+def record_episode(task_id: str, task: str, result: dict[str, Any]) -> str:
     """Convenience: record a task result as an episode."""
     return get_episode_store().save_from_result(task_id, task, result)

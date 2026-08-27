@@ -1,16 +1,15 @@
 """MCP management tools exposed to the agent."""
-from typing import Dict, List
 
 from core.mcp_client import mcp_manager
 
 
-def mcp_list_servers() -> Dict:
+def mcp_list_servers() -> dict:
     """List configured MCP servers and status."""
     servers = mcp_manager.list_servers()
     return {"servers": servers, "count": len(servers)}
 
 
-def mcp_connect_all() -> Dict:
+def mcp_connect_all() -> dict:
     """Connect to all enabled MCP servers and refresh tools."""
     result = mcp_manager.connect_enabled()
     # Reload tool registry so new MCP tools appear
@@ -27,12 +26,12 @@ def mcp_connect_all() -> Dict:
     return result
 
 
-def mcp_call(server: str, tool: str, arguments: Dict = None) -> Dict:
+def mcp_call(server: str, tool: str, arguments: dict = None) -> dict:
     """Call a tool on an MCP server by server name + tool name."""
     return mcp_manager.call(server, tool, arguments or {})
 
 
-def mcp_add_server(name: str, command: str, args: str = "", enabled: bool = True) -> Dict:
+def mcp_add_server(name: str, command: str, args: str = "", enabled: bool = True) -> dict:
     """Add an MCP server. args is space-separated CLI args string."""
     arg_list = [a for a in (args or "").split(" ") if a]
     result = mcp_manager.add_server(name, command, args=arg_list, enabled=enabled)
@@ -45,7 +44,7 @@ def mcp_add_server(name: str, command: str, args: str = "", enabled: bool = True
     return result
 
 
-def mcp_remove_server(name: str) -> Dict:
+def mcp_remove_server(name: str) -> dict:
     result = mcp_manager.remove_server(name)
     try:
         from core.tool_registry import tool_registry

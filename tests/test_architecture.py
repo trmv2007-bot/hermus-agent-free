@@ -60,7 +60,6 @@ def test_workspace_layout_and_projects():
 # Memory 2.0
 # --------------------------------------------------------------------------
 def test_memory2_typed_and_scored_recall():
-    import time
     from core.memory2 import Memory2
 
     m = Memory2(db_path=str(Path(_TMP) / "mem2.db"))

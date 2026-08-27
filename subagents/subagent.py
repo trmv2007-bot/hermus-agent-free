@@ -15,12 +15,11 @@ New: ``delegate(goal, tasks=…)`` for plan→fan-out→aggregate, plus
 """
 from __future__ import annotations
 
-import json
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
-from core.config import config
 
 
 def _engine():
@@ -35,8 +34,8 @@ def spawn_subagent(
     model: str = "",
     max_steps: int = 4,
     timeout: Optional[float] = None,
-    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-) -> Dict[str, Any]:
+    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
     """Spawn one isolated sub-agent (separate process, JSON-RPC worker)."""
     subagent_id = f"sub_{uuid.uuid4().hex[:6]}"
     engine = _engine()
@@ -71,14 +70,14 @@ def spawn_subagent(
 
 
 def spawn_parallel_subagents(
-    tasks: List[str],
+    tasks: list[str],
     *,
     model: str = "",
     max_steps: int = 4,
     timeout: Optional[float] = None,
     aggregate: str = "concat",
-    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-) -> List[Dict[str, Any]]:
+    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+) -> list[dict[str, Any]]:
     """Spawn many sub-agents in parallel — independent workstreams, one process each."""
     if not tasks:
         return []
@@ -88,7 +87,7 @@ def spawn_parallel_subagents(
             tasks, goal="", model=model, max_steps=max_steps, timeout=timeout,
             aggregate=aggregate, on_event=on_event,
         )
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for node in out.get("nodes") or []:
             results.append({
                 "subagent_id": node.get("id"),
@@ -108,13 +107,13 @@ def spawn_parallel_subagents(
 
 def delegate(
     goal: str,
-    tasks: Optional[List[str]] = None,
+    tasks: Optional[list[str]] = None,
     *,
     model: str = "",
     max_children: int = 4,
     aggregate: str = "synthesize",
-    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-) -> Dict[str, Any]:
+    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
     """Plan the work (unless ``tasks`` given), run it in parallel, return one answer."""
     engine = _engine()
     if tasks:
@@ -123,15 +122,15 @@ def delegate(
                                     aggregate=aggregate, on_event=on_event)
 
 
-def subagent_status() -> Dict[str, Any]:
+def subagent_status() -> dict[str, Any]:
     return _engine().status()
 
 
-def cancel_subagents(tree_id: str) -> Dict[str, Any]:
+def cancel_subagents(tree_id: str) -> dict[str, Any]:
     return _engine().cancel_tree(tree_id)
 
 
-def write_python_tool_via_rpc(tool_name: str, steps: List[str]) -> Dict:
+def write_python_tool_via_rpc(tool_name: str, steps: list[str]) -> dict:
     """Collapse a multi-step pipeline into one script that calls tools via RPC.
 
     Same idea as before (zero-context-cost turns), but the generated file now goes

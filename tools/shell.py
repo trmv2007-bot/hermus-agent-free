@@ -13,7 +13,6 @@ Escape hatches (all audited to ``logs/sandbox.jsonl``):
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
 
 from core.config import config
 
@@ -25,7 +24,7 @@ def shell_execute(
     sandbox: str = None,
     network: bool = None,
     allow_dangerous: bool = False,
-) -> Dict:
+) -> dict:
     """Execute a shell command in an ephemeral sandbox with CPU/mem/pid limits."""
     command = (command or "").strip()
     if not command:
@@ -95,7 +94,7 @@ def shell_execute(
     return res
 
 
-def shell_sandbox_status() -> Dict:
+def shell_sandbox_status() -> dict:
     """What isolation is actually in force right now (for the dashboard/CLI)."""
     try:
         from core.sandbox import sandbox as jail

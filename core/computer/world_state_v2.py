@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 import re
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Iterable
 
 
 class ObservationType(str, Enum):
@@ -38,8 +39,8 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _unique(values: Iterable[Any], limit: int = 50) -> List[str]:
-    output: List[str] = []
+def _unique(values: Iterable[Any], limit: int = 50) -> list[str]:
+    output: list[str] = []
     seen = set()
     for value in values:
         text = str(value or "").strip()
@@ -54,7 +55,7 @@ def _unique(values: Iterable[Any], limit: int = 50) -> List[str]:
 class GroundedTarget:
     """Structured visual target with grounding metadata."""
     name: str
-    bbox: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)  # x1, y1, x2, y2
+    bbox: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)  # x1, y1, x2, y2
     confidence: float = 0.0
     role: str = "unknown"  # button, link, field, menu, etc.
     state: str = "unknown"  # enabled, disabled, visible, hidden, etc.
@@ -62,7 +63,7 @@ class GroundedTarget:
     text: str = ""
     element_type: str = ""
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "bbox": list(self.bbox),
@@ -75,7 +76,7 @@ class GroundedTarget:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "GroundedTarget":
+    def from_dict(cls, data: dict[str, Any]) -> "GroundedTarget":
         bbox = data.get("bbox", (0.0, 0.0, 0.0, 0.0))
         if isinstance(bbox, list) and len(bbox) == 4:
             bbox = tuple(float(v) for v in bbox)
@@ -99,16 +100,16 @@ class DesktopContext:
     active_window_id: Optional[str] = None
     focused_element: Optional[str] = None
     focused_element_type: Optional[str] = None
-    mouse_position: Tuple[float, float] = (0.0, 0.0)
-    screen_resolution: Tuple[int, int] = (1920, 1080)
-    visible_controls: List[str] = field(default_factory=list)
-    dialogs: List[str] = field(default_factory=list)
+    mouse_position: tuple[float, float] = (0.0, 0.0)
+    screen_resolution: tuple[int, int] = (1920, 1080)
+    visible_controls: list[str] = field(default_factory=list)
+    dialogs: list[str] = field(default_factory=list)
     active_modal: Optional[str] = None
-    notifications: List[str] = field(default_factory=list)
-    known_errors: List[str] = field(default_factory=list)
-    downloads: List[Dict[str, str]] = field(default_factory=list)
+    notifications: list[str] = field(default_factory=list)
+    known_errors: list[str] = field(default_factory=list)
+    downloads: list[dict[str, str]] = field(default_factory=list)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "active_application": self.active_application,
             "active_window": self.active_window,
@@ -135,9 +136,9 @@ class RichObservation:
     confidence: float = 0.0
     timestamp: str = field(default_factory=_now)
     source: str = ""
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "value": self.value,
@@ -156,12 +157,12 @@ class TaskContext:
     task_state: str = "UNKNOWN"
     current_step: Optional[str] = None
     plan_position: int = 0
-    completed_steps: List[str] = field(default_factory=list)
-    failed_steps: List[str] = field(default_factory=list)
+    completed_steps: list[str] = field(default_factory=list)
+    failed_steps: list[str] = field(default_factory=list)
     repair_count: int = 0
     retry_count: int = 0
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "task_state": self.task_state,
@@ -185,14 +186,14 @@ class WorldStateV2:
     task_ctx: TaskContext = field(default_factory=TaskContext)
     
     # Structured grounded targets (visual grounding)
-    targets: List[GroundedTarget] = field(default_factory=list)
+    targets: list[GroundedTarget] = field(default_factory=list)
     
     # Rich observations with provenance
-    observations: List[RichObservation] = field(default_factory=list)
+    observations: list[RichObservation] = field(default_factory=list)
     
     # Legacy compatible fields
-    visible_targets: List[str] = field(default_factory=list)
-    dialogs: List[str] = field(default_factory=list)
+    visible_targets: list[str] = field(default_factory=list)
+    dialogs: list[str] = field(default_factory=list)
     
     # Lock for thread safety
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
@@ -243,7 +244,7 @@ class WorldStateV2:
         return self.active_window
     
     @property
-    def elements(self) -> List[str]:
+    def elements(self) -> list[str]:
         return self.visible_targets
     
     @property
@@ -279,7 +280,7 @@ class WorldStateV2:
         observation_type: ObservationType = ObservationType.OBSERVED,
         confidence: float = 0.8,
         source: str = "vision",
-        evidence: Optional[Dict[str, Any]] = None,
+        evidence: Optional[dict[str, Any]] = None,
     ) -> None:
         """Record a rich observation with provenance."""
         with self._lock:
@@ -357,17 +358,17 @@ class WorldStateV2:
                     return target
             return None
     
-    def get_targets_by_role(self, role: str) -> List[GroundedTarget]:
+    def get_targets_by_role(self, role: str) -> list[GroundedTarget]:
         """Get all targets with a specific role."""
         with self._lock:
             return [t for t in self.targets if t.role == role]
     
-    def get_safe_to_click_targets(self) -> List[GroundedTarget]:
+    def get_safe_to_click_targets(self) -> list[GroundedTarget]:
         """Get all targets that are safe to click."""
         with self._lock:
             return [t for t in self.targets if t.safe_to_click and t.state == "enabled"]
     
-    def update_from_vision(self, vision_result: Dict[str, Any]) -> Dict[str, Any]:
+    def update_from_vision(self, vision_result: dict[str, Any]) -> dict[str, Any]:
         """Update world state from structured vision output."""
         with self._lock:
             # Process grounded targets
@@ -393,11 +394,11 @@ class WorldStateV2:
         """Mark something as expected (planner assumption)."""
         self.observe(key, value, ObservationType.EXPECTED, 0.5, "planner")
     
-    def infer(self, key: str, value: Any, evidence: Dict[str, Any]) -> None:
+    def infer(self, key: str, value: Any, evidence: dict[str, Any]) -> None:
         """Mark something as inferred (deduced from context)."""
         self.observe(key, value, ObservationType.INFERRED, 0.6, "inference", evidence)
     
-    def satisfies_condition(self, condition: str) -> Dict[str, Any]:
+    def satisfies_condition(self, condition: str) -> dict[str, Any]:
         """Check if the world state satisfies a condition."""
         wanted = str(condition or "").strip().casefold()
         if not wanted:
@@ -460,7 +461,7 @@ class WorldStateV2:
             self.timestamp = _now()
             self.revision += 1
     
-    def to_dict(self, include_history: bool = True) -> Dict[str, Any]:
+    def to_dict(self, include_history: bool = True) -> dict[str, Any]:
         with self._lock:
             data = {
                 # Context
@@ -497,7 +498,7 @@ class WorldStateV2:
             return data
     
     @classmethod
-    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "WorldStateV2":
+    def from_dict(cls, data: Optional[dict[str, Any]]) -> "WorldStateV2":
         data = data if isinstance(data, dict) else {}
         
         # Parse context
@@ -556,7 +557,7 @@ class WorldStateV2:
             timestamp=str(data.get("timestamp", _now())),
         )
     
-    def to_legacy_dict(self) -> Dict[str, Any]:
+    def to_legacy_dict(self) -> dict[str, Any]:
         """Convert to legacy WorldState format for compatibility."""
         return {
             "active_application": self.context.active_application,
@@ -580,7 +581,7 @@ class WorldStateV2:
         }
     
     @classmethod
-    def from_legacy(cls, legacy_data: Dict[str, Any]) -> "WorldStateV2":
+    def from_legacy(cls, legacy_data: dict[str, Any]) -> "WorldStateV2":
         """Create from legacy WorldState format."""
         return cls.from_dict(legacy_data)
     
@@ -602,7 +603,7 @@ class WorldStateV2:
 
 
 # Factory function for backward compatibility
-def create_world_state(data: Optional[Dict[str, Any]] = None) -> WorldStateV2:
+def create_world_state(data: Optional[dict[str, Any]] = None) -> WorldStateV2:
     """Create a WorldStateV2 from optional dict data."""
     if data is None:
         return WorldStateV2()

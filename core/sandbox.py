@@ -43,7 +43,8 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Optional
+from collections.abc import Callable, Sequence
 
 from .config import config
 
@@ -94,10 +95,10 @@ class SandboxPolicy:
     read_only_rootfs: bool = True
     tmpfs_size_mb: int = 128
     workspace_mode: str = "rw"             # rw | ro | none
-    drop_capabilities: Tuple[str, ...] = ("ALL",)
-    add_capabilities: Tuple[str, ...] = ()
-    env_allowlist: Tuple[str, ...] = ENV_ALLOW_DEFAULT
-    deny_patterns: Tuple[str, ...] = DANGEROUS_PATTERNS
+    drop_capabilities: tuple[str, ...] = ("ALL",)
+    add_capabilities: tuple[str, ...] = ()
+    env_allowlist: tuple[str, ...] = ENV_ALLOW_DEFAULT
+    deny_patterns: tuple[str, ...] = DANGEROUS_PATTERNS
     max_output_chars: int = 6000
     keep_artifacts: bool = False
     confine_to_workspace: bool = True
@@ -124,7 +125,7 @@ class SandboxPolicy:
                 setattr(p, k, v)
         return p
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["deny_patterns"] = list(self.deny_patterns)
         return d
@@ -142,12 +143,12 @@ class SandboxResult:
     timeout: bool = False
     error: str = ""
     workdir: str = ""
-    limits: Dict[str, Any] = field(default_factory=dict)
+    limits: dict[str, Any] = field(default_factory=dict)
     container: str = ""
     artifacts: str = ""
-    audit: Dict[str, Any] = field(default_factory=dict)
+    audit: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -156,7 +157,7 @@ class CapabilityProbe:
     """Cached runtime-capability detection (binaries, rlimits, unshare)."""
 
     def __init__(self):
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
         self._lock = threading.Lock()
 
     def _which(self, name: str) -> Optional[str]:
@@ -240,7 +241,7 @@ class CapabilityProbe:
     def rlimits(self) -> bool:
         return resource is not None
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         return {
             "docker_binary": bool(self.binary("docker")),
             "docker_daemon": self.docker_daemon(),
@@ -260,9 +261,9 @@ class CapabilityProbe:
 probe = CapabilityProbe()
 
 
-def scan_command(command: str, patterns: Sequence[str] = DANGEROUS_PATTERNS) -> List[str]:
+def scan_command(command: str, patterns: Sequence[str] = DANGEROUS_PATTERNS) -> list[str]:
     """Return the dangerous patterns a command matches (empty = clean)."""
-    hits: List[str] = []
+    hits: list[str] = []
     text = command or ""
     for pat in patterns:
         try:
@@ -281,7 +282,7 @@ class Sandbox:
         self.policy = policy or SandboxPolicy.from_config()
         self.probe = probe_ or probe
         self._sem = threading.Semaphore(max(1, int(os.getenv("HERMUS_SANDBOX_MAX_CONCURRENT", "4"))))
-        self._active: Dict[str, Dict[str, Any]] = {}
+        self._active: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
@@ -289,7 +290,7 @@ class Sandbox:
     def root(self) -> Path:
         return Path(config.resolve_path("data/sandboxes"))
 
-    def _resolve_backend(self, policy: SandboxPolicy) -> Tuple[str, str]:
+    def _resolve_backend(self, policy: SandboxPolicy) -> tuple[str, str]:
         """Pick a backend and a human-readable reason."""
         want = (policy.backend or "auto").lower()
         if want not in VALID_BACKENDS:
@@ -317,9 +318,9 @@ class Sandbox:
             return "local", f"{want} requested but unavailable → hardened local execution"
         return "local", "hardened local execution"
 
-    def _env(self, policy: SandboxPolicy, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    def _env(self, policy: SandboxPolicy, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
         """Scrubbed environment: allowlist only, secrets never forwarded."""
-        env: Dict[str, str] = {}
+        env: dict[str, str] = {}
         for key in policy.env_allowlist:
             if key in os.environ:
                 env[key] = os.environ[key]
@@ -418,7 +419,7 @@ class Sandbox:
         except Exception:
             return Path(config.resolve_path("data/logs/sandbox.jsonl"))
 
-    def _audit(self, record: Dict[str, Any]) -> None:
+    def _audit(self, record: dict[str, Any]) -> None:
         record = {"ts": _now(), **record}
         try:
             from .workspace import workspace
@@ -434,7 +435,7 @@ class Sandbox:
                 pass
 
     # ----------------------------------------------------------------- public API
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         backend, reason = self._resolve_backend(self.policy)
         caps = self.probe.snapshot()
         return {
@@ -464,15 +465,15 @@ class Sandbox:
         *,
         timeout: Optional[int] = None,
         cwd: Optional[str] = None,
-        env: Optional[Dict[str, str]] = None,
-        files: Optional[Dict[str, str]] = None,
+        env: Optional[dict[str, str]] = None,
+        files: Optional[dict[str, str]] = None,
         input_text: Optional[str] = None,
         backend: Optional[str] = None,
         network: Optional[bool] = None,
-        policy: Optional[Dict[str, Any]] = None,
+        policy: Optional[dict[str, Any]] = None,
         allow_dangerous: bool = False,
         purpose: str = "shell",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute ``command`` inside an ephemeral sandbox. Never raises."""
         t0 = time.time()
         pol = replace(self.policy, **(policy or {}))
@@ -554,13 +555,13 @@ class Sandbox:
         })
         return out
 
-    def run_python(self, code: str, **kw) -> Dict[str, Any]:
+    def run_python(self, code: str, **kw) -> dict[str, Any]:
         """Run a Python snippet under the same boundary (used by skill validation)."""
         kw.setdefault("purpose", "python")
         quoted = shlex.quote(code)
         return self.run(f"{shlex.quote(sys.executable or 'python3')} -c {quoted}", **kw)
 
-    def run_wasm(self, module_path: str, *, args: Sequence[str] = (), timeout: int = 20) -> Dict[str, Any]:
+    def run_wasm(self, module_path: str, *, args: Sequence[str] = (), timeout: int = 20) -> dict[str, Any]:
         """Optional WASI path: run a .wasm module with wasmtime (strictly isolated, no fs/net)."""
         if not self.probe.has("wasmtime"):
             return {"success": False, "error": "wasmtime not installed", "backend": "wasm"}
@@ -573,7 +574,7 @@ class Sandbox:
             return {"success": False, "error": str(e), "backend": "wasm"}
 
     # ------------------------------------------------------------------ backends
-    def _workdirs(self, pol: SandboxPolicy, cwd: Optional[str], sandbox_id: str) -> Tuple[Path, str]:
+    def _workdirs(self, pol: SandboxPolicy, cwd: Optional[str], sandbox_id: str) -> tuple[Path, str]:
         workdir = self._spawn_dir(sandbox_id)
         mounted = str(cwd) if cwd else str(Path(config.base_dir))
         if pol.confine_to_workspace and cwd:
@@ -587,7 +588,7 @@ class Sandbox:
         return workdir, mounted
 
     def _docker_args(self, binary: str, command: str, pol: SandboxPolicy, workdir: Path,
-                     mounted_cwd: str) -> Tuple[List[str], str]:
+                     mounted_cwd: str) -> tuple[list[str], str]:
         name = f"hermus-{sandbox_tag()}-{uuid.uuid4().hex[:6]}"
         args = [binary, "run", "--rm", "-i", "--name", name,
                 "--label", "hermus.sandbox=1",
@@ -625,7 +626,7 @@ class Sandbox:
         return args, name
 
     def _run_container(self, binary: str, command: str, pol: SandboxPolicy, workdir: Path,
-                       mounted_cwd: str, sandbox_id: str, env: Optional[Dict[str, str]],
+                       mounted_cwd: str, sandbox_id: str, env: Optional[dict[str, str]],
                        input_text: Optional[str], reason: str) -> SandboxResult:
         args, name = self._docker_args(binary, command, pol, workdir, mounted_cwd)
         for k, v in (self._env(pol, env)).items():
@@ -670,9 +671,9 @@ class Sandbox:
         return str(root) if root.is_dir() else str(workdir)
 
     def _run_local(self, command: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-                   env: Optional[Dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
+                   env: Optional[dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
         """Hardened local execution: rlimits + new session + no new privs."""
-        argv: List[str] = ["/bin/sh", "-c", command]
+        argv: list[str] = ["/bin/sh", "-c", command]
         if not pol.network and self.probe.unshare_net():
             # A real network cut (empty netns), not just an env hint.
             argv = [self.probe.binary("unshare"), "-n", *argv]
@@ -686,7 +687,7 @@ class Sandbox:
         return self._exec(argv, "local", pol, workdir, sandbox_id, env, input_text, limits)
 
     def _run_bwrap(self, command: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-                   env: Optional[Dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
+                   env: Optional[dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
         """bubblewrap jail: read-only /, writable scratch, no network, clean env."""
         exec_cwd = self._exec_cwd(pol, workdir)
         argv = [
@@ -714,9 +715,9 @@ class Sandbox:
         argv += ["/bin/sh", "-c", command]
         return self._exec(argv, "bwrap", pol, workdir, sandbox_id, env, input_text, limits)
 
-    def _exec(self, argv: List[str], backend: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-              env: Optional[Dict[str, str]], input_text: Optional[str],
-              limits: Dict[str, Any]) -> SandboxResult:
+    def _exec(self, argv: list[str], backend: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
+              env: Optional[dict[str, str]], input_text: Optional[str],
+              limits: dict[str, Any]) -> SandboxResult:
         """Shared hardened execution for the non-container backends."""
         env_final = self._env(pol, env)
         proc = None
@@ -754,7 +755,7 @@ class Sandbox:
                                  sandbox_id=sandbox_id, limits=limits)
 
     def _run_raw(self, command: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-                 env: Optional[Dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
+                 env: Optional[dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
         try:
             proc = subprocess.run(command, shell=True, capture_output=True, text=True,
                                   timeout=pol.timeout, cwd=str(workdir), input=input_text or "")

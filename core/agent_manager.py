@@ -26,9 +26,11 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .workspace import workspace
+import builtins
 
 ROLES = (
     "researcher", "coder", "system-monitor", "scheduler", "memory-manager",
@@ -39,15 +41,15 @@ BASE_DIR = Path(__file__).parent.parent
 
 # role -> handler(job_dict) -> result_dict. Register custom role logic here;
 # it must be importable in a fresh interpreter (the detached worker imports it).
-ROLE_HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {}
+ROLE_HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
 
-def register_handler(role: str, handler: Callable[[Dict[str, Any]], Dict[str, Any]]) -> None:
+def register_handler(role: str, handler: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
     ROLE_HANDLERS[role] = handler
 
 
-def _general_agent_handler(config: Dict[str, Any]) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
-    def handle(job: Dict[str, Any]) -> Dict[str, Any]:
+def _general_agent_handler(config: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def handle(job: dict[str, Any]) -> dict[str, Any]:
         from .agent import HermusAgent
 
         task = str(job.get("task") or job.get("goal") or "")
@@ -63,7 +65,7 @@ def _general_agent_handler(config: Dict[str, Any]) -> Callable[[Dict[str, Any]],
     return handle
 
 
-def _computer_agent_handler(job: Dict[str, Any]) -> Dict[str, Any]:
+def _computer_agent_handler(job: dict[str, Any]) -> dict[str, Any]:
     """Run or resume one persistent desktop task in a detached worker."""
     from core.computer import (
         ComputerActionController,
@@ -121,14 +123,14 @@ def _state_path(name: str) -> Path:
     return _agent_dir(name) / "state.json"
 
 
-def _read_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
+def _read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return default
 
 
-def _write_json(path: Path, data: Dict[str, Any]) -> None:
+def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -205,7 +207,7 @@ def worker_loop(name: str, handler=None, heartbeat_interval: float = 2.0,
 
 class AgentManager:
     def create(self, name: str, role: str = "generic", model: Optional[str] = None,
-               persona: Optional[str] = None) -> Dict[str, Any]:
+               persona: Optional[str] = None) -> dict[str, Any]:
         if role not in ROLES:
             return {"success": False, "error": f"unknown role '{role}' (choose {ROLES})"}
         adir = _agent_dir(name)
@@ -222,7 +224,7 @@ class AgentManager:
                                         "last_result": None, "jobs_done": 0})
         return {"success": True, "name": name, "role": role}
 
-    def start(self, name: str, handler=None, daemon: bool = True) -> Dict[str, Any]:
+    def start(self, name: str, handler=None, daemon: bool = True) -> dict[str, Any]:
         if not _agent_dir(name).exists():
             return {"success": False, "error": f"agent '{name}' not found (create it first)"}
         state = _read_json(_state_path(name), {})
@@ -247,7 +249,7 @@ class AgentManager:
         })
         return {"success": True, "name": name, "pid": proc.pid}
 
-    def stop(self, name: str) -> Dict[str, Any]:
+    def stop(self, name: str) -> dict[str, Any]:
         state = _read_json(_state_path(name), {})
         pid = state.get("pid")
         if pid:
@@ -260,7 +262,7 @@ class AgentManager:
         _write_json(_state_path(name), {**state, "status": "stopped", "pid": None})
         return {"success": True, "name": name}
 
-    def status(self, name: str) -> Dict[str, Any]:
+    def status(self, name: str) -> dict[str, Any]:
         if not _agent_dir(name).exists():
             return {"success": False, "error": f"agent '{name}' not found"}
         cfg = _read_json(_agent_dir(name) / "agent.json", {})
@@ -274,7 +276,7 @@ class AgentManager:
                 alive = False
         return {"success": True, "name": name, **cfg, **state, "alive": alive}
 
-    def list(self) -> List[Dict[str, Any]]:
+    def list(self) -> builtins.list[dict[str, Any]]:
         out = []
         if not _agents_dir().exists():
             return out
@@ -283,7 +285,7 @@ class AgentManager:
                 out.append(self.status(p.name))
         return out
 
-    def submit_job(self, name: str, job: Dict[str, Any]) -> Dict[str, Any]:
+    def submit_job(self, name: str, job: dict[str, Any]) -> dict[str, Any]:
         """Queue a job for a (running) agent to pick up."""
         if not _agent_dir(name).exists():
             return {"success": False, "error": f"agent '{name}' not found"}
@@ -296,7 +298,7 @@ class AgentManager:
         return {"success": True, "name": name, "job_id": ts, "queued": True,
                 "status_path": str(_agent_dir(name) / "results" / f"{ts}.json")}
 
-    def job_status(self, name: str, job_id: str) -> Dict[str, Any]:
+    def job_status(self, name: str, job_id: str) -> dict[str, Any]:
         if not _agent_dir(name).exists():
             return {"success": False, "error": f"agent '{name}' not found"}
         result_path = _agent_dir(name) / "results" / f"{job_id}.json"
@@ -307,7 +309,7 @@ class AgentManager:
                 "name": name, "job_id": job_id}
 
     def wait_job(self, name: str, job_id: str, timeout: float = 120.0,
-                 interval: float = 0.2) -> Dict[str, Any]:
+                 interval: float = 0.2) -> dict[str, Any]:
         deadline = time.monotonic() + max(0.0, float(timeout))
         while time.monotonic() <= deadline:
             status = self.job_status(name, job_id)
@@ -317,7 +319,7 @@ class AgentManager:
         return {"success": False, "status": "timeout", "name": name,
                 "job_id": job_id, "error": f"job did not finish within {timeout:g}s"}
 
-    def watchdog_tick(self, stale_seconds: float = 30.0, restart: bool = True) -> Dict[str, Any]:
+    def watchdog_tick(self, stale_seconds: float = 30.0, restart: bool = True) -> dict[str, Any]:
         """Detect dead/stale agents and (optionally) restart them."""
         now = datetime.now()
         revived, stale, errors = [], [], []

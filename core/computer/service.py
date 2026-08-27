@@ -19,7 +19,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from .event_detector import StreamingEventDetector
 from .permissions import RecordingPolicy, recording_policy
@@ -35,13 +35,13 @@ class ScreenRecordingService:
         self.state_path = self.root / ".screen-recorder.json"
         self.repo_root = Path(__file__).resolve().parents[2]
 
-    def _read_state(self) -> Dict[str, Any]:
+    def _read_state(self) -> dict[str, Any]:
         try:
             return json.loads(self.state_path.read_text(encoding="utf-8"))
         except Exception:
             return {"status": "not_started", "running": False}
 
-    def _write_state(self, state: Dict[str, Any]) -> None:
+    def _write_state(self, state: dict[str, Any]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         temporary = self.state_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
@@ -60,7 +60,7 @@ class ScreenRecordingService:
         except (OSError, TypeError, ValueError):
             return False
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         state = self._read_state()
         alive = self._pid_alive(state.get("pid"))
         state["running"] = bool(alive and state.get("status") in {"starting", "recording", "stopping"})
@@ -70,7 +70,7 @@ class ScreenRecordingService:
         state["state_file"] = str(self.state_path)
         return state
 
-    def start(self, fps: float = 10.0, max_seconds: float = 30.0, container: str = "mp4") -> Dict[str, Any]:
+    def start(self, fps: float = 10.0, max_seconds: float = 30.0, container: str = "mp4") -> dict[str, Any]:
         current = self.status()
         if current.get("running"):
             return {"success": False, "error": "screen recorder service already running", **current}
@@ -156,7 +156,7 @@ class ScreenRecordingService:
             latest.update({"success": False, "error": "recorder service did not become ready"})
         return latest
 
-    def stop(self, timeout: float = 20.0) -> Dict[str, Any]:
+    def stop(self, timeout: float = 20.0) -> dict[str, Any]:
         state = self.status()
         if not state.get("running"):
             if state.get("status") == "stopped":
@@ -178,7 +178,7 @@ class ScreenRecordingService:
             time.sleep(0.1)
         return {"success": False, "error": "recorder service did not stop before timeout", **self.status()}
 
-    def save(self, target: str) -> Dict[str, Any]:
+    def save(self, target: str) -> dict[str, Any]:
         state = self.status()
         if state.get("running"):
             return {"success": False, "error": "stop the recorder before saving"}

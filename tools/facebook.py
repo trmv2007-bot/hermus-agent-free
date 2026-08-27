@@ -1,9 +1,7 @@
 """Facebook, Instagram, XiaoHongShu, LinkedIn, Xiaoyuzhou - via OpenCLI reusing Chrome session free + Jina fallback"""
 
-import requests
-from typing import Dict
 
-def facebook_search(query: str, max_results: int = 5) -> Dict:
+def facebook_search(query: str, max_results: int = 5) -> dict:
     """Facebook search, homepage, Feed, group list via OpenCLI reusing Chrome login free"""
     # Check OpenCLI available
     try:
@@ -17,7 +15,7 @@ def facebook_search(query: str, max_results: int = 5) -> Dict:
                 "note": "Free via OpenCLI reusing Chrome login session - requires user has Chrome logged into Facebook and OpenCLI installed. Tell Agent 'help me config Facebook'",
                 "results": f"Would search Facebook for {query} via OpenCLI Chrome session"
             }
-    except:
+    except Exception:
         pass
 
     # Fallback Jina Reader for public Facebook pages (limited)
@@ -36,7 +34,7 @@ def facebook_search(query: str, max_results: int = 5) -> Dict:
             "config_guide": "Desktop OpenCLI reusing Chrome login free - Tell Agent 'help me config Facebook' - requires Chrome logged into Facebook and OpenCLI installed"
         }
 
-def instagram_user_search(username: str) -> Dict:
+def instagram_user_search(username: str) -> dict:
     """Instagram user search, Profile, recent posts, Explore via OpenCLI free"""
     try:
         import shutil
@@ -47,7 +45,7 @@ def instagram_user_search(username: str) -> Dict:
                 "method": "opencli_chrome_free",
                 "note": "Free via OpenCLI reusing Chrome session - requires Chrome logged into Instagram"
             }
-    except:
+    except Exception:
         pass
 
     # Fallback Jina for public profile
@@ -59,7 +57,7 @@ def instagram_user_search(username: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e), "config_guide": "Tell Agent 'help me config Instagram' - OpenCLI Chrome session free"}
 
-def xiaohongshu_search(query: str) -> Dict:
+def xiaohongshu_search(query: str) -> dict:
     """XiaoHongShu search, reading, comments via OpenCLI free - only uses user's existing Chrome session"""
     return {
         "success": False,
@@ -70,7 +68,7 @@ def xiaohongshu_search(query: str) -> Dict:
         "note": "Cookie only locally, not uploaded, code open source reviewable. OpenCLI only uses existing controlled Chrome session"
     }
 
-def linkedin_read(url: str) -> Dict:
+def linkedin_read(url: str) -> dict:
     """LinkedIn Jina Reader public page + Profile details via OpenCLI"""
     try:
         from .internet_eyes import web_read
@@ -81,7 +79,7 @@ def linkedin_read(url: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def xiaoyuzhou_transcribe(podcast_url: str) -> Dict:
+def xiaoyuzhou_transcribe(podcast_url: str) -> dict:
     """Xiaoyuzhou podcast audio to text Whisper transcription with Groq->OpenAI fallback free"""
     return {
         "success": False,

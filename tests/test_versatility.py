@@ -1,5 +1,4 @@
 """Tests for multi-step loop, tool registry, MCP, embeddings, channels helpers."""
-import json
 import os
 import sys
 import tempfile
@@ -126,9 +125,6 @@ def test_mcp_echo_server_end_to_end():
 def test_skill_use_passes_task_context():
     from core.tool_registry import tool_registry
     from core.skill_manager import skill_manager
-    from core.config import config
-    import tempfile
-    import shutil
 
     # Use existing web research skill which accepts query=
     tool_registry.load(force=True)

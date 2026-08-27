@@ -1,9 +1,6 @@
 """Multi-AI Collaboration - Multiple AIs can talk to each other for anything, free"""
-import json
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
-from pathlib import Path
 
 from .config import config
 from .llm import FreeLLM
@@ -38,8 +35,8 @@ class MultiAIChat:
 
     def __init__(self, session_id: str = None):
         self.session_id = session_id or f"multi_ai_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
-        self.agents: List[AgentPersona] = []
-        self.conversation_history: List[Dict] = []
+        self.agents: list[AgentPersona] = []
+        self.conversation_history: list[dict] = []
         self.rounds = 0
 
     def add_agent(
@@ -87,7 +84,7 @@ class MultiAIChat:
             else:
                 self.add_agent(name, persona, model=model, color=color)
 
-    def _pick_diverse_assignments(self, n: int = 3) -> List[Dict]:
+    def _pick_diverse_assignments(self, n: int = 3) -> list[dict]:
         """Pick up to n different provider/model/key combos from multi_key + ollama."""
         try:
             from .model_fleet import _available_workers
@@ -114,7 +111,7 @@ class MultiAIChat:
         except Exception:
             return []
 
-    def _build_agent_prompt(self, agent: AgentPersona, topic: str, include_history: bool = True) -> List[Dict]:
+    def _build_agent_prompt(self, agent: AgentPersona, topic: str, include_history: bool = True) -> list[dict]:
         """Build prompt for agent with persona + history"""
         system_content = f"{agent.persona}\n\nYou are {agent.name} in a multi-AI collaboration. Current topic/task: {topic}\n\nOther agents in team: {', '.join([f'{a.name} ({a.persona[:40]}...)' for a in self.agents if a.name != agent.name])}\n\nRules:\n- Collaborate, not compete\n- Build on others' ideas\n- Be concise but thorough\n- If you have tools, use them\n- You can disagree respectfully and propose better ideas\n- Aim for consensus but highlight trade-offs\n"
 
@@ -133,7 +130,7 @@ class MultiAIChat:
 
         return messages
 
-    def chat_round(self, topic: str, max_rounds: int = 3, tools: List[Dict] = None) -> List[Dict]:
+    def chat_round(self, topic: str, max_rounds: int = 3, tools: list[dict] = None) -> list[dict]:
         """Run multi-AI chat rounds - each agent talks in turn per round"""
         print(f"\n[MultiAI] Starting collaboration on: {topic}\nAgents: {[a.name for a in self.agents]} | Rounds: {max_rounds}")
 
@@ -143,7 +140,7 @@ class MultiAIChat:
             multi_task_id = task_tracker.add_task(f"multi_ai_{self.session_id}", "multi-ai", topic, model=",".join(set([a.model for a in self.agents])), agent=",".join([a.name for a in self.agents]))
             for ag in self.agents:
                 task_tracker.add_agent(ag.agent_id, ag.name, ag.model, persona=ag.persona[:60], task=topic[:100])
-        except:
+        except Exception:
             multi_task_id = None
 
         for round_num in range(1, max_rounds + 1):
@@ -155,7 +152,7 @@ class MultiAIChat:
                     try:
                         from .task_tracker import task_tracker
                         task_tracker.update_agent(agent.agent_id, status="thinking", progress=f"Round {round_num} thinking")
-                    except:
+                    except Exception:
                         pass
 
                     response = agent.llm.chat(messages, tools=tools or [])
@@ -176,7 +173,7 @@ class MultiAIChat:
                     try:
                         from .task_tracker import task_tracker
                         task_tracker.update_agent(agent.agent_id, status="done", progress=f"Round {round_num} done: {content[:40]}")
-                    except:
+                    except Exception:
                         pass
 
                     # Print with color if rich available
@@ -203,7 +200,7 @@ class MultiAIChat:
                 task_tracker.complete_task(multi_task_id, status="done", result=f"Completed {len(self.conversation_history)} turns")
             for ag in self.agents:
                 task_tracker.remove_agent(ag.agent_id, final_status="done")
-        except:
+        except Exception:
             pass
 
         return self.conversation_history
@@ -240,7 +237,7 @@ class MultiAIChat:
         except Exception as e:
             return f"Final answer generation failed: {e}\n\nHistory:\n{history_text[:2000]}"
 
-    def debate(self, topic: str, rounds: int = 2, model: str = None) -> Dict:
+    def debate(self, topic: str, rounds: int = 2, model: str = None) -> dict:
         """Quick debate mode - free"""
         if not self.agents:
             self.add_default_team(model=model)
@@ -257,7 +254,7 @@ class MultiAIChat:
             "session_id": self.session_id
         }
 
-    def collaborate_on_task(self, task: str, tools: List[Dict] = None, rounds: int = 3) -> Dict:
+    def collaborate_on_task(self, task: str, tools: list[dict] = None, rounds: int = 3) -> dict:
         """Collaborate on task with tools - e.g., research + code + review in parallel then discuss"""
         if not self.agents:
             self.add_default_team()

@@ -14,7 +14,7 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..config import config
 
@@ -78,7 +78,7 @@ class LessonsStore:
         keywords: str = "",
         source: str = "",
         dedupe: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Add a lesson. dedupe=True skips near-identical lessons added recently."""
         lesson = (lesson or "").strip()
         if len(lesson) < 10:
@@ -115,13 +115,13 @@ class LessonsStore:
         return re.sub(r"[^a-z0-9 ]", "", (text or "").lower())
 
     @staticmethod
-    def _tokens(text: str) -> List[str]:
+    def _tokens(text: str) -> list[str]:
         words = re.findall(r"[a-z0-9']{3,}", (text or "").lower())
         return [w for w in words if w not in _STOPWORDS]
 
     # ---------------------------------------------------------------- read
 
-    def relevant(self, text: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def relevant(self, text: str, limit: Optional[int] = None) -> list[dict[str, Any]]:
         """Top lessons for the current task: keyword-overlap score + recency."""
         limit = limit or getattr(config, "lessons_in_prompt", 8)
         tokens = set(self._tokens(text))
@@ -173,7 +173,7 @@ class LessonsStore:
         except Exception:
             pass
 
-    def recent(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         try:
             with self._conn() as conn:
                 rows = conn.execute(
@@ -194,7 +194,7 @@ class LessonsStore:
         except Exception:
             return []
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         try:
             with self._conn() as conn:
                 total = conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0]
@@ -214,7 +214,7 @@ class LessonsStore:
 
     # ---------------------------------------------------------------- distillers
 
-    def distill_user_correction(self, user_message: str) -> Optional[Dict[str, Any]]:
+    def distill_user_correction(self, user_message: str) -> Optional[dict[str, Any]]:
         """User pushed back on the previous answer -> lesson."""
         low = (user_message or "").lower()
         if not any(w in low for w in _CORRECTION_WORDS):
@@ -230,7 +230,7 @@ class LessonsStore:
             source="agent_chat",
         )
 
-    def distill_tool_failure(self, tool_name: str, error_text: str) -> Optional[Dict[str, Any]]:
+    def distill_tool_failure(self, tool_name: str, error_text: str) -> Optional[dict[str, Any]]:
         if not error_text:
             return None
         err = error_text.strip()[:140]
@@ -244,7 +244,7 @@ class LessonsStore:
             source="agent_chat",
         )
 
-    def distill_reflection(self, reflection: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def distill_reflection(self, reflection: dict[str, Any]) -> list[dict[str, Any]]:
         """Self-improvement reflection mistakes -> lessons."""
         out = []
         for m in reflection.get("mistakes", [])[:5]:
@@ -257,7 +257,7 @@ class LessonsStore:
                 out.append(res)
         return out
 
-    def distill_skill_failure(self, skill_name: str, feedback: str) -> Optional[Dict[str, Any]]:
+    def distill_skill_failure(self, skill_name: str, feedback: str) -> Optional[dict[str, Any]]:
         if not feedback:
             return None
         return self.add(

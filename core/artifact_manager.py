@@ -9,12 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import zipfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .workspace import workspace
 
@@ -54,6 +53,18 @@ KNOWN_EXTENSIONS = {
 }
 
 
+def _detect_extension(p: Path) -> str:
+    """Return the extension key for a path, handling multi-part suffixes.
+
+    ``Path.suffix`` only yields ``.gz`` for ``foo.tar.gz``, so the
+    ``.tar.gz`` entry in KNOWN_EXTENSIONS never matched before.
+    """
+    name = p.name.lower()
+    if name.endswith(".tar.gz"):
+        return ".tar.gz"
+    return p.suffix.lower()
+
+
 @dataclass
 class Artifact:
     id: str
@@ -66,13 +77,13 @@ class Artifact:
     created_at: str
     mission_id: Optional[str] = None
     previewable: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Artifact:
+    def from_dict(cls, data: dict[str, Any]) -> Artifact:
         return cls(**data)
 
 
@@ -83,7 +94,7 @@ class ArtifactManager:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self._manifest_file = self.storage_dir / "manifest.json"
 
-    def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
+    def _load_manifest(self) -> dict[str, dict[str, Any]]:
         if not self._manifest_file.exists():
             return {}
         try:
@@ -91,7 +102,7 @@ class ArtifactManager:
         except Exception:
             return {}
 
-    def _save_manifest(self, manifest: Dict[str, Dict[str, Any]]) -> None:
+    def _save_manifest(self, manifest: dict[str, dict[str, Any]]) -> None:
         self._manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     def register_artifact(
@@ -100,7 +111,7 @@ class ArtifactManager:
         name: Optional[str] = None,
         artifact_type: Optional[str] = None,
         mission_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Artifact:
         p = Path(path)
         if not p.is_absolute():
@@ -109,9 +120,8 @@ class ArtifactManager:
         if not p.exists():
             raise FileNotFoundError(f"Artifact file not found: {p}")
 
-        art_id = f"art_{int(datetime.now().timestamp())}_{os.urandom(2).hex()}"
         file_name = name or p.name
-        suffix = p.suffix.lower()
+        suffix = _detect_extension(p)
 
         if artifact_type is None:
             detected_type, is_preview = KNOWN_EXTENSIONS.get(suffix, ("file", False))
@@ -123,6 +133,34 @@ class ArtifactManager:
             rel_path = str(p.relative_to(self.workspace_root))
         except ValueError:
             rel_path = str(p)
+
+        # Idempotent registration: the same physical file must not create a
+        # new manifest entry (and a new SHA scan) on every workspace scan —
+        # otherwise mission repair rounds duplicate entries without bound.
+        # An existing entry is refreshed in place and re-attributed to the
+        # most recent mission that observed it.
+        manifest = self._load_manifest()
+        existing = next(
+            (d for d in manifest.values() if d.get("path") == str(p)),
+            None,
+        )
+        if existing is not None:
+            art = Artifact.from_dict(existing)
+            art.name = file_name
+            art.artifact_type = detected_type
+            art.size_bytes = p.stat().st_size
+            art.sha256 = _sha256(p)
+            art.previewable = is_preview
+            art.mission_id = mission_id or art.mission_id
+            if metadata:
+                merged = dict(art.metadata or {})
+                merged.update(metadata)
+                art.metadata = merged
+            manifest[art.id] = art.to_dict()
+            self._save_manifest(manifest)
+            return art
+
+        art_id = f"art_{int(datetime.now().timestamp())}_{os.urandom(2).hex()}"
 
         art = Artifact(
             id=art_id,
@@ -138,7 +176,6 @@ class ArtifactManager:
             metadata=metadata or {},
         )
 
-        manifest = self._load_manifest()
         manifest[art_id] = art.to_dict()
         self._save_manifest(manifest)
         return art
@@ -152,9 +189,9 @@ class ArtifactManager:
         self,
         mission_id: Optional[str] = None,
         artifact_type: Optional[str] = None,
-    ) -> List[Artifact]:
+    ) -> list[Artifact]:
         manifest = self._load_manifest()
-        results: List[Artifact] = []
+        results: list[Artifact] = []
         for d in manifest.values():
             art = Artifact.from_dict(d)
             if mission_id and art.mission_id != mission_id:
@@ -170,39 +207,49 @@ class ArtifactManager:
         target_dir: Optional[Path] = None,
         mission_id: Optional[str] = None,
         since_timestamp: Optional[float] = None,
-    ) -> List[Artifact]:
+    ) -> list[Artifact]:
         """Scan workspace for build outputs, deliverables, and reports.
         Scopes attribution to files modified since mission start when `since_timestamp` is given.
         """
         root = target_dir or self.workspace_root
-        discovered: List[Artifact] = []
+        discovered: list[Artifact] = []
+        seen_paths: set = set()
 
-        scan_dirs = ["build", "dist", "out", "reports", "artifacts", "bin", "target"]
-        paths_to_scan = [root] + [root / d for d in scan_dirs if (root / d).exists()]
-
-        for base in paths_to_scan:
-            for p in base.rglob("*"):
-                if p.is_file() and p.suffix.lower() in KNOWN_EXTENSIONS:
-                    if ".git" in p.parts or "node_modules" in p.parts or "__pycache__" in p.parts:
+        # NOTE: a single rglob from the root already recurses into build/dist/
+        # out/artifacts/... — scanning those directories again on top used to
+        # register every file in them twice per scan.
+        for p in root.rglob("*"):
+            if not p.is_file() or _detect_extension(p) not in KNOWN_EXTENSIONS:
+                continue
+            if ".git" in p.parts or "node_modules" in p.parts or "__pycache__" in p.parts:
+                continue
+            # Never register the manifest this manager itself maintains.
+            try:
+                if p.resolve() == self._manifest_file.resolve():
+                    continue
+            except Exception:
+                pass
+            if str(p) in seen_paths:
+                continue
+            if since_timestamp is not None:
+                try:
+                    if p.stat().st_mtime < since_timestamp:
                         continue
-                    if since_timestamp is not None:
-                        try:
-                            if p.stat().st_mtime < since_timestamp:
-                                continue
-                        except Exception:
-                            continue
-                    try:
-                        art = self.register_artifact(p, mission_id=mission_id)
-                        discovered.append(art)
-                    except Exception:
-                        continue
+                except Exception:
+                    continue
+            try:
+                art = self.register_artifact(p, mission_id=mission_id)
+                seen_paths.add(str(p))
+                discovered.append(art)
+            except Exception:
+                continue
         return discovered
 
     def export_bundle(
         self,
         output_zip_path: str | Path,
         mission_id: Optional[str] = None,
-        artifact_ids: Optional[List[str]] = None,
+        artifact_ids: Optional[list[str]] = None,
     ) -> str:
         out_p = Path(output_zip_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)

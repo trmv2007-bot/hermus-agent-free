@@ -8,7 +8,7 @@ from core.harness.swarm import spawn
 
 def test_compaction_triggers_at_90_percent():
     messages = [{"role": "system", "content": "sys"}]
-    for i in range(20):
+    for _ in range(20):
         messages.append({"role": "user", "content": "Tool results (step 1):\n" + ("x" * 2000)})
     out, report = compact_messages(messages, budget_chars=8_000, keep_recent=4, tool_limit=200)
     assert report["compacted"] is True

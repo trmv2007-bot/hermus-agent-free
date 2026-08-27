@@ -7,8 +7,8 @@ If only one model exists, members still differ by persona.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 from ..config import config
 from ..llm import FreeLLM
@@ -43,7 +43,7 @@ class CounselMember:
         return FreeLLM(self.model, api_key=self.api_key or None, base_url=self.base_url or None, temperature=temp)
 
 
-def _discover_workers() -> List[Dict]:
+def _discover_workers() -> list[dict]:
     """Best-effort discovery of available free model/key workers."""
     try:
         from ..model_fleet import _available_workers
@@ -53,7 +53,7 @@ def _discover_workers() -> List[Dict]:
         return []
 
 
-def _assign_models(specs: List[Dict], model: Optional[str] = None) -> List[Dict]:
+def _assign_models(specs: list[dict], model: Optional[str] = None) -> list[dict]:
     """Assign diverse model refs to member specs; fall back to `model` or config.model."""
     workers = _discover_workers()
     used_providers = set()
@@ -85,10 +85,10 @@ def _assign_models(specs: List[Dict], model: Optional[str] = None) -> List[Dict]
 
 
 def build_roster(
-    constitution_doc: Dict,
+    constitution_doc: dict,
     max_members: int = 5,
     model: Optional[str] = None,
-) -> List[CounselMember]:
+) -> list[CounselMember]:
     """Build the debate roster (members only; judge is used later in voting)."""
     specs = [m for m in constitution_doc.get("members", []) if m.get("enabled")]
     specs = sorted(specs, key=lambda m: _ROLE_PRIORITY.index(m["role"]) if m["role"] in _ROLE_PRIORITY else 99)
@@ -107,7 +107,7 @@ def build_roster(
 
     assigned = _assign_models(ordered, model=model)
     members = []
-    for i, s in enumerate(assigned):
+    for s in assigned:
         role = s["role"]
         name = s.get("name") or role
         members.append(
@@ -125,5 +125,5 @@ def build_roster(
     return members
 
 
-def describe_roster(members: List[CounselMember]) -> str:
+def describe_roster(members: list[CounselMember]) -> str:
     return ", ".join(f"{m.name} ({m.model})" for m in members)

@@ -1,5 +1,4 @@
 """Free Web Search - DuckDuckGo, no API key - Optimized with caching"""
-from typing import List, Dict
 from core.cache import web_search_cache
 
 try:
@@ -8,7 +7,7 @@ try:
 except ImportError:
     DDG_AVAILABLE = False
 
-def web_search(query: str, max_results: int = 5) -> List[Dict]:
+def web_search(query: str, max_results: int = 5) -> list[dict]:
     """Free web search via DuckDuckGo - no API key - Optimized with caching"""
     # Check cache first - optimize
     cache_key = web_search_cache.make_key(query, max_results)
@@ -55,7 +54,7 @@ TOOL_DEFINITION = {
     }
 }
 
-def execute(query: str, max_results: int = 5) -> Dict:
+def execute(query: str, max_results: int = 5) -> dict:
     results = web_search(query, max_results)
     return {"results": results, "count": len(results)}
 

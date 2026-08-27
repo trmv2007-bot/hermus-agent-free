@@ -15,12 +15,11 @@ This module provides:
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
-from .world_state import WorldState
 
 
 @dataclass
@@ -32,7 +31,7 @@ class BoundingBox:
     y2: float
     
     @property
-    def center(self) -> Tuple[float, float]:
+    def center(self) -> tuple[float, float]:
         return ((self.x1 + self.x2) / 2, (self.y1 + self.y2) / 2)
     
     @property
@@ -59,11 +58,11 @@ class BoundingBox:
         min_area = min(self.area, other.area)
         return overlap_area / min_area if min_area > 0 else 0.0
     
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return {"x1": self.x1, "y1": self.y1, "x2": self.x2, "y2": self.y2}
     
     @classmethod
-    def from_dict(cls, data: Dict[str, float]) -> "BoundingBox":
+    def from_dict(cls, data: dict[str, float]) -> "BoundingBox":
         return cls(
             x1=float(data.get("x1", 0)),
             y1=float(data.get("y1", 0)),
@@ -102,7 +101,7 @@ class GroundedTarget:
     vision_model: Optional[str] = None
     vision_confidence: float = 0.0
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "bbox": self.bbox.to_dict(),
@@ -121,7 +120,7 @@ class GroundedTarget:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "GroundedTarget":
+    def from_dict(cls, data: dict[str, Any]) -> "GroundedTarget":
         bbox_data = data.get("bbox", {})
         bbox = BoundingBox.from_dict(bbox_data) if isinstance(bbox_data, dict) else BoundingBox(0, 0, 0, 0)
         return cls(
@@ -141,7 +140,7 @@ class GroundedTarget:
             vision_confidence=float(data.get("vision_confidence", 0.0)),
         )
     
-    def get_click_point(self) -> Tuple[float, float]:
+    def get_click_point(self) -> tuple[float, float]:
         """Get the recommended click point (center by default)."""
         cx, cy = self.bbox.center
         # Add small random offset to avoid systematic misclicks
@@ -172,7 +171,7 @@ class VisualGrounder:
     
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+        vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
         min_confidence: float = 0.5,
         default_role: str = "unknown",
     ):
@@ -180,9 +179,9 @@ class VisualGrounder:
         self.min_confidence = min_confidence
         self.default_role = default_role
         self._last_frame: Optional[Any] = None
-        self._last_targets: List[GroundedTarget] = []
+        self._last_targets: list[GroundedTarget] = []
     
-    def set_vision_model(self, model: Callable[[Any, str], Dict[str, Any]]) -> None:
+    def set_vision_model(self, model: Callable[[Any, str], dict[str, Any]]) -> None:
         """Set the vision model for grounding."""
         self.vision_model = model
     
@@ -190,7 +189,7 @@ class VisualGrounder:
         self,
         frame: Any,
         description: str,
-        screen_size: Tuple[int, int] = (1920, 1080),
+        screen_size: tuple[int, int] = (1920, 1080),
     ) -> Optional[GroundedTarget]:
         """Ground a text description to a screen location.
         
@@ -226,9 +225,9 @@ class VisualGrounder:
     def ground_all(
         self,
         frame: Any,
-        descriptions: List[str],
-        screen_size: Tuple[int, int] = (1920, 1080),
-    ) -> List[GroundedTarget]:
+        descriptions: list[str],
+        screen_size: tuple[int, int] = (1920, 1080),
+    ) -> list[GroundedTarget]:
         """Ground multiple descriptions to screen locations."""
         targets = []
         for desc in descriptions:
@@ -239,9 +238,9 @@ class VisualGrounder:
     
     def _parse_vision_result(
         self,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         description: str,
-        screen_size: Tuple[int, int],
+        screen_size: tuple[int, int],
     ) -> Optional[GroundedTarget]:
         """Parse vision model output into a GroundedTarget."""
         # Try structured format first
@@ -315,8 +314,8 @@ class VisualGrounder:
     
     def _target_from_structured(
         self,
-        data: Dict[str, Any],
-        screen_size: Tuple[int, int],
+        data: dict[str, Any],
+        screen_size: tuple[int, int],
     ) -> GroundedTarget:
         """Create GroundedTarget from structured vision output."""
         bbox_data = data.get("bbox", data.get("bounding_box", {}))
@@ -349,7 +348,7 @@ class VisualGrounder:
             parent_region=data.get("parent_region"),
         )
     
-    def _matches_description(self, target_data: Dict[str, Any], description: str) -> bool:
+    def _matches_description(self, target_data: dict[str, Any], description: str) -> bool:
         """Check if a target matches the description."""
         desc_lower = description.lower()
         name = str(target_data.get("name", target_data.get("label", ""))).lower()
@@ -399,7 +398,7 @@ class VisualGrounder:
     def _extract_coords_from_text(
         self,
         text: str,
-        screen_size: Tuple[int, int],
+        screen_size: tuple[int, int],
     ) -> Optional[BoundingBox]:
         """Extract coordinates from text description."""
         import re
@@ -426,7 +425,7 @@ class VisualGrounder:
         
         return None
     
-    def get_last_targets(self) -> List[GroundedTarget]:
+    def get_last_targets(self) -> list[GroundedTarget]:
         """Get the last set of grounded targets."""
         return list(self._last_targets)
 
@@ -447,14 +446,14 @@ class PreClickVerifier:
         self.grounder = grounder
         self.overlap_threshold = overlap_threshold
         self.confidence_threshold = confidence_threshold
-        self._verification_history: List[Dict[str, Any]] = []
+        self._verification_history: list[dict[str, Any]] = []
     
     def verify(
         self,
         target: GroundedTarget,
         frame: Any,
-        screen_size: Tuple[int, int] = (1920, 1080),
-    ) -> Dict[str, Any]:
+        screen_size: tuple[int, int] = (1920, 1080),
+    ) -> dict[str, Any]:
         """Verify a target is still valid before clicking.
         
         Returns:
@@ -519,8 +518,8 @@ class PreClickVerifier:
         self,
         target: GroundedTarget,
         frame: Any,
-        screen_size: Tuple[int, int] = (1920, 1080),
-    ) -> Tuple[Optional[Tuple[float, float]], Dict[str, Any]]:
+        screen_size: tuple[int, int] = (1920, 1080),
+    ) -> tuple[Optional[tuple[float, float]], dict[str, Any]]:
         """Verify target and return click point if safe.
         
         Returns:
@@ -539,7 +538,7 @@ class PreClickVerifier:
         
         return None, verification
     
-    def get_history(self) -> List[Dict[str, Any]]:
+    def get_history(self) -> list[dict[str, Any]]:
         """Get verification history."""
         return list(self._verification_history)
 
@@ -549,7 +548,7 @@ class GroundingSystem:
     
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+        vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
         min_confidence: float = 0.5,
         verification_threshold: float = 0.6,
     ):
@@ -558,9 +557,9 @@ class GroundingSystem:
             grounder=self.grounder,
             confidence_threshold=verification_threshold,
         )
-        self._targets: List[GroundedTarget] = []
+        self._targets: list[GroundedTarget] = []
     
-    def set_vision_model(self, model: Callable[[Any, str], Dict[str, Any]]) -> None:
+    def set_vision_model(self, model: Callable[[Any, str], dict[str, Any]]) -> None:
         """Set the vision model for grounding."""
         self.grounder.set_vision_model(model)
     
@@ -568,7 +567,7 @@ class GroundingSystem:
         self,
         frame: Any,
         description: str,
-        screen_size: Tuple[int, int] = (1920, 1080),
+        screen_size: tuple[int, int] = (1920, 1080),
     ) -> Optional[GroundedTarget]:
         """Ground a target description to a screen location."""
         target = self.grounder.ground(frame, description, screen_size)
@@ -580,8 +579,8 @@ class GroundingSystem:
         self,
         target: GroundedTarget,
         frame: Any,
-        screen_size: Tuple[int, int] = (1920, 1080),
-    ) -> Tuple[bool, Optional[Tuple[float, float]], Dict[str, Any]]:
+        screen_size: tuple[int, int] = (1920, 1080),
+    ) -> tuple[bool, Optional[tuple[float, float]], dict[str, Any]]:
         """Verify target and get click point.
         
         Returns:
@@ -590,7 +589,7 @@ class GroundingSystem:
         point, result = self.verifier.verify_and_get_click_point(target, frame, screen_size)
         return result["verified"], point, result
     
-    def get_all_targets(self) -> List[GroundedTarget]:
+    def get_all_targets(self) -> list[GroundedTarget]:
         """Get all grounded targets."""
         return list(self._targets)
     
@@ -601,7 +600,7 @@ class GroundingSystem:
 
 # Factory function
 def create_grounding_system(
-    vision_model: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+    vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
     **kwargs,
 ) -> GroundingSystem:
     """Create a visual grounding system."""

@@ -1,8 +1,6 @@
 """End-to-end tests for world state, graph planning, skills, resume and delegation."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 from PIL import Image
 

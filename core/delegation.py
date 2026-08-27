@@ -41,10 +41,11 @@ import time
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Optional
+from collections.abc import Callable, Sequence
 
 from .config import config
 
@@ -71,21 +72,21 @@ class RpcError(RuntimeError):
         self.data = data
 
 
-def rpc_response(req_id: Any, result: Any) -> Dict[str, Any]:
+def rpc_response(req_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC, "id": req_id, "result": result}
 
 
-def rpc_error(req_id: Any, message: str, code: int = ERR_INTERNAL, data: Any = None) -> Dict[str, Any]:
+def rpc_error(req_id: Any, message: str, code: int = ERR_INTERNAL, data: Any = None) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC, "id": req_id, "error": {"code": code, "message": str(message)[:1500],
                                                           "data": data}}
 
 
-def rpc_notification(method: str, params: Any) -> Dict[str, Any]:
+def rpc_notification(method: str, params: Any) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC, "method": method, "params": params if params is not None else {}}
 
 
 # ------------------------------------------------------------ structured results
-def normalize_result(raw: Any) -> Dict[str, Any]:
+def normalize_result(raw: Any) -> dict[str, Any]:
     """Coerce anything a child returned into the delegation result contract."""
     if raw is None:
         return {"answer": "", "evidence": [], "confidence": 0.0, "tool_calls": [],
@@ -168,10 +169,10 @@ class DelegationWorker:
             if msg.get("method") == "shutdown":
                 break
 
-    def _make_writer(self, stdout) -> Callable[[Dict[str, Any]], None]:
+    def _make_writer(self, stdout) -> Callable[[dict[str, Any]], None]:
         write_lock = threading.Lock()
 
-        def _send(obj: Dict[str, Any]) -> None:
+        def _send(obj: dict[str, Any]) -> None:
             try:
                 with write_lock:
                     stdout.write(json.dumps(obj, default=str) + "\n")
@@ -181,7 +182,7 @@ class DelegationWorker:
 
         return _send
 
-    def _handle_notification(self, msg: Dict[str, Any]) -> None:
+    def _handle_notification(self, msg: dict[str, Any]) -> None:
         method = msg.get("method")
         params = msg.get("params") or {}
         if method == "$/cancel":
@@ -190,7 +191,7 @@ class DelegationWorker:
         elif method == "ping":
             pass
 
-    def emit(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def emit(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
         try:
             self._send(rpc_notification("event", {"type": event_type, **(data or {})}))
         except Exception:
@@ -201,7 +202,7 @@ class DelegationWorker:
             return req_id in self._cancelled
 
     # ---------------------------------------------------------------- dispatch
-    def dispatch(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def dispatch(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
         req_id = msg.get("id")
         method = str(msg.get("method") or "")
         params = msg.get("params") or {}
@@ -228,7 +229,7 @@ class DelegationWorker:
         except Exception as e:  # never die on a bad request
             return rpc_error(req_id, f"{type(e).__name__}: {e}", ERR_INTERNAL)
 
-    def run_agent(self, params: Dict[str, Any], req_id: Any, *, autonomous: bool = False) -> Dict[str, Any]:
+    def run_agent(self, params: dict[str, Any], req_id: Any, *, autonomous: bool = False) -> dict[str, Any]:
         task = str(params.get("task") or params.get("text") or "")
         if not task.strip():
             return normalize_result({"error": "task required"})
@@ -281,7 +282,7 @@ class DelegationWorker:
             return normalize_result({"error": f"worker agent failed: {e}", "status": "failed"})
 
     @staticmethod
-    def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
+    def call_tool(params: dict[str, Any]) -> dict[str, Any]:
         name = str(params.get("tool") or params.get("name") or "")
         args = params.get("args") or params.get("arguments") or {}
         if not name:
@@ -295,7 +296,7 @@ class DelegationWorker:
             return {"tool": name, "error": str(e)[:500]}
 
     @staticmethod
-    def recall(params: Dict[str, Any]) -> Dict[str, Any]:
+    def recall(params: dict[str, Any]) -> dict[str, Any]:
         query = str(params.get("query") or "")
         limit = int(params.get("limit", 5))
         try:
@@ -319,15 +320,15 @@ class DelegationNode:
     depth: int = 1
     parent: Optional[str] = None
     status: str = "pending"          # pending|running|done|failed|cancelled
-    result: Dict[str, Any] = field(default_factory=dict)
+    result: dict[str, Any] = field(default_factory=dict)
     error: str = ""
     pid: int = 0
     backend: str = ""
     started: float = 0.0
     finished: float = 0.0
-    events: List[Dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id, "task": self.task[:400], "depth": self.depth, "parent": self.parent,
             "status": self.status, "error": self.error[:500], "pid": self.pid, "backend": self.backend,
@@ -343,12 +344,12 @@ class DelegationNode:
 class RpcClient:
     """Parent-side handle on one worker process."""
 
-    def __init__(self, *, depth: int = 1, model: str = "", extra_env: Optional[Dict[str, str]] = None,
-                 on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    def __init__(self, *, depth: int = 1, model: str = "", extra_env: Optional[dict[str, str]] = None,
+                 on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
                  spawn_timeout: float = 20.0):
         self.depth = depth
         self.on_event = on_event
-        self._pending: Dict[Any, "queue.Queue"] = {}
+        self._pending: dict[Any, "queue.Queue"] = {}
         self._lock = threading.Lock()
         self._notifications: "queue.Queue" = queue.Queue(maxsize=1000)
         self._proc: Optional[subprocess.Popen] = None
@@ -422,7 +423,7 @@ class RpcClient:
             self.alive = False
             self._notify("worker_closed", {"exit": self.exit_code()})
 
-    def _notify(self, event_type: str, data: Dict[str, Any]) -> None:
+    def _notify(self, event_type: str, data: dict[str, Any]) -> None:
         try:
             self._notifications.put_nowait({"type": event_type, **data})
         except Exception:
@@ -437,8 +438,8 @@ class RpcClient:
         return self._proc.returncode if self._proc else None
 
     # ------------------------------------------------------------------ calls
-    def request(self, method: str, params: Optional[Dict[str, Any]] = None,
-                timeout: float = 60.0) -> Dict[str, Any]:
+    def request(self, method: str, params: Optional[dict[str, Any]] = None,
+                timeout: float = 60.0) -> dict[str, Any]:
         proc = self._proc
         if proc is None or proc.stdin is None:
             raise RpcError("worker not started", ERR_INTERNAL)
@@ -455,19 +456,19 @@ class RpcClient:
         except Exception as e:
             with self._lock:
                 self._pending.pop(req_id, None)
-            raise RpcError(f"worker stdin closed: {e}", ERR_INTERNAL)
+            raise RpcError(f"worker stdin closed: {e}", ERR_INTERNAL) from e
         try:
             msg = box.get(timeout=timeout)
         except queue.Empty:
             with self._lock:
                 self._pending.pop(req_id, None)
-            raise RpcError(f"timeout waiting for '{method}' after {timeout}s", ERR_TIMEOUT)
+            raise RpcError(f"timeout waiting for '{method}' after {timeout}s", ERR_TIMEOUT) from None
         if "error" in msg:
             err = msg.get("error") or {}
             raise RpcError(str(err.get("message"))[:600], int(err.get("code") or ERR_INTERNAL), err.get("data"))
         return msg.get("result") or {}
 
-    def notify(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    def notify(self, method: str, params: Optional[dict[str, Any]] = None) -> None:
         proc = self._proc
         if proc is None or proc.stdin is None:
             return
@@ -533,9 +534,9 @@ class Delegation:
         self.timeout = float(timeout if timeout is not None
                              else getattr(config, "delegation_timeout", 120))
         self.rpc = bool(getattr(config, "delegation_rpc", True) if rpc is None else rpc)
-        self.trees: Dict[str, Dict[str, Any]] = {}
+        self.trees: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
-        self._active: Dict[str, List[RpcClient]] = {}
+        self._active: dict[str, list[RpcClient]] = {}
 
     # ------------------------------------------------------------------ helpers
     def _depth(self) -> int:
@@ -555,10 +556,10 @@ class Delegation:
         model: str = "",
         max_steps: int = 4,
         timeout: Optional[float] = None,
-        on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         stream: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         timeout = float(timeout or self.timeout)
         node.status = "running"
         node.started = time.time()
@@ -616,8 +617,8 @@ class Delegation:
 
     @staticmethod
     def _run_inprocess(node: DelegationNode, *, model: str = "", max_steps: int = 4,
-                       emit: Callable[[str, Dict[str, Any]], None] = lambda t, d: None,
-                       should_cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
+                       emit: Callable[[str, dict[str, Any]], None] = lambda t, d: None,
+                       should_cancel: Optional[Callable[[], bool]] = None) -> dict[str, Any]:
         """Fallback path: run the child agent in this process (no isolation)."""
         from .agent import HermusAgent
 
@@ -645,11 +646,11 @@ class Delegation:
         depth: int = 1,
         timeout: Optional[float] = None,
         aggregate: str = "synthesize",
-        on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         tree_id: str = "",
         max_children: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run N workstreams in parallel and aggregate their structured results."""
         if not self.can_delegate() and self._depth() >= self.max_depth:
             return {"ok": False, "error": f"delegation depth budget exhausted (depth={self._depth()}, "
@@ -672,7 +673,7 @@ class Delegation:
         emit("delegation_fanout", {"tree": tree_id, "children": len(nodes), "goal": goal[:200]})
 
         workers = max(1, min(len(nodes), self.max_workers))
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         try:
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="deleg") as pool:
                 futures = {
@@ -732,10 +733,10 @@ class Delegation:
         *,
         max_children: int = 4,
         model: str = "",
-        on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
         aggregate: str = "synthesize",
         timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Plan → split into workstreams → run in parallel → aggregate."""
         plan = plan_workstreams(goal, max_children=max_children)
         emit = on_event or (lambda t, d: None)
@@ -747,7 +748,7 @@ class Delegation:
         )
 
     # ------------------------------------------------------------------ status
-    def tree(self, tree_id: str) -> Dict[str, Any]:
+    def tree(self, tree_id: str) -> dict[str, Any]:
         with self._lock:
             t = self.trees.get(tree_id)
         if not t:
@@ -761,7 +762,7 @@ class Delegation:
             "result": t.get("result"),
         }
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         with self._lock:
             trees = {k: {"status": v.get("status"), "goal": str(v.get("goal", ""))[:120],
                          "children": len(v.get("nodes") or [])} for k, v in self.trees.items()}
@@ -777,7 +778,7 @@ class Delegation:
             "active_clients": {k: len(v) for k, v in self._active.items() if v},
         }
 
-    def cancel_tree(self, tree_id: str) -> Dict[str, Any]:
+    def cancel_tree(self, tree_id: str) -> dict[str, Any]:
         with self._lock:
             clients = list(self._active.get(tree_id, []))
         for c in clients:
@@ -786,8 +787,8 @@ class Delegation:
                 "note": "children stop at their next step boundary"}
 
 
-def aggregate_results(results: Sequence[Dict[str, Any]], *, strategy: str = "synthesize",
-                      goal: str = "") -> Dict[str, Any]:
+def aggregate_results(results: Sequence[dict[str, Any]], *, strategy: str = "synthesize",
+                      goal: str = "") -> dict[str, Any]:
     """Reduce child results into one answer, with disagreement measured."""
     norm = [normalize_result(r) for r in (results or [])]
     good = [r for r in norm if r.get("status") in ("done", "partial") and r.get("answer")]
@@ -839,7 +840,7 @@ def _signature(text: str) -> str:
     return " ".join(sorted(set(toks))[:12])
 
 
-def _synthesize(goal: str, answers: Sequence[str], results: Sequence[Dict[str, Any]]) -> str:
+def _synthesize(goal: str, answers: Sequence[str], results: Sequence[dict[str, Any]]) -> str:
     """Merge child answers — LLM when available, deterministic otherwise."""
     joined = "\n\n".join(f"[child {i+1}] {a}" for i, a in enumerate(answers))
     try:
@@ -867,7 +868,7 @@ def _synthesize(goal: str, answers: Sequence[str], results: Sequence[Dict[str, A
     return f"{header}\n\n{body}"
 
 
-def plan_workstreams(goal: str, *, max_children: int = 4) -> Dict[str, Any]:
+def plan_workstreams(goal: str, *, max_children: int = 4) -> dict[str, Any]:
     """Split a goal into parallel workstreams (LLM-planned, heuristic fallback)."""
     goal = (goal or "").strip()
     if not goal:
@@ -898,7 +899,7 @@ def plan_workstreams(goal: str, *, max_children: int = 4) -> Dict[str, Any]:
         pass
     # Deterministic fallback: recognise common parallelisable shapes.
     low = goal.lower()
-    tasks: List[str] = []
+    tasks: list[str] = []
     if any(k in low for k in ("compare", "versus", " vs ", "each of", "all of")) and ("," in goal or " and " in low):
         parts = [p.strip(" .") for p in goal.replace(" and ", ",").split(",") if p.strip(" .")]
         tasks = [f"{p} — for goal: {goal[:160]}" for p in parts[: int(max_children)]]

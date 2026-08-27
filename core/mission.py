@@ -15,13 +15,14 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
 from .critic import critic_manager
 from .rollback import rollback_manager
-from .verifier_registry import VerificationResult, verifier_registry
+from .verifier_registry import verifier_registry
 from .workspace import workspace
 
 
@@ -45,10 +46,10 @@ class MissionRequirement:
     id: str
     description: str
     satisfied: bool = False
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     verifier_domain: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -60,7 +61,7 @@ class SubGoal:
     status: str = DAGNodeStatus.PENDING.value
     error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -73,7 +74,7 @@ class MissionBudget:
     max_extensions: int = 2
     extensions_used: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -85,11 +86,11 @@ class MissionReport:
     domain: str = "generic"
     confidence_score: float = 0.0
     progress_pct: int = 0
-    requirements: List[MissionRequirement] = field(default_factory=list)
-    dag_state: Dict[str, Any] = field(default_factory=dict)
-    subgoals: List[SubGoal] = field(default_factory=list)
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
-    artifacts: List[str] = field(default_factory=list)
+    requirements: list[MissionRequirement] = field(default_factory=list)
+    dag_state: dict[str, Any] = field(default_factory=dict)
+    subgoals: list[SubGoal] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[str] = field(default_factory=list)
     blocker_reason: Optional[str] = None
     blocker_instructions: Optional[str] = None
     checkpoint_id: Optional[str] = None
@@ -97,9 +98,9 @@ class MissionReport:
     finished_at: Optional[str] = None
     final_proof: str = ""
     budget: MissionBudget = field(default_factory=MissionBudget)
-    repair_history: List[Dict[str, Any]] = field(default_factory=list)
+    repair_history: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mission_id": self.mission_id,
             "goal": self.goal,
@@ -123,7 +124,7 @@ class MissionReport:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> MissionReport:
+    def from_dict(cls, data: dict[str, Any]) -> MissionReport:
         reqs = [MissionRequirement(**r) for r in data.get("requirements", [])]
         subgoals = [SubGoal(**s) if isinstance(s, dict) else s for s in data.get("subgoals", [])]
         budget = MissionBudget(**data.get("budget", {})) if "budget" in data else MissionBudget()
@@ -155,21 +156,41 @@ class MissionEngine:
 
     def __init__(
         self,
-        executor: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None,
+        executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None,
         storage_dir: Optional[Path] = None,
     ):
         self._raw_executor = executor or self._default_node_executor
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    def _default_node_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    def _default_node_executor(self, node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
         return {
             "success": True,
             "output": f"Executed stage '{node.role}': {node.goal}",
             "evidence": [{"stage": node.role, "goal": node.goal, "status": "completed"}],
         }
 
-    def _call_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _compute_progress(dag: AgentDAG) -> int:
+        """Completion percentage over DAG nodes (0 when the graph is empty)."""
+        total = len(dag.nodes)
+        if total == 0:
+            return 0
+        completed = sum(1 for n in dag.nodes.values() if n.status == DAGNodeStatus.COMPLETED.value)
+        return int(100 * completed / total)
+
+    @staticmethod
+    def _read_capped(path: Path, max_bytes: int = 64_000) -> str:
+        """Read a text artifact capped at ``max_bytes`` so a huge build output
+        cannot exhaust memory when assembling critic review context."""
+        try:
+            with open(path, "rb") as f:
+                data = f.read(max_bytes)
+            return data.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+
+    def _call_executor(self, node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
         try:
             sig = inspect.signature(self._raw_executor)
             params = list(sig.parameters.keys())
@@ -192,8 +213,8 @@ class MissionEngine:
         except Exception:
             return None
 
-    def list_missions(self) -> List[MissionReport]:
-        missions: List[MissionReport] = []
+    def list_missions(self) -> list[MissionReport]:
+        missions: list[MissionReport] = []
         if not self.storage_dir.exists():
             return missions
         for p in self.storage_dir.glob("*.json"):
@@ -204,7 +225,7 @@ class MissionEngine:
         missions.sort(key=lambda m: m.started_at, reverse=True)
         return missions
 
-    def _build_mission_dag(self, goal: str, domain: str, subgoals: Optional[List[str]] = None) -> AgentDAG:
+    def _build_mission_dag(self, goal: str, domain: str, subgoals: Optional[list[str]] = None) -> AgentDAG:
         dag = AgentDAG(name=f"Mission: {goal[:50]}")
         if subgoals:
             for idx, sg in enumerate(subgoals, start=1):
@@ -220,9 +241,9 @@ class MissionEngine:
     def start_mission(
         self,
         goal: str,
-        requirements: Optional[List[str]] = None,
+        requirements: Optional[list[str]] = None,
         domain: Optional[str] = None,
-        subgoals: Optional[List[str]] = None,
+        subgoals: Optional[list[str]] = None,
         budget_steps: int = 25,
     ) -> MissionReport:
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
@@ -258,6 +279,7 @@ class MissionEngine:
     def _run_autonomous_loop(self, report: MissionReport, dag: AgentDAG) -> MissionReport:
         budget = report.budget
         mission_start_ts = datetime.fromisoformat(report.started_at).timestamp()
+        prev_completed = -1
 
         while budget.consumed_steps < (budget.initial_steps + (budget.extensions_used * 10)):
             report.state = MissionState.EXECUTING.value
@@ -271,6 +293,21 @@ class MissionEngine:
             budget.consumed_steps += dag_round_res.get("completed", 1)
             report.dag_state = dag.to_dict()
             report.subgoals = [SubGoal(id=nid, role=n.role, goal=n.goal, status=n.status) for nid, n in dag.nodes.items()]
+            report.progress_pct = self._compute_progress(dag)
+            self._save_mission(report)
+
+            # Dynamic step budget (roadmap): when a round makes verified DAG
+            # progress (more nodes completed than the previous round), grant
+            # one budget extension (up to max_extensions, +10 steps each) so
+            # promising missions are not cut off by a rigid turn count.
+            completed_now = dag_round_res.get("completed", 0)
+            if (
+                prev_completed >= 0
+                and completed_now > prev_completed
+                and budget.extensions_used < budget.max_extensions
+            ):
+                budget.extensions_used += 1
+            prev_completed = completed_now
 
             # Check for explicit external blockers
             blocked_nodes = [n for n in dag.nodes.values() if n.status == DAGNodeStatus.BLOCKED.value]
@@ -317,7 +354,7 @@ class MissionEngine:
             report.confidence_score = v_res.score
 
             files_content = {
-                Path(a).name: Path(a).read_text(errors="ignore")
+                Path(a).name: self._read_capped(Path(a))
                 for a in report.artifacts
                 if Path(a).suffix in (".py", ".js", ".ts", ".html", ".json") and Path(a).exists()
             }
@@ -378,6 +415,9 @@ class MissionEngine:
 
         report.state = MissionState.FAILED.value
         report.finished_at = datetime.now().isoformat()
+        # Never report 100% for a failed mission: DAG stages may all have run,
+        # but the mission only "completes" when verification passes.
+        report.progress_pct = min(95, self._compute_progress(dag))
         report.final_proof = f"Mission failed to achieve verifiable behavioral completion after {budget.consumed_steps} steps and {budget.repairs_used} repair attempts."
         self._save_mission(report)
         return report
@@ -401,6 +441,31 @@ class MissionEngine:
         report.blocker_reason = None
         report.blocker_instructions = None
         return self._run_autonomous_loop(report, dag)
+
+    def extend_budget(self, mission_id: str, steps: int = 10) -> MissionReport:
+        """Grant extra steps to a running/blocked/failed mission.
+
+        Explicit counterpart to the automatic progress-based extension: the
+        loop bound grows by ``10 * extensions_used``, capped at
+        ``max_extensions``; each explicit extension consumes one slot.
+        """
+        report = self.get_mission(mission_id)
+        if not report:
+            raise ValueError(f"Mission {mission_id} not found")
+
+        if report.state == MissionState.COMPLETED.value:
+            return report
+
+        if report.budget.extensions_used >= report.budget.max_extensions:
+            raise ValueError(
+                f"Mission {mission_id} already used its "
+                f"{report.budget.max_extensions} budget extensions"
+            )
+
+        report.budget.extensions_used += 1
+        report.budget.initial_steps += max(1, int(steps))
+        self._save_mission(report)
+        return report
 
 
 mission_engine = MissionEngine()

@@ -16,7 +16,7 @@ from core.computer import (
 )
 from core.computer.permissions import RiskLevel
 from core.computer.remote import PromptState
-from core.plugins import PluginRegistry
+from core.plugins import PluginError, PluginRegistry
 
 
 def _controller(approval=None):
@@ -155,7 +155,7 @@ def test_plugin_registry_discovers_and_invokes():
     out2 = pr.invoke_tool("example_safeguard_check", action="click Install")
     assert out2["allowed"] is True
 
-    with pytest.raises(Exception):
+    with pytest.raises(PluginError):
         pr.invoke_tool("does_not_exist")
 
 

@@ -37,7 +37,8 @@ import sqlite3
 import struct
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Optional
+from collections.abc import Callable, Iterable, Sequence
 
 __all__ = [
     "HybridConfig",
@@ -65,7 +66,7 @@ _FTS_JUNK_RE = re.compile(r"[^\w\s]+")
 
 
 # --------------------------------------------------------------------- helpers
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> list[str]:
     return [t for t in _TOKEN_RE.findall((text or "").lower()) if t not in _STOPWORDS]
 
 
@@ -83,7 +84,7 @@ def sanitize_fts_query(query: str, max_terms: int = 12) -> str:
     (stopwords dropped, punctuation stripped, each term phrase-quoted so no
     operator can be interpreted). Empty result means "nothing to match on".
     """
-    terms: List[str] = []
+    terms: list[str] = []
     for tok in tokenize(_FTS_JUNK_RE.sub(" ", query or "")):
         if len(tok) < 2 or tok in terms:
             continue
@@ -98,7 +99,7 @@ def sanitize_fts_query(query: str, max_terms: int = 12) -> str:
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a)) or 1.0
     nb = math.sqrt(sum(y * y for y in b)) or 1.0
     return dot / (na * nb)
@@ -109,7 +110,7 @@ def pack_vector(vec: Iterable[float]) -> bytes:
     return struct.pack(f"{len(v)}f", *v)
 
 
-def unpack_vector(blob: bytes) -> List[float]:
+def unpack_vector(blob: bytes) -> list[float]:
     n = len(blob) // 4
     return list(struct.unpack(f"{n}f", blob)) if n else []
 
@@ -207,7 +208,7 @@ class HybridConfig:
     def candidates_for(self, limit: int) -> int:
         return max(self.min_candidates, min(self.max_candidates, max(4, int(limit)) * self.candidate_multiplier))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "rrf_k": self.rrf_k,
             "weight_bm25": self.weight_bm25,
@@ -229,9 +230,9 @@ class HybridHit:
     vector_rank: Optional[int] = None
     vector_similarity: Optional[float] = None
     prior: float = 0.0
-    contributions: Dict[str, float] = field(default_factory=dict)
+    contributions: dict[str, float] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "content": self.content,
@@ -273,7 +274,7 @@ class HybridRetriever:
         id_col: str = "id",
         fts_table: Optional[str] = None,
         vector_table: str = "hybrid_vectors",
-        embedder: Optional[Callable[[str], List[float]]] = None,
+        embedder: Optional[Callable[[str], list[float]]] = None,
         config: Optional[HybridConfig] = None,
         vectorizer: str = "",
         manage_schema: bool = True,
@@ -417,7 +418,7 @@ class HybridRetriever:
             self._knn_table = ""
             return None
 
-    def _embed(self, text: str) -> List[float]:
+    def _embed(self, text: str) -> list[float]:
         if not self.embedder or not (text or "").strip():
             return []
         try:
@@ -483,7 +484,7 @@ class HybridRetriever:
         except Exception:
             pass
 
-    def reindex(self, max_rows: int = 100_000) -> Dict[str, Any]:
+    def reindex(self, max_rows: int = 100_000) -> dict[str, Any]:
         """Wipe and re-embed every document (call after switching embedders)."""
         if not self.embedder:
             return {"success": False, "error": "no embedder configured"}
@@ -507,7 +508,7 @@ class HybridRetriever:
         return {"success": True, "reindexed": done, "rows": len(rows), "dim": self.dim()}
 
     # ------------------------------------------------------------------ ranking
-    def bm25(self, query: str, k: int, where: str = "", params: Sequence[Any] = ()) -> List[Tuple[Any, float]]:
+    def bm25(self, query: str, k: int, where: str = "", params: Sequence[Any] = ()) -> list[tuple[Any, float]]:
         """FTS5 BM25 ranking → ``[(id, score01)]`` (higher is better)."""
         if k <= 0 or not self._fts_supported():
             return []
@@ -535,7 +536,7 @@ class HybridRetriever:
                 rows = self._ex(sql2, (like,) + tuple(params) + (int(k),)).fetchall()
             except Exception:
                 return []
-        out: List[Tuple[Any, float]] = []
+        out: list[tuple[Any, float]] = []
         for rid, raw in rows:
             # SQLite bm25() is negative-is-better; map to a 0..1 relevance score.
             raw = float(raw or 0.0)
@@ -549,7 +550,7 @@ class HybridRetriever:
         where: str = "",
         params: Sequence[Any] = (),
         restrict_ids: Optional[Sequence[Any]] = None,
-    ) -> List[Tuple[Any, float]]:
+    ) -> list[tuple[Any, float]]:
         """Dense retrieval → ``[(id, cosine_similarity)]`` sorted desc."""
         if k <= 0:
             return []
@@ -559,7 +560,7 @@ class HybridRetriever:
             return []
         if len(qvec) != dim:
             return []
-        results: List[Tuple[Any, float]] = []
+        results: list[tuple[Any, float]] = []
         knn = self._ensure_knn()
         if knn and restrict_ids is None:
             try:
@@ -598,8 +599,8 @@ class HybridRetriever:
         return results[: int(k)]
 
     def _apply_filter(
-        self, pairs: List[Tuple[Any, float]], where: str, params: Sequence[Any]
-    ) -> List[Tuple[Any, float]]:
+        self, pairs: list[tuple[Any, float]], where: str, params: Sequence[Any]
+    ) -> list[tuple[Any, float]]:
         """Drop vector hits that fail the base-table filter (project/kind/…)."""
         if not pairs:
             return []
@@ -616,7 +617,7 @@ class HybridRetriever:
 
     def fetch_docs(
         self, ids: Sequence[Any], where: str = "", params: Sequence[Any] = (), extra_select: str = ""
-    ) -> Dict[Any, Dict[str, Any]]:
+    ) -> dict[Any, dict[str, Any]]:
         ids = [i for i in ids if i is not None]
         if not ids:
             return {}
@@ -631,9 +632,9 @@ class HybridRetriever:
             rows = self._ex(sql, tuple(ids) + tuple(params)).fetchall()
         except Exception:
             return {}
-        out: Dict[Any, Dict[str, Any]] = {}
+        out: dict[Any, dict[str, Any]] = {}
         for row in rows:
-            d: Dict[str, Any] = {"id": row[0], "content": row[1] or ""}
+            d: dict[str, Any] = {"id": row[0], "content": row[1] or ""}
             if extra_select and len(row) > 2:
                 d["prior"] = float(row[2] or 0.0)
             out[row[0]] = d
@@ -641,12 +642,12 @@ class HybridRetriever:
 
     def fuse(
         self,
-        lists: Dict[str, List[Tuple[Any, float]]],
-        docs: Dict[Any, Dict[str, Any]],
+        lists: dict[str, list[tuple[Any, float]]],
+        docs: dict[Any, dict[str, Any]],
         *,
         limit: int = 10,
-        weights: Optional[Dict[str, float]] = None,
-    ) -> List[HybridHit]:
+        weights: Optional[dict[str, float]] = None,
+    ) -> list[HybridHit]:
         """Reciprocal Rank Fusion over arbitrary ranked lists.
 
         ``lists`` maps a list name → ``[(doc_id, score)]`` in best-first order.
@@ -655,9 +656,9 @@ class HybridRetriever:
         """
         cfg = self.config
         weights = weights or {"bm25": cfg.weight_bm25, "vector": cfg.weight_vector}
-        ranks: Dict[str, Dict[Any, int]] = {}
-        sims: Dict[Any, float] = {}
-        union: List[Any] = []
+        ranks: dict[str, dict[Any, int]] = {}
+        sims: dict[Any, float] = {}
+        union: list[Any] = []
         seen = set()
         for name, pairs in lists.items():
             ranks[name] = {}
@@ -668,14 +669,14 @@ class HybridRetriever:
                 if did not in seen:
                     seen.add(did)
                     union.append(did)
-        hits: List[HybridHit] = []
+        hits: list[HybridHit] = []
         for did in union:
             doc = docs.get(did)
             if doc is None:
                 continue
             total = 0.0
-            contrib: Dict[str, float] = {}
-            ranks_out: Dict[str, Optional[int]] = {}
+            contrib: dict[str, float] = {}
+            ranks_out: dict[str, Optional[int]] = {}
             for name in lists:
                 r = ranks[name].get(did)
                 ranks_out[name] = r
@@ -719,7 +720,7 @@ class HybridRetriever:
         params: Sequence[Any] = (),
         prior_select: str = "",
         embed_missing: bool = True,
-    ) -> List[HybridHit]:
+    ) -> list[HybridHit]:
         """Hybrid search: fused BM25 + dense ranking over ``self.table``.
 
         ``prior_select`` is a SQL expression evaluated on the base table that
@@ -743,7 +744,7 @@ class HybridRetriever:
                     budget -= 1
         vec = self.vector_search(query, k, where=where, params=params)
 
-        ids: List[Any] = [d for d, _ in bm] + [d for d, _ in vec]
+        ids: list[Any] = [d for d, _ in bm] + [d for d, _ in vec]
         docs = self.fetch_docs(ids, where=where, params=params, extra_select=prior_select)
         # Corpus is small enough to scan? Then let the dense list consider every
         # filtered row, so semantic-only matches are not capped by candidate size.
@@ -769,9 +770,9 @@ class HybridRetriever:
         docs = self.fetch_docs([d for d, _ in bm], where=where, params=params)
         return self.fuse({"bm25": bm}, docs, limit=limit, weights={"bm25": 1.0})
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         knn = self._ensure_knn()
-        out: Dict[str, Any] = {
+        out: dict[str, Any] = {
             "available": True,
             "fts5": self._fts_supported(),
             "fts_table": self.fts_table,

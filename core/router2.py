@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 from .config import config
 
 # task type -> (preferred model keywords, needs_tools, wants_vision)
-TASK_PROFILES: Dict[str, Dict[str, Any]] = {
+TASK_PROFILES: dict[str, dict[str, Any]] = {
     "chat":        {"keywords": ("instruct", "chat", "8b", "7b", "small", "llama"), "tools": False, "vision": False},
     "code":        {"keywords": ("code", "coder", "deepseek", "qwen", "starcoder"), "tools": True, "vision": False},
     "reasoning":   {"keywords": ("reason", "thinking", "r1", "70b", "large", "o3", "o1"), "tools": True, "vision": False},
@@ -40,7 +40,7 @@ RESEARCH_HINTS = ("research", "find", "search", "sources", "cite", "latest", "ne
 class ModelRouter:
     def __init__(self, ollama_base_url: Optional[str] = None):
         self.ollama_base_url = ollama_base_url or config.ollama_base_url
-        self._provider_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"successes": 0, "failures": 0, "consecutive_failures": 0, "last_failure_ts": 0.0})
+        self._provider_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"successes": 0, "failures": 0, "consecutive_failures": 0, "last_failure_ts": 0.0})
 
     def record_outcome(self, provider: str, model: str, success: bool, latency_ms: Optional[float] = None) -> None:
         key = f"{provider}:{model}".lower()
@@ -86,8 +86,8 @@ class ModelRouter:
             score += 1
         return min(5, max(1, score))
 
-    def _available_workers(self) -> List[Dict[str, Any]]:
-        workers: List[Dict[str, Any]] = []
+    def _available_workers(self) -> list[dict[str, Any]]:
+        workers: list[dict[str, Any]] = []
         try:
             from .model_fleet import _available_workers
             workers = _available_workers(limit=32)
@@ -95,14 +95,14 @@ class ModelRouter:
             workers = []
         return workers
 
-    def _score_worker(self, w: Dict[str, Any], task_type: str, needs_tools: bool,
-                      wants_vision: bool, context_tokens: int) -> Tuple[float, str]:
+    def _score_worker(self, w: dict[str, Any], task_type: str, needs_tools: bool,
+                      wants_vision: bool, context_tokens: int) -> tuple[float, str]:
         provider = (w.get("provider") or "").lower()
         model = (w.get("model") or "").lower()
         profile = TASK_PROFILES.get(task_type, TASK_PROFILES["chat"])
         keywords = profile["keywords"]
         score = 0.0
-        reasons: List[str] = []
+        reasons: list[str] = []
 
         # free-first provider ordering
         order = {"ollama": 0, "groq": 1, "huggingface": 2, "hf": 2, "openrouter": 3, "mock": 0}
@@ -157,7 +157,7 @@ class ModelRouter:
         return score, ",".join(reasons)
 
     def rank(self, task_type: str, context_tokens: int = 100, needs_tools: bool = False,
-             wants_vision: bool = False) -> List[Dict[str, Any]]:
+             wants_vision: bool = False) -> list[dict[str, Any]]:
         profile = TASK_PROFILES.get(task_type, TASK_PROFILES["chat"])
         needs_tools = needs_tools or profile["tools"]
         wants_vision = wants_vision or profile["vision"]
@@ -170,8 +170,8 @@ class ModelRouter:
 
     def select(self, text: str, context_tokens: Optional[int] = None,
                needs_tools: bool = False, wants_vision: bool = False,
-               exclude_models: Optional[List[str]] = None,
-               task_type: Optional[str] = None) -> Dict[str, Any]:
+               exclude_models: Optional[list[str]] = None,
+               task_type: Optional[str] = None) -> dict[str, Any]:
         """Choose the best model for a single step from the given text."""
         task_type = task_type or self.classify_task(text)
         ctx = context_tokens or self.estimate_context_tokens(text)
@@ -207,7 +207,7 @@ class ModelRouter:
             "alternatives": [],
         }
 
-    def select_for_role(self, role: str, text: str, exclude_models: Optional[List[str]] = None) -> Dict[str, Any]:
+    def select_for_role(self, role: str, text: str, exclude_models: Optional[list[str]] = None) -> dict[str, Any]:
         """Select a capability-appropriate model for specific roles (coder, critic, verifier, architect)."""
         role_map = {
             "coder": "code",

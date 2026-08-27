@@ -1,8 +1,7 @@
 """Updater Tools - Free - Check for GitHub updates and show in dashboard and CLI"""
 
-from typing import Dict
 
-def check_update() -> Dict:
+def check_update() -> dict:
     """Check if update available from GitHub - shows update in dashboard and CLI - free"""
     try:
         from core.updater import get_updater_for_current_repo
@@ -12,7 +11,7 @@ def check_update() -> Dict:
     except Exception as e:
         return {"error": str(e), "update_available": False}
 
-def do_update() -> Dict:
+def do_update() -> dict:
     """Update from GitHub via git pull + pip install - like hermes update - free"""
     try:
         from core.updater import get_updater_for_current_repo
@@ -22,7 +21,7 @@ def do_update() -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def get_local_commit() -> Dict:
+def get_local_commit() -> dict:
     """Get local commit info"""
     try:
         from core.updater import get_updater_for_current_repo
@@ -31,7 +30,7 @@ def get_local_commit() -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def get_remote_commit() -> Dict:
+def get_remote_commit() -> dict:
     """Get remote latest commit from GitHub API - free, no API key for public repo"""
     try:
         from core.updater import get_updater_for_current_repo

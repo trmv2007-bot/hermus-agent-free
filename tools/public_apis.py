@@ -17,7 +17,8 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Optional
+from collections.abc import Iterable
 from urllib.request import Request, urlopen
 
 from core.config import config
@@ -40,7 +41,7 @@ def _clean_cell(value: str) -> str:
     return value.strip().strip("`").strip()
 
 
-def parse_public_apis_markdown(markdown: str) -> List[Dict[str, str]]:
+def parse_public_apis_markdown(markdown: str) -> list[dict[str, str]]:
     """Parse the five-column category tables in the upstream README.
 
     The parser intentionally ignores promotional tables and malformed rows.
@@ -48,7 +49,7 @@ def parse_public_apis_markdown(markdown: str) -> List[Dict[str, str]]:
     five cells makes those rows harmless while preserving the catalog data.
     """
     category = ""
-    entries: List[Dict[str, str]] = []
+    entries: list[dict[str, str]] = []
 
     for raw_line in markdown.splitlines():
         line = raw_line.strip()
@@ -91,11 +92,11 @@ def parse_public_apis_markdown(markdown: str) -> List[Dict[str, str]]:
 
 
 def build_catalog_payload(
-    entries: Iterable[Dict[str, str]],
+    entries: Iterable[dict[str, str]],
     *,
     source_commit: str = "",
     generated_at: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     apis = list(entries)
     categories = sorted({item["category"] for item in apis}, key=str.casefold)
     return {
@@ -133,18 +134,18 @@ class PublicAPICatalog:
         self.bundled_path = Path(bundled_path or BUNDLED_CATALOG)
         self.cache_path = Path(cache_path or RUNTIME_CACHE)
         self.source_url = source_url
-        self._payload: Optional[Dict[str, Any]] = None
+        self._payload: Optional[dict[str, Any]] = None
         self._loaded_from = ""
 
     @staticmethod
-    def _read_json(path: Path) -> Optional[Dict[str, Any]]:
+    def _read_json(path: Path) -> Optional[dict[str, Any]]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             return payload if _valid_payload(payload) else None
         except (OSError, ValueError, TypeError):
             return None
 
-    def load(self, prefer_cache: bool = True) -> Dict[str, Any]:
+    def load(self, prefer_cache: bool = True) -> dict[str, Any]:
         if self._payload is not None:
             return self._payload
 
@@ -166,7 +167,7 @@ class PublicAPICatalog:
         self._loaded_from = "empty"
         return self._payload
 
-    def refresh(self, timeout: int = 20) -> Dict[str, Any]:
+    def refresh(self, timeout: int = 20) -> dict[str, Any]:
         """Fetch and parse upstream README, then atomically update local cache."""
         try:
             sources = [(self.source_url, "text/plain")]
@@ -175,7 +176,7 @@ class PublicAPICatalog:
                 # GitHub contents API can return the same file as raw text.
                 sources.append((SOURCE_CONTENTS_API, "application/vnd.github.raw+json"))
 
-            entries: List[Dict[str, str]] = []
+            entries: list[dict[str, str]] = []
             download_errors = []
             for url, accept in sources:
                 try:
@@ -268,7 +269,7 @@ class PublicAPICatalog:
         return requested in {"", "any", "all"} or value.casefold() == requested
 
     @staticmethod
-    def _score(item: Dict[str, str], query: str, terms: List[str]) -> int:
+    def _score(item: dict[str, str], query: str, terms: list[str]) -> int:
         if not terms:
             return 0
         name = item["name"].casefold()
@@ -307,7 +308,7 @@ class PublicAPICatalog:
         cors: str = "any",
         limit: int = 10,
         refresh: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         refresh_result = self.refresh() if refresh else None
         payload = self.load()
         limit = max(1, min(int(limit), 50))
@@ -341,7 +342,7 @@ class PublicAPICatalog:
             )
             results.append(result)
 
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "success": True,
             "query": query,
             "filters": {
@@ -366,9 +367,9 @@ class PublicAPICatalog:
             response["refresh"] = refresh_result
         return response
 
-    def categories(self) -> Dict[str, Any]:
+    def categories(self) -> dict[str, Any]:
         payload = self.load()
-        counts: Dict[str, Dict[str, int]] = {}
+        counts: dict[str, dict[str, int]] = {}
         for item in payload.get("apis", []):
             stats = counts.setdefault(
                 item["category"],
@@ -407,7 +408,7 @@ def public_api_search(
     cors: str = "any",
     limit: int = 10,
     refresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Find APIs by task/name and free-use metadata."""
     return public_api_catalog.search(
         query=query,
@@ -420,12 +421,12 @@ def public_api_search(
     )
 
 
-def public_api_categories() -> Dict[str, Any]:
+def public_api_categories() -> dict[str, Any]:
     """List catalog categories and useful free/HTTPS/CORS counts."""
     return public_api_catalog.categories()
 
 
-def public_api_refresh(timeout: int = 20) -> Dict[str, Any]:
+def public_api_refresh(timeout: int = 20) -> dict[str, Any]:
     """Refresh the untracked runtime catalog from GitHub."""
     return public_api_catalog.refresh(timeout=timeout)
 

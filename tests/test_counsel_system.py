@@ -8,8 +8,6 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-import json
-import shutil
 
 from core.config import config
 
@@ -37,7 +35,7 @@ def test_governor_difficulty():
 
 
 def test_plan_scaffold():
-    from core.reasoning.scaffold import Plan, PlanBuilder, PlanStep
+    from core.reasoning.scaffold import Plan, PlanBuilder
 
     builder = PlanBuilder(model="mock/mock")
     plan = builder.build_plan("Build a budgeting web app with tests and a security check", session_id="test_plan", difficulty=4)

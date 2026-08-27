@@ -5,7 +5,7 @@ the plan and recent reasoning. Default trigger is 90% of the budget.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 def _len(text: Any) -> int:
@@ -13,11 +13,11 @@ def _len(text: Any) -> int:
 
 
 def compact_messages(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
     budget_chars: int = 24_000,
     keep_recent: int = 6,
     tool_limit: int = 1200,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Return compacted messages plus a report.
 
     System + last ``keep_recent`` turns stay intact except tool payloads
@@ -30,7 +30,7 @@ def compact_messages(
     if total < int(budget_chars * 0.9):
         return messages, {"compacted": False, "chars": total, "budget": budget_chars}
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     n = len(messages)
     cutoff = max(1, n - keep_recent)
     dropped = 0

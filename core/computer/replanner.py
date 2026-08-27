@@ -10,13 +10,11 @@ while replanning modifies the plan structure itself.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
-from .planner import ComputerPlanner, PlanNode, TaskGraph
+from .planner import PlanNode, TaskGraph
 from .world_state import WorldState
 
 
@@ -46,14 +44,14 @@ class PlanDelta:
     strategy: ReplanStrategy
     reason: ReplanReason
     affected_state: str
-    new_nodes: List[PlanNode] = field(default_factory=list)
-    nodes_to_remove: List[str] = field(default_factory=list)
-    nodes_to_reorder: List[str] = field(default_factory=list)
+    new_nodes: list[PlanNode] = field(default_factory=list)
+    nodes_to_remove: list[str] = field(default_factory=list)
+    nodes_to_reorder: list[str] = field(default_factory=list)
     confidence: float = 0.0
     explanation: str = ""
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "strategy": self.strategy.value,
             "reason": self.reason.value,
@@ -73,13 +71,13 @@ class ReplanContext:
     original_task: str
     current_state: str
     expected_state: str
-    observed_state: Dict[str, Any]
+    observed_state: dict[str, Any]
     world_state: WorldState
-    plan_so_far: List[Dict[str, Any]]
-    remaining_plan: List[Dict[str, Any]]
+    plan_so_far: list[dict[str, Any]]
+    remaining_plan: list[dict[str, Any]]
     failure_reason: Optional[str] = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "original_task": self.original_task,
             "current_state": self.current_state,
@@ -112,7 +110,7 @@ class AdaptiveReplanner:
         self.llm = llm
         self.max_inserted_steps = max_inserted_steps
         self.replan_threshold = replan_threshold  # Confidence below which to replan
-        self.replan_history: List[PlanDelta] = []
+        self.replan_history: list[PlanDelta] = []
     
     def should_replan(
         self,
@@ -149,9 +147,9 @@ class AdaptiveReplanner:
     def analyze_mismatch(
         self,
         expected: str,
-        observed: Dict[str, Any],
+        observed: dict[str, Any],
         world_state: WorldState,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Analyze why expected state doesn't match observed state.
         
         Returns structured analysis of:
@@ -213,7 +211,7 @@ class AdaptiveReplanner:
     def create_delta(
         self,
         context: ReplanContext,
-        analysis: Dict[str, Any],
+        analysis: dict[str, Any],
     ) -> PlanDelta:
         """Create a plan modification based on the analysis.
         
@@ -247,7 +245,7 @@ class AdaptiveReplanner:
     def _delta_for_dialog(
         self,
         context: ReplanContext,
-        corrections: List[str],
+        corrections: list[str],
     ) -> PlanDelta:
         """Create delta for handling unexpected dialog."""
         # Find appropriate dismiss action
@@ -293,7 +291,7 @@ class AdaptiveReplanner:
     def _delta_for_window_switch(
         self,
         context: ReplanContext,
-        analysis: Dict[str, Any],
+        analysis: dict[str, Any],
     ) -> PlanDelta:
         """Create delta for wrong window."""
         window_name = self._extract_window_name(context.expected_state) or "the correct window"
@@ -340,7 +338,7 @@ class AdaptiveReplanner:
     def _delta_for_target_update(
         self,
         context: ReplanContext,
-        analysis: Dict[str, Any],
+        analysis: dict[str, Any],
     ) -> PlanDelta:
         """Create delta for when expected target isn't visible."""
         # This generates a step that re-observes and re-targets
@@ -378,7 +376,7 @@ class AdaptiveReplanner:
     def _delta_for_generic_insert(
         self,
         context: ReplanContext,
-        analysis: Dict[str, Any],
+        analysis: dict[str, Any],
     ) -> PlanDelta:
         """Create a generic observation insert."""
         nodes = [
@@ -563,7 +561,7 @@ class AdaptiveReplanner:
         self,
         context: ReplanContext,
         max_deltas: int = 3,
-    ) -> Tuple[Optional[TaskGraph], List[PlanDelta]]:
+    ) -> tuple[Optional[TaskGraph], list[PlanDelta]]:
         """Perform adaptive replanning.
         
         Args:
@@ -628,7 +626,7 @@ class AdaptiveReplanner:
         
         return graph, deltas
     
-    def get_replan_history(self) -> List[Dict[str, Any]]:
+    def get_replan_history(self) -> list[dict[str, Any]]:
         """Get history of replanning decisions."""
         return [d.to_dict() for d in self.replan_history]
     

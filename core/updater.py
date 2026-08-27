@@ -2,9 +2,6 @@
 
 import subprocess
 import requests
-from pathlib import Path
-from typing import Dict
-from datetime import datetime
 import os
 
 from .config import config
@@ -18,7 +15,7 @@ class Updater:
         self.repo_url = f"https://github.com/{repo_owner}/{repo_name}"
         self.api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
 
-    def get_local_commit(self) -> Dict:
+    def get_local_commit(self) -> dict:
         """Get local current commit via git rev-parse HEAD"""
         try:
             result = subprocess.run(
@@ -54,7 +51,7 @@ class Updater:
         except Exception as e:
             return {"commit": "unknown", "error": str(e)}
 
-    def get_remote_commit(self) -> Dict:
+    def get_remote_commit(self) -> dict:
         """Get remote latest commit via GitHub API - free, no API key needed for public repos, but private needs token"""
         try:
             # Try via git ls-remote first (works with token if private)
@@ -95,7 +92,7 @@ class Updater:
         except Exception as e:
             return {"error": str(e)}
 
-    def check_for_updates(self) -> Dict:
+    def check_for_updates(self) -> dict:
         """Check if local is behind remote - shows update in dashboard and CLI"""
         local = self.get_local_commit()
         remote = self.get_remote_commit()
@@ -153,7 +150,7 @@ class Updater:
                     cwd=str(config.resolve_path("."))
                 )
                 behind_count = int(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip().isdigit() else 1
-            except:
+            except Exception:
                 behind_count = 1  # At least 1 behind
 
             return {
@@ -170,7 +167,7 @@ class Updater:
                 "action": "Run 'hermus update' or 'git pull' to update, shows in dashboard and CLI"
             }
 
-    def update(self) -> Dict:
+    def update(self) -> dict:
         """Update from GitHub - pulls latest and reinstalls dependencies - like hermes update - free"""
         try:
             # Git pull
@@ -230,6 +227,6 @@ def get_updater_for_current_repo() -> Updater:
                 owner = m.group(1)
                 repo = m.group(2).replace('.git','')
                 return Updater(repo_owner=owner, repo_name=repo)
-    except:
+    except Exception:
         pass
     return Updater()

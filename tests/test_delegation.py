@@ -38,7 +38,6 @@ from core.delegation import (  # noqa: E402
     ERR_INTERNAL,
     ERR_METHOD_NOT_FOUND,
     Delegation,
-    DelegationNode,
     aggregate_results,
     normalize_result,
     plan_workstreams,

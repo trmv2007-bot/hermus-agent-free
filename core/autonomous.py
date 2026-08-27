@@ -15,7 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 
 class Phase(str, Enum):
@@ -41,17 +42,17 @@ class Step:
 @dataclass
 class TaskReport:
     task: str
-    phases: List[str] = field(default_factory=list)
-    steps: List[Step] = field(default_factory=list)
+    phases: list[str] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
     repairs: int = 0
     verified: bool = False
     status: str = "pending"
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
     final_answer: str = ""
     started: str = field(default_factory=lambda: datetime.now().isoformat())
     finished: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "phases": self.phases,
@@ -76,7 +77,7 @@ class Verifier:
                      "command not found", "refused", "timeout", "not running",
                      "no api key", "not installed", "permission denied", "denied")
 
-    def verify(self, task: str, result: Any) -> Dict[str, Any]:
+    def verify(self, task: str, result: Any) -> dict[str, Any]:
         text = str(result or "").strip()
         low = text.lower()
         problems = [m for m in self.ERROR_MARKERS if m in low]
@@ -91,7 +92,7 @@ class Verifier:
 class Diagnoser:
     """Default rule-based diagnoser: surfaces the failing marker as a hint."""
 
-    def diagnose(self, task: str, result: Any, verification: Dict[str, Any]) -> Dict[str, Any]:
+    def diagnose(self, task: str, result: Any, verification: dict[str, Any]) -> dict[str, Any]:
         problems = verification.get("problems") or []
         hint = f"Previous attempt failed ({', '.join(problems) or 'unsatisfactory result'})."
         return {"hint": hint, "retry": True}
@@ -103,7 +104,7 @@ class AutonomousRunner:
         executor: Optional[Callable[[str], str]] = None,
         verifier: Optional[Any] = None,
         diagnoser: Optional[Any] = None,
-        planner: Optional[Callable[[str], List[str]]] = None,
+        planner: Optional[Callable[[str], list[str]]] = None,
         max_repairs: int = 2,
     ):
         self.executor = executor or (lambda step: f"done: {step}")
@@ -113,7 +114,7 @@ class AutonomousRunner:
         self.max_repairs = max_repairs
 
     @staticmethod
-    def _default_plan(task: str) -> List[str]:
+    def _default_plan(task: str) -> list[str]:
         return [task]
 
     def _call_executor(self, step: Step) -> str:

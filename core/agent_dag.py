@@ -7,13 +7,12 @@ and cycle prevention.
 from __future__ import annotations
 
 import collections
-import inspect
-import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Optional
+from collections.abc import Callable
 
 
 class DAGNodeStatus(str, Enum):
@@ -26,7 +25,7 @@ class DAGNodeStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-def _safe_serialize(obj: Any, seen: Optional[Set[int]] = None) -> Any:
+def _safe_serialize(obj: Any, seen: Optional[set[int]] = None) -> Any:
     if seen is None:
         seen = set()
     obj_id = id(obj)
@@ -60,11 +59,11 @@ class DAGNode:
     id: str
     role: str
     goal: str
-    dependencies: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
     status: str = DAGNodeStatus.PENDING.value
-    inputs: Dict[str, Any] = field(default_factory=dict)
-    outputs: Dict[str, Any] = field(default_factory=dict)
-    artifacts: List[str] = field(default_factory=list)
+    inputs: dict[str, Any] = field(default_factory=dict)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    artifacts: list[str] = field(default_factory=list)
     assigned_model: Optional[str] = None
     retries: int = 0
     max_retries: int = 2
@@ -73,7 +72,7 @@ class DAGNode:
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "role": self.role,
@@ -93,7 +92,7 @@ class DAGNode:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> DAGNode:
+    def from_dict(cls, data: dict[str, Any]) -> DAGNode:
         return cls(
             id=data["id"],
             role=data["role"],
@@ -118,7 +117,7 @@ class AgentDAG:
 
     def __init__(self, name: str = "Agent Team Workflow"):
         self.name = name
-        self.nodes: Dict[str, DAGNode] = {}
+        self.nodes: dict[str, DAGNode] = {}
         self.created_at = datetime.now().isoformat()
 
     def add_node(
@@ -126,8 +125,8 @@ class AgentDAG:
         node_id: str,
         role: str,
         goal: str,
-        dependencies: Optional[List[str]] = None,
-        inputs: Optional[Dict[str, Any]] = None,
+        dependencies: Optional[list[str]] = None,
+        inputs: Optional[dict[str, Any]] = None,
         assigned_model: Optional[str] = None,
         max_retries: int = 2,
     ) -> DAGNode:
@@ -160,9 +159,9 @@ class AgentDAG:
         except ValueError:
             return False
 
-    def topological_sort(self) -> List[DAGNode]:
-        in_degree: Dict[str, int] = {nid: 0 for nid in self.nodes}
-        adj: Dict[str, List[str]] = collections.defaultdict(list)
+    def topological_sort(self) -> list[DAGNode]:
+        in_degree: dict[str, int] = {nid: 0 for nid in self.nodes}
+        adj: dict[str, list[str]] = collections.defaultdict(list)
 
         for nid, node in self.nodes.items():
             for dep in node.dependencies:
@@ -172,7 +171,7 @@ class AgentDAG:
                 in_degree[nid] += 1
 
         queue = collections.deque([nid for nid, deg in in_degree.items() if deg == 0])
-        ordered: List[DAGNode] = []
+        ordered: list[DAGNode] = []
 
         while queue:
             curr = queue.popleft()
@@ -187,8 +186,8 @@ class AgentDAG:
 
         return ordered
 
-    def get_ready_nodes(self) -> List[DAGNode]:
-        ready: List[DAGNode] = []
+    def get_ready_nodes(self) -> list[DAGNode]:
+        ready: list[DAGNode] = []
         for node in self.nodes.values():
             if node.status in (DAGNodeStatus.PENDING.value, DAGNodeStatus.READY.value):
                 deps_satisfied = all(
@@ -209,9 +208,9 @@ class AgentDAG:
 
     def execute_dag(
         self,
-        node_executor: Callable[[Any, Dict[str, Any]], Dict[str, Any]],
+        node_executor: Callable[[Any, dict[str, Any]], dict[str, Any]],
         max_rounds: int = 50,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         self.validate()
         rounds = 0
 
@@ -227,7 +226,7 @@ class AgentDAG:
                 node.started_at = datetime.now().isoformat()
                 t0 = time.time()
 
-                parent_context: Dict[str, Any] = {}
+                parent_context: dict[str, Any] = {}
                 for dep in node.dependencies:
                     parent = self.nodes[dep]
                     parent_context[dep] = {
@@ -282,7 +281,7 @@ class AgentDAG:
             "nodes": {nid: n.to_dict() for nid, n in self.nodes.items()},
         }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "created_at": self.created_at,
@@ -290,7 +289,7 @@ class AgentDAG:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> AgentDAG:
+    def from_dict(cls, data: dict[str, Any]) -> AgentDAG:
         dag = cls(name=data.get("name", "Agent DAG"))
         dag.created_at = data.get("created_at", datetime.now().isoformat())
         nodes_data = data.get("nodes", {})

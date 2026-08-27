@@ -8,15 +8,13 @@ from __future__ import annotations
 import ast
 import difflib
 import json
-import os
 import shutil
 import subprocess
-import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .artifact_manager import artifact_manager
 from .critic import critic_manager
@@ -43,9 +41,9 @@ class ToolchainInfo:
     build_tool: Optional[str] = None  # npm, cargo, gradle, pip, go
     test_runner: Optional[str] = None  # pytest, jest, cargo test, go test
     linter: Optional[str] = None  # ruff, eslint, flake8
-    entrypoints: List[str] = field(default_factory=list)
+    entrypoints: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -145,19 +143,19 @@ def detect_toolchain(root_dir: Path) -> ToolchainInfo:
 class SWEResult:
     success: bool
     task: str
-    toolchain: Dict[str, Any]
-    phases_executed: List[str] = field(default_factory=list)
-    files_modified: List[str] = field(default_factory=list)
+    toolchain: dict[str, Any]
+    phases_executed: list[str] = field(default_factory=list)
+    files_modified: list[str] = field(default_factory=list)
     diff: str = ""
-    test_results: Dict[str, Any] = field(default_factory=dict)
-    verification: Dict[str, Any] = field(default_factory=dict)
-    critic_review: Dict[str, Any] = field(default_factory=dict)
-    artifacts: List[str] = field(default_factory=list)
+    test_results: dict[str, Any] = field(default_factory=dict)
+    verification: dict[str, Any] = field(default_factory=dict)
+    critic_review: dict[str, Any] = field(default_factory=dict)
+    artifacts: list[str] = field(default_factory=list)
     change_report: str = ""
     repairs_made: int = 0
     checkpoint_id: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -182,12 +180,12 @@ class SoftwareEngineerMode:
         self,
         task: str,
         workspace_dir: Optional[Path] = None,
-        coder_fn: Optional[Callable[[str, Dict[str, Any]], Dict[str, str]]] = None,
+        coder_fn: Optional[Callable[[str, dict[str, Any]], dict[str, str]]] = None,
         max_repairs: int = 3,
     ) -> SWEResult:
         root = workspace_dir or self.workspace_root
-        phases: List[str] = []
-        files_modified: List[str] = []
+        phases: list[str] = []
+        files_modified: list[str] = []
         repairs = 0
 
         # Phase 1: INSPECT
@@ -215,7 +213,7 @@ class SoftwareEngineerMode:
 
         # Phase 3 & 4: BUILD & TEST Loop with REPAIRS
         test_success = False
-        test_details: Dict[str, Any] = {}
+        test_details: dict[str, Any] = {}
 
         while repairs <= max_repairs:
             phases.append(SWEPhase.BUILD.value)

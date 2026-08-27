@@ -27,7 +27,8 @@ import json
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Optional
+from collections.abc import Callable, Iterable, Sequence
 
 BANDS = ("hot", "warm", "cold", "archived")
 
@@ -58,7 +59,7 @@ def age_days(ts: Any, now: Optional[datetime] = None) -> float:
     return max(0.0, (now - dt).total_seconds() / 86400.0)
 
 
-def access_count_of(row: Dict[str, Any]) -> float:
+def access_count_of(row: dict[str, Any]) -> float:
     """Unified access count: explicit accesses vs the legacy dedupe counter."""
     meta = row.get("metadata") or {}
     if isinstance(meta, str):
@@ -87,9 +88,9 @@ class DecayReport:
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS
     age_days: float = 0.0
     band: str = "hot"
-    reasons: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "decay": round(self.decay, 4),
             "recency": round(self.recency, 4),
@@ -149,7 +150,7 @@ class MemoryDecay:
 
     def evaluate(
         self,
-        row: Dict[str, Any],
+        row: dict[str, Any],
         now: Optional[datetime] = None,
         *,
         access_count: Optional[float] = None,
@@ -169,7 +170,7 @@ class MemoryDecay:
         hl = self.effective_half_life(float(acc or 0.0))
         rec = self.recency_factor(row.get("ts"), hl, now)
         freq = self.frequency_factor(float(acc or 0.0), last, now)
-        reasons: List[str] = []
+        reasons: list[str] = []
 
         if bool(row.get("pinned") or meta.get("pinned")):
             reasons.append("pinned: decay bypassed")
@@ -194,7 +195,7 @@ class MemoryDecay:
         band = self.band(decay)
         return DecayReport(decay, rec, freq, hl, age_days(row.get("ts"), now), band, reasons)
 
-    def score(self, row: Dict[str, Any], **kw) -> float:
+    def score(self, row: dict[str, Any], **kw) -> float:
         return self.evaluate(row, **kw).decay
 
     def band(self, decay: float) -> str:
@@ -207,13 +208,13 @@ class MemoryDecay:
         return "archived"
 
     # -------------------------------------------------------------------- policy
-    def plan(self, row: Dict[str, Any], now: Optional[datetime] = None, *,
+    def plan(self, row: dict[str, Any], now: Optional[datetime] = None, *,
              archive_below: float = 0.08, purge_below: float = 0.02,
              protect_importance: float = 8.0, working_ttl_hours: float = DEFAULT_WORKING_TTL_HOURS,
-             consolidate_after: int = 3) -> Tuple[str, List[str]]:
+             consolidate_after: int = 3) -> tuple[str, list[str]]:
         """Decide a lifecycle action: keep | decay | archive | purge | promote."""
         rep = self.evaluate(row, now)
-        actions: List[str] = []
+        actions: list[str] = []
         kind = row.get("kind") or ""
         importance = float(row.get("importance") or 5.0)
         acc = access_count_of(row)
@@ -235,7 +236,7 @@ class MemoryDecay:
             return "archive", actions + [f"decay {rep.decay:.3f} below archive threshold {archive_below}"]
         return ("decay", actions + [f"decay {rep.decay:.3f} applied to recall score"])
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "half_life_days": self.half_life_days,
             "access_half_life_days": self.access_half_life_days,
@@ -263,7 +264,7 @@ def value_density(score: float, tokens: int) -> float:
 
 
 def fit_to_budget(
-    items: Sequence[Dict[str, Any]],
+    items: Sequence[dict[str, Any]],
     *,
     budget_tokens: int,
     text_key: str = "content",
@@ -272,8 +273,8 @@ def fit_to_budget(
     always_keep_key: str = "pinned",
     min_items: int = 1,
     token_counter: Optional[Callable[[str], int]] = None,
-    prefix: Optional[Callable[[Dict[str, Any]], str]] = None,
-) -> Dict[str, Any]:
+    prefix: Optional[Callable[[dict[str, Any]], str]] = None,
+) -> dict[str, Any]:
     """Pack ranked memories into a token budget by value density.
 
     Unlike "take the top K", this drops a long low-value memory in favour of a
@@ -300,7 +301,7 @@ def fit_to_budget(
 
     kept_idx: set = set()
     used = 0
-    per_kind: Dict[str, int] = {}
+    per_kind: dict[str, int] = {}
 
     def try_take(idx: int) -> bool:
         nonlocal used
@@ -348,7 +349,7 @@ def fit_to_budget(
     kept = [decorated[i] for i in sorted(kept_idx)]
     evicted = [d for i, d in enumerate(decorated) if i not in kept_idx]
 
-    lines: List[str] = []
+    lines: list[str] = []
     for d in kept:
         it = d["item"]
         pre = prefix(it) if prefix else f"[{it.get('kind', 'memory')}] ({round(float(it.get(score_key) or 0.0), 2)})"
@@ -366,8 +367,8 @@ def fit_to_budget(
     }
 
 
-def consolidate(rows: Iterable[Dict[str, Any]], *, similarity: float = 0.55,
-                text_key: str = "content") -> List[List[Dict[str, Any]]]:
+def consolidate(rows: Iterable[dict[str, Any]], *, similarity: float = 0.55,
+                text_key: str = "content") -> list[list[dict[str, Any]]]:
     """Cluster near-duplicate memories (token Jaccard) for consolidation.
 
     Returns groups of size >= 2, biggest-importance-first inside a group.
@@ -378,11 +379,11 @@ def consolidate(rows: Iterable[Dict[str, Any]], *, similarity: float = 0.55,
     except Exception:  # pragma: no cover - stdlib fallback
         import re as _re
 
-        def tokenize(t: str) -> List[str]:  # type: ignore[misc]
+        def tokenize(t: str) -> list[str]:  # type: ignore[misc]
             return _re.findall(r"[a-z0-9]+", (t or "").lower())
 
-    groups: List[List[Dict[str, Any]]] = []
-    sigs: List[set] = []
+    groups: list[list[dict[str, Any]]] = []
+    sigs: list[set] = []
     for r in sorted(rows, key=lambda x: float(x.get("importance") or 0.0), reverse=True):
         toks = set(tokenize(r.get(text_key) or ""))
         if not toks:

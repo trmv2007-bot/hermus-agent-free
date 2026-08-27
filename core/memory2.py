@@ -32,7 +32,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .config import config
 
@@ -203,7 +203,7 @@ class MemoryStore:
             try:
                 from .embeddings import embedding_store
 
-                def embedder(text: str, _store=embedding_store) -> List[float]:
+                def embedder(text: str, _store=embedding_store) -> list[float]:
                     return _store.embed(text)
 
                 vectorizer = str(getattr(embedding_store, "model", "embed"))
@@ -263,11 +263,11 @@ class MemoryStore:
         project: Optional[str] = None,
         importance: float = 5.0,
         success: Optional[bool] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         session: Optional[str] = None,
         ttl_hours: Optional[float] = None,
         pinned: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if kind not in KINDS:
             return {"success": False, "error": f"unknown kind '{kind}' (choose {KINDS})"}
         content = (content or "").strip()
@@ -390,7 +390,7 @@ class MemoryStore:
             conn.commit()
         return True
 
-    def record_access(self, memory_ids: List[int], query: str = "", event: str = "recall") -> None:
+    def record_access(self, memory_ids: list[int], query: str = "", event: str = "recall") -> None:
         """Close the loop: what gets used stays fresh, what doesn't decays."""
         ids = [int(i) for i in (memory_ids or []) if i is not None]
         if not ids:
@@ -421,7 +421,7 @@ class MemoryStore:
         project: Optional[str] = None,
         limit: int = 1000,
         include_archived: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         q = "SELECT * FROM memories"
         conds, args = [], []
         if kind:
@@ -443,13 +443,13 @@ class MemoryStore:
             rows = [dict(r) for r in cur.fetchall()]
         return rows
 
-    def get(self, memory_id: int) -> Optional[Dict[str, Any]]:
+    def get(self, memory_id: int) -> Optional[dict[str, Any]]:
         with self._lock:
             cur = self.conn().execute("SELECT * FROM memories WHERE id = ?", (int(memory_id),))
             row = cur.fetchone()
         return dict(row) if row else None
 
-    def access_log(self, memory_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+    def access_log(self, memory_id: int, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             cur = self.conn().execute(
                 "SELECT * FROM memory_access WHERE memory_id = ? ORDER BY id DESC LIMIT ?",
@@ -457,7 +457,7 @@ class MemoryStore:
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def tombstones(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def tombstones(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock:
             cur = self.conn().execute(
                 "SELECT * FROM memory_tombstones ORDER BY id DESC LIMIT ?", (int(limit),)
@@ -469,7 +469,7 @@ class MemoryStore:
         with self._lock:
             return int(self.conn().execute(sql).fetchone()[0])
 
-    def index_stats(self) -> Dict[str, Any]:
+    def index_stats(self) -> dict[str, Any]:
         r = self.retriever()
         return r.stats() if r is not None else {"available": False}
 
@@ -508,9 +508,9 @@ class MemoryScorer:
 
     def score(
         self,
-        memory: Dict[str, Any],
+        memory: dict[str, Any],
         query: str,
-        user_preferences: Optional[Dict[str, Any]] = None,
+        user_preferences: Optional[dict[str, Any]] = None,
         now: Optional[datetime] = None,
     ) -> float:
         meta = memory.get("metadata") or {}
@@ -538,7 +538,7 @@ class MemoryScorer:
             success_signal = 1.0 if bool(success) else 0.2
         pref = 0.0
         if user_preferences:
-            for k, v in (user_preferences or {}).items():
+            for _k, v in (user_preferences or {}).items():
                 if isinstance(v, str) and _overlap(query, v) > 0.3:
                     pref += self.preference_bonus / 10.0
                 elif isinstance(v, list):
@@ -571,7 +571,7 @@ class MemoryScorer:
                 pass
         return round(raw, 4)
 
-    def decay_report(self, memory: Dict[str, Any], now: Optional[datetime] = None) -> Dict[str, Any]:
+    def decay_report(self, memory: dict[str, Any], now: Optional[datetime] = None) -> dict[str, Any]:
         if self.decay is None:
             return {"decay": 1.0, "band": "hot", "reasons": ["decay engine unavailable"]}
         return self.decay.evaluate(memory, now).to_dict()
@@ -590,7 +590,7 @@ class Memory2:
     def hybrid_enabled(self) -> bool:
         return bool(getattr(config, "memory_hybrid_enabled", True)) and self.store.retriever() is not None
 
-    def remember(self, kind: str, content: str, **kwargs) -> Dict[str, Any]:
+    def remember(self, kind: str, content: str, **kwargs) -> dict[str, Any]:
         return self.store.remember(kind, content, **kwargs)
 
     # ----------------------------------------------------------------- lexical
@@ -598,11 +598,11 @@ class Memory2:
         self,
         query: str,
         project: Optional[str] = None,
-        kinds: Optional[List[str]] = None,
+        kinds: Optional[list[str]] = None,
         limit: int = 10,
-        user_preferences: Optional[Dict[str, Any]] = None,
+        user_preferences: Optional[dict[str, Any]] = None,
         record_access: bool = True,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         results = []
         now = datetime.now()
         for kind in kinds or KINDS:
@@ -634,12 +634,12 @@ class Memory2:
         self,
         query: str,
         project: Optional[str] = None,
-        kinds: Optional[List[str]] = None,
+        kinds: Optional[list[str]] = None,
         limit: int = 10,
         k_rrf: int = None,
-        user_preferences: Optional[Dict[str, Any]] = None,
+        user_preferences: Optional[dict[str, Any]] = None,
         record_access: bool = True,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Reciprocal Rank Fusion over BM25 (FTS5) + dense vector candidate lists.
 
         Falls back to lexical scored recall when FTS5, embeddings, or
@@ -691,7 +691,7 @@ class Memory2:
             return out
 
         now = datetime.now()
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for h in hits:
             mem = self.store.get(h.id) or {}
             if not mem:
@@ -729,7 +729,7 @@ class Memory2:
                 pass
         return out
 
-    def explain(self, query: str, limit: int = 5, **kw) -> Dict[str, Any]:
+    def explain(self, query: str, limit: int = 5, **kw) -> dict[str, Any]:
         """Diagnostic view of why each memory ranked where it did."""
         hits = self.hybrid_recall(query, limit=limit, record_access=False, **kw)
         return {
@@ -761,7 +761,7 @@ class Memory2:
         consolidate: bool = True,
         dry_run: bool = False,
         limit: int = 5000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Apply the decay lifecycle: decay → archive → purge → consolidate.
 
         Run this on a schedule (the gateway does it hourly) so stale context
@@ -880,14 +880,14 @@ class Memory2:
         query: str = "",
         reason: str = "manual",
         limit: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Tombstone memories so recall stops surfacing them.
 
         By id, or by a `query` (hybrid-matched, so "that postgres note" finds the
         row) optionally narrowed with `kind`. Tombstoned rows stay in the audit
         trail and are excluded from every read path.
         """
-        ids: List[int] = []
+        ids: list[int] = []
         if memory_id is not None:
             ids = [int(memory_id)]
         else:
@@ -909,7 +909,7 @@ class Memory2:
             "reason": reason,
         }
 
-    def pin(self, memory_id: int, pinned: bool = True) -> Dict[str, Any]:
+    def pin(self, memory_id: int, pinned: bool = True) -> dict[str, Any]:
         """Pin (or unpin) a memory: exempt from decay, eviction and sweep."""
         ok = False
         try:
@@ -918,7 +918,7 @@ class Memory2:
             ok = False
         return {"success": ok, "id": int(memory_id), "pinned": bool(pinned)}
 
-    def compact_working_memory(self, max_age_hours: int = 48) -> Dict[str, Any]:
+    def compact_working_memory(self, max_age_hours: int = 48) -> dict[str, Any]:
         """Prune expired short-lived working memory records older than max_age_hours."""
         cutoff_dt = datetime.now() - timedelta(hours=max_age_hours)
         cutoff = cutoff_dt.isoformat(timespec="seconds")
@@ -949,7 +949,7 @@ class Memory2:
         per_kind_cap: int = 2,
         project: Optional[str] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Ranked memories + the eviction report (what got dropped and why).
 
         This is the object the agent loop should use: the text goes into the
@@ -1019,7 +1019,7 @@ class Memory2:
         ).get("text", "")
 
     # ------------------------------------------------------------------- ops
-    def reindex(self) -> Dict[str, Any]:
+    def reindex(self) -> dict[str, Any]:
         """Rebuild FTS + vector indexes (after a backend/model switch)."""
         r = self.store.retriever()
         if r is None:
@@ -1029,9 +1029,9 @@ class Memory2:
         res["fts_rows"] = self.store.count(include_archived=True)
         return res
 
-    def stats(self) -> Dict[str, Any]:
-        by_kind: Dict[str, int] = {}
-        bands: Dict[str, int] = {}
+    def stats(self) -> dict[str, Any]:
+        by_kind: dict[str, int] = {}
+        bands: dict[str, int] = {}
         with self.store._lock:
             conn = self.store.conn()
             for row in conn.execute("SELECT kind, COUNT(*) c FROM memories WHERE archived=0 GROUP BY kind"):

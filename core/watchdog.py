@@ -13,44 +13,45 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
 
 class Watchdog:
     def __init__(self):
-        self._fixes: List[Tuple[re.Pattern, Callable[[str], Dict[str, Any]], str]] = []
+        self._fixes: list[tuple[re.Pattern, Callable[[str], dict[str, Any]], str]] = []
         self.diagnoser: Optional[Callable[[str], str]] = None
         self.tester: Optional[Callable[[], bool]] = None
         self.rollbacker: Optional[Callable[[], None]] = None
-        self.history: List[Dict[str, Any]] = []
+        self.history: list[dict[str, Any]] = []
         self._register_defaults()
 
-    def register_fix(self, pattern: str, fix_fn: Callable[[str], Dict[str, Any]],
+    def register_fix(self, pattern: str, fix_fn: Callable[[str], dict[str, Any]],
                      description: str = "") -> None:
         self._fixes.append((re.compile(pattern, re.I), fix_fn, description))
 
     def _register_defaults(self) -> None:
-        def fix_json(error: str) -> Dict[str, Any]:
+        def fix_json(error: str) -> dict[str, Any]:
             m = re.search(r"line (\d+).*?(?:column|char) (\d+)", error, re.I)
             return {"ok": True, "detail": f"JSON parse error near line {m.group(1) if m else '?'}"}
 
-        def fix_import(error: str) -> Dict[str, Any]:
+        def fix_import(error: str) -> dict[str, Any]:
             return {"ok": True, "detail": "ModuleNotFoundError: suggest installing the missing package"}
 
-        def fix_timeout(error: str) -> Dict[str, Any]:
+        def fix_timeout(error: str) -> dict[str, Any]:
             return {"ok": True, "detail": "timeout: suggest retry with backoff / fallback provider"}
 
         self.register_fix(r"(json|JSONDecodeError|expecting.*delimiter)", fix_json, "json-parse")
         self.register_fix(r"ModuleNotFoundError|ImportError|No module named", fix_import, "missing-import")
         self.register_fix(r"timeout|timed out|ConnectionError|refused", fix_timeout, "timeout-retry")
 
-    def classify(self, error_text: str) -> Dict[str, Any]:
+    def classify(self, error_text: str) -> dict[str, Any]:
         for pattern, _, desc in self._fixes:
             if pattern.search(error_text):
                 return {"known": True, "category": desc or pattern.pattern}
         return {"known": False, "category": "unknown"}
 
-    def handle(self, error_text: str, context: str = "") -> Dict[str, Any]:
+    def handle(self, error_text: str, context: str = "") -> dict[str, Any]:
         record = {"error": error_text[:500], "context": context,
                   "ts": datetime.now().isoformat()}
         classification = self.classify(error_text)
@@ -83,7 +84,7 @@ class Watchdog:
         self.history.append(record)
         return record
 
-    def _verify(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def _verify(self, record: dict[str, Any]) -> dict[str, Any]:
         """Run tests if a tester is supplied; roll back on failure."""
         if self.tester is not None:
             try:
@@ -101,7 +102,7 @@ class Watchdog:
                 record["test_error"] = str(e)
         return record
 
-    def recent(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.history[-limit:]
 
 

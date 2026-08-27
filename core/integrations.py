@@ -10,7 +10,7 @@ live tool registry and agent loop.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from .config import config
 from .workspace import workspace
@@ -26,7 +26,7 @@ def resolve_active_project() -> str:
 def register_architecture_tools(registry) -> None:
     """Register the upgrade tools. Safe to call multiple times (idempotent)."""
     # ---- Research pipeline -------------------------------------------------
-    def research_deep(query: str, limit: int = 10) -> Dict[str, Any]:
+    def research_deep(query: str, limit: int = 10) -> dict[str, Any]:
         from .research import research_pipeline
 
         return research_pipeline.run(query, limit=limit)
@@ -53,7 +53,7 @@ def register_architecture_tools(registry) -> None:
     )
 
     # ---- Memory 2.0 --------------------------------------------------------
-    def memory2_recall(query: str, limit: int = 10, kinds: str = "") -> Dict[str, Any]:
+    def memory2_recall(query: str, limit: int = 10, kinds: str = "") -> dict[str, Any]:
         from .memory2 import memory2, KINDS
 
         k = [x.strip() for x in (kinds or "").split(",") if x.strip()] or None
@@ -86,7 +86,7 @@ def register_architecture_tools(registry) -> None:
     )
 
     def memory2_remember(kind: str, content: str, importance: float = 5.0,
-                         success: str = "none") -> Dict[str, Any]:
+                         success: str = "none") -> dict[str, Any]:
         from .memory2 import memory2
 
         s = None if success == "none" else (success == "true")
@@ -118,7 +118,7 @@ def register_architecture_tools(registry) -> None:
     )
 
     # ---- Model router ------------------------------------------------------
-    def router_choose(text: str) -> Dict[str, Any]:
+    def router_choose(text: str) -> dict[str, Any]:
         from .router2 import router2
 
         return router2.select(text)
@@ -138,7 +138,7 @@ def register_architecture_tools(registry) -> None:
     )
 
     # ---- Workspace ---------------------------------------------------------
-    def workspace_list_projects() -> Dict[str, Any]:
+    def workspace_list_projects() -> dict[str, Any]:
         return {"projects": workspace.list_projects(), "current": workspace.current_project()}
 
     registry.register(
@@ -160,7 +160,7 @@ def register_architecture_tools(registry) -> None:
         max_seconds: float = 30.0,
         fps: float = 10.0,
         output_path: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from .computer import recording_policy
 
         valid = recording_policy.validate_settings(fps, max_seconds)
@@ -174,13 +174,13 @@ def register_architecture_tools(registry) -> None:
                 return {"success": False, "error": str(exc)}
         return _screen_recorder().start(max_seconds=max_seconds, fps=fps, output_path=path)
 
-    def screen_record_stop() -> Dict[str, Any]:
+    def screen_record_stop() -> dict[str, Any]:
         return _screen_recorder().stop()
 
-    def screen_record_status() -> Dict[str, Any]:
+    def screen_record_status() -> dict[str, Any]:
         return _screen_recorder().status()
 
-    def screen_record_save(path: str = "recording.mp4", seconds: float = 0.0, task_id: str = "") -> Dict[str, Any]:
+    def screen_record_save(path: str = "recording.mp4", seconds: float = 0.0, task_id: str = "") -> dict[str, Any]:
         from .computer import TaskArtifacts, VideoAnalyzer, recording_policy
 
         rec = _screen_recorder()
@@ -206,7 +206,7 @@ def register_architecture_tools(registry) -> None:
         )
         return {**saved, "bundle": bundle}
 
-    def screen_get_recent(seconds: float = 10.0) -> Dict[str, Any]:
+    def screen_get_recent(seconds: float = 10.0) -> dict[str, Any]:
         frames = _screen_recorder().recent(seconds=seconds)
         return {
             "frames": len(frames),
@@ -220,14 +220,14 @@ def register_architecture_tools(registry) -> None:
         max_events: int = 12,
         use_vision: bool = True,
         model: str = "llava:7b",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from .computer import VideoAnalyzer
 
         frames = _screen_recorder().recent(seconds=seconds)
         analyzer = VideoAnalyzer.with_ollama(model) if use_vision else VideoAnalyzer()
         return analyzer.analyze(frames, task=task, max_events=max_events)
 
-    def screen_understand(description: str, seconds: float = 10.0) -> Dict[str, Any]:
+    def screen_understand(description: str, seconds: float = 10.0) -> dict[str, Any]:
         from .computer import FrameSampler, ScreenVerifier
 
         frames = _screen_recorder().recent(seconds=seconds)
@@ -241,7 +241,7 @@ def register_architecture_tools(registry) -> None:
         action: str = "",
         use_vision: bool = False,
         remember: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from .computer import ScreenVerifier, VideoAnalyzer
 
         frames = _screen_recorder().recent(seconds=seconds)
@@ -273,7 +273,7 @@ def register_architecture_tools(registry) -> None:
         timeout: float = 60.0,
         stable_matches: int = 1,
         model: str = "llava:7b",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from .computer import ScreenWatcher, VideoAnalyzer
 
         analyzer = VideoAnalyzer.with_ollama(model)
@@ -281,7 +281,7 @@ def register_architecture_tools(registry) -> None:
             condition, timeout=timeout, stable_matches=stable_matches
         )
 
-    def screen_action_before(action: str, expected_state: str = "") -> Dict[str, Any]:
+    def screen_action_before(action: str, expected_state: str = "") -> dict[str, Any]:
         return _screen_action_manager().before(action, expected_state)
 
     def screen_action_after(
@@ -289,7 +289,7 @@ def register_architecture_tools(registry) -> None:
         use_vision: bool = False,
         model: str = "llava:7b",
         remember: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from .computer import ScreenVerifier, VideoAnalyzer
 
         analyzer = VideoAnalyzer.with_ollama(model) if use_vision else None
@@ -370,7 +370,7 @@ def _screen_action_manager():
     return manager
 
 
-def maybe_self_heal(result: Dict[str, Any]) -> Dict[str, Any]:
+def maybe_self_heal(result: dict[str, Any]) -> dict[str, Any]:
     """Attach a watchdog diagnosis when a task/tool result shows errors."""
     if not getattr(config, "watchdog_enabled", True):
         return result

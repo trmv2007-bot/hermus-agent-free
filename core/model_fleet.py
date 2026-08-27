@@ -8,19 +8,16 @@ Model Fleet — distribute tasks across multiple AI models + API keys.
 """
 from __future__ import annotations
 
-import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
 
-from .config import config
 from .multi_key import multi_key_manager
 from .providers import get_provider, list_providers
 
 
-def _split_tasks_from_goal(goal: str, n: int = 3) -> List[str]:
+def _split_tasks_from_goal(goal: str, n: int = 3) -> list[str]:
     """Heuristic split; LLM-enhanced when available."""
     # Bullet / numbered lines
     lines = [ln.strip(" -*\t") for ln in goal.splitlines() if ln.strip()]
@@ -44,7 +41,7 @@ def _split_tasks_from_goal(goal: str, n: int = 3) -> List[str]:
     return facets[:n]
 
 
-def _available_workers(models: List[str] = None, providers: List[str] = None, limit: int = 8) -> List[Dict]:
+def _available_workers(models: list[str] = None, providers: list[str] = None, limit: int = 8) -> list[dict]:
     """
     Build worker list: {provider, model, key, base_url, name}
     Prefer healthy keys with discovered models.
@@ -140,7 +137,7 @@ def _available_workers(models: List[str] = None, providers: List[str] = None, li
     return uniq[:limit]
 
 
-def _run_worker(worker: Dict, prompt: str, system: str = None) -> Dict:
+def _run_worker(worker: dict, prompt: str, system: str = None) -> dict:
     from .llm import FreeLLM
 
     t0 = time.time()
@@ -186,7 +183,7 @@ def _run_worker(worker: Dict, prompt: str, system: str = None) -> Dict:
 class ModelFleet:
     """Distribute work across models and keys."""
 
-    def list_workers(self, models: List[str] = None, providers: List[str] = None, limit: int = 12) -> Dict:
+    def list_workers(self, models: list[str] = None, providers: list[str] = None, limit: int = 12) -> dict:
         workers = _available_workers(models=models, providers=providers, limit=limit)
         return {
             "workers": [
@@ -207,12 +204,12 @@ class ModelFleet:
     def fanout(
         self,
         prompt: str,
-        models: List[str] = None,
-        providers: List[str] = None,
+        models: list[str] = None,
+        providers: list[str] = None,
         system: str = None,
         max_workers: int = 6,
         judge: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Same prompt to many models in parallel → optional judge consensus."""
         workers = _available_workers(models=models, providers=providers, limit=max_workers)
         if not workers:
@@ -243,12 +240,12 @@ class ModelFleet:
     def map_goal(
         self,
         goal: str,
-        subtasks: List[str] = None,
-        models: List[str] = None,
-        providers: List[str] = None,
+        subtasks: list[str] = None,
+        models: list[str] = None,
+        providers: list[str] = None,
         max_workers: int = 6,
         merge: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Split goal into subtasks, assign each to a different model/key, merge."""
         tasks = subtasks or _split_tasks_from_goal(goal, n=max_workers)
         workers = _available_workers(models=models, providers=providers, limit=max(len(tasks), max_workers))
@@ -263,16 +260,9 @@ class ModelFleet:
             w = workers[i % len(workers)]
             paired.append((task, w))
 
-        results = []
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(paired))) as ex:
-            futs = []
-            for task, w in paired:
-                sys = f"You are one specialist on a multi-model team. Complete ONLY this subtask carefully. Parent goal: {goal[:300]}"
-                futs.append(ex.submit(_run_worker, w, task, sys))
-            for i, fut in enumerate(as_completed(futs)):
-                # as_completed loses order — re-collect below
-                pass
-            # Better: map with index
+        # NOTE: an earlier revision submitted every subtask twice — once into
+        # an executor whose results were discarded, then again into the real
+        # one below. Each map_goal call therefore spent 2x the tokens/requests.
         results = []
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paired))) as ex:
             futs = {
@@ -300,11 +290,11 @@ class ModelFleet:
     def race(
         self,
         prompt: str,
-        models: List[str] = None,
-        providers: List[str] = None,
+        models: list[str] = None,
+        providers: list[str] = None,
         max_workers: int = 4,
         timeout: float = 60.0,
-    ) -> Dict:
+    ) -> dict:
         """First successful response wins — cancel others conceptually (we just return first)."""
         workers = _available_workers(models=models, providers=providers, limit=max_workers)
         if not workers:
@@ -335,7 +325,7 @@ class ModelFleet:
             "elapsed_ms": int((time.time() - t0) * 1000),
         }
 
-    def auto_distribute(self, goal: str, strategy: str = "auto", **kwargs) -> Dict:
+    def auto_distribute(self, goal: str, strategy: str = "auto", **kwargs) -> dict:
         """
         strategy:
           - fanout: many models same prompt
@@ -361,7 +351,7 @@ class ModelFleet:
             return self.race(goal, **{k: kwargs[k] for k in ("models", "providers", "max_workers") if k in kwargs})
         return self.fanout(goal, **{k: kwargs[k] for k in ("models", "providers", "system", "max_workers", "judge") if k in kwargs})
 
-    def _judge(self, prompt: str, results: List[Dict]) -> str:
+    def _judge(self, prompt: str, results: list[dict]) -> str:
         ok = [r for r in results if r.get("success") and r.get("response")]
         if not ok:
             return "No successful model responses to judge."
@@ -393,7 +383,7 @@ class ModelFleet:
         judged = _run_worker(judge_worker, judge_prompt, system="You are a fair judge merging multi-model answers.")
         return judged.get("response") or ok[0]["response"]
 
-    def _merge(self, goal: str, results: List[Dict]) -> str:
+    def _merge(self, goal: str, results: list[dict]) -> str:
         ok = [r for r in results if r.get("success")]
         if not ok:
             return "No successful subtask results."

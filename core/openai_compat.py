@@ -9,14 +9,13 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import requests
 
 from .providers import (
     build_auth_headers,
     get_provider,
-    parse_model_ref,
     resolve_endpoint,
 )
 from .token_counter import token_counter
@@ -26,12 +25,12 @@ class CompatResponse:
     def __init__(
         self,
         content: str,
-        tool_calls: Optional[List[Dict]] = None,
-        usage: Optional[Dict] = None,
-        raw: Optional[Dict] = None,
+        tool_calls: Optional[list[dict]] = None,
+        usage: Optional[dict] = None,
+        raw: Optional[dict] = None,
         model: str = "",
         latency_ms: int = 0,
-        headers: Optional[Dict] = None,
+        headers: Optional[dict] = None,
     ):
         self.content = content or ""
         self.tool_calls = tool_calls or []
@@ -42,7 +41,7 @@ class CompatResponse:
         self.headers = headers or {}
 
 
-def _normalize_messages(messages: List[Dict]) -> List[Dict]:
+def _normalize_messages(messages: list[dict]) -> list[dict]:
     out = []
     for m in messages:
         role = m.get("role", "user")
@@ -60,14 +59,14 @@ def _normalize_messages(messages: List[Dict]) -> List[Dict]:
     return out
 
 
-def _normalize_tools(tools: List[Dict] = None) -> Optional[List[Dict]]:
+def _normalize_tools(tools: list[dict] = None) -> Optional[list[dict]]:
     if not tools:
         return None
     # Already OpenAI style
     return tools
 
 
-def _parse_tool_calls(msg: Dict) -> List[Dict]:
+def _parse_tool_calls(msg: dict) -> list[dict]:
     tool_calls = []
     raw_tcs = msg.get("tool_calls") or []
     for tc in raw_tcs:
@@ -88,7 +87,7 @@ def _parse_tool_calls(msg: Dict) -> List[Dict]:
     return tool_calls
 
 
-def _extract_rate_headers(headers: Dict) -> Dict[str, Any]:
+def _extract_rate_headers(headers: dict) -> dict[str, Any]:
     """Parse common rate-limit headers from providers."""
     h = {k.lower(): v for k, v in (headers or {}).items()}
     def pick(*keys):
@@ -144,15 +143,15 @@ def _extract_rate_headers(headers: Dict) -> Dict[str, Any]:
 def chat_completions(
     provider: str,
     model: str,
-    messages: List[Dict],
+    messages: list[dict],
     api_key: str = None,
     base_url: str = None,
-    tools: List[Dict] = None,
+    tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = None,
     timeout: int = 120,
-    extra_headers: Dict = None,
-    extra_body: Dict = None,
+    extra_headers: dict = None,
+    extra_body: dict = None,
 ) -> CompatResponse:
     """
     POST {base}/chat/completions — OpenAI-compatible.
@@ -176,7 +175,7 @@ def chat_completions(
 
     url = resolve_endpoint(provider, base_url=base_url, path_key="chat_path")
     headers = build_auth_headers(provider, api_key, extra=extra_headers)
-    body: Dict[str, Any] = {
+    body: dict[str, Any] = {
         "model": model,
         "messages": _normalize_messages(messages),
         "temperature": temperature,
@@ -249,25 +248,25 @@ def chat_completions(
         )
     except CompatAPIError:
         raise
-    except requests.exceptions.Timeout:
-        raise CompatAPIError("Request timeout", status_code=408, latency_ms=int((time.time() - start) * 1000))
+    except requests.exceptions.Timeout as e:
+        raise CompatAPIError("Request timeout", status_code=408, latency_ms=int((time.time() - start) * 1000)) from e
     except requests.exceptions.ConnectionError as e:
-        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - start) * 1000))
+        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
     except Exception as e:
-        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000))
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
 
 
 def stream_chat_completions(
     provider: str,
     model: str,
-    messages: List[Dict],
+    messages: list[dict],
     api_key: str = None,
     base_url: str = None,
-    tools: List[Dict] = None,
+    tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = None,
     timeout: int = 120,
-    extra_headers: Dict = None,
+    extra_headers: dict = None,
     on_delta: Optional[callable] = None,
 ) -> CompatResponse:
     """Streaming (SSE) variant of :func:`chat_completions`.
@@ -286,7 +285,7 @@ def stream_chat_completions(
     url = resolve_endpoint(provider, base_url=base_url, path_key="chat_path")
     headers = build_auth_headers(provider, api_key, extra=extra_headers)
     headers["Accept"] = "text/event-stream"
-    body: Dict[str, Any] = {
+    body: dict[str, Any] = {
         "model": model,
         "messages": _normalize_messages(messages),
         "temperature": temperature,
@@ -301,9 +300,9 @@ def stream_chat_completions(
         body["tools"] = norm_tools
         body["tool_choice"] = "auto"
 
-    content_parts: List[str] = []
-    pending_calls: Dict[int, Dict[str, Any]] = {}
-    usage_raw: Dict[str, Any] = {}
+    content_parts: list[str] = []
+    pending_calls: dict[int, dict[str, Any]] = {}
+    usage_raw: dict[str, Any] = {}
     finish_reason = ""
     started = time.time()
     try:
@@ -369,7 +368,7 @@ def stream_chat_completions(
                     if isinstance(fn.get("arguments"), str):
                         slot["arguments"] += fn["arguments"]
 
-        tool_calls: List[Dict] = []
+        tool_calls: list[dict] = []
         for idx in sorted(pending_calls):
             slot = pending_calls[idx]
             args = slot.get("arguments") or "{}"
@@ -399,12 +398,12 @@ def stream_chat_completions(
         )
     except CompatAPIError:
         raise
-    except requests.exceptions.Timeout:
-        raise CompatAPIError("Stream timeout", status_code=408, latency_ms=int((time.time() - started) * 1000))
+    except requests.exceptions.Timeout as e:
+        raise CompatAPIError("Stream timeout", status_code=408, latency_ms=int((time.time() - started) * 1000)) from e
     except requests.exceptions.ConnectionError as e:
-        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - started) * 1000))
+        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - started) * 1000)) from e
     except Exception as e:
-        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - started) * 1000))
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - started) * 1000)) from e
 
 
 class CompatAPIError(Exception):
@@ -412,7 +411,7 @@ class CompatAPIError(Exception):
         self,
         message: str,
         status_code: int = 0,
-        rate_limit: Dict = None,
+        rate_limit: dict = None,
         body: Any = None,
         latency_ms: int = 0,
     ):
@@ -469,7 +468,7 @@ def _is_nvidia_catalog(provider: str, base_url: str = None) -> bool:
     return (provider or "").lower() == "nvidia" or "integrate.api.nvidia.com" in (base_url or "").lower()
 
 
-def _filter_nvidia_free_chat_models(models: List[Dict]) -> List[Dict]:
+def _filter_nvidia_free_chat_models(models: list[dict]) -> list[dict]:
     """Keep only NVIDIA API Catalog models with hosted free chat endpoints."""
     return [m for m in models if (m.get("id") or "").lower() in NVIDIA_FREE_CHAT_MODELS]
 
@@ -479,7 +478,7 @@ def list_models(
     api_key: str = None,
     base_url: str = None,
     timeout: int = 30,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """GET {base}/models — discover what this key can run."""
     preset = get_provider(provider)
     start = time.time()
@@ -536,7 +535,7 @@ def list_models(
         return {"success": False, "error": str(e), "models": []}
 
 
-def _normalize_models_list(data: Any, provider: str) -> List[Dict]:
+def _normalize_models_list(data: Any, provider: str) -> list[dict]:
     items = []
     if isinstance(data, dict):
         raw = data.get("data") or data.get("models") or data.get("items") or []
@@ -576,7 +575,7 @@ def _normalize_models_list(data: Any, provider: str) -> List[Dict]:
     return items
 
 
-def _ollama_native_tags(base_url: str = None, latency_ms: int = 0) -> Dict:
+def _ollama_native_tags(base_url: str = None, latency_ms: int = 0) -> dict:
     root = (base_url or "http://localhost:11434").replace("/v1", "").rstrip("/")
     try:
         resp = requests.get(f"{root}/api/tags", timeout=10)
@@ -605,10 +604,10 @@ def _ollama_native_tags(base_url: str = None, latency_ms: int = 0) -> Dict:
 
 def _anthropic_messages(
     model: str,
-    messages: List[Dict],
+    messages: list[dict],
     api_key: str,
     base_url: str,
-    tools: List[Dict] = None,
+    tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = 2048,
     timeout: int = 120,
@@ -679,7 +678,7 @@ def _is_model_error(msg: str, status_code: int) -> bool:
     )
 
 
-def _rank_chat_models(model_ids: List[str]) -> List[str]:
+def _rank_chat_models(model_ids: list[str]) -> list[str]:
     """Rank discovered IDs by likelihood of supporting chat completions.
 
     Some catalogs (notably NVIDIA NIM) mix chat, embedding, reranking,
@@ -724,7 +723,7 @@ def health_ping(
     base_url: str = None,
     model: str = None,
     timeout: int = 25,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Lightweight health check:
     1) list models if possible
@@ -734,7 +733,7 @@ def health_ping(
     preset = get_provider(provider)
     original_model = model or preset.get("default_model") or "gpt-3.5-turbo"
     model = original_model
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "provider": provider,
         "base_url": base_url or preset.get("base_url"),
         "model_tested": model,

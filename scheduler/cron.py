@@ -1,7 +1,6 @@
 """Scheduler - Built-in cron with natural language, free APScheduler"""
 import re
 from datetime import datetime
-from typing import List, Dict
 from pathlib import Path
 import json
 
@@ -67,13 +66,13 @@ class CronManager:
             cron_match = re.search(r'(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)', resp.content)
             if cron_match:
                 return cron_match.group(0)
-        except:
+        except Exception:
             pass
 
         # Default daily 9am
         return "0 9 * * *"
 
-    def add_job(self, natural_text: str, task: str = None, platform: str = "cli", user_id: str = "default") -> Dict:
+    def add_job(self, natural_text: str, task: str = None, platform: str = "cli", user_id: str = "default") -> dict:
         """Add cron job from natural language"""
         cron_expr = self._parse_natural_language(natural_text)
         # If task not provided, use natural_text as task
@@ -93,7 +92,7 @@ class CronManager:
         # Save to file
         try:
             jobs = json.loads(self.db_path.read_text())
-        except:
+        except (OSError, ValueError):
             jobs = []
         jobs.append(job)
         self.db_path.write_text(json.dumps(jobs, indent=2))
@@ -119,7 +118,7 @@ class CronManager:
 
         return job
 
-    def _execute_job(self, job: Dict):
+    def _execute_job(self, job: dict):
         """Execute cron job - delivers to platform"""
         print(f"[Cron] Executing job {job['id']}: {job['task']} -> {job['platform']}:{job['user_id']}")
         try:
@@ -134,10 +133,10 @@ class CronManager:
         except Exception as e:
             print(f"[Cron] Job {job['id']} failed: {e}")
 
-    def list_jobs(self) -> List[Dict]:
+    def list_jobs(self) -> list[dict]:
         try:
             return json.loads(self.db_path.read_text())
-        except:
+        except (OSError, ValueError):
             return []
 
     def remove_job(self, job_id: str) -> bool:
@@ -148,10 +147,10 @@ class CronManager:
             if self.scheduler:
                 try:
                     self.scheduler.remove_job(job_id)
-                except:
+                except Exception:
                     pass
             return True
-        except:
+        except Exception:
             return False
 
 cron_manager = CronManager()

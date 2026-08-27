@@ -7,9 +7,10 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .world_state import WorldState
+import builtins
 
 
 def _now() -> str:
@@ -23,8 +24,8 @@ def _safe_id(value: str) -> str:
     return safe
 
 
-def _unique(values: List[Any]) -> List[str]:
-    output: List[str] = []
+def _unique(values: list[Any]) -> list[str]:
+    output: list[str] = []
     seen = set()
     for value in values:
         text = str(value or "").strip()
@@ -39,29 +40,29 @@ class TaskCheckpoint:
     task_id: str
     task: str
     status: str = "created"  # created|planning|running|interrupted|failed|success|cancelled
-    plan: List[Dict[str, Any]] = field(default_factory=list)
-    graph: Dict[str, Any] = field(default_factory=dict)
+    plan: list[dict[str, Any]] = field(default_factory=list)
+    graph: dict[str, Any] = field(default_factory=dict)
     current_state: Optional[str] = None
-    completed_states: List[str] = field(default_factory=list)
-    pending_states: List[str] = field(default_factory=list)
-    failed_states: List[str] = field(default_factory=list)
-    known_failures: List[Dict[str, Any]] = field(default_factory=list)
-    repairs: List[Dict[str, Any]] = field(default_factory=list)
-    world_state: Dict[str, Any] = field(default_factory=dict)
-    recordings: List[str] = field(default_factory=list)
+    completed_states: list[str] = field(default_factory=list)
+    pending_states: list[str] = field(default_factory=list)
+    failed_states: list[str] = field(default_factory=list)
+    known_failures: list[dict[str, Any]] = field(default_factory=list)
+    repairs: list[dict[str, Any]] = field(default_factory=list)
+    world_state: dict[str, Any] = field(default_factory=dict)
+    recordings: list[str] = field(default_factory=list)
     attempts: int = 0
     resume_count: int = 0
-    last_event: Dict[str, Any] = field(default_factory=dict)
+    last_event: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TaskCheckpoint":
+    def from_dict(cls, data: dict[str, Any]) -> "TaskCheckpoint":
         fields = cls.__dataclass_fields__
         clean = {key: value for key, value in (data or {}).items() if key in fields}
         clean.setdefault("task_id", str(data.get("task_id") or ""))
@@ -108,8 +109,8 @@ class TaskStore:
         self,
         task_id: str,
         task: str,
-        plan: List[Dict[str, Any]],
-        graph: Optional[Dict[str, Any]] = None,
+        plan: builtins.list[dict[str, Any]],
+        graph: Optional[dict[str, Any]] = None,
         world_state: Optional[WorldState] = None,
         resume: bool = False,
     ) -> TaskCheckpoint:
@@ -165,7 +166,7 @@ class TaskStore:
         data = self._read_json(path, None)
         return TaskCheckpoint.from_dict(data) if isinstance(data, dict) else None
 
-    def load_graph(self, task_id: str) -> Dict[str, Any]:
+    def load_graph(self, task_id: str) -> dict[str, Any]:
         checkpoint = self.load(task_id)
         if checkpoint and checkpoint.graph:
             return dict(checkpoint.graph)
@@ -174,7 +175,7 @@ class TaskStore:
     def checkpoint_event(
         self,
         checkpoint: TaskCheckpoint,
-        event: Dict[str, Any],
+        event: dict[str, Any],
         world_state: Optional[WorldState] = None,
     ) -> TaskCheckpoint:
         state = str(event.get("state") or "")
@@ -223,7 +224,7 @@ class TaskStore:
         self,
         checkpoint: TaskCheckpoint,
         success: bool,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         world_state: Optional[WorldState] = None,
         recording: Optional[str] = None,
     ) -> TaskCheckpoint:
@@ -262,8 +263,8 @@ class TaskStore:
             return checkpoint.current_state
         return next((name for name in names if name not in completed), None)
 
-    def list(self) -> List[Dict[str, Any]]:
-        output: List[Dict[str, Any]] = []
+    def list(self) -> builtins.list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
         if not self.root.exists():
             return output
         for path in sorted(self.root.iterdir(), reverse=True):

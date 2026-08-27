@@ -14,6 +14,7 @@ __all__ = [
     "TaskSpec",
     "get_task",
     "list_tasks",
+    "get_categories",
     "BenchmarkRunner",
     "BenchmarkResult",
     "run_benchmark",

@@ -13,7 +13,7 @@ import re
 import sqlite3
 import struct
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 
 import requests
 
@@ -24,11 +24,11 @@ DEFAULT_EMBED_MODEL = "nomic-embed-text"
 FALLBACK_DIM = 256
 
 
-def _tokenize(text: str) -> List[str]:
+def _tokenize(text: str) -> list[str]:
     return re.findall(r"[a-zA-Z0-9_]{2,}", (text or "").lower())
 
 
-def _hash_embed(text: str, dim: int = FALLBACK_DIM) -> List[float]:
+def _hash_embed(text: str, dim: int = FALLBACK_DIM) -> list[float]:
     """Deterministic bag-of-tokens hashing trick — offline free fallback."""
     vec = [0.0] * dim
     tokens = _tokenize(text)
@@ -44,25 +44,25 @@ def _hash_embed(text: str, dim: int = FALLBACK_DIM) -> List[float]:
     return [v / norm for v in vec]
 
 
-def _cosine(a: List[float], b: List[float]) -> float:
+def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a)) or 1.0
     nb = math.sqrt(sum(y * y for y in b)) or 1.0
     return dot / (na * nb)
 
 
-def _pack_vector(vec: List[float]) -> bytes:
+def _pack_vector(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
 
 
-def _unpack_vector(blob: bytes) -> List[float]:
+def _unpack_vector(blob: bytes) -> list[float]:
     n = len(blob) // 4
     return list(struct.unpack(f"{n}f", blob))
 
 
-def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list[str]:
     text = (text or "").strip()
     if not text:
         return []
@@ -115,7 +115,7 @@ class EmbeddingStore:
         """Always available — hash fallback if Ollama embed model missing."""
         return True
 
-    def backend_info(self) -> Dict:
+    def backend_info(self) -> dict:
         self._ensure_backend()
         return {
             "backend": self._backend,
@@ -152,7 +152,7 @@ class EmbeddingStore:
         self._backend = "hash"
         self._dim = FALLBACK_DIM
 
-    def embed(self, text: str) -> List[float]:
+    def embed(self, text: str) -> list[float]:
         self._ensure_backend()
         text = (text or "")[:8000]
         if self._backend == "ollama":
@@ -184,10 +184,10 @@ class EmbeddingStore:
     def add_text(
         self,
         text: str,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[dict] = None,
         source: str = "manual",
         chunk_id: str = None,
-    ) -> Dict:
+    ) -> dict:
         if not text or not text.strip():
             return {"success": False, "error": "empty text"}
         from datetime import datetime
@@ -218,7 +218,7 @@ class EmbeddingStore:
         conn.close()
         return {"success": True, "chunk_id": cid, "source": source, "dim": len(vec)}
 
-    def add_chunks(self, texts: List[str], source: str = "manual", metadata: Optional[Dict] = None) -> Dict:
+    def add_chunks(self, texts: list[str], source: str = "manual", metadata: Optional[dict] = None) -> dict:
         added = 0
         for i, t in enumerate(texts):
             r = self.add_text(t, metadata={**(metadata or {}), "chunk_index": i}, source=source)
@@ -226,7 +226,7 @@ class EmbeddingStore:
                 added += 1
         return {"success": True, "added": added, "source": source}
 
-    def search(self, query: str, limit: int = 5, source: str = None) -> Dict:
+    def search(self, query: str, limit: int = 5, source: str = None) -> dict:
         qvec = self.embed(query)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
@@ -238,7 +238,7 @@ class EmbeddingStore:
         rows = cur.fetchall()
         conn.close()
 
-        scored: List[Tuple[float, Dict]] = []
+        scored: list[tuple[float, dict]] = []
         for r in rows:
             try:
                 vec = _unpack_vector(r["vector"])
@@ -272,7 +272,7 @@ class EmbeddingStore:
             "backend": self.backend_info(),
         }
 
-    def hybrid_search(self, query: str, limit: int = 5) -> Dict:
+    def hybrid_search(self, query: str, limit: int = 5) -> dict:
         """Merge FTS5 keyword hits with semantic hits."""
         from .memory import memory
 
@@ -321,13 +321,13 @@ class EmbeddingStore:
             "backend": self.backend_info(),
         }
 
-    def ingest_path(self, path: str, source: str = None) -> Dict:
+    def ingest_path(self, path: str, source: str = None) -> dict:
         """Ingest file or directory into semantic memory."""
         p = Path(path).expanduser()
         if not p.exists():
             return {"success": False, "error": f"Path not found: {path}"}
 
-        files: List[Path] = []
+        files: list[Path] = []
         if p.is_file():
             files = [p]
         else:
@@ -387,7 +387,7 @@ class EmbeddingStore:
         except Exception:
             return ""
 
-    def clear(self, source: str = None) -> Dict:
+    def clear(self, source: str = None) -> dict:
         conn = sqlite3.connect(str(self.db_path))
         cur = conn.cursor()
         if source:

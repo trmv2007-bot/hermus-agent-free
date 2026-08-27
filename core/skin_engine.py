@@ -2,7 +2,6 @@
 
 import yaml
 from pathlib import Path
-from typing import Dict, List, Any, Optional
 from .config import config
 
 # Optional yaml
@@ -181,10 +180,10 @@ class SkinEngine:
             try:
                 with open(example_path, "w") as f:
                     yaml.safe_dump(example, f)
-            except:
+            except Exception:
                 pass
 
-    def list_skins(self) -> List[Dict]:
+    def list_skins(self) -> list[dict]:
         """List all skins - default + custom YAML"""
         skins = []
         # Default skins
@@ -229,7 +228,7 @@ class SkinEngine:
 
         return skins
 
-    def get_skin(self, name: str) -> Dict:
+    def get_skin(self, name: str) -> dict:
         """Get skin by name - builtin or custom YAML"""
         # Check builtin first
         if name in self.DEFAULT_SKINS:
@@ -243,13 +242,13 @@ class SkinEngine:
                     with open(yaml_path, "r") as f:
                         data = yaml.safe_load(f)
                         return data
-                except:
+                except Exception:
                     pass
 
         # Fallback to default
         return self.DEFAULT_SKINS.get("default", {})
 
-    def set_skin(self, name: str) -> Dict:
+    def set_skin(self, name: str) -> dict:
         """Set current skin - like /skin command or display.skin config"""
         skin = self.get_skin(name)
         if skin:
@@ -261,12 +260,12 @@ class SkinEngine:
                 # For free version, we just store in memory and user_model
                 from .memory import memory
                 memory.update_user_model({"preferences": {"skin": name}})
-            except:
+            except Exception:
                 pass
             return {"success": True, "skin": name, "description": skin.get("description","")}
         return {"success": False, "error": f"Skin {name} not found"}
 
-    def create_custom_skin(self, name: str, description: str, colors: Dict, spinner: Dict = None, branding: Dict = None) -> Dict:
+    def create_custom_skin(self, name: str, description: str, colors: dict, spinner: dict = None, branding: dict = None) -> dict:
         """Create custom YAML skin - free, user can create via CLI"""
         if not YAML_AVAILABLE:
             return {"success": False, "error": "PyYAML not installed. pip install pyyaml"}
@@ -289,7 +288,7 @@ class SkinEngine:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def get_current_skin(self) -> Dict:
+    def get_current_skin(self) -> dict:
         return self.get_skin(self.current_skin)
 
     # Animations toggle
@@ -299,7 +298,7 @@ class SkinEngine:
         try:
             from .memory import memory
             memory.update_user_model({"preferences": {"animations_enabled": enabled}})
-        except:
+        except Exception:
             pass
 
     def are_animations_enabled(self) -> bool:
@@ -307,11 +306,11 @@ class SkinEngine:
             from .memory import memory
             model = memory.load_user_model()
             return model.get("preferences", {}).get("animations_enabled", True)
-        except:
+        except Exception:
             return self.animations_enabled
 
     # Mode persistence - as requested
-    def set_mode(self, mode: str) -> Dict:
+    def set_mode(self, mode: str) -> dict:
         """Set current mode and persist - agent, chat, multi-agent, multi-chat - free"""
         try:
             from .modes import AgentMode
@@ -333,7 +332,7 @@ class SkinEngine:
             from .memory import memory
             model = memory.load_user_model()
             return model.get("preferences", {}).get("mode", "agent")
-        except:
+        except Exception:
             return "agent"
 
     def get_persisted_mode(self) -> str:
