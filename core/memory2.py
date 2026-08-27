@@ -270,6 +270,64 @@ class Memory2:
         results.sort(key=lambda m: m["score"], reverse=True)
         return results[:limit]
 
+    def hybrid_recall(
+        self,
+        query: str,
+        project: Optional[str] = None,
+        kinds: Optional[List[str]] = None,
+        limit: int = 10,
+        k_rrf: int = 60,
+        user_preferences: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Reciprocal Rank Fusion (RRF) combining scored lexical recall with vector embeddings."""
+        lexical = self.recall(query, project=project, kinds=kinds, limit=limit * 2, user_preferences=user_preferences)
+        lexical_ranks = {m.get("id"): idx + 1 for idx, m in enumerate(lexical) if m.get("id")}
+
+        vector_ranks = {}
+        try:
+            from .embeddings import semantic_embeddings
+            v_hits = semantic_embeddings.search(query, limit=limit * 2)
+            for v_idx, hit in enumerate(v_hits):
+                hit_text = hit.get("text", "")
+                for m in lexical:
+                    if m.get("content") and (m.get("content") in hit_text or hit_text in m.get("content")):
+                        if m.get("id") not in vector_ranks:
+                            vector_ranks[m.get("id")] = v_idx + 1
+        except Exception:
+            pass
+
+        rrf_scored = []
+        for mem in lexical:
+            m_id = mem.get("id")
+            r_lex = lexical_ranks.get(m_id, limit * 2)
+            r_vec = vector_ranks.get(m_id, limit * 2)
+            rrf = (1.0 / (k_rrf + r_lex)) + (1.0 / (k_rrf + r_vec))
+            mem_copy = dict(mem)
+            mem_copy["rrf_score"] = round(rrf, 6)
+            mem_copy["hybrid_rank"] = {
+                "lexical_rank": r_lex,
+                "vector_rank": r_vec if m_id in vector_ranks else None,
+            }
+            rrf_scored.append(mem_copy)
+
+        rrf_scored.sort(key=lambda m: m["rrf_score"], reverse=True)
+        return rrf_scored[:limit]
+
+    def compact_working_memory(self, max_age_hours: int = 48) -> Dict[str, Any]:
+        """Prune expired short-lived working memory records older than max_age_hours."""
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+        conn = self.store._conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM memories WHERE kind='working' AND ts <= ?", (cutoff,))
+            count = cur.fetchone()[0]
+            cur.execute("DELETE FROM memories WHERE kind='working' AND ts <= ?", (cutoff,))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"deleted_count": count, "cutoff": cutoff, "max_age_hours": max_age_hours}
+
     def recall_prompt_block(self, query: str, limit: int = 5, **kwargs) -> str:
         mems = self.recall(query, limit=limit, **kwargs)
         if not mems:

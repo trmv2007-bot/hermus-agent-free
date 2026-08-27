@@ -35,8 +35,10 @@ class FreeLLM:
         api_key: str = None,
         base_url: str = None,
         provider: str = None,
+        temperature: Optional[float] = None,
     ):
         self.model = model or config.model
+        self.temperature = temperature
         # Allow override of provider/model
         if provider:
             self.provider = provider.lower()
@@ -183,6 +185,9 @@ class FreeLLM:
         while tries < 3:
             tries += 1
             try:
+                extra_kwargs = {}
+                if self.temperature is not None:
+                    extra_kwargs["temperature"] = self.temperature
                 resp = chat_completions(
                     provider=used_provider,
                     model=model,
@@ -191,6 +196,7 @@ class FreeLLM:
                     base_url=base_url,
                     tools=tools,
                     timeout=120,
+                    **extra_kwargs,
                 )
                 try:
                     multi_key_manager.mark_key_success(
@@ -271,6 +277,8 @@ class FreeLLM:
 
         url = f"{config.ollama_base_url.rstrip('/')}/api/chat"
         payload = {"model": self.model_name, "messages": messages, "stream": False}
+        if self.temperature is not None:
+            payload["options"] = {"temperature": self.temperature}
         if tools:
             payload["tools"] = tools
         try:

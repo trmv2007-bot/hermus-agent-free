@@ -336,7 +336,7 @@ class VisualStateMachine:
             ok = bool(executed.get("ok")) and bool(verification.get("ok"))
             reason = "" if ok else self._failure_reason(executed, verification)
             trace.append({
-                "state": state.name,
+                "state": f"REPAIR:{name}",
                 "phase": "repair",
                 "repair_state": name,
                 "repair_for": state.name,
@@ -360,6 +360,7 @@ class VisualStateMachine:
         trace: List[Dict[str, Any]],
         reason: str,
         category: str = "state_failed",
+        underlying_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         failure = {
             "state": current.name,
@@ -373,6 +374,7 @@ class VisualStateMachine:
             "trace": trace,
             "final_state": current.name,
             "error": reason,
+            "reason": underlying_reason or reason,
             "failure": failure,
         }
 
@@ -382,16 +384,17 @@ class VisualStateMachine:
         by_name: Dict[str, VisualState],
         trace: List[Dict[str, Any]],
         reason: str,
+        underlying_reason: Optional[str] = None,
     ) -> Tuple[Optional[VisualState], Optional[Dict[str, Any]]]:
         fallback = current.on_failure
         if not fallback:
-            return None, self._failure_result(current, trace, reason)
+            return None, self._failure_result(current, trace, reason, underlying_reason=underlying_reason)
         if fallback == current.name:
             explicit = f"{reason}; on_failure for '{current.name}' points to itself"
-            return None, self._failure_result(current, trace, explicit, category="invalid_failure_transition")
+            return None, self._failure_result(current, trace, explicit, category="invalid_failure_transition", underlying_reason=underlying_reason)
         if fallback not in by_name:
             explicit = f"{reason}; on_failure target '{fallback}' does not exist"
-            return None, self._failure_result(current, trace, explicit, category="invalid_failure_transition")
+            return None, self._failure_result(current, trace, explicit, category="invalid_failure_transition", underlying_reason=underlying_reason)
         trace.append({
             "state": current.name,
             "phase": "transition",
@@ -649,6 +652,7 @@ class VisualStateMachine:
                     break
 
                 final_reason = f"state '{current.name}' attempt {attempt}/{max_attempts} failed: {reason}"
+                underlying_reason = verification.get("detail") or verification.get("error") or executed.get("detail") or executed.get("error") or reason
                 retries_left = attempt < max_attempts
                 if not retries_left:
                     trace.append({
@@ -657,6 +661,8 @@ class VisualStateMachine:
                         "attempt": attempt,
                         "outcome": "fail",
                         "retry_allowed": False,
+                        "failure": True,
+                        "decision": "fail_task",
                         "failure_reason": final_reason,
                     })
                     break
@@ -665,7 +671,7 @@ class VisualStateMachine:
                 diagnosis = plan.get("diagnosis", {})
                 retryable = bool(diagnosis.get("retryable", True))
                 trace.append({
-                    "state": current.name,
+                    "state": f"DIAGNOSE:{current.name}",
                     "phase": "diagnose",
                     "attempt": attempt,
                     "outcome": "repair_available" if plan.get("available") else "no_repair",
@@ -685,6 +691,8 @@ class VisualStateMachine:
                         "attempt": attempt,
                         "outcome": "fail",
                         "retry_allowed": False,
+                        "failure": True,
+                        "decision": "fail_task",
                         "failure_reason": final_reason,
                     })
                     break
@@ -702,6 +710,8 @@ class VisualStateMachine:
                             "attempt": attempt,
                             "outcome": "fail",
                             "retry_allowed": False,
+                            "failure": True,
+                            "decision": "fail_task",
                             "failure_reason": final_reason,
                         })
                         break
@@ -735,7 +745,7 @@ class VisualStateMachine:
                 current = by_name[nxt]
                 continue
 
-            current, failed = self._failure_transition(current, by_name, trace, final_reason)
+            current, failed = self._failure_transition(current, by_name, trace, final_reason, underlying_reason=underlying_reason)
             if failed:
                 if failed.get("failure"):
                     failed["failure"]["category"] = final_category

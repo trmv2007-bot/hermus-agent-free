@@ -160,6 +160,8 @@ def main():
     counsel_amend = counsel_sub.add_parser("amend", help="Self-upgrade amendments (Meta-Counsel)")
     counsel_amend_sub = counsel_amend.add_subparsers(dest="counsel_amend_action")
     counsel_amend_list = counsel_amend_sub.add_parser("list", help="List pending amendments + upgrade history")
+    counsel_amend_diff = counsel_amend_sub.add_parser("diff", help="View unified diff of a pending amendment")
+    counsel_amend_diff.add_argument("amendment_id")
     counsel_amend_approve = counsel_amend_sub.add_parser("approve", help="Approve a pending high-risk amendment")
     counsel_amend_approve.add_argument("amendment_id")
     counsel_amend_reject = counsel_amend_sub.add_parser("reject", help="Reject a pending amendment")
@@ -795,7 +797,14 @@ def main():
                 print(f"\nUpgrade history (last 10):")
                 for ev in constitution.upgrade_log()[-10:]:
                     print(f"  - {ev.get('event')} | v{ev.get('new_version') or ev.get('version') or ev.get('to_version')} | {ev.get('reason','')[:100]} | {ev.get('timestamp','')[:19]}")
-                print("\nUse: hermus counsel amend approve <id> | reject <id> | rollback <version>")
+                print("\nUse: hermus counsel amend approve <id> | reject <id> | diff <id> | rollback <version>")
+            elif args.counsel_amend_action == "diff":
+                res = constitution.diff(args.amendment_id)
+                if res.get("success"):
+                    print(f"=== Unified Diff for Amendment {args.amendment_id} ===")
+                    print(res.get("diff") or "(no textual diff)")
+                else:
+                    print(f"Diff error: {res.get('error')}")
             elif args.counsel_amend_action == "approve":
                 res = constitution.approve(args.amendment_id)
                 print(f"Approve result: {res}")

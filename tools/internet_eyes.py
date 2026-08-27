@@ -22,16 +22,77 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import subprocess
 import json
+import sqlite3
+import time
 
 # Free Jina AI Reader - read any webpage free, no API key
 # https://r.jina.ai/http://example.com returns markdown
 JINA_READER_BASE = "https://r.jina.ai/"
 
-def web_read(url: str, use_jina: bool = True) -> Dict:
-    """Read any webpage - free via Jina AI Reader, no config needed"""
+_WEB_CACHE_DB = None
+
+def _get_web_cache_db():
+    global _WEB_CACHE_DB
+    if _WEB_CACHE_DB is None:
+        cache_path = Path("data/web_read_cache.db")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        _WEB_CACHE_DB = sqlite3.connect(str(cache_path), check_same_thread=False)
+        with _WEB_CACHE_DB:
+            _WEB_CACHE_DB.execute("""
+                CREATE TABLE IF NOT EXISTS web_cache (
+                    url TEXT PRIMARY KEY,
+                    content TEXT,
+                    content_length INTEGER,
+                    method TEXT,
+                    created_at REAL
+                )
+            """)
+    return _WEB_CACHE_DB
+
+def _get_cached_web_read(url: str, ttl_seconds: int = 43200) -> Optional[Dict]:
+    try:
+        db = _get_web_cache_db()
+        with db:
+            cur = db.execute("SELECT content, content_length, method, created_at FROM web_cache WHERE url = ?", (url,))
+            row = cur.fetchone()
+            if row:
+                content, content_length, method, created_at = row
+                if time.time() - created_at < ttl_seconds:
+                    return {
+                        "success": True,
+                        "url": url,
+                        "method": f"{method}_cached",
+                        "content": content,
+                        "content_length": content_length,
+                        "cached": True,
+                        "note": "Returned from local persistent cache"
+                    }
+    except Exception:
+        pass
+    return None
+
+def _set_cached_web_read(url: str, content: str, method: str) -> None:
+    try:
+        db = _get_web_cache_db()
+        with db:
+            db.execute(
+                "INSERT OR REPLACE INTO web_cache (url, content, content_length, method, created_at) VALUES (?, ?, ?, ?, ?)",
+                (url, content, len(content), method, time.time())
+            )
+    except Exception:
+        pass
+
+def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> Dict:
+    """Read any webpage - free via Jina AI Reader, with persistent local cache"""
     if not url.startswith("http"):
         url = "https://" + url
 
+    if use_cache:
+        cached = _get_cached_web_read(url)
+        if cached:
+            return cached
+
+    result = None
     if use_jina:
         try:
             jina_url = JINA_READER_BASE + url
@@ -39,7 +100,7 @@ def web_read(url: str, use_jina: bool = True) -> Dict:
             if resp.status_code == 200:
                 # Jina returns markdown
                 content = resp.text[:15000]
-                return {
+                result = {
                     "success": True,
                     "url": url,
                     "method": "jina_reader_free",
@@ -55,20 +116,26 @@ def web_read(url: str, use_jina: bool = True) -> Dict:
             pass
 
     # Fallback direct fetch
-    try:
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        # Simple HTML to text via regex (basic)
-        text = re.sub(r'<[^>]+>', ' ', resp.text)
-        text = re.sub(r'\s+', ' ', text)[:10000]
-        return {
-            "success": True,
-            "url": url,
-            "method": "direct_fetch_free",
-            "content": text,
-            "status_code": resp.status_code
-        }
-    except Exception as e:
-        return {"success": False, "url": url, "error": str(e)}
+    if not result:
+        try:
+            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            # Simple HTML to text via regex (basic)
+            text = re.sub(r'<[^>]+>', ' ', resp.text)
+            text = re.sub(r'\s+', ' ', text)[:10000]
+            result = {
+                "success": True,
+                "url": url,
+                "method": "direct_fetch_free",
+                "content": text,
+                "status_code": resp.status_code
+            }
+        except Exception as e:
+            return {"success": False, "url": url, "error": str(e)}
+
+    if result and result.get("success") and result.get("content"):
+        _set_cached_web_read(url, result["content"], result.get("method", "direct"))
+
+    return result
 
 def rss_read(rss_url: str) -> Dict:
     """Read any RSS/Atom feed - free via feedparser"""

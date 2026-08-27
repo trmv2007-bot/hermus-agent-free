@@ -150,6 +150,20 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
             # Best-effort: leave as-is; skill_use handles bare run()
             pass
         (skill_dir / "skill.py").write_text(code)
+
+        # Auto-generate a smoke test for the newly created skill
+        test_code = f"""# Auto-generated smoke test for skill: {name}
+from pathlib import Path
+
+def test_{name}_smoke():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("skills.{name}.skill", Path(__file__).parent / "skill.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert hasattr(mod, "run"), "Skill must define a run() entrypoint"
+"""
+        (skill_dir / "test_skill.py").write_text(test_code)
+
         # Clear cache after creation
         skill_cache.clear()
 
@@ -219,5 +233,55 @@ This skill was auto-created after a complex task with {len(trajectory)} turns. U
 
         except Exception as e:
             return {"improved": False, "reason": f"Improve failed: {e}"}
+
+    def get_skill_health(self, skill_name: str) -> Dict[str, Any]:
+        """Compute usage health metrics for a skill."""
+        try:
+            from .memory import memory
+            import sqlite3
+            conn = sqlite3.connect(str(memory.db_path))
+            cur = conn.cursor()
+            cur.execute("SELECT success FROM skill_usage WHERE skill_name=? ORDER BY id DESC LIMIT 20", (skill_name,))
+            rows = cur.fetchall()
+            conn.close()
+            if not rows:
+                return {"total": 0, "successes": 0, "success_rate": 1.0, "consecutive_failures": 0, "healthy": True}
+            successes = sum(1 for (s,) in rows if s)
+            total = len(rows)
+            consec_fail = 0
+            for (s,) in rows:
+                if not s:
+                    consec_fail += 1
+                else:
+                    break
+            success_rate = round(successes / total, 2)
+            healthy = consec_fail < 3 and (total < 4 or success_rate >= 0.4)
+            return {
+                "total": total,
+                "successes": successes,
+                "success_rate": success_rate,
+                "consecutive_failures": consec_fail,
+                "healthy": healthy,
+            }
+        except Exception:
+            return {"total": 0, "successes": 0, "success_rate": 1.0, "consecutive_failures": 0, "healthy": True}
+
+    def prune_stale_skills(self, max_consecutive_failures: int = 3, min_success_rate: float = 0.4) -> Dict[str, Any]:
+        """Archive or flag skills with high failure rates."""
+        import shutil
+        pruned = []
+        for skill_info in self.list_skills():
+            name = skill_info["name"]
+            health = self.get_skill_health(name)
+            if health["total"] >= 3 and (health["consecutive_failures"] >= max_consecutive_failures or health["success_rate"] < min_success_rate):
+                skill_dir = Path(skill_info["path"])
+                archived_dir = self.skills_dir / ".archived" / name
+                archived_dir.parent.mkdir(parents=True, exist_ok=True)
+                if skill_dir.exists():
+                    shutil.move(str(skill_dir), str(archived_dir))
+                    pruned.append({"name": name, "health": health, "archived_to": str(archived_dir)})
+        if pruned:
+            skill_cache.clear()
+        return {"pruned": pruned, "count": len(pruned)}
 
 skill_manager = SkillManager()

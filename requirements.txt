@@ -72,5 +72,6 @@ rich>=13.0.0
 
 # Dev
 pytest>=8.0.0
+httpx>=0.24.0
 
 tiktoken>=0.5.0
