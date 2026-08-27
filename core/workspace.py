@@ -170,11 +170,21 @@ class Workspace:
         except Exception:
             pass
 
-    def log(self, name: str, line: str) -> Path:
+    def log(self, name: str, line) -> Path:
+        """Append one JSONL record to ``logs/<name>.jsonl``.
+
+        ``line`` may be a string (wrapped as ``{"line": ...}``) or a dict, which is
+        merged into the record so structured logs stay greppable (`jq .purpose`).
+        """
         path = self.dirs["logs"] / f"{name}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
+        record: Dict[str, Any] = {"ts": datetime.now().isoformat()}
+        if isinstance(line, dict):
+            record.update(line)
+        else:
+            record["line"] = line
         with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": datetime.now().isoformat(), "line": line}) + "\n")
+            f.write(json.dumps(record, default=str) + "\n")
         return path
 
     # -- projects -------------------------------------------------------

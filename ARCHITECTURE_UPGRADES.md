@@ -191,3 +191,293 @@ gateway:
 - `tests/test_computer_agent_v1.py` — compressed RAM, MP4 round-trip,
   event timelines, before/after memory, watcher, artifacts and privacy policy
 - full suite — 87 passing
+
+---
+
+# Part II — Retrieval, Gateway, Sandboxing & Delegation
+
+The second architecture round (the "seven upgrades") is implemented and wired into the
+agent loop, the gateway and the tool registry. Everything below is dependency-free,
+works offline, and degrades to a single-process laptop install instead of requiring
+services. Nothing here is optional-but-expected: each subsystem is on by default and
+each one has a documented off-switch.
+
+```
+core/hybrid_search.py   BM25/FTS5 + dense vectors fused with Reciprocal Rank Fusion
+core/decay.py           exponential decay, value bands, keep/decay/archive/purge plans,
+                        prompt-budget packing
+core/memory2.py         MemoryStore + Memory2 facade (recall, hybrid_recall, sweep,
+                        compact, pin, forget, recall_prompt_block)
+core/skill_forge.py     trajectory → evaluation → distillation → SKILL.md + skill.py
+core/run_events.py      RunBus: per-run event log, ring buffer, replay, fan-out to SSE/WS
+core/run_hooks.py       make_emitter / CancelToken / CancelledRun (agent-side plumbing)
+core/openai_compat.py   stream_chat_completions (upstream token streaming, include_usage)
+core/llm.py             stream_chat / chat_stream
+core/agent.py           on_event + stream + should_cancel, memory block budgeting,
+                        verification-gated skill harvest
+core/sandbox.py         SandboxPolicy, capability probe, docker/podman/bwrap/local/off
+core/delegation.py      JSON-RPC sub-agent trees: fanout, decompose, aggregate, cancel
+tools/shell.py          shell_execute(...) routed through the sandbox
+gateway/queue.py        durable asyncio job queue: lanes, priorities, retries, dedupe
+gateway/redis_backend.py  optional Redis Streams transport (accelerator, never required)
+gateway/handlers.py     job kinds: agent.chat, agent.autonomous, research.deep,
+                        subagent.delegate, memory.sweep, channel.reply
+gateway/realtime.py     SSE + WebSocket + queue/sandbox/memory/forge/delegation routes
+gateway/gateway.py      lifespan wiring, /command async intake, webhook 202, maintenance
+```
+
+## A1 — Hybrid memory + semantic retrieval
+
+Keyword matching alone was the recall bottleneck: `"postgres"` missed `"PostgreSQL
+connection pooling"`. Recall is now three signals fused at query time.
+
+* **Lexical**: `memories_fts`, an FTS5 *external-content* table over `memories.content`
+  with INSERT/UPDATE/DELETE triggers, ranked with `bm25()`. User queries are pushed
+  through `sanitize_fts_query()` (quotes, `NEAR`, trailing `*` prefixes) so a stray `"`,
+  `(` or `-` can never raise `sqlite3.OperationalError`.
+* **Dense**: per-memory float32 embeddings in `memories_vec`. `sqlite-vec` if installed,
+  otherwise a brute-force cosine scan in SQL — same interface, smaller corpora only.
+  Embeddings come from `EmbeddingClient` (Ollama → OpenAI-compatible → `hash`, which is
+  deterministic and dependency-free, so tests and offline boxes index too).
+* **Fusion**: Reciprocal Rank Fusion, `score = Σ weight_i / (rrf_k + rank_i)` with
+  `rrf_k=60`, plus `memory_prior_weight=0.35` on the stored importance prior. Ranks —
+  not raw scores — are combined, so BM25's unbounded scale and cosine's [0,1] can't
+  drown each other out.
+
+Each hit carries its provenance, which is what makes recall debuggable from the
+dashboard: `retrieval: {mode: "hybrid" | "lexical-only", bm25_rank, vector_rank,
+backend}`. `hermus mem2 hybrid "<query>" --explain` prints the per-signal breakdown.
+
+**Fallback ladder** (each step is logged once, never fatal): hybrid → FTS5-only →
+`LIKE` substring search. `HERMUS_MEMORY_HYBRID=0` jumps straight to lexical; a DB without
+the vec0 module reindexes into brute-force cosine on next `hermus mem2 reindex`.
+
+## A2 — Decay, budgets and eviction
+
+Stale context used to compete with fresh context forever. `MemoryDecay` now scores every
+row at recall time:
+
+```
+recency   = 0.5 ** (age_days / half_life)        half_life = 30d * (1 + ln(1+access)/ln(8))
+frequency = 1 - 0.5 ** (access / 8)              saturating, so hoarding access is useless
+combined  = 0.7 * recency + 0.3 * frequency       floored at max(0, memory_prior * 0.35)
+```
+
+Bands: `hot ≥ 0.75 > warm ≥ 0.45 > cold ≥ 0.18 > archive ≥ 0.08 > purge`. `plan()` maps a
+band to `keep | decay | archive | purge` (`promote` for cold-but-repeated signals), and
+`status()` returns the SQL to apply it. `pinned=1` rows are always 1.0 (never decayed,
+never archived); `expires_at` rows expire outright.
+
+Before the memory block reaches the prompt, `fit_to_budget()` packs it greedily by
+*value density* (score × tokens ÷ tokens) with a per-kind cap, so one kind cannot evict
+the rest, and returns `{kept, evicted, tokens, text, utilization, budget_tokens}` — the
+gateway dashboard shows exactly what was dropped and why. Default budget
+`HERMUS_MEMORY_BUDGET_TOKENS=600`.
+
+The gateway runs `_memory_maintenance_loop()` every `HERMUS_MEMORY_SWEEP_MINUTES=60`:
+decay evaluation → archive/purge plan → `compact_working_memory()` (TTL
+`HERMUS_MEMORY_WORKING_TTL_HOURS=48`) → index consistency check. `hermus mem2 sweep
+--apply` does the same on demand, `hermus mem2 context` shows the packed block and what
+was evicted, and `hermus mem2 index` reports FTS5/vector coverage.
+Access is recorded on recall (`memory_access` table) — that is the signal decay adapts to.
+
+## A3 — Skill forge (trajectories → SKILL.md)
+
+After a verified turn the agent distils *itself*:
+
+1. **Gate** (`evaluate_trajectory`) — needs ≥3 tool calls
+   (`HERMUS_SKILL_FORGE_MIN_TOOLS`), a non-empty final answer, failure ratio ≤0.5, no
+   single tool repeated to death, and — critically — `verified is not False`: an
+   unverified run is never harvested. Score must reach 3.0 to harvest.
+2. **Distil** — steps become `DistilledStep(text, tool, args, outcome)`; with
+   `HERMUS_SKILL_FORGE_LLM=1` the LLM rewrites them into imperative, reusable language,
+   otherwise a deterministic template runs (no key needed).
+3. **Emit** — `skills/<slug>/SKILL.md` (frontmatter: name, summary, tools, steps,
+   triggers, `source: forge`, version) plus a `skill.py` that the existing skill loader
+   imports. The generated `skill.py` is JSON-literal safe: argument examples are
+   serialised as Python `repr`, never as JSON.
+4. **Vet** — `validate()` runs import + smoke test of the emitted module. Anything that
+   fails is written to `skills/.quarantine/<name>_<hhmmss>/VALIDATION_ERROR.txt` and is
+   *not* registered.
+5. **Dedupe** — cosine similarity against existing skill summaries at
+   `HERMUS_SKILL_FORGE_DEDUPE=0.72` merges into the neighbour (`merged_into`) instead of
+   duplicating; `HERMUS_SKILL_FORGE_MAX=200` retires the least valuable first.
+6. **Feed back** — `record_outcome()` appends to `skills/forge_log.jsonl`; `stats()`
+   reports `recent_outcome_rate`, and a skill that keeps failing stops being re-harvested.
+
+Endpoints: `POST /skills/forge/harvest` (dry-run by default), `POST /skills/forge/run`,
+`POST /skills/forge/validate`, `GET /skills/forge/stats`. CLI: `hermus forge list|log|run`.
+Tools for the model: `skill_harvest`, `skill_forge_stats`.
+
+## B1 — Queue first: intake decoupled from execution
+
+Webhooks used to block a FastAPI worker for the whole agent run. `POST /command` (and
+every channel webhook) now submits and returns `202` with handles:
+
+```json
+{"async": true, "job_id": "job_3f2b…", "run_id": "run_3f2b…",
+ "status_url": "/jobs/job_3f2b…", "result_url": "/jobs/job_3f2b…/result",
+ "events_url": "/jobs/job_3f2b…/events", "stream_url": "/stream/run/run_3f2b…"}
+```
+
+`gateway/queue.py` is a real asyncio worker pool with **lanes**: jobs sharing a
+`session_key` (normally `platform:user`) run one at a time — so a user's turns never
+interleave — while different lanes run in parallel up to `HERMUS_QUEUE_WORKERS=4`.
+
+* Priority `0…9` (default 5) reorders within a lane.
+* Failures retry with `min(30, HERMUS_QUEUE_RETRY_BACKOFF ** attempts)` delay
+  (`max_attempts` per job); `asyncio.CancelledError`, `CancelledRun` and
+  `CancelledError_` never retry.
+* Per-job `timeout` (default `HERMUS_QUEUE_TIMEOUT=300`) sets a cooperative cancel
+  *first* and only abandons the worker after `HERMUS_QUEUE_CANCEL_GRACE=15`.
+* `dedupe_key` returns the *live* job instead of double-running the same webhook redelivery.
+* Durability: every transition appends to `HERMUS_QUEUE_LOG=data/jobs/jobs.jsonl`,
+  results go to `data/jobs/results/<job_id>.json`. On restart the log is rehydrated
+  (`hermus jobs list` still works in a *different* process), and jobs that were mid-flight
+  when the process died are reported `interrupted`, never silently "running".
+* `submit()` stays synchronous by design (`Job` object returned, no `await` needed from
+  sync tool code); everything after it is async.
+* `HERMUS_QUEUE_ENABLED=0` ⇒ `start()` refuses to spawn workers and `/command` falls back
+  to inline execution, so a laptop can run the gateway with no queue at all.
+
+Optional **Redis Streams** transport (`HERMUS_QUEUE_BACKEND=redis` + `REDIS_URL`, stream
+`hermus:jobs`, group `hermus-workers`) hands jobs between processes with at-least-once
+delivery. `redis_available()` probes first, so a missing package or server prints one
+line and the queue stays in-process.
+
+Handler API (`gateway/handlers.py`) accepts four shapes, all supported: `handler(ctx)`,
+`handler(payload)`, `handler(payload, emit)`, and `async def handler(ctx)`. Registered
+kinds: `agent.chat`, `agent.autonomous`, `research.deep`, `subagent.delegate`,
+`memory.sweep`, `channel.reply` (Telegram/Slack outbound, delivery verdict reported, not
+swallowed).
+
+## B2 — Bi-directional streaming
+
+Every run gets a `Run` in `core/run_events.py`: a ring buffer (2000 events) with
+**monotonic 1-based ids**, plus subscriber queues. `run_started` consumes id 1, so
+`after=N` (or the SSE `Last-Event-ID` header) is an exact resume cursor; a client that
+reconnects replays and then tails live.
+
+* **SSE** — `GET /stream/run/{run_id}` (also `/jobs/{id}/events` as an SSE/JSON
+  negotiable pair) with `?tokens=1` for per-token deltas and `: ping` keepalives.
+* **WebSocket** — `GET /ws/agent`, protocol `hermus.agent.v1`. The `hello` frame
+  advertises available job `kinds`, the sandbox backend and whether a memory index
+  exists. Actions: `chat`, `autonomous`, `delegate`, `subscribe`, `cancel`, `tool`,
+  `memory`, `ping`; everything streams the same event objects back with `run_id` +
+  `event_id`. Unknown actions return `{"type":"error"}` instead of closing the socket.
+* **Tokens** — `core/llm.stream_chat` → `stream_chat_completions()` for OpenAI-compatible
+  providers (`stream:true`, `stream_options.include_usage`), so `llm_delta` events are real
+  upstream tokens; local/non-streaming providers fall back to one delta per turn.
+* **Cancellation** — `POST /jobs/{id}/cancel`, `POST /stream/command {action:"cancel"}`, or
+  WS `{"action":"cancel"}`. It flips the run's cancel flag; `CancelToken` raises
+  `CancelledRun` at the next step boundary, the job is recorded `cancelled`, and the
+  children of a delegation tree are told to stop (`children stop at their next step boundary`).
+
+Event vocabulary: `run_started, lane_assigned, job_started, turn_started, memory_recalled,
+step_started, llm_delta, step_observed, tool_call, tool_result, verification,
+skill_harvest_started, skill_created | skill_skipped, sandbox_output, channel_delivery,
+speech_ready, run_cancelled, turn_finished, run_finished, job_finished`.
+
+## C1 — Sandboxed execution with graceful degradation
+
+`tools/shell.py` no longer runs model-authored commands in the parent process. All local
+execution goes through `SandboxManager.run()`, which picks the strongest isolation the
+machine can provide and *reports* what it got:
+
+```
+docker (if daemon) → podman → bwrap → local (rlimits + setsid + confine) → off
+```
+
+Policy (`SandboxPolicy.from_config`, all overridable per call):
+`cpus=1.0, memory_mb=1024, pids=128, disk_mb=256, timeout=60, network=False,
+read_only_rootfs=True, workspace_rw, tmpfs /tmp, drop=all caps +cap_net_raw only with
+network, no_new_privs, run_as_nobody, env_allowlist, deny_patterns, max_output_chars=6000`.
+
+Enforcement details that matter:
+* **Env**: only the allowlist reaches the child (`PATH, HOME, LANG, LC_ALL, TERM, TZ,
+  PYTHON*` by default) and anything matching `SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL` is
+  dropped even if allowlisted. With `network=False`, `HTTP(S)_PROXY/ALL_PROXY` are pointed
+  at `127.0.0.1:9` (blackhole) — belt and braces for `local`.
+* **Deny patterns** (`DANGEROUS_PATTERNS`, e.g. `rm -rf /`, fork bombs, `curl | sh`,
+  `dd of=/dev/sd*`) block *before* execution with `returncode=126` and the message
+  `blocked by sandbox policy … allow_dangerous=true (audited)`. `scan_command` alone is
+  not the boundary — it is a pre-filter, and `sudo` needs no pattern.
+* **Files**: `files={relpath: text}` stages inputs into `data/sandboxes/<id>/` and the run
+  is `cd`-ed there; paths are confined (`startswith(workdir + os.sep)`) so `../` escapes
+  are rejected. Without staged files the jail cwd is the repo root, per `workspace_rw`.
+* **Output**: stdout/stderr capped, ANSI stripped, secrets scrubbed from the record.
+* **Audit**: every run appends a structured JSON line to `data/sandboxes/sandbox_audit.jsonl`
+  (`backend, limits, returncode, duration_ms, blocked, purpose, session_key`) — `local`
+  mode's weaker isolation is exactly why it is audited.
+* `run_python()` pipes code safely (no `-c` quoting bugs), `run_wasm()` uses `wasmtime`
+  when present and reports `{"success": false, "error": "wasmtime not installed"}` when not.
+* `status()` → `{configured, backend, reason, capabilities, policy, active, active_runs,
+  root, audit_log, note}`; capabilities are flat booleans (`docker_binary`,
+  `bwrap_usable`, `gvisor_runsc`, `wasmtime`, `unshare_net`, `resource_module`, `root`,
+  `platform`) so `hermus sandbox status` and `/sandbox/status` never disagree.
+* `HERMUS_SANDBOX=off` (or `backend="off"`) is explicit and honest:
+  `limits={"enforced": false, "reason": "sandboxing disabled by policy"}`.
+* `hermus sandbox run "<cmd>"`, `hermus sandbox python "<code>"` (code is positional),
+  `hermus sandbox status`. Model-facing tool: `sandbox_run`; the permission manager gates
+  `allow_dangerous` and network escalation.
+
+## C2 — Hierarchical delegation with structured results
+
+`core/delegation.py` turns the old fire-and-forget sub-agent into a *tree* with a wire
+protocol, so a child's answer is structured data instead of scraped stdout.
+
+* **Protocol**: JSON-RPC 2.0 over the child's stdio (newline-delimited), `PROTOCOL_VERSION
+  = "1.0"` in the handshake. Methods: `ping`, `agent.run`, `tool.call`, `memory.recall`,
+  `cancel`. Codes: `-32700` parse, `-32600` invalid request, `-32601` method not found,
+  `-32603` internal, `-32001` timeout, `-32800` cancelled. A malformed frame answers
+  `-32600`; it never kills the child.
+* **Result contract** (`normalize_result`) — every path, including failures and
+  non-RPC in-process children, yields
+  `{answer, confidence, evidence, artifacts, tool_calls, usage, steps, error}`.
+* **Fan-out**: `Delegation.fanout(tasks, goal=…)` runs children concurrently
+  (`HERMUS_DELEGATION_WORKERS=4`), `decompose_and_run(goal)` plans workstreams with
+  `plan_workstreams()` first. `HERMUS_DELEGATION_MAX_DEPTH=2` budgets recursion — an
+  over-budget call returns `{ok: false, status: "refused"}` instead of forking forever.
+* **Aggregation** (`aggregate_results`): `concat` (sections + citations), `vote`
+  (plurality over normalised answers), `best` (winner's confidence, then discounted to
+  `0.85` when `disagreement > 0.4`), `synthesize`. All-children-failed is an explicit
+  `{answer: "", used: 0, errors: [...]}`, never an empty success.
+* **Backends**: `subprocess-jsonrpc` (real isolation + pid), `inprocess` (no RPC needed),
+  `inprocess-fallback` (RPC failed — reported, not hidden).
+* **Observability**: per-node `event_count`, `pid`, `backend`, `duration_ms`, `tool_calls`
+  and the answer; `tree(id)` returns children, `cancel_tree(id)` cascades the cooperative
+  stop. `python -m core.delegation --depth N [--self-test]` is a real smoke test.
+* **Surfaces**: `POST /delegate` (async via the queue, or `sync: true`),
+  `GET /delegation/status`, `GET /delegation/{tree_id}`, `POST /delegation/{tree_id}/cancel`,
+  WS `{"action":"delegate"}`, tools `delegate_tasks` + upgraded `subagent_spawn`, CLI
+  `hermus delegate "<goal>" --task … [--aggregate best|vote|concat|synthesize]`.
+  `subagents/subagent.py` keeps the old function names as a facade.
+
+## Testing
+
+```
+tests/test_hybrid_memory.py     23   FTS5/RRF/vector fallbacks, decay maths, budget, sweep
+tests/test_skill_forge.py       24   gating, distillation, validate/quarantine, dedupe, outcomes
+tests/test_sandbox.py           21   policy, limits actually enforced, env scrub, audit, CLI shape
+tests/test_delegation.py        17   rpc frames, contract, aggregation, depth budget, cancel
+tests/test_gateway_realtime.py  23   queue semantics, SSE replay, WS duplex, all HTTP routes, restart
+```
+
+All five run standalone (`python tests/test_gateway_realtime.py`) and under pytest; the
+whole suite is 263 passed / 1 skipped. Tests set `HERMUS_HOME` to a temp dir, use private
+stores (`Memory2(db_path=…)`, `JobQueue(persist=…)`, `SkillForge(skills_dir=…)`), and run
+with `mock/mock`, so no API keys, Docker or Redis are required — the degraded paths are
+*asserted*, not assumed.
+
+## Known limits (deliberate)
+
+* `local` fallback is rlimits + confinement, not a security boundary; on machines without
+  Docker/Podman/bubblewrap the audit log is the accountability mechanism.
+* `hash` embeddings are deterministic but not semantic — install Ollama (or point
+  `HERMUS_*` at any OpenAI-compatible embedder) for real dense retrieval.
+* Redis is an accelerator: single-node in-process lanes are the supported default, and
+  queue durability comes from the JSONL log, not Redis.
+* Streaming tokens depend on the provider supporting `stream: true`; the fallback is
+  coarser, never wrong.
+* Delegation children inherit the parent's tool permissions; `max_depth=2` and
+  `max_workers=4` are the blast-radius knobs, and there is no cross-machine child (yet).

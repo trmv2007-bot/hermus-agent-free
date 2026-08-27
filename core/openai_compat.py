@@ -257,6 +257,156 @@ def chat_completions(
         raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000))
 
 
+def stream_chat_completions(
+    provider: str,
+    model: str,
+    messages: List[Dict],
+    api_key: str = None,
+    base_url: str = None,
+    tools: List[Dict] = None,
+    temperature: float = 0.7,
+    max_tokens: int = None,
+    timeout: int = 120,
+    extra_headers: Dict = None,
+    on_delta: Optional[callable] = None,
+) -> CompatResponse:
+    """Streaming (SSE) variant of :func:`chat_completions`.
+
+    Yields text deltas to ``on_delta(str)`` while accumulating the full message,
+    so a ReAct loop can stream tokens *and* still receive complete tool calls.
+    Returns the same ``CompatResponse`` shape as the non-streaming path, so
+    callers can treat both identically. Raises ``CompatAPIError`` on any failure
+    (including "provider does not support streaming"), which callers can use to
+    fall back to the plain request.
+    """
+    preset = get_provider(provider)
+    if preset.get("native_anthropic"):
+        raise CompatAPIError("anthropic native path does not support streaming here", status_code=0)
+
+    url = resolve_endpoint(provider, base_url=base_url, path_key="chat_path")
+    headers = build_auth_headers(provider, api_key, extra=extra_headers)
+    headers["Accept"] = "text/event-stream"
+    body: Dict[str, Any] = {
+        "model": model,
+        "messages": _normalize_messages(messages),
+        "temperature": temperature,
+        "stream": True,
+        # Ask for a final usage chunk (OpenAI >= 1.1, Groq, OpenRouter, Ollama /v1).
+        "stream_options": {"include_usage": True},
+    }
+    if max_tokens:
+        body["max_tokens"] = max_tokens
+    norm_tools = _normalize_tools(tools)
+    if norm_tools and preset.get("supports_tools", True):
+        body["tools"] = norm_tools
+        body["tool_choice"] = "auto"
+
+    content_parts: List[str] = []
+    pending_calls: Dict[int, Dict[str, Any]] = {}
+    usage_raw: Dict[str, Any] = {}
+    finish_reason = ""
+    started = time.time()
+    try:
+        with requests.post(url, headers=headers, json=body, timeout=timeout, stream=True) as resp:
+            if resp.status_code >= 400:
+                rate = _extract_rate_headers(dict(resp.headers))
+                raise CompatAPIError(
+                    f"streaming HTTP {resp.status_code}: {resp.text[:400]}",
+                    status_code=resp.status_code, rate_limit=rate,
+                )
+            for raw_line in resp.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                line = raw_line.strip()
+                if line.startswith(":"):        # SSE comment / keep-alive
+                    continue
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                if line in ("[DONE]", ""):
+                    if line == "[DONE]":
+                        break
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(chunk.get("usage"), dict):
+                    usage_raw = chunk["usage"]
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                choice = choices[0] or {}
+                finish_reason = choice.get("finish_reason") or finish_reason
+                delta = choice.get("delta") or choice.get("message") or {}
+                piece = delta.get("content")
+                if isinstance(piece, str) and piece:
+                    content_parts.append(piece)
+                    if on_delta:
+                        try:
+                            on_delta(piece)
+                        except Exception:
+                            pass  # a broken subscriber must not kill the model call
+                elif isinstance(piece, list):  # content-part arrays (some gateways)
+                    for part in piece:
+                        if isinstance(part, dict) and part.get("text"):
+                            content_parts.append(part["text"])
+                            if on_delta:
+                                try:
+                                    on_delta(part["text"])
+                                except Exception:
+                                    pass
+                if delta.get("reasoning_content"):
+                    # expose chain-of-thought as deltas too (some providers)
+                    pass
+                for tc in delta.get("tool_calls") or []:
+                    idx = int(tc.get("index") or 0)
+                    slot = pending_calls.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] = fn["name"]
+                    if isinstance(fn.get("arguments"), str):
+                        slot["arguments"] += fn["arguments"]
+
+        tool_calls: List[Dict] = []
+        for idx in sorted(pending_calls):
+            slot = pending_calls[idx]
+            args = slot.get("arguments") or "{}"
+            try:
+                parsed = json.loads(args) if args.strip() else {}
+            except Exception:
+                parsed = {"raw": args}
+            if not slot.get("name"):
+                continue
+            tool_calls.append({
+                "name": slot["name"],
+                "arguments": parsed if isinstance(parsed, dict) else {},
+                "id": slot.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+            })
+        content = "".join(content_parts)
+        latency_ms = int((time.time() - started) * 1000)
+        pt = usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or token_counter.count_messages(messages)
+        ct = usage_raw.get("completion_tokens") or usage_raw.get("output_tokens") or token_counter.count_text(content)
+        usage = token_counter.estimate_cost(pt, ct, model=f"{provider}/{model}")
+        usage["latency_ms"] = latency_ms
+        usage["streamed"] = True
+        usage["finish_reason"] = finish_reason
+        return CompatResponse(
+            content=content, tool_calls=tool_calls, usage=usage,
+            raw={"stream": True, "finish_reason": finish_reason}, model=model,
+            latency_ms=latency_ms,
+        )
+    except CompatAPIError:
+        raise
+    except requests.exceptions.Timeout:
+        raise CompatAPIError("Stream timeout", status_code=408, latency_ms=int((time.time() - started) * 1000))
+    except requests.exceptions.ConnectionError as e:
+        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - started) * 1000))
+    except Exception as e:
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - started) * 1000))
+
+
 class CompatAPIError(Exception):
     def __init__(
         self,

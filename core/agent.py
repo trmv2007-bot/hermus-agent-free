@@ -4,6 +4,7 @@ Multi-step ReAct tool loop + auto tool registry + semantic memory hooks.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,7 @@ from .skill_manager import skill_manager
 from .task_tracker import task_tracker
 from .modes import AgentMode, get_mode_config, list_modes
 from .tool_registry import tool_registry
+from .run_hooks import CancelledRun, CancelToken, make_emitter
 
 
 class HermusAgent:
@@ -160,7 +162,7 @@ class HermusAgent:
             print(f"[Router] skipped ({e})")
             return None
 
-    def _build_system_prompt(self, user_message: str = "") -> str:
+    def _build_system_prompt(self, user_message: str = "", emit=None) -> str:
         curated = memory.get_curated_memory(limit=10)
         curated_text = (
             "\n".join([f"- {m['key']}: {m['value'][:200]}" for m in curated])
@@ -188,15 +190,34 @@ class HermusAgent:
         except Exception:
             pass
 
-        # Memory 2.0 (architecture upgrade): typed + scored recall
+        # Memory 2.0 (architecture upgrade): hybrid recall + decay + eviction
         memory2_block = ""
         if getattr(config, "memory2_enabled", True):
             try:
                 from .memory2 import memory2
 
-                memory2_block = memory2.recall_prompt_block(
-                    user_message, limit=5, project=self.project
-                )
+                ctx = memory2.recall_context(user_message, limit=5, project=self.project)
+                memory2_block = ctx.get("text") or ""
+                if emit is not None:
+                    emit(
+                        "memory_recalled",
+                        {
+                            "mode": ctx.get("mode"),
+                            "kept": len(ctx.get("kept") or []),
+                            "evicted": len(ctx.get("evicted") or []),
+                            "ids": (ctx.get("ids") or [])[:12],
+                            "tokens": ctx.get("tokens"),
+                            "budget_tokens": ctx.get("budget_tokens"),
+                            "index": ctx.get("index"),
+                            "preview": [
+                                {"id": m.get("id"), "kind": m.get("kind"),
+                                 "score": m.get("score"),
+                                 "rrf": m.get("rrf_score"),
+                                 "text": (m.get("content") or "")[:120]}
+                                for m in (ctx.get("kept") or [])[:5]
+                            ],
+                        },
+                    )
             except Exception:
                 memory2_block = ""
 
@@ -257,8 +278,30 @@ Rules:
             text = text[:limit] + "...(truncated)"
         return f"Tool {name} returned:\n{text}"
 
-    def chat(self, user_message: str) -> Dict[str, Any]:
-        """Multi-step agent loop: plan → tool calls → observe → repeat → final answer."""
+    def chat(
+        self,
+        user_message: str,
+        *,
+        on_event=None,
+        stream: bool = False,
+        should_cancel=None,
+    ) -> Dict[str, Any]:
+        """Multi-step agent loop: plan → tool calls → observe → repeat → final answer.
+
+        ``on_event(event_type, data)`` receives lifecycle events (steps, tool
+        calls/results, llm deltas, memory recall, skill harvest, verification) so
+        the gateway can stream them over SSE/WebSocket. ``stream=True`` requests
+        token-level deltas from the model. ``should_cancel`` is polled at every
+        step boundary for cooperative cancellation.
+        """
+        emit = make_emitter(on_event)
+        cancel = CancelToken(should_cancel)
+        emit(
+            "turn_started",
+            {"session": self.session_id, "model": self.model_name,
+             "mode": self.mode.value, "project": self.project,
+             "stream": bool(stream), "chars": len(user_message or "")},
+        )
         # Pick up custom APIs added/removed via Settings since this agent started
         sig = self._custom_api_signature()
         if sig != getattr(self, "_custom_api_sig", None):
@@ -466,6 +509,9 @@ Rules:
 
         # ---- Multi-step ReAct loop ----
         while steps < budget_steps:
+            if cancel.cancelled:
+                emit("run_cancelled", {"step": steps})
+                raise CancelledRun("agent run cancelled")
             steps += 1
             try:
                 task_tracker.update_agent(
@@ -476,10 +522,21 @@ Rules:
             except Exception:
                 pass
 
+            emit("step_started", {"step": steps, "of": budget_steps})
             # Only pass tools while we still have budget for another tool round
             use_tools = self.tools if self.tools else None
-            response = self.llm.chat(messages, tools=use_tools)
+            if stream:
+                response = self.llm.stream_chat(
+                    messages, tools=use_tools, on_delta=_delta_sink(emit, steps)
+                )
+            else:
+                response = self.llm.chat(messages, tools=use_tools)
             last_usage = getattr(response, "usage", None) or last_usage
+            emit(
+                "step_observed",
+                {"step": steps, "tool_calls": len(getattr(response, "tool_calls", None) or []),
+                 "chars": len(getattr(response, "content", "") or "")},
+            )
 
             if not response.tool_calls:
                 final_content = response.content or ""
@@ -512,7 +569,19 @@ Rules:
                     except Exception:
                         tool_args = {}
                 print(f"[Tool step {steps}] {tool_name}({tool_args})")
+                _t0 = time.time()
+                emit("tool_call", {"step": steps, "tool": tool_name,
+                                   "args": _safe_trunc_args(tool_args)})
                 result = self._execute_tool(tool_name, tool_args)
+                emit(
+                    "tool_result",
+                    {
+                        "step": steps, "tool": tool_name,
+                        "ms": int((time.time() - _t0) * 1000),
+                        "error": _result_failed(result),
+                        "preview": _preview(result),
+                    },
+                )
                 try:
                     from .harness import harness as _harness
 
@@ -680,9 +749,46 @@ Rules:
         except Exception as e:
             print(f"[Self-Improvement] Failed to trigger: {e}")
 
-        # Auto skill creation
+        # Verification is computed *before* the skill forge so distillation is
+        # evidence-gated: we never learn a procedure from a task that failed.
+        verification_early = None
+        if getattr(config, "autonomous_enabled", False) or getattr(config, "skill_forge_enabled", True):
+            verification_early = self._verify_final(user_message, final_content)
+            if verification_early is not None:
+                emit("verification", verification_early)
+
+        # Skill forge (architecture upgrade): evaluate → distill → validate → install
         skill_created = None
-        if skill_manager.should_create_skill(self.trajectory):
+        if getattr(config, "skill_forge_enabled", True):
+            try:
+                from .skill_forge import skill_forge
+
+                emit("skill_harvest_started", {"steps": steps, "turns": len(self.trajectory)})
+                skill_created = skill_forge.harvest(
+                    user_message,
+                    self.trajectory,
+                    verification=verification_early,
+                    tool_results=all_tool_results,
+                    session_id=self.session_id,
+                    final_answer=final_content,
+                )
+                if skill_created.get("created") or skill_created.get("installed"):
+                    emit("skill_created", {
+                        "name": skill_created.get("name"),
+                        "path": skill_created.get("path"),
+                        "stage": skill_created.get("stage"),
+                        "evaluation": skill_created.get("evaluation"),
+                    })
+                    print(f"[SkillForge] {skill_created.get('stage') or 'installed'}: "
+                          f"{skill_created.get('name') or skill_created.get('merged_into')}")
+                else:
+                    emit("skill_skipped", {"stage": skill_created.get("stage"),
+                                           "reasons": (skill_created.get("evaluation") or {}).get("reasons"),
+                                           "merged_into": skill_created.get("merged_into")})
+            except Exception as e:
+                print(f"[SkillForge] skipped ({e}) - falling back to legacy auto-skill")
+                skill_created = None
+        if skill_created is None and skill_manager.should_create_skill(self.trajectory):
             print("[Skill] Complex trajectory detected, auto-creating skill...")
             skill_created = skill_manager.create_skill_from_trajectory(
                 self.trajectory, self.session_id
@@ -704,10 +810,14 @@ Rules:
         self._persist_memory2(user_message, final_content, all_tool_results)
 
         # Optional autonomous verify gate (non-blocking metadata)
-        verification = None
-        if getattr(config, "autonomous_enabled", False):
-            verification = self._verify_final(user_message, final_content)
+        verification = verification_early
 
+        emit(
+            "turn_finished",
+            {"steps": steps, "tools": len(all_tool_results), "chars": len(final_content or ""),
+             "skill": (skill_created or {}).get("name"),
+             "verified": (verification or {}).get("verified")},
+        )
         return {
             "session_id": self.session_id,
             "response": final_content,
@@ -724,6 +834,7 @@ Rules:
             "router": routed,
             "project": self.project,
             "verification": verification,
+            "events": None,
         }
 
     def _persist_memory2(self, user_message: str, final_content: str,
@@ -968,3 +1079,47 @@ if __name__ == "__main__":
             print("\nUse /exit to quit")
         except Exception as e:
             print(f"Error: {e}")
+
+
+# --------------------------------------------------------------------- helpers
+def _delta_sink(emit, step: int):
+    """on_delta callback: forward model tokens as llm_delta events."""
+
+    def _on_delta(piece: str) -> None:
+        emit("llm_delta", {"step": step, "text": (piece or "")[:2000]})
+
+    return _on_delta
+
+
+def _result_failed(result: Any) -> bool:
+    try:
+        from .tool_registry import tool_registry
+
+        return bool(tool_registry._looks_like_error(result))
+    except Exception:
+        if isinstance(result, dict):
+            return result.get("success") is False or bool(result.get("error"))
+        return False
+
+
+def _preview(result: Any, limit: int = 400) -> str:
+    try:
+        text = json.dumps(result, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(result)
+    return text[:limit]
+
+
+def _safe_trunc_args(args: Any, limit: int = 300) -> Dict[str, Any]:
+    """Argument summary safe to publish to a dashboard (no long blobs)."""
+    if not isinstance(args, dict):
+        return {"value": str(args)[:limit]}
+    out: Dict[str, Any] = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            out[k] = v[:160] + ("…" if len(v) > 160 else "")
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        else:
+            out[k] = str(v)[:120]
+    return out

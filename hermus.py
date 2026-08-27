@@ -296,6 +296,79 @@ def main():
     mem2_recall = mem2_sub.add_parser("recall", help="Ranked recall")
     mem2_recall.add_argument("query")
     mem2_recall.add_argument("--limit", type=int, default=10)
+    mem2_hybrid = mem2_sub.add_parser("hybrid", help="Hybrid recall (BM25 + vectors + RRF + decay)")
+    mem2_hybrid.add_argument("query")
+    mem2_hybrid.add_argument("--limit", type=int, default=10)
+    mem2_hybrid.add_argument("--kind", dest="kinds", action="append", default=None)
+    mem2_hybrid.add_argument("--project", default=None)
+    mem2_hybrid.add_argument("--explain", action="store_true", help="Show rank contributions per hit")
+    mem2_sub.add_parser("index", help="Index health (FTS5 / vector backend / coverage)")
+    mem2_sweep = mem2_sub.add_parser("sweep", help="Apply decay lifecycle (archive/purge/consolidate)")
+    mem2_sweep.add_argument("--apply", action="store_true", help="Actually mutate (default: dry run)")
+    mem2_sweep.add_argument("--project", default=None)
+    mem2_pin = mem2_sub.add_parser("pin", help="Pin/unpin a memory so decay never evicts it")
+    mem2_pin.add_argument("id", type=int)
+    mem2_pin.add_argument("--off", action="store_true", help="Unpin")
+    mem2_compact = mem2_sub.add_parser("compact", help="Evict aged working-memory rows into episodic")
+    mem2_compact.add_argument("--age-hours", type=float, default=24.0)
+    mem2_context = mem2_sub.add_parser("context", help="Show the budget-packed prompt block + eviction report")
+    mem2_context.add_argument("query", nargs="?", default="")
+    mem2_reindex = mem2_sub.add_parser("reindex", help="Rebuild FTS + vector indexes")
+    mem2_forget = mem2_sub.add_parser("forget", help="Tombstone a memory (recall stops returning it)")
+    mem2_forget.add_argument("id", type=int, nargs="?", default=None)
+    mem2_forget.add_argument("--query", default="", help="Find the row(s) to forget by meaning instead of id")
+    mem2_forget.add_argument("--kind", default=None)
+    mem2_forget.add_argument("--limit", type=int, default=5)
+
+    # skill forge — trajectory → SKILL.md
+    forge_parser = subparsers.add_parser("forge", help="Skill forge - harvest skills, validate, quarantine")
+    forge_sub = forge_parser.add_subparsers(dest="forge_action")
+    forge_list = forge_sub.add_parser("list", help="Installed skills + health")
+    forge_stats = forge_sub.add_parser("stats", help="Harvest stats (created/quarantined/outcome rate)")
+    forge_validate = forge_sub.add_parser("validate", help="Validate one skill (import + replay + smoke test)")
+    forge_validate.add_argument("name")
+    forge_run = forge_sub.add_parser("run", help="Run a harvested skill")
+    forge_run.add_argument("name")
+    forge_run.add_argument("--task", default="")
+    forge_run.add_argument("--execute", action="store_true", help="Actually execute the replay plan")
+    forge_quarantine = forge_sub.add_parser("quarantine", help="List quarantined skills")
+    forge_log = forge_sub.add_parser("log", help="Recent forge decisions")
+    forge_log.add_argument("--limit", type=int, default=15)
+
+    # sandbox
+    sandbox_parser = subparsers.add_parser("sandbox", help="Sandboxed execution - probe backends, run commands in a jail")
+    sandbox_sub = sandbox_parser.add_subparsers(dest="sandbox_action")
+    sandbox_sub.add_parser("status", help="Backend selection + capability probe")
+    sandbox_run = sandbox_sub.add_parser("run", help="Run a command inside the sandbox")
+    sandbox_run.add_argument("command", nargs="+")
+    sandbox_run.add_argument("--timeout", type=int, default=30)
+    sandbox_run.add_argument("--network", action="store_true")
+    sandbox_py = sandbox_sub.add_parser("python", help="Run Python source in the sandbox")
+    sandbox_py.add_argument("code")
+    sandbox_py.add_argument("--timeout", type=int, default=30)
+
+    # delegation / job queue
+    deleg_parser = subparsers.add_parser("delegate", help="Fan work out to parallel sub-agents (JSON-RPC workers)")
+    deleg_parser.add_argument("goal", nargs="+")
+    deleg_parser.add_argument("--task", dest="tasks", action="append", default=None,
+                              help="Explicit workstream (repeatable); omit to auto-plan")
+    deleg_parser.add_argument("--max-children", type=int, default=4)
+    deleg_parser.add_argument("--aggregate", default="synthesize",
+                              choices=["synthesize", "concat", "vote", "best"])
+    deleg_parser.add_argument("--model", default=None)
+    deleg_parser.add_argument("--json", action="store_true", help="Print the full structured tree as JSON")
+
+    jobs_parser = subparsers.add_parser("jobs", help="Inspect the gateway job queue (data/jobs/)")
+    jobs_sub = jobs_parser.add_subparsers(dest="jobs_action")
+    jobs_list = jobs_sub.add_parser("list", help="Recent jobs from the durable log")
+    jobs_list.add_argument("--limit", type=int, default=20)
+    jobs_list.add_argument("--status", default=None,
+                           help="queued|running|succeeded|failed|cancelled|interrupted")
+    jobs_list.add_argument("--log", default=None, help="read another jobs.jsonl (e.g. another instance)")
+    jobs_status = jobs_sub.add_parser("status", help="One job's status + result")
+    jobs_status.add_argument("job_id")
+    jobs_show = jobs_sub.add_parser("events", help="Replay a job's run events")
+    jobs_show.add_argument("job_id")
 
     # model router 2.0
     router_parser = subparsers.add_parser("router", help="Model Router 2.0 - per-step model selection")
@@ -1168,18 +1241,229 @@ def main():
 
     elif args.command == "mem2":
         from core.memory2 import memory2
-        if args.mem2_action == "remember":
+        action = args.mem2_action
+        if action == "remember":
             success = None if args.success == "none" else (args.success == "true")
             r = memory2.remember(args.kind, args.content, importance=args.importance, success=success)
             print(f"{'✅' if r.get('success') else '❌'} {args.kind} memory {'merged' if r.get('merged') else 'saved'} id={r.get('id')}")
-        elif args.mem2_action == "recall":
+        elif action == "recall":
             res = memory2.recall(args.query, limit=args.limit)
             if not res:
                 print("No memories found.")
             for m in res:
-                print(f" [{m['kind']:10s}] score={m['score']:.3f} | {m['content'][:120]}")
+                band = (m.get("signals") or {}).get("band", "")
+                print(f" [{m['kind']:10s}] score={m['score']:.3f} decay={m.get('decay', 1.0):.2f}"
+                      f"{(' ' + band) if band else ''} | {m['content'][:120]}")
+        elif action == "hybrid":
+            if args.explain:
+                out = memory2.explain(args.query, limit=args.limit, project=args.project, kinds=args.kinds)
+                print(__import__("json").dumps(out, indent=2, default=str)[:4000])
+            else:
+                hits = memory2.hybrid_recall(args.query, limit=args.limit,
+                                             project=args.project, kinds=args.kinds)
+                idx = memory2.store.index_stats()
+                print(f"hybrid index: fts5={idx.get('fts5')} vectors={idx.get('vectors_indexed')}/"
+                      f"{idx.get('corpus')} backend={idx.get('vector_backend')}")
+                if not hits:
+                    print("No memories found.")
+                for h in hits:
+                    ret = h.get("retrieval") or {}
+                    con = ret.get("contributions") or {}
+                    print(f" [{h['kind']:10s}] rrf={h.get('rrf_score', 0):.4f} "
+                          f"bm25#{ret.get('bm25_rank') if ret.get('bm25_rank') is not None else '-'} "
+                          f"vec#{ret.get('vector_rank') if ret.get('vector_rank') is not None else '-'} "
+                          f"(c={con.get('bm25', 0):.3f}/{con.get('vector', 0):.3f}/{con.get('prior', 0):.3f}) "
+                          f"decay={h.get('decay', 1.0):.2f} | {(h['content'] or '')[:100]}")
+        elif action == "index":
+            print(__import__("json").dumps(memory2.store.index_stats(), indent=2, default=str))
+        elif action == "sweep":
+            r = memory2.sweep(project=args.project, dry_run=not args.apply)
+            print(("DRY RUN — " if r.get("dry_run") else "") + __import__("json").dumps(r, indent=2, default=str))
+        elif action == "pin":
+            r = memory2.pin(args.id, not args.off)
+            print(f"{'✅' if r.get('success') else '❌'} id={args.id} pinned={r.get('pinned')}")
+        elif action == "compact":
+            r = memory2.compact_working_memory(max_age_hours=args.age_hours)
+            print(f"compacted {r.get('deleted_count', 0)} working rows -> {r.get('promoted_to') or 'no promotion'}")
+        elif action == "context":
+            out = memory2.recall_context(args.query or "")
+            print(f"budget={out.get('budget_tokens')} used={out.get('tokens')} "
+                  f"({out.get('utilization', 0):.0%}) kept={len(out.get('kept') or [])} "
+                  f"evicted={len(out.get('evicted') or [])} mode={out.get('mode')}")
+            for e in (out.get("evicted") or [])[:10]:
+                print(f"  - evicted [{e.get('kind')}] decay={e.get('decay', 0):.2f} | {(e.get('content') or '')[:80]}")
+            print("--- prompt block ---")
+            print(out.get("text") or "(empty)")
+        elif action == "reindex":
+            print(__import__("json").dumps(memory2.reindex(), indent=2, default=str))
+        elif action == "forget":
+            r = memory2.forget(args.id, query=args.query, kind=args.kind,
+                               limit=args.limit, reason="cli")
+            print(f"{'✅' if r.get('success') else '❌'} forgotten={r.get('forgotten')}"
+                  + ("" if r.get("success") else f" — {r.get('error', '')}"))
         else:
             parser.parse_args(["mem2", "--help"])
+
+    elif args.command == "forge":
+        from core.skill_forge import skill_forge
+        action = args.forge_action
+        if action == "list":
+            reg = skill_forge.index()
+            st = skill_forge.stats()
+            print(f"skills: {reg['count']} (harvested={st['harvested']}, quarantined={st['quarantined']})")
+            print(f"registry: {reg['path']}")
+            for name, entry in reg["skills"].items():
+                print(f" - {name:30s} v{entry.get('version', 1)} :: {str(entry.get('title', ''))[:52]}")
+                print(f"     tools={','.join(entry.get('tools') or [])[:70]} status={entry.get('status')}")
+        elif action == "stats":
+            print(__import__("json").dumps(skill_forge.stats(), indent=2, default=str))
+        elif action == "validate":
+            from pathlib import Path as _P
+            print(__import__("json").dumps(skill_forge.validate(_P(skill_forge.skills_dir) / args.name),
+                                           indent=2, default=str))
+        elif action == "run":
+            print(__import__("json").dumps(skill_forge.run(args.name, task=args.task, execute=args.execute),
+                                           indent=2, default=str))
+        elif action == "quarantine":
+            q = _P(skill_forge.skills_dir) / ".quarantine"
+            names = sorted(p.name for p in q.iterdir()) if q.exists() else []
+            print(f"quarantined ({len(names)}): " + (", ".join(names) or "none"))
+            for n in names:
+                rep = q / n / "report.json"
+                if rep.exists():
+                    try:
+                        print(f"  - {n}: {__import__('json').loads(rep.read_text()).get('error', '')[:120]}")
+                    except Exception:
+                        pass
+        elif action == "log":
+            log = _P(skill_forge.skills_dir) / "forge_log.jsonl"
+            lines = log.read_text().splitlines() if log.exists() else []
+            if not lines:
+                print(f"no forge log yet ({log})")
+            for line in lines[-args.limit:]:
+                try:
+                    e = __import__("json").loads(line)
+                except Exception:
+                    continue
+                print(f" {e.get('ts','')} {e.get('action'):12s} {e.get('stage','')} "
+                      f"{e.get('name','')} score={e.get('evaluation', {}).get('score')} "
+                      f"{str(e.get('reasons') or e.get('report') or '')[:90]}")
+        else:
+            parser.parse_args(["forge", "--help"])
+
+    elif args.command == "sandbox":
+        from core.sandbox import sandbox
+        if args.sandbox_action == "status":
+            st = sandbox.status()
+            print(f"backend : {st['backend']}  ({st['reason']})")
+            pol = st["policy"]
+            print(f"policy  : timeout={pol.get('timeout')}s mem={pol.get('memory_mb')}MB "
+                  f"cpu={pol.get('cpus')} pids={pol.get('pids')} disk={pol.get('disk_mb')}MB "
+                  f"net={pol.get('network')} ro_rootfs={pol.get('read_only_rootfs')}")
+            if st.get("active"):
+                print(f"running : {st['active']} sandbox(es) in flight")
+            caps = st.get("capabilities", {})
+
+            def _cap(v):
+                if isinstance(v, dict):
+                    return bool(v.get("ok")), str(v.get("note", ""))[:60]
+                return bool(v), ""
+
+            for k, label in (("docker_binary", "docker cli"), ("docker_daemon", "docker daemon"),
+                             ("podman", "podman"), ("bwrap_usable", "bubblewrap"),
+                             ("unshare_net", "unshare -n"), ("gvisor_runsc", "gVisor runsc"),
+                             ("wasmtime", "wasmtime"), ("resource_module", "posix rlimits")):
+                ok, note = _cap(caps.get(k))
+                print(f"  {'✅' if ok else '—'} {label:16s} {note}")
+            print("workdir : " + str(st.get("root")))
+        elif args.sandbox_action in ("run", "python"):
+            cmd = " ".join(args.command) if args.sandbox_action == "run" else args.code
+            if args.sandbox_action == "python":
+                res = sandbox.run_python(cmd, timeout=args.timeout)
+            else:
+                res = sandbox.run(cmd, timeout=args.timeout, network=args.network)
+            lim = res.get("limits") or {}
+            print(f"[{res['backend']}] rc={res['returncode']} {res['duration_ms']}ms "
+                  f"limits={lim.get('memory_mb')}MB/{lim.get('pids')}pids "
+                  f"net={lim.get('network')}")
+            if res.get("stdout"):
+                print(res["stdout"].rstrip()[:4000])
+            if res.get("stderr"):
+                print("stderr:", res["stderr"].rstrip()[:1500])
+            if res.get("error"):
+                print("error:", res["error"][:400])
+        else:
+            parser.parse_args(["sandbox", "--help"])
+
+    elif args.command == "delegate":
+        from core.delegation import delegation
+        goal = " ".join(args.goal)
+        sink = (lambda t, d: print(f"  · {t}: {str(d.get('task') or d.get('tool') or d.get('answer') or '')[:80]}")) \
+            if not args.json else None
+        if args.tasks:
+            out = delegation.fanout(args.tasks, goal=goal, max_children=args.max_children,
+                                    aggregate=args.aggregate, model=args.model or "", on_event=sink)
+        else:
+            out = delegation.decompose_and_run(goal, max_children=args.max_children,
+                                               aggregate=args.aggregate, model=args.model or "",
+                                               on_event=sink)
+        if args.json:
+            print(__import__("json").dumps(out, indent=2, default=str))
+        else:
+            agg = out.get("aggregate") or {}
+            print(f"\ndelegated '{str(out.get('goal'))[:60]}' → {out.get('succeeded')}/{out.get('children')} "
+                  f"children ok ({out.get('duration_ms')}ms, tree={out.get('tree_id')})")
+            for n in out.get("nodes") or []:
+                mark = {"done": "✅", "failed": "❌", "cancelled": "⛔", "timeout": "⏱"}.get(n.get("status"), "…")
+                print(f" {mark} {str(n.get('task'))[:56]:58s} {n.get('status')} "
+                      f"[{n.get('backend')}] {n.get('duration_ms')}ms tools={len(n.get('tool_calls') or [])}")
+            sections = agg.get("sections") or []
+            if isinstance(sections, dict):      # older handlers returned a mapping
+                sections = [{"child": k, "answer": v} for k, v in sections.items()]
+            for sec in sections:
+                conf = sec.get("confidence")
+                print(f"\n### {sec.get('child', 'section')}"
+                      + (f"  (conf {conf})" if conf is not None else ""))
+                print(str(sec.get("answer", ""))[:900])
+            if not sections and agg.get("answer"):
+                print(f"\n{str(agg['answer'])[:3000]}")
+            if agg.get("disagreement"):
+                print(f"\n(disagreement among children: {agg['disagreement']:.0%})")
+        if out.get("errors"):
+            print("errors:", "; ".join(str(e)[:120] for e in out["errors"]))
+
+    elif args.command == "jobs":
+        from gateway.queue import job_queue
+        if args.jobs_action == "list":
+            log = getattr(args, "log", None)
+            if log:
+                rows = job_queue.read_log(log, 500)
+            else:
+                rows = job_queue.recent_jobs(max(args.limit * 4, 40))
+            state = getattr(args, "status", None)
+            if state:
+                rows = [r for r in rows if r.get("status") == state]
+            rows = rows[:args.limit]
+            if not rows:
+                print(f"no jobs in {log or job_queue.persist_path} yet (is the gateway running?)")
+            for row in rows:
+                stamp = row.get("created") or row.get("ts") or row.get("finished") or ""
+                print(f" {str(stamp)[:19]:19s} {str(row.get('job_id') or row.get('id',''))[:16]:18s} "
+                      f"{str(row.get('kind',''))[:18]:18s} {str(row.get('status',''))[:10]:10s} "
+                      f"{str(row.get('duration_ms') or 0):>6}ms "
+                      f"{str(row.get('error') or row.get('result_brief') or '')[:56]}")
+        elif args.jobs_action == "status":
+            print(__import__("json").dumps(job_queue.status(args.job_id), indent=2, default=str))
+            res = job_queue.result(args.job_id)
+            if res is not None:
+                print("--- result ---")
+                print(__import__("json").dumps(res, indent=2, default=str)[:3000])
+        elif args.jobs_action == "events":
+            for e in job_queue.events(args.job_id):
+                print(f" #{e.get('id')} {e.get('ts','')[:19]} {e.get('type'):22s} "
+                      f"{__import__('json').dumps(e.get('data'), default=str)[:110]}")
+        else:
+            parser.parse_args(["jobs", "--help"])
 
     elif args.command == "router":
         from core.router2 import router2

@@ -128,6 +128,11 @@ class EmbeddingStore:
     def _ensure_backend(self):
         if self._backend:
             return
+        pref = str(getattr(config, "embedding_backend", "auto") or "auto").lower()
+        if pref in ("hash", "none", "local", "off"):
+            self._backend = "hash"
+            self._dim = FALLBACK_DIM
+            return
         # Probe Ollama embeddings
         try:
             resp = requests.post(

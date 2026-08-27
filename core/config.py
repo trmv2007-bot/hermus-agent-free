@@ -6,7 +6,9 @@ from typing import Optional
 
 class Config(BaseModel):
     # LLM Provider - free options
-    model: str = "ollama/llama3.1:8b"  # ollama/..., groq/..., hf/..., mock/...
+    # ollama/..., groq/..., hf/..., mock/...  (HERMUS_MODEL also scopes a whole
+    # process tree — sub-agent workers inherit it.)
+    model: str = os.getenv("HERMUS_MODEL", "ollama/llama3.1:8b")
     ollama_base_url: str = "http://localhost:11434"
     groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY")
     hf_token: Optional[str] = os.getenv("HF_TOKEN")
@@ -70,6 +72,72 @@ class Config(BaseModel):
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"
     embedding_model: str = os.getenv("HERMUS_EMBED_MODEL", "nomic-embed-text")
+    # auto | ollama | hash  (hash = deterministic offline fallback, no probing)
+    embedding_backend: str = os.getenv("HERMUS_EMBED_BACKEND", "auto")
+
+    # ---- Hybrid memory + decay (retrieval upgrades) ------------------------
+    # FTS5 BM25 + dense vectors fused with Reciprocal Rank Fusion for recall.
+    memory_hybrid_enabled: bool = os.getenv("HERMUS_MEMORY_HYBRID", "1") not in ("0", "false", "False")
+    # Store per-memory float32 embeddings (sqlite-vec if installed, else cosine scan).
+    memory_vectors_enabled: bool = os.getenv("HERMUS_MEMORY_VECTORS", "1") not in ("0", "false", "False")
+    # Recency half-life (days) for exponential decay; lengthens with access count.
+    memory_half_life_days: float = float(os.getenv("HERMUS_MEMORY_HALF_LIFE_DAYS", "30"))
+    # Never silence a memory completely: decay multiplier is floored here.
+    memory_decay_floor: float = float(os.getenv("HERMUS_MEMORY_DECAY_FLOOR", "0.35"))
+    # Token budget for the memories injected into the system prompt.
+    memory_budget_tokens: int = int(os.getenv("HERMUS_MEMORY_BUDGET_TOKENS", "600"))
+    memory_archive_below: float = float(os.getenv("HERMUS_MEMORY_ARCHIVE_BELOW", "0.08"))
+    memory_purge_below: float = float(os.getenv("HERMUS_MEMORY_PURGE_BELOW", "0.02"))
+    memory_working_ttl_hours: float = float(os.getenv("HERMUS_MEMORY_WORKING_TTL_HOURS", "48"))
+    memory_rrf_k: int = int(os.getenv("HERMUS_MEMORY_RRF_K", "60"))
+    memory_prior_weight: float = float(os.getenv("HERMUS_MEMORY_PRIOR_WEIGHT", "0.35"))
+    memory_sweep_minutes: int = int(os.getenv("HERMUS_MEMORY_SWEEP_MINUTES", "60"))
+
+    # ---- Skill forge: post-task trajectory → SKILL.md ----------------------
+    skill_forge_enabled: bool = os.getenv("HERMUS_SKILL_FORGE", "1") not in ("0", "false", "False")
+    skill_forge_min_tools: int = int(os.getenv("HERMUS_SKILL_FORGE_MIN_TOOLS", "3"))
+    # LLM distillation is optional; a deterministic template is used without it.
+    skill_forge_use_llm: bool = os.getenv("HERMUS_SKILL_FORGE_LLM", "1") not in ("0", "false", "False")
+    skill_forge_dedupe_similarity: float = float(os.getenv("HERMUS_SKILL_FORGE_DEDUPE", "0.72"))
+    skill_forge_max_skills: int = int(os.getenv("HERMUS_SKILL_FORGE_MAX", "200"))
+
+    # ---- Gateway async queue + streaming ----------------------------------
+    gateway_queue_enabled: bool = os.getenv("HERMUS_QUEUE_ENABLED", "1") not in ("0", "false", "False")
+    gateway_queue_workers: int = int(os.getenv("HERMUS_QUEUE_WORKERS", "4"))
+    gateway_queue_maxsize: int = int(os.getenv("HERMUS_QUEUE_MAXSIZE", "500"))
+    gateway_queue_timeout: float = float(os.getenv("HERMUS_QUEUE_TIMEOUT", "300"))
+    # inprocess | redis (redis is optional; falls back to inprocess)
+    gateway_queue_retry_backoff: float = float(os.getenv("HERMUS_QUEUE_RETRY_BACKOFF", "1.5"))
+    gateway_queue_cancel_grace: float = float(os.getenv("HERMUS_QUEUE_CANCEL_GRACE", "15"))
+    gateway_queue_backend: str = os.getenv("HERMUS_QUEUE_BACKEND", "inprocess")
+    # durable job log (results/ lives next to it); relative paths anchor to the repo
+    gateway_jobs_log: str = os.getenv("HERMUS_QUEUE_LOG", "data/jobs/jobs.jsonl")
+    redis_url: Optional[str] = os.getenv("REDIS_URL")
+    gateway_stream_enabled: bool = os.getenv("HERMUS_STREAM_ENABLED", "1") not in ("0", "false", "False")
+    gateway_stream_tokens: bool = os.getenv("HERMUS_STREAM_TOKENS", "1") not in ("0", "false", "False")
+
+    # ---- Tool sandboxing ---------------------------------------------------
+    # auto | docker | podman | gvisor | local | off
+    sandbox_mode: str = os.getenv("HERMUS_SANDBOX", "auto")
+    sandbox_image: str = os.getenv("HERMUS_SANDBOX_IMAGE", "python:3.11-alpine")
+    sandbox_cpus: float = float(os.getenv("HERMUS_SANDBOX_CPUS", "1.0"))
+    sandbox_memory_mb: int = int(os.getenv("HERMUS_SANDBOX_MEMORY_MB", "1024"))
+    sandbox_pids: int = int(os.getenv("HERMUS_SANDBOX_PIDS", "128"))
+    sandbox_timeout: int = int(os.getenv("HERMUS_SANDBOX_TIMEOUT", "60"))
+    sandbox_disk_mb: int = int(os.getenv("HERMUS_SANDBOX_DISK_MB", "256"))
+    # 0 = no network inside sandboxes (default, safest)
+    sandbox_network: bool = os.getenv("HERMUS_SANDBOX_NETWORK", "0") not in ("0", "false", "False")
+    sandbox_read_only: bool = os.getenv("HERMUS_SANDBOX_RO_ROOTFS", "1") not in ("0", "false", "False")
+    sandbox_workspace_rw: bool = os.getenv("HERMUS_SANDBOX_WORKSPACE_RW", "1") not in ("0", "false", "False")
+    sandbox_runtime: str = os.getenv("HERMUS_SANDBOX_RUNTIME", "")  # e.g. runsc / kata
+
+    # ---- Hierarchical sub-agent delegation --------------------------------
+    delegation_enabled: bool = os.getenv("HERMUS_DELEGATION", "1") not in ("0", "false", "False")
+    delegation_max_workers: int = int(os.getenv("HERMUS_DELEGATION_WORKERS", "4"))
+    delegation_max_depth: int = int(os.getenv("HERMUS_DELEGATION_MAX_DEPTH", "2"))
+    delegation_timeout: float = float(os.getenv("HERMUS_DELEGATION_TIMEOUT", "120"))
+    delegation_rpc: bool = os.getenv("HERMUS_DELEGATION_RPC", "1") not in ("0", "false", "False")
+
 
     # MCP servers config
     mcp_servers_path: str = "data/mcp_servers.json"
