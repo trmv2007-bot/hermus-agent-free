@@ -41,3 +41,14 @@ data/recordings/
 data/harness/
 data/speech/
 data/delegations/
+
+# Upgrades runtime state (hybrid memory, decay, skill forge, queue, sandboxes)
+data/jobs/
+data/sandboxes/
+data/logs/
+data/decay/
+data/skill_forge/
+data/memory2.db*
+skills/registry.json
+skills/forge_log.jsonl
+skills/.quarantine/

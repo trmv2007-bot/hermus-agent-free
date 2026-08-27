@@ -1,121 +1,172 @@
-"""Subagents - Spawn isolated subagents for parallel workstreams, free"""
-import uuid
+"""Subagents — spawn isolated sub-agents for parallel workstreams, free.
+
+Historically this module used ``multiprocessing`` + a blocking ``join(timeout)``
+with no way to observe progress and no cancellation. It is now a thin, API-stable
+facade over :mod:`core.delegation`, which runs each sub-agent as a separate process
+speaking newline-delimited **JSON-RPC 2.0** over stdio (structured progress
+notifications, cooperative cancel, depth budget, structured result contract).
+
+Kept for backward compatibility:
+    ``spawn_subagent(task) -> {subagent_id, task, result, success}``
+    ``spawn_parallel_subagents([tasks]) -> [ {...}, ... ]``
+
+New: ``delegate(goal, tasks=…)`` for plan→fan-out→aggregate, plus
+``subagent_status()`` / ``cancel_subagent()``.
+"""
+from __future__ import annotations
+
 import json
-import multiprocessing
-from datetime import datetime
-from pathlib import Path
-from typing import List, Dict
+import time
+import uuid
+from typing import Any, Callable, Dict, List, Optional
 
 from core.config import config
 
-def subagent_task_wrapper(task: str, result_queue, subagent_id: str):
-    """Wrapper that runs in separate process - isolated subagent"""
-    try:
-        from core.agent import HermusAgent
-        from core.task_tracker import task_tracker
-        # Track subagent in task tracker
-        try:
-            task_tracker.add_agent(subagent_id, f"subagent_{subagent_id[:4]}", "subagent", persona="subagent", task=task[:100])
-            task_tracker.add_task(subagent_id, "subagent", task, model="subagent", agent=subagent_id)
-        except:
-            pass
 
-        agent = HermusAgent(session_id=f"subagent_{subagent_id}")
-        result = agent.chat(task)
+def _engine():
+    from core.delegation import delegation
 
-        try:
-            task_tracker.complete_task(subagent_id, status="done", result=result.get("response","")[:200])
-            task_tracker.remove_agent(subagent_id, final_status="done")
-        except:
-            pass
+    return delegation
 
-        result_queue.put({"subagent_id": subagent_id, "task": task, "result": result, "success": True})
-    except Exception as e:
-        try:
-            from core.task_tracker import task_tracker
-            task_tracker.complete_task(subagent_id, status="failed", result=str(e)[:200])
-            task_tracker.remove_agent(subagent_id, final_status="failed")
-        except:
-            pass
-        result_queue.put({"subagent_id": subagent_id, "task": task, "error": str(e), "success": False})
 
-def spawn_subagent(task: str) -> Dict:
-    """Spawn single isolated subagent - free"""
+def spawn_subagent(
+    task: str,
+    *,
+    model: str = "",
+    max_steps: int = 4,
+    timeout: Optional[float] = None,
+    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """Spawn one isolated sub-agent (separate process, JSON-RPC worker)."""
     subagent_id = f"sub_{uuid.uuid4().hex[:6]}"
-    result_queue = multiprocessing.Queue()
-    process = multiprocessing.Process(target=subagent_task_wrapper, args=(task, result_queue, subagent_id))
-    process.start()
-    process.join(timeout=60)  # 60s timeout
+    engine = _engine()
+    started = time.time()
+    try:
+        out = engine.fanout(
+            [task], goal=task[:120], model=model, max_steps=max_steps,
+            timeout=timeout, aggregate="concat", on_event=on_event,
+            tree_id=subagent_id, max_children=1,
+        )
+        node = (out.get("nodes") or [{}])[0]
+        result = node.get("result") or {
+            "response": node.get("answer", ""),
+            "tool_calls": node.get("tool_calls", []),
+        }
+        success = node.get("status") in ("done", "partial")
+        return {
+            "subagent_id": subagent_id,
+            "task": task,
+            "result": result,
+            "response": result.get("answer") or result.get("response") or "",
+            "success": bool(success),
+            "error": node.get("error") or ("" if success else "subagent produced no result"),
+            "backend": node.get("backend"),
+            "pid": node.get("pid"),
+            "duration_ms": int((time.time() - started) * 1000),
+            "tree": {k: out.get(k) for k in
+                     ("status", "children", "succeeded", "failed", "duration_ms")},
+        }
+    except Exception as e:
+        return {"subagent_id": subagent_id, "task": task, "error": str(e), "success": False}
 
-    if process.is_alive():
-        process.terminate()
-        return {"subagent_id": subagent_id, "task": task, "error": "Timeout after 60s", "success": False}
 
-    if not result_queue.empty():
-        return result_queue.get()
-    else:
-        return {"subagent_id": subagent_id, "task": task, "error": "No result", "success": False}
+def spawn_parallel_subagents(
+    tasks: List[str],
+    *,
+    model: str = "",
+    max_steps: int = 4,
+    timeout: Optional[float] = None,
+    aggregate: str = "concat",
+    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> List[Dict[str, Any]]:
+    """Spawn many sub-agents in parallel — independent workstreams, one process each."""
+    if not tasks:
+        return []
+    engine = _engine()
+    try:
+        out = engine.fanout(
+            tasks, goal="", model=model, max_steps=max_steps, timeout=timeout,
+            aggregate=aggregate, on_event=on_event,
+        )
+        results: List[Dict[str, Any]] = []
+        for node in out.get("nodes") or []:
+            results.append({
+                "subagent_id": node.get("id"),
+                "task": node.get("task"),
+                "result": node.get("result") or {},
+                "response": (node.get("result") or {}).get("answer", ""),
+                "success": node.get("status") == "done",
+                "error": node.get("error") or "",
+                "backend": node.get("backend"),
+                "pid": node.get("pid"),
+            })
+        return results
+    except Exception as e:
+        return [{"subagent_id": f"sub_{i}", "task": t, "error": str(e), "success": False}
+                for i, t in enumerate(tasks)]
 
-def spawn_parallel_subagents(tasks: List[str]) -> List[Dict]:
-    """Spawn multiple subagents in parallel - free parallel workstreams"""
-    print(f"[Subagents] Spawning {len(tasks)} parallel subagents")
-    processes = []
-    queues = []
 
-    for task in tasks:
-        subagent_id = f"sub_{uuid.uuid4().hex[:6]}"
-        q = multiprocessing.Queue()
-        p = multiprocessing.Process(target=subagent_task_wrapper, args=(task, q, subagent_id))
-        p.start()
-        processes.append(p)
-        queues.append((subagent_id, task, q))
+def delegate(
+    goal: str,
+    tasks: Optional[List[str]] = None,
+    *,
+    model: str = "",
+    max_children: int = 4,
+    aggregate: str = "synthesize",
+    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """Plan the work (unless ``tasks`` given), run it in parallel, return one answer."""
+    engine = _engine()
+    if tasks:
+        return engine.fanout(tasks, goal=goal, model=model, aggregate=aggregate, on_event=on_event)
+    return engine.decompose_and_run(goal, model=model, max_children=max_children,
+                                    aggregate=aggregate, on_event=on_event)
 
-    # Wait for all
-    results = []
-    for p in processes:
-        p.join(timeout=90)
 
-    for subagent_id, task, q in queues:
-        if not q.empty():
-            results.append(q.get())
-        else:
-            results.append({"subagent_id": subagent_id, "task": task, "error": "No result or timeout", "success": False})
+def subagent_status() -> Dict[str, Any]:
+    return _engine().status()
 
-    return results
+
+def cancel_subagents(tree_id: str) -> Dict[str, Any]:
+    return _engine().cancel_tree(tree_id)
+
 
 def write_python_tool_via_rpc(tool_name: str, steps: List[str]) -> Dict:
-    """Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns - free"""
-    # This is a key Hermes feature: subagent writes a Python script that calls tools via RPC instead of many turns
-    # Example: Instead of 5 turns: search, read, write, shell, etc., it writes one Python file that does all via RPC in one turn
+    """Collapse a multi-step pipeline into one script that calls tools via RPC.
 
-    code = f'''# Auto-generated tool {tool_name} via RPC - zero-context-cost
-# Steps: {", ".join(steps)}
+    Same idea as before (zero-context-cost turns), but the generated file now goes
+    through the skill forge so it is validated + indexed instead of dropped in.
+    """
+    from pathlib import Path
 
-from tools.web_search import web_search
-from tools.file_tools import file_read, file_write
-from tools.shell import shell_execute
+    from core.skill_forge import SkillForge, DistilledStep
 
-def run():
-    results = []
-'''
-    for i, step in enumerate(steps):
-        code += f'    # Step {i+1}: {step}\n'
-        code += f'    print("Step {i+1}: {step}")\n'
-
-    code += '''
-    return results
-
-if __name__ == "__main__":
-    run()
-'''
-
-    # Save as skill for reuse
+    code_steps = [
+        DistilledStep(index=i + 1, tool=str(s).split("(")[0].strip() or "shell_execute",
+                      args={"step": i + 1}, intent=str(s))
+        for i, s in enumerate(steps or [])
+    ]
+    cand = None
     try:
-        from core.skill_manager import skill_manager
-        skill_dir = Path(config.resolve_path(config.skills_dir)) / tool_name
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / "skill.py").write_text(code)
-        (skill_dir / "SKILL.md").write_text(f"# {tool_name}\n\nAuto-generated via RPC collapsing {len(steps)} steps\n\nSteps:\n" + "\n".join([f"- {s}" for s in steps]))
-        return {"success": True, "tool_name": tool_name, "path": str(skill_dir), "code": code[:500]}
+        forge = SkillForge()
+        from core.skill_forge import SkillCandidate
+
+        cand = SkillCandidate(
+            name=str(tool_name), title=str(tool_name).replace("_", " ").capitalize(),
+            description=f"RPC-collapsed pipeline: {', '.join(str(s) for s in steps)[:200]}",
+            goal=str(tool_name), steps=code_steps,
+            when_to_use="Use when the same multi-step tool pipeline is needed again.",
+            inputs=["task", "query"], tags=["rpc", "auto"],
+            verification="All steps report success and the final step returns a non-empty result.",
+            provenance={"created": time.strftime("%Y-%m-%dT%H:%M:%S"), "generator": "write_python_tool_via_rpc",
+                        "hash": uuid.uuid4().hex[:12], "evaluation": {}},
+        )
+        res = forge.install(cand)
+        if res.get("installed"):
+            return {**res, "tool_name": cand.name,
+                    "path": str(Path(forge.skills_dir) / cand.name),
+                    "code": f"# {len(code_steps)} steps collapsed into one RPC-driven skill"}
+        return {"success": False, "error": res.get("report", {}).get("error") or "validation failed",
+                "detail": res}
     except Exception as e:
         return {"success": False, "error": str(e)}

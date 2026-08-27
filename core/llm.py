@@ -454,10 +454,109 @@ class FreeLLM:
         # Everything else (groq, openai, openrouter, together, gemini, custom, ...)
         return self._call_openai_compat(messages, tools)
 
-    def chat_stream(self, messages: List[Dict], tools: List[Dict] = None) -> Generator[str, None, None]:
+    # ------------------------------------------------------------- streaming
+    def _stream_target(self) -> Optional[Dict]:
+        """Resolve (provider, model, base_url, api_key) for a streaming request.
+
+        Returns None when the provider needs a key we do not have — the caller
+        then degrades to the non-streaming path (still chunked for subscribers).
+        """
+        preset = get_provider(self.provider)
+        bundle = self._resolve_bundle()
+        api_key = bundle.get("key") or ""
+        base_url = bundle.get("base_url") or ""
+        model = self.model_name or bundle.get("default_model")
+        if self.provider == "ollama":
+            base = (base_url or config.ollama_base_url).rstrip("/")
+            if not base.endswith("/v1"):
+                base = base + "/v1"
+            return {"provider": "ollama", "model": model, "base_url": base,
+                    "api_key": api_key or "ollama"}
+        if not api_key and not preset.get("no_auth"):
+            fb = self._fallback_bundle()
+            if not fb:
+                return None
+            return {"provider": fb.get("provider") or self.provider, "model": fb.get("default_model") or model,
+                    "base_url": fb.get("base_url") or base_url, "api_key": fb.get("key") or ""}
+        return {"provider": self.provider, "model": model, "base_url": base_url, "api_key": api_key}
+
+    def stream_chat(
+        self,
+        messages: List[Dict],
+        tools: List[Dict] = None,
+        on_delta: Optional[callable] = None,
+    ) -> LLMResponse:
+        """Streaming chat: pushes text deltas to ``on_delta`` and returns the full response.
+
+        Providers that accept SSE (OpenAI-compatible endpoints, Ollama /v1) stream
+        natively. Anything else — mock, HF, offline — falls back to a single
+        request whose text is emitted in small chunks, so downstream consumers
+        (SSE, WebSocket, TUI) keep a uniform incremental contract.
+        """
+        if self.provider == "mock":
+            resp = self._call_mock(messages, tools)
+            _emit_chunks(resp.content, on_delta)
+            return resp
+
+        target = self._stream_target()
+        if target:
+            try:
+                from .openai_compat import stream_chat_completions
+
+                stream_tools = self._tools_for_provider(tools, target["provider"])
+                resp = stream_chat_completions(
+                    provider=target["provider"],
+                    model=target["model"],
+                    messages=messages,
+                    api_key=target.get("api_key"),
+                    base_url=target.get("base_url"),
+                    tools=stream_tools,
+                    temperature=self.temperature if self.temperature is not None else 0.7,
+                    timeout=120,
+                    on_delta=on_delta,
+                )
+                return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+            except Exception:
+                pass  # provider rejected streaming → fall back below
+
         resp = self.chat(messages, tools)
-        for word in resp.content.split():
-            yield word + " "
+        _emit_chunks(resp.content, on_delta)
+        return resp
+
+    def chat_stream(self, messages: List[Dict], tools: List[Dict] = None) -> Generator[str, None, None]:
+        """Generator view of :meth:`stream_chat` — yields deltas as they arrive."""
+        import queue
+        import threading
+
+        q: "queue.Queue" = queue.Queue()
+
+        def pump(piece: str) -> None:
+            q.put(piece)
+
+        def worker() -> None:
+            try:
+                resp = self.stream_chat(messages, tools, on_delta=pump)
+                q.put(("__done__", resp))
+            except Exception as e:  # pragma: no cover - defensive
+                q.put(("__error__", str(e)))
+
+        threading.Thread(target=worker, daemon=True).start()
+        while True:
+            item = q.get()
+            if isinstance(item, tuple) and item[0] == "__done__":
+                return
+            if isinstance(item, tuple) and item[0] == "__error__":
+                yield f"[stream error] {item[1]}"
+                return
+            yield item
+
+
+def _emit_chunks(text: str, on_delta: Optional[callable], size: int = 24) -> None:
+    """Emit ``text`` in small pieces for subscribers when the provider cannot stream."""
+    if not on_delta or not text:
+        return
+    for i in range(0, len(text), size):
+        on_delta(text[i : i + size])
 
 
 free_llm = FreeLLM()

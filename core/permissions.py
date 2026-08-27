@@ -111,6 +111,18 @@ DEFAULT_POLICY: Dict[str, tuple] = {
     "computer_focus_window": (Risk.GUI, Decision.DENY),
     "computer_task": (Risk.GUI, Decision.ASK),
     "computer_stop": (Risk.GUI, Decision.ALLOW),
+    # ---- upgrades: hybrid memory, sandbox, delegation, skill forge --------
+    "memory_hybrid_search": (Risk.READ, Decision.ALLOW),
+    "memory2_recall": (Risk.READ, Decision.ALLOW),
+    "memory_sweep": (Risk.WRITE, Decision.ASK),      # archives/purges typed memory
+    "skill_harvest": (Risk.WRITE, Decision.ALLOW),   # writes a validated skill file
+    "skill_forge_stats": (Risk.READ, Decision.ALLOW),
+    "delegate_tasks": (Risk.EXECUTE, Decision.ALLOW),  # spawns sandboxed worker procs
+    "subagent_spawn": (Risk.EXECUTE, Decision.ALLOW),
+    # A sandboxed command is strictly safer than the raw shell tool, so it stays
+    # ASK (audited) rather than DENY — but escalation inside it is still admin.
+    "sandbox_run": (Risk.EXECUTE, Decision.ASK),
+    "sandbox_status": (Risk.READ, Decision.ALLOW),
     "credential_access": (Risk.ADMIN, Decision.DENY),
     "get_credential": (Risk.ADMIN, Decision.DENY),
     "install_package": (Risk.ADMIN, Decision.ASK),
@@ -150,10 +162,21 @@ class PermissionManager:
                     matched = key
                     risk, decision = r, d
         # args can escalate risk (e.g. shell with sudo, write to sensitive path)
-        if tool_name in ("shell_execute", "shell"):
+        if tool_name in ("shell_execute", "shell", "sandbox_run", "backend_execute", "computer_task"):
             cmd = " ".join(str(v) for v in args.values()).lower()
-            if "sudo" in cmd or "rm -rf" in cmd or "dd if" in cmd:
+            # Privilege escalation is admin regardless of what the sandbox screen thinks.
+            dangerous = any(m in cmd for m in ("sudo ", " sudo", "rm -rf /", "dd if=", "mkfs", ":(){"))
+            if not dangerous:
+                try:  # agree with the sandbox's own screen — one list to maintain
+                    from .sandbox import scan_command
+
+                    dangerous = bool(scan_command(cmd))
+                except Exception:
+                    pass
+            if dangerous:
                 risk, decision = Risk.ADMIN, Decision.ASK
+            elif args.get("network") or "curl " in cmd or "wget " in cmd:
+                risk, decision = Risk.NETWORK, Decision.ASK
         if tool_name in ("write_file", "create_file", "append_file"):
             target = str(args.get("path") or args.get("file") or "").lower()
             if any(s in target for s in ("/etc/", "~/.ssh", ".env", "credentials", "id_rsa")):

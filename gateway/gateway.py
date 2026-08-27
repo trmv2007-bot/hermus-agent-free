@@ -43,6 +43,19 @@ except ImportError:
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
+# Realtime layer: async job queue + SSE/WebSocket streaming (see gateway/realtime.py)
+try:
+    from gateway import realtime as _realtime
+    from gateway.queue import job_queue as _job_queue
+    from core.run_events import run_bus as _run_bus
+except ImportError:  # executed as a plain module (python gateway/gateway.py)
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from gateway import realtime as _realtime  # type: ignore
+    from gateway.queue import job_queue as _job_queue  # type: ignore
+    from core.run_events import run_bus as _run_bus  # type: ignore
+
 # Store agents per user/platform for continuity
 AGENTS: Dict[str, HermusAgent] = {}
 
@@ -88,6 +101,31 @@ async def _background_agent_watchdog():
         await asyncio.sleep(30)
 
 
+async def _memory_maintenance_loop():
+    """Hourly decay/eviction pass so stale memories stop polluting prompts.
+
+    Archive/purge is conservative by default (see core.decay thresholds) and pinned
+    or high-importance memories are protected. Failures never take the gateway down.
+    """
+    minutes = max(1, int(getattr(config, "memory_sweep_minutes", 60)))
+    while True:
+        if not (_job_queue.enabled and _job_queue._started):
+            await asyncio.sleep(60)
+            continue
+        try:
+            await asyncio.sleep(minutes * 60)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        try:
+            report = await asyncio.to_thread(_job_queue.submit, "memory.sweep", {})
+            if report is not None:
+                print(f"[Gateway] memory sweep queued as {getattr(report, 'id', '?')}")
+        except Exception as e:
+            print(f"[Gateway] memory sweep failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
@@ -96,15 +134,35 @@ async def lifespan(app: FastAPI):
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
         print(f"[Gateway] Channels started: {started}")
+    # Async worker model: intake never blocks on a tool loop.
+    queue_info = {}
+    try:
+        queue_info = await _realtime.startup(app, agent_getter=get_agent_for_user)
+    except Exception as e:
+        print(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
+    maintenance_task = None
+    if getattr(config, "memory_sweep_minutes", 60) > 0:
+        try:
+            maintenance_task = asyncio.create_task(_memory_maintenance_loop())
+        except Exception as e:
+            print(f"[Gateway] memory maintenance failed to start: {e}")
     watchdog_task = None
     if getattr(config, "background_agents_enabled", True):
         try:
             watchdog_task = asyncio.create_task(_background_agent_watchdog())
         except Exception as e:
             print(f"[Gateway] background-agent watchdog failed to start: {e}")
-    yield
-    if watchdog_task and not watchdog_task.done():
-        watchdog_task.cancel()
+    try:
+        yield
+    finally:
+        if maintenance_task and not maintenance_task.done():
+            maintenance_task.cancel()
+        if watchdog_task and not watchdog_task.done():
+            watchdog_task.cancel()
+        try:
+            await _realtime.shutdown()
+        except Exception:
+            pass
 
 
 app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized", lifespan=lifespan)
@@ -125,6 +183,11 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 _DASHBOARD_STATIC = Path(__file__).parent / "static"
 _DASHBOARD_STATIC.mkdir(parents=True, exist_ok=True)
 app.mount("/dashboard-assets", StaticFiles(directory=str(_DASHBOARD_STATIC)), name="dashboard-assets")
+
+# Job queue + SSE + WebSocket + memory/skill/sandbox/delegation endpoints.
+# The agent getter is injected later, in the lifespan (get_agent_for_user is
+# defined further down this module).
+_realtime.install(app)
 
 
 def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> Optional[JSONResponse]:
@@ -310,9 +373,45 @@ setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
-    """Telegram free Bot API webhook - real sendMessage reply + multi-step agent"""
+    """Telegram webhook — acknowledged immediately, agent runs on the queue.
+
+    Telegram retries (and eventually disables a webhook) when a handler is slow,
+    and one long tool loop should not pin an HTTP worker. So: parse the update,
+    enqueue a `channel.reply` job, return 202 with the job handle. Set
+    HERMUS_WEBHOOK_SYNC=1 to restore the old inline behaviour.
+    """
     try:
         data = await request.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"invalid body: {e}"}, status_code=400)
+
+    sync_mode = os.getenv("HERMUS_WEBHOOK_SYNC", "0") not in ("0", "false", "False")
+    if not sync_mode and _job_queue.enabled and _job_queue._started:
+        try:
+            msg = ((data or {}).get("message") or (data or {}).get("edited_message")
+                   or (data or {}).get("channel_post") or {})
+            chat = msg.get("chat") or {}
+            chat_id = chat.get("id")
+            text = ""
+            if isinstance(msg.get("text"), str):
+                text = msg["text"]
+            elif isinstance(msg.get("voice"), dict) or isinstance(msg.get("audio"), dict):
+                text = ""  # voice notes are resolved inside the job handler
+            if chat_id and str(text).strip():
+                job = _job_queue.submit(
+                    "channel.reply",
+                    {"text": str(text), "platform": "telegram", "chat_id": chat_id,
+                     "user_id": str(chat.get("id") or msg.get("from", {}).get("id") or "tg")},
+                    session_key=f"telegram:{chat_id}",
+                    dedupe_key=str(msg.get("message_id")) and f"tg:{chat_id}:{msg.get('message_id')}",
+                )
+                return JSONResponse({"ok": True, "queued": True, "job_id": job.id,
+                                     "run_id": job.run_id, "events_url": f"/jobs/{job.id}/events"},
+                                    status_code=202)
+        except Exception as e:
+            print(f"[Gateway] telegram queueing failed ({e}) — running inline")
+
+    try:
         # Full handler: chat + sendMessage (+ voice transcribe)
         result = handle_telegram_update(data, agent_factory=_agent_factory)
         return JSONResponse(result if isinstance(result, dict) else {"ok": True, "result": result})
@@ -521,6 +620,33 @@ async def embeddings_search(payload: Dict):
         return embedding_store.hybrid_search(query, limit=limit)
     return embedding_store.search(query, limit=limit)
 
+def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> Dict:
+    """Call ``agent.chat`` with only the keyword arguments it actually accepts.
+
+    Agents are pluggable here — custom API profiles, older builds, test fakes —
+    so the gateway must not assume the streaming/event kwargs exist.
+    """
+    import inspect
+
+    kwargs: Dict[str, object] = {}
+    try:
+        params = inspect.signature(agent.chat).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        params = {name: None for name in ("on_event", "stream", "should_cancel")}
+    if on_event is not None and "on_event" in params:
+        kwargs["on_event"] = on_event
+    if stream and "stream" in params:
+        kwargs["stream"] = True
+    if on_event is not None and "should_cancel" in params:
+        kwargs["should_cancel"] = lambda: False
+    try:
+        return agent.chat(text, **kwargs) if kwargs else agent.chat(text)
+    except TypeError:
+        return agent.chat(text)
+
+
 @app.post("/command")
 async def command_endpoint(payload: Dict):
     """Run an agent command, optionally producing local Talking Mode audio.
@@ -545,6 +671,7 @@ async def command_endpoint(payload: Dict):
     key_name = payload.get("key_name")
     autonomous = bool(payload.get("autonomous", False))
     profile = payload.get("profile") or ""
+    as_async = bool(payload.get("async", payload.get("async_mode", False)))
     talking = bool(payload.get("talking", payload.get("speak", False)))
     run_id = str(payload.get("run_id") or f"run_{os.urandom(5).hex()}")
 
@@ -563,11 +690,42 @@ async def command_endpoint(payload: Dict):
         except Exception:
             pass
 
+    # Async path: hand the turn to the worker pool and answer with a job handle.
+    if as_async and _job_queue.enabled and _job_queue._started:
+        job = _job_queue.submit(
+            "agent.autonomous" if autonomous else "agent.chat",
+            {
+                "text": text, "platform": platform, "user_id": user_id, "model": model,
+                "mode": mode, "api_key": api_key, "base_url": base_url, "provider": provider,
+                "key_name": key_name, "profile": profile, "talking": talking,
+                "speech_rate": payload.get("speech_rate"), "voice": payload.get("voice"),
+                "stream": bool(payload.get("stream", True)),
+            },
+            session_key=f"{platform}:{user_id}",
+            timeout=payload.get("timeout"),
+            run_id=run_id,
+        )
+        return {
+            "async": True, "job_id": job.id, "run_id": job.run_id, "status": job.status,
+            "status_url": f"/jobs/{job.id}", "result_url": f"/jobs/{job.id}/result",
+            "events_url": f"/jobs/{job.id}/events", "stream_url": f"/stream/run/{job.run_id}",
+        }
+
     agent = get_agent_for_user(
         platform, user_id, model=model, mode=mode, api_key=api_key, base_url=base_url
     )
     if profile:
         agent.profile = profile
+
+    # Mirror the inline run onto the run bus so /stream/run/{run_id} works even
+    # when the caller did not use the queue.
+    _run_bus.start(run_id, label=f"command:{platform}:{user_id}")
+
+    def _bus_event(event_type: str, data: Optional[Dict] = None) -> None:
+        try:
+            _run_bus.publish(run_id, event_type, dict(data or {}))
+        except Exception:
+            pass
 
     dashboard_event_bus.publish("session_started", {
         "run_id": run_id, "text": text[:1000], "mode": mode,
@@ -575,17 +733,37 @@ async def command_endpoint(payload: Dict):
         "platform": platform,
     })
     try:
-        if autonomous:
-            result = await asyncio.to_thread(agent.autonomous, text)
-            result["autonomous"] = True
-        else:
-            result = await asyncio.to_thread(agent.chat, text)
+        stream_tokens = bool(
+            getattr(config, "gateway_stream_enabled", True)
+            and getattr(config, "gateway_stream_tokens", True)
+            and payload.get("stream", True)
+        )
+
+        def _run() -> Dict:
+            if autonomous:
+                out = agent.autonomous(text)
+                if isinstance(out, dict):
+                    out["autonomous"] = True
+                return out
+            out = _agent_chat(agent, text, on_event=_bus_event, stream=stream_tokens)
+            if isinstance(out, dict):
+                out.setdefault("steps", out.get("steps", 0))
+                if stream_tokens:
+                    out["streamed"] = True
+            return out
+
+        result = await asyncio.to_thread(_run)
+        if not autonomous:
             # Self-healing watchdog (architecture upgrade)
             from core.integrations import maybe_self_heal
 
             result = maybe_self_heal(result)
     except Exception as exc:
         dashboard_event_bus.publish("session_failed", {"run_id": run_id, "error": str(exc)})
+        try:
+            _run_bus.finish(run_id, "error", None, str(exc))
+        except Exception:
+            pass
         return JSONResponse({"error": str(exc), "run_id": run_id}, status_code=500)
 
     # Include mode in response
@@ -644,6 +822,12 @@ async def command_endpoint(payload: Dict):
         "run_id": run_id, "success": True, "talking": talking,
         "model": result.get("model"), "steps": result.get("steps"),
     })
+    try:
+        _run_bus.publish(run_id, "agent_response", {"text": str(result.get("response") or "")[:8000],
+                                                     "steps": result.get("steps")})
+        _run_bus.finish(run_id, "finished", result)
+    except Exception:
+        pass
     return result
 
 @app.get("/platforms")

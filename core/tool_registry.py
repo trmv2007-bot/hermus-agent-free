@@ -269,10 +269,105 @@ class ToolRegistry:
                     pass
                 return {"error": f"Skill exec failed: {e}", "skill": name}
 
-        def subagent_spawn(task: str) -> Dict:
+        def subagent_spawn(task: str, max_steps: int = 4, timeout: float = 0) -> Dict:
             from subagents.subagent import spawn_subagent
 
-            return spawn_subagent(task)
+            return spawn_subagent(task, max_steps=int(max_steps or 4),
+                                  timeout=float(timeout) or None)
+
+        def delegate_tasks(
+            goal: str,
+            tasks: Optional[List[str]] = None,
+            max_children: int = 4,
+            aggregate: str = "synthesize",
+        ) -> Dict:
+            """Plan → fan out parallel sub-agents → aggregate structured results."""
+            try:
+                from core.delegation import delegation
+
+                if tasks:
+                    return delegation.fanout(
+                        [str(t) for t in tasks], goal=goal, max_children=int(max_children),
+                        aggregate=str(aggregate or "synthesize"),
+                    )
+                return delegation.decompose_and_run(
+                    goal, max_children=int(max_children), aggregate=str(aggregate or "synthesize")
+                )
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        def sandbox_run(command: str, timeout: int = 30, network: bool = False,
+                        backend: str = "", allow_dangerous: bool = False) -> Dict:
+            """Run a command in an ephemeral sandbox (containers when available, else rlimit jail)."""
+            try:
+                from core.sandbox import sandbox
+
+                return sandbox.run(
+                    command, timeout=int(timeout or 30),
+                    network=bool(network), backend=(backend or None),
+                    allow_dangerous=bool(allow_dangerous), purpose="tool:sandbox_run",
+                )
+            except Exception as e:
+                return {"error": str(e)}
+
+        def memory_hybrid_search(
+            query: str, limit: int = 8, kinds: Optional[List[str]] = None,
+            project: str = "", explain: bool = False,
+        ) -> Dict:
+            """Hybrid (BM25 + vectors, RRF-fused) recall over typed memory 2.0."""
+            try:
+                from core.memory2 import memory2
+
+                if explain:
+                    return memory2.explain(query, limit=int(limit),
+                                           project=project or None, kinds=kinds or None)
+                hits = memory2.hybrid_recall(query, limit=int(limit),
+                                             project=project or None, kinds=kinds or None)
+                return {
+                    "query": query, "mode": "hybrid", "count": len(hits),
+                    "index": memory2.store.index_stats(),
+                    "results": [
+                        {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
+                         "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
+                         "retrieval": h.get("retrieval"), "signals": h.get("signals"),
+                         "content": (h.get("content") or "")[:700]}
+                        for h in hits
+                    ],
+                }
+            except Exception as e:
+                return {"query": query, "error": str(e), "results": []}
+
+        def memory_sweep(dry_run: bool = True, project: str = "") -> Dict:
+            """Run the decay lifecycle pass (archive stale, purge dead, consolidate dupes)."""
+            try:
+                from core.memory2 import memory2
+
+                return memory2.sweep(project=project or None, dry_run=bool(dry_run))
+            except Exception as e:
+                return {"error": str(e)}
+
+        def skill_harvest(session_recent: bool = True, dry_run: bool = False, goal: str = "") -> Dict:
+            """Distill the current session's trajectory into a validated SKILL.md skill."""
+            try:
+                from .agent import HermusAgent  # noqa: F401  (only to confirm loop exists)
+                from core.skill_forge import skill_forge
+
+                traj = getattr(self, "_last_trajectory", None) or []
+                if not traj:
+                    return {"created": False,
+                            "error": "no trajectory in this registry context; "
+                                     "the agent loop auto-harvests after each turn"}
+                return skill_forge.harvest(goal or "recent task", traj, dry_run=bool(dry_run))
+            except Exception as e:
+                return {"created": False, "error": str(e)}
+
+        def skill_forge_stats() -> Dict:
+            try:
+                from core.skill_forge import skill_forge
+
+                return {"stats": skill_forge.stats(), "registry": skill_forge.index()["count"]}
+            except Exception as e:
+                return {"error": str(e)}
 
         def counsel_convoke(goal: str, execute: bool = True) -> Dict:
             """Convene the Council of AIs: members talk, vote on a plan, then optionally execute it."""
@@ -359,9 +454,74 @@ class ToolRegistry:
             (
                 "subagent_spawn",
                 subagent_spawn,
-                "Spawn isolated subagent for parallel work",
-                {"task": {"type": "string"}},
+                "Spawn one isolated subagent (separate process, JSON-RPC worker) for a single task",
+                {"task": {"type": "string"}, "max_steps": {"type": "integer", "default": 4},
+                 "timeout": {"type": "number", "default": 0}},
                 ["task"],
+            ),
+            (
+                "delegate_tasks",
+                delegate_tasks,
+                "Hierarchical delegation: split work into parallel sub-agents (own processes, JSON-RPC) and aggregate their structured results",
+                {
+                    "goal": {"type": "string", "description": "What the whole delegation is for"},
+                    "tasks": {"type": "array", "items": {"type": "string"},
+                              "description": "Explicit workstreams; omit to have them planned from `goal`"},
+                    "max_children": {"type": "integer", "default": 4},
+                    "aggregate": {"type": "string", "enum": ["synthesize", "concat", "vote", "best"]},
+                },
+                ["goal"],
+            ),
+            (
+                "sandbox_run",
+                sandbox_run,
+                "Run a shell command in an ephemeral sandbox: dropped capabilities, read-only rootfs, CPU/memory/pid caps, no network unless allowed",
+                {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer", "default": 30},
+                    "network": {"type": "boolean", "default": False},
+                    "backend": {"type": "string", "enum": ["", "auto", "docker", "podman", "bwrap", "local"]},
+                    "allow_dangerous": {"type": "boolean", "default": False},
+                },
+                ["command"],
+            ),
+            (
+                "memory_hybrid_search",
+                memory_hybrid_search,
+                "Hybrid memory recall: FTS5 BM25 + dense embeddings fused with Reciprocal Rank Fusion (handles paraphrased queries)",
+                {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 8},
+                    "kinds": {"type": "array", "items": {"type": "string"}},
+                    "project": {"type": "string"},
+                    "explain": {"type": "boolean", "default": False,
+                                "description": "Return rank/contribution diagnostics instead of hits"},
+                },
+                ["query"],
+            ),
+            (
+                "memory_sweep",
+                memory_sweep,
+                "Apply memory decay lifecycle: archive stale memories, purge dead ones, consolidate duplicates (dry_run by default)",
+                {
+                    "dry_run": {"type": "boolean", "default": True},
+                    "project": {"type": "string"},
+                },
+                [],
+            ),
+            (
+                "skill_harvest",
+                skill_harvest,
+                "Distill the current session trajectory into a SKILL.md skill (evaluation-gated, sandbox-validated)",
+                {"goal": {"type": "string"}, "dry_run": {"type": "boolean", "default": False}},
+                [],
+            ),
+            (
+                "skill_forge_stats",
+                skill_forge_stats,
+                "Skill forge health: harvested count, quarantine, recent outcome success rate",
+                {},
+                [],
             ),
             (
                 "counsel_convoke",
