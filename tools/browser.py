@@ -85,12 +85,12 @@ def browser_extract(selector: str = "body") -> dict:
         # Try text
         try:
             text = page.inner_text(selector, timeout=5000)
-        except:
+        except Exception:
             text = page.text_content(selector, timeout=5000) or ""
         html = ""
         try:
             html = page.inner_html(selector, timeout=5000)[:10000]
-        except:
+        except Exception:
             pass
         return {"success": True, "selector": selector, "text": text[:10000], "html": html[:10000]}
     except Exception as e:

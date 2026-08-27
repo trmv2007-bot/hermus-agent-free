@@ -19,9 +19,9 @@ class TokenCounter:
                 # Try get encoding for model, fallback to cl100k_base
                 try:
                     self.encoding = tiktoken.encoding_for_model(model)
-                except:
+                except Exception:
                     self.encoding = tiktoken.get_encoding("cl100k_base")
-            except:
+            except Exception:
                 self.encoding = None
 
     def count_text(self, text: str) -> int:
@@ -32,7 +32,7 @@ class TokenCounter:
         if self.encoding:
             try:
                 return len(self.encoding.encode(text))
-            except:
+            except Exception:  # tiktoken raises assorted internal errors on odd input
                 pass
 
         # Fallback approximations - free, no API

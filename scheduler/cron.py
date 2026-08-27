@@ -66,7 +66,7 @@ class CronManager:
             cron_match = re.search(r'(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)', resp.content)
             if cron_match:
                 return cron_match.group(0)
-        except:
+        except Exception:
             pass
 
         # Default daily 9am
@@ -92,7 +92,7 @@ class CronManager:
         # Save to file
         try:
             jobs = json.loads(self.db_path.read_text())
-        except:
+        except (OSError, ValueError):
             jobs = []
         jobs.append(job)
         self.db_path.write_text(json.dumps(jobs, indent=2))
@@ -136,7 +136,7 @@ class CronManager:
     def list_jobs(self) -> list[dict]:
         try:
             return json.loads(self.db_path.read_text())
-        except:
+        except (OSError, ValueError):
             return []
 
     def remove_job(self, job_id: str) -> bool:
@@ -147,10 +147,10 @@ class CronManager:
             if self.scheduler:
                 try:
                     self.scheduler.remove_job(job_id)
-                except:
+                except Exception:
                     pass
             return True
-        except:
+        except Exception:
             return False
 
 cron_manager = CronManager()

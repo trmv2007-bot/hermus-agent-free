@@ -100,7 +100,7 @@ class OptimizedFileCache:
                 self.cache[path] = content
                 self.mtimes[path] = mtime
             return content
-        except:
+        except OSError:
             return None
 
     def clear(self):

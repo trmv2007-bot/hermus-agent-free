@@ -1189,7 +1189,7 @@ def main():
             if args.args:
                 try:
                     test_args = json_lib.loads(args.args)
-                except:
+                except Exception:
                     print(f"Failed to parse --args JSON: {args.args}, using empty")
             result = custom_api_manager.execute_api(args.name, test_args)
             print(f"Test {args.name} with {test_args}:")
@@ -1963,7 +1963,7 @@ def main():
                 print(f"\n🚀 Update available! {result.get('message')}")
                 print(f"   Run 'hermus update' to update - shows in dashboard and CLI")
                 print(f"   Dashboard http://localhost:8000/dashboard will show banner")
-        except:
+        except Exception:
             pass
         print("Starting TUI (full terminal interface with slash commands)...")
         print(f"Modes: agent can control everything, chat let's u chat, multi-agent can use multiple keys at once and reach goal no matter how difficult, multi-chat can get accurate reliable info with multiple ai models and api keys")

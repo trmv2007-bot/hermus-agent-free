@@ -20,7 +20,7 @@ class CustomAPIManager:
     def _load(self) -> list[dict]:
         try:
             return json.loads(self.db_path.read_text())
-        except:
+        except Exception:
             return []
 
     def _save(self, apis: list[dict]):
@@ -97,7 +97,7 @@ class CustomAPIManager:
                 provider_key = f"custom_{name}"
                 # Add token to multi-key manager for this custom API
                 multi_key_manager.add_key(provider_key, new_token, name=f"{name}_{len([a for a in apis if a['name']==name])}")
-        except:
+        except Exception:
             pass
 
         if replaced:
@@ -286,7 +286,7 @@ class CustomAPIManager:
                     "data_str": data_str,
                     "headers": dict(resp.headers)
                 }
-            except:
+            except Exception:
                 text = resp.text[:5000]
                 return {
                     "success": True,

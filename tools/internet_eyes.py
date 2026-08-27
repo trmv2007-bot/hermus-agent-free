@@ -212,7 +212,7 @@ def youtube_search(query: str, max_results: int = 5) -> dict:
                     parts = line.split("|")
                     videos.append({"title": parts[0], "url": parts[1] if len(parts)>1 else "", "duration": parts[2] if len(parts)>2 else ""})
             return {"success": True, "query": query, "videos": videos, "method": "yt-dlp_search_free"}
-    except:
+    except Exception:
         pass
 
     # Fallback to DuckDuckGo search for YouTube
@@ -233,7 +233,7 @@ def github_read(repo: str, path: str = "") -> dict:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
             return {"success": True, "repo": repo, "path": path, "data": result.stdout[:10000], "method": "gh_cli_free"}
-    except:
+    except Exception:
         pass
 
     # Fallback to public API no auth
@@ -280,7 +280,7 @@ def twitter_read(tweet_url: str) -> dict:
         # OpenCLI would be via opencli tool if installed
         # For free version, we just note
         result["opencli_available"] = shutil.which("opencli") is not None
-    except:
+    except Exception:
         pass
 
     return result
@@ -305,7 +305,7 @@ def bilibili_search(query: str, max_results: int = 5) -> dict:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             if result.returncode == 0:
                 return {"success": True, "query": query, "results": result.stdout[:5000], "method": "bili-cli_free_no_login"}
-    except:
+    except Exception:
         pass
 
     # Fallback to DuckDuckGo search site:bilibili.com

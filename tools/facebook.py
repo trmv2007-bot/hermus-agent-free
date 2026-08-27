@@ -15,7 +15,7 @@ def facebook_search(query: str, max_results: int = 5) -> dict:
                 "note": "Free via OpenCLI reusing Chrome login session - requires user has Chrome logged into Facebook and OpenCLI installed. Tell Agent 'help me config Facebook'",
                 "results": f"Would search Facebook for {query} via OpenCLI Chrome session"
             }
-    except:
+    except Exception:
         pass
 
     # Fallback Jina Reader for public Facebook pages (limited)
@@ -45,7 +45,7 @@ def instagram_user_search(username: str) -> dict:
                 "method": "opencli_chrome_free",
                 "note": "Free via OpenCLI reusing Chrome session - requires Chrome logged into Instagram"
             }
-    except:
+    except Exception:
         pass
 
     # Fallback Jina for public profile

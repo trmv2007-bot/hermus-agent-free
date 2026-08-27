@@ -77,7 +77,7 @@ class TrajectoryManager:
             for line in f:
                 try:
                     trajectories.append(json.loads(line))
-                except:
+                except ValueError:
                     pass
 
         print(f"[Trajectory] Compressing {len(trajectories)} trajectories to fit {max_tokens} token budget")
@@ -110,7 +110,7 @@ class TrajectoryManager:
                 if total_tokens > max_tokens:
                     # Further truncate
                     compressed_traj["response"] = compressed_traj["response"][:max_tokens*3]  # rough
-            except:
+            except Exception:
                 pass
 
             compressed.append(compressed_traj)
@@ -159,7 +159,7 @@ class TrajectoryManager:
             for line in f:
                 try:
                     trajectories.append(json.loads(line))
-                except:
+                except ValueError:
                     pass
 
         # Group by session_id into conversations

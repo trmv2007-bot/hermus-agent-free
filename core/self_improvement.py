@@ -29,13 +29,13 @@ class SelfImprovement:
     def _load_history(self) -> list[dict]:
         try:
             return json.loads(self.reflection_log_path.read_text())
-        except:
+        except Exception:
             return []
 
     def _save_history(self, history: list[dict]):
         try:
             self.reflection_log_path.write_text(json.dumps(history[-20:], indent=2))  # Keep last 20
-        except:
+        except Exception:
             pass
 
     def reflect_on_trajectory(self, trajectory: list[dict]) -> dict:
@@ -109,7 +109,7 @@ class SelfImprovement:
                 try:
                     search_results = web_search(query, max_results=2)
                     search_text = " ".join([r.get("body","")[:200] for r in search_results[:2]])
-                except:
+                except Exception:
                     search_text = "No search results"
 
                 # Ask free LLM how to improve
@@ -263,7 +263,7 @@ class SelfImprovement:
                     trajectory = [{"role": "user", "content": f"Recent memory: {m['key']}: {m['value'][:100]}"} for m in recent_sessions]
                     if not trajectory:
                         trajectory = [{"role": "user", "content": "No recent trajectory, checking recent tool failures"}, {"role": "tool", "content": "Tool web_search failed: timeout", "tool": "web_search"}]
-                except:
+                except Exception:
                     trajectory = [{"role": "user", "content": "Test trajectory for reflection"}]
 
             reflection = self.reflect_on_trajectory(trajectory)
@@ -361,7 +361,7 @@ class SelfImprovement:
                     from core.task_tracker import task_tracker
                     task_tracker.complete_task(task_id, status="failed", result=str(e)[:200])
                     task_tracker.remove_agent(task_id, final_status="failed")
-                except:
+                except Exception:
                     pass
             return error_result
         finally:
@@ -385,7 +385,7 @@ class SelfImprovement:
                 if self.last_reflection:
                     try:
                         last_reflection_time = datetime.fromisoformat(self.last_reflection.get("timestamp",""))
-                    except:
+                    except Exception:
                         pass
 
                 should_reflect = False

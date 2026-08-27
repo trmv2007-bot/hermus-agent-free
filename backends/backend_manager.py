@@ -59,7 +59,7 @@ class DockerBackend(Backend):
         try:
             result = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=5)
             return result.returncode == 0
-        except:
+        except Exception:
             return False
 
     def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
@@ -108,7 +108,7 @@ class SSHBackend(Backend):
         try:
             result = subprocess.run(["ssh", "-V"], capture_output=True, text=True, timeout=2)
             return True  # ssh exists
-        except:
+        except Exception:
             return False
 
     def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
@@ -149,7 +149,7 @@ class SingularityBackend(Backend):
         try:
             result = subprocess.run(["singularity", "--version"], capture_output=True, text=True, timeout=3)
             return result.returncode == 0
-        except:
+        except Exception:
             return False
 
     def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
@@ -222,7 +222,7 @@ class DaytonaBackend(Backend):
         try:
             result = subprocess.run(["daytona", "--version"], capture_output=True, text=True, timeout=3)
             return result.returncode == 0
-        except:
+        except Exception:
             # Also check if DAYTONA_API_KEY set
             return bool(os.getenv("DAYTONA_API_KEY"))
 
@@ -260,7 +260,7 @@ class VercelBackend(Backend):
         try:
             result = subprocess.run(["vercel", "--version"], capture_output=True, text=True, timeout=3)
             return result.returncode == 0
-        except:
+        except Exception:
             return bool(os.getenv("VERCEL_TOKEN"))
 
     def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:

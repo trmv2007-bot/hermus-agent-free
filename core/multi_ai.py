@@ -140,7 +140,7 @@ class MultiAIChat:
             multi_task_id = task_tracker.add_task(f"multi_ai_{self.session_id}", "multi-ai", topic, model=",".join(set([a.model for a in self.agents])), agent=",".join([a.name for a in self.agents]))
             for ag in self.agents:
                 task_tracker.add_agent(ag.agent_id, ag.name, ag.model, persona=ag.persona[:60], task=topic[:100])
-        except:
+        except Exception:
             multi_task_id = None
 
         for round_num in range(1, max_rounds + 1):
@@ -152,7 +152,7 @@ class MultiAIChat:
                     try:
                         from .task_tracker import task_tracker
                         task_tracker.update_agent(agent.agent_id, status="thinking", progress=f"Round {round_num} thinking")
-                    except:
+                    except Exception:
                         pass
 
                     response = agent.llm.chat(messages, tools=tools or [])
@@ -173,7 +173,7 @@ class MultiAIChat:
                     try:
                         from .task_tracker import task_tracker
                         task_tracker.update_agent(agent.agent_id, status="done", progress=f"Round {round_num} done: {content[:40]}")
-                    except:
+                    except Exception:
                         pass
 
                     # Print with color if rich available
@@ -200,7 +200,7 @@ class MultiAIChat:
                 task_tracker.complete_task(multi_task_id, status="done", result=f"Completed {len(self.conversation_history)} turns")
             for ag in self.agents:
                 task_tracker.remove_agent(ag.agent_id, final_status="done")
-        except:
+        except Exception:
             pass
 
         return self.conversation_history

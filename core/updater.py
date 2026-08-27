@@ -150,7 +150,7 @@ class Updater:
                     cwd=str(config.resolve_path("."))
                 )
                 behind_count = int(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip().isdigit() else 1
-            except:
+            except Exception:
                 behind_count = 1  # At least 1 behind
 
             return {
@@ -227,6 +227,6 @@ def get_updater_for_current_repo() -> Updater:
                 owner = m.group(1)
                 repo = m.group(2).replace('.git','')
                 return Updater(repo_owner=owner, repo_name=repo)
-    except:
+    except Exception:
         pass
     return Updater()

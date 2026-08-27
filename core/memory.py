@@ -23,7 +23,7 @@ class Memory:
             cur.execute("PRAGMA synchronous=NORMAL;")
             cur.execute("PRAGMA cache_size=-64000;")  # 64MB cache
             cur.execute("PRAGMA temp_store=MEMORY;")
-        except:
+        except sqlite3.Error:
             pass
 
         # Sessions table with FTS5 for free full-text search (no Pinecone)
@@ -44,7 +44,7 @@ class Memory:
         # Project-scoped memory (Phase 4, P4): migration for older DBs
         try:
             cur.execute("ALTER TABLE sessions ADD COLUMN project TEXT DEFAULT 'default';")
-        except Exception:
+        except sqlite3.Error:
             pass  # column already exists
         # FTS5 virtual table for free search
         cur.execute("""
@@ -134,7 +134,7 @@ class Memory:
                 line["tag"] = tag
             with open(traj_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(line) + "\n")
-        except:
+        except Exception:
             pass
 
     def search_sessions(self, query: str, limit: int = 5, project: str = None) -> list[dict]:
@@ -192,7 +192,7 @@ class Memory:
             ]
             resp = free_llm.chat(messages)
             return resp.content
-        except:
+        except Exception:
             # Fallback without LLM
             return f"Found {len(results)} prior sessions for '{query}':\n" + context[:1000]
 
@@ -246,7 +246,7 @@ class Memory:
             return {"preferences": {}, "projects": [], "workflows": [], "created": datetime.now().isoformat()}
         try:
             return json.loads(path.read_text())
-        except:
+        except (OSError, ValueError):
             return {}
 
     def save_user_model(self, model: dict):

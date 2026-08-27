@@ -983,7 +983,7 @@ async def response_times_test(payload: dict):
                 try:
                     import json
                     test_args = json.loads(test_args)
-                except:
+                except Exception:
                     test_args = {}
             if api_key:
                 result = response_tester.test_custom_api_key(api_name, api_key=api_key, test_args=test_args)

@@ -180,7 +180,7 @@ class SkinEngine:
             try:
                 with open(example_path, "w") as f:
                     yaml.safe_dump(example, f)
-            except:
+            except Exception:
                 pass
 
     def list_skins(self) -> list[dict]:
@@ -242,7 +242,7 @@ class SkinEngine:
                     with open(yaml_path, "r") as f:
                         data = yaml.safe_load(f)
                         return data
-                except:
+                except Exception:
                     pass
 
         # Fallback to default
@@ -260,7 +260,7 @@ class SkinEngine:
                 # For free version, we just store in memory and user_model
                 from .memory import memory
                 memory.update_user_model({"preferences": {"skin": name}})
-            except:
+            except Exception:
                 pass
             return {"success": True, "skin": name, "description": skin.get("description","")}
         return {"success": False, "error": f"Skin {name} not found"}
@@ -298,7 +298,7 @@ class SkinEngine:
         try:
             from .memory import memory
             memory.update_user_model({"preferences": {"animations_enabled": enabled}})
-        except:
+        except Exception:
             pass
 
     def are_animations_enabled(self) -> bool:
@@ -306,7 +306,7 @@ class SkinEngine:
             from .memory import memory
             model = memory.load_user_model()
             return model.get("preferences", {}).get("animations_enabled", True)
-        except:
+        except Exception:
             return self.animations_enabled
 
     # Mode persistence - as requested
@@ -332,7 +332,7 @@ class SkinEngine:
             from .memory import memory
             model = memory.load_user_model()
             return model.get("preferences", {}).get("mode", "agent")
-        except:
+        except Exception:
             return "agent"
 
     def get_persisted_mode(self) -> str:

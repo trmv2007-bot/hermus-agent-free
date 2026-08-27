@@ -17,7 +17,7 @@ class ResponseTimeTester:
     def _load(self) -> list[dict]:
         try:
             return json.loads(self.results_path.read_text())
-        except:
+        except Exception:
             return []
 
     def _save(self, data: list[dict]):
