@@ -556,6 +556,9 @@ def main():
     m_start.add_argument('--req', action='append', default=None, help='Specific requirement (can be repeated)')
     m_resume = mission_sub.add_parser('resume', help='Resume a mission by ID')
     m_resume.add_argument('mission_id')
+    m_extend = mission_sub.add_parser('extend', help='Grant extra step budget to a mission')
+    m_extend.add_argument('mission_id')
+    m_extend.add_argument('--steps', type=int, default=10, help='Extra steps to grant (default 10)')
     m_status = mission_sub.add_parser('status', help='Check status of a mission')
     m_status.add_argument('mission_id')
     mission_sub.add_parser('list', help='List all missions')
@@ -669,6 +672,15 @@ def main():
         elif args.mission_action == 'resume':
             report = mission_engine.resume_mission(args.mission_id)
             print(json_lib.dumps(report.to_dict(), indent=2))
+        elif args.mission_action == 'extend':
+            try:
+                report = mission_engine.extend_budget(args.mission_id, steps=args.steps)
+                print(f"Budget extended: +{args.steps} steps "
+                      f"(extensions {report.budget.extensions_used}/{report.budget.max_extensions}, "
+                      f"step limit now {report.budget.initial_steps + report.budget.extensions_used * 10})")
+                print(json_lib.dumps(report.budget.to_dict(), indent=2))
+            except ValueError as e:
+                print(f"Error: {e}")
         elif args.mission_action == 'status':
             report = mission_engine.get_mission(args.mission_id)
             if report:

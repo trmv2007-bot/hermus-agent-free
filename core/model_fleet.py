@@ -263,16 +263,9 @@ class ModelFleet:
             w = workers[i % len(workers)]
             paired.append((task, w))
 
-        results = []
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(paired))) as ex:
-            futs = []
-            for task, w in paired:
-                sys = f"You are one specialist on a multi-model team. Complete ONLY this subtask carefully. Parent goal: {goal[:300]}"
-                futs.append(ex.submit(_run_worker, w, task, sys))
-            for i, fut in enumerate(as_completed(futs)):
-                # as_completed loses order — re-collect below
-                pass
-            # Better: map with index
+        # NOTE: an earlier revision submitted every subtask twice — once into
+        # an executor whose results were discarded, then again into the real
+        # one below. Each map_goal call therefore spent 2x the tokens/requests.
         results = []
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paired))) as ex:
             futs = {

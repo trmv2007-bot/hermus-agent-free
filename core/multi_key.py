@@ -7,13 +7,15 @@ Multi-API Keys — any AI API key works.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import threading
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .config import config
 from .providers import get_provider, list_providers
@@ -29,9 +31,7 @@ class MultiKeyManager:
         self.db_path = Path(db_path or config.resolve_path("data/api_keys.json"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.db_path.exists():
-            self.db_path.write_text(
-                json.dumps({"groq": [], "hf": [], "openai": [], "custom": []}, indent=2)
-            )
+            self._save({"groq": [], "hf": [], "openai": [], "custom": []})
 
         self.key_queues: Dict[str, deque] = defaultdict(deque)
         self.key_failures: Dict[str, Dict[str, int]] = defaultdict(dict)
@@ -40,6 +40,12 @@ class MultiKeyManager:
         self._rpm_hits: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
         self._tpm_hits: Dict[str, Dict[str, List[tuple]]] = defaultdict(lambda: defaultdict(list))
         self._lock = threading.Lock()
+        # Serializes load→mutate→save cycles over the JSON key store. Fleet
+        # workers report success/failure from several threads at once; without
+        # this, interleaved writes could hand a reader a half-written file,
+        # whose parse failure fell back to the empty template and was then
+        # saved back — silently wiping every stored API key.
+        self._persist_lock = threading.RLock()
         self._load_queues()
 
     # ---------- persistence ----------
@@ -47,11 +53,38 @@ class MultiKeyManager:
     def _load(self) -> Dict:
         try:
             return json.loads(self.db_path.read_text())
+        except FileNotFoundError:
+            return {"groq": [], "hf": [], "openai": [], "custom": []}
         except Exception:
+            # Corrupt/unreadable store: preserve the bad file for manual
+            # recovery instead of letting the next _save() overwrite it.
+            try:
+                backup = self.db_path.with_name(
+                    self.db_path.name + f".corrupt-{int(time.time())}"
+                )
+                if self.db_path.exists() and not backup.exists():
+                    shutil.copy2(self.db_path, backup)
+            except Exception:
+                pass
             return {"groq": [], "hf": [], "openai": [], "custom": []}
 
     def _save(self, data: Dict):
-        self.db_path.write_text(json.dumps(data, indent=2))
+        """Atomically replace the key store.
+
+        Writes go to a sibling temp file followed by ``os.replace`` so a
+        concurrent reader can never observe a truncated/partial JSON file.
+        """
+        tmp = self.db_path.parent / (self.db_path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(tmp, self.db_path)
+
+    def _update(self, mutator: Callable[[Dict], None]) -> Dict:
+        """Thread-safe read-modify-write cycle over the persisted key store."""
+        with self._persist_lock:
+            data = self._load()
+            mutator(data)
+            self._save(data)
+            return data
 
     def _entry_key(self, entry) -> str:
         if isinstance(entry, str):
@@ -153,46 +186,47 @@ class MultiKeyManager:
     ) -> Dict:
         """Add any API key. Works with openai/groq/openrouter/custom/etc."""
         provider = (provider or "custom").lower().strip()
-        data = self._load()
-        if provider not in data:
-            data[provider] = []
+        with self._persist_lock:
+            data = self._load()
+            if provider not in data:
+                data[provider] = []
 
-        max_keys = (
-            self.MAX_KEYS_PER_CUSTOM_API
-            if provider.startswith("custom")
-            else self.MAX_KEYS_PER_PROVIDER
-        )
-        if len(data[provider]) >= max_keys:
-            return {
-                "success": False,
-                "error": f"Max {max_keys} keys for {provider}. Remove old keys first.",
+            max_keys = (
+                self.MAX_KEYS_PER_CUSTOM_API
+                if provider.startswith("custom")
+                else self.MAX_KEYS_PER_PROVIDER
+            )
+            if len(data[provider]) >= max_keys:
+                return {
+                    "success": False,
+                    "error": f"Max {max_keys} keys for {provider}. Remove old keys first.",
+                }
+
+            existing = [self._entry_key(k) for k in data[provider]]
+            if api_key and api_key in existing:
+                return {"success": False, "error": f"Key already exists for {provider}"}
+
+            preset = get_provider(provider)
+            key_entry = {
+                "key": api_key or "",
+                "name": name or f"{provider}_key_{len(data[provider])+1}",
+                "provider": provider,
+                "base_url": base_url or preset.get("base_url") or "",
+                "default_model": default_model or preset.get("default_model"),
+                "added": datetime.now().isoformat(),
+                "usage_count": 0,
+                "healthy": None,
+                "models": [],
+                "rpm_limit": rpm_limit if rpm_limit is not None else preset.get("default_rpm"),
+                "tpm_limit": tpm_limit if tpm_limit is not None else preset.get("default_tpm"),
             }
+            if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
+                # custom without base_url is ok if they set later — warn
+                if provider in ("custom", "vllm", "azure"):
+                    key_entry["warning"] = "base_url empty — set with --base-url for this provider"
 
-        existing = [self._entry_key(k) for k in data[provider]]
-        if api_key and api_key in existing:
-            return {"success": False, "error": f"Key already exists for {provider}"}
-
-        preset = get_provider(provider)
-        key_entry = {
-            "key": api_key or "",
-            "name": name or f"{provider}_key_{len(data[provider])+1}",
-            "provider": provider,
-            "base_url": base_url or preset.get("base_url") or "",
-            "default_model": default_model or preset.get("default_model"),
-            "added": datetime.now().isoformat(),
-            "usage_count": 0,
-            "healthy": None,
-            "models": [],
-            "rpm_limit": rpm_limit if rpm_limit is not None else preset.get("default_rpm"),
-            "tpm_limit": tpm_limit if tpm_limit is not None else preset.get("default_tpm"),
-        }
-        if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
-            # custom without base_url is ok if they set later — warn
-            if provider in ("custom", "vllm", "azure"):
-                key_entry["warning"] = "base_url empty — set with --base-url for this provider"
-
-        data[provider].append(key_entry)
-        self._save(data)
+            data[provider].append(key_entry)
+            self._save(data)
         self._load_queues()
 
         result = {
@@ -223,19 +257,20 @@ class MultiKeyManager:
         return result
 
     def remove_key(self, provider: str, key_or_name: str) -> Dict:
-        data = self._load()
-        if provider not in data:
-            return {"success": False, "error": f"Provider {provider} not found"}
-        original_len = len(data[provider])
-        data[provider] = [
-            k
-            for k in data[provider]
-            if self._entry_key(k) != key_or_name
-            and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
-        ]
-        if len(data[provider]) == original_len:
-            return {"success": False, "error": f"Key {key_or_name} not found for {provider}"}
-        self._save(data)
+        with self._persist_lock:
+            data = self._load()
+            if provider not in data:
+                return {"success": False, "error": f"Provider {provider} not found"}
+            original_len = len(data[provider])
+            data[provider] = [
+                k
+                for k in data[provider]
+                if self._entry_key(k) != key_or_name
+                and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
+            ]
+            if len(data[provider]) == original_len:
+                return {"success": False, "error": f"Key {key_or_name} not found for {provider}"}
+            self._save(data)
         self._load_queues()
         return {"success": True, "provider": provider, "remaining": len(data[provider])}
 
@@ -420,8 +455,8 @@ class MultiKeyManager:
         if provider in self.key_failures and key in self.key_failures[provider]:
             self.key_failures[provider][key] = max(0, self.key_failures[provider][key] - 1)
         self._record_use(provider, key, tokens=tokens or 0)
-        try:
-            data = self._load()
+
+        def _mutate(data: Dict) -> None:
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["usage_count"] = k.get("usage_count", 0) + 1
@@ -447,7 +482,9 @@ class MultiKeyManager:
                                 k["tpm_limit"] = int(rate_limit["limit_tokens"])
                             except Exception:
                                 pass
-            self._save(data)
+
+        try:
+            self._update(_mutate)
         except Exception:
             pass
 
@@ -460,8 +497,8 @@ class MultiKeyManager:
             f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), "
             f"failures: {self.key_failures[provider].get(key, 0)}"
         )
-        try:
-            data = self._load()
+
+        def _mutate(data: Dict) -> None:
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["last_error"] = str(error)[:300]
@@ -474,7 +511,9 @@ class MultiKeyManager:
                     elif "401" in err_l or "403" in err_l or "auth" in err_l:
                         k["healthy"] = False
                         k["health_status"] = "auth_failed"
-            self._save(data)
+
+        try:
+            self._update(_mutate)
         except Exception:
             pass
 
@@ -492,8 +531,7 @@ class MultiKeyManager:
         result = list_models(provider, api_key=api_key, base_url=base_url)
         if result.get("success") and api_key is not None:
             # persist models onto matching key entry
-            try:
-                data = self._load()
+            def _mutate(data: Dict) -> None:
                 ids = [m.get("id") for m in result.get("models") or [] if m.get("id")]
                 for k in data.get(provider, []):
                     if isinstance(k, dict) and (not api_key or k.get("key") == api_key):
@@ -503,7 +541,9 @@ class MultiKeyManager:
                             k["default_model"] = ids[0]
                         if result.get("rate_limit"):
                             k["last_rate_limit"] = result["rate_limit"]
-                self._save(data)
+
+            try:
+                self._update(_mutate)
             except Exception:
                 pass
         return result
@@ -530,8 +570,7 @@ class MultiKeyManager:
         result = health_ping(provider, api_key=api_key, base_url=base_url, model=model)
 
         # persist
-        try:
-            data = self._load()
+        def _mutate(data: Dict) -> None:
             for k in data.get(provider, []):
                 if not isinstance(k, dict):
                     continue
@@ -568,7 +607,9 @@ class MultiKeyManager:
                     k["last_response_time"] = result["latency_ms"] / 1000.0
                 if api_key:
                     break  # only one
-            self._save(data)
+
+        try:
+            self._update(_mutate)
         except Exception as e:
             result["persist_error"] = str(e)
         return result

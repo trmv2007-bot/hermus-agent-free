@@ -222,6 +222,7 @@ class Memory:
         # Find sessions from yesterday that were important but not yet curated
         yesterday = (datetime.now() - timedelta(days=1)).isoformat()
         conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT * FROM sessions WHERE timestamp > ? AND role='user' ORDER BY id DESC LIMIT 5", (yesterday,))
         recent = cur.fetchall()
@@ -230,9 +231,9 @@ class Memory:
         nudges = []
         for row in recent:
             # Simple heuristic: if user said "remember" or session had many tool calls, nudge
-            content = row[3] if len(row) > 3 else ""
+            content = row["content"] if "content" in row.keys() else ""
             if "remember" in content.lower() or len(content) > 200:
-                nudges.append(f"Should I persist knowledge from session {row[1]}? Content: {content[:100]}")
+                nudges.append(f"Should I persist knowledge from session {row['session_id']}? Content: {content[:100]}")
         return nudges
 
     # Free Honcho alternative - User Modeling
@@ -254,6 +255,26 @@ class Memory:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(model, indent=2))
 
+    @staticmethod
+    def _dedupe_preserving_types(items: List[Any]) -> List[Any]:
+        """Deduplicate a list without coercing items to strings.
+
+        The previous implementation ran every item through ``str()``/``json.dumps()``
+        and kept the *stringified* values, silently turning ``[{"name": "x"}]``
+        into ``['{"name": "x"}']`` and corrupting the persisted user model.
+        """
+        seen: set = set()
+        out: List[Any] = []
+        for item in items:
+            try:
+                key = json.dumps(item, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                key = str(item)
+            if key not in seen:
+                seen.add(key)
+                out.append(item)
+        return out
+
     def update_user_model(self, new_info: Dict):
         """Dialectic user modeling - LLM asks what matters, builds model free"""
         model = self.load_user_model()
@@ -262,9 +283,7 @@ class Memory:
             if k in model and isinstance(model[k], dict) and isinstance(v, dict):
                 model[k].update(v)
             elif k in model and isinstance(model[k], list) and isinstance(v, list):
-                model[k].extend(v)
-                # Deduplicate
-                model[k] = list(dict.fromkeys([json.dumps(x) if isinstance(x, dict) else str(x) for x in model[k]]))
+                model[k] = self._dedupe_preserving_types(model[k] + v)
             else:
                 model[k] = v
         model["last_updated"] = datetime.now().isoformat()

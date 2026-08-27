@@ -190,13 +190,20 @@ app.mount("/dashboard-assets", StaticFiles(directory=str(_DASHBOARD_STATIC)), na
 _realtime.install(app)
 
 
+def _token_matches(provided: Optional[str], expected: str) -> bool:
+    """Constant-time token comparison to avoid timing side channels."""
+    import hmac
+
+    return hmac.compare_digest(str(provided or ""), str(expected))
+
+
 def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> Optional[JSONResponse]:
     """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token."""
     expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
     if not expected:
         return None  # open (local default)
     provided = x_hermus_token or request.headers.get("X-Hermus-Token") or request.query_params.get("token")
-    if provided != expected:
+    if not _token_matches(provided, expected):
         return JSONResponse({"error": "Unauthorized - set X-Hermus-Token header"}, status_code=401)
     return None
 
@@ -2347,7 +2354,7 @@ async def dashboard_events_ws(websocket: WebSocket):
 
     expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
     provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
-    if expected and provided != expected:
+    if expected and not _token_matches(provided, expected):
         await websocket.close(code=1008, reason="Unauthorized")
         return
 
@@ -2431,7 +2438,7 @@ async def computer_events_ws(websocket: WebSocket):
 
     expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
     provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
-    if expected and provided != expected:
+    if expected and not _token_matches(provided, expected):
         await websocket.close(code=1008, reason="Unauthorized")
         return
 

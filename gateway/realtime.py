@@ -36,10 +36,12 @@ _agent_getter: Optional[Callable[..., Any]] = None
 
 
 def _auth_ok(token: Optional[str], header_token: Optional[str]) -> bool:
+    import hmac
+
     expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
     if not expected:
         return True
-    return (token or header_token) == expected
+    return hmac.compare_digest(str(token or header_token or ""), str(expected))
 
 
 # ------------------------------------------------------------------ SSE helpers

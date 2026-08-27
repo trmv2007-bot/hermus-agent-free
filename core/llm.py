@@ -366,23 +366,34 @@ class FreeLLM:
         """HF — try OpenAI-compatible router first, then legacy text_generation."""
         # Prefer router openai path
         compat = self._call_openai_compat(messages, tools=None)  # tools often unsupported
-        if compat.content and not compat.content.startswith("hf error") and "No API key" not in compat.content and "error:" not in compat.content.lower()[:40]:
-            if not (compat.content.startswith("hf error") or "HF error" in compat.content):
-                # If it looks like a real response, return
-                if not compat.content.startswith("No API key"):
-                    # Check for hard failures
-                    if "error" not in (compat.usage or {}) and not compat.content.startswith("huggingface"):
-                        return compat
+        compat_content = (compat.content or "").strip()
+        lowered = compat_content.lower()
+        # Treat the compat answer as usable only when it clearly is NOT an
+        # error/help message emitted by the fallback paths above.
+        error_like = (
+            not compat_content
+            or "no api key" in lowered
+            or "hf error" in lowered
+            or "huggingface error" in lowered
+            or lowered.startswith(("error", "huggingface"))
+            or lowered[:40].find("error:") >= 0
+        )
+        if not error_like:
+            return compat
 
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
+        current_token: Optional[str] = None
         try:
             from .multi_key import multi_key_manager
 
             token = self.api_key_override or multi_key_manager.get_key("hf") or config.hf_token or os.getenv("HF_TOKEN")
+            # Bind early so the except-path below can always report the key
+            # that was attempted (previously `current_token` could be
+            # unbound when the client constructor itself raised).
+            current_token = token
             from huggingface_hub import InferenceClient
 
             client = InferenceClient(token=token)
-            current_token = token
             prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
             response = client.text_generation(
                 prompt=prompt,
@@ -406,9 +417,10 @@ class FreeLLM:
             return LLMResponse(err, usage=usage)
         except Exception as e:
             try:
-                from .multi_key import multi_key_manager
+                if current_token:
+                    from .multi_key import multi_key_manager
 
-                multi_key_manager.mark_key_failed("hf", current_token, str(e))
+                    multi_key_manager.mark_key_failed("hf", current_token, str(e))
             except Exception:
                 pass
             # Fall back to compat error message if we had one

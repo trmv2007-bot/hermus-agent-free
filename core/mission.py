@@ -169,6 +169,26 @@ class MissionEngine:
             "evidence": [{"stage": node.role, "goal": node.goal, "status": "completed"}],
         }
 
+    @staticmethod
+    def _compute_progress(dag: AgentDAG) -> int:
+        """Completion percentage over DAG nodes (0 when the graph is empty)."""
+        total = len(dag.nodes)
+        if total == 0:
+            return 0
+        completed = sum(1 for n in dag.nodes.values() if n.status == DAGNodeStatus.COMPLETED.value)
+        return int(100 * completed / total)
+
+    @staticmethod
+    def _read_capped(path: Path, max_bytes: int = 64_000) -> str:
+        """Read a text artifact capped at ``max_bytes`` so a huge build output
+        cannot exhaust memory when assembling critic review context."""
+        try:
+            with open(path, "rb") as f:
+                data = f.read(max_bytes)
+            return data.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+
     def _call_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
         try:
             sig = inspect.signature(self._raw_executor)
@@ -258,6 +278,7 @@ class MissionEngine:
     def _run_autonomous_loop(self, report: MissionReport, dag: AgentDAG) -> MissionReport:
         budget = report.budget
         mission_start_ts = datetime.fromisoformat(report.started_at).timestamp()
+        prev_completed = -1
 
         while budget.consumed_steps < (budget.initial_steps + (budget.extensions_used * 10)):
             report.state = MissionState.EXECUTING.value
@@ -271,6 +292,21 @@ class MissionEngine:
             budget.consumed_steps += dag_round_res.get("completed", 1)
             report.dag_state = dag.to_dict()
             report.subgoals = [SubGoal(id=nid, role=n.role, goal=n.goal, status=n.status) for nid, n in dag.nodes.items()]
+            report.progress_pct = self._compute_progress(dag)
+            self._save_mission(report)
+
+            # Dynamic step budget (roadmap): when a round makes verified DAG
+            # progress (more nodes completed than the previous round), grant
+            # one budget extension (up to max_extensions, +10 steps each) so
+            # promising missions are not cut off by a rigid turn count.
+            completed_now = dag_round_res.get("completed", 0)
+            if (
+                prev_completed >= 0
+                and completed_now > prev_completed
+                and budget.extensions_used < budget.max_extensions
+            ):
+                budget.extensions_used += 1
+            prev_completed = completed_now
 
             # Check for explicit external blockers
             blocked_nodes = [n for n in dag.nodes.values() if n.status == DAGNodeStatus.BLOCKED.value]
@@ -317,7 +353,7 @@ class MissionEngine:
             report.confidence_score = v_res.score
 
             files_content = {
-                Path(a).name: Path(a).read_text(errors="ignore")
+                Path(a).name: self._read_capped(Path(a))
                 for a in report.artifacts
                 if Path(a).suffix in (".py", ".js", ".ts", ".html", ".json") and Path(a).exists()
             }
@@ -378,6 +414,9 @@ class MissionEngine:
 
         report.state = MissionState.FAILED.value
         report.finished_at = datetime.now().isoformat()
+        # Never report 100% for a failed mission: DAG stages may all have run,
+        # but the mission only "completes" when verification passes.
+        report.progress_pct = min(95, self._compute_progress(dag))
         report.final_proof = f"Mission failed to achieve verifiable behavioral completion after {budget.consumed_steps} steps and {budget.repairs_used} repair attempts."
         self._save_mission(report)
         return report
@@ -401,6 +440,31 @@ class MissionEngine:
         report.blocker_reason = None
         report.blocker_instructions = None
         return self._run_autonomous_loop(report, dag)
+
+    def extend_budget(self, mission_id: str, steps: int = 10) -> MissionReport:
+        """Grant extra steps to a running/blocked/failed mission.
+
+        Explicit counterpart to the automatic progress-based extension: the
+        loop bound grows by ``10 * extensions_used``, capped at
+        ``max_extensions``; each explicit extension consumes one slot.
+        """
+        report = self.get_mission(mission_id)
+        if not report:
+            raise ValueError(f"Mission {mission_id} not found")
+
+        if report.state == MissionState.COMPLETED.value:
+            return report
+
+        if report.budget.extensions_used >= report.budget.max_extensions:
+            raise ValueError(
+                f"Mission {mission_id} already used its "
+                f"{report.budget.max_extensions} budget extensions"
+            )
+
+        report.budget.extensions_used += 1
+        report.budget.initial_steps += max(1, int(steps))
+        self._save_mission(report)
+        return report
 
 
 mission_engine = MissionEngine()
