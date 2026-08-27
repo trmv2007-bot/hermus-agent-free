@@ -1,23 +1,16 @@
 """Unit tests for Domain Verifiers, Software Engineer Mode, Model Router, and Skill Reliability."""
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
 
-import pytest
 
 from core.router2 import ModelRouter
 from core.skill_manager import SkillManager
-from core.swe_mode import SWEPhase, SoftwareEngineerMode, detect_toolchain
+from core.swe_mode import SoftwareEngineerMode, detect_toolchain
 from core.verifier_registry import (
     AndroidVerifier,
-    GitVerifier,
-    LinuxVerifier,
     PythonVerifier,
     ResearchVerifier,
     WebVerifier,
-    verifier_registry,
 )
 
 

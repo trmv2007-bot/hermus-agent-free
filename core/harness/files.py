@@ -10,7 +10,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..config import config
 
@@ -23,7 +23,7 @@ def _path() -> Path:
     return p
 
 
-def _load() -> Dict[str, Any]:
+def _load() -> dict[str, Any]:
     path = _path()
     if not path.exists():
         return {"reads": {}, "events": []}
@@ -33,11 +33,11 @@ def _load() -> Dict[str, Any]:
         return {"reads": {}, "events": []}
 
 
-def _save(data: Dict[str, Any]) -> None:
+def _save(data: dict[str, Any]) -> None:
     _path().write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
-def note_read(session_id: str, file_path: str) -> Dict[str, Any]:
+def note_read(session_id: str, file_path: str) -> dict[str, Any]:
     resolved = str(Path(file_path).expanduser().resolve())
     try:
         mtime = os.path.getmtime(resolved)
@@ -56,14 +56,14 @@ def note_read(session_id: str, file_path: str) -> Dict[str, Any]:
     return {"ok": True, "path": resolved, "mtime": mtime}
 
 
-def note_write(file_path: str, writer: str = "") -> List[Dict[str, Any]]:
+def note_write(file_path: str, writer: str = "") -> list[dict[str, Any]]:
     """Record a write and emit events for every session that had read the file."""
     resolved = str(Path(file_path).expanduser().resolve())
     try:
         mtime = os.path.getmtime(resolved)
     except OSError:
         mtime = 0.0
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     with _LOCK:
         data = _load()
         for _key, rec in list(data.get("reads", {}).items()):
@@ -90,7 +90,7 @@ def note_write(file_path: str, writer: str = "") -> List[Dict[str, Any]]:
     return events
 
 
-def pending(session_id: str) -> List[Dict[str, Any]]:
+def pending(session_id: str) -> list[dict[str, Any]]:
     with _LOCK:
         data = _load()
         return [

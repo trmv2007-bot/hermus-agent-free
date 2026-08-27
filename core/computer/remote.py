@@ -19,7 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .permissions import RiskLevel, emergency_stop
 
@@ -43,14 +43,14 @@ class ApprovalPrompt:
     action: str
     description: str
     risk: str
-    args: Dict[str, Any] = field(default_factory=dict)
+    args: dict[str, Any] = field(default_factory=dict)
     state: str = PromptState.PENDING.value
     created: str = field(default_factory=_now)
     resolved: Optional[str] = None
     decided_by: Optional[str] = None
     reason: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -73,13 +73,13 @@ class RemoteApprovalGate:
         # is auto-allowed for this many seconds — otherwise multi-step tasks
         # would stall waiting for a human on every single click.
         self.approve_grace: float = approve_grace
-        self._prompts: Dict[str, ApprovalPrompt] = {}
-        self._history: List[ApprovalPrompt] = []  # bounded audit trail
+        self._prompts: dict[str, ApprovalPrompt] = {}
+        self._history: list[ApprovalPrompt] = []  # bounded audit trail
         self._history_limit = 200
-        self._recent_approvals: Dict[str, float] = {}  # action -> epoch seconds
+        self._recent_approvals: dict[str, float] = {}  # action -> epoch seconds
 
     # -- policy ---------------------------------------------------------
-    def set_enabled(self, enabled: bool, required_risk: Optional[RiskLevel] = None) -> Dict[str, Any]:
+    def set_enabled(self, enabled: bool, required_risk: Optional[RiskLevel] = None) -> dict[str, Any]:
         with self._lock:
             self.enabled = bool(enabled)
             if required_risk is not None:
@@ -93,10 +93,10 @@ class RemoteApprovalGate:
     def check(
         self,
         action: str,
-        args: Optional[Dict[str, Any]] = None,
+        args: Optional[dict[str, Any]] = None,
         risk: Optional[str] = None,
         description: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Decide whether ``action`` may proceed or must await approval."""
         if not self.enabled or not self._risk_at_or_above(risk):
             return {"allowed": True, "pending": False, "reason": "ok"}
@@ -121,7 +121,7 @@ class RemoteApprovalGate:
         }
 
     # -- resolution -----------------------------------------------------
-    def approve(self, prompt_id: str, by: str = "remote") -> Dict[str, Any]:
+    def approve(self, prompt_id: str, by: str = "remote") -> dict[str, Any]:
         with self._lock:
             prompt = self._prompts.get(prompt_id)
             if prompt is None:
@@ -139,7 +139,7 @@ class RemoteApprovalGate:
         return {"success": True, "prompt_id": prompt_id, "decision": "approved",
                 "action": prompt.action, "description": prompt.description}
 
-    def reject(self, prompt_id: str, reason: str = "", by: str = "remote") -> Dict[str, Any]:
+    def reject(self, prompt_id: str, reason: str = "", by: str = "remote") -> dict[str, Any]:
         with self._lock:
             prompt = self._prompts.get(prompt_id)
             if prompt is None:
@@ -185,16 +185,16 @@ class RemoteApprovalGate:
             return False
 
     # -- inspection -----------------------------------------------------
-    def pending(self) -> List[Dict[str, Any]]:
+    def pending(self) -> list[dict[str, Any]]:
         with self._lock:
             return [p.to_dict() for p in self._prompts.values()]
 
-    def history(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def history(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._history)
         return [p.to_dict() for p in items[-max(1, int(limit)):]]
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         with self._lock:
             self._prune_expired_locked()
             return {
@@ -205,7 +205,7 @@ class RemoteApprovalGate:
             }
 
 
-def _describe(action: str, args: Optional[Dict[str, Any]] = None) -> str:
+def _describe(action: str, args: Optional[dict[str, Any]] = None) -> str:
     args = args or {}
     if action == "click":
         return f"Click at ({args.get('x')}, {args.get('y')})"
@@ -258,30 +258,30 @@ class RemoteControlHub:
         return self._event_bus
 
     # -- lifecycle controls (delegate to task control + emergency stop) --
-    def pause(self, task_id: str, reason: str = "remote pause") -> Dict[str, Any]:
+    def pause(self, task_id: str, reason: str = "remote pause") -> dict[str, Any]:
         ok = self._control().request_pause(task_id, reason)
         return {"success": ok, "action": "pause", "task_id": task_id, "reason": reason}
 
-    def resume(self, task_id: str) -> Dict[str, Any]:
+    def resume(self, task_id: str) -> dict[str, Any]:
         ok = self._control().resume(task_id)
         return {"success": ok, "action": "resume", "task_id": task_id}
 
-    def cancel(self, task_id: str, reason: str = "remote cancel") -> Dict[str, Any]:
+    def cancel(self, task_id: str, reason: str = "remote cancel") -> dict[str, Any]:
         ok = self._control().request_cancel(task_id, reason)
         return {"success": ok, "action": "cancel", "task_id": task_id, "reason": reason}
 
-    def emergency_stop(self, reason: str = "remote emergency stop") -> Dict[str, Any]:
+    def emergency_stop(self, reason: str = "remote emergency stop") -> dict[str, Any]:
         self.emergency.halt(reason)
         self._control().emergency_stop(reason)
         return {"success": True, "action": "emergency_stop", "reason": reason}
 
-    def release(self) -> Dict[str, Any]:
+    def release(self) -> dict[str, Any]:
         self.emergency.release()
         self._control().release_emergency_stop()
         return {"success": True, "action": "emergency_release"}
 
     # -- snapshot -------------------------------------------------------
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """One consolidated view for a remote client (no heavy screen frame)."""
         control_status = {}
         try:

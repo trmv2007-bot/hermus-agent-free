@@ -13,7 +13,8 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Optional
+from collections.abc import Iterable
 
 from .recorder import encode_image
 
@@ -60,7 +61,7 @@ class VideoWriter:
         return None
 
     @classmethod
-    def available(cls) -> Dict[str, Any]:
+    def available(cls) -> dict[str, Any]:
         binary = cls.find_ffmpeg()
         return {
             "available": bool(binary),
@@ -94,7 +95,7 @@ class VideoWriter:
             str(self.output_path),
         ]
 
-    def start(self) -> Dict[str, Any]:
+    def start(self) -> dict[str, Any]:
         if self._running:
             return {"success": False, "error": "video writer already running"}
         if self.output_path.suffix.lower() not in self.SUPPORTED:
@@ -175,7 +176,7 @@ class VideoWriter:
             finally:
                 self._queue.task_done()
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "running": self._running,
             "path": str(self.output_path),
@@ -185,7 +186,7 @@ class VideoWriter:
             "error": self._error,
         }
 
-    def close(self, timeout: float = 30.0) -> Dict[str, Any]:
+    def close(self, timeout: float = 30.0) -> dict[str, Any]:
         self._running = False
         if self._thread:
             self._thread.join(timeout=timeout)
@@ -232,7 +233,7 @@ class VideoWriter:
         frames: Iterable[Any],
         fps: float = 10.0,
         ffmpeg_binary: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Encode a finite iterable, blocking rather than dropping frames."""
         writer = cls(output_path, fps=fps, ffmpeg_binary=ffmpeg_binary, queue_size=1)
         opened = writer.start()

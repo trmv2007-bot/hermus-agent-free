@@ -25,7 +25,8 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Set
+from typing import Any, Optional
+from collections.abc import Callable
 
 
 def _now() -> str:
@@ -38,18 +39,18 @@ class Run:
 
     run_id: str
     label: str = ""
-    events: Deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=2000))
+    events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=2000))
     seq: int = 0
     status: str = "running"          # running | finished | error | cancelled
     started: float = field(default_factory=time.time)
     finished: Optional[float] = None
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
     error: str = ""
-    subscribers: Set[Any] = field(default_factory=set)
+    subscribers: set[Any] = field(default_factory=set)
     cancel: threading.Event = field(default_factory=threading.Event)
 
-    def to_dict(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
             "run_id": self.run_id,
             "label": self.label,
             "status": self.status,
@@ -72,11 +73,11 @@ class RunBus:
     """Thread-safe publish/subscribe for agent runs (SSE + WebSocket friendly)."""
 
     def __init__(self, max_events: int = 2000, max_runs: int = 200):
-        self._runs: Dict[str, Run] = {}
-        self._order: Deque[str] = deque(maxlen=max_runs)
+        self._runs: dict[str, Run] = {}
+        self._order: deque[str] = deque(maxlen=max_runs)
         self._max_events = max(50, int(max_events))
         self._lock = threading.RLock()
-        self._sinks: List[Callable[[str, Dict[str, Any]], None]] = []
+        self._sinks: list[Callable[[str, dict[str, Any]], None]] = []
 
     # ------------------------------------------------------------------- runs
     def start(self, run_id: str, label: str = "") -> Run:
@@ -113,14 +114,14 @@ class RunBus:
         with self._lock:
             return self._runs.get(run_id)
 
-    def runs(self) -> List[Dict[str, Any]]:
+    def runs(self) -> list[dict[str, Any]]:
         with self._lock:
             return [r.to_dict() for r in self._runs.values()]
 
-    def finish(self, run_id: str, status: str = "finished", result: Optional[Dict[str, Any]] = None,
+    def finish(self, run_id: str, status: str = "finished", result: Optional[dict[str, Any]] = None,
                error: str = "") -> None:
         run = self.get(run_id)
-        payload: Dict[str, Any] = {"status": status, "duration_ms": 0}
+        payload: dict[str, Any] = {"status": status, "duration_ms": 0}
         if run is not None:
             with self._lock:
                 run.status = status
@@ -156,7 +157,7 @@ class RunBus:
         return bool(run and run.cancel.is_set())
 
     # ----------------------------------------------------------------- publish
-    def publish(self, run_id: str, event_type: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def publish(self, run_id: str, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         event = {
             "id": None,
             "run_id": run_id,
@@ -181,7 +182,7 @@ class RunBus:
             self._offer(q, event)
         return event
 
-    def _offer(self, q: Any, event: Dict[str, Any]) -> None:
+    def _offer(self, q: Any, event: dict[str, Any]) -> None:
         """Deliver to a subscriber queue without ever blocking the publisher."""
         try:
             loop, aq = q if isinstance(q, tuple) else (None, q)
@@ -195,7 +196,7 @@ class RunBus:
         except Exception:
             pass
 
-    def add_sink(self, fn: Callable[[str, Dict[str, Any]], None]) -> Callable[[], None]:
+    def add_sink(self, fn: Callable[[str, dict[str, Any]], None]) -> Callable[[], None]:
         with self._lock:
             self._sinks.append(fn)
 
@@ -209,7 +210,7 @@ class RunBus:
         return remove
 
     # ------------------------------------------------------------------ subscribe
-    def history(self, run_id: str, after: int = 0, limit: int = 500) -> List[Dict[str, Any]]:
+    def history(self, run_id: str, after: int = 0, limit: int = 500) -> list[dict[str, Any]]:
         run = self.get(run_id)
         if run is None:
             return []
@@ -236,7 +237,7 @@ class RunBus:
 
         return aq, unsubscribe
 
-    def snapshot(self, run_id: str) -> Dict[str, Any]:
+    def snapshot(self, run_id: str) -> dict[str, Any]:
         run = self.get(run_id)
         if run is None:
             return {"run_id": run_id, "exists": False}
@@ -246,7 +247,7 @@ class RunBus:
         return out
 
 
-def _put_nowait(aq: "asyncio.Queue", event: Dict[str, Any]) -> None:
+def _put_nowait(aq: "asyncio.Queue", event: dict[str, Any]) -> None:
     try:
         if aq.full():
             try:
@@ -275,7 +276,7 @@ class RunHandle:
         self.started = True
         return self
 
-    def emit(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def emit(self, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         return self.bus.publish(self.run_id, event_type, data)
 
     def token(self, text: str) -> None:
@@ -285,7 +286,7 @@ class RunHandle:
     def log(self, message: str, level: str = "info") -> None:
         self.emit("log", {"level": level, "message": str(message)[:2000]})
 
-    def finish(self, result: Optional[Dict[str, Any]] = None, error: str = "") -> None:
+    def finish(self, result: Optional[dict[str, Any]] = None, error: str = "") -> None:
         self.bus.finish(self.run_id, "error" if error else "finished", result, error)
 
     @property
@@ -293,7 +294,7 @@ class RunHandle:
         return self.bus.is_cancelled(self.run_id)
 
 
-def sse_format(event: Dict[str, Any]) -> str:
+def sse_format(event: dict[str, Any]) -> str:
     """Server-Sent Events framing (id + event + data)."""
     payload = json.dumps(event, default=str)
     return f"id: {event.get('id')}\nevent: {event.get('type')}\ndata: {payload}\n\n"

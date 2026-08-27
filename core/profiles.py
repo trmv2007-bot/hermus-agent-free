@@ -14,12 +14,13 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .memory2 import Memory2
 from .workspace import workspace
+import builtins
 
-PRESETS: Dict[str, str] = {
+PRESETS: dict[str, str] = {
     "assistant": "You are Hermus, a helpful, general-purpose AI assistant.",
     "coder": "You are a senior software engineer. Prioritize correct, tested, maintainable code.",
     "researcher": "You are a meticulous researcher. Cite sources, note uncertainty, and cross-check claims.",
@@ -44,7 +45,7 @@ class ProfileManager:
         return Memory2(db_path=str(self._profile_dir(name) / "memory2.db"))
 
     def create(self, name: str, persona: Optional[str] = None,
-               model: Optional[str] = None) -> Dict[str, Any]:
+               model: Optional[str] = None) -> dict[str, Any]:
         pdir = self._profile_dir(name)
         if (pdir / "profile.json").exists():
             return {"success": False, "error": f"profile '{name}' already exists"}
@@ -60,7 +61,7 @@ class ProfileManager:
         self._memory(name)
         return {"success": True, "name": name, "persona": data["persona"]}
 
-    def get(self, name: str) -> Optional[Dict[str, Any]]:
+    def get(self, name: str) -> Optional[dict[str, Any]]:
         path = self._profile_dir(name) / "profile.json"
         if not path.exists():
             return None
@@ -69,7 +70,7 @@ class ProfileManager:
         except Exception:
             return None
 
-    def list(self) -> List[Dict[str, Any]]:
+    def list(self) -> builtins.list[dict[str, Any]]:
         out = []
         for p in sorted(self.profiles_dir.iterdir()):
             if p.is_dir() and (p / "profile.json").exists():
@@ -78,7 +79,7 @@ class ProfileManager:
                     out.append(data)
         return out
 
-    def delete(self, name: str) -> Dict[str, Any]:
+    def delete(self, name: str) -> dict[str, Any]:
         pdir = self._profile_dir(name)
         if not pdir.exists():
             return {"success": False, "error": f"profile '{name}' not found"}
@@ -93,10 +94,10 @@ class ProfileManager:
             return data.get("persona") or PRESETS["assistant"]
         return PRESETS.get(name, PRESETS["assistant"])
 
-    def remember(self, name: str, kind: str, content: str, **kwargs) -> Dict[str, Any]:
+    def remember(self, name: str, kind: str, content: str, **kwargs) -> dict[str, Any]:
         return self._memory(name).remember(kind, content, **kwargs)
 
-    def recall(self, name: str, query: str, **kwargs) -> List[Dict[str, Any]]:
+    def recall(self, name: str, query: str, **kwargs) -> builtins.list[dict[str, Any]]:
         return self._memory(name).recall(query, **kwargs)
 
 

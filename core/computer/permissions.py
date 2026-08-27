@@ -13,7 +13,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 class RecordingPolicy:
@@ -32,7 +32,7 @@ class RecordingPolicy:
         self.max_buffer_seconds = float(max_buffer_seconds)
         self.allow_external_paths = allow_external_paths
 
-    def validate_settings(self, fps: float, max_seconds: float) -> Dict[str, Any]:
+    def validate_settings(self, fps: float, max_seconds: float) -> dict[str, Any]:
         if not 0.1 <= float(fps) <= self.max_fps:
             return {"ok": False, "error": f"fps must be between 0.1 and {self.max_fps:g}"}
         if not 1.0 <= float(max_seconds) <= self.max_buffer_seconds:
@@ -81,7 +81,7 @@ class RiskLevel(str, Enum):
 
 # action name -> risk tier.  LOW runs freely, MEDIUM is audited, HIGH always
 # requires explicit approval before the agent may perform it.
-ACTION_RISK: Dict[str, RiskLevel] = {
+ACTION_RISK: dict[str, RiskLevel] = {
     "move_mouse": RiskLevel.LOW,
     "scroll": RiskLevel.LOW,
     "focus_window": RiskLevel.LOW,
@@ -124,7 +124,7 @@ class ComputerPolicy:
     def risk_of(self, action: str) -> RiskLevel:
         return ACTION_RISK.get(action, RiskLevel.MEDIUM)
 
-    def escalate(self, action: str, args: Optional[Dict[str, Any]] = None) -> RiskLevel:
+    def escalate(self, action: str, args: Optional[dict[str, Any]] = None) -> RiskLevel:
         """Raise a risk tier from dangerous argument content (e.g. sudo)."""
         risk = self.risk_of(action)
         text = " ".join(str(v) for v in (args or {}).values()).lower()
@@ -153,9 +153,9 @@ class ComputerPolicy:
     def check(
         self,
         action: str,
-        args: Optional[Dict[str, Any]] = None,
+        args: Optional[dict[str, Any]] = None,
         scope: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Return a decision record for an action (``allowed`` + reason)."""
         risk = self.escalate(action, args)
         allowed = True
@@ -251,7 +251,7 @@ class EmergencyStop:
         except Exception:  # noqa: BLE001
             pass
 
-    def check(self) -> Dict[str, Any]:
+    def check(self) -> dict[str, Any]:
         if self.halted:
             return {"ok": False, "halted": True, "error": self.reason or "emergency stop engaged"}
         return {"ok": True, "halted": False}

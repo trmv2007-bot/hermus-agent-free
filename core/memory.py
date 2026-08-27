@@ -1,10 +1,9 @@
 """Memory - SQLite FTS5 free, no vector DB cost, plus curated memory, nudges, user modeling (free Honcho alternative)"""
 import sqlite3
 import json
-import re
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Any
 from .config import config
 
 class Memory:
@@ -100,7 +99,7 @@ class Memory:
         conn.commit()
         conn.close()
 
-    def add_session_message(self, session_id: str, role: str, content: str, tool_calls: List[Dict] = None, metadata: Dict = None, project: str = None, tag: Dict = None):
+    def add_session_message(self, session_id: str, role: str, content: str, tool_calls: list[dict] = None, metadata: dict = None, project: str = None, tag: dict = None):
         """Add message to session + FTS index.
 
         Phase 4: `project` scopes messages to a project (P4); `tag` attaches
@@ -138,7 +137,7 @@ class Memory:
         except:
             pass
 
-    def search_sessions(self, query: str, limit: int = 5, project: str = None) -> List[Dict]:
+    def search_sessions(self, query: str, limit: int = 5, project: str = None) -> list[dict]:
         """Free FTS5 search - no vector DB needed. Phase 4: project filter."""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
@@ -178,7 +177,7 @@ class Memory:
         conn.close()
         return result
 
-    def summarize_search_results(self, query: str, results: List[Dict]) -> str:
+    def summarize_search_results(self, query: str, results: list[dict]) -> str:
         """LLM summarization for cross-session recall (free via Ollama)"""
         if not results:
             return "No prior sessions found for query."
@@ -208,7 +207,7 @@ class Memory:
         conn.commit()
         conn.close()
 
-    def get_curated_memory(self, limit: int = 20) -> List[Dict]:
+    def get_curated_memory(self, limit: int = 20) -> list[dict]:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -217,7 +216,7 @@ class Memory:
         conn.close()
         return [dict(r) for r in rows]
 
-    def periodic_nudges(self) -> List[str]:
+    def periodic_nudges(self) -> list[str]:
         """Periodic nudges - agent asks itself what to persist"""
         # Find sessions from yesterday that were important but not yet curated
         yesterday = (datetime.now() - timedelta(days=1)).isoformat()
@@ -241,7 +240,7 @@ class Memory:
     def get_user_model_path(self) -> Path:
         return config.resolve_path(config.user_model_path)
 
-    def load_user_model(self) -> Dict:
+    def load_user_model(self) -> dict:
         path = self.get_user_model_path()
         if not path.exists():
             return {"preferences": {}, "projects": [], "workflows": [], "created": datetime.now().isoformat()}
@@ -250,13 +249,13 @@ class Memory:
         except:
             return {}
 
-    def save_user_model(self, model: Dict):
+    def save_user_model(self, model: dict):
         path = self.get_user_model_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(model, indent=2))
 
     @staticmethod
-    def _dedupe_preserving_types(items: List[Any]) -> List[Any]:
+    def _dedupe_preserving_types(items: list[Any]) -> list[Any]:
         """Deduplicate a list without coercing items to strings.
 
         The previous implementation ran every item through ``str()``/``json.dumps()``
@@ -264,7 +263,7 @@ class Memory:
         into ``['{"name": "x"}']`` and corrupting the persisted user model.
         """
         seen: set = set()
-        out: List[Any] = []
+        out: list[Any] = []
         for item in items:
             try:
                 key = json.dumps(item, sort_keys=True, default=str)
@@ -275,7 +274,7 @@ class Memory:
                 out.append(item)
         return out
 
-    def update_user_model(self, new_info: Dict):
+    def update_user_model(self, new_info: dict):
         """Dialectic user modeling - LLM asks what matters, builds model free"""
         model = self.load_user_model()
         # Merge new info
@@ -308,7 +307,7 @@ class Memory:
 
     # Token usage tracking free
 
-    def add_token_usage(self, session_id: str, usage: Dict):
+    def add_token_usage(self, session_id: str, usage: dict):
         """Add token usage - free tracking"""
         try:
             conn = sqlite3.connect(str(self.db_path))
@@ -331,7 +330,7 @@ class Memory:
         except Exception as e:
             print(f"Token usage tracking failed: {e}")
 
-    def get_token_usage(self, session_id: str = None, limit: int = 100) -> Dict:
+    def get_token_usage(self, session_id: str = None, limit: int = 100) -> dict:
         """Get token usage stats - free"""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row

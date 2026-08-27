@@ -8,19 +8,16 @@ clicks on stale, moved, or occluded targets.
 """
 from __future__ import annotations
 
-import time
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .controller import ComputerActionController
 from .events import publish
 from .grounding import (
-    BoundingBox,
     GroundedTarget,
     GroundingSystem,
     PreClickVerifier,
     VisualGrounder,
-    create_grounding_system,
 )
 from .recorder import decode_frame
 
@@ -92,7 +89,7 @@ class GroundedActionController:
             )
 
         self.frame_provider = frame_provider
-        self._last_target_cache: Dict[str, GroundedTarget] = {}
+        self._last_target_cache: dict[str, GroundedTarget] = {}
 
     def _capture_frame(self) -> Any:
         """Get a fresh frame for verification."""
@@ -112,7 +109,7 @@ class GroundedActionController:
         self,
         target: str,
         use_cache: bool = True,
-    ) -> Tuple[bool, Optional[GroundedTarget], str]:
+    ) -> tuple[bool, Optional[GroundedTarget], str]:
         """Verify a target is still visible and at the expected location.
 
         Args:
@@ -156,7 +153,7 @@ class GroundedActionController:
         self._last_target_cache[target] = current
         return True, current, "target verified"
 
-    def _get_screen_size(self, frame: Any) -> Tuple[int, int]:
+    def _get_screen_size(self, frame: Any) -> tuple[int, int]:
         """Extract screen size from a frame."""
         image = decode_frame(frame)
         if image is not None:
@@ -168,7 +165,7 @@ class GroundedActionController:
 
     # -- Delegated methods -----------------------------------------------
 
-    def click_target(self, target: str) -> Dict[str, Any]:
+    def click_target(self, target: str) -> dict[str, Any]:
         """Click a target with pre-click verification."""
         if self.verification_enabled:
             verified, current, reason = self._verify_target(target)
@@ -203,41 +200,41 @@ class GroundedActionController:
 
         return self.controller.click_target(target)
 
-    def click(self, x: int, y: int) -> Dict[str, Any]:
+    def click(self, x: int, y: int) -> dict[str, Any]:
         """Direct coordinate click (no verification needed)."""
         return self.controller.click(x, y)
 
-    def double_click(self, x: int, y: int) -> Dict[str, Any]:
+    def double_click(self, x: int, y: int) -> dict[str, Any]:
         return self.controller.double_click(x, y)
 
-    def right_click(self, x: int, y: int) -> Dict[str, Any]:
+    def right_click(self, x: int, y: int) -> dict[str, Any]:
         return self.controller.right_click(x, y)
 
-    def type_text(self, text: str) -> Dict[str, Any]:
+    def type_text(self, text: str) -> dict[str, Any]:
         return self.controller.type_text(text)
 
-    def press_key(self, key: str) -> Dict[str, Any]:
+    def press_key(self, key: str) -> dict[str, Any]:
         return self.controller.press_key(key)
 
-    def hotkey(self, *keys: str) -> Dict[str, Any]:
+    def hotkey(self, *keys: str) -> dict[str, Any]:
         return self.controller.hotkey(*keys)
 
-    def scroll(self, amount: int, x: Optional[int] = None, y: Optional[int] = None) -> Dict[str, Any]:
+    def scroll(self, amount: int, x: Optional[int] = None, y: Optional[int] = None) -> dict[str, Any]:
         return self.controller.scroll(amount, x, y)
 
-    def open_application(self, name: str) -> Dict[str, Any]:
+    def open_application(self, name: str) -> dict[str, Any]:
         return self.controller.open_application(name)
 
-    def close_application(self, name: str) -> Dict[str, Any]:
+    def close_application(self, name: str) -> dict[str, Any]:
         return self.controller.close_application(name)
 
-    def focus_window(self, name: str) -> Dict[str, Any]:
+    def focus_window(self, name: str) -> dict[str, Any]:
         return self.controller.focus_window(name)
 
-    def move_mouse(self, x: int, y: int) -> Dict[str, Any]:
+    def move_mouse(self, x: int, y: int) -> dict[str, Any]:
         return self.controller.move_mouse(x, y)
 
-    def find_on_screen(self, target: str) -> Dict[str, Any]:
+    def find_on_screen(self, target: str) -> dict[str, Any]:
         """Find a target and return structured grounding info."""
         frame = self._capture_frame()
         if frame is None:
@@ -263,7 +260,7 @@ class GroundedActionController:
         self.verification_enabled = enabled
 
     @property
-    def history(self) -> List[Dict[str, Any]]:
+    def history(self) -> list[dict[str, Any]]:
         """Delegate to underlying controller's action history."""
         return getattr(self.controller, "history", [])
 
@@ -294,7 +291,7 @@ class GroundedActionController:
 
 def wrap_with_grounding(
     controller: ComputerActionController,
-    vision_model: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+    vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
     **kwargs,
 ) -> GroundedActionController:
     """Wrap a ComputerActionController with pre-click visual verification.

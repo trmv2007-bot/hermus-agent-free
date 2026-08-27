@@ -19,9 +19,8 @@ All free, zero API fees, no paid API keys needed for core (except optional free 
 import requests
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Optional
 import subprocess
-import json
 import sqlite3
 import time
 
@@ -49,7 +48,7 @@ def _get_web_cache_db():
             """)
     return _WEB_CACHE_DB
 
-def _get_cached_web_read(url: str, ttl_seconds: int = 43200) -> Optional[Dict]:
+def _get_cached_web_read(url: str, ttl_seconds: int = 43200) -> Optional[dict]:
     try:
         db = _get_web_cache_db()
         with db:
@@ -82,7 +81,7 @@ def _set_cached_web_read(url: str, content: str, method: str) -> None:
     except Exception:
         pass
 
-def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> Dict:
+def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> dict:
     """Read any webpage - free via Jina AI Reader, with persistent local cache"""
     if not url.startswith("http"):
         url = "https://" + url
@@ -137,7 +136,7 @@ def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> Dict:
 
     return result
 
-def rss_read(rss_url: str) -> Dict:
+def rss_read(rss_url: str) -> dict:
     """Read any RSS/Atom feed - free via feedparser"""
     try:
         import feedparser
@@ -164,7 +163,7 @@ def rss_read(rss_url: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def youtube_transcript(video_url: str) -> Dict:
+def youtube_transcript(video_url: str) -> dict:
     """YouTube subtitle extraction + video details - free via yt-dlp, no config needed for public videos"""
     # Try yt-dlp
     try:
@@ -200,7 +199,7 @@ def youtube_transcript(video_url: str) -> Dict:
     except Exception as e:
         return {"success": False, "url": video_url, "error": str(e), "fallback": web_read(video_url, use_jina=True)}
 
-def youtube_search(query: str, max_results: int = 5) -> Dict:
+def youtube_search(query: str, max_results: int = 5) -> dict:
     """YouTube video search - free via yt-dlp search or DuckDuckGo"""
     try:
         # yt-dlp search: ytsearch5:query
@@ -224,7 +223,7 @@ def youtube_search(query: str, max_results: int = 5) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def github_read(repo: str, path: str = "") -> Dict:
+def github_read(repo: str, path: str = "") -> dict:
     """Read GitHub repo - public repo + search free via gh CLI or API, no config for public"""
     # Try gh CLI
     try:
@@ -252,7 +251,7 @@ def github_read(repo: str, path: str = "") -> Dict:
     except Exception as e:
         return {"success": False, "repo": repo, "error": str(e)}
 
-def github_search(query: str, max_results: int = 5) -> Dict:
+def github_search(query: str, max_results: int = 5) -> dict:
     """GitHub search free"""
     try:
         url = f"https://api.github.com/search/repositories?q={requests.utils.quote(query)}&per_page={max_results}"
@@ -264,7 +263,7 @@ def github_search(query: str, max_results: int = 5) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def twitter_read(tweet_url: str) -> Dict:
+def twitter_read(tweet_url: str) -> dict:
     """Twitter/X read single tweet - free via Jina Reader + browser cookies if available"""
     # Free method 1: Jina Reader can often read tweet via https://r.jina.ai/https://twitter.com/...
     # Free method 2: If user has browser cookies via OpenCLI (Chrome session), use that
@@ -286,7 +285,7 @@ def twitter_read(tweet_url: str) -> Dict:
 
     return result
 
-def twitter_search(query: str) -> Dict:
+def twitter_search(query: str) -> dict:
     """Twitter search - needs config for full access per Agent Reach"""
     return {
         "success": False,
@@ -296,7 +295,7 @@ def twitter_search(query: str) -> Dict:
         "config_guide": "Use Cookie-Editor extension to export Twitter cookies, then set env TWITTER_AUTH_TOKEN and TWITTER_CT0. See Agent Reach docs."
     }
 
-def bilibili_search(query: str, max_results: int = 5) -> Dict:
+def bilibili_search(query: str, max_results: int = 5) -> dict:
     """Bilibili search + video details via bili-cli free no login"""
     # Try bili-cli if available
     try:
@@ -317,7 +316,7 @@ def bilibili_search(query: str, max_results: int = 5) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def reddit_read(subreddit: str, post_id: str = None) -> Dict:
+def reddit_read(subreddit: str, post_id: str = None) -> dict:
     """Reddit search + read posts/comments - free via old.reddit.com .json + Jina fallback"""
     # Reddit anonymous API blocked, but old.reddit.com + .json still works sometimes, plus Jina reader
     try:
@@ -339,7 +338,7 @@ def reddit_read(subreddit: str, post_id: str = None) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e), "note": "Reddit anonymous API blocked, try Jina Reader free or OpenCLI with browser login (Chrome session) free as per Agent Reach: desktop OpenCLI reuses Chrome login"}
 
-def reddit_search(query: str, subreddit: str = None) -> Dict:
+def reddit_search(query: str, subreddit: str = None) -> dict:
     """Reddit search - needs config for full access, free via OpenCLI + browser login"""
     return {
         "success": False,
@@ -349,7 +348,7 @@ def reddit_search(query: str, subreddit: str = None) -> Dict:
         "free_alternatives": "Use web_search with site:reddit.com as fallback free"
     }
 
-def v2ex_hot() -> Dict:
+def v2ex_hot() -> dict:
     """V2EX hot posts, node posts, post details + replies, user info - free no config"""
     try:
         url = "https://www.v2ex.com/api/topics/hot.json"
@@ -360,7 +359,7 @@ def v2ex_hot() -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def xueqiu_stock_search(query: str) -> Dict:
+def xueqiu_stock_search(query: str) -> dict:
     """Xueqiu stock search free but needs cookies for some endpoints"""
     try:
         # Try public search endpoint

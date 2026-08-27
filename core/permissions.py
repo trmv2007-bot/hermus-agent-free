@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 from .workspace import workspace
 
@@ -47,7 +47,7 @@ class Capability(str, Enum):
 
 
 # tool name (or substring) -> (risk, default decision, required capabilities)
-DEFAULT_POLICY: Dict[str, tuple] = {
+DEFAULT_POLICY: dict[str, tuple] = {
     # READ — safe
     "read_file": (Risk.READ, Decision.ALLOW, [Capability.READ]),
     "list_files": (Risk.READ, Decision.ALLOW, [Capability.READ]),
@@ -136,7 +136,7 @@ class PermissionManager:
         self.overrides = self._load_overrides()
 
     # -- persistence ----------------------------------------------------
-    def _load_overrides(self) -> Dict[str, Any]:
+    def _load_overrides(self) -> dict[str, Any]:
         try:
             return json.loads(self.overrides_path.read_text(encoding="utf-8"))
         except Exception:
@@ -147,7 +147,7 @@ class PermissionManager:
         self.overrides_path.write_text(json.dumps(self.overrides, indent=2), encoding="utf-8")
 
     # -- classification -------------------------------------------------
-    def classify(self, tool_name: str, args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def classify(self, tool_name: str, args: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         args = args or {}
         risk = DEFAULT_RISK
         decision = DEFAULT_DECISION
@@ -200,8 +200,8 @@ class PermissionManager:
         self,
         tool_name: str,
         agent: Optional[str] = None,
-        args: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        args: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         info = self.classify(tool_name, args)
         decision = Decision(info["default"])
 
@@ -229,7 +229,7 @@ class PermissionManager:
         tool_name: str,
         decision: str,
         agent: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if decision not in (Decision.ALLOW.value, Decision.ASK.value, Decision.DENY.value):
             return {"success": False, "error": f"decision must be allow/ask/deny, got '{decision}'"}
         if agent:
@@ -245,7 +245,7 @@ class PermissionManager:
         decision: str,
         agent: Optional[str],
         risk: Optional[str] = None,
-        extra: Optional[Dict[str, Any]] = None,
+        extra: Optional[dict[str, Any]] = None,
     ) -> Path:
         path = workspace.dirs["logs"] / "permissions.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +261,7 @@ class PermissionManager:
             f.write(json.dumps(entry) + "\n")
         return path
 
-    def recent(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         path = workspace.dirs["logs"] / "permissions.jsonl"
         if not path.exists():
             return []
@@ -284,11 +284,11 @@ class PolicyGate:
     def enforce(
         self,
         tool_name: str,
-        args: Optional[Dict[str, Any]] = None,
+        args: Optional[dict[str, Any]] = None,
         agent: Optional[str] = None,
-        granted_capabilities: Optional[Set[str]] = None,
+        granted_capabilities: Optional[set[str]] = None,
         strict: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         check_res = self.manager.check(tool_name, agent=agent, args=args)
         decision = check_res.get("decision")
         req_caps = set(check_res.get("capabilities", []))

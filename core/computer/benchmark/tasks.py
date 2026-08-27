@@ -7,7 +7,7 @@ measures not just success but recovery capability.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -18,15 +18,15 @@ class TaskSpec:
     category: str          # app, browser, file, install, dialog, recovery, multi
     difficulty: int        # 1=easy, 2=medium, 3=hard
     prompt: str            # The natural-language instruction for the agent
-    expected_states: List[str] = field(default_factory=list)
-    failure_modes: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    expected_states: list[str] = field(default_factory=list)
+    failure_modes: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     timeout: int = 120     # Max seconds
     min_steps: int = 1
     max_steps: int = 30
     description: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "category": self.category,
@@ -46,7 +46,7 @@ class TaskSpec:
 # 30 benchmark tasks
 # ---------------------------------------------------------------------------
 
-COMPUTER_TASKS: List[TaskSpec] = [
+COMPUTER_TASKS: list[TaskSpec] = [
     # === APP CATEGORY: Launch and verify applications ===
     TaskSpec(
         id="COMPUTER-001",
@@ -348,7 +348,7 @@ def list_tasks(
     category: Optional[str] = None,
     max_difficulty: int = 3,
     min_difficulty: int = 1,
-) -> List[TaskSpec]:
+) -> list[TaskSpec]:
     """List tasks with optional filters."""
     return [
         t for t in COMPUTER_TASKS
@@ -357,9 +357,9 @@ def list_tasks(
     ]
 
 
-def get_categories() -> Dict[str, List[TaskSpec]]:
+def get_categories() -> dict[str, list[TaskSpec]]:
     """Group tasks by category."""
-    groups: Dict[str, List[TaskSpec]] = {}
+    groups: dict[str, list[TaskSpec]] = {}
     for task in COMPUTER_TASKS:
         groups.setdefault(task.category, []).append(task)
     return groups

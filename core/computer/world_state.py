@@ -13,15 +13,16 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Optional
+from collections.abc import Iterable
 
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _unique(values: Iterable[Any], limit: int = 50) -> List[str]:
-    output: List[str] = []
+def _unique(values: Iterable[Any], limit: int = 50) -> list[str]:
+    output: list[str] = []
     seen = set()
     for value in values:
         text = str(value or "").strip()
@@ -40,13 +41,13 @@ class WorldObservation:
     timestamp: str = field(default_factory=_now)
     application: Optional[str] = None
     window: Optional[str] = None
-    visible_targets: List[str] = field(default_factory=list)
-    dialogs: List[str] = field(default_factory=list)
+    visible_targets: list[str] = field(default_factory=list)
+    dialogs: list[str] = field(default_factory=list)
     task_state: Optional[str] = None
     verification_ok: Optional[bool] = None
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -56,18 +57,18 @@ class WorldState:
 
     active_application: Optional[str] = None
     active_window: Optional[str] = None
-    visible_targets: List[str] = field(default_factory=list)
-    dialogs: List[str] = field(default_factory=list)
+    visible_targets: list[str] = field(default_factory=list)
+    dialogs: list[str] = field(default_factory=list)
     task: Optional[str] = None
     task_state: str = "UNKNOWN"
     confidence: float = 0.0
     timestamp: str = field(default_factory=_now)
     revision: int = 0
-    last_action: Optional[Dict[str, Any]] = None
-    last_verification: Optional[Dict[str, Any]] = None
-    completed_states: List[str] = field(default_factory=list)
-    failed_states: List[str] = field(default_factory=list)
-    observations: List[Dict[str, Any]] = field(default_factory=list)
+    last_action: Optional[dict[str, Any]] = None
+    last_verification: Optional[dict[str, Any]] = None
+    completed_states: list[str] = field(default_factory=list)
+    failed_states: list[str] = field(default_factory=list)
+    observations: list[dict[str, Any]] = field(default_factory=list)
     max_observations: int = 100
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
@@ -89,11 +90,11 @@ class WorldState:
         self.active_window = value
 
     @property
-    def elements(self) -> List[str]:
+    def elements(self) -> list[str]:
         return self.visible_targets
 
     @elements.setter
-    def elements(self, value: List[str]) -> None:
+    def elements(self, value: list[str]) -> None:
         self.visible_targets = list(value or [])
 
     @property
@@ -120,7 +121,7 @@ class WorldState:
             return default
 
     @staticmethod
-    def _as_list(value: Any) -> List[str]:
+    def _as_list(value: Any) -> list[str]:
         if value is None:
             return []
         if isinstance(value, (list, tuple, set)):
@@ -128,11 +129,11 @@ class WorldState:
         return [str(value)] if str(value).strip() else []
 
     @staticmethod
-    def _heuristics(detail: str) -> Dict[str, Any]:
+    def _heuristics(detail: str) -> dict[str, Any]:
         """Extract conservative structure from legacy prose observations."""
         text = str(detail or "").strip()
         lowered = text.lower()
-        result: Dict[str, Any] = {"visible_targets": [], "dialogs": []}
+        result: dict[str, Any] = {"visible_targets": [], "dialogs": []}
 
         app_match = re.search(
             r"\b(?:in|inside|shows?|visible in)\s+(?:the\s+)?([A-Z][A-Za-z0-9 ._-]{1,40})\s+(?:app|application|browser)\b",
@@ -183,7 +184,7 @@ class WorldState:
             self.failed_states = []
             self.observations = []
 
-    def update(self, observation: Dict[str, Any], source: str = "vision") -> Dict[str, Any]:
+    def update(self, observation: dict[str, Any], source: str = "vision") -> dict[str, Any]:
         """Merge one structured or prose observation and return the new snapshot."""
         if not isinstance(observation, dict):
             observation = {"detail": str(observation)}
@@ -264,7 +265,7 @@ class WorldState:
             self.timestamp = _now()
             self.revision += 1
 
-    def before_action(self, state: str, action: Dict[str, Any]) -> None:
+    def before_action(self, state: str, action: dict[str, Any]) -> None:
         with self._lock:
             self.task_state = state
             self.last_action = {"state": state, "action": dict(action), "started": _now()}
@@ -298,7 +299,7 @@ class WorldState:
             self.timestamp = _now()
             self.revision += 1
 
-    def satisfies(self, condition: str) -> Dict[str, Any]:
+    def satisfies(self, condition: str) -> dict[str, Any]:
         """Best-effort local precondition check before asking vision again."""
         wanted = str(condition or "").strip().casefold()
         if not wanted:
@@ -321,7 +322,7 @@ class WorldState:
             "detail": f"world-state token match {len(matched_tokens)}/{len(tokens)}",
         }
 
-    def to_dict(self, include_history: bool = True) -> Dict[str, Any]:
+    def to_dict(self, include_history: bool = True) -> dict[str, Any]:
         with self._lock:
             data = {
                 "active_application": self.active_application,
@@ -349,7 +350,7 @@ class WorldState:
             return data
 
     @classmethod
-    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "WorldState":
+    def from_dict(cls, data: Optional[dict[str, Any]]) -> "WorldState":
         data = data if isinstance(data, dict) else {}
         return cls(
             active_application=data.get("active_application", data.get("application")),

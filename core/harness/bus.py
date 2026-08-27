@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..config import config
 
@@ -23,7 +23,7 @@ def _path() -> Path:
     return p
 
 
-def _load() -> Dict[str, Any]:
+def _load() -> dict[str, Any]:
     path = _path()
     if not path.exists():
         return {"messages": []}
@@ -33,7 +33,7 @@ def _load() -> Dict[str, Any]:
         return {"messages": []}
 
 
-def _save(data: Dict[str, Any]) -> None:
+def _save(data: dict[str, Any]) -> None:
     _path().write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
@@ -44,7 +44,7 @@ def send(
     to: Optional[str] = None,
     channel: Optional[str] = None,
     kind: str = "dm",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """kind: dm | broadcast | channel."""
     msg = {
         "id": uuid.uuid4().hex[:10],
@@ -66,7 +66,7 @@ def send(
     return msg
 
 
-def inbox(session_id: str, channel: Optional[str] = None, unread_only: bool = True) -> List[Dict[str, Any]]:
+def inbox(session_id: str, channel: Optional[str] = None, unread_only: bool = True) -> list[dict[str, Any]]:
     with _LOCK:
         data = _load()
         out = []
@@ -87,7 +87,7 @@ def inbox(session_id: str, channel: Optional[str] = None, unread_only: bool = Tr
         return out
 
 
-def mark_read(session_id: str, message_ids: Optional[List[str]] = None) -> int:
+def mark_read(session_id: str, message_ids: Optional[list[str]] = None) -> int:
     with _LOCK:
         data = _load()
         n = 0

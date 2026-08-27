@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -38,7 +37,8 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Optional
+from collections.abc import Callable, Sequence
 
 from .config import config
 
@@ -118,10 +118,10 @@ class TaskEvaluation:
 
     harvest: bool = False
     score: float = 0.0
-    reasons: List[str] = field(default_factory=list)
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "harvest": self.harvest,
             "score": round(self.score, 3),
@@ -131,10 +131,10 @@ class TaskEvaluation:
 
 
 def evaluate_trajectory(
-    trajectory: Sequence[Dict[str, Any]],
+    trajectory: Sequence[dict[str, Any]],
     *,
-    verification: Optional[Dict[str, Any]] = None,
-    tool_results: Optional[Sequence[Dict[str, Any]]] = None,
+    verification: Optional[dict[str, Any]] = None,
+    tool_results: Optional[Sequence[dict[str, Any]]] = None,
     min_tool_calls: int = None,
     final_answer: str = "",
 ) -> TaskEvaluation:
@@ -183,7 +183,7 @@ def evaluate_trajectory(
         "answer_chars": len(answer or ""),
         "verified": verified,
     }
-    reasons: List[str] = []
+    reasons: list[str] = []
     score = 0.0
 
     if len(tool_calls) < min_tools:
@@ -234,13 +234,13 @@ def evaluate_trajectory(
 class DistilledStep:
     index: int
     tool: str
-    args: Dict[str, Any] = field(default_factory=dict)
+    args: dict[str, Any] = field(default_factory=dict)
     intent: str = ""
     outcome: str = ""
     error: bool = False
     recovered: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
             "tool": self.tool,
@@ -253,18 +253,18 @@ class DistilledStep:
 
 
 def extract_steps(
-    trajectory: Sequence[Dict[str, Any]],
-    tool_results: Optional[Sequence[Dict[str, Any]]] = None,
-) -> List[DistilledStep]:
+    trajectory: Sequence[dict[str, Any]],
+    tool_results: Optional[Sequence[dict[str, Any]]] = None,
+) -> list[DistilledStep]:
     """Flatten a trajectory into an ordered, de-duplicated procedure."""
     traj = [dict(t) for t in (trajectory or [])]
     goal = next((t.get("content", "") for t in traj if t.get("role") == "user"), "")
-    by_call: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    by_call: dict[tuple[str, str], dict[str, Any]] = {}
     for tr in tool_results or []:
         key = (str(tr.get("tool")), json.dumps(tr.get("args") or {}, sort_keys=True, default=str)[:200])
         by_call[key] = tr
 
-    steps: List[DistilledStep] = []
+    steps: list[DistilledStep] = []
     seen: set = set()
     for turn in traj:
         for tc in turn.get("tool_calls") or []:
@@ -324,16 +324,16 @@ class SkillCandidate:
     title: str
     description: str
     goal: str
-    steps: List[DistilledStep]
+    steps: list[DistilledStep]
     when_to_use: str = ""
-    inputs: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    inputs: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     verification: str = ""
-    pitfalls: List[str] = field(default_factory=list)
-    provenance: Dict[str, Any] = field(default_factory=dict)
+    pitfalls: list[str] = field(default_factory=list)
+    provenance: dict[str, Any] = field(default_factory=dict)
     merged_with: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = dict(self.__dict__)
         d["steps"] = [s.to_dict() for s in self.steps]
         return d
@@ -351,7 +351,7 @@ class SkillForge:
         "run proves it worked). No code, no markdown fences, no commentary."
     )
 
-    def __init__(self, skills_dir: Optional[str] = None, llm: Optional[Callable[[List[Dict]], str]] = None):
+    def __init__(self, skills_dir: Optional[str] = None, llm: Optional[Callable[[list[dict]], str]] = None):
         self.skills_dir = Path(skills_dir or config.resolve_path(config.skills_dir))
         self._llm = llm
         self.quarantine_dir = self.skills_dir / ".quarantine"
@@ -361,13 +361,13 @@ class SkillForge:
     def registry_path(self) -> Path:
         return self.skills_dir / "registry.json"
 
-    def _registry(self) -> Dict[str, Any]:
+    def _registry(self) -> dict[str, Any]:
         try:
             return json.loads(self.registry_path.read_text())
         except Exception:
             return {"version": 1, "updated": None, "skills": {}}
 
-    def _save_registry(self, reg: Dict[str, Any]) -> None:
+    def _save_registry(self, reg: dict[str, Any]) -> None:
         reg["updated"] = _now()
         try:
             self.skills_dir.mkdir(parents=True, exist_ok=True)
@@ -377,7 +377,7 @@ class SkillForge:
         except Exception:
             pass
 
-    def index(self) -> Dict[str, Any]:
+    def index(self) -> dict[str, Any]:
         reg = self._registry()
         return {
             "count": len(reg.get("skills", {})),
@@ -387,7 +387,7 @@ class SkillForge:
         }
 
     # ------------------------------------------------------------------ dedupe
-    def _existing_skills(self) -> List[Dict[str, Any]]:
+    def _existing_skills(self) -> list[dict[str, Any]]:
         out = []
         try:
             for d in sorted(self.skills_dir.iterdir()):
@@ -405,7 +405,7 @@ class SkillForge:
             pass
         return out
 
-    def find_similar(self, description: str, *, threshold: float = None) -> Optional[Dict[str, Any]]:
+    def find_similar(self, description: str, *, threshold: float = None) -> Optional[dict[str, Any]]:
         th = float(threshold if threshold is not None else getattr(config, "skill_forge_dedupe_similarity", 0.55))
         best, best_score = None, 0.0
         for sk in self._existing_skills():
@@ -494,8 +494,8 @@ class SkillForge:
         )
 
     @staticmethod
-    def _inputs_for(steps: Sequence[DistilledStep]) -> List[str]:
-        keys: List[str] = []
+    def _inputs_for(steps: Sequence[DistilledStep]) -> list[str]:
+        keys: list[str] = []
         for s in steps:
             for k in (s.args or {}):
                 if k not in keys:
@@ -538,7 +538,7 @@ class SkillForge:
             cand.provenance["llm_error"] = str(e)[:160]
         return cand
 
-    def _call_llm(self, messages: List[Dict]) -> str:
+    def _call_llm(self, messages: list[dict]) -> str:
         if self._llm:
             return self._llm(messages)
         try:
@@ -699,13 +699,13 @@ class SkillForge:
     ''').lstrip("\n")
 
     # -------------------------------------------------------------- validation
-    def validate(self, skill_dir: Path, *, timeout: int = 25) -> Dict[str, Any]:
+    def validate(self, skill_dir: Path, *, timeout: int = 25) -> dict[str, Any]:
         """Compile + import + smoke-test a skill in a sandboxed subprocess.
 
         Runs through ``core.sandbox`` when available so a bad distilled skill
         cannot hang or blow up the agent process.
         """
-        report: Dict[str, Any] = {"path": str(skill_dir), "checks": []}
+        report: dict[str, Any] = {"path": str(skill_dir), "checks": []}
         md = skill_dir / "SKILL.md"
         py = skill_dir / "skill.py"
         if not md.exists():
@@ -741,7 +741,7 @@ class SkillForge:
         report["valid"] = all(c["ok"] for c in report["checks"])
         return report
 
-    def _probe(self, code: str, timeout: int = 25) -> Tuple[int, str, str]:
+    def _probe(self, code: str, timeout: int = 25) -> tuple[int, str, str]:
         """Execute a validation snippet under resource limits (sandbox if present)."""
         try:
             from .sandbox import sandbox
@@ -760,7 +760,7 @@ class SkillForge:
             return 1, "", str(e)
 
     # ------------------------------------------------------------------ install
-    def install(self, cand: SkillCandidate, *, validate: bool = True) -> Dict[str, Any]:
+    def install(self, cand: SkillCandidate, *, validate: bool = True) -> dict[str, Any]:
         target = self.skills_dir / cand.name
         version = 1
         if target.exists():
@@ -847,14 +847,14 @@ class SkillForge:
     def harvest(
         self,
         goal: str,
-        trajectory: Sequence[Dict[str, Any]],
+        trajectory: Sequence[dict[str, Any]],
         *,
-        verification: Optional[Dict[str, Any]] = None,
-        tool_results: Optional[Sequence[Dict[str, Any]]] = None,
+        verification: Optional[dict[str, Any]] = None,
+        tool_results: Optional[Sequence[dict[str, Any]]] = None,
         session_id: str = "",
         final_answer: str = "",
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Full pipeline: evaluate → extract → distill → dedupe → validate → install."""
         evaluation = evaluate_trajectory(
             trajectory, verification=verification, tool_results=tool_results, final_answer=final_answer
@@ -899,7 +899,7 @@ class SkillForge:
         result.setdefault("path", str(self.skills_dir / cand.name))
         return result
 
-    def run(self, name: str, **kwargs) -> Dict[str, Any]:
+    def run(self, name: str, **kwargs) -> dict[str, Any]:
         """Execute an installed distilled skill (used by the CLI + skill_use)."""
         py = self.skills_dir / name / "skill.py"
         if not py.exists():
@@ -923,7 +923,7 @@ class SkillForge:
                 pass
             return {"success": False, "error": str(e)}
 
-    def record_outcome(self, name: str, success: bool, note: str = "") -> Dict[str, Any]:
+    def record_outcome(self, name: str, success: bool, note: str = "") -> dict[str, Any]:
         """Feed the self-improvement loop: outcomes land in skill_usage + forge log."""
         try:
             from .skill_manager import skill_manager
@@ -954,7 +954,7 @@ class SkillForge:
             pass
         return {"recorded": True, "skill": name, "success": success}
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         reg = self._registry()
         skills = list(reg.get("skills", {}).values())
         harvested = sum(1 for s in skills if s.get("created"))
@@ -963,7 +963,7 @@ class SkillForge:
             quarantined = [p.name for p in self.quarantine_dir.iterdir() if p.is_dir()]
         except Exception:
             pass
-        outcomes: List[bool] = []
+        outcomes: list[bool] = []
         try:
             for line in (self.skills_dir / "forge_log.jsonl").read_text().splitlines()[-200:]:
                 outcomes.append(bool(json.loads(line).get("success")))
@@ -1006,7 +1006,7 @@ def _frontmatter_summary(doc: str) -> str:
     return " ".join(bits)[:600] or head.strip()[:200]
 
 
-def _parse_json_object(text: str) -> Optional[Dict[str, Any]]:
+def _parse_json_object(text: str) -> Optional[dict[str, Any]]:
     if not text:
         return None
     text = text.strip()

@@ -15,7 +15,8 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Optional
+from collections.abc import Callable
 
 from ..config import config
 
@@ -35,7 +36,7 @@ class EvalHarness:
 
     # ------------------------------------------------------------ tasks
 
-    def load_tasks(self) -> List[Dict]:
+    def load_tasks(self) -> list[dict]:
         if not self.tasks_path.exists():
             return []
         try:
@@ -44,7 +45,7 @@ class EvalHarness:
             print(f"[Eval] could not load tasks: {e}")
             return []
 
-    def list_categories(self) -> List[str]:
+    def list_categories(self) -> list[str]:
         cats = []
         for t in self.load_tasks():
             if t.get("category") not in cats:
@@ -53,7 +54,7 @@ class EvalHarness:
 
     # ------------------------------------------------------------ checks
 
-    def check_task(self, task: Dict, response: str) -> Dict:
+    def check_task(self, task: dict, response: str) -> dict:
         checks = task.get("checks") or []
         passed, failed = [], []
         for c in checks:
@@ -86,11 +87,11 @@ class EvalHarness:
     def run(
         self,
         strategy: str = "auto",
-        tasks: Optional[List[Dict]] = None,
+        tasks: Optional[list[dict]] = None,
         limit: Optional[int] = None,
         model: Optional[str] = None,
         tag: str = "",
-    ) -> Dict:
+    ) -> dict:
         """Run benchmark tasks under a strategy. Offline-safe with mock/mock."""
         all_tasks = tasks if tasks is not None else self.load_tasks()
         if limit:
@@ -159,14 +160,14 @@ class EvalHarness:
         self._save_run(summary)
         return summary
 
-    def _summarize(self, results: List[Dict]) -> Dict:
+    def _summarize(self, results: list[dict]) -> dict:
         if not results:
             return {"runs": 0, "success_rate": 0.0}
         total = len(results)
         ok = sum(1 for r in results if r["success"])
         steps = [r["steps"] for r in results]
         fails = [r["tool_failures"] for r in results]
-        by_cat: Dict[str, Dict] = {}
+        by_cat: dict[str, dict] = {}
         for r in results:
             c = by_cat.setdefault(r["category"], {"runs": 0, "success": 0})
             c["runs"] += 1
@@ -186,22 +187,22 @@ class EvalHarness:
         if not self.history_path.exists():
             self.history_path.write_text("[]")
 
-    def _load_history(self) -> List[Dict]:
+    def _load_history(self) -> list[dict]:
         try:
             return json.loads(self.history_path.read_text())
         except Exception:
             return []
 
-    def _save_run(self, run: Dict):
+    def _save_run(self, run: dict):
         history = self._load_history()
         history.append(run)
         self.history_path.write_text(json.dumps(history[-100:], indent=2))
 
-    def history(self, limit: int = 20) -> List[Dict]:
+    def history(self, limit: int = 20) -> list[dict]:
         h = self._load_history()
         return h[-limit:]
 
-    def summary(self) -> Dict:
+    def summary(self) -> dict:
         h = self._load_history()
         if not h:
             return {"runs": 0}
@@ -225,10 +226,10 @@ class EvalHarness:
         self,
         strategy_a: str,
         strategy_b: str,
-        tasks: Optional[List[Dict]] = None,
+        tasks: Optional[list[dict]] = None,
         limit: Optional[int] = None,
         model: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """A/B: run both strategies on the same tasks, pick the winner."""
         all_tasks = (tasks if tasks is not None else self.load_tasks())[:limit]
         run_a = self.run(strategy_a, tasks=all_tasks, limit=None, model=model, tag=f"compare:{strategy_a}")

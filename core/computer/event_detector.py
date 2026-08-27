@@ -1,7 +1,7 @@
 """Turn low-level frame changes into a small set of visual events."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .frame_sampler import FrameSampler, _image_diff
 
@@ -18,15 +18,15 @@ class EventDetector:
         self.debounce_seconds = max(0.0, float(debounce_seconds))
 
     @staticmethod
-    def _offset(frame: Dict[str, Any], fallback: float) -> float:
+    def _offset(frame: dict[str, Any], fallback: float) -> float:
         try:
             return float(frame.get("offset"))
         except (TypeError, ValueError):
             return fallback
 
-    def detect(self, frames: List[Dict[str, Any]], max_events: Optional[int] = 12) -> List[Dict[str, Any]]:
+    def detect(self, frames: list[dict[str, Any]], max_events: Optional[int] = 12) -> list[dict[str, Any]]:
         changes = self.sampler.detect_changes(frames)
-        groups: List[List[Dict[str, Any]]] = []
+        groups: list[list[dict[str, Any]]] = []
         for change in changes:
             offset = self._offset(change, float(change.get("frame_index", 0)))
             if not groups:
@@ -39,7 +39,7 @@ class EventDetector:
             else:
                 groups.append([change])
 
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         for group in groups:
             strongest = max(group, key=lambda item: item.get("change_score", 0.0))
             frame_index = int(strongest.get("frame_index", 0))
@@ -70,7 +70,7 @@ class EventDetector:
         return events
 
     @staticmethod
-    def json_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    def json_event(event: dict[str, Any]) -> dict[str, Any]:
         """Strip in-memory frame blobs from an event for persistence."""
         return {
             key: value
@@ -91,10 +91,10 @@ class StreamingEventDetector:
     def __init__(self, threshold: float = 0.02, debounce_seconds: float = 0.5):
         self.threshold = max(0.0, min(float(threshold), 1.0))
         self.debounce_seconds = max(0.0, float(debounce_seconds))
-        self._previous: Optional[Dict[str, Any]] = None
-        self._events: List[Dict[str, Any]] = []
+        self._previous: Optional[dict[str, Any]] = None
+        self._events: list[dict[str, Any]] = []
 
-    def observe(self, frame: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def observe(self, frame: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         if frame is None:
             return None
         if self._previous is None:
@@ -128,5 +128,5 @@ class StreamingEventDetector:
         self._events.append(event)
         return event
 
-    def events(self) -> List[Dict[str, Any]]:
+    def events(self) -> list[dict[str, Any]]:
         return list(self._events)

@@ -2,7 +2,6 @@
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
 
 try:
     from prompt_toolkit import PromptSession
@@ -145,7 +144,7 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
 
         if cmd == "/plan":
             # DeepThink plan persistence (Phase 4, P1)
-            from core.reasoning.scaffold import list_plans, show_plan
+            from core.reasoning.scaffold import list_plans
             plans = list_plans(limit=5)
             if not plans:
                 print("No saved plans yet. Multi-step tasks auto-draft plans (data/plans/).")

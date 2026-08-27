@@ -5,11 +5,11 @@ when lexical hits are weak. Results from turn N are ready at turn N+1.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 
-def cascade_recall(query: str, limit: int = 5, project: str = "") -> Dict[str, Any]:
-    hits: List[Dict[str, Any]] = []
+def cascade_recall(query: str, limit: int = 5, project: str = "") -> dict[str, Any]:
+    hits: list[dict[str, Any]] = []
     source = "empty"
 
     try:

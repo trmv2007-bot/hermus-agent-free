@@ -9,12 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import zipfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .workspace import workspace
 
@@ -78,13 +77,13 @@ class Artifact:
     created_at: str
     mission_id: Optional[str] = None
     previewable: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Artifact:
+    def from_dict(cls, data: dict[str, Any]) -> Artifact:
         return cls(**data)
 
 
@@ -95,7 +94,7 @@ class ArtifactManager:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self._manifest_file = self.storage_dir / "manifest.json"
 
-    def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
+    def _load_manifest(self) -> dict[str, dict[str, Any]]:
         if not self._manifest_file.exists():
             return {}
         try:
@@ -103,7 +102,7 @@ class ArtifactManager:
         except Exception:
             return {}
 
-    def _save_manifest(self, manifest: Dict[str, Dict[str, Any]]) -> None:
+    def _save_manifest(self, manifest: dict[str, dict[str, Any]]) -> None:
         self._manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     def register_artifact(
@@ -112,7 +111,7 @@ class ArtifactManager:
         name: Optional[str] = None,
         artifact_type: Optional[str] = None,
         mission_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Artifact:
         p = Path(path)
         if not p.is_absolute():
@@ -190,9 +189,9 @@ class ArtifactManager:
         self,
         mission_id: Optional[str] = None,
         artifact_type: Optional[str] = None,
-    ) -> List[Artifact]:
+    ) -> list[Artifact]:
         manifest = self._load_manifest()
-        results: List[Artifact] = []
+        results: list[Artifact] = []
         for d in manifest.values():
             art = Artifact.from_dict(d)
             if mission_id and art.mission_id != mission_id:
@@ -208,12 +207,12 @@ class ArtifactManager:
         target_dir: Optional[Path] = None,
         mission_id: Optional[str] = None,
         since_timestamp: Optional[float] = None,
-    ) -> List[Artifact]:
+    ) -> list[Artifact]:
         """Scan workspace for build outputs, deliverables, and reports.
         Scopes attribution to files modified since mission start when `since_timestamp` is given.
         """
         root = target_dir or self.workspace_root
-        discovered: List[Artifact] = []
+        discovered: list[Artifact] = []
         seen_paths: set = set()
 
         # NOTE: a single rglob from the root already recurses into build/dist/
@@ -250,7 +249,7 @@ class ArtifactManager:
         self,
         output_zip_path: str | Path,
         mission_id: Optional[str] = None,
-        artifact_ids: Optional[List[str]] = None,
+        artifact_ids: Optional[list[str]] = None,
     ) -> str:
         out_p = Path(output_zip_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)

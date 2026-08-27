@@ -12,12 +12,13 @@ the queue module must not import the app, and the app owns the per-user agents.
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from core.config import config
 
 
-def _agent_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _agent_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "model": payload.get("model"),
         "mode": payload.get("mode", "agent"),
@@ -26,7 +27,7 @@ def _agent_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _resolve_key_from_store(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_key_from_store(payload: dict[str, Any]) -> dict[str, Any]:
     """Swap a stored (provider, key_name) pair for the real key server-side."""
     if payload.get("key_name") and payload.get("provider"):
         try:
@@ -45,7 +46,7 @@ def _resolve_key_from_store(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def make_chat_handler(agent_getter: Callable[..., Any]):
-    def chat(ctx) -> Dict[str, Any]:
+    def chat(ctx) -> dict[str, Any]:
         payload = _resolve_key_from_store(dict(ctx.payload))
         text = str(payload.get("text") or payload.get("message") or "")
         if not text.strip():
@@ -97,7 +98,7 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
 
 
 def make_autonomous_handler(agent_getter: Callable[..., Any]):
-    def autonomous(ctx) -> Dict[str, Any]:
+    def autonomous(ctx) -> dict[str, Any]:
         payload = _resolve_key_from_store(dict(ctx.payload))
         text = str(payload.get("text") or payload.get("task") or "")
         if not text.strip():
@@ -117,7 +118,7 @@ def make_autonomous_handler(agent_getter: Callable[..., Any]):
 
 
 def make_mission_start_handler(agent_getter: Callable[..., Any]):
-    def mission_start(ctx) -> Dict[str, Any]:
+    def mission_start(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         goal = str(payload.get("goal") or payload.get("text") or "")
         if not goal:
@@ -140,7 +141,7 @@ def make_mission_start_handler(agent_getter: Callable[..., Any]):
 
 
 def make_swe_develop_handler():
-    def swe_develop(ctx) -> Dict[str, Any]:
+    def swe_develop(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         task = str(payload.get("task") or payload.get("text") or "")
         if not task:
@@ -160,7 +161,7 @@ def make_swe_develop_handler():
 
 
 def make_research_handler():
-    def research(ctx) -> Dict[str, Any]:
+    def research(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         query = str(payload.get("query") or payload.get("text") or "")
         if not query:
@@ -179,7 +180,7 @@ def make_research_handler():
 
 
 def make_delegate_handler():
-    def delegate(ctx) -> Dict[str, Any]:
+    def delegate(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         tasks = payload.get("tasks")
         goal = payload.get("goal") or payload.get("text") or ""
@@ -207,7 +208,7 @@ def make_delegate_handler():
 
 
 def make_memory_sweep_handler():
-    def sweep(ctx) -> Dict[str, Any]:
+    def sweep(ctx) -> dict[str, Any]:
         from core.memory2 import memory2
 
         payload = dict(ctx.payload)
@@ -230,7 +231,7 @@ def make_memory_sweep_handler():
 def make_channel_reply_handler(agent_getter: Callable[..., Any]):
     """Telegram/webhook style job: run the agent, then push the answer back."""
 
-    def channel_reply(ctx) -> Dict[str, Any]:
+    def channel_reply(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         chat_result = make_chat_handler(agent_getter)(
             _PseudoCtx(ctx.id, ctx.run_id, {**payload, "platform": payload.get("platform", "telegram")}, ctx.emit)
@@ -280,13 +281,13 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
 class _PseudoCtx:
     """Adapter so handlers can be composed (channel_reply wraps chat)."""
 
-    def __init__(self, job_id: str, run_id: str, payload: Dict[str, Any], emit: Callable) -> None:
+    def __init__(self, job_id: str, run_id: str, payload: dict[str, Any], emit: Callable) -> None:
         self.id = job_id
         self.run_id = run_id
         self.payload = payload
         self._emit = emit
 
-    def emit(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def emit(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
         try:
             self._emit(event_type, data)
         except Exception:
@@ -296,7 +297,7 @@ class _PseudoCtx:
         return False
 
 
-def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: bool = True) -> Dict[str, str]:
+def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: bool = True) -> dict[str, str]:
     """Register every gateway job kind. Returns the kind → description map."""
     kinds = {
         "agent.chat": (make_chat_handler(agent_getter), "run one agent turn (ReAct loop, streamed events)"),

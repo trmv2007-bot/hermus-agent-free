@@ -1,18 +1,15 @@
 """Task Tracker - Tracks what agents/AI models are running or doing the task - free - for slide panel"""
-import json
 import uuid
 from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 from threading import Lock
 
 class TaskTracker:
     """Tracks active agents, models, tasks for slide panel UI"""
 
     def __init__(self):
-        self.active_agents: Dict[str, Dict] = {}  # agent_id -> info
-        self.active_tasks: Dict[str, Dict] = {}  # task_id -> info
-        self.completed_tasks: List[Dict] = []  # recent completed
+        self.active_agents: dict[str, dict] = {}  # agent_id -> info
+        self.active_tasks: dict[str, dict] = {}  # task_id -> info
+        self.completed_tasks: list[dict] = []  # recent completed
         self.lock = Lock()
 
     def add_agent(self, agent_id: str, name: str, model: str, persona: str = "", task: str = "") -> str:
@@ -97,7 +94,7 @@ class TaskTracker:
                 if len(self.completed_tasks) > 20:
                     self.completed_tasks = self.completed_tasks[-20:]
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get full status for slide panel"""
         with self.lock:
             return {

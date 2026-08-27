@@ -1,6 +1,5 @@
 """Voice Memo Transcription faster-whisper Free - Local Whisper, no API key, free"""
 from pathlib import Path
-from typing import Dict
 
 # faster-whisper optional - free local Whisper
 FASTER_WHISPER_AVAILABLE = False
@@ -29,7 +28,7 @@ def _get_model(model_name: str = "base"):
 
     return _model, None
 
-def transcribe_audio(audio_path: str, model: str = "base", language: str = None) -> Dict:
+def transcribe_audio(audio_path: str, model: str = "base", language: str = None) -> dict:
     """Transcribe voice memo audio to text via faster-whisper free local - no API key"""
     p = Path(audio_path)
     if not p.exists():
@@ -67,11 +66,11 @@ def transcribe_audio(audio_path: str, model: str = "base", language: str = None)
     except Exception as e:
         return {"success": False, "error": f"Transcription failed: {e}"}
 
-def transcribe_voice_memo(audio_path: str, model: str = "base") -> Dict:
+def transcribe_voice_memo(audio_path: str, model: str = "base") -> dict:
     """Alias for transcribe_audio - for voice memo transcription feature"""
     return transcribe_audio(audio_path, model=model)
 
-def voice_available_models() -> Dict:
+def voice_available_models() -> dict:
     """List available Whisper models - free local"""
     models = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
     return {

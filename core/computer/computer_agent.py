@@ -5,7 +5,8 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .controller import ComputerActionController
 from .events import machine_event, publish
@@ -16,7 +17,7 @@ from .replanner import AdaptiveReplanner, ReplanContext
 from .recorder import ImageGrabSource, ScreenRecorder
 from .skills import ComputerSkillStore
 from .state_machine import VisualStateMachine, dispatch_action
-from .task_control import get_task_control, TaskControlState
+from .task_control import get_task_control
 from .task_store import TaskStore
 from .timeline import TaskArtifacts, Timeline
 from .verifier import ScreenVerifier
@@ -55,7 +56,7 @@ class ComputerAgent:
         self,
         controller: Optional[ComputerActionController] = None,
         recorder: Optional[ScreenRecorder] = None,
-        planner: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
+        planner: Optional[Callable[[str], list[dict[str, Any]]]] = None,
         analyzer: Optional[VideoAnalyzer] = None,
         verifier: Optional[ScreenVerifier] = None,
         repair_engine: Optional[RepairEngine] = None,
@@ -82,18 +83,18 @@ class ComputerAgent:
         self.max_retries = max_retries
 
     # -- convenience tools ----------------------------------------------
-    def find_on_screen(self, target: str) -> Dict[str, Any]:
+    def find_on_screen(self, target: str) -> dict[str, Any]:
         return self.controller.find_on_screen(target)
 
-    def click_target(self, target: str) -> Dict[str, Any]:
+    def click_target(self, target: str) -> dict[str, Any]:
         return self.controller.click_target(target)
 
-    def wait_until(self, condition: str, timeout: float = 60.0) -> Dict[str, Any]:
+    def wait_until(self, condition: str, timeout: float = 60.0) -> dict[str, Any]:
         watcher = ScreenWatcher(self.recorder, analyzer=self.analyzer or VideoAnalyzer())
         return watcher.watch(condition, timeout=timeout, start_if_needed=False)
 
     # -- planning / resume ----------------------------------------------
-    def _make_plan(self, task: str) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def _make_plan(self, task: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         if self.planner is not None:
             plan = self.planner(task) or []
             return plan, {
@@ -106,7 +107,7 @@ class ComputerAgent:
         return graph.to_plan(), graph.to_dict()
 
     @staticmethod
-    def _recalled_skill(plan: List[Dict[str, Any]], graph: Dict[str, Any]) -> Optional[str]:
+    def _recalled_skill(plan: list[dict[str, Any]], graph: dict[str, Any]) -> Optional[str]:
         source = str(graph.get("source") or "")
         if source.startswith("skill:"):
             return source.split(":", 1)[1]
@@ -118,7 +119,7 @@ class ComputerAgent:
                 return str(metadata["recalled_from"])
         return None
 
-    def resume(self, task_id: str, dry_run: bool = False) -> Dict[str, Any]:
+    def resume(self, task_id: str, dry_run: bool = False) -> dict[str, Any]:
         checkpoint = self.task_store.load(task_id)
         if checkpoint is None:
             return {"success": False, "task_id": task_id, "error": f"task '{task_id}' was not found"}
@@ -158,11 +159,11 @@ class ComputerAgent:
         task: str,
         task_id: Optional[str] = None,
         dry_run: bool = False,
-        plan: Optional[List[Dict[str, Any]]] = None,
-        graph: Optional[Dict[str, Any]] = None,
+        plan: Optional[list[dict[str, Any]]] = None,
+        graph: Optional[dict[str, Any]] = None,
         resume: bool = False,
         start_state: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if dry_run:
             from .keyboard import DryRunKeyboard
             from .mouse import DryRunMouse
@@ -288,7 +289,7 @@ class ComputerAgent:
 
         states = VisualStateMachine.plan_to_states(plan)
 
-        def checkpoint_event(event: Dict[str, Any]) -> None:
+        def checkpoint_event(event: dict[str, Any]) -> None:
             saved = self.task_store.checkpoint_event(checkpoint, event, self.world_state)
             machine_event(event, task_id=task_id, task=task, emit_lifecycle_starts=False)
             publish("checkpoint_saved", {
@@ -316,7 +317,7 @@ class ComputerAgent:
             except Exception:  # noqa: BLE001
                 pass
 
-        def live_telemetry(event_type: str, data: Dict[str, Any]) -> None:
+        def live_telemetry(event_type: str, data: dict[str, Any]) -> None:
             payload = {"task_id": task_id, "task": task, **dict(data or {})}
             spec = payload.get("action_spec")
             if isinstance(spec, dict):
@@ -441,10 +442,10 @@ class ComputerAgent:
             publish("task_interrupted", {"task_id": task_id, "task": task, "reason": report["error"]})
 
         # Collect structured evidence from the current generation's trace.
-        actions: List[Dict[str, Any]] = list(previous_actions) if isinstance(previous_actions, list) else []
-        verifications: List[Dict[str, Any]] = list(previous_verifications) if isinstance(previous_verifications, list) else []
-        diagnoses: List[Dict[str, Any]] = list(previous_repairs_payload.get("diagnoses", [])) if isinstance(previous_repairs_payload, dict) else []
-        repairs: List[Dict[str, Any]] = list(previous_repairs_payload.get("repairs", [])) if isinstance(previous_repairs_payload, dict) else []
+        actions: list[dict[str, Any]] = list(previous_actions) if isinstance(previous_actions, list) else []
+        verifications: list[dict[str, Any]] = list(previous_verifications) if isinstance(previous_verifications, list) else []
+        diagnoses: list[dict[str, Any]] = list(previous_repairs_payload.get("diagnoses", [])) if isinstance(previous_repairs_payload, dict) else []
+        repairs: list[dict[str, Any]] = list(previous_repairs_payload.get("repairs", [])) if isinstance(previous_repairs_payload, dict) else []
         retries = 0
         for visited in report.get("states_visited", []):
             phase = visited.get("phase", "")
@@ -666,7 +667,7 @@ class ComputerAgent:
         return final_result
 
     # -- verification ---------------------------------------------------
-    def _verify(self, before: Any, after: Any, expected: str) -> Dict[str, Any]:
+    def _verify(self, before: Any, after: Any, expected: str) -> dict[str, Any]:
         if self.analyzer is not None and self.analyzer.vision_model is not None:
             result = self.analyzer.evaluate_transition(before, after, expected or "the action had its intended effect")
             result["ok"] = bool(result.get("matched"))
@@ -678,11 +679,11 @@ class ComputerAgent:
         task: str,
         success: bool,
         duration: float,
-        actions: List[Dict[str, Any]],
-        verifications: List[Dict[str, Any]],
+        actions: list[dict[str, Any]],
+        verifications: list[dict[str, Any]],
         retries: int,
-        repairs: List[Dict[str, Any]],
-        failure: Optional[Dict[str, Any]],
+        repairs: list[dict[str, Any]],
+        failure: Optional[dict[str, Any]],
         timeline: Timeline,
         resume: bool = False,
     ) -> str:

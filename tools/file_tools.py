@@ -1,10 +1,8 @@
 """Free File Tools - no API key - Optimized with file cache"""
 from pathlib import Path
-from typing import List, Dict
-import os
 from core.cache import file_cache
 
-def file_read(path: str) -> Dict:
+def file_read(path: str) -> dict:
     try:
         p = Path(path)
         if not p.exists():
@@ -22,7 +20,7 @@ def file_read(path: str) -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def file_write(path: str, content: str) -> Dict:
+def file_write(path: str, content: str) -> dict:
     try:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -34,7 +32,7 @@ def file_write(path: str, content: str) -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def file_edit(path: str, old_text: str, new_text: str) -> Dict:
+def file_edit(path: str, old_text: str, new_text: str) -> dict:
     try:
         p = Path(path)
         if not p.exists():
@@ -51,7 +49,7 @@ def file_edit(path: str, old_text: str, new_text: str) -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def file_search(query: str, directory: str = ".") -> Dict:
+def file_search(query: str, directory: str = ".") -> dict:
     try:
         p = Path(directory)
         matches = []

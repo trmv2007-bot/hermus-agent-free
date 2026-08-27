@@ -7,13 +7,13 @@ evidence or verified artifacts.
 from __future__ import annotations
 
 import ast
-import json
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 
 class CriticVerdict(str, Enum):
@@ -38,7 +38,7 @@ class Finding:
     line: Optional[int] = None
     suggestion: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -47,12 +47,12 @@ class CriticReport:
     reviewer_role: str
     verdict: str  # approved | changes_requested | rejected
     score: int  # 0 to 100
-    findings: List[Finding] = field(default_factory=list)
-    repair_directives: List[str] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+    repair_directives: list[str] = field(default_factory=list)
     summary: str = ""
     evaluated_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reviewer_role": self.reviewer_role,
             "verdict": self.verdict,
@@ -73,11 +73,11 @@ class IndependentCritic:
     def review_code(
         self,
         task: str,
-        files_content: Dict[str, str],
-        requirements: Optional[List[str]] = None,
+        files_content: dict[str, str],
+        requirements: Optional[list[str]] = None,
     ) -> CriticReport:
-        findings: List[Finding] = []
-        repair_directives: List[str] = []
+        findings: list[Finding] = []
+        repair_directives: list[str] = []
 
         if not files_content:
             return CriticReport(
@@ -153,11 +153,11 @@ class IndependentCritic:
 
     def audit_security(
         self,
-        files_content: Dict[str, str],
-        command_history: Optional[List[str]] = None,
+        files_content: dict[str, str],
+        command_history: Optional[list[str]] = None,
     ) -> CriticReport:
-        findings: List[Finding] = []
-        repair_directives: List[str] = []
+        findings: list[Finding] = []
+        repair_directives: list[str] = []
 
         dangerous_patterns = [
             (r"eval\s*\(", "Use of eval() introduces arbitrary code execution risks", Severity.HIGH.value),
@@ -213,12 +213,12 @@ class IndependentCritic:
         self,
         task: str,
         execution_log: str,
-        artifacts: List[str],
-        requirements: Optional[List[str]] = None,
-        verification_evidence: Optional[List[Dict[str, Any]]] = None,
+        artifacts: list[str],
+        requirements: Optional[list[str]] = None,
+        verification_evidence: Optional[list[dict[str, Any]]] = None,
     ) -> CriticReport:
-        findings: List[Finding] = []
-        repair_directives: List[str] = []
+        findings: list[Finding] = []
+        repair_directives: list[str] = []
 
         reqs = requirements or [task]
         satisfied_count = 0
@@ -270,12 +270,12 @@ class IndependentCritic:
     def run_full_review(
         self,
         task: str,
-        files_content: Dict[str, str],
+        files_content: dict[str, str],
         execution_log: str = "",
-        artifacts: Optional[List[str]] = None,
-        requirements: Optional[List[str]] = None,
-        verification_evidence: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        artifacts: Optional[list[str]] = None,
+        requirements: Optional[list[str]] = None,
+        verification_evidence: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
         art_list = artifacts or []
         code_rep = self.review_code(task, files_content, requirements)
         sec_rep = self.audit_security(files_content)

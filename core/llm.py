@@ -11,7 +11,8 @@ from __future__ import annotations
 import os
 import json
 import requests
-from typing import List, Dict, Any, Optional, Generator
+from typing import Optional
+from collections.abc import Generator
 
 from .config import config
 from .token_counter import token_counter
@@ -20,7 +21,7 @@ from .providers import get_provider, parse_model_ref
 
 
 class LLMResponse:
-    def __init__(self, content: str, tool_calls: Optional[List[Dict]] = None, usage: Optional[Dict] = None):
+    def __init__(self, content: str, tool_calls: Optional[list[dict]] = None, usage: Optional[dict] = None):
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage or {}
@@ -51,7 +52,7 @@ class FreeLLM:
     def _parse_model(self, model_str: str) -> tuple:
         return parse_model_ref(model_str)
 
-    def _resolve_bundle(self) -> Dict:
+    def _resolve_bundle(self) -> dict:
         """Resolve api_key + base_url from override or multi_key_manager."""
         if self.api_key_override is not None or self.base_url_override:
             preset = get_provider(self.provider)
@@ -90,7 +91,7 @@ class FreeLLM:
             "provider": self.provider,
         }
 
-    def _fallback_bundle(self) -> Optional[Dict]:
+    def _fallback_bundle(self) -> Optional[dict]:
         """First usable API key bundle across providers (custom preferred)."""
         try:
             from .multi_key import multi_key_manager
@@ -100,7 +101,7 @@ class FreeLLM:
             return None
 
     @staticmethod
-    def _tools_for_provider(tools: Optional[List[Dict]], provider: str) -> Optional[List[Dict]]:
+    def _tools_for_provider(tools: Optional[list[dict]], provider: str) -> Optional[list[dict]]:
         """Return a tool set accepted by the selected provider.
 
         The registry can contain more functions than hosted APIs permit.  In
@@ -118,7 +119,7 @@ class FreeLLM:
             return tools[: int(max_tools)]
         return tools
 
-    def _call_openai_compat(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
+    def _call_openai_compat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Universal path for any OpenAI-compatible provider."""
         from .openai_compat import chat_completions, CompatAPIError
         from .multi_key import multi_key_manager
@@ -240,7 +241,7 @@ class FreeLLM:
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{used_provider}/{model}")
         return LLMResponse(err, usage=usage)
 
-    def _call_ollama(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
+    def _call_ollama(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Ollama — prefer OpenAI-compatible /v1, fallback to native /api/chat."""
         # Try openai compat first (tool calling better on newer ollama)
         try:
@@ -362,7 +363,7 @@ class FreeLLM:
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err_content), model="ollama/mock")
             return LLMResponse(err_content, usage=usage)
 
-    def _call_hf_free(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
+    def _call_hf_free(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """HF — try OpenAI-compatible router first, then legacy text_generation."""
         # Prefer router openai path
         compat = self._call_openai_compat(messages, tools=None)  # tools often unsupported
@@ -430,7 +431,7 @@ class FreeLLM:
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"hf/{self.model_name}")
             return LLMResponse(err, usage=usage)
 
-    def _call_mock(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
+    def _call_mock(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
         last = messages[-1].get("content", "") if messages else ""
         if "search" in last.lower() or "weather" in last.lower():
@@ -453,7 +454,7 @@ class FreeLLM:
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(content), model="mock/mock")
         return LLMResponse(content, usage=usage)
 
-    def chat(self, messages: List[Dict], tools: List[Dict] = None) -> LLMResponse:
+    def chat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Route to provider. Any unknown provider → OpenAI-compatible HTTP."""
         p = self.provider
         if p == "mock":
@@ -467,7 +468,7 @@ class FreeLLM:
         return self._call_openai_compat(messages, tools)
 
     # ------------------------------------------------------------- streaming
-    def _stream_target(self) -> Optional[Dict]:
+    def _stream_target(self) -> Optional[dict]:
         """Resolve (provider, model, base_url, api_key) for a streaming request.
 
         Returns None when the provider needs a key we do not have — the caller
@@ -494,8 +495,8 @@ class FreeLLM:
 
     def stream_chat(
         self,
-        messages: List[Dict],
-        tools: List[Dict] = None,
+        messages: list[dict],
+        tools: list[dict] = None,
         on_delta: Optional[callable] = None,
     ) -> LLMResponse:
         """Streaming chat: pushes text deltas to ``on_delta`` and returns the full response.
@@ -535,7 +536,7 @@ class FreeLLM:
         _emit_chunks(resp.content, on_delta)
         return resp
 
-    def chat_stream(self, messages: List[Dict], tools: List[Dict] = None) -> Generator[str, None, None]:
+    def chat_stream(self, messages: list[dict], tools: list[dict] = None) -> Generator[str, None, None]:
         """Generator view of :meth:`stream_chat` — yields deltas as they arrive."""
         import queue
         import threading

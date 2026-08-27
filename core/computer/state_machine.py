@@ -13,9 +13,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
-from .task_control import get_task_control, TaskControlState
+from .task_control import get_task_control
 
 
 def _now() -> str:
@@ -27,18 +28,18 @@ class VisualState:
     name: str
     # The visual state that must be true *after* action execution.
     expected: str = ""
-    action: Optional[Dict[str, Any]] = None
+    action: Optional[dict[str, Any]] = None
     on_success: Optional[str] = None
     on_failure: Optional[str] = None
     terminal: bool = False
     # Optional visual gate that must be true before executing the action.
     precondition: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def dispatch_action(controller: Any, spec: Dict[str, Any]) -> Dict[str, Any]:
+def dispatch_action(controller: Any, spec: dict[str, Any]) -> dict[str, Any]:
     """Map an action spec to a :class:`ComputerActionController` call."""
     kind = spec.get("kind") or spec.get("action") or ""
     target = spec.get("target")
@@ -72,11 +73,11 @@ def dispatch_action(controller: Any, spec: Dict[str, Any]) -> Dict[str, Any]:
 class _EventTrace(list):
     """List that emits every durable state-machine event as it is appended."""
 
-    def __init__(self, callback: Optional[Callable[[Dict[str, Any]], None]] = None):
+    def __init__(self, callback: Optional[Callable[[dict[str, Any]], None]] = None):
         super().__init__()
         self.callback = callback
 
-    def append(self, event: Dict[str, Any]) -> None:
+    def append(self, event: dict[str, Any]) -> None:
         super().append(event)
         if self.callback is not None:
             try:
@@ -94,14 +95,14 @@ class VisualStateMachine:
         self,
         controller: Any = None,
         recorder: Any = None,
-        wait_until: Optional[Callable[[str, float], Dict[str, Any]]] = None,
-        execute: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
-        verify: Optional[Callable[[Any, Any, str], Dict[str, Any]]] = None,
-        repair: Optional[Callable[[str, str, Dict[str, Any]], Any]] = None,
+        wait_until: Optional[Callable[[str, float], dict[str, Any]]] = None,
+        execute: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
+        verify: Optional[Callable[[Any, Any, str], dict[str, Any]]] = None,
+        repair: Optional[Callable[[str, str, dict[str, Any]], Any]] = None,
         max_retries: int = 2,
         world_state: Any = None,
-        on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_telemetry: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        on_event: Optional[Callable[[dict[str, Any]], None]] = None,
+        on_telemetry: Optional[Callable[[str, dict[str, Any]], None]] = None,
     ):
         self.controller = controller
         self.recorder = recorder
@@ -131,7 +132,7 @@ class VisualStateMachine:
             except Exception:
                 pass
 
-    def _handle_event(self, event: Dict[str, Any]) -> None:
+    def _handle_event(self, event: dict[str, Any]) -> None:
         """Update shared world state, then durably publish the event."""
         if self.world_state is not None:
             try:
@@ -173,7 +174,7 @@ class VisualStateMachine:
         return None
 
     @staticmethod
-    def _result_dict(value: Any, action: str = "") -> Dict[str, Any]:
+    def _result_dict(value: Any, action: str = "") -> dict[str, Any]:
         if isinstance(value, dict):
             return value
         return {
@@ -182,7 +183,7 @@ class VisualStateMachine:
             "error": f"action returned unsupported result: {type(value).__name__}",
         }
 
-    def _execute_action(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_action(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Execute one action, including state-machine-native visual waits."""
         kind = str(spec.get("kind") or spec.get("action") or "")
         if kind == "wait_until":
@@ -215,7 +216,7 @@ class VisualStateMachine:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "action": kind, "error": f"action executor raised: {exc}", "ts": _now()}
 
-    def _verify_action(self, before: Any, after: Any, expected: str, executed: Dict[str, Any]) -> Dict[str, Any]:
+    def _verify_action(self, before: Any, after: Any, expected: str, executed: dict[str, Any]) -> dict[str, Any]:
         # A successful wait_until already semantically verified its condition;
         # comparing static before/after pixels would incorrectly turn it into a
         # failure when the condition was already present.
@@ -236,8 +237,8 @@ class VisualStateMachine:
         return result
 
     @staticmethod
-    def _failure_reason(executed: Dict[str, Any], verification: Dict[str, Any]) -> str:
-        reasons: List[str] = []
+    def _failure_reason(executed: dict[str, Any], verification: dict[str, Any]) -> str:
+        reasons: list[str] = []
         if not executed.get("ok"):
             action_reason = executed.get("error") or executed.get("detail") or "action execution failed"
             reasons.append(f"action: {action_reason}")
@@ -247,10 +248,10 @@ class VisualStateMachine:
         return "; ".join(reasons) or "action failed for an unknown reason"
 
     @staticmethod
-    def _normalize_repair(raw: Any) -> Dict[str, Any]:
+    def _normalize_repair(raw: Any) -> dict[str, Any]:
         """Accept RepairPlan, its dict form, or the legacy list-of-steps API."""
         if raw is None:
-            payload: Dict[str, Any] = {}
+            payload: dict[str, Any] = {}
         elif hasattr(raw, "to_dict") and callable(raw.to_dict):
             converted = raw.to_dict()
             payload = converted if isinstance(converted, dict) else {}
@@ -276,10 +277,10 @@ class VisualStateMachine:
         self,
         state: VisualState,
         attempt: int,
-        action_result: Dict[str, Any],
-        verification: Dict[str, Any],
+        action_result: dict[str, Any],
+        verification: dict[str, Any],
         reason: str,
-    ) -> Tuple[Dict[str, Any], Optional[str]]:
+    ) -> tuple[dict[str, Any], Optional[str]]:
         if self.repair is None:
             return self._normalize_repair(None), None
         # Preserve top-level action result fields for old callbacks while adding
@@ -301,9 +302,9 @@ class VisualStateMachine:
         self,
         state: VisualState,
         attempt: int,
-        plan: Dict[str, Any],
-        trace: List[Dict[str, Any]],
-    ) -> Tuple[bool, str]:
+        plan: dict[str, Any],
+        trace: list[dict[str, Any]],
+    ) -> tuple[bool, str]:
         plan_id = plan.get("plan_id") or f"repair-{state.name}-{attempt}"
         for index, step in enumerate(plan.get("steps", []), 1):
             action = step.get("action")
@@ -357,11 +358,11 @@ class VisualStateMachine:
     @staticmethod
     def _failure_result(
         current: VisualState,
-        trace: List[Dict[str, Any]],
+        trace: list[dict[str, Any]],
         reason: str,
         category: str = "state_failed",
         underlying_reason: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         failure = {
             "state": current.name,
             "category": category,
@@ -381,11 +382,11 @@ class VisualStateMachine:
     def _failure_transition(
         self,
         current: VisualState,
-        by_name: Dict[str, VisualState],
-        trace: List[Dict[str, Any]],
+        by_name: dict[str, VisualState],
+        trace: list[dict[str, Any]],
         reason: str,
         underlying_reason: Optional[str] = None,
-    ) -> Tuple[Optional[VisualState], Optional[Dict[str, Any]]]:
+    ) -> tuple[Optional[VisualState], Optional[dict[str, Any]]]:
         fallback = current.on_failure
         if not fallback:
             return None, self._failure_result(current, trace, reason, underlying_reason=underlying_reason)
@@ -406,16 +407,16 @@ class VisualStateMachine:
 
     def run(
         self,
-        states: List[VisualState],
+        states: list[VisualState],
         timeout_per_state: float = 30.0,
         start_state: Optional[str] = None,
         task_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not states:
             return {"success": False, "error": "no states provided", "states_visited": [], "trace": []}
 
-        by_name: Dict[str, VisualState] = {}
-        duplicate_names: List[str] = []
+        by_name: dict[str, VisualState] = {}
+        duplicate_names: list[str] = []
         for state in states:
             if state.name in by_name:
                 duplicate_names.append(state.name)
@@ -440,7 +441,7 @@ class VisualStateMachine:
                 "failure": {"state": "INIT", "category": "emergency_stop", "reason": task_control._emergency_stop_reason},
             }
 
-        trace: List[Dict[str, Any]] = _EventTrace(self._handle_event)
+        trace: list[dict[str, Any]] = _EventTrace(self._handle_event)
         if start_state and start_state not in by_name:
             return {
                 "success": False,
@@ -453,7 +454,7 @@ class VisualStateMachine:
         max_transitions = max(4, len(states) * (self.max_retries + 2) + 4)
 
         # Helper to check for pause/cancel at a safe boundary
-        def _check_control() -> Optional[Dict[str, Any]]:
+        def _check_control() -> Optional[dict[str, Any]]:
             if task_control.is_emergency_stop_active():
                 trace.append({
                     "state": current.name if current else "unknown",
@@ -756,9 +757,9 @@ class VisualStateMachine:
         return self._failure_result(current, trace, reason, category="transition_guard")
 
     @staticmethod
-    def plan_to_states(plan: List[Dict[str, Any]], terminal: str = "SUCCESS") -> List[VisualState]:
+    def plan_to_states(plan: list[dict[str, Any]], terminal: str = "SUCCESS") -> list[VisualState]:
         """Convert planner steps into a linear graph while preserving overrides."""
-        states: List[VisualState] = []
+        states: list[VisualState] = []
         for index, step in enumerate(plan):
             name = str(step.get("name") or f"STATE_{index}")
             next_name = (

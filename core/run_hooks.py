@@ -6,15 +6,16 @@ exception-proof, so an SSE/WebSocket client vanishing mid-run cannot break a tas
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 
-def make_emitter(on_event: Optional[Callable[[str, Dict[str, Any]], None]]) -> Callable[..., None]:
+def make_emitter(on_event: Optional[Callable[[str, dict[str, Any]], None]]) -> Callable[..., None]:
     """Return ``emit(type, **data)``; a no-op when nobody is listening."""
     if on_event is None:
         return lambda *a, **k: None
 
-    def emit(event_type: str, data: Optional[Dict[str, Any]] = None, **extra: Any) -> None:
+    def emit(event_type: str, data: Optional[dict[str, Any]] = None, **extra: Any) -> None:
         payload = dict(data or {})
         payload.update(extra)
         payload.setdefault("ts", time.time())

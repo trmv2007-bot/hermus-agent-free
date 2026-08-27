@@ -1,31 +1,30 @@
 """Semantic memory / embeddings tools for the agent."""
-from typing import Dict
 
 from core.embeddings import embedding_store
 
 
-def embeddings_status() -> Dict:
+def embeddings_status() -> dict:
     return {"success": True, **embedding_store.backend_info()}
 
 
-def embeddings_search(query: str, limit: int = 5) -> Dict:
+def embeddings_search(query: str, limit: int = 5) -> dict:
     return embedding_store.search(query, limit=limit)
 
 
-def embeddings_hybrid_search(query: str, limit: int = 5) -> Dict:
+def embeddings_hybrid_search(query: str, limit: int = 5) -> dict:
     return embedding_store.hybrid_search(query, limit=limit)
 
 
-def embeddings_ingest(path: str, source: str = None) -> Dict:
+def embeddings_ingest(path: str, source: str = None) -> dict:
     return embedding_store.ingest_path(path, source=source)
 
 
-def embeddings_add(text: str, source: str = "manual", key: str = None) -> Dict:
+def embeddings_add(text: str, source: str = "manual", key: str = None) -> dict:
     meta = {"key": key} if key else {}
     return embedding_store.add_text(text, metadata=meta, source=source)
 
 
-def embeddings_clear(source: str = None) -> Dict:
+def embeddings_clear(source: str = None) -> dict:
     return embedding_store.clear(source=source)
 
 

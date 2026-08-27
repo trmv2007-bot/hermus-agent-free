@@ -1,9 +1,8 @@
 """Mission, SWE Mode, Verification, Artifact, and Rollback Tools for Hermus Agent."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from core.artifact_manager import artifact_manager
 from core.critic import critic_manager
@@ -15,11 +14,11 @@ from core.verifier_registry import verifier_registry
 
 def mission_start(
     goal: str,
-    requirements: Optional[List[str]] = None,
+    requirements: Optional[list[str]] = None,
     domain: Optional[str] = None,
-    subgoals: Optional[List[str]] = None,
+    subgoals: Optional[list[str]] = None,
     budget_steps: int = 20,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Start an objective-driven mission lifecycle with dynamic budgets and verification."""
     report = mission_engine.start_mission(
         goal=goal,
@@ -31,13 +30,13 @@ def mission_start(
     return report.to_dict()
 
 
-def mission_resume(mission_id: str) -> Dict[str, Any]:
+def mission_resume(mission_id: str) -> dict[str, Any]:
     """Resume a paused, blocked, or interrupted mission."""
     report = mission_engine.resume_mission(mission_id)
     return report.to_dict()
 
 
-def mission_status(mission_id: str) -> Dict[str, Any]:
+def mission_status(mission_id: str) -> dict[str, Any]:
     """Get the current state, evidence, and progress of a mission."""
     report = mission_engine.get_mission(mission_id)
     if not report:
@@ -49,7 +48,7 @@ def swe_develop(
     task: str,
     workspace_dir: Optional[str] = None,
     max_repairs: int = 3,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute dedicated Software Engineer mode: Inspect -> Plan -> Edit -> Build -> Test -> Repair -> Diff -> Package."""
     target = Path(workspace_dir) if workspace_dir else None
     res = swe_mode.execute(task=task, workspace_dir=target, max_repairs=max_repairs)
@@ -62,9 +61,9 @@ def domain_verify(
     task: Optional[str] = None,
     output: Optional[str] = None,
     port: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run domain-specific verification for Python, Android, Web, Git, Linux, Research, or File tasks."""
-    ctx: Dict[str, Any] = {
+    ctx: dict[str, Any] = {
         "task": task or "",
         "target_path": target_path,
         "file": target_path,
@@ -78,7 +77,7 @@ def domain_verify(
 def artifact_list(
     mission_id: Optional[str] = None,
     artifact_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List registered workspace artifacts (APKs, ZIPs, reports, diffs, builds)."""
     arts = artifact_manager.list_artifacts(mission_id=mission_id, artifact_type=artifact_type)
     return {
@@ -90,7 +89,7 @@ def artifact_list(
 def artifact_export(
     output_zip_path: str,
     mission_id: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Bundle artifacts into a standalone ZIP archive."""
     try:
         path = artifact_manager.export_bundle(output_zip_path=output_zip_path, mission_id=mission_id)
@@ -101,7 +100,7 @@ def artifact_export(
 
 def rollback_checkpoint(
     label: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Create a transactional checkpoint before risky changes."""
     cp = rollback_manager.checkpoint(label=label)
     return {"success": True, "checkpoint": cp.to_dict()}
@@ -109,23 +108,23 @@ def rollback_checkpoint(
 
 def rollback_restore(
     checkpoint_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Revert workspace to a previous checkpoint state."""
     return rollback_manager.restore(checkpoint_id=checkpoint_id)
 
 
 def rollback_diff(
     checkpoint_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare current workspace state with a checkpoint."""
     return rollback_manager.diff(checkpoint_id=checkpoint_id)
 
 
 def critic_review(
     task: str,
-    files: Dict[str, str],
+    files: dict[str, str],
     execution_log: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run independent critic panel: Code Review + Security Audit + Outcome Verification."""
     return critic_manager.run_full_review(
         task=task,

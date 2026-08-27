@@ -2,12 +2,8 @@
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from datetime import datetime
-import random
 
 from .config import config
-from .memory import memory
 
 class TrajectoryManager:
     """Batch trajectory generation + compression - free, research-ready"""
@@ -16,10 +12,9 @@ class TrajectoryManager:
         self.trajectory_path = config.resolve_path(config.trajectory_path)
         self.trajectory_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def batch_generate(self, prompts: List[str], model: str = None, max_workers: int = 3) -> List[Dict]:
+    def batch_generate(self, prompts: list[str], model: str = None, max_workers: int = 3) -> list[dict]:
         """Batch trajectory generation - generate thousands of tool-calling trajectories in parallel with checkpointing - free"""
         from .agent import HermusAgent
-        import multiprocessing
 
         print(f"[Trajectory] Batch generation: {len(prompts)} prompts, {max_workers} workers")
 
@@ -68,7 +63,7 @@ class TrajectoryManager:
         print(f"[Trajectory] Batch generated {len(results)} trajectories, checkpointed to {checkpoint_path}")
         return results
 
-    def compress_trajectories(self, input_path: str = None, output_path: str = None, max_tokens: int = 4000) -> Dict:
+    def compress_trajectories(self, input_path: str = None, output_path: str = None, max_tokens: int = 4000) -> dict:
         """Trajectory compression for training next generation of tool-calling models - fits training data into token budgets - free"""
         input_path = Path(input_path or self.trajectory_path)
         output_path = Path(output_path or config.resolve_path("data/trajectories_compressed.jsonl"))
@@ -151,7 +146,7 @@ class TrajectoryManager:
             "note": "Compressed for training next generation of tool-calling models, fits into token budgets, ShareGPT format for fine-tuning"
         }
 
-    def export_sharegpt(self, limit: int = 100) -> Dict:
+    def export_sharegpt(self, limit: int = 100) -> dict:
         """Export conversations in ShareGPT format for fine-tuning - free"""
         input_path = self.trajectory_path
         output_path = config.resolve_path("data/trajectories_sharegpt.json")
@@ -193,7 +188,7 @@ class TrajectoryManager:
 
         return {"success": True, "count": len(sharegpt), "path": str(output_path)}
 
-    def stats(self) -> Dict:
+    def stats(self) -> dict:
         """Stats for analytics pane - free"""
         path = self.trajectory_path
         if not path.exists():

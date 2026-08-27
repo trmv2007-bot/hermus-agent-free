@@ -9,7 +9,7 @@ from __future__ import annotations
 import platform
 import subprocess
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 def _now() -> str:
@@ -21,19 +21,19 @@ class WindowBackend:
 
     name = "window"
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    def open_application(self, name: str) -> Dict[str, Any]:
+    def open_application(self, name: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def close_application(self, name: str) -> Dict[str, Any]:
+    def close_application(self, name: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def focus_window(self, name: str) -> Dict[str, Any]:
+    def focus_window(self, name: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def list_windows(self) -> Dict[str, Any]:
+    def list_windows(self) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -52,7 +52,7 @@ class PyGetWindowBackend(WindowBackend):
         except Exception as exc:  # noqa: BLE001
             self._error = f"pygetwindow unavailable: {exc}"
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         return {"available": self._gw is not None, "error": self._error}
 
     def _find(self, name: str):
@@ -63,11 +63,11 @@ class PyGetWindowBackend(WindowBackend):
                 return window
         return None
 
-    def open_application(self, name: str) -> Dict[str, Any]:
+    def open_application(self, name: str) -> dict[str, Any]:
         # pygetwindow can't launch apps; fall back to the platform opener.
         return _platform_open(name)
 
-    def close_application(self, name: str) -> Dict[str, Any]:
+    def close_application(self, name: str) -> dict[str, Any]:
         window = self._find(name)
         if window is None:
             return {"ok": False, "error": f"no window matching '{name}'", "dry_run": False}
@@ -77,7 +77,7 @@ class PyGetWindowBackend(WindowBackend):
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc), "dry_run": False}
 
-    def focus_window(self, name: str) -> Dict[str, Any]:
+    def focus_window(self, name: str) -> dict[str, Any]:
         window = self._find(name)
         if window is None:
             return {"ok": False, "error": f"no window matching '{name}'", "dry_run": False}
@@ -87,12 +87,12 @@ class PyGetWindowBackend(WindowBackend):
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc), "dry_run": False}
 
-    def list_windows(self) -> Dict[str, Any]:
+    def list_windows(self) -> dict[str, Any]:
         titles = [w.title for w in self._gw.getAllWindows() if w.title]
         return {"ok": True, "windows": titles, "dry_run": False}
 
 
-def _platform_open(name: str) -> Dict[str, Any]:
+def _platform_open(name: str) -> dict[str, Any]:
     system = platform.system()
     try:
         if system == "Darwin":
@@ -121,26 +121,26 @@ class DryRunWindowBackend(WindowBackend):
     name = "dry_run"
 
     def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         return {"available": True, "error": None, "note": "dry-run backend; no real window control"}
 
-    def _record(self, action: str, **kwargs: Any) -> Dict[str, Any]:
+    def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
         self.calls.append(record)
         return {**record, "ok": True}
 
-    def open_application(self, name: str) -> Dict[str, Any]:
+    def open_application(self, name: str) -> dict[str, Any]:
         return self._record("open_application", name=str(name))
 
-    def close_application(self, name: str) -> Dict[str, Any]:
+    def close_application(self, name: str) -> dict[str, Any]:
         return self._record("close_application", name=str(name))
 
-    def focus_window(self, name: str) -> Dict[str, Any]:
+    def focus_window(self, name: str) -> dict[str, Any]:
         return self._record("focus_window", name=str(name))
 
-    def list_windows(self) -> Dict[str, Any]:
+    def list_windows(self) -> dict[str, Any]:
         return self._record("list_windows", windows=[])
 
 

@@ -23,7 +23,8 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Optional
+from collections.abc import Callable
 
 from .config import config
 
@@ -35,7 +36,7 @@ def _mcp_config_path() -> Path:
 class MCPServerConnection:
     """Minimal JSON-RPC MCP client over stdio (NDJSON + Content-Length)."""
 
-    def __init__(self, name: str, command: str, args: List[str] = None, env: Dict = None):
+    def __init__(self, name: str, command: str, args: list[str] = None, env: dict = None):
         self.name = name
         self.command = command
         self.args = args or []
@@ -43,7 +44,7 @@ class MCPServerConnection:
         self.proc: Optional[subprocess.Popen] = None
         self._id = 0
         self._lock = threading.Lock()
-        self._tools: List[Dict] = []
+        self._tools: list[dict] = []
         self._initialized = False
         self.last_error: Optional[str] = None
         self._buf = b""
@@ -129,7 +130,7 @@ class MCPServerConnection:
         self._initialized = False
         self._buf = b""
 
-    def _write_message(self, msg: Dict, framing: str = "ndjson"):
+    def _write_message(self, msg: dict, framing: str = "ndjson"):
         if not self.proc or not self.proc.stdin:
             raise RuntimeError("MCP process not running")
         raw = json.dumps(msg).encode("utf-8")
@@ -140,7 +141,7 @@ class MCPServerConnection:
             self.proc.stdin.write(raw + b"\n")
         self.proc.stdin.flush()
 
-    def _read_message(self, timeout: float = 12.0) -> Dict:
+    def _read_message(self, timeout: float = 12.0) -> dict:
         """Read one JSON-RPC message supporting NDJSON or Content-Length."""
         if not self.proc or not self.proc.stdout:
             raise RuntimeError("MCP process not running")
@@ -175,7 +176,7 @@ class MCPServerConnection:
                 continue
         raise TimeoutError("MCP response timeout")
 
-    def _try_parse_buffer(self) -> Optional[Dict]:
+    def _try_parse_buffer(self) -> Optional[dict]:
         if not self._buf:
             return None
         # Content-Length framing
@@ -230,7 +231,7 @@ class MCPServerConnection:
         except json.JSONDecodeError:
             return self._try_parse_buffer()
 
-    def _request(self, method: str, params: Dict, timeout: float = 12.0) -> Dict:
+    def _request(self, method: str, params: dict, timeout: float = 12.0) -> dict:
         with self._lock:
             req_id = self._next_id()
             msg = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
@@ -247,17 +248,17 @@ class MCPServerConnection:
                     return msg_in
             raise TimeoutError(f"MCP response timeout waiting for id={req_id}")
 
-    def _notify(self, method: str, params: Dict):
+    def _notify(self, method: str, params: dict):
         with self._lock:
             msg = {"jsonrpc": "2.0", "method": method, "params": params}
             self._write_message(msg, framing="ndjson")
 
-    def list_tools(self) -> List[Dict]:
+    def list_tools(self) -> list[dict]:
         if not self._initialized:
             self.start()
         return self._tools
 
-    def call_tool(self, tool_name: str, arguments: Dict = None) -> Dict:
+    def call_tool(self, tool_name: str, arguments: dict = None) -> dict:
         if not self._initialized and not self.start():
             return {"error": self.last_error or "MCP server failed to start", "server": self.name}
         try:
@@ -295,11 +296,11 @@ class MCPManager:
     """Manage multiple MCP server configs and expose tools to Hermus."""
 
     def __init__(self):
-        self.servers: Dict[str, MCPServerConnection] = {}
-        self._config: List[Dict] = []
+        self.servers: dict[str, MCPServerConnection] = {}
+        self._config: list[dict] = []
         self.load_config()
 
-    def load_config(self) -> List[Dict]:
+    def load_config(self) -> list[dict]:
         path = _mcp_config_path()
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -333,10 +334,10 @@ class MCPManager:
         self,
         name: str,
         command: str,
-        args: List[str] = None,
-        env: Dict = None,
+        args: list[str] = None,
+        env: dict = None,
         enabled: bool = True,
-    ) -> Dict:
+    ) -> dict:
         self.load_config()
         self._config = [s for s in self._config if s.get("name") != name]
         entry = {
@@ -353,7 +354,7 @@ class MCPManager:
             del self.servers[name]
         return {"success": True, "server": entry}
 
-    def remove_server(self, name: str) -> Dict:
+    def remove_server(self, name: str) -> dict:
         self.load_config()
         before = len(self._config)
         self._config = [s for s in self._config if s.get("name") != name]
@@ -363,7 +364,7 @@ class MCPManager:
             del self.servers[name]
         return {"success": True, "removed": before - len(self._config)}
 
-    def list_servers(self) -> List[Dict]:
+    def list_servers(self) -> list[dict]:
         self.load_config()
         out = []
         for s in self._config:
@@ -375,7 +376,7 @@ class MCPManager:
             out.append(info)
         return out
 
-    def _get_conn(self, entry: Dict) -> MCPServerConnection:
+    def _get_conn(self, entry: dict) -> MCPServerConnection:
         name = entry["name"]
         if name in self.servers:
             return self.servers[name]
@@ -388,7 +389,7 @@ class MCPManager:
         self.servers[name] = conn
         return conn
 
-    def connect_enabled(self) -> Dict:
+    def connect_enabled(self) -> dict:
         self.load_config()
         results = []
         for entry in self._config:
@@ -407,10 +408,10 @@ class MCPManager:
             )
         return {"results": results}
 
-    def get_tools_and_executors(self) -> Tuple[List[Dict], Dict[str, Callable]]:
+    def get_tools_and_executors(self) -> tuple[list[dict], dict[str, Callable]]:
         self.load_config()
-        definitions: List[Dict] = []
-        executors: Dict[str, Callable] = {}
+        definitions: list[dict] = []
+        executors: dict[str, Callable] = {}
 
         for entry in self._config:
             if not entry.get("enabled", True):
@@ -444,7 +445,7 @@ class MCPManager:
 
         return definitions, executors
 
-    def call(self, server: str, tool: str, arguments: Dict = None) -> Dict:
+    def call(self, server: str, tool: str, arguments: dict = None) -> dict:
         self.load_config()
         entry = next((s for s in self._config if s.get("name") == server), None)
         if not entry:

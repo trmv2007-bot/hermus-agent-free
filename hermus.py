@@ -927,7 +927,7 @@ def main():
             parser.parse_args(["fleet", "--help"])
 
     elif args.command == "multiai":
-        from core.multi_ai import multi_ai_manager, PERSONA_PRESETS
+        from core.multi_ai import PERSONA_PRESETS
         if args.multiai_action == "debate":
             from core.multi_ai import MultiAIChat
             chat = MultiAIChat()

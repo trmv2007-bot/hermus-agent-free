@@ -12,7 +12,8 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .event_detector import EventDetector
 from .frame_sampler import _image_diff
@@ -27,7 +28,7 @@ class OllamaVisionModel:
     def __init__(self, model: str = "llava:7b"):
         self.model = model
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         from tools.vision import vision_available_models
 
         status = vision_available_models()
@@ -39,7 +40,7 @@ class OllamaVisionModel:
             "suggestion": status.get("suggestion"),
         }
 
-    def __call__(self, image: Any, prompt: str) -> Dict[str, Any]:
+    def __call__(self, image: Any, prompt: str) -> dict[str, Any]:
         from tools.vision import vision_analyze
 
         with tempfile.NamedTemporaryFile(suffix=".jpg") as temporary:
@@ -54,7 +55,7 @@ class OllamaVisionModel:
 class VideoAnalyzer:
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+        vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
         event_detector: Optional[EventDetector] = None,
     ):
         self.vision_model = vision_model
@@ -88,7 +89,7 @@ class VideoAnalyzer:
         except Exception:
             return right
 
-    def _call_vision(self, image: Any, prompt: str) -> Dict[str, Any]:
+    def _call_vision(self, image: Any, prompt: str) -> dict[str, Any]:
         if self.vision_model is None:
             return {"success": False, "error": "no vision model configured"}
         try:
@@ -114,7 +115,7 @@ class VideoAnalyzer:
         }
 
     @staticmethod
-    def _evidence(event: Dict[str, Any], recording: Optional[str] = None) -> Dict[str, Any]:
+    def _evidence(event: dict[str, Any], recording: Optional[str] = None) -> dict[str, Any]:
         evidence = {
             "sequence": event.get("sequence"),
             "timestamp": event.get("ts"),
@@ -128,12 +129,12 @@ class VideoAnalyzer:
 
     def _analyze_detected(
         self,
-        baseline: Dict[str, Any],
-        detected: List[Dict[str, Any]],
+        baseline: dict[str, Any],
+        detected: list[dict[str, Any]],
         task: str,
         recording: Optional[str],
         frames_total: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run vision only on a baseline and already-selected transitions."""
         timeline = Timeline(task=task, recording=recording, started=baseline.get("ts"))
         baseline_result = self._call_vision(
@@ -150,7 +151,7 @@ class VideoAnalyzer:
             self._evidence(baseline, recording),
         )
 
-        semantic_failures: List[str] = []
+        semantic_failures: list[str] = []
         vision_unavailable = False
         if baseline_result.get("error"):
             semantic_failures.append(str(baseline_result["error"]))
@@ -194,11 +195,11 @@ class VideoAnalyzer:
 
     def analyze(
         self,
-        frames: List[Dict[str, Any]],
+        frames: list[dict[str, Any]],
         task: str = "",
         max_events: int = 12,
         recording: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not frames:
             timeline = Timeline(task=task, recording=recording)
             return {
@@ -213,7 +214,7 @@ class VideoAnalyzer:
         )
 
     @staticmethod
-    def _match_result(response: Dict[str, Any]) -> Dict[str, Any]:
+    def _match_result(response: dict[str, Any]) -> dict[str, Any]:
         if not response.get("success"):
             return {"matched": False, "confidence": 0.0, "detail": response.get("error", "vision failed"), "error": response.get("error")}
         text = response.get("description", "")
@@ -230,7 +231,7 @@ class VideoAnalyzer:
             "detail": text,
         }
 
-    def observe_world(self, frame: Any) -> Dict[str, Any]:
+    def observe_world(self, frame: Any) -> dict[str, Any]:
         """Produce one structured observation for the shared WorldState."""
         response = self._call_vision(
             decode_frame(frame),
@@ -263,7 +264,7 @@ class VideoAnalyzer:
             "source": "vision_prose",
         }
 
-    def evaluate_condition(self, frame: Any, condition: str) -> Dict[str, Any]:
+    def evaluate_condition(self, frame: Any, condition: str) -> dict[str, Any]:
         """Ask the vision model whether a visual condition is currently true."""
         response = self._call_vision(
             decode_frame(frame),
@@ -271,7 +272,7 @@ class VideoAnalyzer:
         )
         return self._match_result(response)
 
-    def evaluate_transition(self, before: Any, after: Any, expected: str) -> Dict[str, Any]:
+    def evaluate_transition(self, before: Any, after: Any, expected: str) -> dict[str, Any]:
         """Semantically verify an expected BEFORE → AFTER UI transition."""
         response = self._call_vision(
             self._composite(before, after),
@@ -286,7 +287,7 @@ class VideoAnalyzer:
         sample_fps: float,
         max_seconds: float,
         max_events: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Stream JPEGs from FFmpeg and retain only baseline + top events."""
         source = Path(video_path).expanduser().resolve()
         if not source.exists():
@@ -322,14 +323,14 @@ class VideoAnalyzer:
 
         threshold = self.event_detector.sampler.threshold
         debounce = self.event_detector.debounce_seconds
-        baseline: Optional[Dict[str, Any]] = None
-        previous: Optional[Dict[str, Any]] = None
-        pending: Optional[Dict[str, Any]] = None
-        selected: List[Any] = []  # min-heap: (score, order, event)
+        baseline: Optional[dict[str, Any]] = None
+        previous: Optional[dict[str, Any]] = None
+        pending: Optional[dict[str, Any]] = None
+        selected: list[Any] = []  # min-heap: (score, order, event)
         order = 0
         count = 0
 
-        def finalize(event: Optional[Dict[str, Any]]) -> None:
+        def finalize(event: Optional[dict[str, Any]]) -> None:
             nonlocal order
             if event is None or max_events <= 0:
                 return
@@ -441,7 +442,7 @@ class VideoAnalyzer:
         }
 
     @staticmethod
-    def frames_from_video(video_path: str, sample_fps: float = 2.0, max_seconds: float = 300.0) -> Dict[str, Any]:
+    def frames_from_video(video_path: str, sample_fps: float = 2.0, max_seconds: float = 300.0) -> dict[str, Any]:
         """Extract a low-FPS analysis stream from an MP4/WebM using FFmpeg."""
         source = Path(video_path).expanduser().resolve()
         if not source.exists():
@@ -472,7 +473,7 @@ class VideoAnalyzer:
             if completed.returncode != 0:
                 error = completed.stderr.decode("utf-8", errors="replace")[-1000:]
                 return {"success": False, "error": error or "FFmpeg frame extraction failed", "frames": []}
-            frames: List[Dict[str, Any]] = []
+            frames: list[dict[str, Any]] = []
             for index, path in enumerate(sorted(Path(directory).glob("frame-*.jpg"))):
                 data = path.read_bytes()
                 offset = index / fps
@@ -494,7 +495,7 @@ class VideoAnalyzer:
         sample_fps: float = 2.0,
         max_seconds: float = 3600.0,
         max_events: int = 12,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         selected = self._select_video_events(
             video_path,
             sample_fps=sample_fps,

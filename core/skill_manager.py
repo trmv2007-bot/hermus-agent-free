@@ -2,12 +2,10 @@
 import ast
 import json
 import re
-import shutil
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 from .cache import skill_cache
 from .config import config
@@ -21,7 +19,7 @@ class SkillManager:
         self.skills_dir = Path(skills_dir or config.resolve_path(config.skills_dir))
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
-    def list_skills(self) -> List[Dict[str, Any]]:
+    def list_skills(self) -> list[dict[str, Any]]:
         """List all skills - compatible with /skills command - Optimized with caching"""
         cache_key = skill_cache.make_key("list_skills")
         cached = skill_cache.get(cache_key)
@@ -49,7 +47,7 @@ class SkillManager:
         skill_cache.set(cache_key, skills)
         return skills
 
-    def get_skill(self, name: str) -> Dict[str, Any]:
+    def get_skill(self, name: str) -> dict[str, Any]:
         """Get skill by name - Optimized with caching"""
         cache_key = skill_cache.make_key("get_skill", name)
         cached = skill_cache.get(cache_key)
@@ -79,7 +77,7 @@ class SkillManager:
         skill_cache.set(cache_key, result)
         return result
 
-    def get_skill_capabilities(self, name: str) -> List[str]:
+    def get_skill_capabilities(self, name: str) -> list[str]:
         """Inspect skill source to extract declared or inferred security capabilities."""
         skill_dir = self.skills_dir / name
         py_path = skill_dir / "skill.py"
@@ -107,12 +105,12 @@ class SkillManager:
         except Exception:
             return [Capability.READ.value]
 
-    def should_create_skill(self, trajectory: List[Dict]) -> bool:
+    def should_create_skill(self, trajectory: list[dict]) -> bool:
         """Decide if trajectory warrants skill creation - 3+ tool calls = complex"""
         tool_calls = sum(1 for turn in trajectory for _ in (turn.get("tool_calls") or []))
         return tool_calls >= config.auto_skill_threshold
 
-    def create_skill_from_trajectory(self, trajectory: List[Dict], session_id: str) -> Dict:
+    def create_skill_from_trajectory(self, trajectory: list[dict], session_id: str) -> dict:
         """Autonomous skill creation after complex task - free via LLM"""
         if not self.should_create_skill(trajectory):
             return {"created": False, "reason": f"Only {len(trajectory)} tool calls, need >= {config.auto_skill_threshold}"}
@@ -258,10 +256,10 @@ def test_{name}_entrypoint():
         except Exception:
             pass
 
-    def run_regression_tests(self, skill_name: Optional[str] = None) -> Dict[str, Any]:
+    def run_regression_tests(self, skill_name: Optional[str] = None) -> dict[str, Any]:
         """Execute regression tests for skills to detect degradation."""
         skills_to_test = [skill_name] if skill_name else [s["name"] for s in self.list_skills()]
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         passed = 0
         failed = 0
 
@@ -298,7 +296,7 @@ def test_{name}_entrypoint():
             "details": results,
         }
 
-    def get_skill_health(self, skill_name: str) -> Dict[str, Any]:
+    def get_skill_health(self, skill_name: str) -> dict[str, Any]:
         """Compute usage health and reliability score for a skill."""
         try:
             from .memory import memory

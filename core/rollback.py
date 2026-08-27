@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 from .workspace import workspace
 
@@ -51,17 +51,17 @@ class Checkpoint:
     label: str
     timestamp: str
     workspace_path: str
-    files: Dict[str, str] = field(default_factory=dict)  # rel_path -> sha256
+    files: dict[str, str] = field(default_factory=dict)  # rel_path -> sha256
     snapshot_dir: Optional[str] = None
     git_branch: Optional[str] = None
     git_commit: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Checkpoint:
+    def from_dict(cls, data: dict[str, Any]) -> Checkpoint:
         return cls(**data)
 
 
@@ -77,9 +77,9 @@ class RollbackManager:
         self.workspace_dir = workspace_dir or workspace.root
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self._active_tx_file = self.storage_dir / "git_tx_active.json"
-        self._active_git_tx: Optional[Dict[str, Any]] = self._load_active_tx()
+        self._active_git_tx: Optional[dict[str, Any]] = self._load_active_tx()
 
-    def _load_active_tx(self) -> Optional[Dict[str, Any]]:
+    def _load_active_tx(self) -> Optional[dict[str, Any]]:
         if self._active_tx_file.exists():
             try:
                 return json.loads(self._active_tx_file.read_text(encoding="utf-8"))
@@ -87,7 +87,7 @@ class RollbackManager:
                 return None
         return None
 
-    def _save_active_tx(self, tx: Optional[Dict[str, Any]]) -> None:
+    def _save_active_tx(self, tx: Optional[dict[str, Any]]) -> None:
         if tx is None:
             if self._active_tx_file.exists():
                 try:
@@ -123,14 +123,14 @@ class RollbackManager:
         self,
         label: str,
         target_dir: Optional[Path] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Checkpoint:
         root = target_dir or self.workspace_dir
         cid = f"chk_{int(time.time())}_{os.urandom(3).hex()}"
         snapshot_path = self.storage_dir / cid
         snapshot_path.mkdir(parents=True, exist_ok=True)
 
-        files_map: Dict[str, str] = {}
+        files_map: dict[str, str] = {}
         if root.exists():
             for p in root.rglob("*"):
                 if p.is_file():
@@ -187,8 +187,8 @@ class RollbackManager:
         meta_file.write_text(json.dumps(cp.to_dict(), indent=2), encoding="utf-8")
         return cp
 
-    def list_checkpoints(self) -> List[Checkpoint]:
-        checkpoints: List[Checkpoint] = []
+    def list_checkpoints(self) -> list[Checkpoint]:
+        checkpoints: list[Checkpoint] = []
         if not self.storage_dir.exists():
             return checkpoints
 
@@ -213,13 +213,13 @@ class RollbackManager:
         except Exception:
             return None
 
-    def diff(self, checkpoint_id: str) -> Dict[str, Any]:
+    def diff(self, checkpoint_id: str) -> dict[str, Any]:
         cp = self.get_checkpoint(checkpoint_id)
         if not cp:
             return {"success": False, "error": f"Checkpoint {checkpoint_id} not found"}
 
         root = Path(cp.workspace_path)
-        current_files: Dict[str, str] = {}
+        current_files: dict[str, str] = {}
         if root.exists():
             for p in root.rglob("*"):
                 if p.is_file():
@@ -256,7 +256,7 @@ class RollbackManager:
             "has_changes": bool(added or deleted or modified),
         }
 
-    def restore(self, checkpoint_id: str) -> Dict[str, Any]:
+    def restore(self, checkpoint_id: str) -> dict[str, Any]:
         cp = self.get_checkpoint(checkpoint_id)
         if not cp:
             return {"success": False, "error": f"Checkpoint {checkpoint_id} not found"}
@@ -315,7 +315,7 @@ class RollbackManager:
         self,
         repo_dir: Optional[Path] = None,
         transaction_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         root = repo_dir or self.workspace_dir
         self._ensure_git_exclude(root)
         tx_id = transaction_name or f"tx_{int(time.time())}_{os.urandom(2).hex()}"
@@ -362,7 +362,7 @@ class RollbackManager:
     def commit_git_transaction(
         self,
         message: str = "Apply verified changes from Hermus agent",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not self._active_git_tx:
             return {"success": False, "error": "No active git transaction"}
 
@@ -408,7 +408,7 @@ class RollbackManager:
             self.abort_git_transaction()
             return {"success": False, "error": f"Failed to commit git transaction: {e}"}
 
-    def abort_git_transaction(self) -> Dict[str, Any]:
+    def abort_git_transaction(self) -> dict[str, Any]:
         if not self._active_git_tx:
             return {"success": False, "error": "No active git transaction"}
 

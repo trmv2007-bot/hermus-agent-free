@@ -30,14 +30,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import os
 import time
 import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
 from core.config import config
 from core.run_events import RunBus, run_bus
@@ -60,7 +60,7 @@ def _now() -> str:
 class Job:
     id: str
     kind: str
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
     status: str = STATUS_QUEUED
     session_key: str = ""
     run_id: str = ""
@@ -71,12 +71,12 @@ class Job:
     created_at: float = field(default_factory=time.time)
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
     error: str = ""
     dedupe_key: str = ""
     created: str = field(default_factory=_now)
 
-    def brief(self) -> Dict[str, Any]:
+    def brief(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("result", None)
         d["has_result"] = self.result is not None
@@ -104,7 +104,7 @@ class JobContext:
         self.run_id = job.run_id
 
     @property
-    def emit(self) -> Callable[[str, Dict[str, Any]], None]:
+    def emit(self) -> Callable[[str, dict[str, Any]], None]:
         return self._queue.emit_for(self.job)
 
     def should_cancel(self) -> bool:
@@ -119,7 +119,7 @@ class Lane:
 
     def __init__(self, key: str):
         self.key = key
-        self.pending: Deque[Job] = deque()
+        self.pending: deque[Job] = deque()
         self.running = False
         self.task: Optional[asyncio.Task] = None
 
@@ -143,11 +143,11 @@ class JobQueue:
         self.bus = bus or run_bus
         self.enabled = bool(getattr(config, "gateway_queue_enabled", True))
         self.backend = str(backend or getattr(config, "gateway_queue_backend", "inprocess")).lower()
-        self.handlers: Dict[str, JobHandler] = {}
-        self.jobs: Dict[str, Job] = {}
-        self._order: Deque[str] = deque(maxlen=self.maxsize)
-        self._lanes: Dict[str, Lane] = {}
-        self._recent_keys: Dict[str, str] = {}      # dedupe key -> job id
+        self.handlers: dict[str, JobHandler] = {}
+        self.jobs: dict[str, Job] = {}
+        self._order: deque[str] = deque(maxlen=self.maxsize)
+        self._lanes: dict[str, Lane] = {}
+        self._recent_keys: dict[str, str] = {}      # dedupe key -> job id
         self._sem: Optional[asyncio.Semaphore] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._started = False
@@ -171,7 +171,7 @@ class JobQueue:
     def handler(self, kind: str) -> Optional[JobHandler]:
         return self.handlers.get(kind)
 
-    async def start(self) -> Dict[str, Any]:
+    async def start(self) -> dict[str, Any]:
         """Bind to the running loop; recover the durable log; spin up lanes on demand."""
         if not self.enabled:
             info = self.status()
@@ -223,8 +223,8 @@ class JobQueue:
         self._started = False
 
     # ------------------------------------------------------------------ intake
-    def emit_for(self, job: Job) -> Callable[[str, Dict[str, Any]], None]:
-        def emit(event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def emit_for(self, job: Job) -> Callable[[str, dict[str, Any]], None]:
+        def emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
             try:
                 payload = dict(data or {})
                 payload.setdefault("job_id", job.id)
@@ -238,7 +238,7 @@ class JobQueue:
     def submit(
         self,
         kind: str,
-        payload: Optional[Dict[str, Any]] = None,
+        payload: Optional[dict[str, Any]] = None,
         *,
         session_key: str = "",
         priority: int = 0,
@@ -400,7 +400,7 @@ class JobQueue:
             return
         self._kick(job)
 
-    def _finalize(self, job: Job, status: str, result: Optional[Dict[str, Any]] = None,
+    def _finalize(self, job: Job, status: str, result: Optional[dict[str, Any]] = None,
                   error: str = "") -> None:
         job.status = status
         job.finished_at = time.time()
@@ -430,7 +430,7 @@ class JobQueue:
             pass
 
     # ------------------------------------------------------------------ control
-    def cancel(self, job_id: str) -> Dict[str, Any]:
+    def cancel(self, job_id: str) -> dict[str, Any]:
         job = self.jobs.get(job_id)
         if not job:
             return {"cancelled": False, "error": f"unknown job '{job_id}'"}
@@ -451,7 +451,7 @@ class JobQueue:
         return {"cancelled": True, "job_id": job_id, "stage": "cooperative",
                 "note": "agent will stop at its next step boundary"}
 
-    def status(self, job_id: Optional[str] = None) -> Dict[str, Any]:
+    def status(self, job_id: Optional[str] = None) -> dict[str, Any]:
         if job_id:
             job = self.jobs.get(job_id)
             if not job:
@@ -465,7 +465,7 @@ class JobQueue:
             out["events"] = self.bus.history(job.run_id, limit=20)
             out["run"] = self.bus.snapshot(job.run_id)
             return out
-        by_status: Dict[str, int] = {}
+        by_status: dict[str, int] = {}
         for j in self.jobs.values():
             by_status[j.status] = by_status.get(j.status, 0) + 1
         return {
@@ -483,7 +483,7 @@ class JobQueue:
         }
 
     def list_jobs(self, *, limit: int = 50, status: Optional[str] = None,
-                  session_key: Optional[str] = None) -> List[Dict[str, Any]]:
+                  session_key: Optional[str] = None) -> list[dict[str, Any]]:
         rows = [self.jobs[i].brief() for i in reversed(list(self._order)) if i in self.jobs]
         if status:
             rows = [r for r in rows if r["status"] == status]
@@ -491,18 +491,18 @@ class JobQueue:
             rows = [r for r in rows if r.get("session_key") == session_key]
         return rows[: max(1, int(limit))]
 
-    def events(self, job_id: str, *, after: int = 0, limit: int = 200) -> List[Dict[str, Any]]:
+    def events(self, job_id: str, *, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
         job = self.jobs.get(job_id)
         if not job:
             return []
         return self.bus.history(job.run_id, after=after, limit=limit)
 
-    def _lookup_logged_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def _lookup_logged_job(self, job_id: str) -> Optional[dict[str, Any]]:
         """Answer for a job from a previous process (read from the durable log)."""
         try:
             if not self.persist_path.exists():
                 return None
-            found: Optional[Dict[str, Any]] = None
+            found: Optional[dict[str, Any]] = None
             for line in reversed(self.persist_path.read_text(errors="ignore").splitlines()[-4000:]):
                 try:
                     rec = json.loads(line)
@@ -536,7 +536,7 @@ class JobQueue:
         except Exception:
             return None
 
-    def result(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def result(self, job_id: str) -> Optional[dict[str, Any]]:
         job = self.jobs.get(job_id)
         if job and job.result is not None:
             return job.result
@@ -553,7 +553,7 @@ class JobQueue:
         return None
 
     # ---------------------------------------------------------------- durability
-    def _record(self, line: Dict[str, Any]) -> None:
+    def _record(self, line: dict[str, Any]) -> None:
         try:
             self.persist_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.persist_path, "a", encoding="utf-8") as f:
@@ -584,14 +584,14 @@ class JobQueue:
         return self.persist_path
 
     @staticmethod
-    def read_records(path, tail: int = 4000) -> Tuple[Dict[str, Dict[str, Any]], List[str], int]:
+    def read_records(path, tail: int = 4000) -> tuple[dict[str, dict[str, Any]], list[str], int]:
         """Fold the append-only log into ``({job_id: latest record}, submission order, lines seen)``.
 
         Shared by restart recovery and the CLI, so both agree on what a job's
         state was — including jobs that finished in another process.
         """
-        latest: Dict[str, Dict[str, Any]] = {}
-        order: List[str] = []
+        latest: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
         path = Path(path)
         if not path.exists():
             return latest, order, 0
@@ -627,10 +627,10 @@ class JobQueue:
             latest[jid] = merged
         return latest, order, len(lines)
 
-    def read_log(self, path=None, limit: int = 50, *, include_live: bool = True) -> List[Dict[str, Any]]:
+    def read_log(self, path=None, limit: int = 50, *, include_live: bool = True) -> list[dict[str, Any]]:
         """Log-shaped rows, newest first, merging disk history with live state."""
         latest, _order = self.read_records(Path(path) if path else self.persist_path)[:2]
-        rows: Dict[str, Dict[str, Any]] = dict(latest)
+        rows: dict[str, dict[str, Any]] = dict(latest)
         if include_live:
             for jid, job in self.jobs.items():
                 rows[jid] = {**rows.get(jid, {}), **job.brief(),
@@ -639,7 +639,7 @@ class JobQueue:
         out = sorted(rows.values(), key=_row_time, reverse=True)
         return out[:max(1, int(limit))]
 
-    def _load_durable_log(self, *, replay_limit: int = 50) -> Dict[str, Any]:
+    def _load_durable_log(self, *, replay_limit: int = 50) -> dict[str, Any]:
         """Rehydrate recent jobs from the append-only log after a restart.
 
         Two things this buys: a job that was running when the process died is
@@ -689,13 +689,13 @@ class JobQueue:
             _ = keep_running
         self.stats_counts["rejected"] += 1
 
-    def recent_jobs(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def recent_jobs(self, limit: int = 10) -> list[dict[str, Any]]:
         """Most recent jobs (any status), log-shaped for the CLI and ``GET /jobs``.
 
         Live jobs first, then whatever the durable log remembers — a restart must
         not make the queue look empty.
         """
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         seen: set = set()
         for jid in reversed(list(self._order)):
             job = self.jobs.get(jid)
@@ -716,7 +716,7 @@ class JobQueue:
                 break
         return out[:max(1, int(limit))]
 
-    def recent_completed(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def recent_completed(self, limit: int = 10) -> list[dict[str, Any]]:
         return [row for row in self.recent_jobs(limit * 3) if row.get("status") == STATUS_DONE][:limit]
 
 
@@ -734,7 +734,7 @@ _NO_RETRY_ERRORS: tuple = tuple(
 )
 
 
-def _row_time(row: Dict[str, Any]) -> float:
+def _row_time(row: dict[str, Any]) -> float:
     """Sortable timestamp for a log row: epoch floats and ISO strings both occur.
 
     Live jobs carry ``time.time()`` floats, the JSONL log carries ISO-8601 — a
@@ -801,7 +801,7 @@ def _trim(data: Any, limit: int = 1500) -> Any:
     return data
 
 
-def _brief_result(result: Optional[Dict[str, Any]], limit: int = 160) -> str:
+def _brief_result(result: Optional[dict[str, Any]], limit: int = 160) -> str:
     """One-line summary of a job result for `hermus jobs list` / listings."""
     if not isinstance(result, dict):
         return str(result or "")[:limit]

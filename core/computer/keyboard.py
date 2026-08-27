@@ -7,7 +7,7 @@ identical structured action records for offline testing and auditing.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 def _now() -> str:
@@ -19,16 +19,16 @@ class KeyboardBackend:
 
     name = "keyboard"
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    def type_text(self, text: str, interval: float = 0.0) -> Dict[str, Any]:
+    def type_text(self, text: str, interval: float = 0.0) -> dict[str, Any]:
         raise NotImplementedError
 
-    def press(self, key: str) -> Dict[str, Any]:
+    def press(self, key: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def hotkey(self, *keys: str) -> Dict[str, Any]:
+    def hotkey(self, *keys: str) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -48,24 +48,24 @@ class PyAutoGUIKeyboard(KeyboardBackend):
         except Exception as exc:  # noqa: BLE001
             self._error = f"pyautogui unavailable: {exc}"
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         return {"available": self._gui is not None, "error": self._error}
 
     def _require(self) -> None:
         if self._gui is None:
             raise RuntimeError(self._error or "pyautogui unavailable")
 
-    def type_text(self, text: str, interval: float = 0.0) -> Dict[str, Any]:
+    def type_text(self, text: str, interval: float = 0.0) -> dict[str, Any]:
         self._require()
         self._gui.write(str(text), interval=float(interval))
         return {"ok": True, "text": str(text), "interval": float(interval)}
 
-    def press(self, key: str) -> Dict[str, Any]:
+    def press(self, key: str) -> dict[str, Any]:
         self._require()
         self._gui.press(str(key))
         return {"ok": True, "key": str(key)}
 
-    def hotkey(self, *keys: str) -> Dict[str, Any]:
+    def hotkey(self, *keys: str) -> dict[str, Any]:
         self._require()
         self._gui.hotkey(*keys)
         return {"ok": True, "keys": list(keys)}
@@ -77,23 +77,23 @@ class DryRunKeyboard(KeyboardBackend):
     name = "dry_run"
 
     def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         return {"available": True, "error": None, "note": "dry-run backend; no real key injection"}
 
-    def _record(self, action: str, **kwargs: Any) -> Dict[str, Any]:
+    def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
         self.calls.append(record)
         return record
 
-    def type_text(self, text: str, interval: float = 0.0) -> Dict[str, Any]:
+    def type_text(self, text: str, interval: float = 0.0) -> dict[str, Any]:
         return self._record("type_text", text=str(text), interval=float(interval))
 
-    def press(self, key: str) -> Dict[str, Any]:
+    def press(self, key: str) -> dict[str, Any]:
         return self._record("press", key=str(key))
 
-    def hotkey(self, *keys: str) -> Dict[str, Any]:
+    def hotkey(self, *keys: str) -> dict[str, Any]:
         return self._record("hotkey", keys=list(keys))
 
 

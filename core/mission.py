@@ -15,13 +15,14 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
 from .critic import critic_manager
 from .rollback import rollback_manager
-from .verifier_registry import VerificationResult, verifier_registry
+from .verifier_registry import verifier_registry
 from .workspace import workspace
 
 
@@ -45,10 +46,10 @@ class MissionRequirement:
     id: str
     description: str
     satisfied: bool = False
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     verifier_domain: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -60,7 +61,7 @@ class SubGoal:
     status: str = DAGNodeStatus.PENDING.value
     error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -73,7 +74,7 @@ class MissionBudget:
     max_extensions: int = 2
     extensions_used: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -85,11 +86,11 @@ class MissionReport:
     domain: str = "generic"
     confidence_score: float = 0.0
     progress_pct: int = 0
-    requirements: List[MissionRequirement] = field(default_factory=list)
-    dag_state: Dict[str, Any] = field(default_factory=dict)
-    subgoals: List[SubGoal] = field(default_factory=list)
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
-    artifacts: List[str] = field(default_factory=list)
+    requirements: list[MissionRequirement] = field(default_factory=list)
+    dag_state: dict[str, Any] = field(default_factory=dict)
+    subgoals: list[SubGoal] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[str] = field(default_factory=list)
     blocker_reason: Optional[str] = None
     blocker_instructions: Optional[str] = None
     checkpoint_id: Optional[str] = None
@@ -97,9 +98,9 @@ class MissionReport:
     finished_at: Optional[str] = None
     final_proof: str = ""
     budget: MissionBudget = field(default_factory=MissionBudget)
-    repair_history: List[Dict[str, Any]] = field(default_factory=list)
+    repair_history: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mission_id": self.mission_id,
             "goal": self.goal,
@@ -123,7 +124,7 @@ class MissionReport:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> MissionReport:
+    def from_dict(cls, data: dict[str, Any]) -> MissionReport:
         reqs = [MissionRequirement(**r) for r in data.get("requirements", [])]
         subgoals = [SubGoal(**s) if isinstance(s, dict) else s for s in data.get("subgoals", [])]
         budget = MissionBudget(**data.get("budget", {})) if "budget" in data else MissionBudget()
@@ -155,14 +156,14 @@ class MissionEngine:
 
     def __init__(
         self,
-        executor: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None,
+        executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None,
         storage_dir: Optional[Path] = None,
     ):
         self._raw_executor = executor or self._default_node_executor
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    def _default_node_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    def _default_node_executor(self, node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
         return {
             "success": True,
             "output": f"Executed stage '{node.role}': {node.goal}",
@@ -189,7 +190,7 @@ class MissionEngine:
         except Exception:
             return ""
 
-    def _call_executor(self, node: DAGNode, parent_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    def _call_executor(self, node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
         try:
             sig = inspect.signature(self._raw_executor)
             params = list(sig.parameters.keys())
@@ -212,8 +213,8 @@ class MissionEngine:
         except Exception:
             return None
 
-    def list_missions(self) -> List[MissionReport]:
-        missions: List[MissionReport] = []
+    def list_missions(self) -> list[MissionReport]:
+        missions: list[MissionReport] = []
         if not self.storage_dir.exists():
             return missions
         for p in self.storage_dir.glob("*.json"):
@@ -224,7 +225,7 @@ class MissionEngine:
         missions.sort(key=lambda m: m.started_at, reverse=True)
         return missions
 
-    def _build_mission_dag(self, goal: str, domain: str, subgoals: Optional[List[str]] = None) -> AgentDAG:
+    def _build_mission_dag(self, goal: str, domain: str, subgoals: Optional[list[str]] = None) -> AgentDAG:
         dag = AgentDAG(name=f"Mission: {goal[:50]}")
         if subgoals:
             for idx, sg in enumerate(subgoals, start=1):
@@ -240,9 +241,9 @@ class MissionEngine:
     def start_mission(
         self,
         goal: str,
-        requirements: Optional[List[str]] = None,
+        requirements: Optional[list[str]] = None,
         domain: Optional[str] = None,
-        subgoals: Optional[List[str]] = None,
+        subgoals: Optional[list[str]] = None,
         budget_steps: int = 25,
     ) -> MissionReport:
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"

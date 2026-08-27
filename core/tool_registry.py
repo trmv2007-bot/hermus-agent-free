@@ -12,7 +12,8 @@ import inspect
 import json
 import traceback
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Optional
+from collections.abc import Callable
 from urllib.parse import quote
 
 # Modules that expose TOOLS (list of OpenAI-style defs) and/or TOOL_MAP (name -> callable)
@@ -44,7 +45,7 @@ DISCOVER_MODULES = [
 # Fallback chains (Phase 4, P3): tool -> ordered fallbacks.
 # entry: {"retry": True} = call the same tool once more,
 #        {"tool": name, "args": dict | callable} = call another tool.
-TOOL_FALLBACK_CHAINS: Dict[str, List[Dict]] = {
+TOOL_FALLBACK_CHAINS: dict[str, list[dict]] = {
     "web_search": [
         {"retry": True},
         {
@@ -61,7 +62,7 @@ TOOL_FALLBACK_CHAINS: Dict[str, List[Dict]] = {
 }
 
 
-def _normalize_tool_def(item: Any) -> Optional[Dict]:
+def _normalize_tool_def(item: Any) -> Optional[dict]:
     """Normalize various tool definition shapes to OpenAI function-calling format."""
     if not isinstance(item, dict):
         return None
@@ -121,11 +122,11 @@ class ToolRegistry:
     """Central registry: definitions for LLM + executors for runtime."""
 
     def __init__(self):
-        self.definitions: List[Dict] = []
-        self.executors: Dict[str, Callable] = {}
-        self.sources: Dict[str, str] = {}  # tool_name -> module path
+        self.definitions: list[dict] = []
+        self.executors: dict[str, Callable] = {}
+        self.sources: dict[str, str] = {}  # tool_name -> module path
         self._loaded = False
-        self._errors: List[str] = []
+        self._errors: list[str] = []
 
     def clear(self):
         self.definitions = []
@@ -138,7 +139,7 @@ class ToolRegistry:
         self,
         name: str,
         executor: Callable,
-        definition: Optional[Dict] = None,
+        definition: Optional[dict] = None,
         source: str = "manual",
         overwrite: bool = True,
     ):
@@ -162,7 +163,7 @@ class ToolRegistry:
         from core.memory import memory
         from core.skill_manager import skill_manager
 
-        def memory_search(query: str, limit: int = 5, hybrid: bool = True, project: str = "") -> Dict:
+        def memory_search(query: str, limit: int = 5, hybrid: bool = True, project: str = "") -> dict:
             # Phase 4 (P4): optional project-scoped recall
             proj = project or None
             # Prefer hybrid semantic+FTS when available
@@ -178,7 +179,7 @@ class ToolRegistry:
             summary = memory.summarize_search_results(query, results)
             return {"query": query, "results": results, "summary": summary, "mode": "fts5", "project": proj or "all"}
 
-        def memory_add(key: str, value: str, importance: int = 5) -> Dict:
+        def memory_add(key: str, value: str, importance: int = 5) -> dict:
             memory.curate_memory(key, value, importance=importance)
             # Also embed for semantic recall
             try:
@@ -193,21 +194,21 @@ class ToolRegistry:
                 pass
             return {"success": True, "key": key}
 
-        def memory_semantic_search(query: str, limit: int = 5) -> Dict:
+        def memory_semantic_search(query: str, limit: int = 5) -> dict:
             from core.embeddings import embedding_store
 
             return embedding_store.search(query, limit=limit)
 
-        def memory_ingest(path: str, source: str = None) -> Dict:
+        def memory_ingest(path: str, source: str = None) -> dict:
             from core.embeddings import embedding_store
 
             return embedding_store.ingest_path(path, source=source)
 
-        def skill_list() -> Dict:
+        def skill_list() -> dict:
             skills = skill_manager.list_skills()
             return {"skills": skills, "count": len(skills)}
 
-        def skill_use(name: str, task: str = "", query: str = "", **kwargs) -> Dict:
+        def skill_use(name: str, task: str = "", query: str = "", **kwargs) -> dict:
             skill = skill_manager.get_skill(name)
             if not skill:
                 return {"error": f"Skill {name} not found"}
@@ -270,7 +271,7 @@ class ToolRegistry:
                     pass
                 return {"error": f"Skill exec failed: {e}", "skill": name}
 
-        def subagent_spawn(task: str, max_steps: int = 4, timeout: float = 0) -> Dict:
+        def subagent_spawn(task: str, max_steps: int = 4, timeout: float = 0) -> dict:
             from subagents.subagent import spawn_subagent
 
             return spawn_subagent(task, max_steps=int(max_steps or 4),
@@ -278,10 +279,10 @@ class ToolRegistry:
 
         def delegate_tasks(
             goal: str,
-            tasks: Optional[List[str]] = None,
+            tasks: Optional[list[str]] = None,
             max_children: int = 4,
             aggregate: str = "synthesize",
-        ) -> Dict:
+        ) -> dict:
             """Plan → fan out parallel sub-agents → aggregate structured results."""
             try:
                 from core.delegation import delegation
@@ -298,7 +299,7 @@ class ToolRegistry:
                 return {"ok": False, "error": str(e)}
 
         def sandbox_run(command: str, timeout: int = 30, network: bool = False,
-                        backend: str = "", allow_dangerous: bool = False) -> Dict:
+                        backend: str = "", allow_dangerous: bool = False) -> dict:
             """Run a command in an ephemeral sandbox (containers when available, else rlimit jail)."""
             try:
                 from core.sandbox import sandbox
@@ -312,9 +313,9 @@ class ToolRegistry:
                 return {"error": str(e)}
 
         def memory_hybrid_search(
-            query: str, limit: int = 8, kinds: Optional[List[str]] = None,
+            query: str, limit: int = 8, kinds: Optional[list[str]] = None,
             project: str = "", explain: bool = False,
-        ) -> Dict:
+        ) -> dict:
             """Hybrid (BM25 + vectors, RRF-fused) recall over typed memory 2.0."""
             try:
                 from core.memory2 import memory2
@@ -338,7 +339,7 @@ class ToolRegistry:
             except Exception as e:
                 return {"query": query, "error": str(e), "results": []}
 
-        def memory_sweep(dry_run: bool = True, project: str = "") -> Dict:
+        def memory_sweep(dry_run: bool = True, project: str = "") -> dict:
             """Run the decay lifecycle pass (archive stale, purge dead, consolidate dupes)."""
             try:
                 from core.memory2 import memory2
@@ -347,7 +348,7 @@ class ToolRegistry:
             except Exception as e:
                 return {"error": str(e)}
 
-        def skill_harvest(session_recent: bool = True, dry_run: bool = False, goal: str = "") -> Dict:
+        def skill_harvest(session_recent: bool = True, dry_run: bool = False, goal: str = "") -> dict:
             """Distill the current session's trajectory into a validated SKILL.md skill."""
             try:
                 from .agent import HermusAgent  # noqa: F401  (only to confirm loop exists)
@@ -362,7 +363,7 @@ class ToolRegistry:
             except Exception as e:
                 return {"created": False, "error": str(e)}
 
-        def skill_forge_stats() -> Dict:
+        def skill_forge_stats() -> dict:
             try:
                 from core.skill_forge import skill_forge
 
@@ -370,7 +371,7 @@ class ToolRegistry:
             except Exception as e:
                 return {"error": str(e)}
 
-        def counsel_convoke(goal: str, execute: bool = True) -> Dict:
+        def counsel_convoke(goal: str, execute: bool = True) -> dict:
             """Convene the Council of AIs: members talk, vote on a plan, then optionally execute it."""
             try:
                 from core.counsel.council import CouncilSession
@@ -680,7 +681,7 @@ class ToolRegistry:
         self._loaded = True
         return self
 
-    def get_definitions(self, allowed: Optional[Set[str]] = None) -> List[Dict]:
+    def get_definitions(self, allowed: Optional[set[str]] = None) -> list[dict]:
         self.load()
         if allowed is None or "all" in allowed:
             return list(self.definitions)
@@ -699,7 +700,7 @@ class ToolRegistry:
                     break
         return out
 
-    def execute(self, name: str, args: Optional[Dict] = None) -> Dict:
+    def execute(self, name: str, args: Optional[dict] = None) -> dict:
         self.load()
         args = args or {}
         if isinstance(args, str):
@@ -748,7 +749,7 @@ class ToolRegistry:
                 return trail
             return {"error": f"{name} failed: {e}"}
 
-    def _check_permission(self, name: str, args: Dict) -> Optional[Dict]:
+    def _check_permission(self, name: str, args: dict) -> Optional[dict]:
         """Return a denial result dict to short-circuit execution, or None to allow."""
         try:
             from .config import config
@@ -786,7 +787,7 @@ class ToolRegistry:
             return bool(err) or str(result.get("success", "")).lower() == "false"
         return False
 
-    def _walk_fallback(self, name: str, args: Dict, original: Any) -> Optional[Dict]:
+    def _walk_fallback(self, name: str, args: dict, original: Any) -> Optional[dict]:
         """Walk the fallback chain for a failed tool. Returns result with trail or None."""
         chain = TOOL_FALLBACK_CHAINS.get(name)
         if not chain:
@@ -841,12 +842,12 @@ class ToolRegistry:
         return self._with_trail(original, trail) if isinstance(original, dict) else None
 
     @staticmethod
-    def _with_trail(result: Dict, trail: List[str]) -> Dict:
+    def _with_trail(result: dict, trail: list[str]) -> dict:
         out = dict(result)
         out["fallback_trail"] = trail
         return out
 
-    def list_tools(self) -> Dict:
+    def list_tools(self) -> dict:
         self.load()
         return {
             "count": len(self.executors),

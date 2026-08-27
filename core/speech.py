@@ -23,7 +23,7 @@ import uuid
 import sys
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 from .config import config
 
@@ -57,7 +57,7 @@ class SpeechEngine:
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
-    def _discover(self) -> Tuple[Optional[str], Dict[str, Any]]:
+    def _discover(self) -> tuple[Optional[str], dict[str, Any]]:
         requested = os.getenv("HERMUS_TTS_BACKEND", "auto").strip().lower()
         piper = shutil.which("piper")
         piper_model = os.getenv("HERMUS_PIPER_MODEL", "").strip()
@@ -89,7 +89,7 @@ class SpeechEngine:
         }
         return None, detail
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         backend, detail = self._discover()
         return {
             "available": bool(backend),
@@ -104,7 +104,7 @@ class SpeechEngine:
             ) if not backend else None,
         }
 
-    def synthesize(self, text: str, voice: Optional[str] = None, rate: int = 165) -> Dict[str, Any]:
+    def synthesize(self, text: str, voice: Optional[str] = None, rate: int = 165) -> dict[str, Any]:
         # Runtime cleanup or an operator may remove data/speech while the
         # gateway stays up; recreate it before every generation.
         self.root.mkdir(parents=True, exist_ok=True)

@@ -1,8 +1,7 @@
 """Self-Improvement Tools - Free - Reflection when idle, sees mistakes, searches improvements, fixes in background"""
 
-from typing import Dict
 
-def run_self_improvement_reflection() -> Dict:
+def run_self_improvement_reflection() -> dict:
     """Run self-improvement reflection now - goes through reflections, sees mistakes, searches how to improve, fixes itself in background - free"""
     try:
         from core.self_improvement import self_improvement
@@ -11,7 +10,7 @@ def run_self_improvement_reflection() -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def get_self_improvement_status() -> Dict:
+def get_self_improvement_status() -> dict:
     """Get status for hideable panel to show what it is doing - free"""
     try:
         from core.self_improvement import self_improvement
@@ -19,7 +18,7 @@ def get_self_improvement_status() -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def start_self_improvement_background_checker() -> Dict:
+def start_self_improvement_background_checker() -> dict:
     """Start background idle checker that triggers reflection when idle - free"""
     try:
         from core.self_improvement import self_improvement
@@ -27,7 +26,7 @@ def start_self_improvement_background_checker() -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-def stop_self_improvement_background_checker() -> Dict:
+def stop_self_improvement_background_checker() -> dict:
     """Stop background checker"""
     try:
         from core.self_improvement import self_improvement

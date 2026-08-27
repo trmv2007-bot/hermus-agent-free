@@ -16,7 +16,9 @@ import importlib.util
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
+import builtins
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SEARCH_DIRS = ("core/plugins", "plugins")
@@ -46,15 +48,15 @@ class PluginAPI:
         name: str,
         fn: Callable[..., Any],
         description: str = "",
-        params: Optional[Dict[str, Any]] = None,
-        required: Optional[List[str]] = None,
+        params: Optional[dict[str, Any]] = None,
+        required: Optional[list[str]] = None,
     ) -> None:
         self._registry.register_tool(self._name, name, fn, description, params or {}, required or [])
 
-    def subscribe(self, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
+    def subscribe(self, event_type: str, handler: Callable[[dict[str, Any]], None]) -> None:
         self._registry.subscribe(self._name, event_type, handler)
 
-    def publish(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def publish(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
         self._registry.publish(self._name, event_type, data)
 
     def log(self, message: str) -> None:
@@ -62,13 +64,13 @@ class PluginAPI:
 
 
 class PluginRegistry:
-    def __init__(self, search_dirs: Optional[List[str]] = None):
+    def __init__(self, search_dirs: Optional[builtins.list[str]] = None):
         self._lock = None  # lazy; replaced on first use
         self._search_dirs = list(search_dirs or DEFAULT_SEARCH_DIRS)
-        self._plugins: Dict[str, Dict[str, Any]] = {}
-        self._tools: Dict[str, Dict[str, Any]] = {}
-        self._event_handlers: Dict[str, List[Callable[[Dict[str, Any]], None]]] = {}
-        self._logs: List[Dict[str, str]] = []
+        self._plugins: dict[str, dict[str, Any]] = {}
+        self._tools: dict[str, dict[str, Any]] = {}
+        self._event_handlers: dict[str, list[Callable[[dict[str, Any]], None]]] = {}
+        self._logs: list[dict[str, str]] = []
 
     def _sync(self):
         if self._lock is None:
@@ -78,8 +80,8 @@ class PluginRegistry:
         return self._lock
 
     # -- discovery ------------------------------------------------------
-    def discover_paths(self) -> List[Path]:
-        found: List[Path] = []
+    def discover_paths(self) -> builtins.list[Path]:
+        found: list[Path] = []
         for directory in self._search_dirs:
             base = Path(directory).expanduser()
             if not base.is_absolute():
@@ -88,7 +90,7 @@ class PluginRegistry:
                 found.extend(p for p in sorted(base.glob("*.py")) if not p.name.startswith("_"))
         return found
 
-    def load_all(self, reload: bool = False) -> Dict[str, Any]:
+    def load_all(self, reload: bool = False) -> dict[str, Any]:
         lock = self._sync()
         loaded, failed = [], []
         for path in self.discover_paths():
@@ -106,7 +108,7 @@ class PluginRegistry:
                 failed.append({"name": name, "path": str(path), "error": str(exc)})
         return {"loaded": loaded, "failed": failed}
 
-    def _load_plugin(self, path: Path, name: str) -> Dict[str, Any]:
+    def _load_plugin(self, path: Path, name: str) -> dict[str, Any]:
         module = self._import_module(path, name)
         metadata = dict(getattr(module, "PLUGIN", {}) or {})
         if "name" not in metadata:
@@ -148,8 +150,8 @@ class PluginRegistry:
 
     # -- registration ---------------------------------------------------
     def register_tool(self, plugin: str, name: str, fn: Callable[..., Any],
-                      description: str = "", params: Optional[Dict[str, Any]] = None,
-                      required: Optional[List[str]] = None) -> None:
+                      description: str = "", params: Optional[dict[str, Any]] = None,
+                      required: Optional[builtins.list[str]] = None) -> None:
         with self._sync():
             self._tools[name] = {
                 "name": name, "plugin": plugin, "fn": fn,
@@ -158,12 +160,12 @@ class PluginRegistry:
                 "required": list(required or []),
             }
 
-    def subscribe(self, plugin: str, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
+    def subscribe(self, plugin: str, event_type: str, handler: Callable[[dict[str, Any]], None]) -> None:
         handler.__plugin__ = plugin
         with self._sync():
             self._event_handlers.setdefault(event_type, []).append(handler)
 
-    def publish(self, plugin: str, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def publish(self, plugin: str, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
         try:
             from ..computer.events import publish as bus_publish
 
@@ -185,7 +187,7 @@ class PluginRegistry:
                 if getattr(h, "__plugin__", None) != plugin
             ]
 
-    def _tools_for_plugin(self, plugin: str) -> List[str]:
+    def _tools_for_plugin(self, plugin: str) -> builtins.list[str]:
         return [k for k, v in self._tools.items() if v.get("plugin") == plugin]
 
     # -- dispatch -------------------------------------------------------
@@ -197,7 +199,7 @@ class PluginRegistry:
             fn = record["fn"]
         return fn(**kwargs)
 
-    def dispatch_event(self, event_type: str, event: Dict[str, Any]) -> None:
+    def dispatch_event(self, event_type: str, event: dict[str, Any]) -> None:
         with self._sync():
             handlers = list(self._event_handlers.get(event_type, []))
         for handler in handlers:
@@ -207,15 +209,15 @@ class PluginRegistry:
                 pass
 
     # -- inspection -----------------------------------------------------
-    def list(self) -> List[Dict[str, Any]]:
+    def list(self) -> builtins.list[dict[str, Any]]:
         with self._sync():
             return [dict(r) for r in self._plugins.values()]
 
-    def tools(self) -> List[Dict[str, Any]]:
+    def tools(self) -> builtins.list[dict[str, Any]]:
         with self._sync():
             return [{k: v for k, v in r.items() if k != "fn"} for r in self._tools.values()]
 
-    def logs(self, limit: int = 50) -> List[Dict[str, str]]:
+    def logs(self, limit: int = 50) -> builtins.list[dict[str, str]]:
         with self._sync():
             return list(self._logs)[-max(1, int(limit)):]
 

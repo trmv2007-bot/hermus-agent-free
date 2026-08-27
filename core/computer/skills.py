@@ -12,7 +12,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Iterable
 
 
 def _now() -> str:
@@ -24,8 +25,8 @@ def _slug(value: str) -> str:
     return safe.lower() or "skill"
 
 
-def _unique_text(values: Iterable[Any], limit: int = 25) -> List[str]:
-    output: List[str] = []
+def _unique_text(values: Iterable[Any], limit: int = 25) -> list[str]:
+    output: list[str] = []
     seen = set()
     for value in values:
         text = str(value or "").strip()
@@ -36,8 +37,8 @@ def _unique_text(values: Iterable[Any], limit: int = 25) -> List[str]:
     return output[-limit:]
 
 
-def _aggregate_repairs(values: Iterable[Dict[str, Any]], limit: int = 50) -> List[Dict[str, Any]]:
-    aggregated: Dict[str, Dict[str, Any]] = {}
+def _aggregate_repairs(values: Iterable[dict[str, Any]], limit: int = 50) -> list[dict[str, Any]]:
+    aggregated: dict[str, dict[str, Any]] = {}
     for value in values:
         if not isinstance(value, dict):
             continue
@@ -70,17 +71,17 @@ def _aggregate_repairs(values: Iterable[Dict[str, Any]], limit: int = 50) -> Lis
 class ComputerSkill:
     name: str
     task: str
-    procedure: List[Dict[str, Any]] = field(default_factory=list)
+    procedure: list[dict[str, Any]] = field(default_factory=list)
     success_rate: float = 0.0
     runs: int = 0
     successes: int = 0
     failures: int = 0
-    repairs: List[Dict[str, Any]] = field(default_factory=list)
+    repairs: list[dict[str, Any]] = field(default_factory=list)
     average_duration: float = 0.0
     total_duration: float = 0.0
-    visual_states: List[str] = field(default_factory=list)
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    typical_failures: List[str] = field(default_factory=list)
+    visual_states: list[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    typical_failures: list[str] = field(default_factory=list)
     created: str = field(default_factory=_now)
     updated: str = field(default_factory=_now)
     uses: int = 0
@@ -106,12 +107,12 @@ class ComputerSkill:
         self.repairs = _aggregate_repairs(self.repairs, limit=50)
         return self
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         self.normalize()
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ComputerSkill":
+    def from_dict(cls, data: dict[str, Any]) -> "ComputerSkill":
         runs = int(data.get("runs", data.get("uses", 0)) or 0)
         rate = float(data.get("success_rate", 0.0 if runs else 1.0))
         successes = int(data.get("successes", round(rate * runs)) or 0)
@@ -136,9 +137,9 @@ class ComputerSkill:
         )
         return skill.normalize()
 
-    def known_repair(self, failure: str) -> Optional[Dict[str, Any]]:
+    def known_repair(self, failure: str) -> Optional[dict[str, Any]]:
         words = set(re.findall(r"[a-z0-9]+", str(failure).lower()))
-        ranked: List[Tuple[int, float, Dict[str, Any]]] = []
+        ranked: list[tuple[int, float, dict[str, Any]]] = []
         for repair in self.repairs:
             failure_text = str(repair.get("failure") or repair.get("diagnosis") or "")
             score = len(words & set(re.findall(r"[a-z0-9]+", failure_text.lower())))
@@ -168,7 +169,7 @@ class ComputerSkillStore:
         return self.root / f"{_slug(name)}.json"
 
     @staticmethod
-    def _merge_evidence(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
+    def _merge_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         merged = dict(old or {})
         for key, value in (new or {}).items():
             if key == "runs":
@@ -194,14 +195,14 @@ class ComputerSkillStore:
     def save_skill(
         self,
         task: str,
-        procedure: List[Dict[str, Any]],
-        evidence: Optional[Dict[str, Any]] = None,
+        procedure: list[dict[str, Any]],
+        evidence: Optional[dict[str, Any]] = None,
         name: Optional[str] = None,
         duration: Optional[float] = None,
-        repairs: Optional[List[Dict[str, Any]]] = None,
-        visual_states: Optional[List[str]] = None,
+        repairs: Optional[list[dict[str, Any]]] = None,
+        visual_states: Optional[list[str]] = None,
         record_success: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create or refresh a skill and record the successful source run."""
         skill_name = name or _slug(task)
         skill = self.get_skill(skill_name) or ComputerSkill(name=skill_name, task=task)
@@ -224,8 +225,8 @@ class ComputerSkillStore:
         path = self._write(skill)
         return {"success": True, "name": skill.name, "path": path, "skill": skill.to_dict()}
 
-    def list_skills(self) -> List[Dict[str, Any]]:
-        skills: List[Dict[str, Any]] = []
+    def list_skills(self) -> list[dict[str, Any]]:
+        skills: list[dict[str, Any]] = []
         for path in sorted(self.root.glob("*.json")):
             try:
                 skill = ComputerSkill.from_dict(json.loads(path.read_text(encoding="utf-8")))
@@ -264,9 +265,9 @@ class ComputerSkillStore:
             if word not in cls.STOPWORDS and len(word) > 1
         }
 
-    def rank(self, task: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def rank(self, task: str, limit: int = 5) -> list[dict[str, Any]]:
         words = self._words(task)
-        ranked: List[Dict[str, Any]] = []
+        ranked: list[dict[str, Any]] = []
         for path in self.root.glob("*.json"):
             try:
                 skill = ComputerSkill.from_dict(json.loads(path.read_text(encoding="utf-8")))
@@ -293,9 +294,9 @@ class ComputerSkillStore:
         success: bool,
         error: Optional[str] = None,
         duration: Optional[float] = None,
-        repairs: Optional[List[Dict[str, Any]]] = None,
-        visual_states: Optional[List[str]] = None,
-        evidence: Optional[Dict[str, Any]] = None,
+        repairs: Optional[list[dict[str, Any]]] = None,
+        visual_states: Optional[list[str]] = None,
+        evidence: Optional[dict[str, Any]] = None,
     ) -> None:
         skill = self.get_skill(name)
         if skill is None:
@@ -324,11 +325,11 @@ class ComputerSkillStore:
     def record_use(self, name: str) -> None:
         self.record_run(name, success=True)
 
-    def known_repair(self, skill_name: str, failure: str) -> Optional[Dict[str, Any]]:
+    def known_repair(self, skill_name: str, failure: str) -> Optional[dict[str, Any]]:
         skill = self.get_skill(skill_name)
         return skill.known_repair(failure) if skill else None
 
-    def profile(self, name: str) -> Optional[Dict[str, Any]]:
+    def profile(self, name: str) -> Optional[dict[str, Any]]:
         """Human-readable reliability profile for one skill.
 
         Example::

@@ -8,15 +8,14 @@ matcher is also provided for the (rare) case where an exact image is known.
 """
 from __future__ import annotations
 
-import io
 import json
-import re
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
-from .recorder import decode_frame, encode_image
+from .recorder import decode_frame
 
 
-def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+def extract_json_object(text: str) -> Optional[dict[str, Any]]:
     """Best-effort parse of a JSON object embedded in model prose."""
     if not text:
         return None
@@ -61,7 +60,7 @@ class TargetDetector:
     def __init__(
         self,
         vision_model: Optional[Callable[[Any, str], Any]] = None,
-        locator: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+        locator: Optional[Callable[[Any, str], dict[str, Any]]] = None,
         min_confidence: float = 0.4,
     ):
         # vision_model(image, prompt) -> dict|str  (same contract as VideoAnalyzer)
@@ -70,7 +69,7 @@ class TargetDetector:
         self.locator = locator
         self.min_confidence = max(0.0, min(float(min_confidence), 1.0))
 
-    def _call_vision(self, image: Any, prompt: str) -> Dict[str, Any]:
+    def _call_vision(self, image: Any, prompt: str) -> dict[str, Any]:
         if self.vision_model is None:
             return {"success": False, "error": "no vision model configured"}
         try:
@@ -91,7 +90,7 @@ class TargetDetector:
         return {**response, "success": response.get("success", True), "description": str(text).strip()}
 
     @staticmethod
-    def _screen_size(frame: Any) -> Optional[Tuple[int, int]]:
+    def _screen_size(frame: Any) -> Optional[tuple[int, int]]:
         if isinstance(frame, dict) and frame.get("size"):
             try:
                 width, height = frame["size"]
@@ -102,7 +101,7 @@ class TargetDetector:
         return None
 
     @staticmethod
-    def _decode_size(frame: Any) -> Optional[Tuple[int, int]]:
+    def _decode_size(frame: Any) -> Optional[tuple[int, int]]:
         image = decode_frame(frame)
         if image is None:
             return None
@@ -112,7 +111,7 @@ class TargetDetector:
             return None
 
     @staticmethod
-    def _scale_point(x: float, y: float, from_size, to_size) -> Tuple[float, float]:
+    def _scale_point(x: float, y: float, from_size, to_size) -> tuple[float, float]:
         """Map a point from one image size to another."""
         if from_size is None or to_size is None or from_size == to_size:
             return float(x), float(y)
@@ -120,7 +119,7 @@ class TargetDetector:
         sy = float(to_size[1]) / float(from_size[1])
         return float(x) * sx, float(y) * sy
 
-    def find_on_screen(self, frame: Any, target: str) -> Dict[str, Any]:
+    def find_on_screen(self, frame: Any, target: str) -> dict[str, Any]:
         """Return ``{found, x, y, confidence, description}`` for ``target``.
 
         Coordinates are reported in *screen* pixels (the frame's original
@@ -148,7 +147,7 @@ class TargetDetector:
         if found and x is not None and y is not None:
             x, y = self._scale_point(x, y, decoded_size, screen_size)
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "found": found and x is not None and y is not None,
             "target": target,
             "confidence": round(max(0.0, min(confidence, 1.0)), 3),
@@ -164,7 +163,7 @@ class TargetDetector:
             result.setdefault("description", "")
         return result
 
-    def _locate_with_vision(self, image: Any, decoded_size, target: str) -> Dict[str, Any]:
+    def _locate_with_vision(self, image: Any, decoded_size, target: str) -> dict[str, Any]:
         prompt = (
             f"Locate the UI element described as: {target}\n"
             "Respond with ONLY a JSON object, no prose, in the form:\n"
@@ -186,7 +185,7 @@ class TargetDetector:
             "box": parsed.get("box") or parsed.get("bbox"),
         }
 
-    def find_template(self, frame: Any, template: Any, threshold: float = 0.05) -> Dict[str, Any]:
+    def find_template(self, frame: Any, template: Any, threshold: float = 0.05) -> dict[str, Any]:
         """Locate an exact image ``template`` in a frame (pure PIL, no OpenCV).
 
         Downscales both to a small search grid so it stays cheap; accuracy is
@@ -197,7 +196,6 @@ class TargetDetector:
         if screen is None or needle is None:
             return {"found": False, "confidence": 0.0, "description": "could not decode images"}
         try:
-            from PIL import Image
 
             screen_rgb = screen.convert("RGB")
             needle_rgb = needle.convert("RGB")

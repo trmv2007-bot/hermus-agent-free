@@ -13,7 +13,7 @@ Difficulty scale:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 from ..config import config
 
@@ -32,7 +32,7 @@ _MEDIUM_HARD = (
 _EXPLICIT_HARD = ("complex", "hard", "thorough", "deep", "careful", "difficult", "extensive", "comprehensive", "critical", "in detail", "complete")
 
 # Budget table: difficulty -> (max_members, max_rounds, plan_first, council)
-_BUDGET_TABLE: Dict[int, Tuple[int, int, bool, bool]] = {
+_BUDGET_TABLE: dict[int, tuple[int, int, bool, bool]] = {
     1: (0, 0, False, False),
     2: (0, 0, False, False),
     3: (3, 2, True, False),    # mini deliberation can still help
@@ -81,7 +81,7 @@ class Governor:
 
         return max(1, min(5, score))
 
-    def budget(self, difficulty: int) -> Dict:
+    def budget(self, difficulty: int) -> dict:
         """Thinking budget for a difficulty: members, rounds, plan_first, council."""
         b = _BUDGET_TABLE.get(difficulty, _BUDGET_TABLE[5])
         return {
@@ -106,7 +106,7 @@ class Governor:
             return False
         return True
 
-    def council_config(self, text: str, mode: str = "agent") -> Optional[Dict]:
+    def council_config(self, text: str, mode: str = "agent") -> Optional[dict]:
         """Return convene parameters for the Council, or None if not worth it."""
         if not self.should_use_council(text, mode):
             return None

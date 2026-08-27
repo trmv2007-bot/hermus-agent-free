@@ -1,13 +1,9 @@
 """Doctor - Tells you which platform works, which not, how to fix - like agent-reach doctor - free, real probing"""
 
-import shutil
 import subprocess
 import requests
-from pathlib import Path
-from typing import List, Dict
-import json
 
-def probe_command(cmd: List[str], timeout: int = 10) -> Dict:
+def probe_command(cmd: list[str], timeout: int = 10) -> dict:
     """Real probing - actually executes upstream commands and tells apart missing/broken/timeout - free"""
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -26,7 +22,7 @@ def probe_command(cmd: List[str], timeout: int = 10) -> Dict:
     except Exception as e:
         return {"status": "error", "error": str(e), "cmd": " ".join(cmd)}
 
-def doctor_check_all() -> Dict:
+def doctor_check_all() -> dict:
     """Doctor check all channels with real probing, ordered backend candidates - free"""
     checks = []
 

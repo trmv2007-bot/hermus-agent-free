@@ -22,7 +22,8 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -95,7 +96,7 @@ def _ts() -> str:
 
 # ------------------------------------------------------------------ job intake
 @router.post("/jobs")
-async def submit_job(payload: Dict[str, Any] = None):
+async def submit_job(payload: dict[str, Any] = None):
     """Enqueue any registered job kind and return immediately with a job id."""
     payload = payload or {}
     from gateway.queue import job_queue
@@ -201,7 +202,7 @@ async def stream_run(run_id: str, request: Request, after: int = 0):
 
 
 @router.post("/stream/command")
-async def stream_command(payload: Dict[str, Any] = None, request: Request = None):
+async def stream_command(payload: dict[str, Any] = None, request: Request = None):
     """Run a turn and stream it as SSE (single call). Non-streaming clients keep /command."""
     from gateway.queue import job_queue
 
@@ -256,7 +257,7 @@ async def ws_agent(websocket: WebSocket):
 
     send_lock = asyncio.Lock()
 
-    async def send(obj: Dict[str, Any]) -> None:
+    async def send(obj: dict[str, Any]) -> None:
         async with send_lock:
             try:
                 await websocket.send_json(obj)
@@ -274,7 +275,7 @@ async def ws_agent(websocket: WebSocket):
         "ts": _ts(),
     })
 
-    streams: Dict[str, asyncio.Task] = {}
+    streams: dict[str, asyncio.Task] = {}
 
     async def pump_events(run_id: str, source: str = "") -> None:
         try:
@@ -391,7 +392,7 @@ async def ws_agent(websocket: WebSocket):
             task.cancel()
 
 
-def _hello(job_queue) -> Dict[str, Any]:
+def _hello(job_queue) -> dict[str, Any]:
     """Capabilities frame sent right after a WS handshake."""
     from core.sandbox import sandbox as jail
     from core.memory2 import memory2
@@ -418,7 +419,7 @@ def _safe(fn: Callable[[], Any]) -> Any:
 
 # ------------------------------------------------------------- subsystem routes
 @router.post("/memory/hybrid")
-async def memory_hybrid(payload: Dict[str, Any] = None):
+async def memory_hybrid(payload: dict[str, Any] = None):
     """Hybrid recall over typed memory (BM25 + vectors + RRF + decay)."""
     payload = payload or {}
     from core.memory2 import memory2
@@ -446,7 +447,7 @@ async def memory_hybrid(payload: Dict[str, Any] = None):
 
 
 @router.post("/memory/remember")
-async def memory_remember(payload: Dict[str, Any] = None):
+async def memory_remember(payload: dict[str, Any] = None):
     from core.memory2 import memory2
 
     payload = payload or {}
@@ -460,7 +461,7 @@ async def memory_remember(payload: Dict[str, Any] = None):
 
 
 @router.post("/memory/sweep")
-async def memory_sweep(payload: Dict[str, Any] = None):
+async def memory_sweep(payload: dict[str, Any] = None):
     payload = payload or {}
     if not payload.get("confirm"):
         return JSONResponse({"error": "sweep archives/purges memory; send confirm=true"}, status_code=400)
@@ -480,7 +481,7 @@ async def memory_stats():
 
 
 @router.post("/memory/reindex")
-async def memory_reindex(payload: Dict[str, Any] = None):
+async def memory_reindex(payload: dict[str, Any] = None):
     """Rebuild the FTS + vector indexes (after switching embedding model)."""
     from core.memory2 import memory2
 
@@ -496,7 +497,7 @@ async def memory_access_log(memory_id: int, limit: int = 20):
 
 # ---- skill forge ---------------------------------------------------------------
 @router.post("/skills/forge/harvest")
-async def skill_forge_harvest(payload: Dict[str, Any] = None):
+async def skill_forge_harvest(payload: dict[str, Any] = None):
     """Harvest a trajectory into a validated skill. Provide goal + trajectory, or a session id."""
     payload = payload or {}
     from core.skill_forge import skill_forge
@@ -526,7 +527,7 @@ async def skill_forge_stats():
 
 
 @router.post("/skills/forge/run")
-async def skill_forge_run(payload: Dict[str, Any] = None):
+async def skill_forge_run(payload: dict[str, Any] = None):
     payload = payload or {}
     name = str(payload.get("name") or "")
     if not name:
@@ -540,7 +541,7 @@ async def skill_forge_run(payload: Dict[str, Any] = None):
 
 
 @router.post("/skills/forge/validate")
-async def skill_forge_validate(payload: Dict[str, Any] = None):
+async def skill_forge_validate(payload: dict[str, Any] = None):
     payload = payload or {}
     from pathlib import Path
 
@@ -561,7 +562,7 @@ async def sandbox_status():
 
 
 @router.post("/sandbox/run")
-async def sandbox_run(payload: Dict[str, Any] = None):
+async def sandbox_run(payload: dict[str, Any] = None):
     payload = payload or {}
     command = str(payload.get("command") or "")
     if not command.strip():
@@ -595,7 +596,7 @@ async def sandbox_recent(limit: int = 20):
 
 # ---- delegation ---------------------------------------------------------------
 @router.post("/delegate")
-async def delegate(payload: Dict[str, Any] = None):
+async def delegate(payload: dict[str, Any] = None):
     """Fan out work to parallel sub-agents (processes + JSON-RPC) and aggregate."""
     payload = payload or {}
     from core.delegation import delegation
@@ -667,7 +668,7 @@ async def get_run(run_id: str, limit: int = 200):
 
 # ---- missions & DAG -----------------------------------------------------------
 @router.post("/missions")
-async def mission_start_api(payload: Dict[str, Any] = None):
+async def mission_start_api(payload: dict[str, Any] = None):
     payload = payload or {}
     goal = str(payload.get("goal") or payload.get("text") or "")
     if not goal:
@@ -722,7 +723,7 @@ async def artifact_get_api(artifact_id: str):
     return art.to_dict()
 
 @router.post("/artifacts/export")
-async def artifact_export_api(payload: Dict[str, Any] = None):
+async def artifact_export_api(payload: dict[str, Any] = None):
     payload = payload or {}
     output_path = payload.get("output_path", "artifacts_bundle.zip")
     from core.artifact_manager import artifact_manager
@@ -744,7 +745,7 @@ async def verifiers_list_domains():
     return {"domains": verifier_registry.list_domains()}
 
 @router.post("/verifiers/verify")
-async def verifiers_verify_api(payload: Dict[str, Any] = None):
+async def verifiers_verify_api(payload: dict[str, Any] = None):
     payload = payload or {}
     from core.verifier_registry import verifier_registry
     res = await asyncio.to_thread(
@@ -755,7 +756,7 @@ async def verifiers_verify_api(payload: Dict[str, Any] = None):
     return res.to_dict()
 
 @router.post("/swe/run")
-async def swe_run_api(payload: Dict[str, Any] = None):
+async def swe_run_api(payload: dict[str, Any] = None):
     payload = payload or {}
     task = str(payload.get("task") or payload.get("text") or "")
     if not task:
@@ -776,7 +777,7 @@ async def rollback_list_api():
     return {"count": len(cps), "checkpoints": [c.to_dict() for c in cps]}
 
 @router.post("/rollback/checkpoint")
-async def rollback_create_api(payload: Dict[str, Any] = None):
+async def rollback_create_api(payload: dict[str, Any] = None):
     payload = payload or {}
     label = str(payload.get("label") or "manual_checkpoint")
     from core.rollback import rollback_manager
@@ -784,7 +785,7 @@ async def rollback_create_api(payload: Dict[str, Any] = None):
     return {"success": True, "checkpoint": cp.to_dict()}
 
 @router.post("/rollback/restore")
-async def rollback_restore_api(payload: Dict[str, Any] = None):
+async def rollback_restore_api(payload: dict[str, Any] = None):
     payload = payload or {}
     cid = str(payload.get("checkpoint_id") or "")
     if not cid:
@@ -795,7 +796,7 @@ async def rollback_restore_api(payload: Dict[str, Any] = None):
 
 
 # ------------------------------------------------------------------ lifespan glue
-async def startup(app=None, *, agent_getter: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
+async def startup(app=None, *, agent_getter: Optional[Callable[..., Any]] = None) -> dict[str, Any]:
     """Start the queue workers + register handlers + schedule maintenance."""
     global _agent_getter
     if agent_getter is not None:
@@ -828,7 +829,7 @@ async def shutdown() -> None:
         print(f"[Realtime] queue stop failed: {e}")
 
 
-def install(app, *, agent_getter: Optional[Callable[..., Any]] = None) -> Dict[str, str]:
+def install(app, *, agent_getter: Optional[Callable[..., Any]] = None) -> dict[str, str]:
     """Mount the realtime router on the app and wire queue ⇄ app lifecycle."""
     global _agent_getter
     if agent_getter is not None:

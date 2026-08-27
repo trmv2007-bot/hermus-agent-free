@@ -12,7 +12,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..agent_manager import AgentManager, agent_manager
 from ..llm import FreeLLM, free_llm
@@ -24,24 +24,24 @@ class WorkUnit:
     unit_id: str
     role: str
     task: str
-    depends_on: List[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
     agent: Optional[str] = None
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class DelegationPlan:
     task: str
-    units: List[WorkUnit]
+    units: list[WorkUnit]
     plan_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     created_at: str = field(default_factory=lambda: datetime.now().astimezone().isoformat())
 
-    def validate(self) -> Dict[str, Any]:
+    def validate(self) -> dict[str, Any]:
         names = [unit.unit_id for unit in self.units]
-        errors: List[str] = []
+        errors: list[str] = []
         if len(names) != len(set(names)):
             errors.append("work unit ids must be unique")
         known = set(names)
@@ -61,7 +61,7 @@ class DelegationPlan:
             pending = {name: deps - ready for name, deps in pending.items() if name not in ready}
         return {"ok": not errors, "errors": errors}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "plan_id": self.plan_id,
             "task": self.task,
@@ -101,9 +101,9 @@ class MultiAgentDelegator:
 
     def plan(self, task: str, graph: Optional[TaskGraph] = None) -> DelegationPlan:
         if graph is not None and graph.nodes:
-            grouped: List[WorkUnit] = []
+            grouped: list[WorkUnit] = []
             current_role: Optional[str] = None
-            current_nodes: List[str] = []
+            current_nodes: list[str] = []
             previous_id: Optional[str] = None
             for node in graph.nodes:
                 role = node.agent or "computer-operator"
@@ -135,7 +135,7 @@ class MultiAgentDelegator:
         clauses = [part.strip() for part in re.split(r"\b(?:and then|then|after that)\b|[;]", task, flags=re.I) if part.strip()]
         if not clauses:
             clauses = [task]
-        units: List[WorkUnit] = []
+        units: list[WorkUnit] = []
         previous: Optional[str] = None
         for index, clause in enumerate(clauses):
             role = self._role_for(clause)
@@ -175,7 +175,7 @@ class MultiAgentDelegator:
         wait: bool = True,
         timeout_per_unit: float = 180.0,
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         validation = plan.validate()
         if not validation["ok"]:
             return {"success": False, "plan": plan.to_dict(), "error": "; ".join(validation["errors"])}
@@ -183,8 +183,8 @@ class MultiAgentDelegator:
             return {"success": True, "dry_run": True, "plan": plan.to_dict(), "jobs": []}
 
         pending = {unit.unit_id: unit for unit in plan.units}
-        results: Dict[str, Dict[str, Any]] = {}
-        jobs: List[Dict[str, Any]] = []
+        results: dict[str, dict[str, Any]] = {}
+        jobs: list[dict[str, Any]] = []
         while pending:
             ready = [unit for unit in pending.values() if all(dep in results for dep in unit.depends_on)]
             if not ready:
@@ -239,7 +239,7 @@ class MultiAgentDelegator:
         self._save(plan.plan_id, output)
         return output
 
-    def _save(self, plan_id: str, output: Dict[str, Any]) -> str:
+    def _save(self, plan_id: str, output: dict[str, Any]) -> str:
         path = self.root / f"{plan_id}.json"
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")

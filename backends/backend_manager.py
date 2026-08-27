@@ -1,9 +1,6 @@
 """Backend Manager - Seven terminal backends: local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox - free with fallbacks"""
 import subprocess
 import os
-from pathlib import Path
-from typing import Dict, List, Optional
-import json
 import shlex
 
 class Backend:
@@ -14,10 +11,10 @@ class Backend:
     def is_available(self) -> bool:
         return False
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 30) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 30) -> dict:
         raise NotImplementedError
 
-    def info(self) -> Dict:
+    def info(self) -> dict:
         return {"name": self.name, "available": self.is_available()}
 
 class LocalBackend(Backend):
@@ -28,7 +25,7 @@ class LocalBackend(Backend):
     def is_available(self) -> bool:
         return True
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 30) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 30) -> dict:
         try:
             result = subprocess.run(
                 command,
@@ -65,7 +62,7 @@ class DockerBackend(Backend):
         except:
             return False
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
         if not self.is_available():
             return {"backend": self.name, "error": "Docker not available. Install free: https://docs.docker.com/get-docker/"}
 
@@ -114,7 +111,7 @@ class SSHBackend(Backend):
         except:
             return False
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
         if not self.host:
             return {"backend": self.name, "error": "SSH host not configured. Set HERMUS_SSH_HOST env or pass host. Example: HERMUS_SSH_HOST=user@host hermus --backend ssh"}
 
@@ -155,7 +152,7 @@ class SingularityBackend(Backend):
         except:
             return False
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
         if not self.is_available():
             return {"backend": self.name, "error": "Singularity not available. For HPC environments."}
 
@@ -189,7 +186,7 @@ class ModalBackend(Backend):
         except ImportError:
             return False
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 120) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 120) -> dict:
         if not self.is_available():
             return {
                 "backend": self.name,
@@ -229,7 +226,7 @@ class DaytonaBackend(Backend):
             # Also check if DAYTONA_API_KEY set
             return bool(os.getenv("DAYTONA_API_KEY"))
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 120) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 120) -> dict:
         if not self.is_available():
             return {
                 "backend": self.name,
@@ -266,7 +263,7 @@ class VercelBackend(Backend):
         except:
             return bool(os.getenv("VERCEL_TOKEN"))
 
-    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> Dict:
+    def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
         if not self.is_available():
             return {
                 "backend": self.name,
@@ -303,7 +300,7 @@ class BackendManager:
             "vercel": VercelBackend(),
         }
 
-    def list_backends(self) -> List[Dict]:
+    def list_backends(self) -> list[dict]:
         """List all backends and availability"""
         result = []
         for name, backend in self.backends.items():
@@ -327,7 +324,7 @@ class BackendManager:
     def get_backend(self, name: str) -> Backend:
         return self.backends.get(name) or self.backends["local"]
 
-    def execute(self, backend_name: str, command: str, workdir: str = None, timeout: int = 30) -> Dict:
+    def execute(self, backend_name: str, command: str, workdir: str = None, timeout: int = 30) -> dict:
         backend = self.get_backend(backend_name)
         return backend.execute(command, workdir, timeout)
 
@@ -352,8 +349,8 @@ TOOL_DEFINITION = {
     }
 }
 
-def backend_execute(backend: str, command: str, workdir: str = None, timeout: int = 30) -> Dict:
+def backend_execute(backend: str, command: str, workdir: str = None, timeout: int = 30) -> dict:
     return backend_manager.execute(backend, command, workdir, timeout)
 
-def list_backends() -> Dict:
+def list_backends() -> dict:
     return {"backends": backend_manager.list_backends()}

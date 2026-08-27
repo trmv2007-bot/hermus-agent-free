@@ -8,9 +8,8 @@ testable and auditable offline.  Agents should never assume a backend is
 """
 from __future__ import annotations
 
-import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 def _now() -> str:
@@ -22,19 +21,19 @@ class MouseBackend:
 
     name = "mouse"
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    def move(self, x: float, y: float) -> Dict[str, Any]:
+    def move(self, x: float, y: float) -> dict[str, Any]:
         raise NotImplementedError
 
-    def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> Dict[str, Any]:
+    def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> dict[str, Any]:
         raise NotImplementedError
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> Dict[str, Any]:
+    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
         raise NotImplementedError
 
-    def position(self) -> Dict[str, Any]:
+    def position(self) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -54,24 +53,24 @@ class PyAutoGUIMouse(MouseBackend):
         except Exception as exc:  # noqa: BLE001 - any import/display failure
             self._error = f"pyautogui unavailable: {exc}"
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         return {"available": self._gui is not None, "error": self._error}
 
     def _require(self) -> None:
         if self._gui is None:
             raise RuntimeError(self._error or "pyautogui unavailable")
 
-    def move(self, x: float, y: float) -> Dict[str, Any]:
+    def move(self, x: float, y: float) -> dict[str, Any]:
         self._require()
         self._gui.moveTo(float(x), float(y))
         return {"ok": True, "x": float(x), "y": float(y)}
 
-    def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> Dict[str, Any]:
+    def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> dict[str, Any]:
         self._require()
         self._gui.click(float(x), float(y), button=button, clicks=int(clicks))
         return {"ok": True, "x": float(x), "y": float(y), "button": button, "clicks": int(clicks)}
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> Dict[str, Any]:
+    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
         self._require()
         if x is not None and y is not None:
             self._gui.scroll(int(amount), float(x), float(y))
@@ -79,7 +78,7 @@ class PyAutoGUIMouse(MouseBackend):
             self._gui.scroll(int(amount))
         return {"ok": True, "amount": float(amount), "x": x, "y": y}
 
-    def position(self) -> Dict[str, Any]:
+    def position(self) -> dict[str, Any]:
         self._require()
         pos = self._gui.position()
         return {"ok": True, "x": float(pos[0]), "y": float(pos[1])}
@@ -91,26 +90,26 @@ class DryRunMouse(MouseBackend):
     name = "dry_run"
 
     def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def available(self) -> Dict[str, Any]:
+    def available(self) -> dict[str, Any]:
         return {"available": True, "error": None, "note": "dry-run backend; no real pointer control"}
 
-    def _record(self, action: str, **kwargs: Any) -> Dict[str, Any]:
+    def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
         self.calls.append(record)
         return record
 
-    def move(self, x: float, y: float) -> Dict[str, Any]:
+    def move(self, x: float, y: float) -> dict[str, Any]:
         return self._record("move", x=float(x), y=float(y))
 
-    def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> Dict[str, Any]:
+    def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> dict[str, Any]:
         return self._record("click", x=float(x), y=float(y), button=button, clicks=int(clicks))
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> Dict[str, Any]:
+    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
         return self._record("scroll", amount=float(amount), x=x, y=y)
 
-    def position(self) -> Dict[str, Any]:
+    def position(self) -> dict[str, Any]:
         return self._record("position", x=0.0, y=0.0)
 
 

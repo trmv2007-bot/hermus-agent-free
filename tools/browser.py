@@ -1,7 +1,5 @@
 """Browser Automation Playwright Free - No API key, free"""
 from pathlib import Path
-from typing import Dict, Any, Optional
-import json
 
 # Playwright optional - free, no API key
 PLAYWRIGHT_AVAILABLE = False
@@ -32,7 +30,7 @@ def _ensure_browser():
     
     return _page, None
 
-def browser_navigate(url: str) -> Dict:
+def browser_navigate(url: str) -> dict:
     """Navigate to URL - free"""
     page, err = _ensure_browser()
     if err:
@@ -43,7 +41,7 @@ def browser_navigate(url: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def browser_click(selector: str) -> Dict:
+def browser_click(selector: str) -> dict:
     """Click element by selector - free"""
     page, err = _ensure_browser()
     if err:
@@ -54,7 +52,7 @@ def browser_click(selector: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def browser_type(selector: str, text: str) -> Dict:
+def browser_type(selector: str, text: str) -> dict:
     """Type text into element - free"""
     page, err = _ensure_browser()
     if err:
@@ -65,7 +63,7 @@ def browser_type(selector: str, text: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def browser_screenshot(path: str = "screenshot.png", full_page: bool = False) -> Dict:
+def browser_screenshot(path: str = "screenshot.png", full_page: bool = False) -> dict:
     """Screenshot - free"""
     page, err = _ensure_browser()
     if err:
@@ -78,7 +76,7 @@ def browser_screenshot(path: str = "screenshot.png", full_page: bool = False) ->
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def browser_extract(selector: str = "body") -> Dict:
+def browser_extract(selector: str = "body") -> dict:
     """Extract text/HTML from selector - free"""
     page, err = _ensure_browser()
     if err:
@@ -98,7 +96,7 @@ def browser_extract(selector: str = "body") -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def browser_close() -> Dict:
+def browser_close() -> dict:
     """Close browser - free"""
     global _browser, _playwright, _page
     try:

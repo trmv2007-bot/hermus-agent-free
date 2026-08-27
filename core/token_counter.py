@@ -1,7 +1,5 @@
 """Token Counter - Free - Counts tokens for usage tracking, no paywall"""
 import re
-from typing import Dict, List
-from pathlib import Path
 
 # Try tiktoken for accurate counting (optional, free)
 try:
@@ -52,7 +50,7 @@ class TokenCounter:
             # Natural language: ~4 chars per token
             return max(1, int(len(text) / 4))
 
-    def count_messages(self, messages: List[Dict]) -> int:
+    def count_messages(self, messages: list[dict]) -> int:
         """Count tokens in messages list (like OpenAI format)"""
         total = 0
         for msg in messages:
@@ -65,14 +63,14 @@ class TokenCounter:
                 total += self.count_text(str(tc))
         return total
 
-    def count_tools(self, tools: List[Dict]) -> int:
+    def count_tools(self, tools: list[dict]) -> int:
         """Count tokens in tool definitions"""
         if not tools:
             return 0
         text = str(tools)
         return self.count_text(text)
 
-    def estimate_cost(self, prompt_tokens: int, completion_tokens: int, model: str = None) -> Dict:
+    def estimate_cost(self, prompt_tokens: int, completion_tokens: int, model: str = None) -> dict:
         """Estimate cost - free for Ollama, but show for Groq etc for tracking"""
         model = model or self.model
 

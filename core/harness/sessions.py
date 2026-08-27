@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..config import config
 
@@ -35,7 +35,7 @@ def create(
     role: str = "worker",
     parent: Optional[str] = None,
     model: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     sid = session_id or f"sess_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     rec = {
         "id": sid,
@@ -55,7 +55,7 @@ def create(
     return rec
 
 
-def get(session_id: str) -> Optional[Dict[str, Any]]:
+def get(session_id: str) -> Optional[dict[str, Any]]:
     path = _file(session_id)
     if not path.exists():
         return None
@@ -65,7 +65,7 @@ def get(session_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def touch(session_id: str, **fields: Any) -> Dict[str, Any]:
+def touch(session_id: str, **fields: Any) -> dict[str, Any]:
     with _LOCK:
         rec = get(session_id) or create(session_id)
         rec.update({k: v for k, v in fields.items() if v is not None})
@@ -77,18 +77,18 @@ def touch(session_id: str, **fields: Any) -> Dict[str, Any]:
         return rec
 
 
-def attach(session_id: str) -> Dict[str, Any]:
+def attach(session_id: str) -> dict[str, Any]:
     rec = get(session_id) or create(session_id)
     return touch(session_id, attachments=int(rec.get("attachments") or 0) + 1, status="attached")
 
 
-def detach(session_id: str) -> Dict[str, Any]:
+def detach(session_id: str) -> dict[str, Any]:
     rec = get(session_id) or create(session_id)
     n = max(0, int(rec.get("attachments") or 1) - 1)
     return touch(session_id, attachments=n, status="idle" if n == 0 else "attached")
 
 
-def list_sessions() -> List[Dict[str, Any]]:
+def list_sessions() -> list[dict[str, Any]]:
     out = []
     for path in sorted(_dir().glob("*.json")):
         try:

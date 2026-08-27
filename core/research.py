@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -44,15 +45,15 @@ class Source:
     url: str
     snippet: str
     rank: float = 0.0
-    claims: List[str] = field(default_factory=list)
+    claims: list[str] = field(default_factory=list)
     evidence_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"title": self.title, "url": self.url, "rank": round(self.rank, 3),
                 "claims": self.claims, "evidence_count": self.evidence_count}
 
 
-def _default_search(query: str, limit: int = 10) -> List[Dict[str, str]]:
+def _default_search(query: str, limit: int = 10) -> list[dict[str, str]]:
     try:
         from tools.web_search import search  # noqa: F401
         from duckduckgo_search import DDGS
@@ -88,7 +89,7 @@ def _token_overlap(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
-def _extract_claims(text: str, max_claims: int = 5) -> List[str]:
+def _extract_claims(text: str, max_claims: int = 5) -> list[str]:
     sents = [s.strip() for s in _SENT_SPLIT.split(text) if len(s.strip()) > 30]
     return sents[:max_claims]
 
@@ -98,12 +99,12 @@ def _claim_norm(claim: str) -> str:
 
 
 class ResearchPipeline:
-    def __init__(self, search_fn: Optional[Callable[[str, int], List[Dict[str, str]]]] = None,
-                 synthesizer: Optional[Callable[[str, List[Source]], str]] = None):
+    def __init__(self, search_fn: Optional[Callable[[str, int], list[dict[str, str]]]] = None,
+                 synthesizer: Optional[Callable[[str, list[Source]], str]] = None):
         self.search_fn = search_fn or _default_search
         self.synthesizer = synthesizer
 
-    def _deduplicate(self, sources: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _deduplicate(self, sources: list[dict[str, str]]) -> list[dict[str, str]]:
         seen = set()
         out = []
         for s in sources:
@@ -122,8 +123,8 @@ class ResearchPipeline:
             out.append(s)
         return out
 
-    def _rank(self, sources: List[Dict[str, str]], query: str) -> List[Source]:
-        ranked: List[Source] = []
+    def _rank(self, sources: list[dict[str, str]], query: str) -> list[Source]:
+        ranked: list[Source] = []
         for s in sources:
             title = s.get("title", "")
             snippet = s.get("snippet", "")
@@ -136,9 +137,9 @@ class ResearchPipeline:
         ranked.sort(key=lambda s: s.rank, reverse=True)
         return ranked
 
-    def _cross_check(self, ranked: List[Source]) -> Dict[str, Any]:
+    def _cross_check(self, ranked: list[Source]) -> dict[str, Any]:
         # count how many sources independently support each claim
-        claim_support: Dict[str, int] = {}
+        claim_support: dict[str, int] = {}
         for src in ranked:
             for claim in src.claims:
                 key = _claim_norm(claim)
@@ -148,7 +149,7 @@ class ResearchPipeline:
                 src.evidence_count = len(claim_support.get(_claim_norm(claim), {claim}) or {claim}) - 0
         return claim_support
 
-    def _find_contradictions(self, ranked: List[Source]) -> List[Dict[str, str]]:
+    def _find_contradictions(self, ranked: list[Source]) -> list[dict[str, str]]:
         contradictions = []
         claims = [(s.url, c) for s in ranked for c in s.claims]
         negators = re.compile(r"\b(no|not|never|deny|denies|denied|refute|refuted|disagree|false|incorrect|untrue|without)\b")
@@ -167,7 +168,7 @@ class ResearchPipeline:
                     contradictions.append({"a": ci, "source_a": ui, "b": cj, "source_b": uj})
         return contradictions[:10]
 
-    def run(self, query: str, limit: int = 10) -> Dict[str, Any]:
+    def run(self, query: str, limit: int = 10) -> dict[str, Any]:
         raw = self.search_fn(query, limit=limit)
         deduped = self._deduplicate(raw)
         ranked = self._rank(deduped, query)

@@ -15,7 +15,8 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Optional
+from collections.abc import Callable
 
 from .config import config
 from .providers import get_provider, list_providers
@@ -33,12 +34,12 @@ class MultiKeyManager:
         if not self.db_path.exists():
             self._save({"groq": [], "hf": [], "openai": [], "custom": []})
 
-        self.key_queues: Dict[str, deque] = defaultdict(deque)
-        self.key_failures: Dict[str, Dict[str, int]] = defaultdict(dict)
-        self.key_last_used: Dict[str, Dict[str, datetime]] = defaultdict(dict)
+        self.key_queues: dict[str, deque] = defaultdict(deque)
+        self.key_failures: dict[str, dict[str, int]] = defaultdict(dict)
+        self.key_last_used: dict[str, dict[str, datetime]] = defaultdict(dict)
         # Live rate windows: provider -> key -> list of timestamps
-        self._rpm_hits: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
-        self._tpm_hits: Dict[str, Dict[str, List[tuple]]] = defaultdict(lambda: defaultdict(list))
+        self._rpm_hits: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        self._tpm_hits: dict[str, dict[str, list[tuple]]] = defaultdict(lambda: defaultdict(list))
         self._lock = threading.Lock()
         # Serializes load→mutate→save cycles over the JSON key store. Fleet
         # workers report success/failure from several threads at once; without
@@ -50,7 +51,7 @@ class MultiKeyManager:
 
     # ---------- persistence ----------
 
-    def _load(self) -> Dict:
+    def _load(self) -> dict:
         try:
             return json.loads(self.db_path.read_text())
         except FileNotFoundError:
@@ -68,7 +69,7 @@ class MultiKeyManager:
                 pass
             return {"groq": [], "hf": [], "openai": [], "custom": []}
 
-    def _save(self, data: Dict):
+    def _save(self, data: dict):
         """Atomically replace the key store.
 
         Writes go to a sibling temp file followed by ``os.replace`` so a
@@ -78,7 +79,7 @@ class MultiKeyManager:
         tmp.write_text(json.dumps(data, indent=2))
         os.replace(tmp, self.db_path)
 
-    def _update(self, mutator: Callable[[Dict], None]) -> Dict:
+    def _update(self, mutator: Callable[[dict], None]) -> dict:
         """Thread-safe read-modify-write cycle over the persisted key store."""
         with self._persist_lock:
             data = self._load()
@@ -91,7 +92,7 @@ class MultiKeyManager:
             return entry
         return entry.get("key") or entry.get("token") or ""
 
-    def _normalize_entry(self, entry, provider: str, idx: int = 0) -> Dict:
+    def _normalize_entry(self, entry, provider: str, idx: int = 0) -> dict:
         if isinstance(entry, str):
             preset = get_provider(provider)
             return {
@@ -137,7 +138,7 @@ class MultiKeyManager:
 
     # ---------- CRUD ----------
 
-    def list_keys(self, provider: str = None, redact: bool = False) -> Dict:
+    def list_keys(self, provider: str = None, redact: bool = False) -> dict:
         data = self._load()
         if provider:
             data = {provider: data.get(provider, [])}
@@ -183,7 +184,7 @@ class MultiKeyManager:
         rpm_limit: int = None,
         tpm_limit: int = None,
         auto_discover: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Add any API key. Works with openai/groq/openrouter/custom/etc."""
         provider = (provider or "custom").lower().strip()
         with self._persist_lock:
@@ -256,7 +257,7 @@ class MultiKeyManager:
 
         return result
 
-    def remove_key(self, provider: str, key_or_name: str) -> Dict:
+    def remove_key(self, provider: str, key_or_name: str) -> dict:
         with self._persist_lock:
             data = self._load()
             if provider not in data:
@@ -274,7 +275,7 @@ class MultiKeyManager:
         self._load_queues()
         return {"success": True, "provider": provider, "remaining": len(data[provider])}
 
-    def get_entry(self, provider: str, api_key: str = None) -> Optional[Dict]:
+    def get_entry(self, provider: str, api_key: str = None) -> Optional[dict]:
         data = self._load()
         keys = data.get(provider, [])
         if api_key:
@@ -290,7 +291,7 @@ class MultiKeyManager:
                 return e
         return self._normalize_entry(keys[0], provider) if keys else None
 
-    def get_all_entries(self, provider: str = None) -> List[Dict]:
+    def get_all_entries(self, provider: str = None) -> list[dict]:
         data = self._load()
         out = []
         providers = [provider] if provider else list(data.keys())
@@ -382,7 +383,7 @@ class MultiKeyManager:
             "" if queue else None
         )
 
-    def get_key_bundle(self, provider: str) -> Optional[Dict]:
+    def get_key_bundle(self, provider: str) -> Optional[dict]:
         """Return key + base_url + default_model for LLM calls."""
         key = self.get_key(provider)
         if key is None and not get_provider(provider).get("no_auth"):
@@ -417,7 +418,7 @@ class MultiKeyManager:
             "tpm_limit": entry.get("tpm_limit"),
         }
 
-    def first_available_bundle(self, prefer: Optional[List[str]] = None) -> Optional[Dict]:
+    def first_available_bundle(self, prefer: Optional[list[str]] = None) -> Optional[dict]:
         """
         First usable key bundle across all providers (used as a fallback when
         the requested provider has no key, e.g. Ollama not running but a
@@ -449,14 +450,14 @@ class MultiKeyManager:
                 return bundle
         return None
 
-    def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: Dict = None):
+    def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: dict = None):
         if not key:
             return
         if provider in self.key_failures and key in self.key_failures[provider]:
             self.key_failures[provider][key] = max(0, self.key_failures[provider][key] - 1)
         self._record_use(provider, key, tokens=tokens or 0)
 
-        def _mutate(data: Dict) -> None:
+        def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["usage_count"] = k.get("usage_count", 0) + 1
@@ -488,7 +489,7 @@ class MultiKeyManager:
         except Exception:
             pass
 
-    def mark_key_failed(self, provider: str, key: str, error: str = "", rate_limit: Dict = None):
+    def mark_key_failed(self, provider: str, key: str, error: str = "", rate_limit: dict = None):
         if not key:
             return
         if provider in self.key_failures:
@@ -498,7 +499,7 @@ class MultiKeyManager:
             f"failures: {self.key_failures[provider].get(key, 0)}"
         )
 
-        def _mutate(data: Dict) -> None:
+        def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
                     k["last_error"] = str(error)[:300]
@@ -519,7 +520,7 @@ class MultiKeyManager:
 
     # ---------- health + models ----------
 
-    def discover_models(self, provider: str, api_key: str = None, base_url: str = None) -> Dict:
+    def discover_models(self, provider: str, api_key: str = None, base_url: str = None) -> dict:
         from .openai_compat import list_models
 
         if api_key is None:
@@ -531,7 +532,7 @@ class MultiKeyManager:
         result = list_models(provider, api_key=api_key, base_url=base_url)
         if result.get("success") and api_key is not None:
             # persist models onto matching key entry
-            def _mutate(data: Dict) -> None:
+            def _mutate(data: dict) -> None:
                 ids = [m.get("id") for m in result.get("models") or [] if m.get("id")]
                 for k in data.get(provider, []):
                     if isinstance(k, dict) and (not api_key or k.get("key") == api_key):
@@ -554,7 +555,7 @@ class MultiKeyManager:
         api_key: str = None,
         base_url: str = None,
         model: str = None,
-    ) -> Dict:
+    ) -> dict:
         from .openai_compat import health_ping
 
         entry = None
@@ -570,7 +571,7 @@ class MultiKeyManager:
         result = health_ping(provider, api_key=api_key, base_url=base_url, model=model)
 
         # persist
-        def _mutate(data: Dict) -> None:
+        def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
                 if not isinstance(k, dict):
                     continue
@@ -614,7 +615,7 @@ class MultiKeyManager:
             result["persist_error"] = str(e)
         return result
 
-    def check_all_health(self, provider: str = None) -> List[Dict]:
+    def check_all_health(self, provider: str = None) -> list[dict]:
         entries = self.get_all_entries(provider)
         results = []
         # Also probe no-key local providers
@@ -636,7 +637,7 @@ class MultiKeyManager:
             results.append(r)
         return results
 
-    def rate_status(self, provider: str = None) -> Dict:
+    def rate_status(self, provider: str = None) -> dict:
         """Snapshot of RPM/TPM usage vs limits for all keys."""
         entries = self.get_all_entries(provider)
         out = []
@@ -669,7 +670,7 @@ class MultiKeyManager:
 
     # ---------- parallel execution ----------
 
-    def execute_parallel_with_keys(self, provider: str, tasks: List[Dict]) -> List[Dict]:
+    def execute_parallel_with_keys(self, provider: str, tasks: list[dict]) -> list[dict]:
         """Execute tasks in parallel using different API keys (thread pool)."""
         entries = self.get_all_entries(provider)
         if not entries:
@@ -682,7 +683,7 @@ class MultiKeyManager:
             f"[MultiKey] Parallel execution with {len(entries)} keys for {len(tasks)} tasks"
         )
 
-        def run_one(task_id: int, task_data: Dict, entry: Dict) -> Dict:
+        def run_one(task_id: int, task_data: dict, entry: dict) -> dict:
             try:
                 from .llm import FreeLLM
 

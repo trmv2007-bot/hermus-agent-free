@@ -2,19 +2,15 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import time
-from pathlib import Path
 
-import pytest
 
-from core.agent_dag import DAGNodeStatus
 from core.artifact_manager import ArtifactManager
 from core.critic import CriticVerdict, critic_manager
 from core.mission import MissionEngine, MissionState
 from core.modes import AgentMode, get_mode_config
 from core.rollback import GitTxState, RollbackManager
-from core.verifier_registry import PythonVerifier, WebVerifier, verifier_registry
+from core.verifier_registry import PythonVerifier
 
 
 def test_mission_engine_autonomous_repair_replan_loop(tmp_path):

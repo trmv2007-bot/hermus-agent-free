@@ -6,7 +6,7 @@ observational; it never mutates agent state.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .permissions import emergency_stop
 
@@ -16,8 +16,8 @@ class ControlCenter:
         self.controller = controller
         self.emergency = emergency or emergency_stop
 
-    def status(self) -> Dict[str, Any]:
-        history: List[Dict[str, Any]] = list(getattr(self.controller, "history", []))
+    def status(self) -> dict[str, Any]:
+        history: list[dict[str, Any]] = list(getattr(self.controller, "history", []))
         last_action = history[-1] if history else None
         return {
             "active": not self.emergency.halted,

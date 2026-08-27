@@ -273,6 +273,7 @@ __all__ = [
     "PromptState",
     "remote_approval",
     "remote_control",
+    "PreClickVerificationError",
     # Phase D — Performance / resources
     "ResourceMonitor",
     "get_resource_monitor",

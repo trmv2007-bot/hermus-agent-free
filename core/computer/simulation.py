@@ -11,16 +11,14 @@ environment and test recovery flows safely.
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .grounding import BoundingBox, GroundedTarget, VisualGrounder
 from .mouse import MouseBackend
 from .keyboard import KeyboardBackend
 from .window_manager import WindowBackend
-from .world_state import WorldState
 
 
 @dataclass
@@ -48,7 +46,7 @@ class SimulatedWindow:
     height: int = 600
     minimized: bool = False
     focused: bool = False
-    elements: List[SimulatedElement] = field(default_factory=list)
+    elements: list[SimulatedElement] = field(default_factory=list)
 
 
 class SimulatedScreen:
@@ -64,17 +62,17 @@ class SimulatedScreen:
     def __init__(self, width: int = 1920, height: int = 1080):
         self.width = width
         self.height = height
-        self.windows: Dict[str, SimulatedWindow] = {}
-        self.popups: List[SimulatedWindow] = []
+        self.windows: dict[str, SimulatedWindow] = {}
+        self.popups: list[SimulatedWindow] = []
         self.active_popup: Optional[SimulatedWindow] = None
-        self._mouse_pos: Tuple[int, int] = (0, 0)
-        self._click_history: List[Dict[str, Any]] = []
+        self._mouse_pos: tuple[int, int] = (0, 0)
+        self._click_history: list[dict[str, Any]] = []
         self._fail_next_click: bool = False
         self._fail_next_target: Optional[str] = None
         self._inject_popup_at: Optional[int] = None
-        self._state_change_callbacks: List[Callable] = []
+        self._state_change_callbacks: list[Callable] = []
         self._current_time: float = 0.0
-        self._planned_errors: List[Dict[str, Any]] = []
+        self._planned_errors: list[dict[str, Any]] = []
 
     def add_window(self, window: SimulatedWindow) -> None:
         """Add a window to the desktop."""
@@ -148,7 +146,7 @@ class SimulatedScreen:
                     return elem
         return None
 
-    def get_elements_by_role(self, role: str) -> List[SimulatedElement]:
+    def get_elements_by_role(self, role: str) -> list[SimulatedElement]:
         """Get all visible elements with a specific role."""
         elements = []
         # From active popup
@@ -175,7 +173,7 @@ class SimulatedScreen:
             "triggered": False,
         })
 
-    def simulate_click(self, x: int, y: int) -> Dict[str, Any]:
+    def simulate_click(self, x: int, y: int) -> dict[str, Any]:
         """Simulate a click on the virtual screen.
 
         Returns the result with info about what was clicked.
@@ -250,11 +248,11 @@ class SimulatedScreen:
             "window": clicked_window.title if clicked_window else None,
         }
 
-    def simulate_type(self, text: str) -> Dict[str, Any]:
+    def simulate_type(self, text: str) -> dict[str, Any]:
         """Simulate typing text."""
         return {"ok": True, "text": text, "length": len(text)}
 
-    def simulate_keypress(self, key: str) -> Dict[str, Any]:
+    def simulate_keypress(self, key: str) -> dict[str, Any]:
         """Simulate pressing a key."""
         result = {"ok": True, "key": key}
 
@@ -287,7 +285,7 @@ class SimulatedScreen:
 
         return "\n".join(lines)
 
-    def get_world_state(self) -> Dict[str, Any]:
+    def get_world_state(self) -> dict[str, Any]:
         """Get current world state as a dict (compatible with WorldState)."""
         active = self.get_active_window()
         return {
@@ -300,7 +298,7 @@ class SimulatedScreen:
             "confidence": 0.95,
         }
 
-    def _get_visible_targets(self) -> List[str]:
+    def _get_visible_targets(self) -> list[str]:
         targets = []
         if self.active_popup:
             for elem in self.active_popup.elements:
@@ -324,7 +322,7 @@ class SimulatedMouse(MouseBackend):
 
     def __init__(self, screen: SimulatedScreen):
         self.screen = screen
-        self._position: Tuple[int, int] = (0, 0)
+        self._position: tuple[int, int] = (0, 0)
 
     def move(self, x: int, y: int) -> bool:
         self._position = (int(x), int(y))
@@ -345,7 +343,7 @@ class SimulatedMouse(MouseBackend):
     def scroll(self, amount: int) -> bool:
         return True
 
-    def position(self) -> Tuple[int, int]:
+    def position(self) -> tuple[int, int]:
         return self._position
 
     def drag(self, x: int, y: int) -> bool:
@@ -358,7 +356,7 @@ class SimulatedKeyboard(KeyboardBackend):
 
     def __init__(self, screen: SimulatedScreen):
         self.screen = screen
-        self._history: List[str] = []
+        self._history: list[str] = []
 
     def type(self, text: str) -> bool:
         self._history.append(f"type:{text}")
@@ -384,7 +382,7 @@ class SimulatedWindowManager(WindowBackend):
     def __init__(self, screen: SimulatedScreen):
         self.screen = screen
 
-    def list_windows(self) -> List[Dict[str, Any]]:
+    def list_windows(self) -> list[dict[str, Any]]:
         return [
             {"title": win.title, "application": win.application,
              "minimized": win.minimized, "focused": win.focused}
@@ -415,7 +413,7 @@ class SimulatedGrounder(VisualGrounder):
         self,
         frame: Any,
         description: str,
-        screen_size: Tuple[int, int] = (1920, 1080),
+        screen_size: tuple[int, int] = (1920, 1080),
     ) -> Optional[GroundedTarget]:
         """Find a target on the simulated screen by name."""
         element = self.screen.get_element(description)
@@ -434,9 +432,9 @@ class SimulatedGrounder(VisualGrounder):
     def ground_all(
         self,
         frame: Any,
-        descriptions: List[str],
-        screen_size: Tuple[int, int] = (1920, 1080),
-    ) -> List[GroundedTarget]:
+        descriptions: list[str],
+        screen_size: tuple[int, int] = (1920, 1080),
+    ) -> list[GroundedTarget]:
         targets = []
         for desc in descriptions:
             target = self.ground(frame, desc, screen_size)

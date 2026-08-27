@@ -1,7 +1,7 @@
 """Facade used by HermusAgent each turn."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from . import bus, files, sessions
 from .compaction import compact_messages
@@ -13,14 +13,14 @@ class HarnessRuntime:
         self,
         session_id: str,
         user_message: str,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         project: str = "",
         budget_chars: int = 24_000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         sessions.touch(session_id, status="running", task=user_message[:200], turns_inc=1)
         compacted, report = compact_messages(messages, budget_chars=budget_chars)
-        notices: List[str] = []
+        notices: list[str] = []
 
         for ev in files.pending(session_id):
             notices.append(
@@ -59,7 +59,7 @@ class HarnessRuntime:
             "memory": memory,
         }
 
-    def observe_tool(self, session_id: str, tool_name: str, args: Dict[str, Any]) -> None:
+    def observe_tool(self, session_id: str, tool_name: str, args: dict[str, Any]) -> None:
         path = args.get("path") or args.get("file") or args.get("filename")
         if not path:
             return

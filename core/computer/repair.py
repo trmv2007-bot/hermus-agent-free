@@ -14,7 +14,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Optional
+from collections.abc import Sequence
 
 from ..llm import FreeLLM, free_llm
 
@@ -44,20 +45,20 @@ class FailureDiagnosis:
     retryable: bool = True
     suggested_strategy: str = ""
     source: str = "heuristic"
-    plan: Optional[List[Dict[str, Any]]] = None
+    plan: Optional[list[dict[str, Any]]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class RepairStep:
     name: str
-    action: Dict[str, Any]
+    action: dict[str, Any]
     expected: str
     rationale: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -66,7 +67,7 @@ class RepairPlan:
     """A diagnosis plus the recovery actions required before retrying."""
 
     diagnosis: FailureDiagnosis
-    steps: List[RepairStep] = field(default_factory=list)
+    steps: list[RepairStep] = field(default_factory=list)
     retry_original: bool = True
     source: str = "none"
     reason: str = ""
@@ -77,7 +78,7 @@ class RepairPlan:
     def available(self) -> bool:
         return bool(self.steps)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "plan_id": self.plan_id,
             "created_at": self.created_at,
@@ -129,14 +130,14 @@ class RepairEngine:
         self.llm = llm or free_llm
         self.max_steps = max(1, min(int(max_steps), 5))
         self.use_llm = bool(use_llm)
-        self.known_repairs: List[Dict[str, Any]] = []
+        self.known_repairs: list[dict[str, Any]] = []
 
-    def set_known_repairs(self, repairs: Optional[List[Dict[str, Any]]]) -> None:
+    def set_known_repairs(self, repairs: Optional[list[dict[str, Any]]]) -> None:
         """Attach evidence-backed repairs recalled with the active skill."""
         self.known_repairs = [item for item in (repairs or []) if isinstance(item, dict)][-50:]
 
     @staticmethod
-    def _context_parts(last_action: Optional[Dict[str, Any]]) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    def _context_parts(last_action: Optional[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         context = last_action if isinstance(last_action, dict) else {}
         spec = context.get("spec") if isinstance(context.get("spec"), dict) else {}
         result = context.get("result") if isinstance(context.get("result"), dict) else context
@@ -147,7 +148,7 @@ class RepairEngine:
         self,
         failure_detail: str,
         expected: str,
-        last_action: Optional[Dict[str, Any]] = None,
+        last_action: Optional[dict[str, Any]] = None,
     ) -> FailureDiagnosis:
         """Return a deterministic first-pass diagnosis from all failure signals."""
         spec, result, verification = self._context_parts(last_action)
@@ -314,7 +315,7 @@ class RepairEngine:
         )
 
     @staticmethod
-    def _intended_window(spec: Dict[str, Any], expected: str) -> str:
+    def _intended_window(spec: dict[str, Any], expected: str) -> str:
         if spec.get("kind") in {"open_application", "focus_window"} and spec.get("name"):
             return str(spec["name"]).strip()
         # Use only an explicit "X window/application" phrase; do not guess from
@@ -371,7 +372,7 @@ class RepairEngine:
         self,
         diagnosis: FailureDiagnosis,
         expected: str,
-        last_action: Optional[Dict[str, Any]],
+        last_action: Optional[dict[str, Any]],
     ) -> Optional[RepairPlan]:
         spec, _, _ = self._context_parts(last_action)
         if diagnosis.kind == FailureKind.BLOCKING_DIALOG.value:
@@ -410,10 +411,10 @@ class RepairEngine:
                 continue
         return None
 
-    def _sanitize_steps(self, raw_steps: Any) -> List[RepairStep]:
+    def _sanitize_steps(self, raw_steps: Any) -> list[RepairStep]:
         if not isinstance(raw_steps, list):
             return []
-        steps: List[RepairStep] = []
+        steps: list[RepairStep] = []
         for index, raw in enumerate(raw_steps[: self.max_steps]):
             if not isinstance(raw, dict):
                 continue
@@ -423,7 +424,7 @@ class RepairEngine:
             kind = str(action.get("kind") or "").strip().lower()
             if kind not in self.SAFE_ACTIONS:
                 continue
-            cleaned: Dict[str, Any] = {"kind": kind}
+            cleaned: dict[str, Any] = {"kind": kind}
             if kind == "click_target":
                 target = str(action.get("target") or "").strip()
                 if not target:
@@ -481,7 +482,7 @@ class RepairEngine:
         self,
         diagnosis: FailureDiagnosis,
         expected: str,
-        last_action: Optional[Dict[str, Any]],
+        last_action: Optional[dict[str, Any]],
     ) -> RepairPlan:
         spec, result, verification = self._context_parts(last_action)
         prompt = f"""You are the Hermus desktop Repair Planner.
@@ -538,7 +539,7 @@ Generate at most {self.max_steps} steps. An empty steps list is better than an u
         self,
         failure_detail: str,
         expected: str,
-        last_action: Optional[Dict[str, Any]] = None,
+        last_action: Optional[dict[str, Any]] = None,
     ) -> RepairPlan:
         """Diagnose a failure and return a bounded, validated repair plan."""
         diagnosis = self.diagnose(failure_detail, expected, last_action)
@@ -591,8 +592,8 @@ Generate at most {self.max_steps} steps. An empty steps list is better than an u
         self,
         failure_detail: str,
         expected: str,
-        last_action: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        last_action: Optional[dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
         """Backward-compatible list API.
 
         New integrations should use :meth:`create_plan` so diagnosis and retry

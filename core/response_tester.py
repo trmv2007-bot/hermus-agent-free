@@ -3,8 +3,6 @@
 import time
 import json
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
 from .config import config
 
 class ResponseTimeTester:
@@ -16,13 +14,13 @@ class ResponseTimeTester:
         if not self.results_path.exists():
             self.results_path.write_text("[]")
 
-    def _load(self) -> List[Dict]:
+    def _load(self) -> list[dict]:
         try:
             return json.loads(self.results_path.read_text())
         except:
             return []
 
-    def _save(self, data: List[Dict]):
+    def _save(self, data: list[dict]):
         self.results_path.write_text(json.dumps(data, indent=2))
 
     def test_llm_key(
@@ -33,7 +31,7 @@ class ResponseTimeTester:
         prompt: str = "Hello, what is Python async?",
         timeout: int = 30,
         base_url: str = None,
-    ) -> Dict:
+    ) -> dict:
         """Test response time for ANY LLM API key (OpenAI-compatible)."""
         start = time.time()
         success = False
@@ -45,7 +43,7 @@ class ResponseTimeTester:
 
         try:
             from .providers import get_provider
-            from .openai_compat import health_ping, chat_completions, CompatAPIError
+            from .openai_compat import health_ping
 
             preset = get_provider(provider)
             model_name = model or preset.get("default_model") or "gpt-3.5-turbo"
@@ -127,7 +125,7 @@ class ResponseTimeTester:
 
         return result
 
-    def test_custom_api_key(self, api_name: str, api_key: str = None, test_args: Dict = None, timeout: int = 30) -> Dict:
+    def test_custom_api_key(self, api_name: str, api_key: str = None, test_args: dict = None, timeout: int = 30) -> dict:
         """Test response time for custom API key from different website"""
         from .custom_api import custom_api_manager
         import time as time_module
@@ -195,7 +193,7 @@ class ResponseTimeTester:
                 "timestamp": datetime.now().isoformat()
             }
 
-    def test_all_keys_for_provider(self, provider: str, prompt: str = "Hello", model: str = None) -> List[Dict]:
+    def test_all_keys_for_provider(self, provider: str, prompt: str = "Hello", model: str = None) -> list[dict]:
         """Test all keys for provider and rank by response time - free, to find fastest key"""
         from .multi_key import multi_key_manager
         data = multi_key_manager.list_keys()
@@ -216,7 +214,7 @@ class ResponseTimeTester:
 
         return results
 
-    def test_all_keys_for_custom_api(self, api_name: str, test_args: Dict = None) -> List[Dict]:
+    def test_all_keys_for_custom_api(self, api_name: str, test_args: dict = None) -> list[dict]:
         """Test all keys for same custom API name from different websites and rank by response time"""
         from .custom_api import custom_api_manager
         apis = custom_api_manager.list_apis()
@@ -231,11 +229,11 @@ class ResponseTimeTester:
         results.sort(key=lambda x: (0 if x["success"] else 1, x["response_time_seconds"]))
         return results
 
-    def get_history(self, limit: int = 20) -> List[Dict]:
+    def get_history(self, limit: int = 20) -> list[dict]:
         history = self._load()
         return history[-limit:][::-1]  # Most recent first
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         history = self._load()
         if not history:
             return {"total_tests": 0, "avg_response_time": 0, "fastest": None, "slowest": None}

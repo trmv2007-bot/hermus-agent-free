@@ -11,7 +11,8 @@ input library is present.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .keyboard import KeyboardBackend, default_keyboard
 from .mouse import MouseBackend, default_mouse
@@ -57,10 +58,10 @@ class ComputerActionController:
 
             approval = remote_approval
         self.approval = approval
-        self.history: List[Dict[str, Any]] = []
+        self.history: list[dict[str, Any]] = []
 
     # -- safety ---------------------------------------------------------
-    def _gate(self, action: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _gate(self, action: str, args: dict[str, Any]) -> dict[str, Any]:
         halt = self.emergency.check()
         if halt.get("halted"):
             return {"allowed": False, "decision": "deny", "risk": "n/a", "reason": halt["error"]}
@@ -94,13 +95,13 @@ class ComputerActionController:
         self,
         action: str,
         description: str,
-        args: Dict[str, Any],
-        gate: Dict[str, Any],
-        backend_result: Optional[Dict[str, Any]] = None,
+        args: dict[str, Any],
+        gate: dict[str, Any],
+        backend_result: Optional[dict[str, Any]] = None,
         error: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         backend_result = backend_result or {}
-        record: Dict[str, Any] = {
+        record: dict[str, Any] = {
             "ok": bool(backend_result.get("ok")) and not error,
             "action": action,
             "description": description,
@@ -131,9 +132,9 @@ class ComputerActionController:
         self,
         action: str,
         description: str,
-        args: Dict[str, Any],
-        fn: Callable[[], Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        args: dict[str, Any],
+        fn: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
         gate = self._gate(action, args)
         if not gate.get("allowed"):
             return self._record(action, description, args, gate, error=gate.get("reason"))
@@ -147,54 +148,54 @@ class ComputerActionController:
             return self._record(action, description, args, gate, error=str(exc))
 
     # -- mouse ----------------------------------------------------------
-    def move_mouse(self, x: float, y: float) -> Dict[str, Any]:
+    def move_mouse(self, x: float, y: float) -> dict[str, Any]:
         return self._perform("move_mouse", f"Move mouse to ({x}, {y})", {"x": x, "y": y},
                              lambda: self.mouse.move(x, y))
 
-    def click(self, x: float, y: float, button: str = "left") -> Dict[str, Any]:
+    def click(self, x: float, y: float, button: str = "left") -> dict[str, Any]:
         return self._perform("click", f"Click ({x}, {y})", {"x": x, "y": y, "button": button},
                              lambda: self.mouse.click(x, y, button=button))
 
-    def double_click(self, x: float, y: float) -> Dict[str, Any]:
+    def double_click(self, x: float, y: float) -> dict[str, Any]:
         return self._perform("double_click", f"Double-click ({x}, {y})", {"x": x, "y": y},
                              lambda: self.mouse.click(x, y, clicks=2))
 
-    def right_click(self, x: float, y: float) -> Dict[str, Any]:
+    def right_click(self, x: float, y: float) -> dict[str, Any]:
         return self._perform("right_click", f"Right-click ({x}, {y})", {"x": x, "y": y},
                              lambda: self.mouse.click(x, y, button="right"))
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> Dict[str, Any]:
+    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
         return self._perform("scroll", f"Scroll {amount}", {"amount": amount, "x": x, "y": y},
                              lambda: self.mouse.scroll(amount, x=x, y=y))
 
     # -- keyboard -------------------------------------------------------
-    def type_text(self, text: str, interval: float = 0.0) -> Dict[str, Any]:
+    def type_text(self, text: str, interval: float = 0.0) -> dict[str, Any]:
         return self._perform("type_text", f"Type text ({len(text)} chars)", {"text": text, "interval": interval},
                              lambda: self.keyboard.type_text(text, interval=interval))
 
-    def press_key(self, key: str) -> Dict[str, Any]:
+    def press_key(self, key: str) -> dict[str, Any]:
         return self._perform("press_key", f"Press key {key}", {"key": key},
                              lambda: self.keyboard.press(key))
 
-    def hotkey(self, *keys: str) -> Dict[str, Any]:
+    def hotkey(self, *keys: str) -> dict[str, Any]:
         return self._perform("hotkey", f"Hotkey {'+'.join(keys)}", {"keys": list(keys)},
                              lambda: self.keyboard.hotkey(*keys))
 
     # -- windows / applications -----------------------------------------
-    def open_application(self, name: str) -> Dict[str, Any]:
+    def open_application(self, name: str) -> dict[str, Any]:
         return self._perform("open_application", f"Open application {name}", {"name": name},
                              lambda: self.windows.open_application(name))
 
-    def close_application(self, name: str) -> Dict[str, Any]:
+    def close_application(self, name: str) -> dict[str, Any]:
         return self._perform("close_application", f"Close application {name}", {"name": name},
                              lambda: self.windows.close_application(name))
 
-    def focus_window(self, name: str) -> Dict[str, Any]:
+    def focus_window(self, name: str) -> dict[str, Any]:
         return self._perform("focus_window", f"Focus window {name}", {"name": name},
                              lambda: self.windows.focus_window(name))
 
     # -- vision-driven --------------------------------------------------
-    def find_on_screen(self, target: str) -> Dict[str, Any]:
+    def find_on_screen(self, target: str) -> dict[str, Any]:
         """Locate a described UI target and return its screen coordinates."""
         args = {"target": target}
         gate = self._gate("find_on_screen", args)
@@ -216,7 +217,7 @@ class ComputerActionController:
         self.history.append(detection)
         return detection
 
-    def click_target(self, target: str) -> Dict[str, Any]:
+    def click_target(self, target: str) -> dict[str, Any]:
         """Vision-driven click: locate ``target`` on screen, then click it."""
         detection = self.find_on_screen(target)
         if not detection.get("found"):

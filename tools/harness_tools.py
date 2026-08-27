@@ -1,17 +1,17 @@
 """Tools for the jcode-inspired harness: sessions, swarm, bus, file-shift."""
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
-def harness_sessions() -> Dict[str, Any]:
+def harness_sessions() -> dict[str, Any]:
     from core.harness import sessions
 
     items = sessions.list_sessions()
     return {"sessions": items, "count": len(items)}
 
 
-def harness_message(body: str, sender: str, to: str = "", channel: str = "", kind: str = "dm") -> Dict[str, Any]:
+def harness_message(body: str, sender: str, to: str = "", channel: str = "", kind: str = "dm") -> dict[str, Any]:
     from core.harness import bus
 
     k = kind if not channel else "channel"
@@ -20,26 +20,26 @@ def harness_message(body: str, sender: str, to: str = "", channel: str = "", kin
     return bus.send(body, sender, to=to or None, channel=channel or None, kind=k)
 
 
-def harness_inbox(session_id: str, unread_only: bool = True) -> Dict[str, Any]:
+def harness_inbox(session_id: str, unread_only: bool = True) -> dict[str, Any]:
     from core.harness import bus
 
     items = bus.inbox(session_id, unread_only=unread_only)
     return {"messages": items, "count": len(items)}
 
 
-def harness_swarm_spawn(task: str, parent: str, count: int = 1, model: str = "") -> Dict[str, Any]:
+def harness_swarm_spawn(task: str, parent: str, count: int = 1, model: str = "") -> dict[str, Any]:
     from core.harness.swarm import spawn
 
     return spawn(task, parent, model=model, count=count)
 
 
-def harness_file_note_read(session_id: str, path: str) -> Dict[str, Any]:
+def harness_file_note_read(session_id: str, path: str) -> dict[str, Any]:
     from core.harness import files
 
     return files.note_read(session_id, path)
 
 
-def harness_cascade_recall(query: str, limit: int = 5) -> Dict[str, Any]:
+def harness_cascade_recall(query: str, limit: int = 5) -> dict[str, Any]:
     from core.harness.memory_graph import cascade_recall
 
     return cascade_recall(query, limit=limit)

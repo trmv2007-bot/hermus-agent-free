@@ -1,7 +1,6 @@
 """Modes - Agent Mode, Chat Mode, Multi Agent Mode, Multi Chat Mode, SWE Mode - Free as requested"""
 
 from enum import Enum
-from typing import List, Dict
 from dataclasses import dataclass
 
 class AgentMode(str, Enum):
@@ -17,7 +16,7 @@ class AgentMode(str, Enum):
 class ModeConfig:
     name: str
     description: str
-    tools_allowed: List[str]  # List of tool names or "all" or "none" or categories
+    tools_allowed: list[str]  # List of tool names or "all" or "none" or categories
     max_tool_calls_per_turn: int
     use_multi_key: bool
     use_multi_ai: bool
@@ -133,7 +132,7 @@ def get_mode_config(mode: AgentMode | str) -> ModeConfig:
             return MODE_CONFIGS[AgentMode.AGENT]
     return MODE_CONFIGS.get(mode, MODE_CONFIGS[AgentMode.AGENT])
 
-def list_modes() -> Dict[str, Dict]:
+def list_modes() -> dict[str, dict]:
     """List all modes"""
     return {
         mode.value: {

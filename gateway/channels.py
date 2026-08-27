@@ -10,7 +10,8 @@ import os
 import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 import requests
 
@@ -21,7 +22,7 @@ _agent_factory: Optional[Callable] = None
 _telegram_poller_thread: Optional[threading.Thread] = None
 _telegram_poller_stop = threading.Event()
 _discord_thread: Optional[threading.Thread] = None
-_channel_status: Dict[str, Any] = {
+_channel_status: dict[str, Any] = {
     "telegram": {"running": False, "mode": None, "last_error": None, "updates": 0},
     "discord": {"running": False, "last_error": None, "messages": 0},
 }
@@ -32,7 +33,7 @@ def set_agent_factory(factory: Callable):
     _agent_factory = factory
 
 
-def get_channel_status() -> Dict:
+def get_channel_status() -> dict:
     return dict(_channel_status)
 
 
@@ -42,7 +43,7 @@ def get_telegram_token() -> Optional[str]:
     return os.getenv("TELEGRAM_BOT_TOKEN") or config.telegram_bot_token
 
 
-def telegram_api(method: str, payload: Dict = None, token: str = None) -> Dict:
+def telegram_api(method: str, payload: dict = None, token: str = None) -> dict:
     token = token or get_telegram_token()
     if not token:
         return {"ok": False, "error": "TELEGRAM_BOT_TOKEN not set"}
@@ -61,7 +62,7 @@ def telegram_send_message(
     reply_to_message_id: int = None,
     parse_mode: str = None,
     token: str = None,
-) -> Dict:
+) -> dict:
     """Send a message via Telegram Bot API (real send)."""
     if not text:
         return {"ok": False, "error": "empty text"}
@@ -84,11 +85,11 @@ def telegram_send_message(
     return last or {"ok": False, "error": "no send"}
 
 
-def telegram_send_chat_action(chat_id: str | int, action: str = "typing", token: str = None) -> Dict:
+def telegram_send_chat_action(chat_id: str | int, action: str = "typing", token: str = None) -> dict:
     return telegram_api("sendChatAction", {"chat_id": chat_id, "action": action}, token=token)
 
 
-def handle_telegram_update(update: Dict, agent_factory: Callable = None) -> Dict:
+def handle_telegram_update(update: dict, agent_factory: Callable = None) -> dict:
     """
     Process one Telegram update dict.
     Replies via sendMessage. Supports text + voice (downloads + Whisper if available).
@@ -175,7 +176,7 @@ def handle_telegram_update(update: Dict, agent_factory: Callable = None) -> Dict
         return {"ok": False, "error": err, "trace": traceback.format_exc()[-500:]}
 
 
-def _telegram_transcribe_voice(message: Dict) -> str:
+def _telegram_transcribe_voice(message: dict) -> str:
     token = get_telegram_token()
     voice = message.get("voice") or message.get("audio") or {}
     file_id = voice.get("file_id")

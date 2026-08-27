@@ -7,14 +7,14 @@ import json
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .config import config
-from .llm import free_llm, FreeLLM
+from .llm import FreeLLM
 from .memory import memory
 from .skill_manager import skill_manager
 from .task_tracker import task_tracker
-from .modes import AgentMode, get_mode_config, list_modes
+from .modes import AgentMode, get_mode_config
 from .tool_registry import tool_registry
 from .run_hooks import CancelledRun, CancelToken, make_emitter
 
@@ -37,7 +37,7 @@ class HermusAgent:
         self.session_id = session_id or (
             f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         )
-        self.trajectory: List[Dict] = []
+        self.trajectory: list[dict] = []
         self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
         self.max_steps = max_steps or getattr(config, "max_tool_steps", 8)
 
@@ -84,13 +84,13 @@ class HermusAgent:
         except Exception:
             pass
 
-    def _get_tools(self) -> List[Dict]:
+    def _get_tools(self) -> list[dict]:
         """Definitions from auto-discovered registry, filtered by mode."""
         allowed = self.mode_config.tools_allowed
         if "all" in allowed:
             return tool_registry.get_definitions(allowed={"all"})
         if "none" in allowed:
-            defs: List[Dict] = []
+            defs: list[dict] = []
         else:
             defs = tool_registry.get_definitions(allowed=set(allowed))
         # User-defined custom APIs are available in every mode that allows them
@@ -131,11 +131,11 @@ class HermusAgent:
         except Exception:
             return ""
 
-    def _execute_tool(self, name: str, args: Dict) -> Dict:
+    def _execute_tool(self, name: str, args: dict) -> dict:
         """Execute via central registry — all tools including full pentest map."""
         return tool_registry.execute(name, args or {})
 
-    def _apply_router(self, user_message: str) -> Optional[Dict]:
+    def _apply_router(self, user_message: str) -> Optional[dict]:
         """Model Router 2.0: swap the LLM to the best available model for this turn.
 
         Returns the selection dict on success, or None when routing is skipped
@@ -285,7 +285,7 @@ Rules:
         on_event=None,
         stream: bool = False,
         should_cancel=None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Multi-step agent loop: plan → tool calls → observe → repeat → final answer.
 
         ``on_event(event_type, data)`` receives lifecycle events (steps, tool
@@ -475,7 +475,7 @@ Rules:
                 else ""
             )
 
-        messages: List[Dict] = [
+        messages: list[dict] = [
             {
                 "role": "system",
                 "content": system_prompt
@@ -502,7 +502,7 @@ Rules:
             elif role in ("user", "assistant", "system"):
                 messages.append({"role": role, "content": turn.get("content", "")[:4000]})
 
-        all_tool_results: List[Dict] = []
+        all_tool_results: list[dict] = []
         steps = 0
         final_content = ""
         last_usage = {}
@@ -651,7 +651,7 @@ Rules:
 
         # DeepThink deliberation strategy (Phase 3): reflexion / verify / self-consistency
         strategy = "none"
-        strategy_meta: Dict = {}
+        strategy_meta: dict = {}
         try:
             from .reasoning.governor import governor as _gov
             from .reasoning.strategies import apply_strategy
@@ -838,7 +838,7 @@ Rules:
         }
 
     def _persist_memory2(self, user_message: str, final_content: str,
-                         tool_results: List[Dict]) -> None:
+                         tool_results: list[dict]) -> None:
         """Auto-persist typed memories after a turn (best-effort, offline-safe)."""
         if not getattr(config, "memory2_enabled", True):
             return
@@ -870,7 +870,7 @@ Rules:
         except Exception:
             pass
 
-    def _verify_final(self, user_message: str, final_content: str) -> Dict:
+    def _verify_final(self, user_message: str, final_content: str) -> dict:
         """Lightweight verification of the final answer (autonomous gate)."""
         try:
             from .autonomous import Verifier
@@ -880,7 +880,7 @@ Rules:
         except Exception as e:
             return {"verified": True, "error": str(e)}
 
-    def autonomous(self, task: str, max_repairs: int = 2) -> Dict[str, Any]:
+    def autonomous(self, task: str, max_repairs: int = 2) -> dict[str, Any]:
         """Run a goal through the full plan→execute→observe→verify→repair loop.
 
         Each execution step reuses this agent's ReAct loop (``self.chat``); the
@@ -899,7 +899,7 @@ Rules:
         report = runner.run(task)
         return report.to_dict()
 
-    def _maybe_fleet_distribute(self, user_message: str) -> Optional[Dict[str, Any]]:
+    def _maybe_fleet_distribute(self, user_message: str) -> Optional[dict[str, Any]]:
         """
         In multi-agent / multi-chat modes, auto-dispatch hard goals across
         multiple models and API keys via the model fleet.
@@ -1110,11 +1110,11 @@ def _preview(result: Any, limit: int = 400) -> str:
     return text[:limit]
 
 
-def _safe_trunc_args(args: Any, limit: int = 300) -> Dict[str, Any]:
+def _safe_trunc_args(args: Any, limit: int = 300) -> dict[str, Any]:
     """Argument summary safe to publish to a dashboard (no long blobs)."""
     if not isinstance(args, dict):
         return {"value": str(args)[:limit]}
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for k, v in args.items():
         if isinstance(v, str):
             out[k] = v[:160] + ("…" if len(v) > 160 else "")

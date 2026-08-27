@@ -31,7 +31,7 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .config import config
 
@@ -49,9 +49,9 @@ def _scalar(v: Any) -> str:
     return json.dumps(v)
 
 
-def dump_yaml(d: Dict[str, Any]) -> str:
+def dump_yaml(d: dict[str, Any]) -> str:
     """Minimal flat-YAML writer (scalars + lists only)."""
-    lines: List[str] = []
+    lines: list[str] = []
     for k, v in d.items():
         if isinstance(v, list):
             lines.append(f"{k}:")
@@ -66,9 +66,9 @@ def dump_yaml(d: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def load_yaml(text: str) -> Dict[str, Any]:
+def load_yaml(text: str) -> dict[str, Any]:
     """Parse the flat-YAML subset emitted by :func:`dump_yaml`."""
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     current_list: Optional[str] = None
     for raw in text.splitlines():
         line = raw.rstrip()
@@ -124,7 +124,7 @@ class Project:
     def memory_db(self) -> Path:
         return self.path / "memory.db"
 
-    def load(self) -> Dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         if not self.config_path.exists():
             return {"name": self.name, "description": "", "created": ""}
         try:
@@ -132,10 +132,10 @@ class Project:
         except Exception:
             return {"name": self.name, "description": "", "created": ""}
 
-    def save(self, data: Dict[str, Any]) -> None:
+    def save(self, data: dict[str, Any]) -> None:
         self.config_path.write_text(dump_yaml(data), encoding="utf-8")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = self.load()
         data.setdefault("name", self.name)
         data.setdefault("path", str(self.path))
@@ -154,7 +154,7 @@ class Workspace:
 
     # -- layout ---------------------------------------------------------
     @property
-    def dirs(self) -> Dict[str, Path]:
+    def dirs(self) -> dict[str, Path]:
         return {
             "root": self.base_dir,
             "agents": self.base_dir / "agents",
@@ -186,7 +186,7 @@ class Workspace:
         """
         path = self.dirs["logs"] / f"{name}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
-        record: Dict[str, Any] = {"ts": datetime.now().isoformat()}
+        record: dict[str, Any] = {"ts": datetime.now().isoformat()}
         if isinstance(line, dict):
             record.update(line)
         else:
@@ -200,7 +200,7 @@ class Workspace:
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "default"
         return self.dirs["projects"] / safe
 
-    def create_project(self, name: str, description: str = "") -> Dict[str, Any]:
+    def create_project(self, name: str, description: str = "") -> dict[str, Any]:
         path = self.project_dir(name)
         if path.exists():
             return {"success": False, "error": f"project '{name}' already exists", "path": str(path)}
@@ -221,7 +221,7 @@ class Workspace:
         conn.close()
         return {"success": True, "name": name, "path": str(path)}
 
-    def list_projects(self) -> List[Dict[str, Any]]:
+    def list_projects(self) -> list[dict[str, Any]]:
         out = []
         if not self.dirs["projects"].exists():
             return out
@@ -236,7 +236,7 @@ class Workspace:
             return None
         return Project(path)
 
-    def delete_project(self, name: str) -> Dict[str, Any]:
+    def delete_project(self, name: str) -> dict[str, Any]:
         path = self.project_dir(name)
         if not path.exists():
             return {"success": False, "error": f"project '{name}' not found"}
@@ -246,7 +246,7 @@ class Workspace:
         return {"success": True, "name": name}
 
     # -- current project ------------------------------------------------
-    def set_current_project(self, name: str) -> Dict[str, Any]:
+    def set_current_project(self, name: str) -> dict[str, Any]:
         p = self.get_project(name)
         if not p:
             return {"success": False, "error": f"project '{name}' not found"}

@@ -10,13 +10,11 @@ import ast
 import json
 import os
 import re
-import shutil
 import subprocess
 import zipfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Optional
 
 from .workspace import workspace
 
@@ -30,42 +28,42 @@ class VerificationResult:
     behavioral_verified: bool = True
     structural_score: float = 1.0
     behavioral_score: float = 1.0
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
-    artifacts: List[str] = field(default_factory=list)
-    details: Dict[str, Any] = field(default_factory=dict)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
+    artifacts: list[str] = field(default_factory=list)
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 class BaseVerifier:
     domain: str = "generic"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         raise NotImplementedError
 
 
 class PythonVerifier(BaseVerifier):
     domain = "python"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         root_dir = Path(context.get("workspace_dir") or context.get("target_dir") or workspace.root)
         files = context.get("files_modified") or context.get("files") or []
         execution_output = str(context.get("output") or context.get("result") or "")
 
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        warnings: List[str] = []
-        suggestions: List[str] = []
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        warnings: list[str] = []
+        suggestions: list[str] = []
 
         # --- A. STRUCTURAL VERIFICATION ---
         struct_passed = 0
         struct_total = 0
 
-        py_files: List[Path] = []
+        py_files: list[Path] = []
         if files:
             for f in files:
                 p = Path(f) if Path(f).is_absolute() else root_dir / f
@@ -151,13 +149,13 @@ class PythonVerifier(BaseVerifier):
 class AndroidVerifier(BaseVerifier):
     domain = "android"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         root_dir = Path(context.get("workspace_dir") or context.get("target_dir") or workspace.root)
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        warnings: List[str] = []
-        suggestions: List[str] = []
-        artifacts: List[str] = []
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        warnings: list[str] = []
+        suggestions: list[str] = []
+        artifacts: list[str] = []
 
         struct_passed = 0
         manifest_files = list(root_dir.rglob("AndroidManifest.xml"))
@@ -227,13 +225,13 @@ class AndroidVerifier(BaseVerifier):
 class WebVerifier(BaseVerifier):
     domain = "web"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         root_dir = Path(context.get("workspace_dir") or context.get("target_dir") or workspace.root)
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        warnings: List[str] = []
-        suggestions: List[str] = []
-        artifacts: List[str] = []
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        warnings: list[str] = []
+        suggestions: list[str] = []
+        artifacts: list[str] = []
 
         html_files = list(root_dir.rglob("index.html")) + list(root_dir.rglob("*.html"))
         pkg_files = list(root_dir.rglob("package.json"))
@@ -283,11 +281,11 @@ class WebVerifier(BaseVerifier):
 class GitVerifier(BaseVerifier):
     domain = "git"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         root_dir = Path(context.get("workspace_dir") or context.get("target_dir") or workspace.root)
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        warnings: List[str] = []
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         if not (root_dir / ".git").exists():
             return VerificationResult(verified=False, score=0.0, domain=self.domain, errors=["Not a git repository"])
@@ -318,10 +316,10 @@ class GitVerifier(BaseVerifier):
 class LinuxVerifier(BaseVerifier):
     domain = "linux"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        suggestions: List[str] = []
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        suggestions: list[str] = []
 
         struct_ok = True
         behav_ok = True
@@ -361,11 +359,11 @@ class LinuxVerifier(BaseVerifier):
 class ResearchVerifier(BaseVerifier):
     domain = "research"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         content = str(context.get("output") or context.get("result") or context.get("content") or "")
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        warnings: List[str] = []
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         has_headings = bool(re.search(r"^#+\s+|\n#+\s+", content))
         struct_ok = has_headings or bool(re.search(r"^\s*[-*•]\s+", content, re.MULTILINE))
@@ -404,12 +402,12 @@ class ResearchVerifier(BaseVerifier):
 class FileVerifier(BaseVerifier):
     domain = "file"
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         root_dir = Path(context.get("workspace_dir") or workspace.root)
         target = context.get("target_path") or context.get("file")
-        evidence: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        artifacts: List[str] = []
+        evidence: list[dict[str, Any]] = []
+        errors: list[str] = []
+        artifacts: list[str] = []
 
         if not target:
             return VerificationResult(verified=False, score=0.0, domain=self.domain, errors=["No target file specified"])
@@ -457,7 +455,7 @@ class GenericVerifier(BaseVerifier):
         "command not found", "connection refused", "permission denied"
     )
 
-    def verify(self, context: Dict[str, Any]) -> VerificationResult:
+    def verify(self, context: dict[str, Any]) -> VerificationResult:
         text = str(context.get("output") or context.get("result") or "").strip()
         low = text.lower()
         problems = [m for m in self.ERROR_MARKERS if m in low]
@@ -479,7 +477,7 @@ class GenericVerifier(BaseVerifier):
 
 class VerifierRegistry:
     def __init__(self):
-        self._verifiers: Dict[str, BaseVerifier] = {
+        self._verifiers: dict[str, BaseVerifier] = {
             "python": PythonVerifier(),
             "android": AndroidVerifier(),
             "web": WebVerifier(),
@@ -496,10 +494,10 @@ class VerifierRegistry:
     def get(self, domain: str) -> BaseVerifier:
         return self._verifiers.get(domain.lower(), self._verifiers["generic"])
 
-    def list_domains(self) -> List[str]:
+    def list_domains(self) -> list[str]:
         return sorted(list(self._verifiers.keys()))
 
-    def auto_detect_domain(self, task: str, files_modified: Optional[List[str]] = None, context: Optional[Dict[str, Any]] = None) -> str:
+    def auto_detect_domain(self, task: str, files_modified: Optional[list[str]] = None, context: Optional[dict[str, Any]] = None) -> str:
         low = task.lower()
         files = files_modified or (context.get("files") if context else []) or []
         file_exts = {Path(f).suffix.lower() for f in files if f}
@@ -524,7 +522,7 @@ class VerifierRegistry:
     def verify(
         self,
         domain_or_auto: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> VerificationResult:
         ctx = context or {}
         task = ctx.get("task", "")
@@ -537,8 +535,8 @@ class VerifierRegistry:
 
     def verify_multi(
         self,
-        domains: List[str],
-        context: Optional[Dict[str, Any]] = None,
+        domains: list[str],
+        context: Optional[dict[str, Any]] = None,
     ) -> VerificationResult:
         ctx = context or {}
         results = [self.get(d).verify(ctx) for d in domains]

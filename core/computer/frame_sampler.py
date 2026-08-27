@@ -6,12 +6,12 @@ change-detection path inexpensive.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from .recorder import decode_frame
 
 
-def _comparison_image(value: Any, max_size: Tuple[int, int] = (320, 180)) -> Any:
+def _comparison_image(value: Any, max_size: tuple[int, int] = (320, 180)) -> Any:
     image = decode_frame(value)
     if image is None:
         return None
@@ -45,10 +45,10 @@ class FrameSampler:
     def __init__(self, threshold: float = 0.02):
         self.threshold = max(0.0, min(float(threshold), 1.0))
 
-    def detect_changes(self, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def detect_changes(self, frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Mark frames that differ from the previous frame beyond threshold."""
-        events: List[Dict[str, Any]] = []
-        prev: Optional[Dict[str, Any]] = None
+        events: list[dict[str, Any]] = []
+        prev: Optional[dict[str, Any]] = None
         for index, frame in enumerate(frames):
             if prev is None:
                 prev = frame
@@ -67,10 +67,10 @@ class FrameSampler:
 
     def select_important(
         self,
-        frames: List[Dict[str, Any]],
+        frames: list[dict[str, Any]],
         max_frames: int = 5,
         chronological: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Pick frames with the largest changes, optionally restoring time order."""
         events = self.detect_changes(frames)
         events.sort(key=lambda event: event.get("change_score", 0.0), reverse=True)
@@ -81,9 +81,9 @@ class FrameSampler:
 
     def before_after(
         self,
-        frames: List[Dict[str, Any]],
+        frames: list[dict[str, Any]],
         event_index: int,
-    ) -> Tuple[Optional[Any], Optional[Any], Optional[Any]]:
+    ) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
         """Return decoded ``(before, event, after)`` around a frame index."""
         if not frames or event_index < 0 or event_index >= len(frames):
             return None, None, None
@@ -92,7 +92,7 @@ class FrameSampler:
         after = decode_frame(frames[event_index + 1]) if event_index + 1 < len(frames) else None
         return before, event, after
 
-    def summarize(self, frames: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def summarize(self, frames: list[dict[str, Any]]) -> dict[str, Any]:
         events = self.detect_changes(frames)
         important = self.select_important(frames, chronological=True)
         return {

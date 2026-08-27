@@ -1,9 +1,7 @@
 """Vision LLaVA via Ollama Free - No API key, local free vision model"""
 from pathlib import Path
-from typing import Dict, List
 import base64
 import requests
-import os
 
 from core.config import config
 
@@ -17,7 +15,7 @@ def _encode_image_to_base64(image_path: str) -> str:
     except Exception as e:
         return ""
 
-def vision_analyze(image_path: str, prompt: str = "Describe this image in detail", model: str = "llava:7b") -> Dict:
+def vision_analyze(image_path: str, prompt: str = "Describe this image in detail", model: str = "llava:7b") -> dict:
     """Vision analysis via Ollama LLaVA free - no API key, local"""
     # Check if image exists
     p = Path(image_path)
@@ -62,7 +60,7 @@ def vision_analyze(image_path: str, prompt: str = "Describe this image in detail
     except Exception as e:
         return {"success": False, "error": f"Vision analyze failed: {e}"}
 
-def vision_analyze_multiple(image_paths: List[str], prompt: str = "Describe these images", model: str = "llava:7b") -> Dict:
+def vision_analyze_multiple(image_paths: list[str], prompt: str = "Describe these images", model: str = "llava:7b") -> dict:
     """Analyze multiple images - free"""
     results = []
     for img_path in image_paths:
@@ -70,7 +68,7 @@ def vision_analyze_multiple(image_paths: List[str], prompt: str = "Describe thes
         results.append(result)
     return {"results": results, "count": len(results)}
 
-def vision_available_models() -> Dict:
+def vision_available_models() -> dict:
     """List available vision models in Ollama - free"""
     try:
         url = f"{config.ollama_base_url}/api/tags"

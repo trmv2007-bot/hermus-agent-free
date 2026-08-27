@@ -4,7 +4,7 @@ import json
 import hashlib
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing import Any, Optional
 from threading import Lock
 
 class LRUCache:
@@ -54,7 +54,7 @@ class LRUCache:
             self.cache.clear()
             self.timestamps.clear()
 
-    def stats(self) -> Dict:
+    def stats(self) -> dict:
         total = self.hits + self.misses
         hit_rate = self.hits / total if total > 0 else 0
         return {
@@ -119,7 +119,7 @@ def clear_all_caches():
     file_cache.clear()
     return {"cleared": True, "message": "All caches cleared"}
 
-def get_cache_stats() -> Dict:
+def get_cache_stats() -> dict:
     """Get stats for all caches - for dashboard analytics"""
     return {
         "llm_cache": llm_cache.stats(),

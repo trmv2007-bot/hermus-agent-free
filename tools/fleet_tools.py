@@ -1,14 +1,13 @@
 """Tools: multi-model fleet, key health, model discovery, rate limits — any API key."""
-from typing import Dict, List, Any
 
 
-def list_ai_providers() -> Dict:
+def list_ai_providers() -> dict:
     from core.providers import list_providers
 
     return {"providers": list_providers(), "count": len(list_providers())}
 
 
-def list_api_keys(provider: str = None) -> Dict:
+def list_api_keys(provider: str = None) -> dict:
     from core.multi_key import multi_key_manager
 
     return {"keys": multi_key_manager.list_keys(provider, redact=True)}
@@ -22,7 +21,7 @@ def add_api_key(
     default_model: str = None,
     rpm_limit: int = None,
     tpm_limit: int = None,
-) -> Dict:
+) -> dict:
     """Add any AI API key (OpenAI-compatible). Auto health + model discovery."""
     from core.multi_key import multi_key_manager
 
@@ -38,7 +37,7 @@ def add_api_key(
     )
 
 
-def discover_models(provider: str, api_key: str = None, base_url: str = None) -> Dict:
+def discover_models(provider: str, api_key: str = None, base_url: str = None) -> dict:
     """List models this API key can run."""
     from core.multi_key import multi_key_manager
 
@@ -51,7 +50,7 @@ def check_api_key_health(
     base_url: str = None,
     model: str = None,
     all_keys: bool = False,
-) -> Dict:
+) -> dict:
     """Health check: auth, latency, rate-limit headers, usable models."""
     from core.multi_key import multi_key_manager
 
@@ -69,14 +68,14 @@ def check_api_key_health(
     return multi_key_manager.check_key_health(provider, api_key=api_key, base_url=base_url, model=model)
 
 
-def get_rate_limit_status(provider: str = None) -> Dict:
+def get_rate_limit_status(provider: str = None) -> dict:
     """RPM/TPM usage vs limits + last server-reported rate headers."""
     from core.multi_key import multi_key_manager
 
     return multi_key_manager.rate_status(provider)
 
 
-def fleet_list_workers(models: str = None, providers: str = None) -> Dict:
+def fleet_list_workers(models: str = None, providers: str = None) -> dict:
     from core.model_fleet import model_fleet
 
     m = [x.strip() for x in (models or "").split(",") if x.strip()] or None
@@ -90,7 +89,7 @@ def fleet_distribute_task(
     models: str = None,
     providers: str = None,
     max_workers: int = 4,
-) -> Dict:
+) -> dict:
     """
     Give tasks to multiple AI models/keys in parallel.
     strategy: auto | fanout | map | race
@@ -109,7 +108,7 @@ def fleet_distribute_task(
     )
 
 
-def fleet_fanout(prompt: str, models: str = None, providers: str = None, max_workers: int = 4) -> Dict:
+def fleet_fanout(prompt: str, models: str = None, providers: str = None, max_workers: int = 4) -> dict:
     from core.model_fleet import model_fleet
 
     m = [x.strip() for x in (models or "").split(",") if x.strip()] or None
@@ -117,7 +116,7 @@ def fleet_fanout(prompt: str, models: str = None, providers: str = None, max_wor
     return model_fleet.fanout(prompt, models=m, providers=p, max_workers=max_workers, judge=True)
 
 
-def fleet_map_goal(goal: str, models: str = None, providers: str = None, max_workers: int = 4) -> Dict:
+def fleet_map_goal(goal: str, models: str = None, providers: str = None, max_workers: int = 4) -> dict:
     from core.model_fleet import model_fleet
 
     m = [x.strip() for x in (models or "").split(",") if x.strip()] or None

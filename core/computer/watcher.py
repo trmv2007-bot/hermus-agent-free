@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 from .frame_sampler import _image_diff
 from .video_analyzer import VideoAnalyzer
@@ -13,7 +14,7 @@ class ScreenWatcher:
         self,
         recorder: Any,
         analyzer: Optional[VideoAnalyzer] = None,
-        evaluator: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+        evaluator: Optional[Callable[[Any, str], dict[str, Any]]] = None,
         change_threshold: float = 0.02,
     ):
         self.recorder = recorder
@@ -28,7 +29,7 @@ class ScreenWatcher:
         poll_interval: float = 0.25,
         stable_matches: int = 1,
         start_if_needed: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Stop when ``condition`` is seen on an initial or changed frame."""
         timeout = max(0.1, float(timeout))
         poll_interval = max(0.05, float(poll_interval))
@@ -47,7 +48,7 @@ class ScreenWatcher:
         last_sequence = None
         consecutive = 0
         checked = 0
-        last_result: Dict[str, Any] = {}
+        last_result: dict[str, Any] = {}
         try:
             while time.monotonic() - started_at < timeout:
                 frame = self.recorder.latest()

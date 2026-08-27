@@ -4,7 +4,7 @@ import json
 import re
 import requests
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from datetime import datetime
 from .config import config
 
@@ -17,13 +17,13 @@ class CustomAPIManager:
         if not self.db_path.exists():
             self.db_path.write_text("[]")
 
-    def _load(self) -> List[Dict]:
+    def _load(self) -> list[dict]:
         try:
             return json.loads(self.db_path.read_text())
         except:
             return []
 
-    def _save(self, apis: List[Dict]):
+    def _save(self, apis: list[dict]):
         self.db_path.write_text(json.dumps(apis, indent=2))
 
     def _invalidate_tool_registry(self):
@@ -37,12 +37,12 @@ class CustomAPIManager:
         except Exception:
             pass
 
-    def list_apis(self) -> List[Dict]:
+    def list_apis(self) -> list[dict]:
         return self._load()
 
     MAX_KEYS_PER_API_NAME = 10  # Increased to 10 as user requested (was 3 example)
 
-    def add_api(self, api_def: Dict) -> Dict:
+    def add_api(self, api_def: dict) -> dict:
         """Add custom API - free - now supports up to 10 keys for same API name from different websites as requested"""
         apis = self._load()
 
@@ -109,7 +109,7 @@ class CustomAPIManager:
             else:
                 return {"success": True, "api": api_def, "message": f"Custom API '{name}' added. Now available as tool for agent."}
 
-    def remove_api(self, name: str) -> Dict:
+    def remove_api(self, name: str) -> dict:
         apis = self._load()
         original_len = len(apis)
         apis = [a for a in apis if a["name"] != name and a["id"] != name]
@@ -119,14 +119,14 @@ class CustomAPIManager:
         self._invalidate_tool_registry()
         return {"success": True, "message": f"Removed custom API '{name}'"}
 
-    def get_api(self, name: str) -> Optional[Dict]:
+    def get_api(self, name: str) -> Optional[dict]:
         apis = self._load()
         for api in apis:
             if api["name"] == name or api["id"] == name:
                 return api
         return None
 
-    def get_tool_definitions(self) -> List[Dict]:
+    def get_tool_definitions(self) -> list[dict]:
         """Convert custom APIs to LLM tool definitions - free - deduplicated by name for multi-key support"""
         apis = self._load()
         # Deduplicate by name - for multi-key support, multiple APIs with same name (different keys) should only appear as 1 tool for LLM
@@ -187,7 +187,7 @@ class CustomAPIManager:
             tools.append(tool_def)
         return tools
 
-    def execute_api(self, name: str, arguments: Dict) -> Dict:
+    def execute_api(self, name: str, arguments: dict) -> dict:
         """Execute custom API - free, uses requests + multi-key round-robin for same API name with multiple keys"""
         # Check if multiple APIs with same name exist (multi-key for custom APIs)
         all_apis = self._load()
@@ -234,7 +234,7 @@ class CustomAPIManager:
 
         return self._execute_single_api(api, arguments)
 
-    def _execute_single_api(self, api: Dict, arguments: Dict) -> Dict:
+    def _execute_single_api(self, api: dict, arguments: dict) -> dict:
         """Execute single custom API definition - internal"""
         try:
             url = api["url"]

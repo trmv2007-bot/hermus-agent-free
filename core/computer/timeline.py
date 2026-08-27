@@ -7,7 +7,8 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Optional
+from collections.abc import Iterable
 
 
 @dataclass
@@ -17,9 +18,9 @@ class TimelineEvent:
     description: str
     confidence: float = 0.0
     timestamp: Optional[str] = None
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["offset"] = round(float(data["offset"]), 3)
         data["confidence"] = round(max(0.0, min(float(data["confidence"]), 1.0)), 3)
@@ -31,7 +32,7 @@ class Timeline:
         self.task = task
         self.recording = recording
         self.started = started or datetime.now().astimezone().isoformat()
-        self.events: List[TimelineEvent] = []
+        self.events: list[TimelineEvent] = []
 
     def add(
         self,
@@ -40,7 +41,7 @@ class Timeline:
         description: str,
         confidence: float = 0.0,
         timestamp: Optional[str] = None,
-        evidence: Optional[Dict[str, Any]] = None,
+        evidence: Optional[dict[str, Any]] = None,
     ) -> TimelineEvent:
         event = TimelineEvent(
             offset=max(0.0, float(offset or 0.0)),
@@ -54,7 +55,7 @@ class Timeline:
         self.events.sort(key=lambda item: item.offset)
         return event
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "recording": self.recording,
@@ -120,12 +121,12 @@ class TaskArtifacts:
     def write(
         self,
         timeline: Optional[Any] = None,
-        events: Optional[Iterable[Dict[str, Any]]] = None,
-        actions: Optional[Iterable[Dict[str, Any]]] = None,
-        result: Optional[Dict[str, Any]] = None,
+        events: Optional[Iterable[dict[str, Any]]] = None,
+        actions: Optional[Iterable[dict[str, Any]]] = None,
+        result: Optional[dict[str, Any]] = None,
         recording_path: Optional[str] = None,
         copy_recording: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if isinstance(timeline, Timeline):
             timeline_data = timeline.to_dict()
         else:

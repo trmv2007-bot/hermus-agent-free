@@ -22,8 +22,7 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from ..config import config
 from ..llm import FreeLLM
@@ -61,16 +60,16 @@ class CouncilSession:
         self.max_rounds = max_rounds or budget["max_rounds"]
         self.execute_plan_flag = execute
         self.doc = constitution.load()
-        self.members: List[CounselMember] = []
-        self.debaters: List[CounselMember] = []
-        self.transcript: List[Dict] = []
-        self.proposal_texts: Dict[str, str] = {}
-        self.votes: List[Dict] = []
+        self.members: list[CounselMember] = []
+        self.debaters: list[CounselMember] = []
+        self.transcript: list[dict] = []
+        self.proposal_texts: dict[str, str] = {}
+        self.votes: list[dict] = []
         self.plan: Optional[Plan] = None
-        self.step_results: List[Dict] = []
+        self.step_results: list[dict] = []
         self.final_answer: str = ""
         self.replanned = False
-        self.errors: List[str] = []
+        self.errors: list[str] = []
         self.task_id: Optional[str] = None
         self.rules = self.doc.get("rules", {})
         self.budget_doc = self.doc.get("budget", {})
@@ -120,7 +119,7 @@ class CouncilSession:
 
     # ---------------------------------------------------------------- lifecycle
 
-    def run(self) -> Dict:
+    def run(self) -> dict:
         """Full council lifecycle. Returns a summary dict (never raises)."""
         try:
             print(f"\n[⚖️ Counsel] Convening council for: {self.goal[:120]}")
@@ -158,7 +157,7 @@ class CouncilSession:
 
     # ---------------------------------------------------------------- talk
 
-    def _add_turn(self, agent: str, content: str, round_num: int = 0, extra: Optional[Dict] = None):
+    def _add_turn(self, agent: str, content: str, round_num: int = 0, extra: Optional[dict] = None):
         turn = {
             "agent": agent,
             "role": "council",
@@ -185,7 +184,7 @@ class CouncilSession:
     def _member_llm(self, member: CounselMember) -> FreeLLM:
         return member.llm()
 
-    def _base_messages(self, member: CounselMember, extra_system: str = "") -> List[Dict]:
+    def _base_messages(self, member: CounselMember, extra_system: str = "") -> list[dict]:
         rules_text = json.dumps(self.rules, indent=1)[:600]
         system = (
             f"{member.persona}\n\n"
@@ -204,7 +203,7 @@ class CouncilSession:
         """Round 1: every debater drafts its approach in parallel."""
         print(f"[⚖️ Counsel] Proposals from {len(self.debaters)} members (parallel)...")
 
-        def draft(m: CounselMember) -> Dict:
+        def draft(m: CounselMember) -> dict:
             messages = self._base_messages(
                 m,
                 extra_system="\nYour task NOW: propose your approach to the task. End with 'PROPOSAL:' plus 3-6 concrete steps."
@@ -304,7 +303,7 @@ class CouncilSession:
         except Exception as e:
             print(f"[⚖️ Counsel] Judge failed ({e}) - skipping formal vote")
 
-    def _parse_vote_json(self, content: str) -> Optional[Dict]:
+    def _parse_vote_json(self, content: str) -> Optional[dict]:
         import re
 
         text = content.strip()
@@ -563,7 +562,7 @@ class CouncilSession:
             pass
         self._track_done(self.final_answer)
 
-    def summary(self) -> Dict:
+    def summary(self) -> dict:
         return {
             "session_id": self.session_id,
             "goal": self.goal,
@@ -582,7 +581,7 @@ class CouncilSession:
             "timestamp": datetime.now().isoformat(),
         }
 
-    def _maybe_review(self, summary: Dict):
+    def _maybe_review(self, summary: dict):
         """Meta-Counsel reviews the session and proposes self-upgrades (Phase 2)."""
         if not config.counsel_auto_review:
             return

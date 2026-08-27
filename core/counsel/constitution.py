@@ -23,12 +23,11 @@ import json
 import shutil
 import uuid
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..config import config
 
-DEFAULT_CONSTITUTION: Dict[str, Any] = {
+DEFAULT_CONSTITUTION: dict[str, Any] = {
     "version": 1,
     "name": "Hermus Council Constitution v1",
     "rules": {
@@ -124,7 +123,7 @@ class ConstitutionManager:
         if not self.path.exists():
             self.save(DEFAULT_CONSTITUTION, log=False)
 
-    def load(self) -> Dict:
+    def load(self) -> dict:
         try:
             doc = json.loads(self.path.read_text())
             if not isinstance(doc, dict) or "version" not in doc:
@@ -134,7 +133,7 @@ class ConstitutionManager:
             self.save(DEFAULT_CONSTITUTION, log=False)
             return dict(DEFAULT_CONSTITUTION)
 
-    def save(self, doc: Dict, log: bool = True, reason: str = ""):
+    def save(self, doc: dict, log: bool = True, reason: str = ""):
         """Atomic write + snapshot copy for every new version."""
         doc = dict(doc)
         doc["version"] = int(doc.get("version", 1))
@@ -158,18 +157,18 @@ class ConstitutionManager:
 
     # ---------- upgrade log ----------
 
-    def _load_log(self) -> List[Dict]:
+    def _load_log(self) -> list[dict]:
         try:
             return json.loads(self.log_path.read_text())
         except Exception:
             return []
 
-    def _append_log(self, entry: Dict):
+    def _append_log(self, entry: dict):
         log = self._load_log()
         log.append(entry)
         self.log_path.write_text(json.dumps(log[-200:], indent=2))
 
-    def upgrade_log(self) -> List[Dict]:
+    def upgrade_log(self) -> list[dict]:
         return self._load_log()
 
     # ---------- amendments ----------
@@ -177,7 +176,7 @@ class ConstitutionManager:
     ALLOWED_TARGETS = ("member_prompt", "rule", "budget", "strategy")
     LOW_RISK_TARGETS = ("member_prompt", "strategy")
 
-    def validate_amendment(self, a: Dict) -> Optional[str]:
+    def validate_amendment(self, a: dict) -> Optional[str]:
         """Return an error string if the amendment is invalid, else None."""
         if not isinstance(a, dict):
             return "amendment must be an object"
@@ -208,7 +207,7 @@ class ConstitutionManager:
                 return "budget amendments must target max_members or max_rounds"
         return None
 
-    def risk(self, a: Dict) -> str:
+    def risk(self, a: dict) -> str:
         """Low = prompt tweaks / strategy prefs. High = rules / budgets / roster."""
         target = a.get("target")
         if target in self.LOW_RISK_TARGETS:
@@ -221,7 +220,7 @@ class ConstitutionManager:
             return "low"
         return "high"  # budget changes
 
-    def apply_amendment(self, amendment: Dict, reason: str = "") -> Dict:
+    def apply_amendment(self, amendment: dict, reason: str = "") -> dict:
         """Validate + apply an amendment -> new constitution version."""
         err = self.validate_amendment(amendment)
         if err:
@@ -275,7 +274,7 @@ class ConstitutionManager:
         )
         return {"success": True, "version": doc["version"], "amendment": amendment}
 
-    def rollback(self, version: int) -> Dict:
+    def rollback(self, version: int) -> dict:
         """Restore a previous snapshot version."""
         snap = self.dir / f"constitution_v{version}.json"
         if not snap.exists():
@@ -290,16 +289,16 @@ class ConstitutionManager:
 
     # ---------- pending amendments (human approval for high-risk) ----------
 
-    def _load_pending(self) -> List[Dict]:
+    def _load_pending(self) -> list[dict]:
         try:
             return json.loads(self.pending_path.read_text())
         except Exception:
             return []
 
-    def _save_pending(self, items: List[Dict]):
+    def _save_pending(self, items: list[dict]):
         self.pending_path.write_text(json.dumps(items, indent=2))
 
-    def propose(self, amendment: Dict, source: str = "meta") -> Dict:
+    def propose(self, amendment: dict, source: str = "meta") -> dict:
         """Store an amendment. Low risk -> apply now (auto). High risk -> pending approval."""
         amendment = dict(amendment)
         amendment.setdefault("id", f"amend_{uuid.uuid4().hex[:8]}")
@@ -324,10 +323,10 @@ class ConstitutionManager:
         self._save_pending(pending)
         return {"success": True, "status": "pending", "risk": "high", "amendment": amendment}
 
-    def pending_amendments(self) -> List[Dict]:
+    def pending_amendments(self) -> list[dict]:
         return [p for p in self._load_pending() if p.get("status") == "pending"]
 
-    def approve(self, amendment_id: str) -> Dict:
+    def approve(self, amendment_id: str) -> dict:
         items = self._load_pending()
         for p in items:
             if p.get("id") == amendment_id and p.get("status") == "pending":
@@ -339,7 +338,7 @@ class ConstitutionManager:
                 return res
         return {"success": False, "error": f"pending amendment '{amendment_id}' not found"}
 
-    def reject(self, amendment_id: str) -> Dict:
+    def reject(self, amendment_id: str) -> dict:
         items = self._load_pending()
         for p in items:
             if p.get("id") == amendment_id and p.get("status") == "pending":
@@ -349,7 +348,7 @@ class ConstitutionManager:
                 return {"success": True, "rejected": amendment_id}
         return {"success": False, "error": f"pending amendment '{amendment_id}' not found"}
 
-    def diff(self, amendment_id: str) -> Dict:
+    def diff(self, amendment_id: str) -> dict:
         """Return a unified diff showing how the pending amendment would modify the constitution."""
         import difflib
         items = self._load_pending()
@@ -385,7 +384,7 @@ class ConstitutionManager:
     def current_version(self) -> int:
         return int(self.load().get("version", 1))
 
-    def status(self) -> Dict:
+    def status(self) -> dict:
         doc = self.load()
         return {
             "version": doc["version"],

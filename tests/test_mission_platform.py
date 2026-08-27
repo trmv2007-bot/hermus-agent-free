@@ -1,21 +1,16 @@
 """Unit tests for the Mission Platform, Rollback Manager, Artifact Manager, and Agent DAG."""
 from __future__ import annotations
 
-import json
-import os
-import tempfile
-import time
 from pathlib import Path
 
 import pytest
 
-from core.agent_dag import AgentDAG, DAGNodeStatus, create_standard_mission_dag
+from core.agent_dag import AgentDAG, DAGNodeStatus
 from core.artifact_manager import ArtifactManager
-from core.critic import CriticVerdict, Severity, critic_manager
+from core.critic import CriticVerdict, critic_manager
 from core.mission import MissionEngine, MissionState
-from core.permissions import Capability, Decision, PolicyGate
+from core.permissions import Decision, PolicyGate
 from core.rollback import RollbackManager
-from core.router2 import ModelRouter
 
 
 def test_rollback_manager_snapshot_and_restore(tmp_path):

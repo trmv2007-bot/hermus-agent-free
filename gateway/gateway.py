@@ -8,8 +8,8 @@ import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
-from fastapi import FastAPI, Request, Header, WebSocket
+from typing import Optional
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response, RedirectResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +18,6 @@ import uvicorn
 from core.config import config
 from core.agent import HermusAgent
 from core.task_tracker import task_tracker
-from core.cache import get_cache_stats
 try:
     from gateway.channels import (
         handle_telegram_update,
@@ -57,7 +56,7 @@ except ImportError:  # executed as a plain module (python gateway/gateway.py)
     from core.run_events import run_bus as _run_bus  # type: ignore
 
 # Store agents per user/platform for continuity
-AGENTS: Dict[str, HermusAgent] = {}
+AGENTS: dict[str, HermusAgent] = {}
 
 def get_agent_for_user(
     platform: str,
@@ -268,7 +267,7 @@ async def dashboard_legacy():
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache stats - for optimization dashboard"""
-    from core.cache import get_cache_stats, clear_all_caches
+    from core.cache import get_cache_stats
     return get_cache_stats()
 
 @app.post("/cache/clear")
@@ -438,7 +437,7 @@ async def channels_status():
 
 
 @app.post("/channels/start")
-async def channels_start(payload: Dict = None):
+async def channels_start(payload: dict = None):
     """Manually start Telegram polling + Discord bot"""
     payload = payload or {}
     mode = payload.get("telegram_mode") or getattr(config, "telegram_mode", "auto")
@@ -447,7 +446,7 @@ async def channels_start(payload: Dict = None):
 
 
 @app.post("/telegram/send")
-async def telegram_send(payload: Dict):
+async def telegram_send(payload: dict):
     """Send a Telegram message directly (ops / cron delivery)"""
     chat_id = payload.get("chat_id")
     text = payload.get("text", "")
@@ -563,7 +562,7 @@ async def fleet_workers():
 
 
 @app.post("/fleet/run")
-async def fleet_run(payload: Dict):
+async def fleet_run(payload: dict):
     from core.model_fleet import model_fleet
 
     goal = payload.get("goal") or payload.get("prompt") or ""
@@ -607,7 +606,7 @@ async def keys_models(provider: str, key: str = None, base_url: str = None):
 
 
 @app.post("/embeddings/ingest")
-async def embeddings_ingest(payload: Dict):
+async def embeddings_ingest(payload: dict):
     from core.embeddings import embedding_store
 
     path = payload.get("path")
@@ -617,7 +616,7 @@ async def embeddings_ingest(payload: Dict):
 
 
 @app.post("/embeddings/search")
-async def embeddings_search(payload: Dict):
+async def embeddings_search(payload: dict):
     from core.embeddings import embedding_store
 
     query = payload.get("query", "")
@@ -627,7 +626,7 @@ async def embeddings_search(payload: Dict):
         return embedding_store.hybrid_search(query, limit=limit)
     return embedding_store.search(query, limit=limit)
 
-def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> Dict:
+def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> dict:
     """Call ``agent.chat`` with only the keyword arguments it actually accepts.
 
     Agents are pluggable here — custom API profiles, older builds, test fakes —
@@ -635,7 +634,7 @@ def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> Dic
     """
     import inspect
 
-    kwargs: Dict[str, object] = {}
+    kwargs: dict[str, object] = {}
     try:
         params = inspect.signature(agent.chat).parameters
     except (TypeError, ValueError):
@@ -655,7 +654,7 @@ def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> Dic
 
 
 @app.post("/command")
-async def command_endpoint(payload: Dict):
+async def command_endpoint(payload: dict):
     """Run an agent command, optionally producing local Talking Mode audio.
 
     ``talking``/``speak`` is additive: every existing CLI/channel caller keeps
@@ -728,7 +727,7 @@ async def command_endpoint(payload: Dict):
     # when the caller did not use the queue.
     _run_bus.start(run_id, label=f"command:{platform}:{user_id}")
 
-    def _bus_event(event_type: str, data: Optional[Dict] = None) -> None:
+    def _bus_event(event_type: str, data: Optional[dict] = None) -> None:
         try:
             _run_bus.publish(run_id, event_type, dict(data or {}))
         except Exception:
@@ -746,7 +745,7 @@ async def command_endpoint(payload: Dict):
             and payload.get("stream", True)
         )
 
-        def _run() -> Dict:
+        def _run() -> dict:
             if autonomous:
                 out = agent.autonomous(text)
                 if isinstance(out, dict):
@@ -878,7 +877,7 @@ async def keys_list():
         return {"error": str(e)}
 
 @app.post("/keys/add")
-async def keys_add(payload: Dict):
+async def keys_add(payload: dict):
     """Add ANY AI API key — auto health + model discovery"""
     try:
         from core.multi_key import multi_key_manager
@@ -903,7 +902,7 @@ async def keys_add(payload: Dict):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 @app.post("/keys/remove")
-async def keys_remove(payload: Dict):
+async def keys_remove(payload: dict):
     """Remove API key via Settings"""
     try:
         from core.multi_key import multi_key_manager
@@ -917,7 +916,7 @@ async def keys_remove(payload: Dict):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 @app.post("/custom-apis/add")
-async def custom_apis_add(payload: Dict):
+async def custom_apis_add(payload: dict):
     """Add custom API via Settings panel - free"""
     try:
         from core.custom_api import custom_api_manager
@@ -937,7 +936,7 @@ async def custom_apis_list():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/custom-apis/remove")
-async def custom_apis_remove(payload: Dict):
+async def custom_apis_remove(payload: dict):
     """Remove custom API by name or id - for Settings panel add API key in settings"""
     try:
         from core.custom_api import custom_api_manager
@@ -967,7 +966,7 @@ async def response_times_list():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/response-times/test")
-async def response_times_test(payload: Dict):
+async def response_times_test(payload: dict):
     """Test response time for API key - how much time does API key take to get response from AI model - free"""
     try:
         from core.response_tester import response_tester
@@ -1057,7 +1056,7 @@ async def background_agents_list():
 
 
 @app.post("/agents/start")
-async def background_agents_start(payload: Dict):
+async def background_agents_start(payload: dict):
     from core.agent_manager import agent_manager
 
     name = payload.get("name", "")
@@ -1067,7 +1066,7 @@ async def background_agents_start(payload: Dict):
 
 
 @app.post("/agents/stop")
-async def background_agents_stop(payload: Dict):
+async def background_agents_stop(payload: dict):
     from core.agent_manager import agent_manager
 
     name = payload.get("name", "")
@@ -1077,7 +1076,7 @@ async def background_agents_stop(payload: Dict):
 
 
 @app.post("/agents/create")
-async def background_agents_create(payload: Dict):
+async def background_agents_create(payload: dict):
     from core.agent_manager import agent_manager
 
     name = payload.get("name", "")
@@ -1096,21 +1095,21 @@ async def workspace_info():
 
 
 @app.post("/workspace/create")
-async def workspace_create(payload: Dict):
+async def workspace_create(payload: dict):
     from core.workspace import workspace as ws
 
     return ws.create_project(payload.get("name", ""), description=payload.get("description", ""))
 
 
 @app.post("/workspace/use")
-async def workspace_use(payload: Dict):
+async def workspace_use(payload: dict):
     from core.workspace import workspace as ws
 
     return ws.set_current_project(payload.get("name", ""))
 
 
 @app.post("/memory2/remember")
-async def memory2_remember(payload: Dict):
+async def memory2_remember(payload: dict):
     from core.memory2 import memory2
 
     return memory2.remember(payload.get("kind", "semantic"), payload.get("content", ""),
@@ -1119,7 +1118,7 @@ async def memory2_remember(payload: Dict):
 
 
 @app.post("/memory2/recall")
-async def memory2_recall(payload: Dict):
+async def memory2_recall(payload: dict):
     from core.memory2 import memory2
 
     return {"results": memory2.recall(payload.get("query", ""), limit=int(payload.get("limit", 10)),
@@ -1134,7 +1133,7 @@ async def permissions_log(limit: int = 20):
 
 
 @app.post("/permissions/check")
-async def permissions_check(payload: Dict):
+async def permissions_check(payload: dict):
     from core.permissions import permission_manager
 
     return permission_manager.check(payload.get("tool", ""), agent=payload.get("agent"),
@@ -1142,7 +1141,7 @@ async def permissions_check(payload: Dict):
 
 
 @app.post("/permissions/set")
-async def permissions_set(payload: Dict):
+async def permissions_set(payload: dict):
     from core.permissions import permission_manager
 
     return permission_manager.set_policy(payload.get("tool", ""), payload.get("decision", "ask"),
@@ -1150,14 +1149,14 @@ async def permissions_set(payload: Dict):
 
 
 @app.post("/research")
-async def research_run(payload: Dict):
+async def research_run(payload: dict):
     from core.research import research_pipeline
 
     return research_pipeline.run(payload.get("query", ""), limit=int(payload.get("limit", 10)))
 
 
 @app.post("/router/select")
-async def router_select(payload: Dict):
+async def router_select(payload: dict):
     from core.router2 import router2
 
     return router2.select(payload.get("text", ""))
@@ -1171,7 +1170,7 @@ async def screen_status():
 
 
 @app.post("/screen/start")
-async def screen_start(payload: Dict = None):
+async def screen_start(payload: dict = None):
     from core.computer import recording_policy
     from core.integrations import _screen_recorder
 
@@ -1198,7 +1197,7 @@ async def screen_stop():
 
 
 @app.post("/screen/save")
-async def screen_save(payload: Dict):
+async def screen_save(payload: dict):
     from core.computer import recording_policy
     from core.integrations import _screen_recorder
 
@@ -1211,7 +1210,7 @@ async def screen_save(payload: Dict):
 
 
 @app.post("/screen/analyze")
-async def screen_analyze(payload: Dict):
+async def screen_analyze(payload: dict):
     from core.computer import VideoAnalyzer
     from core.integrations import _screen_recorder
 
@@ -1227,7 +1226,7 @@ async def screen_analyze(payload: Dict):
 
 
 @app.post("/screen/watch")
-async def screen_watch(payload: Dict):
+async def screen_watch(payload: dict):
     from core.computer import ScreenWatcher, VideoAnalyzer
     from core.integrations import _screen_recorder
 
@@ -1244,7 +1243,7 @@ async def screen_watch(payload: Dict):
 
 
 @app.post("/screen/action/before")
-async def screen_action_before(payload: Dict):
+async def screen_action_before(payload: dict):
     from core.integrations import _screen_action_manager
 
     return _screen_action_manager().before(
@@ -1253,7 +1252,7 @@ async def screen_action_before(payload: Dict):
 
 
 @app.post("/screen/action/after")
-async def screen_action_after(payload: Dict):
+async def screen_action_after(payload: dict):
     from core.computer import ScreenVerifier, VideoAnalyzer
     from core.integrations import _screen_action_manager
 
@@ -1271,7 +1270,7 @@ async def screen_action_after(payload: Dict):
 
 
 @app.post("/watchdog/handle")
-async def watchdog_handle(payload: Dict):
+async def watchdog_handle(payload: dict):
     from core.watchdog import watchdog
 
     return watchdog.handle(payload.get("error", ""), context=payload.get("context", ""))
@@ -1285,7 +1284,7 @@ async def profiles_list():
 
 
 @app.post("/profiles/create")
-async def profiles_create(payload: Dict):
+async def profiles_create(payload: dict):
     from core.profiles import profile_manager
 
     return profile_manager.create(payload.get("name", ""), persona=payload.get("persona"),
@@ -1314,7 +1313,7 @@ def _read_task_json(task_id: str, filename: str, default):
         return default
 
 
-def _recording_info(task_id: str) -> Optional[Dict]:
+def _recording_info(task_id: str) -> Optional[dict]:
     directory = _task_dir(task_id)
     candidates = sorted(directory.glob("recording.*")) if directory.exists() else []
     if not candidates:
@@ -1334,7 +1333,7 @@ def _recording_info(task_id: str) -> Optional[Dict]:
     }
 
 
-def _checkpoint_summary(task_id: str) -> Optional[Dict]:
+def _checkpoint_summary(task_id: str) -> Optional[dict]:
     """Compact live view of one persisted task checkpoint (world + counters)."""
     store = _computer_task_store()
     checkpoint = store.load(task_id)
@@ -1387,12 +1386,12 @@ def _checkpoint_summary(task_id: str) -> Optional[Dict]:
     }
 
 
-def _repairs_aggregate(limit_recent: int = 12) -> Dict:
+def _repairs_aggregate(limit_recent: int = 12) -> dict:
     """Aggregate repair history across all persisted tasks."""
     import re
 
     tasks = _computer_task_store().list()
-    by_kind: Dict[str, Dict] = {}
+    by_kind: dict[str, dict] = {}
     recent: list = []
     total = successes = 0
     for task in tasks:
@@ -1400,7 +1399,7 @@ def _repairs_aggregate(limit_recent: int = 12) -> Dict:
         payload = _read_task_json(task_id, "repairs.json", {})
         if not isinstance(payload, dict):
             continue
-        diagnoses_by_state: Dict[str, list] = {}
+        diagnoses_by_state: dict[str, list] = {}
         for d in payload.get("diagnoses") or []:
             if isinstance(d, dict):
                 diagnoses_by_state.setdefault(str(d.get("state")), []).append(d)
@@ -1456,7 +1455,7 @@ def _repairs_aggregate(limit_recent: int = 12) -> Dict:
     }
 
 
-def _skill_stats(skills: list) -> Dict:
+def _skill_stats(skills: list) -> dict:
     runs = sum(int(s.get("runs", 0) or 0) for s in skills)
     successes = sum(int(s.get("successes", 0) or 0) for s in skills)
     return {
@@ -1788,7 +1787,7 @@ async def computer_benchmark_tasks(category: str = "", max_difficulty: int = 3):
 
 
 @app.post("/computer/benchmark/run")
-async def computer_benchmark_run(payload: Dict = None):
+async def computer_benchmark_run(payload: dict = None):
     """Run the benchmark and return results."""
     from core.computer.benchmark import run_benchmark
     payload = payload or {}
@@ -1812,7 +1811,7 @@ async def computer_benchmark_task(task_id: str):
 
 
 @app.post("/computer/run")
-async def computer_run(payload: Dict = None):
+async def computer_run(payload: dict = None):
     """Start a new autonomous computer task in the background (dry-run by default
     so the dashboard never moves the mouse unless the user opts in)."""
     from core.computer.events import publish
@@ -1839,7 +1838,7 @@ async def computer_run(payload: Dict = None):
 
 
 @app.post("/computer/resume/{task_id}")
-async def computer_resume(task_id: str, payload: Dict = None):
+async def computer_resume(task_id: str, payload: dict = None):
     """Resume a paused/interrupted task in the background."""
     from core.computer import TaskStore
     from core.computer.events import publish
@@ -1876,7 +1875,7 @@ async def computer_task_delete(task_id: str):
 
 
 @app.post("/computer/stop")
-async def computer_stop(payload: Dict = None):
+async def computer_stop(payload: dict = None):
     """Emergency stop - halt all mouse/keyboard/autonomous control."""
     from core.computer import emergency_stop
 
@@ -1907,7 +1906,7 @@ async def computer_control_status():
 
 
 @app.post("/computer/control/pause/{task_id}")
-async def computer_control_pause(task_id: str, payload: Dict = None):
+async def computer_control_pause(task_id: str, payload: dict = None):
     """Request pause for a task at next safe boundary.
     
     The task will pause after completing its current action.
@@ -1963,7 +1962,7 @@ async def computer_control_resume(task_id: str):
 
 
 @app.post("/computer/control/cancel/{task_id}")
-async def computer_control_cancel(task_id: str, payload: Dict = None):
+async def computer_control_cancel(task_id: str, payload: dict = None):
     """Request cancellation of a task.
     
     The task will be marked as cancelled and terminated.
@@ -1993,7 +1992,7 @@ async def computer_control_cancel(task_id: str, payload: Dict = None):
 
 
 @app.post("/computer/control/emergency-stop")
-async def computer_emergency_stop(payload: Dict = None):
+async def computer_emergency_stop(payload: dict = None):
     """EMERGENCY STOP - immediately block all computer actions.
     
     This is the safety override that stops ALL computer control instantly.
@@ -2110,7 +2109,7 @@ async def computer_skill_profile(skill_name: str):
 
 
 @app.post("/computer/delegate")
-async def computer_delegate(payload: Dict = None):
+async def computer_delegate(payload: dict = None):
     """Delegate a task across persistent agents (Phase C multi-agent delegation).
 
     Accepts either a free-form ``task`` (decomposed heuristically) or a custom
@@ -2180,7 +2179,7 @@ async def remote_approvals():
 
 
 @app.post("/remote/approval/enable")
-async def remote_approval_enable(payload: Dict = None):
+async def remote_approval_enable(payload: dict = None):
     """Enable/disable the remote approval gate (per-action human approval)."""
     payload = payload or {}
     from core.computer import remote_approval
@@ -2194,7 +2193,7 @@ async def remote_approval_enable(payload: Dict = None):
 
 
 @app.post("/remote/approve")
-async def remote_approve(payload: Dict = None):
+async def remote_approve(payload: dict = None):
     """Approve a pending action prompt (by prompt_id)."""
     payload = payload or {}
     from core.computer import remote_approval
@@ -2203,7 +2202,7 @@ async def remote_approve(payload: Dict = None):
 
 
 @app.post("/remote/reject")
-async def remote_reject(payload: Dict = None):
+async def remote_reject(payload: dict = None):
     """Reject a pending action prompt."""
     payload = payload or {}
     from core.computer import remote_approval
@@ -2216,7 +2215,7 @@ async def remote_reject(payload: Dict = None):
 
 
 @app.post("/remote/control")
-async def remote_control_action(payload: Dict = None):
+async def remote_control_action(payload: dict = None):
     """Remote lifecycle control: pause / resume / cancel / emergency-stop / release."""
     payload = payload or {}
     from core.computer import remote_control
@@ -2265,7 +2264,7 @@ async def speech_status():
 
 
 @app.post("/speech/synthesize")
-async def speech_synthesize(payload: Dict):
+async def speech_synthesize(payload: dict):
     """Generate local WAV speech and return a gateway URL, never a host path."""
     from core.dashboard_events import dashboard_event_bus
     from core.speech import speech_engine
@@ -2362,7 +2361,7 @@ async def dashboard_events_ws(websocket: WebSocket):
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=500)
 
-    def enqueue(event: Dict) -> None:
+    def enqueue(event: dict) -> None:
         def put() -> None:
             if queue.full():
                 try:
@@ -2415,7 +2414,7 @@ async def plugins_reload():
 
 
 @app.post("/plugins/invoke")
-async def plugins_invoke(payload: Dict = None):
+async def plugins_invoke(payload: dict = None):
     """Invoke a plugin-registered tool by name with keyword arguments."""
     payload = payload or {}
     from core.plugins import plugin_registry, PluginError
@@ -2446,7 +2445,7 @@ async def computer_events_ws(websocket: WebSocket):
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
 
-    def enqueue(event: Dict) -> None:
+    def enqueue(event: dict) -> None:
         def put() -> None:
             if queue.full():
                 try:

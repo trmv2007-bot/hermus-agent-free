@@ -1,9 +1,6 @@
 """Tests for the newly built recommendations across Council, Security, Skills, Memory, and Tools."""
 import pytest
 from pathlib import Path
-import tempfile
-import json
-import time
 
 def test_scope_checker_whitelisting(tmp_path):
     from pentest.scope import ScopeChecker

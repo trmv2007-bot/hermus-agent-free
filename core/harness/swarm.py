@@ -6,12 +6,12 @@ siblings via file-shift events.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from . import bus, sessions
 
 
-def spawn(task: str, parent: str, *, model: str = "", count: int = 1) -> Dict[str, Any]:
+def spawn(task: str, parent: str, *, model: str = "", count: int = 1) -> dict[str, Any]:
     count = max(1, min(int(count or 1), 8))
     sessions.touch(parent, role="coordinator", status="coordinating", task=task)
     workers = []
@@ -32,10 +32,10 @@ def spawn(task: str, parent: str, *, model: str = "", count: int = 1) -> Dict[st
     return {"ok": True, "parent": parent, "workers": workers, "count": count}
 
 
-def run_workers(task: str, parent: str, *, model: str = "", count: int = 1) -> Dict[str, Any]:
+def run_workers(task: str, parent: str, *, model: str = "", count: int = 1) -> dict[str, Any]:
     """Spawn workers and execute each via an isolated HermusAgent chat."""
     spec = spawn(task, parent, model=model, count=count)
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     from core.agent import HermusAgent
 
     for worker in spec["workers"]:
@@ -56,7 +56,7 @@ def run_workers(task: str, parent: str, *, model: str = "", count: int = 1) -> D
     return {"ok": True, "parent": parent, "results": results, "workers": spec["workers"]}
 
 
-def status(parent: Optional[str] = None) -> Dict[str, Any]:
+def status(parent: Optional[str] = None) -> dict[str, Any]:
     all_s = sessions.list_sessions()
     if parent:
         kids = [s for s in all_s if s.get("parent") == parent or s.get("id") == parent]

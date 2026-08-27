@@ -13,14 +13,15 @@ import os
 import threading
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Optional
+from collections.abc import Callable
 
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _read_pid_stat() -> Optional[Dict[str, float]]:
+def _read_pid_stat() -> Optional[dict[str, float]]:
     """Parse /proc/<pid>/stat + /proc/<pid>/status on Linux for CPU/mem."""
     try:
         pid = os.getpid()
@@ -52,18 +53,18 @@ class ResourceMonitor:
 
     def __init__(
         self,
-        subsystem_readers: Optional[Dict[str, Callable[[], Dict[str, Any]]]] = None,
+        subsystem_readers: Optional[dict[str, Callable[[], dict[str, Any]]]] = None,
     ) -> None:
         self._lock = threading.Lock()
         self._subsystem_readers = dict(subsystem_readers or {})
-        self._prev: Optional[Dict[str, float]] = None
+        self._prev: Optional[dict[str, float]] = None
 
-    def register_subsystem(self, name: str, reader: Callable[[], Dict[str, Any]]) -> None:
+    def register_subsystem(self, name: str, reader: Callable[[], dict[str, Any]]) -> None:
         with self._lock:
             self._subsystem_readers[name] = reader
 
     @staticmethod
-    def _disk_usage() -> Dict[str, Any]:
+    def _disk_usage() -> dict[str, Any]:
         try:
             import shutil
 
@@ -77,9 +78,9 @@ class ResourceMonitor:
         except Exception:  # noqa: BLE001
             return {}
 
-    def sample(self) -> Dict[str, Any]:
+    def sample(self) -> dict[str, Any]:
         """Return one point-in-time telemetry snapshot."""
-        out: Dict[str, Any] = {"ts": _now(), "pid": os.getpid()}
+        out: dict[str, Any] = {"ts": _now(), "pid": os.getpid()}
         # CPU / memory
         psutil = self._import_psutil()
         if psutil is not None:
@@ -104,7 +105,7 @@ class ResourceMonitor:
         out["disk"] = self._disk_usage()
 
         # Subsystem footprints (cache, event bus, memory stores).
-        subsystems: Dict[str, Dict[str, Any]] = {}
+        subsystems: dict[str, dict[str, Any]] = {}
         with self._lock:
             readers = dict(self._subsystem_readers)
         for name, reader in readers.items():
@@ -115,7 +116,7 @@ class ResourceMonitor:
         out["subsystems"] = subsystems
         return out
 
-    def _fill_stdlib(self, out: Dict[str, Any]) -> None:
+    def _fill_stdlib(self, out: dict[str, Any]) -> None:
         """POSIX fallback for CPU/memory when psutil is unavailable."""
         out["cpu_percent"] = None
         out["memory_bytes"] = None
@@ -157,14 +158,14 @@ class ResourceMonitor:
             return None
 
     def register_event_bus(self, bus) -> None:
-        def reader() -> Dict[str, Any]:
+        def reader() -> dict[str, Any]:
             try:
                 return {"recent_events": len(getattr(bus, "_recent", ()) or ())}
             except Exception:  # noqa: BLE001
                 return {}
         self.register_subsystem("event_bus", reader)
 
-    def register_cache(self, cache_stats: Callable[[], Dict[str, Any]]) -> None:
+    def register_cache(self, cache_stats: Callable[[], dict[str, Any]]) -> None:
         self.register_subsystem("cache", cache_stats)
 
 

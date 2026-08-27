@@ -6,11 +6,11 @@ Model discovery via GET /v1/models (or provider-specific).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Canonical provider presets. base_url is OpenAI-compatible chat completions root
 # (we append /chat/completions and /models as needed).
-PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
+PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     "openai": {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
@@ -261,7 +261,7 @@ PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def list_providers() -> List[Dict[str, Any]]:
+def list_providers() -> list[dict[str, Any]]:
     out = []
     for pid, p in PROVIDER_PRESETS.items():
         out.append(
@@ -278,7 +278,7 @@ def list_providers() -> List[Dict[str, Any]]:
     return out
 
 
-def get_provider(provider_id: str) -> Dict[str, Any]:
+def get_provider(provider_id: str) -> dict[str, Any]:
     pid = (provider_id or "custom").lower().strip()
     # aliases
     if pid in ("huggingface",):
@@ -319,8 +319,8 @@ def resolve_endpoint(
 def build_auth_headers(
     provider: str,
     api_key: str = None,
-    extra: Dict[str, str] = None,
-) -> Dict[str, str]:
+    extra: dict[str, str] = None,
+) -> dict[str, str]:
     preset = get_provider(provider)
     headers = {"Content-Type": "application/json"}
     extra_h = preset.get("extra_headers") or {}

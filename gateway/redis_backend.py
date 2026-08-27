@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from core.config import config
 
@@ -58,7 +58,7 @@ class RedisStreamsConsumer:
         self._task: Optional[asyncio.Task] = None
         self._consumer = f"gw-{id(self):x}"
 
-    async def start(self) -> Dict[str, Any]:
+    async def start(self) -> dict[str, Any]:
         import redis.asyncio as aioredis  # raises ImportError → caller falls back
 
         url = getattr(config, "redis_url", None) or "redis://localhost:6379/0"
@@ -88,7 +88,7 @@ class RedisStreamsConsumer:
                 pass
             self._redis = None
 
-    async def publish(self, job_id: str, kind: str, payload: Dict[str, Any],
+    async def publish(self, job_id: str, kind: str, payload: dict[str, Any],
                       session_key: str = "") -> Optional[str]:
         if self._redis is None:
             return None
@@ -113,7 +113,7 @@ class RedisStreamsConsumer:
                     await self._handle(entry_id, fields)
             await asyncio.sleep(0)
 
-    async def _handle(self, entry_id: str, fields: Dict[str, Any]) -> None:
+    async def _handle(self, entry_id: str, fields: dict[str, Any]) -> None:
         job_id = str(fields.get("job_id") or "")
         try:
             payload = json.loads(fields.get("payload") or "{}")

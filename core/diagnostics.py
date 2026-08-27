@@ -13,7 +13,7 @@ import os
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,7 +37,7 @@ def _importable(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def _check(name: str, ok: bool, detail: str, hint: str = "", level: str = "required") -> Dict[str, Any]:
+def _check(name: str, ok: bool, detail: str, hint: str = "", level: str = "required") -> dict[str, Any]:
     return {"name": name, "ok": bool(ok), "detail": detail, "hint": hint, "level": level}
 
 
@@ -50,8 +50,8 @@ def _ffmpeg_available() -> bool:
         return False
 
 
-def run_diagnostics() -> Dict[str, Any]:
-    checks: List[Dict[str, Any]] = []
+def run_diagnostics() -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
 
     # Python version
     py_ok = sys.version_info >= (3, 9)
@@ -142,7 +142,7 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def print_diagnostics(report: Dict[str, Any]) -> None:
+def print_diagnostics(report: dict[str, Any]) -> None:
     print("=" * 60)
     print("Hermus Doctor — health report")
     print("=" * 60)

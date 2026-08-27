@@ -23,14 +23,11 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..computer_agent import ComputerAgent
-from ..episodes import Episode, EpisodeStore, record_episode
-from ..skills import ComputerSkillStore
-from ..task_store import TaskStore
-from .tasks import COMPUTER_TASKS, TaskSpec, get_task
-from ...config import config
+from ..episodes import EpisodeStore, record_episode
+from .tasks import COMPUTER_TASKS, TaskSpec
 
 
 @dataclass
@@ -56,7 +53,7 @@ class TaskResult:
     llm_calls: int = 0
     episode_path: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "spec_id": self.spec_id,
@@ -89,9 +86,9 @@ class BenchmarkResult:
     success_rate: float = 0.0
     first_attempt_success: int = 0
     # Per-category breakdown
-    by_category: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Detailed results
-    results: List[TaskResult] = field(default_factory=list)
+    results: list[TaskResult] = field(default_factory=list)
     # Aggregate metrics
     avg_duration: float = 0.0
     avg_actions: float = 0.0
@@ -107,9 +104,9 @@ class BenchmarkResult:
     false_click_rate: float = 0.0
     resume_success_count: int = 0
     skill_reuse_count: int = 0
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp,
             "summary": {
@@ -144,9 +141,9 @@ class BenchmarkRunner:
         dry_run: bool = True,
         episode_store: Optional[EpisodeStore] = None,
         max_tasks: int = 0,  # 0 = all
-        categories: Optional[List[str]] = None,
+        categories: Optional[list[str]] = None,
         max_difficulty: int = 3,
-        tags: Optional[List[str]] = None,
+        tags: Optional[list[str]] = None,
     ):
         self.agent = agent
         self.dry_run = dry_run
@@ -283,7 +280,7 @@ def run_benchmark(
     agent: Optional[ComputerAgent] = None,
     dry_run: bool = True,
     max_tasks: int = 0,
-    categories: Optional[List[str]] = None,
+    categories: Optional[list[str]] = None,
     **kwargs,
 ) -> BenchmarkResult:
     """Convenience: create runner and execute benchmark."""
