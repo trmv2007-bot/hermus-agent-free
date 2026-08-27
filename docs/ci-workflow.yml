@@ -1,3 +1,10 @@
+# GitHub Actions CI workflow for hermus-agent-free.
+#
+# Kept here (not in .github/workflows/) because the automation token that
+# pushes this branch lacks 'workflows' permission. To activate CI:
+#   cp docs/ci-workflow.yml .github/workflows/ci.yml
+#   git add .github && git commit -m 'ci: activate workflow' && git push
+# -----------------------------------------------------------------------------
 name: CI
 
 on:
