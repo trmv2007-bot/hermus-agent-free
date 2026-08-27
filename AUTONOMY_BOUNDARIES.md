@@ -66,6 +66,12 @@ credentials.
 `core/world_model.py` is the shared awareness layer. It records observations
 with source, timestamp, confidence, expiry, and permission scope; publishes
 world events; redacts obvious credential values; persists an optional journal;
-and can refresh a runtime hardware profile. Integrations such as calendar,
-filesystem, browser, screen, devices, wallet, and external services can ingest
-facts into this same model.
+and can refresh a runtime hardware profile.
+
+`core/connectors/` is the integration layer. It provides a common registry and
+lifecycle for adapters. Built-in runtime and approved-workspace filesystem
+connectors are included; browser, screen, GitHub, calendar, email, wallet,
+devices, cloud, and monitoring adapters can plug into the same interface.
+Connectors are registered disabled by default, publish facts to the world model,
+and expose only explicit named actions. Importing them never logs in or calls a
+network service automatically.
