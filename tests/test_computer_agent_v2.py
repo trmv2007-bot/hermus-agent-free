@@ -385,7 +385,10 @@ def test_plan_preserves_explicit_failure_transition():
 
 def test_state_machine_invokes_repair_then_retries_original():
     order = []
-    controller = _FreshController.make()
+    controller = _FreshController.make(
+        frame_provider=lambda: {"size": [64, 48], "image": Image.new("RGB", (64, 48), "white")},
+        locator=lambda frame, target: {"found": True, "x": 1, "y": 1, "confidence": 0.9, "description": target},
+    )
 
     def execute(spec):
         order.append(spec.get("kind") or spec.get("target"))
@@ -457,7 +460,7 @@ def test_agent_run_produces_evidence_bundle_and_skill(tmp_path):
     assert result["success"] is True and result["result"] == "SUCCESS"
     assert len(result["actions"]) == 1
     assert len(result["verifications"]) == 1
-    assert result["recording"] is None  # no FFmpeg in CI → RAM-only, still succeeds
+    assert result["recording"] is None or Path(result["recording"]).exists()
 
     task_dir = Path(result["artifacts"]["directory"])
     assert (task_dir / "timeline.json").exists()

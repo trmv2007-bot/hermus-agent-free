@@ -349,6 +349,37 @@ class ConstitutionManager:
                 return {"success": True, "rejected": amendment_id}
         return {"success": False, "error": f"pending amendment '{amendment_id}' not found"}
 
+    def diff(self, amendment_id: str) -> Dict:
+        """Return a unified diff showing how the pending amendment would modify the constitution."""
+        import difflib
+        items = self._load_pending()
+        amendment = next((p for p in items if p.get("id") == amendment_id), None)
+        if not amendment:
+            return {"success": False, "error": f"pending amendment '{amendment_id}' not found"}
+        err = self.validate_amendment(amendment)
+        if err:
+            return {"success": False, "error": f"invalid amendment: {err}"}
+        current = self.load()
+        simulated = json.loads(json.dumps(current))
+        target = amendment.get("target")
+        change = amendment.get("change")
+        if target == "member_prompt":
+            for m in simulated.get("members", []):
+                if m.get("role") == amendment.get("member"):
+                    m["persona"] = change
+        elif target == "rule":
+            simulated.setdefault("rules", {})[amendment.get("rule_key")] = change
+        elif target == "budget":
+            simulated.setdefault("budget", {})[amendment.get("budget_key")] = int(change)
+        elif target == "strategy":
+            simulated["default_strategy"] = str(change)
+        simulated["version"] = int(current.get("version", 1)) + 1
+
+        curr_lines = json.dumps(current, indent=2).splitlines(keepends=True)
+        sim_lines = json.dumps(simulated, indent=2).splitlines(keepends=True)
+        diff_text = "".join(difflib.unified_diff(curr_lines, sim_lines, fromfile=f"constitution_v{current.get('version', 1)}.json", tofile=f"constitution_v{simulated['version']}_proposed.json"))
+        return {"success": True, "amendment_id": amendment_id, "diff": diff_text, "amendment": amendment}
+
     # ---------- convenience ----------
 
     def current_version(self) -> int:

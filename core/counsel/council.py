@@ -168,6 +168,18 @@ class CouncilSession:
             **(extra or {}),
         }
         self.transcript.append(turn)
+        try:
+            from ..dashboard_events import publish
+            publish("counsel_turn", {
+                "session_id": self.session_id,
+                "agent": agent,
+                "role": (extra or {}).get("role", "council"),
+                "round": round_num,
+                "content": (content or "")[:400],
+                "model": (extra or {}).get("model", ""),
+            })
+        except Exception:
+            pass
         return turn
 
     def _member_llm(self, member: CounselMember) -> FreeLLM:
@@ -250,6 +262,18 @@ class CouncilSession:
                     content = f"(deliberation failed: {e})"
                 self._add_turn(member.name, content, round_num=round_num, extra={"model": member.model})
                 print(f"\n[👤 {member.name} R{round_num}] {content[:280]}...")
+
+            # Early convergence check: if Critic expressed explicit approval / no objections, conclude early
+            critic_turns = [
+                t for t in self.transcript
+                if t.get("round") == round_num and "critic" in t.get("agent", "").lower()
+            ]
+            if critic_turns:
+                c_content = critic_turns[-1].get("content", "").upper()
+                if "APPROVAL:" in c_content or "NO_OBJECTIONS" in c_content or "NO OBJECTIONS" in c_content:
+                    print(f"[⚖️ Counsel] Critic approved; consensus reached early in round {round_num}.")
+                    self._add_turn("system", f"Early consensus reached in round {round_num}.", round_num=round_num)
+                    break
 
     def _recent_transcript_text(self, limit: int = 8, max_len: int = 250) -> str:
         return "\n".join(
@@ -507,6 +531,16 @@ class CouncilSession:
             self.final_answer = (
                 f"Council plan:\n{plan_text}\n\nExecution:\n{results_text}"
             )
+        # Preserve minority dissents / critical objections if raised during deliberations
+        objections = [
+            t["content"].strip()
+            for t in self.transcript
+            if "critic" in t.get("agent", "").lower() and "OBJECTION:" in t.get("content", "")
+        ]
+        if objections and "risk" not in self.final_answer.lower() and "objection" not in self.final_answer.lower():
+            summary_obs = "\n".join(f"- {o[:180]}" for o in objections[:2])
+            self.final_answer += f"\n\n### ⚠️ Risks & Objections Considered:\n{summary_obs}"
+
         self._add_turn("synthesizer", self.final_answer, round_num=95)
         print(f"\n[✅ Counsel] Final answer ({len(self.final_answer)} chars)")
 

@@ -23,6 +23,7 @@ data/response_times.json
 data/config.yaml
 data/skins/
 data/embeddings.db
+data/target_scope.json
 data/mcp_servers.json
 data/telegram_offset.txt
 data/tmp/
@@ -37,3 +38,6 @@ bounty_reports/
 *.webm
 *.mp3
 data/recordings/
+data/harness/
+data/speech/
+data/delegations/

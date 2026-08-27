@@ -43,6 +43,8 @@ class FailureDiagnosis:
     confidence: float = 0.0
     retryable: bool = True
     suggested_strategy: str = ""
+    source: str = "heuristic"
+    plan: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -170,6 +172,19 @@ class RepairEngine:
 
         # Dialog detection intentionally precedes target-not-found: a dialog is
         # often the reason the requested target cannot be seen.
+        if re.search(r"cookie|consent|banner", text):
+            step = {"name": "DISMISS_COOKIE_BANNER", "action": {"kind": "click_target", "target": "Accept all"}, "expected": "Cookie banner is dismissed"}
+            return FailureDiagnosis(
+                kind=FailureKind.BLOCKING_DIALOG.value,
+                summary="A cookie consent banner is blocking the page.",
+                evidence=evidence,
+                confidence=0.92,
+                retryable=True,
+                suggested_strategy="Accept or dismiss the cookie banner, then retry the original action.",
+                source="heuristic",
+                plan=[step],
+            )
+
         if re.search(r"popup|pop-up|modal|dialog|overlay|prompt is blocking|obscur(?:e|ed|ing)|unexpected window", text):
             return FailureDiagnosis(
                 kind=FailureKind.BLOCKING_DIALOG.value,
@@ -271,14 +286,17 @@ class RepairEngine:
 
     def _dialog_plan(self, diagnosis: FailureDiagnosis, expected: str) -> RepairPlan:
         lowered = diagnosis.evidence.lower()
-        label = next((candidate for candidate in self.DISMISS_LABELS if candidate in lowered), None)
-        if label:
-            action = {"kind": "click_target", "target": label.title()}
-            name = f"DISMISS_{re.sub(r'[^A-Z0-9]+', '_', label.upper()).strip('_')}"
+        if "cookie" in lowered or "consent" in lowered or "banner" in lowered:
+            action = {"kind": "click_target", "target": "Accept all"}
+            name = "DISMISS_COOKIE_BANNER"
         else:
-            # Escape is safer than guessing a positive/consent button.
-            action = {"kind": "press_key", "key": "escape"}
-            name = "DISMISS_BLOCKING_DIALOG"
+            label = next((candidate for candidate in self.DISMISS_LABELS if candidate in lowered), None)
+            if label:
+                action = {"kind": "click_target", "target": label.title()}
+                name = f"DISMISS_{re.sub(r'[^A-Z0-9]+', '_', label.upper()).strip('_')}"
+            else:
+                action = {"kind": "click_target", "target": "Close"}
+                name = "DISMISS_BLOCKING_DIALOG"
         condition = "The unexpected blocking dialog or popup is no longer visible"
         if expected:
             condition += f", and the screen is ready for: {expected}"

@@ -16,6 +16,15 @@ from ..llm import FreeLLM
 # Priority order used to pick members when the budget allows fewer than the roster
 _ROLE_PRIORITY = ["chair", "researcher", "critic", "synthesizer", "judge"]
 
+ROLE_TEMPERATURES = {
+    "critic": 0.1,
+    "judge": 0.0,
+    "chair": 0.3,
+    "researcher": 0.5,
+    "researcher2": 0.5,
+    "synthesizer": 0.2,
+}
+
 
 @dataclass
 class CounselMember:
@@ -27,9 +36,11 @@ class CounselMember:
     base_url: str = ""
     weight: int = 1
     provider: str = ""
+    temperature: Optional[float] = None
 
     def llm(self) -> FreeLLM:
-        return FreeLLM(self.model, api_key=self.api_key or None, base_url=self.base_url or None)
+        temp = self.temperature if self.temperature is not None else ROLE_TEMPERATURES.get(self.role, 0.3)
+        return FreeLLM(self.model, api_key=self.api_key or None, base_url=self.base_url or None, temperature=temp)
 
 
 def _discover_workers() -> List[Dict]:

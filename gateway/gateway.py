@@ -40,16 +40,8 @@ except ImportError:
         set_agent_factory,
     )
 
-app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized")
-
-# Add GZip compression for faster dashboard - optimized
-app.add_middleware(GZipMiddleware, minimum_size=500)
-
-# The dashboard is intentionally shipped as local static assets (no CDN) so it
-# stays usable offline and inside the self-hosted gateway.
-_DASHBOARD_STATIC = Path(__file__).parent / "static"
-_DASHBOARD_STATIC.mkdir(parents=True, exist_ok=True)
-app.mount("/dashboard-assets", StaticFiles(directory=str(_DASHBOARD_STATIC)), name="dashboard-assets")
+from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 # Store agents per user/platform for continuity
 AGENTS: Dict[str, HermusAgent] = {}
@@ -82,32 +74,6 @@ def _agent_factory(platform: str, user_id: str, model: str = None, mode: str = "
     return get_agent_for_user(platform, user_id, model=model, mode=mode)
 
 
-def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> Optional[JSONResponse]:
-    """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token."""
-    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
-    if not expected:
-        return None  # open (local default)
-    provided = x_hermus_token or request.headers.get("X-Hermus-Token") or request.query_params.get("token")
-    if provided != expected:
-        return JSONResponse({"error": "Unauthorized - set X-Hermus-Token header"}, status_code=401)
-    return None
-
-
-@app.on_event("startup")
-async def _startup_channels():
-    """Auto-start Telegram polling + Discord bot when tokens present."""
-    set_agent_factory(_agent_factory)
-    if getattr(config, "auto_start_channels", True):
-        mode = getattr(config, "telegram_mode", "auto")
-        started = start_all_channels(_agent_factory, telegram_mode=mode)
-        print(f"[Gateway] Channels started: {started}")
-    if getattr(config, "background_agents_enabled", True):
-        try:
-            _watchdog_task = asyncio.create_task(_background_agent_watchdog())
-        except Exception as e:
-            print(f"[Gateway] background-agent watchdog failed to start: {e}")
-
-
 async def _background_agent_watchdog():
     """Periodically revive stale/dead persistent background agents."""
     from core.agent_manager import agent_manager
@@ -120,6 +86,56 @@ async def _background_agent_watchdog():
         except Exception as e:
             print(f"[Gateway] background agents tick error: {e}")
         await asyncio.sleep(30)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Modern lifespan handler replacing deprecated on_event."""
+    set_agent_factory(_agent_factory)
+    if getattr(config, "auto_start_channels", True):
+        mode = getattr(config, "telegram_mode", "auto")
+        started = start_all_channels(_agent_factory, telegram_mode=mode)
+        print(f"[Gateway] Channels started: {started}")
+    watchdog_task = None
+    if getattr(config, "background_agents_enabled", True):
+        try:
+            watchdog_task = asyncio.create_task(_background_agent_watchdog())
+        except Exception as e:
+            print(f"[Gateway] background-agent watchdog failed to start: {e}")
+    yield
+    if watchdog_task and not watchdog_task.done():
+        watchdog_task.cancel()
+
+
+app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add GZip compression for faster dashboard - optimized
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# The dashboard is intentionally shipped as local static assets (no CDN) so it
+# stays usable offline and inside the self-hosted gateway.
+_DASHBOARD_STATIC = Path(__file__).parent / "static"
+_DASHBOARD_STATIC.mkdir(parents=True, exist_ok=True)
+app.mount("/dashboard-assets", StaticFiles(directory=str(_DASHBOARD_STATIC)), name="dashboard-assets")
+
+
+def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> Optional[JSONResponse]:
+    """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token."""
+    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    if not expected:
+        return None  # open (local default)
+    provided = x_hermus_token or request.headers.get("X-Hermus-Token") or request.query_params.get("token")
+    if provided != expected:
+        return JSONResponse({"error": "Unauthorized - set X-Hermus-Token header"}, status_code=401)
+    return None
 
 
 @app.get("/")
