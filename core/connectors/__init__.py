@@ -5,9 +5,11 @@ explicitly named actions.  Importing this package does not log in, start a
 browser, or contact a network service.
 """
 from .base import Connector, ConnectorContext, ConnectorStatus
+from .control_center import IntegrationControlCenter, integration_center
 from .filesystem import FilesystemConnector
 from .registry import ConnectorRegistry, connector_registry, register_builtin_connectors
 from .runtime import RuntimeConnector
+from .services import CalendarConnector, EmailConnector, GitHubConnector, HostingConnector, WalletConnector
 
 __all__ = [
     "Connector",
@@ -18,4 +20,11 @@ __all__ = [
     "RuntimeConnector",
     "connector_registry",
     "register_builtin_connectors",
+    "IntegrationControlCenter",
+    "integration_center",
+    "CalendarConnector",
+    "EmailConnector",
+    "GitHubConnector",
+    "HostingConnector",
+    "WalletConnector",
 ]
