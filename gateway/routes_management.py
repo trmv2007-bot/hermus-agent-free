@@ -44,6 +44,27 @@ async def keys_list():
     except Exception as e:
         return {"error": str(e)}
 
+@router.get("/remote/pairing-info")
+async def remote_pairing_info():
+    """Returns dynamic network addresses and Tailscale pairing status for Step 2 setup."""
+    try:
+        from core.tailscale import get_pairing_info
+        return JSONResponse(get_pairing_info())
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/keys/auto-provision-free")
+async def keys_auto_provision_free():
+    """Autonomously discover and register free AI models & local engines."""
+    try:
+        from core.free_keys import discover_and_provision_free_models
+        res = discover_and_provision_free_models(auto_register=True)
+        return JSONResponse(res)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 @router.post("/keys/add")
 async def keys_add(payload: dict):
     """Add ANY AI API key — auto health + model discovery"""
@@ -251,5 +272,3 @@ async def plugins_invoke(payload: dict = None):
         return JSONResponse({"success": False, "error": str(exc)}, status_code=404)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-
-
