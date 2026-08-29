@@ -326,13 +326,68 @@ def test_reinstall_of_the_same_run_refreshes_in_place_and_bumps_version():
 # --------------------------------------------------------------------------
 # Dedupe + full harvest pipeline
 # --------------------------------------------------------------------------
+def test_unverified_success_is_not_distilled():
+    """A run whose work was never verified must not become a learned skill."""
+    forge = _forge(dir="unverified")
+    out = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
+                        verification={"verified": False}, tool_results=GOOD_RESULTS,
+                        session_id="s0")
+    assert out["created"] is False
+    assert out["stage"] == "unverified"
+    assert "verification" in out["reason"].lower()
+    # even a run that merely *described* the work is vetoed
+    described = [
+        {"role": "user", "content": "Summarize nginx error log"},
+        {"role": "assistant", "content": "I would read the log and write a report … but no_evidence_of_work "
+                                         "means this stage never actually ran the tools.",
+         "tool_calls": [{"name": "shell_execute", "arguments": {"command": "true"}},
+                        {"name": "write_file", "arguments": {"path": "r.md"}},
+                        {"name": "file_read", "arguments": {"path": "r.md"}}]},
+    ]
+    out2 = forge.harvest("Summarize nginx error log", described, verification={"verified": True},
+                         tool_results=[{"tool": "shell_execute", "result": {"ok": True}},
+                                       {"tool": "write_file", "result": {"ok": True}},
+                                       {"tool": "file_read", "result": {"ok": True}}],
+                         session_id="s0b")
+    assert out2["created"] is False
+    assert out2["stage"] == "unverified"
+    assert "no_evidence_of_work" in out2["reason"]
+
+
+def test_single_success_waits_for_a_repeat():
+    """One successful run is a hypothesis, not a skill (repeatability gate)."""
+    forge = _forge(dir="repeat")
+    first = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
+                          verification={"verified": True}, tool_results=GOOD_RESULTS,
+                          session_id="s1")
+    assert first["created"] is False
+    assert first["stage"] == "awaiting_repeat"
+    assert first["observed"] == 1 and first["required"] >= 2
+    # the same session repeating itself is NOT independent evidence
+    again = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
+                          verification={"verified": True}, tool_results=GOOD_RESULTS,
+                          session_id="s1")
+    assert again["stage"] == "awaiting_repeat"
+    assert again["observed"] == 2 or again["observed"] == 1
+    # an independent session confirms the procedure
+    second = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
+                           verification={"verified": True}, tool_results=GOOD_RESULTS,
+                           session_id="s2")
+    assert second["created"] is True, second
+    assert second["repeatability"]["observed"] >= second["repeatability"]["required"]
+
+
 def test_duplicate_goal_merges_instead_of_multiplying():
     forge = _forge(dir="dedupe")
+    # repeatability gate: two independent successes before the skill is installed
+    seed = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
+                         verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="s1")
     a = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
-                      verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="s1")
+                      verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="s2")
+    assert seed["stage"] == "awaiting_repeat"
     assert a["created"] is True, a
     b = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
-                      verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="s2")
+                      verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="s3")
     assert b["created"] is False
     assert b["stage"] == "dedupe"
     assert b["merged_into"] == a["name"]
@@ -350,12 +405,14 @@ def test_unrelated_goal_becomes_its_own_skill():
                         {"name": "shell_execute", "arguments": {"command": "systemctl reload nginx"}, "id": "2"}]},
         {"role": "assistant", "content": "Certificate renewed and nginx reloaded; expiry is now 90 days out."},
     ]
+    tools = [{"tool": "shell_execute", "result": {"stdout": "certs listed"}},
+             {"tool": "shell_execute", "result": {"stdout": "renewed"}},
+             {"tool": "shell_execute", "result": {"stdout": "reloaded"}}]
+    first = forge.harvest("Renew TLS certificate for api host", other_traj,
+                          verification={"verified": True}, tool_results=tools, session_id="s9")
+    assert first["stage"] == "awaiting_repeat"
     res = forge.harvest("Renew TLS certificate for api host", other_traj,
-                        verification={"verified": True},
-                        tool_results=[{"tool": "shell_execute", "result": {"stdout": "certs listed"}},
-                                      {"tool": "shell_execute", "result": {"stdout": "renewed"}},
-                                      {"tool": "shell_execute", "result": {"stdout": "reloaded"}}],
-                        session_id="s9")
+                        verification={"verified": True}, tool_results=tools, session_id="s10")
     assert res["created"] is True, res
 
 
@@ -380,8 +437,11 @@ def test_harvest_dry_run_previews_without_writing():
 
 def test_run_executes_installed_skill_and_records_outcome():
     forge = _forge(dir="run")
+    forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
+                  verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="r1")
     made = forge.harvest("Summarize nginx error log and file a report", GOOD_TRAJ,
-                         verification={"verified": True}, tool_results=GOOD_RESULTS)
+                         verification={"verified": True}, tool_results=GOOD_RESULTS, session_id="r2")
+    assert made["created"] is True, made
     name = made["name"]
     dry = forge.run(name, task="today", execute=False)
     assert dry["success"] is True and dry["dry_run"] is True, dry

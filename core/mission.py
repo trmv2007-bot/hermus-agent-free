@@ -10,10 +10,37 @@ This module is the **universal execution core**: every autonomous surface
 CLI, channels, the scheduler) runs through :class:`MissionEngine` via
 ``core.runtime``, so behavior no longer depends on the entry point.
 
-Node executors are **evidence-gated**: a stage whose role implies performing
-work (coder/implementation/verification/…) only counts as successful when the
-agent actually did something — executed tools, changed files, produced
-artifacts — not when it merely described how the work would be done.
+Node executors are **evidence-gated**, and the gate is driven by the *expected
+output type* of the stage rather than by its role name:
+
+===============  ==========================================================
+expected output  what counts as doing the job
+===============  ==========================================================
+``change``       files created/modified (code, configs, deliverables)
+``execution``    commands/tests actually run (shell, sandbox, browser, …)
+``analysis``     a substantive written finding (review, diagnosis, report)
+===============  ==========================================================
+
+A verifier that reports *"tests failed because X"* has done its job: it is an
+``analysis`` stage and no file change is required. A coder that writes a
+beautiful description of the code it *would* write has not: it is a ``change``
+stage and prose is not evidence. Supporting actions (``memory_add``,
+``slack_notify``, ``embeddings_add``, …) never satisfy a goal-completion gate.
+
+Failure semantics (see :mod:`core.runtime`)
+-------------------------------------------
+A mission that crashes does **not** degrade into a chat answer. The engine
+persists a ``failed`` report carrying the error, the stage it died in and its
+recoverability, so the run can be diagnosed, repaired and resumed::
+
+    MISSION ERROR → MISSION FAILED (diagnostics + resume handle)
+                ↛  never a silent chat turn
+
+Budgets are a hierarchy (planning → execution → verification → repair →
+emergency), and each mission gets its own isolated workspace
+(``<HERMUS_HOME>/missions/<mission_id>/workspace``) plus a precise per-mission
+file baseline, so concurrent autonomous jobs cannot leak evidence into each
+other.
 """
 from __future__ import annotations
 
@@ -22,6 +49,7 @@ import json
 import os
 import threading
 import time
+import traceback
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -31,7 +59,9 @@ from collections.abc import Callable
 
 from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
+from .atomic_io import atomic_write_json, file_lock
 from .critic import critic_manager
+from .mission_files import MissionFileScope
 from .rollback import rollback_manager
 from .run_events import record_issue
 from .verifier_registry import verifier_registry
@@ -78,9 +108,62 @@ class SubGoal:
         return asdict(self)
 
 
+# ------------------------------------------------------------------ budgets
+#: mission lifecycle phases that draw on the budget
+PHASE_PLANNING = "planning"
+PHASE_EXECUTION = "execution"
+PHASE_VERIFICATION = "verification"
+PHASE_REPAIR = "repair"
+PHASE_EMERGENCY = "emergency"
+MISSION_PHASES = (PHASE_PLANNING, PHASE_EXECUTION, PHASE_VERIFICATION,
+                  PHASE_REPAIR, PHASE_EMERGENCY)
+
+#: how the total budget is split across the lifecycle (fractions of total)
+PHASE_SHARES = {
+    PHASE_PLANNING: 0.08,
+    PHASE_EXECUTION: 0.55,
+    PHASE_VERIFICATION: 0.12,
+    PHASE_REPAIR: 0.20,
+    PHASE_EMERGENCY: 0.05,
+}
+#: never allocate less than this to a phase, however small the mission
+PHASE_MINIMUM = {
+    PHASE_PLANNING: 1,
+    PHASE_EXECUTION: 4,
+    PHASE_VERIFICATION: 2,
+    PHASE_REPAIR: 1,
+    PHASE_EMERGENCY: 1,
+}
+
+#: Default mission budget. A mission owns the whole lifecycle (plan →
+#: implement → test → inspect → repair → retest), so it must be strictly larger
+#: than a single agent turn (``config.max_tool_steps`` = 32), not smaller: with
+#: the old default of 25 a real coding mission ran out of steps before the
+#: first repair round finished.
+DEFAULT_MISSION_BUDGET = 48
+
+
 @dataclass
 class MissionBudget:
-    initial_steps: int = 25
+    """Hierarchical step budget.
+
+    The overall loop bound (``total_steps()``) is the sum of the phase
+    allocations below it::
+
+        Mission budget
+          ├─ planning       requirement analysis + DAG build
+          ├─ execution      DAG rounds (implement / write / run)
+          ├─ verification   observe + verify + critic panel
+          ├─ repair         diagnose + repair replans
+          └─ emergency      reserve a phase borrows from when it runs dry
+
+    Phase accounting is additive to the global counter: consuming a step in a
+    phase consumes one global step too. When a phase runs dry but the mission
+    still has budget, it borrows from the emergency reserve
+    (:meth:`borrow`) instead of failing the whole mission.
+    """
+
+    initial_steps: int = DEFAULT_MISSION_BUDGET
     consumed_steps: int = 0
     max_repairs: int = 3
     repairs_used: int = 0
@@ -90,18 +173,103 @@ class MissionBudget:
     # bound was `initial_steps + extensions_used*10` while extend_budget() also
     # added to initial_steps, double-counting every extension.
     bonus_steps: int = 0
+    # Emergency extensions are outside the normal extension slots: they exist
+    # so a mission that is *provably* still making progress can be rescued
+    # after the ordinary budget is gone (see MissionEngine.extend_budget).
+    emergency_extensions: int = 0
+    max_emergency_extensions: int = 2
+    #: phase → {"limit": int, "used": int}
+    phases: dict[str, dict[str, int]] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.allocate()
+
+    # -- allocation ----------------------------------------------------
+    def allocate(self, total: Optional[int] = None) -> None:
+        """Split ``total`` across the lifecycle phases (never shrinks a limit)."""
+        total = int(total if total is not None else self.total_steps())
+        for name in MISSION_PHASES:
+            limit = max(
+                PHASE_MINIMUM.get(name, 1),
+                int(round(total * PHASE_SHARES.get(name, 0.0))),
+            )
+            entry = self.phases.setdefault(name, {"limit": limit, "used": 0})
+            entry["limit"] = max(int(entry.get("limit") or 0), limit)
+
+    def phase(self, name: str) -> dict[str, int]:
+        if name not in self.phases:
+            self.allocate()
+        return self.phases.setdefault(name, {"limit": 1, "used": 0})
+
+    # -- global --------------------------------------------------------
     def total_steps(self) -> int:
         return self.initial_steps + self.bonus_steps
 
+    def steps_left(self) -> int:
+        return max(0, self.total_steps() - self.consumed_steps)
+
+    # -- per-phase accounting -----------------------------------------
+    def remaining(self, name: str) -> int:
+        entry = self.phase(name)
+        return max(0, int(entry.get("limit") or 0) - int(entry.get("used") or 0))
+
+    def exhausted(self, name: str) -> bool:
+        return self.remaining(name) <= 0
+
+    def consume(self, name: str, steps: int = 1) -> None:
+        """Spend ``steps`` in phase ``name`` (and on the global counter)."""
+        steps = max(0, int(steps))
+        entry = self.phase(name)
+        entry["used"] = int(entry.get("used") or 0) + steps
+        self.consumed_steps += steps
+
+    def borrow(self, name: str, steps: int = 1) -> bool:
+        """Move ``steps`` from the emergency reserve into phase ``name``."""
+        steps = max(1, int(steps))
+        if self.remaining(PHASE_EMERGENCY) < steps:
+            return False
+        self.phase(PHASE_EMERGENCY)["limit"] -= steps
+        self.phase(name)["limit"] += steps
+        return True
+
+    # -- extensions ----------------------------------------------------
     def grant_extension(self, steps: int = 10) -> None:
-        """Consume one extension slot and add exactly ``steps`` budget steps."""
+        """Consume one extension slot and add exactly ``steps`` budget steps.
+
+        The steps are not added to a single counter: ~60% go to execution and
+        the rest to the emergency reserve, so an extension actually reaches the
+        phase that ran out.
+        """
         self.extensions_used += 1
-        self.bonus_steps += max(1, int(steps))
+        steps = max(1, int(steps))
+        self.bonus_steps += steps
+        exec_share = max(1, int(steps * 0.6))
+        self.phase(PHASE_EXECUTION)["limit"] += exec_share
+        self.phase(PHASE_EMERGENCY)["limit"] += max(1, steps - exec_share)
+        return True
+
+    def grant_emergency_extension(self, steps: int = 8) -> bool:
+        """Last-resort extension (does not consume a normal extension slot)."""
+        if self.emergency_extensions >= self.max_emergency_extensions:
+            return False
+        self.emergency_extensions += 1
+        steps = max(1, int(steps))
+        self.bonus_steps += steps
+        self.phase(PHASE_EMERGENCY)["limit"] += steps
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["total_steps"] = self.total_steps()
+        d["steps_left"] = self.steps_left()
+        d["phases"] = {
+            name: {
+                "limit": int(self.phase(name).get("limit") or 0),
+                "used": int(self.phase(name).get("used") or 0),
+                "remaining": self.remaining(name),
+            }
+            for name in MISSION_PHASES
+        }
         return d
 
 
@@ -126,6 +294,62 @@ class MissionReport:
     final_proof: str = ""
     budget: MissionBudget = field(default_factory=MissionBudget)
     repair_history: list[dict[str, Any]] = field(default_factory=list)
+    # ---- failure / recovery -------------------------------------------------
+    # A crashed mission is recorded, not swallowed: ``error`` carries the
+    # exception, the lifecycle stage it happened in and whether a restart is
+    # likely to help. See MissionEngine.start_mission / resume_mission.
+    error: Optional[dict[str, Any]] = None
+    recoverable: bool = True
+    restarts_used: int = 0
+
+    # -- state helpers ------------------------------------------------------
+    TERMINAL_STATES = (MissionState.COMPLETED.value, MissionState.CANCELLED.value)
+    #: states a plain ``resume_mission()`` will pick up again
+    RESUMABLE_STATES = (
+        MissionState.PENDING.value, MissionState.REQUIREMENTS.value,
+        MissionState.PLANNING.value, MissionState.EXECUTING.value,
+        MissionState.OBSERVING.value, MissionState.VERIFYING.value,
+        MissionState.DIAGNOSING.value, MissionState.REPAIRING.value,
+        MissionState.CONTINUING.value, MissionState.BLOCKED.value,
+    )
+
+    def is_terminal(self) -> bool:
+        return self.state in self.TERMINAL_STATES
+
+    def is_resumable(self, *, allow_restart: bool = False) -> bool:
+        """Can this mission be picked up again right now?
+
+        ``blocked`` / ``paused`` / interrupted runs are resumable; ``failed`` is
+        terminal *by default* and needs an explicit restart
+        (``resume_mission(..., restart_failed=True)``) so a crash-looping
+        mission is never auto-resumed by accident.
+        """
+        if self.state == MissionState.FAILED.value:
+            return bool(allow_restart and self.recoverable)
+        return self.state in self.RESUMABLE_STATES
+
+    def failure_summary(self) -> dict[str, Any]:
+        """Structured diagnostics for a non-completed mission."""
+        err = self.error or {}
+        return {
+            "mission_id": self.mission_id,
+            "state": self.state,
+            "stage": err.get("stage") or self.state,
+            "reason": (
+                err.get("message")
+                or self.blocker_reason
+                or self.final_proof
+                or f"mission ended in state '{self.state}'"
+            ),
+            "error_type": err.get("type"),
+            "recoverable": bool(self.recoverable) and not self.is_terminal(),
+            "resumable": self.is_resumable(),
+            "resume_with_restart": self.is_resumable(allow_restart=True),
+            "restarts_used": self.restarts_used,
+            "budget": self.budget.to_dict(),
+            "resume_command": f"hermus mission resume {self.mission_id}"
+            + (" --restart-failed" if self.state == MissionState.FAILED.value else ""),
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -151,6 +375,13 @@ class MissionReport:
             "response": self.final_proof,
             "budget": self.budget.to_dict(),
             "repair_history": self.repair_history,
+            "error": self.error,
+            "recoverable": self.recoverable,
+            "restarts_used": self.restarts_used,
+            "resumable": self.is_resumable(),
+            # diagnostics for every non-completed mission (stage/reason/resume)
+            "failure": (self.failure_summary()
+                        if self.state != MissionState.COMPLETED.value else None),
         }
 
     @classmethod
@@ -185,6 +416,9 @@ class MissionReport:
             final_proof=data.get("final_proof", ""),
             budget=budget,
             repair_history=data.get("repair_history", []),
+            error=data.get("error"),
+            recoverable=bool(data.get("recoverable", True)),
+            restarts_used=int(data.get("restarts_used") or 0),
         )
 
 
@@ -195,34 +429,87 @@ class MissionReport:
 # performed the work". A coder node that answers with a plan but never touches
 # a tool, a file, or a command is NOT a completed stage.
 
+#: the three kinds of evidence a stage can produce
+EVIDENCE_CHANGE = "change"        # files/code created or modified
+EVIDENCE_EXECUTION = "execution"  # commands/tests actually run
+EVIDENCE_ANALYSIS = "analysis"    # substantive written finding
+
+#: minimum characters for a written finding to count as analysis evidence
+MIN_ANALYSIS_CHARS = 120
+#: shorter, but still concrete — used for test verdicts / observations
+MIN_FINDING_CHARS = 40
+
 #: roles whose job is to change the world (files/code/tests), not just analyze
-ACTION_ROLES = {
+CHANGE_ROLES = {
     "coder", "developer", "implementer", "implementation", "engineer",
-    "integrator", "builder", "tester", "verifier", "fixer", "operator",
-    "deployer", "specialist",
+    "integrator", "builder", "fixer", "deployer", "operator", "patcher",
+    "migrator", "installer",
 }
 
-#: goal verbs that imply performing work even for analysis-ish roles
-ACTION_GOAL_VERBS = (
+#: roles whose job is to observe, judge or analyse — a written finding IS the
+#: deliverable, and demanding a file change from them (the old rule) punished
+#: a verifier for correctly reporting "tests failed because X".
+OBSERVATION_ROLES = {
+    "verifier", "tester", "reviewer", "auditor", "inspector", "analyst",
+    "researcher", "architect", "spec", "specifier", "planner", "critic",
+    "observer", "qa", "validator", "monitor",
+}
+
+#: kept for backwards compatibility with older callers/injected executors
+ACTION_ROLES = CHANGE_ROLES | OBSERVATION_ROLES | {"specialist"}
+
+#: goal verbs that mean "produce/change an artifact"
+CHANGE_GOAL_VERBS = (
     "implement", "build", "write", "create", "fix", "repair", "refactor",
-    "deploy", "run ", "execute", "generate", "develop", "integrate", "patch",
-    "migrate", "install", "test", "apply",
+    "deploy", "generate", "develop", "integrate", "patch", "migrate",
+    "install", "scaffold", "add a", "modify", "update the", "apply",
 )
 
-#: tools that mutate state or execute commands (real work, not reading)
-ACTION_TOOLS = {
-    "file_write", "file_edit", "sandbox_run", "shell_execute", "backend_execute",
-    "swe_develop", "mission_start", "mission_resume", "rollback_checkpoint",
-    "rollback_restore", "slack_notify", "jira_create_issue", "linear_create_issue",
-    "github_integration_pr_comment", "custom_exploit_runtime", "browser_click",
-    "browser_type", "browser_navigate", "browser_close", "embeddings_add",
-    "embeddings_ingest", "memory_add", "memory2_remember", "subagent_spawn",
-    "delegate_tasks", "fleet_distribute_task", "skill_harvest",
-}
-ACTION_TOOL_PREFIXES = ("pentest_", "browser_", "screen_", "sast_", "dast_", "custom_")
+#: goal verbs that make a stage an *analysis* stage (a report is the product)
+ANALYSIS_GOAL_VERBS = (
+    "analyz", "analyse", "review", "research", "investigate", "design",
+    "summarize", "summarise", "compare", "audit", "inspect", "evaluate",
+    "assess", "document", "explain", "plan", "draft", "report", "describe",
+    "diagnose", "check whether", "verify", "validate", "critique",
+)
 
+#: goal verbs that ask for something to be *executed* (tests, builds, commands)
+EXEC_GOAL_VERBS = (
+    "run ", "run the", "execute", "pytest", "run tests", "test the",
+    "benchmark", "compile", "build the", "start the", "launch", "smoke test",
+)
+
+#: legacy alias: any verb that implies performing (not describing) work
+ACTION_GOAL_VERBS = CHANGE_GOAL_VERBS + EXEC_GOAL_VERBS + ("test",)
+
+# ---- tool taxonomy ------------------------------------------------------------
+# The old gate counted *any* "action tool" as proof of work, so an agent could
+# satisfy a coding stage by writing a memory entry or posting a Slack message.
+# Goal-completion tools and supporting tools are now separated.
+
+#: tools that produce or mutate the deliverable (goal-completion evidence)
+GOAL_EVIDENCE_TOOLS = {
+    "file_write", "file_edit", "file_delete", "file_move", "file_copy",
+    "swe_develop", "git_apply_patch", "git_commit", "patch_apply",
+    "sandbox_run", "shell_execute", "backend_execute",
+    "mission_start", "mission_resume", "rollback_checkpoint", "rollback_restore",
+}
 #: tools that literally execute commands/tests (strongest evidence)
 EXEC_TOOLS = {"sandbox_run", "shell_execute", "backend_execute"}
+#: tool families that perform real (domain-specific) actions
+GOAL_TOOL_PREFIXES = ("pentest_", "browser_", "screen_", "sast_", "dast_", "custom_")
+#: auxiliary actions: useful, but they never prove the goal was accomplished
+SUPPORTING_TOOLS = {
+    "memory_add", "memory2_remember", "memory_search", "embeddings_add",
+    "embeddings_ingest", "embeddings_search", "slack_notify",
+    "jira_create_issue", "linear_create_issue",
+    "github_integration_pr_comment", "github_integration_pr_create",
+    "skill_harvest", "skill_use", "subagent_spawn", "delegate_tasks",
+    "fleet_distribute_task", "notion_create_page", "email_send_draft",
+}
+#: legacy alias (kept so third-party executors importing it keep working)
+ACTION_TOOLS = GOAL_EVIDENCE_TOOLS | SUPPORTING_TOOLS
+ACTION_TOOL_PREFIXES = GOAL_TOOL_PREFIXES
 
 #: directories never counted as workspace evidence
 _SCAN_SKIP_DIRS = {
@@ -233,18 +520,181 @@ _SCAN_SKIP_DIRS = {
 _SCAN_MAX_FILES = 6000
 
 
-def _is_action_tool(name: str) -> bool:
+def _is_goal_tool(name: str) -> bool:
+    """Does this tool produce/mutate the deliverable (goal-completion proof)?"""
     n = str(name or "")
-    return n in ACTION_TOOLS or any(n.startswith(p) for p in ACTION_TOOL_PREFIXES)
+    return n in GOAL_EVIDENCE_TOOLS or any(n.startswith(p) for p in GOAL_TOOL_PREFIXES)
+
+
+def _is_supporting_tool(name: str) -> bool:
+    """Auxiliary action: recorded, but never accepted as proof of the goal."""
+    n = str(name or "")
+    if n in SUPPORTING_TOOLS:
+        return True
+    # anything that is neither a goal tool nor a known read tool is supporting
+    return not (_is_goal_tool(n) or n.endswith("_read") or n.endswith("_get")
+                or n.endswith("_list") or n.endswith("_search"))
+
+
+def _is_action_tool(name: str) -> bool:
+    """Legacy predicate: goal-completion tools (kept for older callers)."""
+    return _is_goal_tool(name)
+
+
+def expected_output_type(node: Any) -> dict[str, Any]:
+    """What kind of output does this stage owe us, and what satisfies it?
+
+    The model is driven by the **expected output type**, not by the role name:
+    a verifier/reviewer/analyst delivers a *finding*; a coder delivers a
+    *change*; a test-runner delivers *execution*. Returns::
+
+        {"primary": kind, "acceptable": [kinds], "min_chars": int, "why": str}
+    """
+    role = str(getattr(node, "role", "") or "").strip().lower()
+    goal = str(getattr(node, "goal", "") or "").strip().lower()
+
+    is_observation_role = role in OBSERVATION_ROLES
+    is_change_role = role in CHANGE_ROLES
+    has_change_verb = any(v in goal for v in CHANGE_GOAL_VERBS)
+    has_analysis_verb = any(v in goal for v in ANALYSIS_GOAL_VERBS)
+    has_exec_verb = any(v in goal for v in EXEC_GOAL_VERBS)
+
+    # 1. Observation roles (verifier/tester/reviewer/analyst/…) deliver a
+    #    finding. Only an explicit change verb ("fix", "implement", …) turns
+    #    them into change stages — the old rule demanded a file change from
+    #    every verifier and punished a correct "tests failed because X".
+    if is_observation_role:
+        if has_change_verb:
+            return {
+                "primary": EVIDENCE_CHANGE,
+                "acceptable": [EVIDENCE_CHANGE, EVIDENCE_EXECUTION],
+                "min_chars": MIN_ANALYSIS_CHARS,
+                "why": f"role '{role}' was asked to change something",
+            }
+        if has_exec_verb:
+            return {
+                "primary": EVIDENCE_EXECUTION,
+                "acceptable": [EVIDENCE_EXECUTION, EVIDENCE_ANALYSIS],
+                "min_chars": MIN_FINDING_CHARS,
+                "why": f"role '{role}' must run the checks it reports on",
+            }
+        return {
+            "primary": EVIDENCE_ANALYSIS,
+            "acceptable": [EVIDENCE_ANALYSIS, EVIDENCE_EXECUTION, EVIDENCE_CHANGE],
+            "min_chars": MIN_ANALYSIS_CHARS,
+            "why": f"stage delivers a finding ({role})",
+        }
+
+    # 2. everyone else: the goal text decides
+    if has_change_verb:
+        return {
+            "primary": EVIDENCE_CHANGE,
+            "acceptable": [EVIDENCE_CHANGE, EVIDENCE_EXECUTION],
+            "min_chars": MIN_ANALYSIS_CHARS,
+            "why": f"goal contains an action verb ({role or 'specialist'})",
+        }
+    if has_exec_verb:
+        return {
+            "primary": EVIDENCE_EXECUTION,
+            "acceptable": [EVIDENCE_EXECUTION, EVIDENCE_ANALYSIS],
+            "min_chars": MIN_FINDING_CHARS,
+            "why": f"goal asks for execution ({role or 'specialist'})",
+        }
+    if has_analysis_verb:
+        return {
+            "primary": EVIDENCE_ANALYSIS,
+            "acceptable": [EVIDENCE_ANALYSIS, EVIDENCE_EXECUTION, EVIDENCE_CHANGE],
+            "min_chars": MIN_ANALYSIS_CHARS,
+            "why": f"goal asks for analysis ({role or 'specialist'})",
+        }
+    if is_change_role:
+        return {
+            "primary": EVIDENCE_CHANGE,
+            "acceptable": [EVIDENCE_CHANGE, EVIDENCE_EXECUTION],
+            "min_chars": MIN_ANALYSIS_CHARS,
+            "why": f"role '{role}' changes the world",
+        }
+    # unknown/specialist stages default to "produce something" — the historical
+    # behaviour, which keeps generic subgoals honest.
+    return {
+        "primary": EVIDENCE_CHANGE,
+        "acceptable": [EVIDENCE_CHANGE, EVIDENCE_EXECUTION, EVIDENCE_ANALYSIS],
+        "min_chars": MIN_ANALYSIS_CHARS,
+        "why": "generic stage: any concrete output counts",
+    }
 
 
 def _node_requires_action(node: Any) -> bool:
-    """Does this node's job description imply performing (not describing) work?"""
-    role = str(getattr(node, "role", "") or "").lower()
-    goal = str(getattr(node, "goal", "") or "").lower()
-    if any(v in goal for v in ACTION_GOAL_VERBS):
-        return True
-    return role in ACTION_ROLES
+    """Does this node owe us performed work (change/execution), not just prose?
+
+    Kept for backwards compatibility; ``expected_output_type`` is the
+    authoritative model used by the executor.
+    """
+    return expected_output_type(node)["primary"] in (EVIDENCE_CHANGE, EVIDENCE_EXECUTION)
+
+
+#: markers that make a short written answer a real *finding* (test verdicts …)
+_FINDING_MARKERS = (
+    "passed", "failed", "failure", "error", "traceback", "exit code",
+    "assert", "test result", "tests:", "ok", "broken", "missing", "blocked",
+    "vulnerability", "warning", "regression", "coverage", "verified",
+)
+
+
+def _has_findings(text: str, min_chars: int = MIN_FINDING_CHARS) -> bool:
+    """Does this text carry a concrete finding (not just filler)?"""
+    body = str(text or "").strip()
+    if len(body) < min_chars:
+        return False
+    low = body.lower()
+    return any(m in low for m in _FINDING_MARKERS)
+
+
+def classify_evidence(
+    *,
+    tool_calls: list[str],
+    files_changed: list[str],
+    text: str,
+    expectation: dict[str, Any],
+) -> dict[str, Any]:
+    """Turn raw signals into an evidence verdict for one stage.
+
+    Returns ``{"kinds": set, "satisfied": bool, "missing": [..], ...}`` where
+    ``kinds`` ⊆ {change, execution, analysis} and supporting actions are
+    reported separately so a repair round can name them.
+    """
+    tool_calls = list(tool_calls or [])
+    goal_tools = sorted({t for t in tool_calls if _is_goal_tool(t)})
+    supporting = sorted({t for t in tool_calls if _is_supporting_tool(t)})
+    exec_tools = sorted({t for t in tool_calls if t in EXEC_TOOLS})
+    files_changed = list(files_changed or [])
+
+    change_tools = sorted(set(goal_tools) - set(exec_tools))
+    kinds: set[str] = set()
+    if change_tools or files_changed:
+        kinds.add(EVIDENCE_CHANGE)
+    if exec_tools:
+        kinds.add(EVIDENCE_EXECUTION)
+    min_chars = int(expectation.get("min_chars") or MIN_ANALYSIS_CHARS)
+    if len(str(text or "").strip()) >= min_chars or (
+        expectation.get("primary") == EVIDENCE_ANALYSIS and _has_findings(text, MIN_FINDING_CHARS)
+    ):
+        kinds.add(EVIDENCE_ANALYSIS)
+
+    acceptable = set(expectation.get("acceptable") or [expectation.get("primary")])
+    satisfied = bool(kinds & acceptable)
+    missing = [k for k in (expectation.get("acceptable") or []) if k not in kinds]
+    return {
+        "kinds": kinds,
+        "satisfied": satisfied,
+        "missing": missing,
+        "goal_tools": goal_tools,
+        "supporting_tools": supporting,
+        "exec_tools": exec_tools,
+        "files_changed": files_changed,
+        "primary": expectation.get("primary"),
+        "why": expectation.get("why", ""),
+    }
 
 
 def _scan_changed_files(since_ts: float, roots: Optional[list[Path]] = None) -> list[str]:
@@ -283,7 +733,8 @@ def _scan_changed_files(since_ts: float, roots: Optional[list[Path]] = None) -> 
     return changed
 
 
-def build_node_prompt(node: Any, parent_ctx: Optional[dict[str, Any]] = None) -> str:
+def build_node_prompt(node: Any, parent_ctx: Optional[dict[str, Any]] = None,
+                      workspace_dir: Optional[str] = None) -> str:
     """Compose the prompt for one DAG node, injecting upstream (parent) results.
 
     Previously the executor only passed the node's own goal (+ repair hints), so
@@ -323,6 +774,13 @@ def build_node_prompt(node: Any, parent_ctx: Optional[dict[str, Any]] = None) ->
                 "## Upstream results (already completed by previous stages — build on "
                 "these, do NOT redo or contradict them)\n" + "\n\n".join(blocks)
             )
+
+    if workspace_dir:
+        parts.append(
+            "## Mission workspace\n"
+            f"Write every deliverable for this mission inside: {workspace_dir}\n"
+            "Files created anywhere else may not be collected as mission evidence."
+        )
 
     hints = (getattr(node, "inputs", None) or {}).get("repair_hints")
     if hints:
@@ -368,6 +826,8 @@ def make_agent_backed_executor(
     should_cancel: Optional[Callable[[], bool]] = None,
     steer_source: Optional[Callable[[], list[str]]] = None,
     model: Optional[str] = None,
+    scope: Optional[MissionFileScope] = None,
+    workspace_dir: Optional[str] = None,
 ) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
     """Build an executor that actually runs each DAG node goal via an agent.
 
@@ -376,12 +836,20 @@ def make_agent_backed_executor(
     * ``on_event`` / ``should_cancel`` / ``steer_source`` — forwarded into every
       node's ReAct loop so SSE streaming, cooperative cancellation and mid-run
       steering work inside missions exactly like they do in plain chat.
+    * ``scope`` — the mission's :class:`~core.mission_files.MissionFileScope`.
+      File evidence then comes from a precise per-mission baseline diff inside
+      the mission's own roots, so concurrent jobs cannot leak evidence into
+      each other (without it the executor falls back to the legacy timestamp
+      scan).
+    * ``workspace_dir`` — the mission workspace advertised to the model so it
+      writes deliverables where the mission can see them.
 
     Never fabricates success:
     * no usable model/key/Ollama backend → the node is blocked, not completed;
-    * a node whose job implies performing work must show evidence (executed
-      tools / changed files / produced artifacts) — a prose description alone
-      fails with ``no_evidence_of_work`` so the repair loop can act.
+    * a stage must produce the **expected kind** of output (change / execution /
+      analysis) — a prose description of a coding task fails with
+      ``no_evidence_of_work``, and supporting actions (memory_add,
+      slack_notify, …) never satisfy the gate.
     """
     from .config import config as _config
 
@@ -415,7 +883,11 @@ def make_agent_backed_executor(
                     mode="agent",
                 )
 
-            prompt = build_node_prompt(node, parent_ctx)
+            # Per-node file baseline: precise diff, scoped to this mission.
+            node_snapshot = scope.snapshot() if scope is not None else None
+            prompt = build_node_prompt(
+                node, parent_ctx, workspace_dir=workspace_dir,
+            )
             res = _chat_compat(
                 node_agent, prompt,
                 on_event=on_event, should_cancel=should_cancel,
@@ -443,61 +915,88 @@ def make_agent_backed_executor(
                     "evidence": [{"stage": stage, "status": "blocked", "reason": reason}],
                 }
 
-            # ---- evidence collection: did the agent PERFORM the work? ----
+            # ---- evidence collection: did the agent deliver what it owed? ----
             tool_calls = list(res.get("tool_calls") or [])
-            action_tools = sorted({t for t in tool_calls if _is_action_tool(t)})
-            exec_tools = sorted({t for t in tool_calls if t in EXEC_TOOLS})
-            files_changed = _scan_changed_files(node_started)
+            if scope is not None and node_snapshot is not None:
+                # precise, mission-scoped diff (baseline → now)
+                files_changed = scope.changed_since(node_snapshot)
+            else:
+                # legacy timestamp scan (standalone executors / offline callers)
+                files_changed = _scan_changed_files(node_started)
             # evidence the agent itself reported (tool_results carry per-tool outcomes)
             tool_results = res.get("tool_results") or []
-            performed_work = bool(action_tools or exec_tools or files_changed)
 
-            requires_action = _node_requires_action(node)
+            expectation = expected_output_type(node)
+            verdict = classify_evidence(
+                tool_calls=tool_calls,
+                files_changed=files_changed,
+                text=text,
+                expectation=expectation,
+            )
+            performed_work = bool(verdict["kinds"] & {EVIDENCE_CHANGE, EVIDENCE_EXECUTION})
             evidence = [{
                 "stage": stage,
-                "status": "executed" if (performed_work or not requires_action) else "needs_evidence",
+                "status": "executed" if verdict["satisfied"] else "needs_evidence",
                 "model": provider,
                 "tools_used": len(tool_results),
-                "action_tools": action_tools,
-                "commands_executed": exec_tools,
+                "expected_output": expectation["primary"],
+                "acceptable_evidence": list(expectation["acceptable"]),
+                "evidence_found": sorted(verdict["kinds"]),
+                "evidence_missing": list(verdict["missing"]),
+                "why": expectation["why"],
+                # legacy keys (older dashboards/tests read these)
+                "action_tools": verdict["goal_tools"],
+                "supporting_actions": verdict["supporting_tools"],
+                "commands_executed": verdict["exec_tools"],
                 "files_changed": files_changed[:20],
                 "performed_work": performed_work,
             }]
 
-            if requires_action and not performed_work:
-                # The model *described* the work without *performing* it.
+            if not verdict["satisfied"]:
+                empty_analysis = (
+                    expectation["primary"] == EVIDENCE_ANALYSIS
+                    and not (verdict["kinds"] & {EVIDENCE_CHANGE, EVIDENCE_EXECUTION})
+                )
+                reason = "empty_analysis" if empty_analysis else "no_evidence_of_work"
                 _emit("node_finished", {"stage": stage, "status": "needs_evidence",
-                                        "reason": "no_evidence_of_work"})
+                                        "reason": reason,
+                                        "expected": expectation["primary"]})
+                if empty_analysis:
+                    instructions = (
+                        f"This stage delivers a finding ('{stage}'): produce a "
+                        "substantive result (review findings, test verdicts, research "
+                        f"summary) of at least {expectation['min_chars']} characters "
+                        "that states what you observed. The answer was empty or trivial."
+                    )
+                else:
+                    supporting = verdict["supporting_tools"]
+                    supporting_note = (
+                        f" Only supporting actions were recorded ({', '.join(supporting)}); "
+                        "those do not prove the goal was accomplished."
+                        if supporting else ""
+                    )
+                    instructions = (
+                        f"This stage must produce '{expectation['primary']}' evidence "
+                        f"({expectation['why']}), but none was found. Re-run the stage "
+                        "and actually use the tools to accomplish the goal — "
+                        + ("write/modify the files" if expectation["primary"] == EVIDENCE_CHANGE
+                           else "run the commands/tests")
+                        + "; do not merely describe how to do it."
+                        + supporting_note
+                    )
                 return {
                     "success": False,
                     "output": text,
-                    "error": "no_evidence_of_work",
+                    "error": reason,
                     "evidence": evidence,
-                    "instructions": (
-                        "The stage answer contained no evidence of performed work "
-                        f"(no tools executed, no files changed). Re-run this stage and "
-                        "actually use the tools (write files, run commands/tests) to "
-                        "accomplish the goal; do not merely describe how to do it."
-                    ),
-                }
-
-            if not requires_action and len(text.strip()) < 120:
-                # analysis stages still need a substantive analysis product
-                _emit("node_finished", {"stage": stage, "status": "needs_evidence",
-                                        "reason": "empty_analysis"})
-                return {
-                    "success": False,
-                    "output": text,
-                    "error": "empty_analysis",
-                    "evidence": evidence,
-                    "instructions": (
-                        "Analysis stages must produce a substantive result (design, "
-                        "review findings, research summary). The answer was empty or trivial."
-                    ),
+                    "expected_output": expectation["primary"],
+                    "instructions": instructions,
                 }
 
             _emit("node_finished", {
                 "stage": stage, "status": "executed",
+                "expected": expectation["primary"],
+                "evidence": sorted(verdict["kinds"]),
                 "tools": len(tool_results), "files_changed": len(files_changed),
                 "ms": int((time.time() - node_started) * 1000),
             })
@@ -619,13 +1118,61 @@ class MissionEngine:
         return executor(node, parent_ctx)
 
     def _save_mission(self, report: MissionReport) -> None:
+        """Persist mission state atomically (tmp → fsync → rename).
+
+        Mission state is durable background state: a plain ``write_text``
+        truncates the document first, so a crash between truncate and flush (or
+        a concurrent reader) can observe invalid JSON and lose the mission
+        entirely. Writers are also serialised with an advisory lock so two
+        queue workers cannot interleave partial reads/writes.
+        """
         p = self.storage_dir / f"{report.mission_id}.json"
         try:
-            p.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+            self.storage_dir.mkdir(parents=True, exist_ok=True)
+            with file_lock(p):
+                atomic_write_json(p, report.to_dict(), indent=2)
         except Exception as exc:
             record_issue("mission", "save_report", exc,
                          mission_id=report.mission_id, retryable=True,
                          fallback="mission report not persisted (run continues)")
+
+    @staticmethod
+    def _bind_control_hooks(
+        executor: Callable[[Any, dict[str, Any]], dict[str, Any]],
+        *,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
+        """Layer cooperative cancellation on top of an injected executor."""
+        if should_cancel is None:
+            return executor
+
+        def wrapped(node: Any, parent_ctx: dict[str, Any]) -> dict[str, Any]:
+            try:
+                if should_cancel():
+                    stage = str(getattr(node, "role", "?") or "?")
+                    return {"success": False, "output": "", "error": "cancelled",
+                            "evidence": [{"stage": stage, "status": "cancelled"}]}
+            except Exception:
+                pass
+            return executor(node, parent_ctx)
+
+        return wrapped
+
+    def _mission_file_scope(self, mission_id: str) -> MissionFileScope:
+        """Open (and cache per thread) the mission's isolated file scope."""
+        scope = getattr(self._tls, "scope", None)
+        if scope is None or scope.mission_id != mission_id:
+            scope = MissionFileScope.open(mission_id)
+            self._tls.scope = scope
+        return scope
+
+    def _mission_workspace(self, mission_id: str) -> Path:
+        try:
+            return workspace.mission_workspace(mission_id)
+        except Exception as exc:
+            record_issue("mission", "workspace", exc, mission_id=mission_id,
+                         retryable=False, fallback="mission workspace unavailable")
+            return Path.cwd()
 
     def get_mission(self, mission_id: str) -> Optional[MissionReport]:
         p = self.storage_dir / f"{mission_id}.json"
@@ -667,7 +1214,7 @@ class MissionEngine:
         requirements: Optional[list[str]] = None,
         domain: Optional[str] = None,
         subgoals: Optional[list[str]] = None,
-        budget_steps: int = 25,
+        budget_steps: Optional[int] = None,
         max_repairs: Optional[int] = None,
         executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None,
         agent: Any = None,
@@ -682,7 +1229,15 @@ class MissionEngine:
         mission stages share its session, model and profile. ``on_event`` /
         ``should_cancel`` / ``steer_source`` stream and control the mission the
         same way a plain chat turn is streamed and controlled.
+
+        Failure contract: an unexpected exception inside the lifecycle is
+        **recorded on the report** (``state='failed'``, ``error={type, stage,
+        message, traceback}``) and returned — it is never swallowed, and it is
+        never converted into a successful/chat-shaped answer. The mission
+        remains restartable with ``resume_mission(..., restart_failed=True)``.
         """
+        from .config import config as _cfg
+
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
         detected_domain = domain or verifier_registry.auto_detect_domain(goal)
 
@@ -697,6 +1252,15 @@ class MissionEngine:
 
         cp = rollback_manager.checkpoint(label=f"mission_start_{mid}")
         dag = self._build_mission_dag(goal, detected_domain, subgoals)
+        # Mission-isolated workspace: the only file root that is always
+        # attributable to this mission (see core.mission_files).
+        try:
+            workspace_dir = self._mission_workspace(mid)
+        except Exception:
+            workspace_dir = Path.cwd()
+        if budget_steps is None:
+            budget_steps = int(getattr(_cfg, "mission_budget_steps", DEFAULT_MISSION_BUDGET)
+                               or DEFAULT_MISSION_BUDGET)
 
         report = MissionReport(
             mission_id=mid,
@@ -715,24 +1279,79 @@ class MissionEngine:
         self._save_mission(report)
 
         # per-run executor override (bound agent / hooks), scoped to this thread
+        scope = self._mission_file_scope(mid)
         if executor is not None:
             self._tls.executor = executor
+        elif self._injected_executor is not None:
+            # An explicitly injected executor (tests, simulations, custom
+            # runtimes) must not be replaced by the default agent-backed one
+            # just because the caller also passed streaming/control hooks —
+            # the hooks are layered on top of it instead.
+            self._tls.executor = self._bind_control_hooks(
+                self._injected_executor, should_cancel=should_cancel
+            )
         elif agent is not None or on_event or should_cancel or steer_source:
             self._tls.executor = make_agent_backed_executor(
                 agent=agent,
                 on_event=on_event,
                 should_cancel=should_cancel,
                 steer_source=steer_source,
+                scope=scope,
+                workspace_dir=str(workspace_dir),
             )
         else:
             self._tls.executor = None
         try:
-            return self._run_autonomous_loop(
-                report, dag,
-                on_event=on_event, should_cancel=should_cancel,
-            )
+            try:
+                return self._run_autonomous_loop(
+                    report, dag,
+                    on_event=on_event, should_cancel=should_cancel,
+                )
+            except Exception as exc:
+                # ---- crash → recorded failure, never a silent downgrade ----
+                crash_stage = str(report.state or MissionState.EXECUTING.value)
+                report.state = MissionState.FAILED.value
+                report.error = {
+                    "type": type(exc).__name__,
+                    "message": str(exc)[:1000],
+                    "stage": crash_stage,
+                    "traceback": traceback.format_exc(limit=8)[-2000:],
+                    "recoverable": True,
+                }
+                report.recoverable = True
+                report.finished_at = datetime.now().isoformat()
+                report.progress_pct = min(95, self._compute_progress(dag))
+                report.final_proof = (
+                    f"MISSION FAILED: {type(exc).__name__}: {str(exc)[:300]} "
+                    f"(mission {mid} can be repaired and resumed)"
+                )
+                record_issue(
+                    "mission", "lifecycle", exc, mission_id=mid, retryable=True,
+                    fallback="mission recorded as FAILED with diagnostics; "
+                             "resume with restart_failed=True",
+                )
+                self._save_mission(report)
+                if on_event is not None:
+                    try:
+                        on_event("mission_error", {
+                            "mission_id": mid,
+                            "stage": report.error["stage"],
+                            "error": report.error["message"],
+                            "error_type": report.error["type"],
+                            "recoverable": True,
+                            "resumable": True,
+                        })
+                        on_event("mission_finished", {
+                            "mission_id": mid, "state": report.state,
+                            "progress_pct": report.progress_pct,
+                            "failure": report.failure_summary(),
+                        })
+                    except Exception:
+                        pass
+                return report
         finally:
             self._tls.executor = None
+            self._tls.scope = None
 
     def _run_autonomous_loop(
         self,
@@ -745,6 +1364,8 @@ class MissionEngine:
         budget = report.budget
         mission_start_ts = datetime.fromisoformat(report.started_at).timestamp()
         prev_completed = -1
+        # mission-isolated file scope (baseline taken in start_mission)
+        scope = self._mission_file_scope(report.mission_id)
 
         def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
             if on_event is not None:
@@ -753,8 +1374,29 @@ class MissionEngine:
                 except Exception:
                     pass
 
+        def _spend(phase: str, steps: int = 1) -> None:
+            """Charge a phase; over-drawing borrows from the emergency reserve.
+
+            Phase budgets are the *planning* hierarchy the mission reports on.
+            The hard stop stays the global budget, so a phase that legitimately
+            needs more (e.g. extra verification rounds) borrows from the
+            emergency reserve and, when that is empty, records an overdraw
+            instead of aborting an otherwise healthy mission.
+            """
+            steps = max(1, int(steps))
+            if budget.remaining(phase) < steps:
+                if not budget.borrow(phase, steps):
+                    entry = budget.phase(phase)
+                    entry["overdraw"] = int(entry.get("overdraw") or 0) + steps
+            budget.consume(phase, steps)
+
         _emit("mission_started", {"goal": report.goal[:200], "domain": report.domain,
-                                  "budget_steps": budget.total_steps()})
+                                  "budget_steps": budget.total_steps(),
+                                  "budget": budget.to_dict()})
+
+        # requirements analysis + DAG construction already happened: charge the
+        # planning phase once (it is not repeated on every round).
+        _spend(PHASE_PLANNING, 1)
 
         while budget.consumed_steps < budget.total_steps():
             if should_cancel is not None and should_cancel():
@@ -767,7 +1409,8 @@ class MissionEngine:
             report.state = MissionState.EXECUTING.value
             _emit("mission_state", {"state": report.state,
                                     "progress_pct": self._compute_progress(dag),
-                                    "steps_left": budget.total_steps() - budget.consumed_steps})
+                                    "steps_left": budget.steps_left(),
+                                    "budget": budget.to_dict()})
             self._save_mission(report)
 
             # A. EXECUTE DAG STAGES
@@ -775,7 +1418,7 @@ class MissionEngine:
                 node_executor=self._call_executor,
                 max_rounds=15,
             )
-            budget.consumed_steps += dag_round_res.get("completed", 1)
+            _spend(PHASE_EXECUTION, max(1, int(dag_round_res.get("completed", 1) or 1)))
             report.dag_state = dag.to_dict()
             report.subgoals = [SubGoal(id=nid, role=n.role, goal=n.goal, status=n.status) for nid, n in dag.nodes.items()]
             report.progress_pct = self._compute_progress(dag)
@@ -836,14 +1479,22 @@ class MissionEngine:
                 mission_id=report.mission_id,
                 since_timestamp=mission_start_ts,
             )
+            # Concurrency guard: only files inside THIS mission's scope (its own
+            # workspace + the project root, minus every other mission's
+            # directory) can be claimed as deliverables, and only when the
+            # per-mission baseline says they appeared/changed during this run.
+            scoped_changed = set(scope.changed_since_baseline())
             report.artifacts = [
                 a.path for a in artifacts
-                if not getattr(a, "mission_id", None) or a.mission_id == report.mission_id
+                if (not getattr(a, "mission_id", None) or a.mission_id == report.mission_id)
+                and (str(getattr(a, "path", "")) in scoped_changed or scope.contains(str(getattr(a, "path", ""))))
             ]
 
             # C. VERIFY (STRUCTURAL + BEHAVIORAL + CRITIC)
             report.state = MissionState.VERIFYING.value
-            _emit("mission_state", {"state": report.state})
+            _spend(PHASE_VERIFICATION, 1)
+            _emit("mission_state", {"state": report.state,
+                                    "budget": budget.to_dict()})
             try:
                 v_res = verifier_registry.verify(
                     domain_or_auto=report.domain,
@@ -915,8 +1566,9 @@ class MissionEngine:
                 return report
 
             # D. DIAGNOSE & REPAIR LOOP
-            if budget.repairs_used < budget.max_repairs:
+            if budget.repairs_used < budget.max_repairs and not budget.exhausted(PHASE_REPAIR):
                 budget.repairs_used += 1
+                _spend(PHASE_REPAIR, 1)
                 report.state = MissionState.DIAGNOSING.value
 
                 diagnosis = {
@@ -942,17 +1594,47 @@ class MissionEngine:
             else:
                 break
 
+        # ---- structured failure (never a silent downgrade to chat) ----------
         report.state = MissionState.FAILED.value
         report.finished_at = datetime.now().isoformat()
         # Never report 100% for a failed mission: DAG stages may all have run,
         # but the mission only "completes" when verification passes.
         report.progress_pct = min(95, self._compute_progress(dag))
-        report.final_proof = f"Mission failed to achieve verifiable behavioral completion after {budget.consumed_steps} steps and {budget.repairs_used} repair attempts."
+        if budget.steps_left() <= 0:
+            reason, stage = ("budget_exhausted", PHASE_EXECUTION)
+        else:
+            reason, stage = ("repairs_exhausted", PHASE_REPAIR)
+        can_extend = (
+            budget.extensions_used < budget.max_extensions
+            or budget.emergency_extensions < budget.max_emergency_extensions
+        )
+        report.recoverable = bool(can_extend)
+        report.error = report.error or {
+            "type": reason,
+            "stage": stage,
+            "message": (
+                f"Mission did not reach verifiable completion after "
+                f"{budget.consumed_steps} step(s) and {budget.repairs_used} repair "
+                f"attempt(s) ({reason})."
+            ),
+            "recoverable": can_extend,
+        }
+        report.final_proof = (
+            f"MISSION FAILED ({reason}): {report.error['message']} "
+            f"Mission {report.mission_id} can be extended and resumed."
+        )
         self._save_mission(report)
         _emit("mission_finished", {"state": report.state,
-                                   "progress_pct": report.progress_pct})
+                                   "progress_pct": report.progress_pct,
+                                   "failure": report.failure_summary()})
         return report
 
+    # -- resume semantics ---------------------------------------------------
+    # TERMINAL  : completed, cancelled  → never resumed
+    # RESUMABLE : pending/planning/executing/... and blocked → plain resume
+    # RECOVERABLE: failed → only with restart_failed=True (a crash-looping
+    #              mission must not be auto-resumed by a scheduler or by an
+    #              eager retry path; the restart is explicit and auditable).
     def resume_mission(
         self,
         mission_id: str,
@@ -961,13 +1643,59 @@ class MissionEngine:
         on_event: Optional[Callable[..., None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         steer_source: Optional[Callable[[], list[str]]] = None,
+        restart_failed: bool = False,
+        extra_steps: Optional[int] = None,
     ) -> MissionReport:
+        """Continue a mission that is blocked, interrupted or (explicitly) failed.
+
+        ``restart_failed=True`` is the recovery path for a ``failed`` mission:
+        it clears the recorded error, resets failed/skipped DAG nodes, grants a
+        fresh step allowance and re-enters the lifecycle. Raises ``ValueError``
+        when the mission is terminal (completed/cancelled) or when a failed
+        mission is resumed without the explicit flag — silently returning the
+        old report is what made resumability look broken.
+        """
         report = self.get_mission(mission_id)
         if not report:
             raise ValueError(f"Mission {mission_id} not found")
 
-        if report.state in (MissionState.COMPLETED.value, MissionState.FAILED.value):
-            return report
+        if report.state == MissionState.COMPLETED.value:
+            raise ValueError(
+                f"Mission {mission_id} is already completed; nothing to resume"
+            )
+        if report.state == MissionState.CANCELLED.value:
+            raise ValueError(
+                f"Mission {mission_id} was cancelled; start a new mission instead"
+            )
+        if report.state == MissionState.FAILED.value:
+            if not restart_failed:
+                raise ValueError(
+                    f"Mission {mission_id} is FAILED (terminal). Restart it explicitly "
+                    f"with resume_mission('{mission_id}', restart_failed=True) — "
+                    f"{report.failure_summary().get('reason')}"
+                )
+            if not report.recoverable:
+                raise ValueError(
+                    f"Mission {mission_id} is FAILED and marked unrecoverable "
+                    f"({(report.error or {}).get('message')})"
+                )
+            report.restarts_used += 1
+            report.error = None
+            report.recoverable = True
+            report.finished_at = None
+            # a restart needs room to redo the work it is restarting
+            if extra_steps is None:
+                extra_steps = 8
+        elif extra_steps is None and report.budget.steps_left() <= 0:
+            # resuming a mission that already burned its budget would loop
+            # zero times and immediately fail again
+            extra_steps = 8
+
+        if extra_steps:
+            if report.budget.extensions_used < report.budget.max_extensions:
+                report.budget.grant_extension(int(extra_steps))
+            else:
+                report.budget.grant_emergency_extension(int(extra_steps))
 
         dag = AgentDAG.from_dict(report.dag_state) if report.dag_state else self._build_mission_dag(report.goal, report.domain)
 
@@ -975,30 +1703,54 @@ class MissionEngine:
             if node.status in (DAGNodeStatus.BLOCKED.value, DAGNodeStatus.FAILED.value, DAGNodeStatus.SKIPPED.value):
                 node.status = DAGNodeStatus.READY.value
                 node.retries = 0
+                try:
+                    node.error = None
+                except Exception:
+                    pass
 
         report.state = MissionState.CONTINUING.value
         report.blocker_reason = None
         report.blocker_instructions = None
-        if agent is not None or on_event or should_cancel or steer_source:
+        scope = self._mission_file_scope(report.mission_id)
+        if self._injected_executor is not None and agent is None:
+            self._tls.executor = self._bind_control_hooks(
+                self._injected_executor, should_cancel=should_cancel
+            )
+        elif agent is not None or on_event or should_cancel or steer_source:
             self._tls.executor = make_agent_backed_executor(
                 agent=agent, on_event=on_event,
                 should_cancel=should_cancel, steer_source=steer_source,
+                scope=scope,
+                workspace_dir=str(self._mission_workspace(report.mission_id)),
             )
         else:
             self._tls.executor = None
+        self._save_mission(report)
         try:
             return self._run_autonomous_loop(
                 report, dag, on_event=on_event, should_cancel=should_cancel
             )
         finally:
             self._tls.executor = None
+            self._tls.scope = None
 
-    def extend_budget(self, mission_id: str, steps: int = 10) -> MissionReport:
-        """Grant extra steps to a running/blocked/failed mission.
+    def extend_budget(self, mission_id: str, steps: int = 10, *,
+                      emergency: bool = False) -> MissionReport:
+        """Grant ``steps`` extra steps to a running/blocked/failed mission.
 
-        Explicit counterpart to the automatic progress-based extension: the
-        loop bound grows by ``10 * extensions_used``, capped at
-        ``max_extensions``; each explicit extension consumes one slot.
+        The step allowance is tracked in ``bonus_steps`` (the loop bound is
+        ``initial_steps + bonus_steps``); ~60% of each extension goes to the
+        execution phase and the rest to the emergency reserve, so an extension
+        reaches the phase that actually ran dry.
+
+        * normal extensions consume one of ``max_extensions`` slots;
+        * ``emergency=True`` uses the separate ``max_emergency_extensions``
+          reserve (last resort for a mission that is still making progress);
+        * ``completed`` missions are returned untouched, everything else —
+          including ``failed`` — can be extended so it becomes resumable again
+          (``extend_budget`` then ``resume_mission(..., restart_failed=True)``).
+
+        Raises ``ValueError`` when no slot is left.
         """
         report = self.get_mission(mission_id)
         if not report:
@@ -1007,13 +1759,26 @@ class MissionEngine:
         if report.state == MissionState.COMPLETED.value:
             return report
 
-        if report.budget.extensions_used >= report.budget.max_extensions:
-            raise ValueError(
-                f"Mission {mission_id} already used its "
-                f"{report.budget.max_extensions} budget extensions"
-            )
+        if emergency:
+            if not report.budget.grant_emergency_extension(steps):
+                raise ValueError(
+                    f"Mission {mission_id} already used its "
+                    f"{report.budget.max_emergency_extensions} emergency extensions"
+                )
+        else:
+            if report.budget.extensions_used >= report.budget.max_extensions:
+                raise ValueError(
+                    f"Mission {mission_id} already used its "
+                    f"{report.budget.max_extensions} budget extensions"
+                )
+            report.budget.grant_extension(steps)
 
-        report.budget.grant_extension(steps)
+        # A mission that ran out of budget is recoverable again once it has room.
+        if report.state == MissionState.FAILED.value:
+            report.recoverable = True
+            if isinstance(report.error, dict):
+                report.error["recoverable"] = True
+                report.error["extended"] = True
         self._save_mission(report)
         return report
 

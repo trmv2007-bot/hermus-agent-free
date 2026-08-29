@@ -37,7 +37,9 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
+
+from .atomic_io import atomic_write_json
 from collections.abc import Callable, Sequence
 
 from .config import config
@@ -229,6 +231,213 @@ def evaluate_trajectory(
     return TaskEvaluation(score >= 3.0, round(score, 3), reasons, metrics)
 
 
+# --------------------------------------------------------- verified success gate
+#: markers the mission/agent evidence gate emits when a run did NOT actually
+#: perform the work — such a trajectory must never be distilled into a skill.
+_NO_WORK_MARKERS = (
+    "no_evidence_of_work", "empty_analysis", "no_model_backend",
+    "mission failed", "mission_failed", "blocked:",
+)
+
+
+def procedure_signature(goal: str, tool_names: Sequence[str]) -> str:
+    """Stable signature of a *procedure* (goal shape + tool set).
+
+    Two runs of "summarize the nginx error log and save a report" share a
+    signature even when the paths, dates and numbers differ — which is exactly
+    what a repeatability test needs. Without it, "the trajectory had several
+    successful-looking tool calls" was enough to install a skill learned from a
+    single, possibly lucky, run.
+    """
+    stop = {"the", "and", "for", "with", "from", "that", "this", "into",
+            "then", "please", "your", "their", "about", "using"}
+    seen: list[str] = []
+    for w in re.findall(r"[a-z]{3,}", str(goal or "").lower()):
+        if w in stop or w in seen:
+            continue
+        seen.append(w)
+        if len(seen) >= 4:
+            break
+    shape = " ".join(seen)
+    tools = ",".join(sorted({str(t) for t in (tool_names or []) if t}))
+    return hashlib.sha1(f"{shape}|{tools}".encode("utf-8")).hexdigest()[:16]
+
+
+@dataclass
+class SuccessProof:
+    """Did this run *succeed*, and what independently proves it?"""
+
+    verified: Optional[bool] = None
+    ok: bool = False
+    reasons: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"verified": self.verified, "ok": self.ok,
+                "reasons": self.reasons, "evidence": self.evidence}
+
+
+def evaluate_success_proof(
+    trajectory: Sequence[dict[str, Any]] = (),
+    *,
+    verification: Optional[dict[str, Any]] = None,
+    tool_results: Optional[Sequence[dict[str, Any]]] = None,
+    final_answer: str = "",
+) -> SuccessProof:
+    """Require *verified success*, not just "several successful-looking calls".
+
+    A bad execution otherwise becomes a bad trajectory becomes a learned
+    procedure:
+
+        bad execution → bad trajectory → skill harvest → system learns it
+
+    Three independent signals are required:
+
+    1. **verification** — a verifier (or the critic panel) confirmed the
+       outcome, *or* the run is unverified but clean;
+    2. **no failure markers** — no ``no_evidence_of_work`` / mock-backend /
+       mission-failed marker anywhere in the trajectory;
+    3. **independent evidence** — ≥2 distinct tools produced successful,
+       non-error results and the answer is substantive.
+    """
+    results = list(tool_results or [])
+    verified: Optional[bool] = None
+    if isinstance(verification, dict) and "verified" in verification:
+        verified = bool(verification.get("verified"))
+
+    reasons: list[str] = []
+    evidence: list[str] = []
+    ok = True
+
+    joined = " ".join(str(t.get("content", "")) for t in (trajectory or [])
+                      if isinstance(t, dict)).lower()
+    hit = [m for m in _NO_WORK_MARKERS if m in joined]
+    if hit:
+        ok = False
+        reasons.append(f"trajectory contains work-not-performed markers: {', '.join(sorted(set(hit)))}")
+
+    if verified is False:
+        ok = False
+        reasons.append("verification explicitly failed this task")
+    elif verified is True:
+        evidence.append("verifier confirmed the outcome")
+
+    failures = [r for r in results if _is_error_blob(r.get("result", r))]
+    successes = [r for r in results if not _is_error_blob(r.get("result", r))]
+    distinct_ok_tools = sorted({
+        str(r.get("tool")) for r in successes if r.get("tool")
+    })
+    if failures:
+        reasons.append(f"{len(failures)}/{len(results)} tool result(s) were errors")
+    if len(distinct_ok_tools) >= 2:
+        evidence.append(f"{len(distinct_ok_tools)} distinct tools succeeded: {', '.join(distinct_ok_tools[:6])}")
+    elif successes:
+        reasons.append(f"only {len(distinct_ok_tools)} distinct tool(s) succeeded — weak independent evidence")
+
+    answer = final_answer or next(
+        (t.get("content", "") for t in reversed(list(trajectory or []))
+         if isinstance(t, dict) and t.get("role") == "assistant"), ""
+    )
+    if len(str(answer or "").strip()) >= 80:
+        evidence.append("substantive final answer")
+
+    if verified is None and (len(successes) < 2 or len(distinct_ok_tools) < 2):
+        ok = False
+        reasons.append("unverified run with thin independent evidence")
+    if verified is True and not evidence:
+        evidence.append("verifier verdict only")
+
+    return SuccessProof(verified=verified, ok=ok, reasons=reasons, evidence=evidence)
+
+
+class SkillSuccessLedger:
+    """Repeatability ledger — how many *independent* successes has this
+    procedure actually produced?
+
+    A single good trajectory is a hypothesis; two or more independent
+    successful runs of the same procedure are a pattern worth distilling. The
+    ledger is a small JSON document written atomically (``core.atomic_io``).
+    """
+
+    MAX_ENTRIES = 500
+
+    def __init__(self, path: Optional[Path] = None):
+        self.path = Path(path) if path else Path(config.resolve_path(config.skills_dir)) / "success_ledger.json"
+        self._data: dict[str, Any] = {}
+        self._loaded = False
+
+    # -- persistence ----------------------------------------------------
+    def _load(self) -> dict[str, Any]:
+        if self._loaded:
+            return self._data
+        try:
+            self._data = json.loads(self.path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            self._data = {}
+        if not isinstance(self._data, dict):
+            self._data = {}
+        self._data.setdefault("version", 1)
+        self._data.setdefault("entries", {})
+        self._loaded = True
+        return self._data
+
+    def _save(self) -> None:
+        data = self._load()
+        entries = data.get("entries", {})
+        if len(entries) > self.MAX_ENTRIES:  # keep the freshest
+            for key in sorted(entries, key=lambda k: str(entries[k].get("last") or ""))[: len(entries) - self.MAX_ENTRIES]:
+                entries.pop(key, None)
+        data["updated"] = _now()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(self.path, data, indent=2)
+        except Exception:
+            pass
+
+    # -- api ------------------------------------------------------------
+    def count(self, signature: str) -> int:
+        return int((self._load().get("entries", {}).get(signature) or {}).get("count") or 0)
+
+    def sessions(self, signature: str) -> list[str]:
+        return list((self._load().get("entries", {}).get(signature) or {}).get("sessions") or [])
+
+    def record(
+        self,
+        signature: str,
+        *,
+        session_id: str = "",
+        goal: str = "",
+        evidence: Optional[Sequence[str]] = None,
+    ) -> int:
+        """Record one successful observation; returns the new (independent) count.
+
+        Repeat calls with the *same* session id do not count as independent
+        evidence — otherwise one chatty session would mint a skill.
+        """
+        data = self._load()
+        entries = data.setdefault("entries", {})
+        entry = entries.setdefault(signature, {
+            "count": 0, "sessions": [], "goals": [], "first": _now(), "last": _now(),
+        })
+        sid = str(session_id or "")
+        independent = bool(sid) and sid not in (entry.get("sessions") or [])
+        if independent or not sid:
+            entry["count"] = int(entry.get("count") or 0) + 1
+        if sid and sid not in entry["sessions"]:
+            entry["sessions"] = (entry.get("sessions") or [])[-9:] + [sid]
+        if goal:
+            goals = entry.get("goals") or []
+            if goal[:120] not in goals:
+                entry["goals"] = goals[-4:] + [goal[:120]]
+        entry["last"] = _now()
+        entry["evidence"] = list(evidence or [])[:6]
+        self._save()
+        return int(entry["count"])
+
+    def to_dict(self) -> dict[str, Any]:
+        return self._load()
+
+
 # ---------------------------------------------------------------------- extract
 @dataclass
 class DistilledStep:
@@ -355,6 +564,20 @@ class SkillForge:
         self.skills_dir = Path(skills_dir or config.resolve_path(config.skills_dir))
         self._llm = llm
         self.quarantine_dir = self.skills_dir / ".quarantine"
+        self._success_ledger: Optional[SkillSuccessLedger] = None
+
+    # ------------------------------------------------------------- repeatability
+    def _ledger(self) -> SkillSuccessLedger:
+        """Repeatability ledger (independent successes per procedure)."""
+        if self._success_ledger is None:
+            self._success_ledger = SkillSuccessLedger(self.skills_dir / "success_ledger.json")
+        return self._success_ledger
+
+    def success_ledger(self) -> dict[str, Any]:
+        return self._ledger().to_dict()
+
+    def observed_successes(self, goal: str, tool_names: Sequence[str]) -> int:
+        return self._ledger().count(procedure_signature(goal, tool_names))
 
     # ------------------------------------------------------------------ registry
     @property
@@ -856,11 +1079,36 @@ class SkillForge:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Full pipeline: evaluate → extract → distill → dedupe → validate → install."""
+        # ---- gate 1: VERIFIED SUCCESS -------------------------------------
+        # never learn a procedure from a run that did not demonstrably work
+        proof = evaluate_success_proof(
+            trajectory, verification=verification, tool_results=tool_results,
+            final_answer=final_answer,
+        )
+        require_verified = bool(getattr(config, "skill_forge_require_verified", True))
+        # An explicit verifier verdict outranks the generic evaluation: a failed
+        # task is reported as "unverified", not as "not harvestable".
+        if require_verified and proof.verified is False:
+            return {
+                "created": False, "stage": "unverified",
+                "reason": "; ".join(proof.reasons) or "verification failed",
+                "proof": proof.to_dict(),
+            }
+
         evaluation = evaluate_trajectory(
             trajectory, verification=verification, tool_results=tool_results, final_answer=final_answer
         )
         if not evaluation.harvest:
-            return {"created": False, "stage": "evaluation", "evaluation": evaluation.to_dict()}
+            return {"created": False, "stage": "evaluation", "evaluation": evaluation.to_dict(),
+                    "proof": proof.to_dict()}
+        if require_verified and not proof.ok:
+            return {
+                "created": False, "stage": "unverified",
+                "reason": "; ".join(proof.reasons) or "no verified success",
+                "proof": proof.to_dict(),
+                "evaluation": evaluation.to_dict(),
+            }
+
         steps = extract_steps(trajectory, tool_results)
         if len(steps) < 2:
             return {"created": False, "stage": "extraction",
@@ -887,9 +1135,37 @@ class SkillForge:
             }
         if dry_run:
             return {"created": False, "stage": "dry_run", "candidate": cand.to_dict(),
-                    "skill_md": self.skill_md(cand), "evaluation": evaluation.to_dict()}
+                    "skill_md": self.skill_md(cand), "evaluation": evaluation.to_dict(),
+                    "proof": proof.to_dict()}
+
+        # ---- gate 2: REPEATABILITY ----------------------------------------
+        # One successful run is a hypothesis; a procedure is only distilled
+        # after it has been observed to succeed in independent runs.
+        tool_names = [str(st.tool) for st in steps]
+        signature = procedure_signature(goal, tool_names)
+        ledger = self._ledger()
+        min_repeats = max(1, int(getattr(config, "skill_forge_min_repeats", 2) or 1))
+        observed = ledger.record(
+            signature, session_id=session_id, goal=goal, evidence=proof.evidence,
+        )
+        if observed < min_repeats:
+            return {
+                "created": False, "stage": "awaiting_repeat",
+                "name": cand.name,
+                "signature": signature,
+                "observed": observed, "required": min_repeats,
+                "reason": (f"procedure observed {observed}/{min_repeats} times — "
+                           "needs a repeat success in an independent run before "
+                           "it is distilled into a skill"),
+                "proof": proof.to_dict(),
+                "evaluation": evaluation.to_dict(),
+            }
+
         result = self.install(cand)
         result["evaluation"] = evaluation.to_dict()
+        result["proof"] = proof.to_dict()
+        result["repeatability"] = {"signature": signature, "observed": observed,
+                                   "required": min_repeats}
         result["steps"] = len(steps)
         # normalised verdict so callers (agent loop, CLI, /command) read one shape
         result["created"] = bool(result.get("installed"))

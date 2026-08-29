@@ -1174,12 +1174,26 @@
   </div>
 </div>
 
+<!-- SHARED RUNTIME OUTPUT ---------------------------------------------------
+     /jarvis used to be a dead UI: it drew a beautiful HUD and never issued a
+     single request. It now submits through the same shared client as
+     /dashboard (queue-first, durable gateway job) and renders the real answer.
+--------------------------------------------------------------------------- -->
+<div id="jarvisRuntime" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:132px;z-index:9500;width:min(760px,92vw);max-height:34vh;overflow:auto;background:rgba(3,10,24,0.94);border:1px solid rgba(0,242,254,0.45);border-radius:14px;padding:12px 14px;box-shadow:0 0 34px rgba(0,242,254,0.22);backdrop-filter:blur(9px);font-family:var(--font-mono);">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+    <span style="color:var(--cyan);font-size:11px;letter-spacing:1.6px;">HERMUS RUNTIME</span>
+    <span id="jarvisRuntimeStatus" style="color:var(--text-muted);font-size:11px;">idle</span>
+  </div>
+  <pre id="jarvisRuntimeOut" style="margin:0;white-space:pre-wrap;color:var(--text-main);font-size:12px;line-height:1.5;"></pre>
+</div>
+
 <!-- Compatibility Anchor for test suite -->
 <div style="display:none;" id="talkMode">
   <span>LIVE MISSION CONTROL</span>
   <script src="/dashboard-assets/living-deck.js"></script>
 </div>
 
+<script src="/dashboard-assets/hermus-client.js"></script>
 <script>
   // ==========================================
   // 1. BULLETPROOF SCI-FI WEB AUDIO ENGINE
@@ -2405,39 +2419,95 @@
     if (e.key === 'Enter') executeCommand();
   });
 
-  function executeCommand() {
-    const inputEl = document.getElementById('cmdInput');
-    const val = inputEl.value.trim().toLowerCase();
-    if (!val) return;
-    document.getElementById('liveTranscript').textContent = `"${inputEl.value}"`;
-    inputEl.value = '';
+  // ---- shared runtime client ------------------------------------------------
+  // Every directive that is not a local UI command is executed by the SAME
+  // queue-first runtime as /dashboard (gateway/static/hermus-client.js): the
+  // turn is submitted with async:true, runs as a durable gateway job and
+  // streams its answer back — closing this tab does not cancel the work.
+  const JARVIS_RUNTIME = document.getElementById('jarvisRuntime');
+  let jarvisBusy = false;
 
-    if (val.includes('red') || val.includes('aggressive')) {
-      currentModeIndex = 0; cycleCoreMode();
-    } else if (val.includes('green') || val.includes('eco')) {
-      currentModeIndex = 1; cycleCoreMode();
-    } else if (val.includes('blue') || val.includes('normal')) {
-      currentModeIndex = 2; cycleCoreMode();
-    } else if (val.includes('code') || val.includes('swe')) {
-      spawnSpatialWindow('swe');
-    } else if (val.includes('dag') || val.includes('mission')) {
-      spawnSpatialWindow('missions');
-    } else if (val.includes('classic') || val.includes('dash')) {
-      spawnSpatialWindow('classic');
-    } else if (val.includes('map') || val.includes('neural')) {
-      spawnSpatialWindow('constellation');
-    } else if (val.includes('vis') || val.includes('spectrum')) {
-      spawnSpatialWindow('audio-vis');
-    } else if (val.includes('scratch') || val.includes('note')) {
-      spawnSpatialWindow('scratchpad');
-    } else if (val.includes('time') || val.includes('chrono')) {
-      spawnSpatialWindow('chrono');
-    } else if (val.includes('shock') || val.includes('pulse')) {
-      triggerShockwave();
-    } else {
-      spawnSpatialWindow('browser');
+  function jarvisOut(status, text) {
+    if (!JARVIS_RUNTIME) return;
+    JARVIS_RUNTIME.style.display = 'block';
+    const st = document.getElementById('jarvisRuntimeStatus');
+    const out = document.getElementById('jarvisRuntimeOut');
+    if (st) st.textContent = status || '';
+    if (out) out.textContent = text || '';
+  }
+
+  function jarvisDismiss() {
+    if (JARVIS_RUNTIME) JARVIS_RUNTIME.style.display = 'none';
+    jarvisBusy = false;
+  }
+
+  const JARVIS_MISSION_LABELS = {
+    executing: '🚀 EXECUTING MISSION', verifying: '🔍 VERIFYING', observing: '👁️ OBSERVING',
+    repairing: '🔧 REPAIRING', planning: '🧠 PLANNING', diagnosing: '🩺 DIAGNOSING',
+    continuing: '♻️ CONTINUING', blocked: '⛔ BLOCKED', failed: '⚠️ MISSION FAILED',
+  };
+
+  async function jarvisRun(text) {
+    if (jarvisBusy) { jarvisOut('⚠️ BUSY', 'A directive is already running server-side.'); return; }
+    jarvisBusy = true;
+    let streamed = '';
+    jarvisOut('⏳ QUEUED — running server-side (safe to close this tab)', '');
+    try {
+      const out = await HermusClient.sendCommand({
+        text, platform: 'jarvis', userId: 'jarvis-01', mode: 'agent', timeout: 1800,
+        onDelta: (piece, acc) => { streamed = acc; jarvisOut('⚡ GENERATING', acc); },
+        onEvent: (type, d) => {
+          if (type === 'mission_state' && JARVIS_MISSION_LABELS[d.state]) jarvisOut(JARVIS_MISSION_LABELS[d.state], streamed);
+          else if (type === 'node_started' && d.stage) jarvisOut(`🤖 STAGE: ${d.stage}`, streamed);
+          else if (type === 'tool_call') jarvisOut(`🛠️ ${d.name || d.tool || 'tool'}`, streamed);
+          else if (type === 'model_capability_warning') jarvisOut('⚠️ MODEL CAPABILITY', (d.warnings || []).join('\n'));
+        },
+      });
+      if (out.failure) {
+        // A failed mission is reported with diagnostics — never dressed up as advice.
+        jarvisOut('⚠️ MISSION FAILED', HermusClient.formatFailure(out));
+      } else if (!out.ok) {
+        jarvisOut('⚠️ ERROR', out.error || 'unknown error');
+      } else {
+        const tag = (out.run_kind || 'done').toUpperCase();
+        jarvisOut(`✔ ${tag}${out.mission_id ? ' · ' + out.mission_id : ''}`, out.response || '(no answer)');
+      }
+    } catch (err) {
+      jarvisOut('⚠️ CONNECTION ERROR', `${err.message}\nIs the gateway running?`);
+    } finally {
+      jarvisBusy = false;
     }
   }
+
+  async function executeCommand() {
+    const inputEl = document.getElementById('cmdInput');
+    const raw = inputEl.value.trim();
+    if (!raw) return;
+    const val = raw.toLowerCase();
+    document.getElementById('liveTranscript').textContent = `"${raw}"`;
+    inputEl.value = '';
+
+    // Local UI directives (mode switches, module launches) stay local.
+    if (val.includes('red') || val.includes('aggressive')) { currentModeIndex = 0; cycleCoreMode(); return; }
+    if (val.includes('green') || val.includes('eco')) { currentModeIndex = 1; cycleCoreMode(); return; }
+    if (val.includes('blue') || val.includes('normal')) { currentModeIndex = 2; cycleCoreMode(); return; }
+    if (val.includes('shock') || val.includes('pulse')) { triggerShockwave(); return; }
+    if (val.includes('scratch') || val.includes('note')) { spawnSpatialWindow('scratchpad'); return; }
+    if (val.includes('time') || val.includes('chrono')) { spawnSpatialWindow('chrono'); return; }
+    if (val.includes('vis') || val.includes('spectrum')) { spawnSpatialWindow('audio-vis'); return; }
+    if (val.includes('map') || val.includes('neural')) { spawnSpatialWindow('constellation'); return; }
+    if (val.includes('classic') || val.includes('dash')) { spawnSpatialWindow('classic'); return; }
+
+    // Everything else is REAL work: run it through the universal runtime.
+    if (val.includes('code') || val.includes('swe')) spawnSpatialWindow('swe');
+    else if (val.includes('dag') || val.includes('mission')) spawnSpatialWindow('missions');
+    else if (val.includes('browser') || val.includes('web')) spawnSpatialWindow('browser');
+
+    await jarvisRun(raw);
+  }
+
+  // dismiss the runtime panel with Escape
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') jarvisDismiss(); });
 
   // Live Clock & Chronometer updater
   function updateClock() {

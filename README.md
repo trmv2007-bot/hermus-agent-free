@@ -9,6 +9,7 @@ Build with local models or free-tier providers. Keep your data, tools and runtim
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/stargazers"><img src="https://img.shields.io/github/stars/trmv2007-bot/hermus-agent-free?style=for-the-badge" alt="Stars"></a>
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
 <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
+<a href="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/ci.yml"><img src="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 > **Hermus Agent Free** is a self-hosted agent platform focused on practical autonomy: it can reason over tasks, use tools, delegate work, write and test software, maintain project memory, create reusable skills, run scheduled jobs, and expose a gateway/dashboard for interacting with the agent.
@@ -74,12 +75,27 @@ USER / DASHBOARD / SCHEDULE / CHANNEL / CLI / API
   `channel.reply` / `swe.develop`, background agents, the cron scheduler, the
   CLI (`hermus run`, `hermus mission start`, `hermus swe run`), Telegram /
   Discord / Slack channel messages, and sub-agent delegation.
-- **Evidence-gated success**: a stage whose job is to *perform* work (coder,
-  implementation, verification, …) only succeeds when the agent actually did
-  something — executed tools, changed files, produced artifacts. Describing
-  the work fails the stage with `no_evidence_of_work` and feeds the repair
-  loop. No backend configured → the mission is honestly `BLOCKED`, never
-  fake-completed.
+- **Evidence-gated success**: a stage is judged by *expected output type*
+  (`change` / `execution` / `analysis`), not by a role list. A coder that only
+  describes the work fails with `no_evidence_of_work` and feeds the repair
+  loop; supporting actions (`memory_add`, `slack_notify`, `embeddings_add`, …)
+  never count as proof; a verifier that reports *"tests failed because X"*
+  has done its job. No backend configured → the mission is honestly `BLOCKED`,
+  never fake-completed.
+- **Failure is a result, never a downgrade**: a mission that crashes returns
+  `MISSION FAILED` with `stage`, `reason`, `recoverable`, `resumable` and a
+  resume command — it never silently becomes a chat answer explaining how the
+  task could be done (`HERMUS_MISSION_FALLBACK_TO_CHAT=1` opts back in, and
+  the reply is then labelled `chat_fallback`).
+- **Intent before mission**: questions, explanations and analysis requests
+  stay chat ("Can you explain how to fix my app?", "What is the best way to
+  build an API?"); only action requests are auto-promoted.
+- **Hierarchical budgets**: planning / execution / verification / repair /
+  emergency, with a default mission budget of 48 steps (larger than the 32-step
+  single-turn budget, because a mission owns the whole lifecycle).
+- **Mission isolation + crash-safe state**: each mission gets its own
+  workspace and a precise baseline diff for file evidence (concurrent missions
+  cannot leak proof into each other), and mission state is written atomically.
 - **DAG parent-context handoff**: each stage's prompt carries the upstream
   stages' real outputs and artifacts ("Upstream results — build on these"),
   so Researcher → Architect → Coder is an actual chain, not a name.
@@ -87,12 +103,23 @@ USER / DASHBOARD / SCHEDULE / CHANNEL / CLI / API
   inbox; the active agent loop drains it at the next step boundary and injects
   it into the conversation (`steer_applied` event on the stream). Steering
   reaches the model, not just the UI.
-- **Queue-first dashboard**: the dashboard submits `async:true`, so a turn
-  runs as a durable gateway job — close the tab and the work keeps going;
-  the answer streams back over SSE when you return.
+- **Queue-first dashboard**: every dashboard (`/dashboard` **and** `/jarvis`)
+  submits through the shared client
+  (`gateway/static/hermus-client.js`) with `async:true`, so a turn runs as a
+  durable gateway job — close the tab and the work keeps going; the answer
+  streams back over SSE and, if the stream drops, from the job result.
+- **Model capability negotiation**: Hermus checks *before* starting whether the
+  selected model supports tools / vision / long context / structured outputs /
+  streaming / computer control, and recommends a compatible model when it does
+  not (`GET /models/capabilities`).
 - **Flags**: `HERMUS_MISSION_RUNTIME=0` reverts to the legacy runner,
   `HERMUS_MISSION_AUTO_CLASSIFY=0` disables auto-promotion of goal-like
-  messages (only explicit `autonomous`/`mission` requests run missions).
+  messages (only explicit `autonomous`/`mission` requests run missions),
+  `HERMUS_MISSION_BUDGET_STEPS` sets the mission budget (default 48).
+
+See **[`docs/EXECUTION_PATH_HARDENING.md`](docs/EXECUTION_PATH_HARDENING.md)**
+for the failure contract, evidence model, budget hierarchy and resume
+semantics in detail.
 
 ## 1. Autonomous Mission Engine
 

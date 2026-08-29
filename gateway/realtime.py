@@ -144,10 +144,17 @@ async def list_jobs(limit: int = 50, status: str = None, session_key: str = None
 
 @router.get("/jobs/{job_id}")
 async def job_status(job_id: str):
+    """Status of one job.
+
+    ``found`` (not the mere presence of an ``error`` key) decides 404: every
+    job carries an ``error`` field that is simply empty on success, so the old
+    ``"error" in st`` test answered 404 for jobs that had already succeeded and
+    broke the dashboard's job-poll fallback.
+    """
     from gateway.queue import job_queue
 
     st = job_queue.status(job_id)
-    if "error" in st:
+    if st.get("found") is False:
         return JSONResponse(st, status_code=404)
     return st
 
@@ -159,8 +166,11 @@ async def job_result(job_id: str):
     res = job_queue.result(job_id)
     if res is None:
         st = job_queue.status(job_id)
-        return JSONResponse({"error": st.get("error") or "result not ready", "status": st.get("status")},
-                            status_code=409 if "error" not in st else 404)
+        if st.get("found") is False:
+            return JSONResponse({"error": st.get("error") or "unknown job",
+                                 "status": st.get("status")}, status_code=404)
+        return JSONResponse({"error": "result not ready", "status": st.get("status")},
+                            status_code=409)
     return {"job_id": job_id, "result": res}
 
 
@@ -177,7 +187,7 @@ async def job_events(job_id: str, request: Request, follow: bool = True, after: 
     from gateway.queue import job_queue
 
     st = job_queue.status(job_id)
-    if "error" in st:
+    if st.get("found") is False:
         return JSONResponse(st, status_code=404)
     run_id = st.get("run_id") or job_id
     if not follow:
@@ -687,7 +697,8 @@ async def mission_start_api(payload: dict[str, Any] = None):
         requirements=payload.get("requirements"),
         domain=payload.get("domain"),
         subgoals=payload.get("subgoals"),
-        budget_steps=int(payload.get("budget_steps", 20)),
+        budget_steps=(int(payload["budget_steps"]) if payload.get("budget_steps")
+                      not in (None, "") else None),
     )
     return report.to_dict()
 
@@ -706,13 +717,82 @@ async def mission_get_api(mission_id: str):
     return report.to_dict()
 
 @router.post("/missions/{mission_id}/resume")
-async def mission_resume_api(mission_id: str):
+async def mission_resume_api(
+    mission_id: str,
+    restart_failed: bool = False,
+    extra_steps: Optional[int] = None,
+    payload: dict[str, Any] = None,
+):
+    """Resume a blocked/interrupted mission — or restart a failed one.
+
+    ``failed`` is terminal by default: pass ``restart_failed=true`` (explicit
+    recovery) so a crash-looping mission is never auto-resumed by accident.
+    """
+    payload = payload or {}
+    restart = bool(restart_failed or payload.get("restart_failed"))
+    steps = extra_steps if extra_steps is not None else payload.get("extra_steps")
     from core.mission import mission_engine
     try:
-        report = await asyncio.to_thread(mission_engine.resume_mission, mission_id)
+        report = await asyncio.to_thread(
+            mission_engine.resume_mission, mission_id,
+            restart_failed=restart,
+            extra_steps=int(steps) if steps not in (None, "") else None,
+        )
         return report.to_dict()
+    except ValueError as e:
+        # terminal / unrecoverable: say why, and how to recover
+        from core.mission import mission_engine as _me
+
+        current = await asyncio.to_thread(_me.get_mission, mission_id)
+        body: dict[str, Any] = {"error": str(e), "mission_id": mission_id,
+                                "restart_failed": restart}
+        if current is not None:
+            body["state"] = current.state
+            body["failure"] = current.failure_summary()
+        return JSONResponse(body, status_code=409)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@router.post("/missions/{mission_id}/extend")
+async def mission_extend_api(
+    mission_id: str,
+    steps: int = 10,
+    emergency: bool = False,
+    payload: dict[str, Any] = None,
+):
+    """Grant extra step budget (normal slot, or the emergency reserve)."""
+    payload = payload or {}
+    from core.mission import mission_engine
+
+    n = int(payload.get("steps", steps) or steps)
+    try:
+        report = await asyncio.to_thread(
+            mission_engine.extend_budget, mission_id, n,
+            emergency=bool(emergency or payload.get("emergency")),
+        )
+        return report.to_dict()
+    except ValueError as e:
+        return JSONResponse({"error": str(e), "mission_id": mission_id}, status_code=409)
+
+
+@router.get("/models/capabilities")
+async def models_capabilities_api(model: Optional[str] = None, needs_vision: bool = False,
+                                  needs_computer: bool = False):
+    """Pre-flight capability negotiation for the current (or a given) model.
+
+    Answers, before a run starts: tools? vision? long context? structured
+    outputs? streaming? computer control? — and recommends a compatible model
+    when the selected one cannot do the job.
+    """
+    from core.config import config
+    from core.model_capabilities import mission_capability_gate
+
+    ref = model or str(getattr(config, "model", "") or "")
+    return await asyncio.to_thread(
+        mission_capability_gate, ref,
+        needs_vision=needs_vision, needs_computer=needs_computer,
+    )
 
 # ---- artifacts ----------------------------------------------------------------
 @router.get("/artifacts")

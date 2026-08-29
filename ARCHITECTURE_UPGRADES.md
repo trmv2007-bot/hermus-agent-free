@@ -546,3 +546,27 @@ Consolidated architecture upgrades transforming Hermus into an objective-driven,
 
 ## 13. Mission-Centric Control Room Dashboard
 - Visualizes active missions, dynamic progress bars %, sub-goals with live state icons (✓, →, ■, ✕, ⚠), evidence metrics, generated artifacts, and recovery checkpoints.
+
+---
+
+# Part IV — Execution-path hardening (mission failure contract, evidence, budgets, isolation)
+
+A review-driven pass over the universal runtime. Full details and rationale:
+**[`docs/EXECUTION_PATH_HARDENING.md`](docs/EXECUTION_PATH_HARDENING.md)**.
+
+| # | Area | Change |
+|---|---|---|
+| 1 | Mission failure | `MISSION FAILED` with stage/reason/recoverable/resume — **never** a silent downgrade to chat (opt-in `HERMUS_MISSION_FALLBACK_TO_CHAT=1`) |
+| 2 | Request classification | `detect_intent()`: question / explanation / analysis / action decided *before* mission promotion |
+| 3 | Evidence gate | goal-completion evidence vs supporting actions (`memory_add`, `slack_notify`, … never satisfy a change stage) |
+| 4 | Roles | `expected_output_type()`: change / execution / analysis instead of an action-role list — a verifier reporting "tests failed because X" now succeeds |
+| 5 | Budgets | hierarchy: planning / execution / verification / repair / emergency; default mission budget 48 (> the 32-step agent turn) |
+| 6 | Isolation | per-mission workspace + baseline snapshot diff (`core/mission_files.py`) instead of a global mtime scan |
+| 7 | Persistence | atomic writes (tmp → fsync → rename) + advisory locks (`core/atomic_io.py`) |
+| 8 | Resume | blocked/interrupted resumable; `failed` restartable only with `restart_failed=True`; completed/cancelled terminal |
+| 9 | Frontends | one shared queue-first client (`gateway/static/hermus-client.js`) used by `/dashboard` **and** `/jarvis`; fixed `GET /jobs/{id}` 404-for-succeeded-jobs |
+| 10 | Self-improvement | skill distillation gated by verified success **and** repeatability (independent sessions) |
+| 11 | Models | capability negotiation (tools/vision/context/structured/streaming/computer) via `core/model_capabilities.py` + `GET /models/capabilities` |
+| 12 | CI | `.github/workflows/ci.yml` committed — green checks are GitHub results, not local claims |
+
+Tests: `tests/test_execution_path_hardening.py` (46 new) — suite is **399 passed / 1 skipped**.

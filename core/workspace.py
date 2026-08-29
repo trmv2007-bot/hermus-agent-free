@@ -196,6 +196,25 @@ class Workspace:
             f.write(json.dumps(record, default=str) + "\n")
         return path
 
+    # -- missions -------------------------------------------------------
+    def mission_dir(self, mission_id: str) -> Path:
+        """Per-mission isolated directory: ``<root>/missions/<id>/``.
+
+        ``workspace/`` is the mission's own file area (the only root that is
+        *always* scanned for mission evidence, so concurrent missions and
+        unrelated processes cannot contribute files to each other's proof of
+        work) and ``artifacts/`` holds deliverables copied out of the run.
+        """
+        safe = re.sub(r"[^A-Za-z0-9_.\-]", "_", str(mission_id or "unknown"))
+        d = self.dirs["missions"] / safe
+        (d / "workspace").mkdir(parents=True, exist_ok=True)
+        (d / "artifacts").mkdir(parents=True, exist_ok=True)
+        return d
+
+    def mission_workspace(self, mission_id: str) -> Path:
+        """The directory a mission should write its deliverables into."""
+        return self.mission_dir(mission_id) / "workspace"
+
     # -- projects -------------------------------------------------------
     def project_dir(self, name: str) -> Path:
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "default"
