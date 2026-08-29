@@ -221,8 +221,8 @@ step_start "6" "Computer Agent Browser Automation Runtime (Playwright)"
 
 sub_step "Installing Playwright library..."
 pip install "playwright>=1.40.0" --quiet
-sub_step "Setting up Chromium browser binaries..."
-python -m playwright install chromium 2>/dev/null || true
+sub_step "Setting up Chromium browser binaries (~150MB engine download)..."
+python -m playwright install chromium || true
 step_ok "Playwright Chromium browser automation engine ready"
 
 # -----------------------------------------------------------------------------
