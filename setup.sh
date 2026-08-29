@@ -206,13 +206,20 @@ pip install "APScheduler>=3.10.0" "prompt_toolkit>=3.0.41" "rich>=13.0.0" "pytes
 step_ok "Terminal UI and autonomous scheduling subsystem ready"
 
 sub_step "Installing Media & Vision (Pillow, FFmpeg bindings)..."
-pip install "Pillow>=10.0.0" "imageio-ffmpeg>=0.5.1" --quiet 2>/dev/null || true
-step_ok "Vision, screenshot and image analysis tools ready"
+if pip install "Pillow>=10.0.0" "imageio-ffmpeg>=0.5.1" --quiet 2>/dev/null; then
+  step_ok "Vision, screenshot and image analysis tools ready"
+else
+  # Optional component: report the real outcome instead of a false "ready".
+  sub_step "⚠️  Vision/FFmpeg packages failed to install (optional; screenshots/vision degraded)"
+fi
 
 # Optional voice / bot packages
 sub_step "Installing Voice & Bot Integrations (faster-whisper, telegram, discord)..."
-pip install "faster-whisper>=0.9.0" "python-telegram-bot>=20.0" "discord.py>=2.3.0" "paramiko>=3.0.0" --quiet 2>/dev/null || true
-step_ok "Voice transcription & messaging integrations ready"
+if pip install "faster-whisper>=0.9.0" "python-telegram-bot>=20.0" "discord.py>=2.3.0" "paramiko>=3.0.0" --quiet 2>/dev/null; then
+  step_ok "Voice transcription & messaging integrations ready"
+else
+  sub_step "⚠️  Voice/bot packages failed to install (optional; voice & Telegram/Discord degraded)"
+fi
 
 # -----------------------------------------------------------------------------
 # STEP 6: Computer Agent & Browser Automation Runtime
@@ -222,8 +229,11 @@ step_start "6" "Computer Agent Browser Automation Runtime (Playwright)"
 sub_step "Installing Playwright library..."
 pip install "playwright>=1.40.0" --quiet
 sub_step "Setting up Chromium browser binaries (~150MB engine download)..."
-python -m playwright install chromium || true
-step_ok "Playwright Chromium browser automation engine ready"
+if python -m playwright install chromium; then
+  step_ok "Playwright Chromium browser automation engine ready"
+else
+  sub_step "⚠️  Chromium download failed (computer-agent live browser view degraded; the library is installed and you can re-run: python -m playwright install chromium)"
+fi
 
 # -----------------------------------------------------------------------------
 # STEP 7: Local Storage, Databases & Memory Initialization
@@ -316,6 +326,21 @@ EOF
 chmod +x hermus-gateway
 
 step_ok "Generated executables: ./hermus, ./hermus-gateway, ./bin/hermus-gateway, source activate.sh"
+
+# -----------------------------------------------------------------------------
+# STEP 9: Verify the core actually imports (do NOT declare success if broken).
+# -----------------------------------------------------------------------------
+step_start "9" "Verifying Hermus core imports"
+sub_step "Importing gateway + agent + mission runtime..."
+if python -c "import sys; sys.path.insert(0, '.'); from gateway.gateway import app; from core import agent, mission" 2>/dev/null; then
+  step_ok "Hermus gateway, agent and mission runtime import successfully"
+else
+  echo ""
+  echo -e "${C_RED}${C_BOLD}  ✗ VERIFICATION FAILED: Hermus core did not import cleanly.${C_RESET}"
+  echo -e "${C_MUTED}    Re-run setup with: bash setup.sh   (or activate the venv and run: pip install -r requirements.txt)${C_RESET}"
+  echo ""
+  exit 1
+fi
 
 echo ""
 echo -e "${C_GREEN}${C_BOLD}═════════════════════════════════════════════════════════════════════════${C_RESET}"

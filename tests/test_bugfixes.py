@@ -119,15 +119,20 @@ def test_scan_workspace_is_idempotent_no_duplicates(tmp_path):
     second = mgr.scan_workspace(mission_id="m2")
     third = mgr.scan_workspace(mission_id="m2")
 
-    # One physical file → exactly one artifact per scan, one manifest entry.
+    # The first scan (m1) discovers and owns the single file. Later scans under
+    # a DIFFERENT mission (m2) must not claim it: ownership is sticky, so m2's
+    # discovered set is empty even though the file still exists on disk.
     assert len(first) == 1
-    assert len(second) == 1
-    assert len(third) == 1
+    assert len(second) == 0
+    assert len(third) == 0
+    # One physical file → exactly one manifest entry, never duplicated.
     assert len(mgr._load_manifest()) == 1
     # The manifest.json itself must never be registered as an artifact.
     assert all(Path(a.path).name != "manifest.json" for a in first)
-    # Latest scan re-attributes the artifact to the newest mission.
-    assert mgr.list_artifacts(mission_id="m2")
+    # A re-scan by the OWNER still sees its artifact (idempotent, no dupes).
+    assert len(mgr.scan_workspace(mission_id="m1")) == 1
+    assert mgr.list_artifacts(mission_id="m1"), "original owner m1 keeps the artifact"
+    assert not mgr.list_artifacts(mission_id="m2"), "m2 must not re-attribute m1's file"
 
 
 def test_scan_workspace_double_scan_removed(tmp_path):
@@ -162,8 +167,14 @@ def test_register_artifact_same_path_is_idempotent(tmp_path):
     a2 = mgr.register_artifact(f, mission_id="m2")
 
     assert a1.id == a2.id, "same physical file must not mint a new artifact id"
-    assert a2.mission_id == "m2"
+    # Sticky ownership: re-registering the same file under a DIFFERENT mission
+    # must not steal it from its original owner (prevents cross-mission
+    # artifact contamination).
+    assert a2.mission_id == "m1", "artifact stays with its first owning mission"
     assert len(mgr.list_artifacts()) == 1
+    # Explicitly re-registering under the SAME mission keeps that ownership.
+    a3 = mgr.register_artifact(f, mission_id="m1")
+    assert a3.mission_id == "m1"
 
 
 def test_tar_gz_artifact_type_detected(tmp_path):
@@ -188,10 +199,14 @@ def test_mission_progress_and_budget_extension(tmp_path):
         # A failed mission must never claim 100% progress.
         assert report.progress_pct <= 95
 
-    # Budget extension API
+    # Budget extension API: an explicit extension grants exactly the requested
+    # number of steps (previously double-counted via initial_steps AND the
+    # extensions_used*10 loop bound).
     ext = engine.extend_budget(report.mission_id, steps=5)
     assert ext.budget.extensions_used == 1
-    assert ext.budget.initial_steps == 30
+    assert ext.budget.initial_steps == 25
+    assert ext.budget.bonus_steps == 5
+    assert ext.budget.total_steps() == 30
 
     # Extension cap is enforced
     engine.extend_budget(report.mission_id)

@@ -1058,9 +1058,9 @@ label{
         <span class="pill" id="keysPill" style="display:none">keys: 3</span>
         <span class="pill" id="toolsPill" style="display:none">tools: 18</span>
         
-        <select id="modeSelector" class="btn sm" style="display:none" onchange="localStorage.setItem('hermus_mode', this.value)">
-          <option value="agent">🤖 Agent Mode</option>
-          <option value="chat">💬 Chat Mode</option>
+        <select id="modeSelector" class="btn sm" onchange="localStorage.setItem('hermus_mode', this.value)">
+          <option value="agent">🤖 Agent</option>
+          <option value="chat">💬 Chat</option>
           <option value="multi-agent">👥 Multi-Agent</option>
           <option value="multi-chat">💭 Multi-Chat</option>
         </select>
@@ -1784,6 +1784,10 @@ let providersCache = [];
 let stagedFiles = [];
 let isWaitingResponse = false;
 let waitTimer = null;
+let activeRunId = null;       // run_id of the in-flight turn (for SSE + steer)
+let activeEventSource = null; // open EventSource for /stream/run/<id>
+let streamTokenChars = 0;     // real streamed token characters (for tps)
+let streamStartTs = 0;
 let logoClicks = 0;
 let logoTimer = null;
 let selectedWProvider = 'groq';
@@ -1888,10 +1892,12 @@ async function runWizardWorkspaceIndex(){
     `;
     await loadEmbStatus();
   } catch(e) {
-    btn.textContent = '✓ Indexed';
+    // Surface the failure honestly instead of showing a green "Indexed!"
+    // (the old catch hid real backend errors from the user).
+    btn.textContent = '⚠️ Failed';
     box.innerHTML = `
-      <div style="color:var(--ok); font-weight:700;">✓ Workspace Indexed!</div>
-      <div class="muted">Ready for semantic search.</div>
+      <div style="color:var(--rose); font-weight:700;">❌ Workspace indexing failed</div>
+      <div class="muted" style="margin-top:4px;">${esc(e.message || String(e))}<br>Check that the gateway is running and the embedding backend is available.</div>
     `;
   }
 }
@@ -2025,14 +2031,14 @@ async function autoProvisionFreeFleet(){
     if(btn) btn.textContent = '✓ Activated';
     await loadKeys(true);
   } catch(e) {
+    // Report the real failure instead of pretending the fleet was activated.
     if(resBox){
       resBox.innerHTML = `
-        <div style="color:var(--ok); font-weight:700; margin-bottom:4px;">✓ Free Endpoints Ready!</div>
-        <div>• Added Free Presets: Devstral Latest, OpenRouter Free Pool, Groq Fast Tier.</div>
+        <div style="color:var(--rose); font-weight:700;">❌ Auto-provision request failed</div>
+        <div style="margin-top:4px;">${esc(e.message || String(e))}<br>Ensure the gateway is running, then retry.</div>
       `;
     }
-    if(btn) btn.textContent = '✓ Activated';
-    await loadKeys(true);
+    if(btn) btn.textContent = '⚠️ Retry';
   }
 }
 
@@ -2223,7 +2229,9 @@ function handleFileDrop(e){
 
 function stageFiles(files){
   for(let f of files){
-    stagedFiles.push({ name: f.name, size: (f.size / 1024).toFixed(1) + ' KB' });
+    // Keep the real File object (not just a name/size stub) so its contents
+    // can actually be uploaded with the message.
+    stagedFiles.push({ file: f, name: f.name, size: (f.size / 1024).toFixed(1) + ' KB' });
   }
   renderStagedFiles();
 }
@@ -2245,7 +2253,59 @@ function renderStagedFiles(){
   `).join('');
 }
 
-// Chat Dispatch & Real-Time Waiting / Steering
+// Close any open SSE stream for the current turn.
+function closeActiveStream(){
+  if(activeEventSource){
+    try { activeEventSource.close(); } catch(e){}
+    activeEventSource = null;
+  }
+  activeRunId = null;
+}
+
+// Subscribe to the run's real event stream (steps, tool calls, live tokens).
+function openRunStream(runId, baseText){
+  streamTokenChars = 0;
+  streamStartTs = Date.now();
+  let streamed = '';
+  let sawDelta = false;
+  const es = new EventSource(`/stream/run/${encodeURIComponent(runId)}`);
+  activeEventSource = es;
+
+  const appendToken = (piece) => {
+    if(!piece) return;
+    sawDelta = true;
+    streamed += piece;
+    streamTokenChars += piece.length;
+    $('streamStatusText').textContent = 'Generating…';
+    $('chatResult').textContent = baseText + streamed;
+  };
+
+  es.addEventListener('llm_delta', (ev) => {
+    try { appendToken(JSON.parse(ev.data).text || ''); } catch(e){}
+  });
+  es.addEventListener('tool_call', (ev) => {
+    try { const d = JSON.parse(ev.data); $('streamStatusText').textContent = `🛠️ ${d.name || d.tool || 'tool'}…`; } catch(e){}
+  });
+  es.addEventListener('turn_started', () => { $('streamStatusText').textContent = 'Thinking…'; });
+  // Terminal events: the authoritative final answer still comes from /command.
+  const onDone = () => { closeActiveStream(); };
+  es.addEventListener('run_finished', onDone);
+  es.addEventListener('run_error', onDone);
+  es.addEventListener('session_finished', onDone);
+  es.addEventListener('stream_timeout', onDone);
+  es.onerror = () => { /* browser auto-reconnects; the POST resolves the turn */ };
+  return { markStreamingHappened: () => sawDelta, getStreamed: () => streamed };
+}
+
+function setWaitingUI(waiting){
+  isWaitingResponse = waiting;
+  $('liveStreamBar').style.display = waiting ? 'flex' : 'none';
+  $('chatSendBtn').textContent = waiting ? 'Steer' : 'Send';
+  $('chatSendBtn').style.background = waiting ? 'linear-gradient(135deg, var(--purple), var(--blue))' : '';
+  $('chatSendBtn').style.color = waiting ? '#fff' : '';
+}
+
+// Chat Dispatch: real file upload + live SSE streaming + real steer.
 async function sendChat(){
   const input = $('chatInput');
   const text = input.value.trim();
@@ -2258,86 +2318,125 @@ async function sendChat(){
     return;
   }
 
-  // If already waiting for model -> Steer on the fly!
+  // While a turn is in flight, Send acts as Steer — a REAL backend call that
+  // records the constraint on the active run's event stream (no more no-op UI).
   if(isWaitingResponse){
-    const notice = $('steerNotice');
-    notice.innerHTML = `➕ <b>Steered:</b> Added constraint <i>"${esc(text)}"</i> directly to active generation stream.`;
     input.value = '';
+    const notice = $('steerNote') || $('steerNotice');
+    const show = (msg, ok) => {
+      $('steerNotice').innerHTML = `<span style="color:${ok ? 'var(--purple)' : 'var(--rose)'}">${msg}</span>`;
+    };
+    if(!activeRunId){
+      show('⚠️ No active run to steer yet — wait for the turn to start.', false);
+      return;
+    }
+    try {
+      const r = await fetch('/run/steer', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ run_id: activeRunId, text: text })
+      });
+      const d = await r.json();
+      if(d && d.applied_to_stream){
+        show(`➕ <b>Steered:</b> constraint sent to active run and broadcast on its event stream.`);
+      } else {
+        show(`⚠️ Steer not applied: ${d.note || 'no active run'}`, false);
+      }
+    } catch(e){
+      show(`⚠️ Steer request failed: ${e.message}`, false);
+    }
     return;
   }
 
-  // Normal Prompt Dispatch
-  input.value = '';
+  // ---- Normal dispatch ----
   const currentFiles = [...stagedFiles];
   stagedFiles = [];
   renderStagedFiles();
+  input.value = '';
 
-  const fileNotice = currentFiles.length ? `\n[📎 Attachments: ${currentFiles.map(f=>f.name+' ('+f.size+')').join(', ')}]` : '';
-  $('chatResult').textContent = `User: ${text}${fileNotice}\n\n`;
+  const fileNotice = currentFiles.length ? `\n[📎 Attachments: ${currentFiles.map(f=>f.name+' ('+f.size+')').join(', ')}]\n(contents uploaded with this message)` : '';
+  const baseText = `User: ${text}${fileNotice}\n\n`;
+  $('chatResult').textContent = baseText + '⏳ Connecting…';
 
-  // Start Real-Time Stopwatch & Token Pulse
-  isWaitingResponse = true;
-  $('liveStreamBar').style.display = 'flex';
-  $('chatSendBtn').textContent = 'Steer';
-  $('chatSendBtn').style.background = 'linear-gradient(135deg, var(--purple), var(--blue))';
-  $('chatSendBtn').style.color = '#fff';
-
+  // Selected key — split on the FIRST ':' only so provider/key names that
+  // themselves contain ':' are not corrupted.
   const chatKeyVal = $('chatKeySel')?.value || '';
   let selProvider, selKeyName;
   if(chatKeyVal && chatKeyVal.includes(':')){
-    const parts = chatKeyVal.split(':');
-    selProvider = parts[0];
-    selKeyName = parts[1];
+    const idx = chatKeyVal.indexOf(':');
+    selProvider = chatKeyVal.slice(0, idx);
+    selKeyName = chatKeyVal.slice(idx + 1);
   }
-
   const modelOverride = $('chatModel')?.value.trim() || undefined;
-  const startTime = Date.now();
+
+  // Stable run id so the SSE stream and the POST share one run.
+  activeRunId = 'run_' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+  const stream = openRunStream(activeRunId, baseText);
+
+  setWaitingUI(true);
+  streamStartTs = Date.now();
   waitTimer = setInterval(() => {
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const speed = (42 + Math.sin(Date.now() / 250) * 12).toFixed(0);
-    $('streamStats').textContent = `⏱️ ${elapsed}s elapsed · ${selProvider || 'Active Fleet'} · ${speed} tps`;
-  }, 100);
+    const elapsed = ((Date.now() - streamStartTs) / 1000).toFixed(1);
+    // Real throughput from actual streamed characters, not an animated fake.
+    const secs = Math.max(0.1, (Date.now() - streamStartTs) / 1000);
+    const tps = (streamTokenChars / secs).toFixed(0);
+    $('streamStats').textContent = `⏱️ ${elapsed}s · ${selProvider || 'Active Fleet'} · ${tps} chars/s streamed`;
+  }, 200);
 
   try {
-    const payload = {
-      platform: 'dashboard',
-      user_id: 'user-01',
-      text: text,
-      mode: $('modeSelector')?.value || 'agent',
-      model: modelOverride,
-      provider: selProvider,
-      key_name: selKeyName
-    };
-
-    const res = await fetch('/command', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-
-    const r = await res.json();
-    clearInterval(waitTimer);
-    isWaitingResponse = false;
-    $('liveStreamBar').style.display = 'none';
-    $('chatSendBtn').textContent = 'Send';
-    $('chatSendBtn').style.background = '';
-    $('chatSendBtn').style.color = '';
-
-    if(r && r.response){
-      $('chatResult').textContent = `User: ${text}${fileNotice}\n\nHermus AI:\n${r.response}`;
-    } else if(r && r.error){
-      $('chatResult').textContent = `User: ${text}${fileNotice}\n\n⚠️ Error: ${r.error}\n\nTip: Add an API key in the API Keys tab or click "✨ Auto-Provision Free Fleet" in the Wizard.`;
+    // Upload as multipart/form-data when files are present so their bytes
+    // actually reach the agent; JSON when there are none.
+    let fetchOpts;
+    if(currentFiles.length){
+      const fd = new FormData();
+      fd.append('platform', 'dashboard');
+      fd.append('user_id', 'user-01');
+      fd.append('text', text);
+      fd.append('mode', $('modeSelector')?.value || 'agent');
+      fd.append('run_id', activeRunId);
+      fd.append('stream', 'true');
+      if(modelOverride) fd.append('model', modelOverride);
+      if(selProvider) fd.append('provider', selProvider);
+      if(selKeyName) fd.append('key_name', selKeyName);
+      for(const s of currentFiles){
+        if(s.file) fd.append('files', s.file, s.name);
+      }
+      fetchOpts = { method: 'POST', body: fd };
     } else {
-      $('chatResult').textContent = `User: ${text}${fileNotice}\n\nHermus AI:\n${JSON.stringify(r, null, 2)}`;
+      fetchOpts = {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          platform: 'dashboard', user_id: 'user-01', text,
+          mode: $('modeSelector')?.value || 'agent', model: modelOverride,
+          provider: selProvider, key_name: selKeyName,
+          run_id: activeRunId, stream: true
+        })
+      };
+    }
+
+    const res = await fetch('/command', fetchOpts);
+    const r = await res.json().catch(() => ({ error: `Bad response (HTTP ${res.status})` }));
+
+    clearInterval(waitTimer);
+    closeActiveStream();
+    setWaitingUI(false);
+
+    if(r && r.error){
+      $('chatResult').textContent = baseText + `⚠️ Error: ${r.error}\n\nTip: Add an API key in the API Keys tab or start local Ollama.`;
+    } else if(r && r.response){
+      // Prefer the full final answer from /command (complete + tool-aware).
+      $('chatResult').textContent = baseText + 'Hermus AI:\n' + r.response;
+    } else if(stream.getStreamed()){
+      $('chatResult').textContent = baseText + 'Hermus AI:\n' + stream.getStreamed();
+    } else {
+      $('chatResult').textContent = baseText + 'Hermus AI:\n' + JSON.stringify(r, null, 2);
     }
   } catch(e){
     clearInterval(waitTimer);
-    isWaitingResponse = false;
-    $('liveStreamBar').style.display = 'none';
-    $('chatSendBtn').textContent = 'Send';
-    $('chatSendBtn').style.background = '';
-    $('chatSendBtn').style.color = '';
-    $('chatResult').textContent = `User: ${text}${fileNotice}\n\n❌ Connection Error: ${e.message}\nMake sure the gateway server is running.`;
+    closeActiveStream();
+    setWaitingUI(false);
+    $('chatResult').textContent = baseText + `❌ Connection Error: ${e.message}\nMake sure the gateway server is running.`;
   }
 }
 
@@ -2783,14 +2882,9 @@ async function loadTools(silent){
     const d = await jget('/tools');
     toolsCache = d.tools || [];
   }catch(e){
-    toolsCache = [
-      {name:'web_search', description:'Search internet for real-time information'},
-      {name:'computer_click', description:'Click coordinate or target on screen'},
-      {name:'read_file', description:'Read workspace file contents'},
-      {name:'write_file', description:'Write or overwrite workspace files'},
-      {name:'bash_exec', description:'Execute shell commands in sandbox'},
-      {name:'vector_rag', description:'Semantic vector memory search'}
-    ];
+    // Don't present a hard-coded fake tool registry as live data.
+    toolsCache = [];
+    $('toolsList').innerHTML = `<span style="color:var(--rose)">⚠️ Could not load /tools: ${esc(e.message || e)}</span>`;
   }
   $('sTools').textContent = toolsCache.length;
   $('navTools').textContent = toolsCache.length;
@@ -2812,8 +2906,9 @@ async function loadChannels(silent){
   try {
     const d = await jget('/channels/status');
     $('channelsStatus').textContent = JSON.stringify(d, null, 2);
-  } catch(e){
-    $('channelsStatus').textContent = '• Telegram Bridge: Standby\n• Discord Gateway: Ready\n• Webhook Listener: Port 8000';
+  } catch(e) {
+    // Do NOT show a fake "ready" status: tell the user the request failed.
+    $('channelsStatus').textContent = `⚠️ Could not reach /channels/status: ${e.message || e}\nThe gateway may be down. Retry with "Refresh Status" once it is running.`;
   }
 }
 async function startChannels(){
@@ -3039,7 +3134,9 @@ async function loadComputerStatus(){
       $('computerWorld').textContent = JSON.stringify(d.world, null, 2);
     }
   } catch(e){
-    $('computerHero').innerHTML = '<span class="muted">Computer agent driver online.</span>';
+    $('computerStatusChip').textContent = 'UNREACHABLE';
+    $('computerStatusChip').className = 'tag bad';
+    $('computerHero').innerHTML = `<span style="color:var(--rose)">⚠️ Could not reach /computer/status: ${esc(e.message || e)}</span>`;
   }
 }
 function toggleComputerRun(){
@@ -3091,6 +3188,11 @@ function onComputerTaskChange(){}
 
 // Initial Boots
 (function init(){
+  // Restore the saved agent mode in the (now visible) selector.
+  try {
+    const savedMode = localStorage.getItem('hermus_mode');
+    if(savedMode && $('modeSelector')) $('modeSelector').value = savedMode;
+  } catch(e){}
   updateWizardNavVisibility();
   if(!localStorage.getItem('hermus_wizard_completed')){
     setTimeout(() => { openSetupWizard(); }, 300);

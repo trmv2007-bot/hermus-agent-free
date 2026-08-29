@@ -73,9 +73,23 @@ class MissionBudget:
     repairs_used: int = 0
     max_extensions: int = 2
     extensions_used: int = 0
+    # Extra steps granted by explicit/auto extensions. Previously the loop
+    # bound was `initial_steps + extensions_used*10` while extend_budget() also
+    # added to initial_steps, double-counting every extension.
+    bonus_steps: int = 0
+
+    def total_steps(self) -> int:
+        return self.initial_steps + self.bonus_steps
+
+    def grant_extension(self, steps: int = 10) -> None:
+        """Consume one extension slot and add exactly ``steps`` budget steps."""
+        self.extensions_used += 1
+        self.bonus_steps += max(1, int(steps))
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["total_steps"] = self.total_steps()
+        return d
 
 
 @dataclass
@@ -119,6 +133,9 @@ class MissionReport:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "final_proof": self.final_proof,
+            # Canonical response field used across /command and the dashboard.
+            # ``final_proof`` is retained as the human-readable mission summary.
+            "response": self.final_proof,
             "budget": self.budget.to_dict(),
             "repair_history": self.repair_history,
         }
@@ -127,7 +144,14 @@ class MissionReport:
     def from_dict(cls, data: dict[str, Any]) -> MissionReport:
         reqs = [MissionRequirement(**r) for r in data.get("requirements", [])]
         subgoals = [SubGoal(**s) if isinstance(s, dict) else s for s in data.get("subgoals", [])]
-        budget = MissionBudget(**data.get("budget", {})) if "budget" in data else MissionBudget()
+        if "budget" in data and data["budget"]:
+            # Drop computed/derived keys so older/newer payloads (e.g. the
+            # serialized ``total_steps`` helper) never break deserialization.
+            _budget_fields = {f for f in MissionBudget.__dataclass_fields__}
+            _budget_data = {k: v for k, v in data["budget"].items() if k in _budget_fields}
+            budget = MissionBudget(**_budget_data)
+        else:
+            budget = MissionBudget()
         return cls(
             mission_id=data["mission_id"],
             goal=data["goal"],
@@ -159,16 +183,105 @@ class MissionEngine:
         executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None,
         storage_dir: Optional[Path] = None,
     ):
-        self._raw_executor = executor or self._default_node_executor
+        # NOTE: a real agent-backed executor is wired lazily on first use
+        # (see ``_get_executor``). The old inline ``_default_node_executor``
+        # merely *claimed* every stage succeeded without doing any work, which
+        # let production missions "pass" without executing anything. It is now
+        # only used as an explicit, clearly-labelled simulation for offline
+        # tests that pass ``executor=`` themselves.
+        self._injected_executor = executor
+        self._real_executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    def _default_node_executor(self, node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
+    @property
+    def _raw_executor(self) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
+        if self._injected_executor is not None:
+            return self._injected_executor
+        if self._real_executor is None:
+            self._real_executor = self._build_real_executor()
+        return self._real_executor
+
+    @_raw_executor.setter
+    def _raw_executor(self, value: Callable[[Any, dict[str, Any]], dict[str, Any]]) -> None:
+        # Keep the long-standing monkeypatch/injection seam working: assigning
+        # an explicit executor overrides the lazy real agent-backed executor.
+        self._injected_executor = value
+        self._real_executor = None
+
+    @staticmethod
+    def _simulated_node_executor(node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
+        """Offline simulation — does NO real work. Only for tests."""
         return {
             "success": True,
+            "simulated": True,
             "output": f"Executed stage '{node.role}': {node.goal}",
-            "evidence": [{"stage": node.role, "goal": node.goal, "status": "completed"}],
+            "evidence": [{"stage": node.role, "goal": node.goal, "status": "completed",
+                          "simulated": True}],
         }
+
+    def _build_real_executor(self) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
+        """Build an executor that actually runs each DAG node goal via an agent.
+
+        Unlike the previous default executor, this never fabricates success:
+        when no usable model/key/Ollama backend is reachable the node is
+        reported as failed so the mission correctly ends up BLOCKED/FAILED
+        instead of pretending the work was done.
+        """
+        def executor(node: Any, parent_ctx: dict[str, Any]) -> dict[str, Any]:
+            try:
+                from .agent import HermusAgent
+                from .config import config as _config
+
+                agent = HermusAgent(
+                    model=getattr(_config, "model", None) or "ollama/llama3.1:8b",
+                    session_id=f"mission_{os.urandom(4).hex()}",
+                    mode="agent",
+                )
+                repair_hints = ""
+                try:
+                    hints = (getattr(node, "inputs", None) or {}).get("repair_hints")
+                    if hints:
+                        repair_hints = "\n\nPrevious verification found these problems to fix:\n- " + \
+                            "\n- ".join(str(h) for h in hints)
+                except Exception:
+                    pass
+                goal = f"You are the '{getattr(node, 'role', 'specialist')}' stage of a mission. " \
+                       f"Accomplish this goal using the available tools and report concrete results:\n" \
+                       f"{node.goal}{repair_hints}"
+                res = agent.chat(goal)
+                text = str(res.get("response") or "")
+                provider = str(getattr(getattr(agent, "llm", None), "provider", "") or "")
+                is_mock = provider == "mock" or "Fallback mock" in text or text.strip().startswith("⚠️")
+                if is_mock:
+                    return {
+                        "success": False,
+                        "output": text,
+                        "error": "no_model_backend",
+                        "evidence": [{"stage": getattr(node, "role", "?"),
+                                      "status": "blocked",
+                                      "reason": "No model backend reachable (no Ollama and no API key). "
+                                                "Configure a model before running missions."}],
+                    }
+                tool_results = res.get("tool_results") or []
+                return {
+                    "success": True,
+                    "output": text,
+                    "tool_calls": len(res.get("tool_calls") or []),
+                    "tool_results": len(tool_results),
+                    "evidence": [{"stage": getattr(node, "role", "?"), "status": "executed",
+                                  "model": provider, "tools_used": len(tool_results)}],
+                }
+            except Exception as exc:  # never fabricate success on error
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "evidence": [{"stage": getattr(node, "role", "?"), "status": "failed",
+                                  "error": str(exc)[:300]}],
+                }
+
+        return executor
 
     @staticmethod
     def _compute_progress(dag: AgentDAG) -> int:
@@ -281,7 +394,7 @@ class MissionEngine:
         mission_start_ts = datetime.fromisoformat(report.started_at).timestamp()
         prev_completed = -1
 
-        while budget.consumed_steps < (budget.initial_steps + (budget.extensions_used * 10)):
+        while budget.consumed_steps < budget.total_steps():
             report.state = MissionState.EXECUTING.value
             self._save_mission(report)
 
@@ -306,7 +419,7 @@ class MissionEngine:
                 and completed_now > prev_completed
                 and budget.extensions_used < budget.max_extensions
             ):
-                budget.extensions_used += 1
+                budget.grant_extension(10)
             prev_completed = completed_now
 
             # Check for explicit external blockers
@@ -332,11 +445,23 @@ class MissionEngine:
                                 report.evidence.append(ev)
             combined_log = "\n".join(all_node_outputs)
 
+            # Scope the scan to THIS mission's workspace root so concurrent
+            # missions cannot discover (and re-attribute) each other's files.
+            # Artifacts produced by the node executor are written under the
+            # mission's own project directory; a shared whole-workspace scan
+            # used to let a later mission claim an earlier mission's outputs.
+            # Scan the workspace for deliverables produced since this mission
+            # started. Ownership is protected in ArtifactManager: a file that
+            # already belongs to another mission is never reattributed, so
+            # concurrent missions cannot claim each other's outputs.
             artifacts = artifact_manager.scan_workspace(
                 mission_id=report.mission_id,
                 since_timestamp=mission_start_ts,
             )
-            report.artifacts = [a.path for a in artifacts]
+            report.artifacts = [
+                a.path for a in artifacts
+                if not getattr(a, "mission_id", None) or a.mission_id == report.mission_id
+            ]
 
             # C. VERIFY (STRUCTURAL + BEHAVIORAL + CRITIC)
             report.state = MissionState.VERIFYING.value
@@ -462,8 +587,7 @@ class MissionEngine:
                 f"{report.budget.max_extensions} budget extensions"
             )
 
-        report.budget.extensions_used += 1
-        report.budget.initial_steps += max(1, int(steps))
+        report.budget.grant_extension(steps)
         self._save_mission(report)
         return report
 
