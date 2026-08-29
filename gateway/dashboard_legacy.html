@@ -908,7 +908,7 @@ label{
   <!-- Desktop Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-header">
-      <div class="logo" onclick="handleLogoTripleClick()" title="Triple-click for Jarvis Holographic Mode">
+      <div class="logo" onclick="handleLogoTripleClick()" title="Hermus Autonomous Agent">
         <div class="logo-icon">☤</div>
         <div>
           <h1>HERMUS <span>PRO</span></h1>
@@ -987,7 +987,6 @@ label{
         <div class="nav-group">
           <div class="nav-group-title">Mobile Apps</div>
           <div class="nav-item" onclick="window.open('/remote','_blank')"><span>📱</span> Pocket Remote App ↗</div>
-          <div class="nav-item" onclick="triggerJarvisEasterEgg()"><span>🌌</span> Full Jarvis Spatial OS ↗</div>
         </div>
       </nav>
     </div>
@@ -1054,7 +1053,7 @@ label{
           <div class="row" style="align-items:stretch">
             <input type="file" id="chatFileInput" multiple style="display:none" onchange="handleFileDrop(event)">
             <button class="btn" onclick="$('chatFileInput').click()" title="Attach file or drop here" style="padding:0 12px;font-size:1.1rem">📎</button>
-            <input id="chatInput" placeholder="Message Hermus... (Type /jarvis for full power)" style="flex:1;min-width:160px" onkeydown="if(event.key==='Enter')sendChat()"/>
+            <input id="chatInput" placeholder="Message Hermus... (Press Enter to send, Shift+Enter for newline)" style="flex:1;min-width:160px" onkeydown="if(event.key==='Enter')sendChat()"/>
             <button class="btn primary" id="chatSendBtn" onclick="sendChat()">Send</button>
           </div>
 
