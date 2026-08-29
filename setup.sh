@@ -3,15 +3,11 @@
 # Hermus Agent Free — Single Unified Master Installer for Linux / WSL / macOS
 # =============================================================================
 
-# Auto-re-exec in bash if invoked via sh/dash
 if [ -z "${BASH_VERSION:-}" ]; then
   exec bash "$0" "$@"
 fi
 
 set -e
-
-REPO_URL="https://github.com/trmv2007-bot/hermus-agent-free.git"
-DEFAULT_PORT="8000"
 
 # Color helpers
 if [ -t 1 ]; then
@@ -38,63 +34,104 @@ echo "  Universal Autonomous Multi-Model Agent"
 echo -e "${C_RESET}${C_DIM}  ======================================================${C_RESET}"
 echo ""
 
-# 1. Detect Working Directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo -e "${C_CYAN}[1/6]${C_RESET} Checking system dependencies for Linux/WSL..."
+echo -e "${C_CYAN}[1/5]${C_RESET} Checking and installing system packages (Linux / WSL)..."
 
-# 2. Install System Packages if on Debian/Ubuntu/WSL
+# 1. Install Essential System Packages
 if command -v apt-get >/dev/null 2>&1; then
   SUDO_CMD=""
   if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
     SUDO_CMD="sudo"
   fi
   
-  echo -e "      Updating apt packages and installing Python3, venv, git, ffmpeg..."
-  $SUDO_CMD apt-get update -y -qq || true
+  $SUDO_CMD DEBIAN_FRONTEND=noninteractive apt-get update -y -qq 2>/dev/null || true
   $SUDO_CMD DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    git curl ca-certificates python3 python3-venv python3-pip python3-dev \
-    build-essential ffmpeg libasound2 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
-    libxrandr2 libgbm1 libpango-1.0-0 libcairo2 || true
+    git curl ca-certificates build-essential ffmpeg \
+    python3 python3-venv python3-pip python3-dev python3-virtualenv virtualenv 2>/dev/null || true
 fi
 
-# 3. Locate Python 3.10+
-PYTHON_BIN=""
+# 2. Locate Best Python 3.10+
+PYTHON_CANDIDATES=()
 for cmd in python3.13 python3.12 python3.11 python3.10 python3 python; do
   if command -v "$cmd" >/dev/null 2>&1; then
     if "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-      PYTHON_BIN="$cmd"
-      break
+      PYTHON_CANDIDATES+=("$cmd")
     fi
   fi
 done
 
-if [ -z "$PYTHON_BIN" ]; then
+if [ ${#PYTHON_CANDIDATES[@]} -eq 0 ]; then
   echo -e "${C_RED}[ERROR] Python 3.10+ is required but not found.${C_RESET}"
   echo "Please install Python 3.10 or newer (sudo apt install python3 python3-venv)"
   exit 1
 fi
 
-echo -e "      ${C_GREEN}✓ Found Python: $($PYTHON_BIN --version)${C_RESET}"
+PRIMARY_PY="${PYTHON_CANDIDATES[0]}"
+echo -e "      ${C_GREEN}✓ Selected Python: $($PRIMARY_PY --version)${C_RESET}"
 
-# 4. Create & Activate Virtual Environment (.venv)
-echo -e "${C_CYAN}[2/6]${C_RESET} Creating virtual environment (.venv)..."
-if [ ! -d ".venv" ]; then
-  "$PYTHON_BIN" -m venv .venv
+# 3. Create & Activate Virtual Environment (.venv)
+echo -e "${C_CYAN}[2/5]${C_RESET} Setting up virtual environment (.venv)..."
+
+# Clean up broken .venv if activate script is missing
+if [ -d ".venv" ] && [ ! -f ".venv/bin/activate" ]; then
+  rm -rf .venv
+fi
+
+VENV_SUCCESS=0
+
+# Strategy A: Standard venv with candidates
+for py in "${PYTHON_CANDIDATES[@]}"; do
+  if [ ! -f ".venv/bin/activate" ]; then
+    "$py" -m venv .venv 2>/dev/null || true
+  fi
+  if [ -f ".venv/bin/activate" ]; then
+    VENV_SUCCESS=1
+    PRIMARY_PY="$py"
+    break
+  fi
+done
+
+# Strategy B: virtualenv tool
+if [ "$VENV_SUCCESS" -ne 1 ] && command -v virtualenv >/dev/null 2>&1; then
+  virtualenv -p "$PRIMARY_PY" .venv 2>/dev/null || true
+  if [ -f ".venv/bin/activate" ]; then
+    VENV_SUCCESS=1
+  fi
+fi
+
+# Strategy C: venv --without-pip + bootstrap get-pip
+if [ "$VENV_SUCCESS" -ne 1 ]; then
+  "$PRIMARY_PY" -m venv --without-pip .venv 2>/dev/null || true
+  if [ -f ".venv/bin/python" ]; then
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || true
+    if [ -f "/tmp/get-pip.py" ]; then
+      .venv/bin/python /tmp/get-pip.py --quiet 2>/dev/null || true
+      rm -f /tmp/get-pip.py
+    fi
+    if [ -f ".venv/bin/activate" ]; then
+      VENV_SUCCESS=1
+    fi
+  fi
+fi
+
+if [ ! -f ".venv/bin/activate" ]; then
+  echo -e "${C_RED}[ERROR] Could not create virtual environment (.venv).${C_RESET}"
+  echo "On Ubuntu/WSL, install: sudo apt install python3-venv python3-pip virtualenv"
+  exit 1
 fi
 
 # Activate venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
-echo -e "      ${C_GREEN}✓ Virtualenv active: $(python --version)${C_RESET}"
+echo -e "      ${C_GREEN}✓ Virtual environment active: $(python --version)${C_RESET}"
 
 # Upgrade pip, setuptools, wheel
-python -m pip install -U pip setuptools wheel --quiet
+python -m pip install -U pip setuptools wheel --quiet 2>/dev/null || true
 
-# 5. Install A-to-Z Python Dependencies
-echo -e "${C_CYAN}[3/6]${C_RESET} Installing complete A-to-Z Python package stack..."
+# 4. Install Complete A-to-Z Python Dependencies
+echo -e "${C_CYAN}[3/5]${C_RESET} Installing complete A-to-Z Python package stack..."
 pip install --quiet \
   "fastapi>=0.104.0" \
   "uvicorn[standard]>=0.24.0" \
@@ -120,7 +157,6 @@ pip install --quiet \
   "pytest>=8.0.0" \
   "anyio>=4.0.0" \
   "playwright>=1.40.0" || {
-    echo -e "${C_YELLOW}[warn] Some optional voice/bot packages had warnings, installing core stack...${C_RESET}"
     pip install \
       "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0" "httpx>=0.24.0" \
       "pydantic>=2.0.0" "python-dotenv>=1.0.0" "requests>=2.31.0" \
@@ -130,18 +166,12 @@ pip install --quiet \
 }
 echo -e "      ${C_GREEN}✓ Python packages installed successfully${C_RESET}"
 
-# 6. Install Playwright Browser Binaries for Computer Agent
-echo -e "${C_CYAN}[4/6]${C_RESET} Setting up Playwright Chromium browser for Computer Agent..."
-python -m playwright install chromium 2>/dev/null || true
-echo -e "      ${C_GREEN}✓ Browser automation runtime ready${C_RESET}"
-
-# 7. Initialize Storage Directories & Data Stores
-echo -e "${C_CYAN}[5/6]${C_RESET} Initializing local storage & vector databases..."
+# 5. Initialize Storage & Launchers
+echo -e "${C_CYAN}[4/5]${C_RESET} Initializing local data storage & vector DBs..."
 mkdir -p data data/sessions data/tmp data/skins data/counsel data/plans data/recordings missions artifacts checkpoints bin
-echo -e "      ${C_GREEN}✓ Local storage directories initialized${C_RESET}"
+echo -e "      ${C_GREEN}✓ Local storage initialized${C_RESET}"
 
-# 8. Create Ready-to-Run Launchers
-echo -e "${C_CYAN}[6/6]${C_RESET} Generating executable launchers..."
+echo -e "${C_CYAN}[5/5]${C_RESET} Generating executable launchers..."
 
 cat > bin/hermus << 'EOF'
 #!/usr/bin/env bash
@@ -156,22 +186,22 @@ exec python "$ROOT/hermus.py" "$@"
 EOF
 chmod +x bin/hermus
 
-cat > bin/hermus-gateway << EOF
+cat > bin/hermus-gateway << 'EOF'
 #!/usr/bin/env bash
 set -e
-ROOT="\$(cd "\$(dirname "\$0")/.." && pwd)"
-if [ -f "\$ROOT/.venv/bin/activate" ]; then
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$ROOT/.venv/bin/activate" ]; then
   # shellcheck disable=SC1091
-  source "\$ROOT/.venv/bin/activate"
+  source "$ROOT/.venv/bin/activate"
 fi
-export PYTHONPATH="\$ROOT\${PYTHONPATH:+:\$PYTHONPATH}"
-PORT="\${1:-$DEFAULT_PORT}"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+PORT="${1:-8000}"
 echo -e "\033[0;36m☤ Hermus Live Gateway\033[0m"
-echo -e "  • Control Center:   \033[1mhttp://localhost:\${PORT}/dashboard/legacy\033[0m"
-echo -e "  • Computer Agent:   \033[1mhttp://localhost:\${PORT}/computer/dashboard\033[0m"
-echo -e "  • Pocket Remote:    \033[1mhttp://localhost:\${PORT}/remote\033[0m"
+echo -e "  • Control Center:   \033[1mhttp://localhost:${PORT}/dashboard/legacy\033[0m"
+echo -e "  • Computer Agent:   \033[1mhttp://localhost:${PORT}/computer/dashboard\033[0m"
+echo -e "  • Pocket Remote:    \033[1mhttp://localhost:${PORT}/remote\033[0m"
 echo ""
-exec python "\$ROOT/hermus.py" gateway start --port "\$PORT"
+exec python "$ROOT/hermus.py" gateway start --port "$PORT"
 EOF
 chmod +x bin/hermus-gateway
 
@@ -194,16 +224,6 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 exec "$ROOT/bin/hermus" "$@"
 EOF
 chmod +x hermus
-
-# Create default .env if missing
-if [ ! -f ".env" ]; then
-  cat > .env << 'EOF'
-# Hermus Configuration
-HERMUS_GATEWAY_PORT=8000
-HERMUS_AUTONOMY_MODE=balanced
-# Add keys anytime via the Quickstart Setup Wizard or dashboard
-EOF
-fi
 
 echo ""
 echo -e "${C_GREEN}${C_BOLD}═══════════════════════════════════════════════════════════════════${C_RESET}"
