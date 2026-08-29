@@ -698,7 +698,14 @@ def classify_evidence(
 
 
 def _scan_changed_files(since_ts: float, roots: Optional[list[Path]] = None) -> list[str]:
-    """Files modified under the given roots since ``since_ts`` (bounded walk)."""
+    """Legacy timestamp scan: files under ``roots`` modified since ``since_ts``.
+
+    Kept for standalone executors and offline callers (and as the seam tests
+    patch). **Mission runs do not rely on it**: they use
+    :class:`core.mission_files.MissionFileScope`, whose baseline + snapshot
+    diff is scoped to the mission's own directories and is immune to another
+    process touching a file inside a shared root.
+    """
     if roots is None:
         roots = []
         try:
