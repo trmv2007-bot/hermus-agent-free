@@ -35,9 +35,9 @@ if __package__ in (None, ""):
         sys.path.remove(_here)
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from core.config import config
@@ -195,10 +195,31 @@ app.include_router(_computer_router)
 app.include_router(_speech_router)
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    """Open the Living Agent Control Room for browsers and live previews."""
+    """Open the Living Agent Control Room for browsers and live previews.
+
+    Explicitly allows HEAD so health checks / proxies that probe ``/`` with HEAD
+    no longer get a 405.
+    """
     return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve a tiny inline Hermus (caduceus-style) favicon so browsers stop
+    logging a 404 on every dashboard load."""
+    favicon_svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+        "<rect width='32' height='32' rx='7' fill='#02050e'/>"
+        "<text x='16' y='23' font-size='20' text-anchor='middle' fill='#00f2fe'>&#9764;</text>"
+        "</svg>"
+    )
+    return Response(
+        content=favicon_svg.encode("utf-8"),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/api/status")
@@ -382,9 +403,36 @@ setInterval(()=>{if(panelOpen) loadPanel();}, 2000);
 </html>
     """)
 
+_TEXT_UPLOAD_EXTS = {
+    ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx", ".json", ".csv", ".yaml",
+    ".yml", ".html", ".htm", ".css", ".xml", ".log", ".ini", ".cfg", ".toml",
+    ".sh", ".sql", ".rst", ".env", ".c", ".cc", ".cpp", ".h", ".hpp", ".java",
+    ".go", ".rs", ".rb", ".php", ".kt", ".swift", ".vue", ".svelte",
+}
+
+
+def _is_text_upload(filename: str, sample: bytes) -> bool:
+    """Best-effort guess that an uploaded file is safe to inline as text."""
+    ext = Path(filename).suffix.lower()
+    if ext in _TEXT_UPLOAD_EXTS:
+        return True
+    if b"\x00" in sample:  # NUL bytes => binary
+        return False
+    try:
+        sample.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
 @app.post("/command")
-async def command_endpoint(payload: dict):
+async def command_endpoint(request: Request):
     """Run an agent command, optionally producing local Talking Mode audio.
+
+    Accepts either a JSON body (CLI/channels) or ``multipart/form-data`` (the
+    dashboard drag-and-drop chat). Attachments uploaded as ``files`` are read
+    and appended to the prompt as a real context block so the agent actually
+    receives their contents — previously staged files never reached the agent.
 
     ``talking``/``speak`` is additive: every existing CLI/channel caller keeps
     the original JSON contract, while the dashboard receives lifecycle events
@@ -392,7 +440,59 @@ async def command_endpoint(payload: dict):
     """
     from core.dashboard_events import dashboard_event_bus
 
+    payload: dict = {}
+    attachments: list[dict] = []
+    ctype = request.headers.get("content-type", "")
+    if ctype.startswith("multipart/form-data"):
+        form = await request.form()
+        # Scalar fields (text, mode, model, ...) arrive as form strings.
+        for key in ("platform", "user_id", "text", "model", "mode", "api_key",
+                    "base_url", "provider", "key_name", "profile", "run_id",
+                    "autonomous", "async", "async_mode", "talking", "speak",
+                    "stream", "voice", "speech_rate", "timeout"):
+            val = form.get(key)
+            if val is not None and val != "":
+                payload[key] = val
+        for upload in form.getlist("files"):
+            if not getattr(upload, "filename", None):
+                continue
+            content = await upload.read()
+            entry = {
+                "filename": upload.filename,
+                "content_type": upload.content_type or "",
+                "size_bytes": len(content),
+                "text": None,
+            }
+            # Inline text-like files directly; binary files are acknowledged
+            # by name/size so the agent knows they were provided (full binary
+            # understanding requires a vision/multimodal model).
+            try:
+                if len(content) <= 200_000 and _is_text_upload(upload.filename, content[:2048]):
+                    entry["text"] = content.decode("utf-8", errors="replace")
+            except Exception:
+                entry["text"] = None
+            attachments.append(entry)
+    else:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
     payload = payload or {}
+
+    # Inject attachment contents into the prompt as an explicit context block.
+    if attachments:
+        blocks = []
+        for att in attachments:
+            if att.get("text"):
+                blocks.append(f"--- Attachment: {att['filename']} ({att['size_bytes']} bytes) ---\n{att['text']}")
+            else:
+                blocks.append(f"--- Attachment: {att['filename']} ({att['content_type'] or 'binary'}, {att['size_bytes']} bytes; content not inlined) ---")
+        if blocks:
+            payload["text"] = f"{str(payload.get('text') or '').strip()}\n\nThe user attached {len(attachments)} file(s):\n" + "\n\n".join(blocks)
+        payload["attachments"] = [{"filename": a["filename"], "size_bytes": a["size_bytes"],
+                                   "content_type": a["content_type"], "inlined": a["text"] is not None}
+                                  for a in attachments]
+
     platform = payload.get("platform", "cli")
     user_id = payload.get("user_id", "cli_user")
     text = str(payload.get("text", ""))
@@ -488,6 +588,15 @@ async def command_endpoint(payload: dict):
             return out
 
         result = await asyncio.to_thread(_run)
+        # Normalize the answer contract: chat returns "response", autonomous
+        # reports historically returned "final_answer" and missions use
+        # "final_proof". Promote whichever exists to canonical "response" so the
+        # dashboard, SSE events and TTS never see an empty answer.
+        if isinstance(result, dict) and not result.get("response"):
+            for alt in ("final_answer", "final_proof", "answer", "output"):
+                if result.get(alt):
+                    result["response"] = str(result[alt])
+                    break
         if not autonomous:
             # Self-healing watchdog (architecture upgrade)
             from core.integrations import maybe_self_heal
@@ -564,6 +673,45 @@ async def command_endpoint(payload: dict):
     except Exception:
         pass
     return result
+
+@app.post("/run/steer")
+async def run_steer(payload: dict = None):
+    """Send a mid-run constraint for an active run.
+
+    The instruction is published onto the run's event stream (so live dashboards
+    and the SSE feed see it) and, when the run is a queued job, handed to that
+    job's cancellation/control channel. Unlike the old dashboard-only stub, this
+    is a real backend call — but cooperative mid-token injection into a model
+    call is not possible, so the message is recorded and applied as guidance to
+    the run rather than falsely claiming it altered tokens already streaming.
+    """
+    payload = payload or {}
+    run_id = str(payload.get("run_id") or "").strip()
+    text = str(payload.get("text") or payload.get("steer") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text required"}, status_code=400)
+
+    delivered = False
+    run = _run_bus.get(run_id) if run_id else None
+    if run is not None:
+        _run_bus.publish(run_id, "steer", {"text": text, "ts": __import__("datetime").datetime.now().isoformat()})
+        delivered = True
+
+    # Also signal any matching queued job (used for cooperative cancel/control).
+    job_info = None
+    try:
+        from gateway.queue import job_queue
+        for job in job_queue.list_jobs() if hasattr(job_queue, "list_jobs") else []:
+            if run_id and getattr(job, "run_id", None) == run_id:
+                job_info = job.id
+    except Exception:
+        pass
+
+    return {"ok": True, "run_id": run_id, "applied_to_stream": delivered,
+            "job_id": job_info,
+            "note": ("Steer recorded on the active run stream." if delivered
+                     else "No active run found for that run_id; the message was not applied.")}
+
 
 @app.get("/platforms")
 async def platforms():

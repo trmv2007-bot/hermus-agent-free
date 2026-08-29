@@ -151,7 +151,13 @@ class ArtifactManager:
             art.size_bytes = p.stat().st_size
             art.sha256 = _sha256(p)
             art.previewable = is_preview
-            art.mission_id = mission_id or art.mission_id
+            # Ownership is sticky: an artifact already attributed to one
+            # mission must never be reassigned to a different mission just
+            # because that mission's scan observed the same file. Doing so used
+            # to let concurrent/sequential missions steal each other's
+            # deliverables and corrupt verification + history.
+            if mission_id and (not art.mission_id or art.mission_id == mission_id):
+                art.mission_id = mission_id
             if metadata:
                 merged = dict(art.metadata or {})
                 merged.update(metadata)
@@ -240,6 +246,12 @@ class ArtifactManager:
             try:
                 art = self.register_artifact(p, mission_id=mission_id)
                 seen_paths.add(str(p))
+                # Do not report a file that belongs to a different mission as
+                # belonging to this scan: ownership is sticky, so an artifact
+                # already attributed to another mission is observed/refreshed
+                # but excluded from THIS mission's discovered set.
+                if mission_id and art.mission_id and art.mission_id != mission_id:
+                    continue
                 discovered.append(art)
             except Exception:
                 continue

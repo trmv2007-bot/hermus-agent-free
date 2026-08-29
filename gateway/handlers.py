@@ -40,8 +40,22 @@ def _resolve_key_from_store(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.setdefault("base_url", entry.get("base_url"))
                 if not payload.get("model") and entry.get("default_model"):
                     payload["model"] = f"{payload['provider']}/{entry['default_model']}"
-        except Exception:
-            pass
+            else:
+                # Surface a missing selected key instead of silently running
+                # with no usable model (which produced "key looks configured but
+                # the agent doesn't respond" failures).
+                print(f"[Gateway] key resolution: no stored key for "
+                      f"provider={payload['provider']} name={payload['key_name']!r}")
+                payload = dict(payload)
+                payload["_key_warning"] = (
+                    f"No stored API key named {payload['key_name']!r} for provider "
+                    f"{payload['provider']}; add it in the API Keys tab."
+                )
+        except Exception as exc:
+            # Log instead of swallowing: a broken key-store lookup used to turn
+            # into a request with no usable key and no diagnostic.
+            print(f"[Gateway] key resolution error for {payload.get('provider')}/"
+                  f"{payload.get('key_name')}: {type(exc).__name__}: {exc}")
     return payload
 
 

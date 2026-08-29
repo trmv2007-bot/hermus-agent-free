@@ -47,6 +47,7 @@ modal>=0.60.0
 
 # Gateway - Free Bot APIs
 fastapi>=0.104.0
+python-multipart>=0.0.9  # multipart form parsing (dashboard file attachments)
 uvicorn[standard]>=0.24.0
 python-telegram-bot>=20.0
 discord.py>=2.3.0
@@ -74,4 +75,3 @@ rich>=13.0.0
 pytest>=8.0.0
 httpx>=0.24.0
 
-tiktoken>=0.5.0

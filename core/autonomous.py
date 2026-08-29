@@ -61,6 +61,10 @@ class TaskReport:
             "verified": self.verified,
             "status": self.status,
             "final_answer": self.final_answer,
+            # Canonical response field: /command and the dashboard read
+            # ``response``; exposing it here keeps autonomous runs on the same
+            # contract as normal chat instead of returning an empty answer.
+            "response": self.final_answer,
             "started": self.started,
             "finished": self.finished,
         }
