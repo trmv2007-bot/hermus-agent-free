@@ -242,10 +242,27 @@ async def api_status():
 
 @app.get("/dashboard/legacy", response_class=HTMLResponse)
 async def dashboard_legacy():
-    """Previous all-in-one dashboard, kept as a compatibility escape hatch."""
-    html_path = Path(__file__).parent / "dashboard_legacy.html"
+    """Main control room dashboard (legacy alias)."""
+    html_path = Path(__file__).parent / "dashboard.html"
     if not html_path.exists():
-        return HTMLResponse("Legacy dashboard not found", status_code=404)
+        html_path = Path(__file__).parent / "dashboard_legacy.html"
+    if not html_path.exists():
+        return HTMLResponse("Dashboard not found", status_code=404)
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/jarvis", response_class=HTMLResponse)
+@app.get("/dashboard/jarvis", response_class=HTMLResponse)
+async def dashboard_jarvis():
+    """Second dashboard: Full-power 3D Jarvis Holographic Spatial HUD."""
+    html_path = Path(__file__).parent / "jarvis_dashboard.html"
+    if not html_path.exists():
+        html_path = Path(__file__).parent / "dashboard.html"
+    if not html_path.exists():
+        return HTMLResponse("Jarvis dashboard not found", status_code=404)
     return HTMLResponse(
         html_path.read_text(encoding="utf-8"),
         headers={"Cache-Control": "no-store, max-age=0"},

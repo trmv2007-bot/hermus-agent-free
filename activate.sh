@@ -6,4 +6,7 @@ if [ -f "$ROOT/.venv/bin/activate" ]; then
 fi
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="$ROOT/bin:$PATH"
+if [ -d "$HOME/.bun/bin" ]; then
+  export PATH="$HOME/.bun/bin:$PATH"
+fi
 echo "☤ Hermus environment active! Run 'hermus --help' or 'hermus-gateway'"
