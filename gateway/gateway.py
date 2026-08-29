@@ -430,15 +430,20 @@ async def command_endpoint(request: Request):
     """Run an agent command, optionally producing local Talking Mode audio.
 
     Accepts either a JSON body (CLI/channels) or ``multipart/form-data`` (the
-    dashboard drag-and-drop chat). Attachments uploaded as ``files`` are read
-    and appended to the prompt as a real context block so the agent actually
-    receives their contents — previously staged files never reached the agent.
+    dashboard drag-and-drop chat). Attachments are processed by
+    ``core.document_ingest``: text files are inlined, and binary documents
+    (DOCX/XLSX/PPTX/PDF/ZIP/…) get their real contents extracted when possible
+    (plus the raw bytes persisted to the workspace uploads dir so vision/OCR
+    tools can open them) — previously binaries were reduced to name+size.
 
-    ``talking``/``speak`` is additive: every existing CLI/channel caller keeps
-    the original JSON contract, while the dashboard receives lifecycle events
-    and (when a local TTS backend is configured) an ``audio_url``.
+    ``async``/``async_mode`` (sent by the dashboard) enqueues a
+    ``runtime.turn`` job instead of running inline, so the turn survives the
+    dashboard being closed and is executed queue-first exactly like every
+    other surface. ``talking``/``speak`` is additive: every existing
+    CLI/channel caller keeps the original JSON contract.
     """
     from core.dashboard_events import dashboard_event_bus
+    from core.document_ingest import attachment_prompt_block, extract_document
 
     payload: dict = {}
     attachments: list[dict] = []
@@ -449,29 +454,28 @@ async def command_endpoint(request: Request):
         for key in ("platform", "user_id", "text", "model", "mode", "api_key",
                     "base_url", "provider", "key_name", "profile", "run_id",
                     "autonomous", "async", "async_mode", "talking", "speak",
-                    "stream", "voice", "speech_rate", "timeout"):
+                    "stream", "voice", "speech_rate", "timeout", "prefer"):
             val = form.get(key)
             if val is not None and val != "":
                 payload[key] = val
+        uploads_dir = None
+        try:
+            from core.workspace import workspace
+
+            uploads_dir = workspace.dirs["uploads"]
+        except Exception:
+            uploads_dir = None
         for upload in form.getlist("files"):
             if not getattr(upload, "filename", None):
                 continue
             content = await upload.read()
-            entry = {
-                "filename": upload.filename,
-                "content_type": upload.content_type or "",
-                "size_bytes": len(content),
-                "text": None,
-            }
-            # Inline text-like files directly; binary files are acknowledged
-            # by name/size so the agent knows they were provided (full binary
-            # understanding requires a vision/multimodal model).
-            try:
-                if len(content) <= 200_000 and _is_text_upload(upload.filename, content[:2048]):
-                    entry["text"] = content.decode("utf-8", errors="replace")
-            except Exception:
-                entry["text"] = None
-            attachments.append(entry)
+            doc = extract_document(
+                upload.filename,
+                content,
+                upload.content_type or "",
+                save_binary_to=uploads_dir,
+            )
+            attachments.append(doc)
     else:
         try:
             payload = await request.json()
@@ -481,17 +485,10 @@ async def command_endpoint(request: Request):
 
     # Inject attachment contents into the prompt as an explicit context block.
     if attachments:
-        blocks = []
-        for att in attachments:
-            if att.get("text"):
-                blocks.append(f"--- Attachment: {att['filename']} ({att['size_bytes']} bytes) ---\n{att['text']}")
-            else:
-                blocks.append(f"--- Attachment: {att['filename']} ({att['content_type'] or 'binary'}, {att['size_bytes']} bytes; content not inlined) ---")
+        blocks = [attachment_prompt_block(doc) for doc in attachments]
         if blocks:
             payload["text"] = f"{str(payload.get('text') or '').strip()}\n\nThe user attached {len(attachments)} file(s):\n" + "\n\n".join(blocks)
-        payload["attachments"] = [{"filename": a["filename"], "size_bytes": a["size_bytes"],
-                                   "content_type": a["content_type"], "inlined": a["text"] is not None}
-                                  for a in attachments]
+        payload["attachments"] = [doc.to_dict() for doc in attachments]
 
     platform = payload.get("platform", "cli")
     user_id = payload.get("user_id", "cli_user")
@@ -505,6 +502,7 @@ async def command_endpoint(request: Request):
     provider = payload.get("provider")
     key_name = payload.get("key_name")
     autonomous = bool(payload.get("autonomous", False))
+    prefer = str(payload.get("prefer") or ("mission" if autonomous else "auto")).lower()
     profile = payload.get("profile") or ""
     as_async = bool(payload.get("async", payload.get("async_mode", False)))
     talking = bool(payload.get("talking", payload.get("speak", False)))
@@ -526,15 +524,21 @@ async def command_endpoint(request: Request):
             pass
 
     # Async path: hand the turn to the worker pool and answer with a job handle.
+    # This is the dashboard's default path (queue-first execution): the turn
+    # keeps running server-side even if the browser is closed, and its events
+    # stream over SSE via the run bus.
     if as_async and _job_queue.enabled and _job_queue._started:
         job = _job_queue.submit(
-            "agent.autonomous" if autonomous else "agent.chat",
+            "runtime.turn",
             {
                 "text": text, "platform": platform, "user_id": user_id, "model": model,
                 "mode": mode, "api_key": api_key, "base_url": base_url, "provider": provider,
                 "key_name": key_name, "profile": profile, "talking": talking,
                 "speech_rate": payload.get("speech_rate"), "voice": payload.get("voice"),
                 "stream": bool(payload.get("stream", True)),
+                "prefer": prefer,
+                "max_repairs": payload.get("max_repairs"),
+                "budget_steps": payload.get("budget_steps"),
             },
             session_key=f"{platform}:{user_id}",
             timeout=payload.get("timeout"),
@@ -542,6 +546,7 @@ async def command_endpoint(request: Request):
         )
         return {
             "async": True, "job_id": job.id, "run_id": job.run_id, "status": job.status,
+            "run_kind": "queued",
             "status_url": f"/jobs/{job.id}", "result_url": f"/jobs/{job.id}/result",
             "events_url": f"/jobs/{job.id}/events", "stream_url": f"/stream/run/{job.run_id}",
         }
@@ -575,14 +580,25 @@ async def command_endpoint(request: Request):
         )
 
         def _run() -> dict:
-            if autonomous:
-                out = agent.autonomous(text)
-                if isinstance(out, dict):
-                    out["autonomous"] = True
-                return out
-            out = _agent_chat(agent, text, on_event=_bus_event, stream=stream_tokens)
+            # Universal mission runtime: same core for inline /command turns as
+            # for queued jobs, the CLI and channels — with live streaming,
+            # cooperative cancellation and mid-run steering from the run bus.
+            from core.runtime import execute as runtime_execute
+
+            out = runtime_execute(
+                text,
+                agent=agent,
+                prefer=prefer,
+                on_event=_bus_event,
+                stream=stream_tokens,
+                should_cancel=lambda: _run_bus.is_cancelled(run_id),
+                steer_source=lambda: _run_bus.pending_steers(run_id),
+                max_repairs=int(payload.get("max_repairs") or 2),
+            )
             if isinstance(out, dict):
                 out.setdefault("steps", out.get("steps", 0))
+                if autonomous:
+                    out["autonomous"] = True
                 if stream_tokens:
                     out["streamed"] = True
             return out
@@ -616,6 +632,9 @@ async def command_endpoint(request: Request):
     result["model"] = agent.model_name
     result["run_id"] = run_id
     result["talking"] = talking
+    if attachments:
+        # attachment extraction report (inlined text? which method? saved path?)
+        result["attachments"] = payload.get("attachments") or [doc.to_dict() for doc in attachments]
     try:
         bundle = agent.llm._resolve_bundle()
         result["resolved"] = {
@@ -678,12 +697,13 @@ async def command_endpoint(request: Request):
 async def run_steer(payload: dict = None):
     """Send a mid-run constraint for an active run.
 
-    The instruction is published onto the run's event stream (so live dashboards
-    and the SSE feed see it) and, when the run is a queued job, handed to that
-    job's cancellation/control channel. Unlike the old dashboard-only stub, this
-    is a real backend call — but cooperative mid-token injection into a model
-    call is not possible, so the message is recorded and applied as guidance to
-    the run rather than falsely claiming it altered tokens already streaming.
+    The instruction is queued on the run's steer inbox (``RunBus.steer``): the
+    executing agent loop drains it at its next step boundary and injects it
+    into the conversation as a user message, and the event is published on the
+    run's stream so dashboards/SSE see it live. Mid-token injection into an
+    in-flight model call is still not possible — steering applies at the next
+    step boundary — but it now genuinely reaches the model instead of only
+    being recorded.
     """
     payload = payload or {}
     run_id = str(payload.get("run_id") or "").strip()
@@ -692,10 +712,12 @@ async def run_steer(payload: dict = None):
         return JSONResponse({"error": "text required"}, status_code=400)
 
     delivered = False
+    queued = False
     run = _run_bus.get(run_id) if run_id else None
     if run is not None:
-        _run_bus.publish(run_id, "steer", {"text": text, "ts": __import__("datetime").datetime.now().isoformat()})
-        delivered = True
+        # queue on the inbox (the agent drains it) + publish on the stream
+        delivered = _run_bus.steer(run_id, text)
+        queued = delivered
 
     # Also signal any matching queued job (used for cooperative cancel/control).
     job_info = None
@@ -708,8 +730,10 @@ async def run_steer(payload: dict = None):
         pass
 
     return {"ok": True, "run_id": run_id, "applied_to_stream": delivered,
+            "queued_for_agent": queued,
             "job_id": job_info,
-            "note": ("Steer recorded on the active run stream." if delivered
+            "note": ("Steer queued for the active run: the agent applies it at its "
+                     "next step boundary and the event is on the run stream." if delivered
                      else "No active run found for that run_id; the message was not applied.")}
 
 

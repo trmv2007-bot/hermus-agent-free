@@ -16,6 +16,7 @@ from .skill_manager import skill_manager
 from .task_tracker import task_tracker
 from .modes import AgentMode, get_mode_config
 from .tool_registry import tool_registry
+from .run_events import record_issue
 from .run_hooks import CancelledRun, CancelToken, make_emitter
 
 
@@ -81,8 +82,9 @@ class HermusAgent:
                 persona=self.mode.value,
                 task=f"Mode: {self.mode_config.name} - {self.mode_config.description[:60]}",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("telemetry", "agent_register", exc, retryable=False,
+                         fallback="agent runs untracked this session")
 
     def _get_tools(self) -> list[dict]:
         """Definitions from auto-discovered registry, filtered by mode."""
@@ -187,8 +189,9 @@ class HermusAgent:
             from .reasoning.lessons import lessons_store
 
             lessons_block = lessons_store.to_prompt_block(user_message)
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("memory", "lessons_prompt", exc, retryable=False,
+                         fallback="turn continues without lessons block")
 
         # Memory 2.0 (architecture upgrade): hybrid recall + decay + eviction
         memory2_block = ""
@@ -218,7 +221,9 @@ class HermusAgent:
                             ],
                         },
                     )
-            except Exception:
+            except Exception as exc:
+                record_issue("memory", "memory2_recall", exc, retryable=False,
+                             fallback="turn continues without memory2 context block")
                 memory2_block = ""
 
         # Profile persona (architecture upgrade)
@@ -285,6 +290,7 @@ Rules:
         on_event=None,
         stream: bool = False,
         should_cancel=None,
+        steer_source=None,
     ) -> dict[str, Any]:
         """Multi-step agent loop: plan → tool calls → observe → repeat → final answer.
 
@@ -292,10 +298,24 @@ Rules:
         calls/results, llm deltas, memory recall, skill harvest, verification) so
         the gateway can stream them over SSE/WebSocket. ``stream=True`` requests
         token-level deltas from the model. ``should_cancel`` is polled at every
-        step boundary for cooperative cancellation.
+        step boundary for cooperative cancellation. ``steer_source`` is an
+        optional callable returning newly queued mid-run instructions (see
+        ``RunBus.pending_steers``); they are injected into the conversation at
+        the next step boundary so /run/steer actually reaches the model.
         """
         emit = make_emitter(on_event)
         cancel = CancelToken(should_cancel)
+
+        def _drain_steers() -> list[str]:
+            if steer_source is None:
+                return []
+            try:
+                drained = steer_source()
+                return [str(s) for s in (drained or []) if str(s).strip()]
+            except Exception as exc:
+                record_issue("agent", "steer_source", exc,
+                             retryable=False, fallback="steering skipped this step")
+                return []
         emit(
             "turn_started",
             {"session": self.session_id, "model": self.model_name,
@@ -323,8 +343,9 @@ Rules:
                 status="running",
                 progress="Thinking...",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("telemetry", "task_tracker_add", exc, retryable=False,
+                         fallback="turn continues without task tracking")
 
         # Counsel System (Phases 0-2): for hard tasks, convene the council of AIs
         # instead of answering alone. Falls back to the normal loop on any failure.
@@ -413,8 +434,9 @@ Rules:
                 metadata={"session_id": self.session_id, "role": "user"},
                 source=f"session:{self.session_id}",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("memory", "embeddings_index_user", exc, retryable=False,
+                         fallback="user turn not indexed in semantic memory")
 
         system_prompt = self._build_system_prompt(user_message)
 
@@ -489,8 +511,9 @@ Rules:
                 self.session_id, user_message, messages, project=str(self.project or "")
             )
             messages = _prep.get("messages") or messages
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("harness", "prepare_turn", exc, retryable=False,
+                         fallback="turn continues without harness context")
         # Recent trajectory context
         for turn in self.trajectory[-12:]:
             role = turn.get("role") or "user"
@@ -512,6 +535,20 @@ Rules:
             if cancel.cancelled:
                 emit("run_cancelled", {"step": steps})
                 raise CancelledRun("agent run cancelled")
+            # Mid-run steering: drain new instructions queued since the last
+            # step (POST /run/steer) and inject them into the conversation.
+            new_steers = _drain_steers()
+            if new_steers:
+                steer_block = (
+                    "MID-RUN STEERING — the user added the following constraint(s) "
+                    "while you were working. Treat them as the newest instruction "
+                    "and adjust your remaining work accordingly:\n- "
+                    + "\n- ".join(new_steers)
+                )
+                messages.append({"role": "user", "content": steer_block})
+                self.trajectory.append({"role": "user", "content": steer_block, "tool_calls": []})
+                emit("steer_applied", {"step": steps, "count": len(new_steers),
+                                       "texts": [s[:200] for s in new_steers]})
             steps += 1
             try:
                 task_tracker.update_agent(
@@ -539,6 +576,26 @@ Rules:
             )
 
             if not response.tool_calls:
+                # Before committing to a final answer, honor steering that
+                # arrived while the model was generating: the user's newest
+                # instruction takes precedence over a stale answer.
+                late_steers = _drain_steers()
+                if late_steers and steps < budget_steps:
+                    steer_block = (
+                        "MID-RUN STEERING — the user added the following constraint(s) "
+                        "while you were working. Treat them as the newest instruction "
+                        "and adjust your answer/work accordingly:\n- "
+                        + "\n- ".join(late_steers)
+                    )
+                    messages.append({"role": "assistant", "content": response.content or ""})
+                    messages.append({"role": "user", "content": steer_block})
+                    self.trajectory.append({"role": "assistant", "content": response.content or "",
+                                            "tool_calls": []})
+                    self.trajectory.append({"role": "user", "content": steer_block, "tool_calls": []})
+                    emit("steer_applied", {"step": steps, "count": len(late_steers),
+                                           "phase": "finalizing",
+                                           "texts": [s[:200] for s in late_steers]})
+                    continue
                 final_content = response.content or ""
                 break
 
@@ -586,8 +643,9 @@ Rules:
                     from .harness import harness as _harness
 
                     _harness.observe_tool(self.session_id, tool_name, tool_args)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    record_issue("harness", "observe_tool", exc, retryable=False,
+                                 fallback=f"observation for tool '{tool_name}' skipped")
                 all_tool_results.append(
                     {"tool": tool_name, "args": tool_args, "result": result, "step": steps}
                 )
@@ -704,8 +762,9 @@ Rules:
         try:
             if last_usage:
                 memory.add_token_usage(self.session_id, last_usage)
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("telemetry", "token_usage", exc, retryable=False,
+                         fallback="token usage not recorded")
 
         try:
             if task_id:
@@ -786,6 +845,8 @@ Rules:
                                            "reasons": (skill_created.get("evaluation") or {}).get("reasons"),
                                            "merged_into": skill_created.get("merged_into")})
             except Exception as e:
+                record_issue("skill_forge", "harvest", e, retryable=False,
+                             fallback="legacy auto-skill path")
                 print(f"[SkillForge] skipped ({e}) - falling back to legacy auto-skill")
                 skill_created = None
         if skill_created is None and skill_manager.should_create_skill(self.trajectory):
@@ -803,8 +864,9 @@ Rules:
                     source_session=self.session_id,
                     importance=6,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("memory", "curate", exc, retryable=False,
+                         fallback="turn not curated into memory")
 
         # Memory 2.0 (architecture upgrade): auto-persist typed memories
         self._persist_memory2(user_message, final_content, all_tool_results)
@@ -867,8 +929,9 @@ Rules:
                     f"For '{user_message[:120]}', a working tool sequence: {chain}",
                     project=project, success=True,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            record_issue("memory", "memory2_persist", exc, retryable=False,
+                         fallback="typed memories for this turn not persisted")
 
     def _verify_final(self, user_message: str, final_content: str) -> dict:
         """Lightweight verification of the final answer (autonomous gate)."""
@@ -880,24 +943,37 @@ Rules:
         except Exception as e:
             return {"verified": True, "error": str(e)}
 
-    def autonomous(self, task: str, max_repairs: int = 2) -> dict[str, Any]:
-        """Run a goal through the full plan→execute→observe→verify→repair loop.
+    def autonomous(self, task: str, max_repairs: int = 2, *,
+                   on_event=None, should_cancel=None, steer_source=None) -> dict[str, Any]:
+        """Run a goal through the universal mission runtime.
 
-        Each execution step reuses this agent's ReAct loop (``self.chat``); the
-        autonomous runner re-runs steps and repairs until a verifier confirms
-        the goal is met (bounded by ``max_repairs``).
+        This used to spin up a private ``AutonomousRunner`` — a second,
+        weaker autonomous system that ran in parallel with the MissionEngine
+        (different budget, different verification, different repair loop), so
+        behavior depended on which entry point a request happened to use.
+        ``autonomous()`` now routes through the same MissionEngine the
+        mission API, gateway queue and CLI use; each DAG stage reuses THIS
+        agent's ReAct loop (session memory, model and profile preserved),
+        with evidence-gated node success and mid-run steering.
+
+        The returned dict keeps the legacy contract (``status``, ``phases``,
+        ``steps``, ``verified``, ``repairs``, ``final_answer``) and adds the
+        canonical ``response`` plus the full mission report under ``mission``.
+
+        Set ``HERMUS_MISSION_RUNTIME=0`` to fall back to the old
+        AutonomousRunner path.
         """
-        from .autonomous import AutonomousRunner, Verifier
+        from .runtime import execute as runtime_execute
 
-        def executor(goal: str) -> str:
-            res = self.chat(goal)
-            return str(res.get("response") or "")
-
-        runner = AutonomousRunner(
-            executor=executor, verifier=Verifier(), max_repairs=max_repairs
+        return runtime_execute(
+            task,
+            agent=self,
+            prefer="mission",
+            max_repairs=max_repairs,
+            on_event=on_event,
+            should_cancel=should_cancel,
+            steer_source=steer_source,
         )
-        report = runner.run(task)
-        return report.to_dict()
 
     def _maybe_fleet_distribute(self, user_message: str) -> Optional[dict[str, Any]]:
         """

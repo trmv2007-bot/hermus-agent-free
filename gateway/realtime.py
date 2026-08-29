@@ -203,7 +203,12 @@ async def stream_run(run_id: str, request: Request, after: int = 0):
 
 @router.post("/stream/command")
 async def stream_command(payload: dict[str, Any] = None, request: Request = None):
-    """Run a turn and stream it as SSE (single call). Non-streaming clients keep /command."""
+    """Run a turn and stream it as SSE (single call). Non-streaming clients keep /command.
+
+    Submits the canonical ``runtime.turn`` job (auto-classified chat vs mission
+    by the universal runtime) — the dashboard's queue-first path uses exactly
+    the same kind.
+    """
     from gateway.queue import job_queue
 
     payload = payload or {}
@@ -212,8 +217,10 @@ async def stream_command(payload: dict[str, Any] = None, request: Request = None
         return JSONResponse({"error": "text required"}, status_code=400)
     body = dict(payload)
     body["stream"] = bool(payload.get("stream", True))
+    prefer = str(payload.get("prefer") or ("mission" if payload.get("autonomous") else "auto")).lower()
+    body["prefer"] = prefer
     job = job_queue.submit(
-        "agent.autonomous" if payload.get("autonomous") else "agent.chat",
+        "runtime.turn",
         body,
         session_key=f"{payload.get('platform', 'api')}:{payload.get('user_id', 'anonymous')}",
         timeout=payload.get("timeout"),
@@ -757,17 +764,48 @@ async def verifiers_verify_api(payload: dict[str, Any] = None):
 
 @router.post("/swe/run")
 async def swe_run_api(payload: dict[str, Any] = None):
+    """Run the SWE lifecycle with an agent-backed coder phase.
+
+    The coder stage executes on the same agent runtime as chat/missions (real
+    tools, real diffs as evidence) instead of a deterministic template.
+    """
     payload = payload or {}
     task = str(payload.get("task") or payload.get("text") or "")
     if not task:
         return JSONResponse({"error": "task is required"}, status_code=400)
     from core.swe_mode import swe_mode
+
+    agent = None
+    if _agent_getter is not None and not payload.get("no_agent"):
+        try:
+            agent = _agent_getter(
+                payload.get("platform", "api"), payload.get("user_id", "swe"),
+                model=payload.get("model"), mode="agent",
+                api_key=payload.get("api_key"), base_url=payload.get("base_url"),
+            )
+        except Exception:
+            agent = None
     res = await asyncio.to_thread(
         swe_mode.execute,
         task=task,
         max_repairs=int(payload.get("max_repairs", 3)),
+        agent=agent,
     )
     return res.to_dict()
+
+
+@router.get("/runtime/issues")
+async def runtime_issues(limit: int = 100):
+    """Recent structured runtime issues (component/operation/error/context).
+
+    Replaces silent ``except: pass`` blindness: every non-fatal failure in the
+    agent loop, mission engine, memory, routing and telemetry lands here with
+    enough context to diagnose what an autonomous run actually did.
+    """
+    from core.run_events import recent_issues
+
+    issues = recent_issues(limit=limit)
+    return {"count": len(issues), "issues": issues}
 
 # ---- rollback & checkpoints ---------------------------------------------------
 @router.get("/rollback/checkpoints")

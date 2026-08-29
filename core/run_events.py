@@ -15,6 +15,13 @@ Event kinds used by the agent loop: ``run_started``, ``step_started``,
 ``llm_delta``, ``llm_finished``, ``tool_call``, ``tool_result``, ``memory``,
 ``skill``, `subagent``, ``job_status``, ``verification``, ``run_finished``,
 ``run_error``, ``log``.
+
+Mid-run steering: ``RunBus.steer(run_id, text)`` queues an instruction that the
+executing agent loop drains via ``pending_steers()`` at each step boundary —
+steering reaches the model, not just the dashboard. Structured, non-fatal
+failures are recorded via :func:`record_issue` (component / operation / error /
+mission / run / step / retryable / fallback) instead of silent
+``except Exception: pass``.
 """
 from __future__ import annotations
 
@@ -25,6 +32,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 from collections.abc import Callable
 
@@ -48,6 +56,12 @@ class Run:
     error: str = ""
     subscribers: set[Any] = field(default_factory=set)
     cancel: threading.Event = field(default_factory=threading.Event)
+    # Mid-run steering: instructions queued by POST /run/steer. The active
+    # agent loop drains this inbox at every step boundary and injects whatever
+    # is new into the conversation, so steering actually reaches the model
+    # instead of only being recorded on the event stream.
+    steer_inbox: deque[str] = field(default_factory=lambda: deque(maxlen=100))
+
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -155,6 +169,39 @@ class RunBus:
     def is_cancelled(self, run_id: str) -> bool:
         run = self.get(run_id)
         return bool(run and run.cancel.is_set())
+
+    # ------------------------------------------------------------------ steer
+    def steer(self, run_id: str, text: str) -> bool:
+        """Queue a mid-run instruction for the agent executing ``run_id``.
+
+        Returns True when an active run was found. The instruction is (a)
+        published on the run's event stream (dashboards/SSE see it live) and
+        (b) appended to the run's steer inbox, which the agent loop drains at
+        its next step boundary — so the constraint reaches the model, not just
+        the UI.
+        """
+        text = str(text or "").strip()
+        if not text:
+            return False
+        run = self.get(run_id)
+        if run is None:
+            return False
+        with self._lock:
+            run.steer_inbox.append(text)
+        self.publish(run_id, "steer", {"text": text, "queued": True, "ts": _now()})
+        return True
+
+    def pending_steers(self, run_id: str) -> list[str]:
+        """Drain and return steering instructions not yet consumed by the agent."""
+        run = self.get(run_id)
+        if run is None:
+            return []
+        with self._lock:
+            drained = list(run.steer_inbox)
+            run.steer_inbox.clear()
+        if drained:
+            self.publish(run_id, "steer_consumed", {"count": len(drained)})
+        return drained
 
     # ----------------------------------------------------------------- publish
     def publish(self, run_id: str, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -294,7 +341,130 @@ class RunHandle:
         return self.bus.is_cancelled(self.run_id)
 
 
+# --------------------------------------------------------------------- issues
+@dataclass
+class RuntimeIssue:
+    """A structured, non-fatal runtime problem (replaces silent except/pass).
+
+    Every "best-effort" path that used to swallow an exception can now record
+    WHAT failed, WHERE, and whether it fell back — with enough context
+    (mission/run/step ids) to diagnose an autonomous run after the fact.
+    """
+
+    component: str                 # memory | routing | telemetry | executor | ...
+    operation: str                 # recall | publish | scan | ...
+    error: str
+    error_type: str = ""
+    mission_id: Optional[str] = None
+    run_id: Optional[str] = None
+    step: Optional[int] = None
+    retryable: Optional[bool] = None
+    fallback: Optional[str] = None   # what was done instead ("continued without memory block")
+    ts: str = field(default_factory=_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "component": self.component,
+            "operation": self.operation,
+            "error": self.error[:500],
+            "error_type": self.error_type,
+            "mission_id": self.mission_id,
+            "run_id": self.run_id,
+            "step": self.step,
+            "retryable": self.retryable,
+            "fallback": self.fallback,
+            "ts": self.ts,
+        }
+
+
+_issue_ring: deque[dict[str, Any]] = deque(maxlen=500)
+_issue_lock = threading.Lock()
+
+
+def _issue_log_path() -> Optional[Path]:
+    """Best-effort durable issue log under the hermus workspace logs dir."""
+    try:
+        from core.workspace import workspace
+
+        path = workspace.dirs["logs"] / "runtime_issues.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+    except Exception:
+        return None
+
+
+def record_issue(
+    component: str,
+    operation: str,
+    error: Any,
+    *,
+    error_type: str = "",
+    mission_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    step: Optional[int] = None,
+    retryable: Optional[bool] = None,
+    fallback: Optional[str] = None,
+) -> dict[str, Any]:
+    """Record a structured runtime issue: log line + ring buffer + run event.
+
+    Never raises — the whole point is that diagnostics must not break the run
+    they are diagnosing.
+    """
+    try:
+        if isinstance(error, BaseException):
+            error_type = error_type or type(error).__name__
+            error = str(error) or type(error).__name__
+        issue = RuntimeIssue(
+            component=str(component or "unknown"),
+            operation=str(operation or "unknown"),
+            error=str(error)[:500],
+            error_type=error_type,
+            mission_id=mission_id,
+            run_id=run_id,
+            step=step,
+            retryable=retryable,
+            fallback=fallback,
+        )
+        d = issue.to_dict()
+        with _issue_lock:
+            _issue_ring.append(d)
+        print(
+            f"[issue] component={d['component']} op={d['operation']} "
+            f"error={d['error_type']}: {d['error'][:160]} "
+            f"retryable={d['retryable']} fallback={d['fallback'] or 'none'}"
+        )
+        # durable append-only log (best-effort)
+        try:
+            path = _issue_log_path()
+            if path is not None:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(d, default=str) + "\n")
+        except Exception:
+            pass
+        # surface on the run's event stream when the issue belongs to one
+        if run_id:
+            try:
+                run_bus.publish(run_id, "runtime_issue", d)
+            except Exception:
+                pass
+        return d
+    except Exception:
+        return {"component": str(component), "operation": str(operation),
+                "error": "issue-recorder-failed"}
+
+
+def recent_issues(limit: int = 100) -> list[dict[str, Any]]:
+    """Most recent structured runtime issues (newest last)."""
+    with _issue_lock:
+        return list(_issue_ring)[-max(1, int(limit)):]
+
+
+def run_handle_from(run_id: str) -> RunHandle:
+    return RunHandle(run_id)
+
+
 def sse_format(event: dict[str, Any]) -> str:
+
     """Server-Sent Events framing (id + event + data)."""
     payload = json.dumps(event, default=str)
     return f"id: {event.get('id')}\nevent: {event.get('type')}\ndata: {payload}\n\n"

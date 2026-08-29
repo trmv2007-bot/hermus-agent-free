@@ -51,6 +51,7 @@ def register_handler(role: str, handler: Callable[[dict[str, Any]], dict[str, An
 def _general_agent_handler(config: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
     def handle(job: dict[str, Any]) -> dict[str, Any]:
         from .agent import HermusAgent
+        from .runtime import execute as runtime_execute
 
         task = str(job.get("task") or job.get("goal") or "")
         if not task:
@@ -59,8 +60,12 @@ def _general_agent_handler(config: dict[str, Any]) -> Callable[[dict[str, Any]],
             model=config.get("model"),
             session_id=f"background_{config.get('name', 'agent')}",
         )
-        result = agent.chat(task)
+        # Background agents use the universal runtime too: goal-like tasks get
+        # the full mission lifecycle instead of a single chat turn.
+        result = runtime_execute(task, agent=agent, prefer=str(job.get("prefer") or "auto"))
         ok = bool(result.get("success", True)) if isinstance(result, dict) else bool(result)
+        if isinstance(result, dict) and result.get("run_kind") == "mission":
+            ok = result.get("state") == "completed"
         return {"ok": ok, "task": task, "result": result}
     return handle
 

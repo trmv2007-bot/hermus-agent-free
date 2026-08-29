@@ -182,11 +182,62 @@ class SoftwareEngineerMode:
         workspace_dir: Optional[Path] = None,
         coder_fn: Optional[Callable[[str, dict[str, Any]], dict[str, str]]] = None,
         max_repairs: int = 3,
+        agent: Any = None,
+        on_event: Any = None,
+        should_cancel: Any = None,
+        steer_source: Any = None,
     ) -> SWEResult:
+        """Run the SWE lifecycle.
+
+        ``agent`` binds the coder phase to a real agent loop (the universal
+        runtime's executor): the agent edits files with its tools and the
+        modified-file list comes from the real checkpoint diff — evidence, not
+        declarations. Without ``agent`` (or ``coder_fn``) the legacy
+        deterministic template path is used (offline/mock runs).
+        """
         root = workspace_dir or self.workspace_root
         phases: list[str] = []
         files_modified: list[str] = []
         repairs = 0
+
+        def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+            if on_event is not None:
+                try:
+                    on_event(event_type, data or {})
+                except Exception:
+                    pass
+
+        def _agent_coder(goal: str, ctx: dict[str, Any]) -> None:
+            """Run the bound agent on a coding goal; evidence = diff vs checkpoint."""
+            from .mission import _chat_compat
+
+            prompt = (
+                f"You are the coder stage of a software-engineering task.\n"
+                f"## Task\n{task}\n\n"
+                f"## Repository\n{root} (detected toolchain: {toolchain.language}"
+                f"{'/' + toolchain.framework if toolchain.framework else ''}, "
+                f"test runner: {toolchain.test_runner or 'none'})\n"
+            )
+            error_log = str(ctx.get("error_log") or "").strip()
+            if error_log:
+                prompt += (
+                    f"\n## Failing test output (fix these)\n```\n{error_log[:4000]}\n```\n"
+                )
+            prompt += (
+                "\nImplement/repair the code now using your tools (write files, run "
+                "commands). Report what you changed and the commands you ran. Do not "
+                "merely describe the changes — make them."
+            )
+            _chat_compat(
+                agent, prompt,
+                on_event=on_event, should_cancel=should_cancel,
+                steer_source=steer_source,
+            )
+            # ground truth: files actually changed since the checkpoint
+            diff_info = rollback_manager.diff(cp.id)
+            for rel in diff_info.get("added", []) + diff_info.get("modified", []):
+                if str(rel) not in files_modified:
+                    files_modified.append(str(rel))
 
         # Phase 1: INSPECT
         phases.append(SWEPhase.INSPECT.value)
@@ -199,17 +250,18 @@ class SoftwareEngineerMode:
         phases.append(SWEPhase.PLAN.value)
         phases.append(SWEPhase.EDIT.value)
 
-        # Default or injected coder function
-        if coder_fn:
+        if agent is not None:
+            _emit("swe_coder_started", {"task": task[:200], "mode": "agent"})
+            _agent_coder(task, {"toolchain": toolchain.to_dict(), "workspace": str(root)})
+        elif coder_fn:
             code_changes = coder_fn(task, {"toolchain": toolchain.to_dict(), "workspace": str(root)})
+            for rel_p, content in code_changes.items():
+                target_p = root / rel_p
+                if self._apply_patch(target_p, content):
+                    files_modified.append(str(rel_p))
         else:
             # Fallback deterministic template if offline/mock
-            code_changes = {}
-
-        for rel_p, content in code_changes.items():
-            target_p = root / rel_p
-            if self._apply_patch(target_p, content):
-                files_modified.append(str(rel_p))
+            pass
 
         # Phase 3 & 4: BUILD & TEST Loop with REPAIRS
         test_success = False
@@ -218,6 +270,9 @@ class SoftwareEngineerMode:
         while repairs <= max_repairs:
             phases.append(SWEPhase.BUILD.value)
             phases.append(SWEPhase.TEST.value)
+
+            if should_cancel is not None and should_cancel():
+                break
 
             # Run Python or toolchain tests
             if toolchain.language == "python":
@@ -258,21 +313,25 @@ class SoftwareEngineerMode:
             # Attempt repair
             repairs += 1
             phases.append(SWEPhase.DEBUG_REPAIR.value)
-            if repairs > max_repairs or not coder_fn:
+            if repairs > max_repairs or (coder_fn is None and agent is None):
                 break
 
-            # Feed test failure back into coder_fn
+            # Feed test failure back into the coder (agent or function)
             repair_ctx = {
                 "toolchain": toolchain.to_dict(),
                 "error_log": test_details.get("stdout", "") + test_details.get("stderr", ""),
                 "repair_round": repairs,
             }
-            repaired_changes = coder_fn(f"Repair test failures for: {task}", repair_ctx)
-            for rel_p, content in repaired_changes.items():
-                target_p = root / rel_p
-                if self._apply_patch(target_p, content):
-                    if str(rel_p) not in files_modified:
-                        files_modified.append(str(rel_p))
+            if agent is not None:
+                _emit("swe_repair_started", {"round": repairs})
+                _agent_coder(f"Repair test failures for: {task}", repair_ctx)
+            else:
+                repaired_changes = coder_fn(f"Repair test failures for: {task}", repair_ctx)
+                for rel_p, content in repaired_changes.items():
+                    target_p = root / rel_p
+                    if self._apply_patch(target_p, content):
+                        if str(rel_p) not in files_modified:
+                            files_modified.append(str(rel_p))
 
         # If tests completely failed and unrepairable, optionally rollback
         if not test_success and repairs > max_repairs:

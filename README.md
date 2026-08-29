@@ -48,6 +48,52 @@ It is **self-hosted and open source**. Local models such as Ollama can be used w
 
 # 🧭 Core Architecture
 
+## 0. Universal Mission Runtime (one execution core)
+
+Every surface that runs work goes through **one runtime** — behavior no longer
+depends on which door the request came in:
+
+```
+USER / DASHBOARD / SCHEDULE / CHANNEL / CLI / API
+                     │
+                     ▼
+            core/runtime.execute()
+             │                    │
+   (goal classifier)      (single ReAct chat turn)
+             │
+             ▼
+        MissionEngine   plan → DAG → execute → observe → verify → critic → repair
+             │          (every DAG stage runs an evidence-gated agent loop)
+             ▼
+     unified result contract (``response`` + mission report / chat fields)
+```
+
+- **Entry points wired through it**: `agent.autonomous()`, `POST /command`
+  (inline *and* queued), `POST /stream/command`, the job kinds
+  `runtime.turn` / `agent.chat` / `agent.autonomous` / `mission.start` /
+  `channel.reply` / `swe.develop`, background agents, the cron scheduler, the
+  CLI (`hermus run`, `hermus mission start`, `hermus swe run`), Telegram /
+  Discord / Slack channel messages, and sub-agent delegation.
+- **Evidence-gated success**: a stage whose job is to *perform* work (coder,
+  implementation, verification, …) only succeeds when the agent actually did
+  something — executed tools, changed files, produced artifacts. Describing
+  the work fails the stage with `no_evidence_of_work` and feeds the repair
+  loop. No backend configured → the mission is honestly `BLOCKED`, never
+  fake-completed.
+- **DAG parent-context handoff**: each stage's prompt carries the upstream
+  stages' real outputs and artifacts ("Upstream results — build on these"),
+  so Researcher → Architect → Coder is an actual chain, not a name.
+- **Mid-run steering**: `POST /run/steer` queues an instruction on the run's
+  inbox; the active agent loop drains it at the next step boundary and injects
+  it into the conversation (`steer_applied` event on the stream). Steering
+  reaches the model, not just the UI.
+- **Queue-first dashboard**: the dashboard submits `async:true`, so a turn
+  runs as a durable gateway job — close the tab and the work keeps going;
+  the answer streams back over SSE when you return.
+- **Flags**: `HERMUS_MISSION_RUNTIME=0` reverts to the legacy runner,
+  `HERMUS_MISSION_AUTO_CLASSIFY=0` disables auto-promotion of goal-like
+  messages (only explicit `autonomous`/`mission` requests run missions).
+
 ## 1. Autonomous Mission Engine
 
 Start an objective rather than manually driving every individual tool call:
@@ -286,10 +332,20 @@ tool_call
 tool_result
 verification
 skill_created
+mission_state / node_started / node_finished   (mission progress)
+steer / steer_applied                          (mid-run steering)
+agent_response                                 (full final answer on the stream)
+runtime_issue                                  (structured non-fatal failures)
 run_finished
 ```
 
-Jobs can be queued and cancelled, and completed results can survive process restarts when durable job storage is enabled.
+Jobs can be queued and cancelled, and completed results can survive process restarts when durable job storage is enabled. The dashboard submits its turns **queue-first** (`async:true`), so closing the tab never cancels the work; the final answer arrives over SSE or via `GET /jobs/{id}/result`.
+
+Structured diagnostics for every best-effort subsystem (memory, routing, telemetry, executor, …) are available at `GET /runtime/issues` — each entry carries component, operation, error, mission/run/step ids, retryability and the fallback taken, instead of silent `except: pass`.
+
+### Attachments (drag & drop)
+
+`POST /command` accepts `multipart/form-data` uploads. Text and code files are inlined; binary documents get real extraction — DOCX/ODT/EPUB, XLSX/ODS, PPTX, PDF (with `pypdf` when installed), and ZIP/JAR/APK entry listings — via `core/document_ingest`. Anything not extractable (images, media, unknown binaries) is saved to the workspace `uploads/` dir with its path included in the prompt so vision/OCR/transcription tools can open it.
 
 ---
 

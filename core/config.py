@@ -18,7 +18,24 @@ class Config(BaseModel):
     anthropic_api_key: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
 
     # Agent loop
-    max_tool_steps: int = int(os.getenv("HERMUS_MAX_TOOL_STEPS", "8"))
+    # Default tool-step budget per turn. 8 was far too tight for "build this
+    # app, test it, fix every error, and keep going until it works" style
+    # goals — the loop hit the cap and force-synthesized an answer mid-work.
+    # 32 keeps simple chat cheap (the governor scales the per-task budget
+    # down for easy tasks) while giving real work room to finish.
+    max_tool_steps: int = int(os.getenv("HERMUS_MAX_TOOL_STEPS", "32"))
+
+    # ---- Universal mission runtime -----------------------------------------
+    # Route every execution surface (agent.autonomous(), /command?autonomous,
+    # /stream/command, queue jobs, CLI, channels, scheduler) through the
+    # MissionEngine runtime so behavior no longer depends on the entry point.
+    mission_runtime_enabled: bool = os.getenv("HERMUS_MISSION_RUNTIME", "1") not in ("0", "false", "False")
+    # Auto-promote goal-like messages ("build … and keep going until it works")
+    # to full missions even when the caller did not set autonomous=true.
+    mission_auto_classify: bool = os.getenv("HERMUS_MISSION_AUTO_CLASSIFY", "1") not in ("0", "false", "False")
+    # Default step budget for a mission (verifier + repair rounds draw from it).
+    mission_budget_steps: int = int(os.getenv("HERMUS_MISSION_BUDGET_STEPS", "25"))
+
 
     # DeepThink — plan-first thinking (Phase 0)
     think_enabled: bool = os.getenv("HERMUS_THINK_ENABLED", "1") not in ("0", "false", "False")

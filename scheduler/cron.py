@@ -122,9 +122,13 @@ class CronManager:
         """Execute cron job - delivers to platform"""
         print(f"[Cron] Executing job {job['id']}: {job['task']} -> {job['platform']}:{job['user_id']}")
         try:
-            # Use agent to execute task
+            # Scheduled tasks run on the universal mission runtime (same core
+            # as /command, the queue and the CLI): goal-like tasks get the
+            # full mission lifecycle, chat stays a chat turn.
+            from core.runtime import execute as runtime_execute
+
             agent = HermusAgent(session_id=f"cron_{job['id']}")
-            result = agent.chat(job["task"])
+            result = runtime_execute(job["task"], agent=agent, prefer="auto")
             # In free version, delivery is via gateway - for now just log
             # Real gateway would send via Telegram/Discord API
             print(f"[Cron] Result for {job['platform']}:{job['user_id']}: {result['response'][:200]}")

@@ -6,6 +6,14 @@ handlers idempotent-ish and *never* raise for expected failures — return
 ``{"error": ...}`` so the job finishes as `succeeded` with a structured error the
 caller can render, instead of burning a retry.
 
+Every work kind funnels through the universal mission runtime
+(``core.runtime.execute``): ``runtime.turn`` is the canonical kind (chat or
+mission, auto-classified), while the legacy ``agent.chat`` /
+``agent.autonomous`` kinds are kept for API compatibility and simply pin
+``prefer``. As a result a queued job, an inline /command, the CLI and
+channels all execute on the same core with the same streaming, cancellation
+and steering hooks.
+
 ``agent_getter`` is injected by ``gateway.gateway`` to avoid a circular import:
 the queue module must not import the app, and the app owns the per-user agents.
 """
@@ -59,6 +67,60 @@ def _resolve_key_from_store(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _runtime_execute(
+    ctx,
+    *,
+    prefer: str,
+    agent_getter: Callable[..., Any],
+) -> dict[str, Any]:
+    """Run one request through the universal runtime on behalf of a queued job."""
+    from core.runtime import execute as runtime_execute
+
+    payload = _resolve_key_from_store(dict(ctx.payload))
+    text = str(payload.get("text") or payload.get("task") or payload.get("message") or "")
+    if not text.strip():
+        return {"error": "text required"}
+
+    def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+        try:
+            ctx.emit(event_type, dict(data or {}))
+        except Exception:
+            pass
+
+    max_repairs_raw = payload.get("max_repairs")
+    max_repairs = int(max_repairs_raw) if max_repairs_raw not in (None, "") else 2
+    budget_raw = payload.get("budget_steps")
+    budget_steps = int(budget_raw) if budget_raw not in (None, "") else None
+
+    started = time.time()
+    result = runtime_execute(
+        text,
+        agent_getter=agent_getter,
+        platform=payload.get("platform", "api"),
+        user_id=payload.get("user_id", "anonymous"),
+        model=payload.get("model"),
+        mode=payload.get("mode", "agent"),
+        api_key=payload.get("api_key"),
+        base_url=payload.get("base_url"),
+        prefer=prefer,
+        on_event=_emit,
+        stream=bool(payload.get("stream", getattr(config, "gateway_stream_enabled", True))),
+        should_cancel=ctx.should_cancel,
+        steer_source=ctx.pending_steers,
+        max_repairs=max_repairs,
+        budget_steps=budget_steps,
+        requirements=payload.get("requirements"),
+        domain=payload.get("domain"),
+        subgoals=payload.get("subgoals"),
+    )
+    if not isinstance(result, dict):
+        result = {"response": str(result or "")}
+    result.setdefault("run_id", ctx.run_id)
+    result["job_id"] = ctx.id
+    result["elapsed_ms"] = int((time.time() - started) * 1000)
+    return result
+
+
 def make_chat_handler(agent_getter: Callable[..., Any]):
     def chat(ctx) -> dict[str, Any]:
         payload = _resolve_key_from_store(dict(ctx.payload))
@@ -74,15 +136,24 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
             agent.profile = payload["profile"]
         want_stream = bool(payload.get("stream", getattr(config, "gateway_stream_enabled", True)))
         started = time.time()
-        result = agent.chat(
-            text,
+        result = _chat_with_optional_kwargs(
+            agent, text,
             on_event=ctx.emit,
             stream=want_stream and bool(getattr(config, "gateway_stream_tokens", True)),
             should_cancel=ctx.should_cancel,
+            steer_source=ctx.pending_steers,
         )
         result.setdefault("run_id", ctx.run_id)
         result["job_id"] = ctx.id
         result["elapsed_ms"] = int((time.time() - started) * 1000)
+        # Full final answer on the run stream: queued (dashboard) clients read
+        # the authoritative response from SSE instead of only the HTTP reply.
+        ctx.emit("agent_response", {
+            "text": str(result.get("response") or "")[:12000],
+            "steps": result.get("steps"),
+            "tool_calls": list(result.get("tool_calls") or [])[:30],
+            "run_kind": result.get("run_kind", "chat"),
+        })
         try:
             from core.integrations import maybe_self_heal
 
@@ -111,24 +182,61 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
     return chat
 
 
+def _chat_with_optional_kwargs(agent, text: str, *, on_event=None, stream: bool = False,
+                               should_cancel=None, steer_source=None) -> dict[str, Any]:
+    """agent.chat with only the kwargs this agent actually supports."""
+    import inspect
+
+    kwargs: dict[str, Any] = {}
+    try:
+        params = inspect.signature(agent.chat).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        params = {name: None for name in ("on_event", "stream", "should_cancel", "steer_source")}
+    if on_event is not None and "on_event" in params:
+        kwargs["on_event"] = on_event
+    if stream and "stream" in params:
+        kwargs["stream"] = True
+    if should_cancel is not None and "should_cancel" in params:
+        kwargs["should_cancel"] = should_cancel
+    if steer_source is not None and "steer_source" in params:
+        kwargs["steer_source"] = steer_source
+    try:
+        return agent.chat(text, **kwargs) if kwargs else agent.chat(text)
+    except TypeError:
+        return agent.chat(text)
+
+
 def make_autonomous_handler(agent_getter: Callable[..., Any]):
     def autonomous(ctx) -> dict[str, Any]:
+        """Autonomous goals run on the universal mission runtime (same core as
+        ``/command?autonomous``, the CLI and the mission API)."""
         payload = _resolve_key_from_store(dict(ctx.payload))
         text = str(payload.get("text") or payload.get("task") or "")
         if not text.strip():
             return {"error": "text required"}
-        agent = agent_getter(
-            payload.get("platform", "api"), payload.get("user_id", "anonymous"),
-            **_agent_kwargs(payload),
-        )
         ctx.emit("autonomous_started", {"task": text[:200]})
-        result = agent.autonomous(text, max_repairs=int(payload.get("max_repairs", 2)))
-        result["job_id"] = ctx.id
+        result = _runtime_execute(ctx, prefer="mission", agent_getter=agent_getter)
         result["autonomous"] = True
-        result.setdefault("run_id", ctx.run_id)
         return result
 
     return autonomous
+
+
+def make_runtime_turn_handler(agent_getter: Callable[..., Any]):
+    """Canonical job kind: one request, auto-classified chat vs mission."""
+
+    def turn(ctx) -> dict[str, Any]:
+        payload = dict(ctx.payload)
+        prefer = str(payload.get("prefer") or "auto").lower()
+        if prefer not in ("auto", "chat", "mission"):
+            prefer = "auto"
+        ctx.emit("turn_started", {"prefer": prefer,
+                                  "text": str(payload.get("text") or "")[:200]})
+        return _runtime_execute(ctx, prefer=prefer, agent_getter=agent_getter)
+
+    return turn
 
 
 def make_mission_start_handler(agent_getter: Callable[..., Any]):
@@ -137,24 +245,31 @@ def make_mission_start_handler(agent_getter: Callable[..., Any]):
         goal = str(payload.get("goal") or payload.get("text") or "")
         if not goal:
             return {"error": "goal required"}
-        from core.mission import mission_engine
+        from core.mission import MissionEngine, mission_engine
 
         ctx.emit("mission_started", {"goal": goal[:200]})
-        report = mission_engine.start_mission(
+        engine = MissionEngine(storage_dir=mission_engine.storage_dir)
+        report = engine.start_mission(
             goal=goal,
             requirements=payload.get("requirements"),
             domain=payload.get("domain"),
             subgoals=payload.get("subgoals"),
             budget_steps=int(payload.get("budget_steps", 20)),
+            on_event=ctx.emit,
         )
         out = report.to_dict()
         out["job_id"] = ctx.id
+        out["run_kind"] = "mission"
+        ctx.emit("agent_response", {"text": (out.get("response") or "")[:12000],
+                                    "run_kind": "mission",
+                                    "mission_id": out.get("mission_id"),
+                                    "state": out.get("state")})
         return out
 
     return mission_start
 
 
-def make_swe_develop_handler():
+def make_swe_develop_handler(agent_getter: Optional[Callable[..., Any]] = None):
     def swe_develop(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         task = str(payload.get("task") or payload.get("text") or "")
@@ -163,12 +278,32 @@ def make_swe_develop_handler():
         from core.swe_mode import swe_mode
 
         ctx.emit("swe_started", {"task": task[:200]})
+        # The SWE lifecycle runs its coder phase on the same agent runtime as
+        # everything else (real tools, real diffs as evidence) instead of a
+        # deterministic template that touched nothing.
+        agent = None
+        if agent_getter is not None and not payload.get("no_agent"):
+            try:
+                agent = agent_getter(
+                    payload.get("platform", "api"),
+                    payload.get("user_id", "anonymous"),
+                    **_agent_kwargs(payload),
+                )
+            except Exception as exc:
+                ctx.emit("log", {"level": "warning",
+                                 "message": f"agent unavailable for SWE coder phase: {exc}"})
         res = swe_mode.execute(
             task=task,
             max_repairs=int(payload.get("max_repairs", 3)),
+            agent=agent,
+            on_event=ctx.emit,
+            should_cancel=ctx.should_cancel,
+            steer_source=ctx.pending_steers,
         )
         out = res.to_dict()
         out["job_id"] = ctx.id
+        ctx.emit("agent_response", {"text": (out.get("change_report") or "")[:12000],
+                                    "run_kind": "swe"})
         return out
 
     return swe_develop
@@ -247,10 +382,18 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
 
     def channel_reply(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
-        chat_result = make_chat_handler(agent_getter)(
-            _PseudoCtx(ctx.id, ctx.run_id, {**payload, "platform": payload.get("platform", "telegram")}, ctx.emit)
+        # Channels (Telegram/Discord/Slack) go through the same universal
+        # runtime as the dashboard and CLI — auto-classified, so a goal-like
+        # channel message gets the full mission lifecycle.
+        runtime_result = _runtime_execute(
+            _PseudoCtx(ctx.id, ctx.run_id,
+                       {**payload, "platform": payload.get("platform", "telegram")},
+                       ctx.emit),
+            prefer=str(payload.get("prefer") or "auto"),
+            agent_getter=agent_getter,
         )
-        answer = str(chat_result.get("response") or chat_result.get("error") or "")
+        chat_result = runtime_result
+        answer = str(runtime_result.get("response") or runtime_result.get("error") or "")
         sent = {"delivered": False}
         platform = payload.get("platform", "telegram")
         if platform == "telegram" and answer:
@@ -293,7 +436,7 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
 
 
 class _PseudoCtx:
-    """Adapter so handlers can be composed (channel_reply wraps chat)."""
+    """Adapter so handlers can be composed (channel_reply wraps the runtime)."""
 
     def __init__(self, job_id: str, run_id: str, payload: dict[str, Any], emit: Callable) -> None:
         self.id = job_id
@@ -310,18 +453,22 @@ class _PseudoCtx:
     def should_cancel(self) -> bool:
         return False
 
+    def pending_steers(self) -> list[str]:
+        return []
+
 
 def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: bool = True) -> dict[str, str]:
     """Register every gateway job kind. Returns the kind → description map."""
     kinds = {
+        "runtime.turn": (make_runtime_turn_handler(agent_getter), "canonical runtime turn: auto-classified chat or full mission (universal core)"),
         "agent.chat": (make_chat_handler(agent_getter), "run one agent turn (ReAct loop, streamed events)"),
-        "agent.autonomous": (make_autonomous_handler(agent_getter), "plan→act→verify→repair loop for a goal"),
+        "agent.autonomous": (make_autonomous_handler(agent_getter), "goal through the universal mission runtime (plan→execute→verify→repair)"),
         "mission.start": (make_mission_start_handler(agent_getter), "objective-driven mission with verifiers & dynamic budgets"),
-        "swe.develop": (make_swe_develop_handler(), "repository-level software engineering lifecycle"),
+        "swe.develop": (make_swe_develop_handler(agent_getter), "repository-level software engineering lifecycle (agent-backed coder phase)"),
         "research.deep": (make_research_handler(), "multi-source research pipeline with citations"),
         "subagent.delegate": (make_delegate_handler(), "hierarchical sub-agent fan-out + aggregation"),
         "memory.sweep": (make_memory_sweep_handler(), "decay/archive/purge pass over typed memory"),
-        "channel.reply": (make_channel_reply_handler(agent_getter), "agent turn + deliver answer back to the channel"),
+        "channel.reply": (make_channel_reply_handler(agent_getter), "runtime turn + deliver answer back to the channel"),
     }
     for kind, (fn, _desc) in kinds.items():
         queue.register(kind, fn, overwrite=overwrite)

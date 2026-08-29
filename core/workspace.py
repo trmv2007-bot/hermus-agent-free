@@ -168,6 +168,7 @@ class Workspace:
             "credentials": self.base_dir / "credentials",
             "logs": self.base_dir / "logs",
             "profiles": self.base_dir / "profiles",
+            "uploads": self.base_dir / "uploads",
         }
 
     def ensure_layout(self) -> None:
