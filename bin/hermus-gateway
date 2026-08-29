@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck disable=SC1091
-source "$ROOT/.venv/bin/activate"
+if [[ -f "$ROOT/.venv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source "$ROOT/.venv/bin/activate"
+fi
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 PORT="${1:-8000}"
-echo "☤ Starting Hermus gateway on http://0.0.0.0:${PORT}"
-echo "   Dashboard: http://localhost:${PORT}/dashboard"
+echo "☤ Starting Hermus on http://0.0.0.0:${PORT}"
+echo "   Dashboard: http://localhost:${PORT}/dashboard/legacy"
+echo "   Pocket Remote: http://localhost:${PORT}/remote"
 exec python "$ROOT/hermus.py" gateway start --port "$PORT"

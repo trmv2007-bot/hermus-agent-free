@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ -f "$ROOT/.venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT/.venv/bin/activate"
-else
-  echo "Hermus venv missing. Run: bash setup.sh" >&2
-  exit 1
 fi
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 exec python "$ROOT/hermus.py" "$@"

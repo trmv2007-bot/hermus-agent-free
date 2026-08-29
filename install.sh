@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Thin wrapper: download Hermus (if needed) and run full setup.
+# =============================================================================
+# Hermus Agent Free — One-Line Download & Setup Wrapper
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash
-#   curl -fsSL .../install.sh | bash -s -- --with-ollama --groq-key gsk_xxx --start
-set -euo pipefail
+# =============================================================================
+
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
+set -e
+set -u
+(set -o pipefail 2>/dev/null) && set -o pipefail
 
 REPO="${HERMUS_REPO_URL:-https://github.com/trmv2007-bot/hermus-agent-free.git}"
 DIR="${HERMUS_INSTALL_DIR:-$HOME/hermus-agent-free}"
@@ -20,7 +28,7 @@ if [[ -f "$DIR/setup.sh" && -f "$DIR/hermus.py" ]]; then
 fi
 
 if ! command -v git >/dev/null 2>&1; then
-  echo "git is required. Install git, then re-run." >&2
+  echo "git is required. Please install git and re-run." >&2
   exit 1
 fi
 
