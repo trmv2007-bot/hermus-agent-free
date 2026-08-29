@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [[ -f "$ROOT/.venv/bin/activate" ]]; then
+if [ -f "$ROOT/.venv/bin/activate" ]; then
   # shellcheck disable=SC1091
   source "$ROOT/.venv/bin/activate"
 fi

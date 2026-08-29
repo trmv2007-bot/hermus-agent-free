@@ -417,18 +417,31 @@ For the project-specific setup flow, see [`QUICKSTART.md`](QUICKSTART.md) and [`
 
 ---
 
-# ⚡ Quick Start
+# ⚡ Quick Start & Installation
 
-### Interactive agent
+### 1. 1-Step Master Installation (Linux / WSL / macOS)
 
 ```bash
-hermus
+git clone https://github.com/trmv2007-bot/hermus-agent-free.git
+cd hermus-agent-free
+bash setup.sh
 ```
 
-### Gateway
+### 2. Launch Gateway & Dashboards
 
 ```bash
-hermus gateway start
+./bin/hermus-gateway
+```
+
+Open in your browser:
+* **🎛️ Control Center & Setup Wizard:** [`http://localhost:8000/dashboard/legacy`](http://localhost:8000/dashboard/legacy)
+* **🖥️ Computer Agent Flight Deck:** [`http://localhost:8000/computer/dashboard`](http://localhost:8000/computer/dashboard)
+* **📱 Mobile Pocket Remote Deck:** [`http://localhost:8000/remote`](http://localhost:8000/remote)
+
+### 3. Interactive Terminal Agent
+
+```bash
+./hermus
 ```
 
 ### Mission

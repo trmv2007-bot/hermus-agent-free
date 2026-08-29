@@ -1,122 +1,67 @@
-# ☤ Hermus — Quick Start (from scratch)
+# ☤ Hermus Agent Free — Quickstart & Installation Guide
 
-## One command (recommended)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash
-```
-
-That will:
-
-1. Clone the repo to `~/hermus-agent-free` (if needed)
-2. Install system basics when possible (git, python3, venv, ffmpeg)
-3. Create `.venv` and install **all** Python dependencies
-4. Install Playwright Chromium (browser tools)
-5. Create launchers: `./hermus`, `./bin/hermus-gateway`
-6. Verify tools/agent/gateway import
-7. Print exactly how to chat + open the dashboard
+Get up and running with Hermus on **Linux, macOS, or Windows (WSL2)** in 3 simple steps.
 
 ---
 
-## One command + extras
+## ⚡ 3-Step Fast Installation (Linux / WSL / macOS)
 
-```bash
-# Full setup + local Ollama model
-curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash -s -- --with-ollama
-
-# Full setup + save Groq key + start dashboard
-curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash -s -- \
-  --groq-key gsk_YOUR_KEY \
-  --start
-
-# Custom OpenAI-compatible gateway URL + key
-curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash -s -- \
-  --custom-key sk_YOUR_KEY \
-  --custom-base-url https://your-gateway.example.com/v1 \
-  --custom-model my-model
-```
-
----
-
-## Already cloned?
-
+### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
+```
+
+### Step 2: Run the Single Master Installer
+```bash
 bash setup.sh
 ```
+*(Or run non-interactively in one shot: `bash setup.sh -y`)*
 
-Flags:
-
-| Flag | Meaning |
-|------|---------|
-| `--yes` | Non-interactive |
-| `--minimal` | Lighter deps (no browser/whisper) |
-| `--with-ollama` | Install Ollama + pull `llama3.1:8b` |
-| `--no-browser` | Skip Playwright |
-| `--groq-key KEY` | Register Groq during setup |
-| `--openrouter-key KEY` | Register OpenRouter |
-| `--openai-key KEY` | Register OpenAI |
-| `--custom-key` + `--custom-base-url` | Any OpenAI-compatible API |
-| `--start` | Start gateway/dashboard when done |
-| `--port 8000` | Gateway port |
-| `--dir ~/hermus-agent-free` | Install location |
+**What this automatically does:**
+1. Installs all required system dependencies (`python3-venv`, `python3-pip`, `git`, `curl`, `ffmpeg`, browser graphics libs).
+2. Sets up the Python virtual environment (`.venv`).
+3. Installs the complete A-to-Z Python stack (`fastapi`, `uvicorn`, `httpx`, `groq`, `pydantic`, `tiktoken`, `rich`, `pytest`, etc.).
+4. Sets up Playwright Chromium binaries for the Computer Agent.
+5. Generates ready-to-run executables (`./hermus`, `./bin/hermus-gateway`, `source activate.sh`).
 
 ---
 
-## After setup — every day
-
+### Step 3: Launch the Server & Open Your Dashboard
 ```bash
-cd ~/hermus-agent-free
-source activate.sh
-
-# Chat
-./hermus --model groq/llama-3.1-8b-instant
-# or local:
-./hermus --model ollama/llama3.1:8b
-
-# Dashboard
 ./bin/hermus-gateway
-# → http://localhost:8000/dashboard
 ```
 
-### Add any API key later
-
-```bash
-./hermus multikey add --provider groq --key gsk_...
-./hermus multikey add --provider custom --key sk_... \
-  --base-url https://your-gateway.example.com/v1 --model my-model
-./hermus multikey health
-```
-
-### Multi-model fleet
-
-```bash
-./hermus fleet run "Research X and recommend Y" --strategy auto
-```
+Open in your browser:
+* **🎛️ Control Center & Setup Wizard:** [`http://localhost:8000/dashboard/legacy`](http://localhost:8000/dashboard/legacy)
+* **🖥️ Autonomous Computer Agent Deck:** [`http://localhost:8000/computer/dashboard`](http://localhost:8000/computer/dashboard)
+* **📱 Mobile Pocket Remote Deck:** [`http://localhost:8000/remote`](http://localhost:8000/remote)
 
 ---
 
-## Requirements (short)
+## 🧙‍♂️ 4-Step Interactive Onboarding Wizard
 
-| Mode | Specs |
-|------|--------|
-| Cloud keys only | Python 3.10+, ~2 GB RAM, internet |
-| Ollama `llama3.1:8b` | ~8–16 GB RAM, ~15 GB disk |
-| Full (browser+voice) | +1–2 GB RAM, Playwright Chromium |
+When you open the dashboard for the first time, the interactive wizard walks you through:
+
+1. **AI Brain & Key Connection:**
+   * Select **⚡ Groq (Free Tier)**, **🌪️ Mistral (`devstral-latest` Free Tier)**, **🧠 OpenAI**, or **💻 Local Ollama (100% Offline)**.
+   * Or click **`✨ 1-Click Activate Free Fleet`** to auto-provision 12+ free models from OpenRouter Free and Mistral Devstral!
+2. **Mobile Remote & Tailscale Mesh Pairing:**
+   * Instant scannable vector SVG QR Code to pair your iPhone/Android camera.
+   * Auto-detects Tailscale WireGuard VPN (`100.x.y.z`) to control Hermus from anywhere outside home Wi-Fi.
+3. **Local Workspace & Semantic RAG Indexer:**
+   * 1-click vector memory indexing into local SQLite (`data/memory2.db`).
+4. **Autonomy & Safety Policy:**
+   * Choose between Supervised (confirm shell edits), Autonomous (smart auto-run with pocket push notifications), or Full Auto.
 
 ---
 
-## Troubleshooting
+## ⌨️ Using Hermus in the Terminal (CLI)
 
 ```bash
-# Re-run setup anytime (safe)
-cd ~/hermus-agent-free && bash setup.sh --yes
+# Chat with default free AI brain
+./hermus
 
-# Fix browser
-source activate.sh && python -m playwright install chromium
-
-# Check health
-./hermus multikey health
-./hermus tools
+# Distribute hard coding & research tasks across the multi-model fleet
+./hermus fleet run "Analyze this repository and refactor routes"
 ```
