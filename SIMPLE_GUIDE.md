@@ -16,19 +16,23 @@ bash setup.sh
 
 Then start the live gateway:
 ```bash
-./bin/hermus-gateway
+./hermus-gateway
 ```
-Open **`http://localhost:8000/dashboard/legacy`** in your browser!
+*(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
+
+Open **`http://localhost:8000/dashboard`** in your browser!
 
 ---
 
-## 🎛️ The 3 Control Decks
+## 🎛️ The 4 Control Decks
 
-1. **Daily Control Center & Setup Wizard (`http://localhost:8000/dashboard/legacy`):**
+1. **Daily Control Center & Setup Wizard (`http://localhost:8000/dashboard`):**
    * Multi-tab control room for chat, multi-model fleet, key vault, semantic RAG memory, tools registry, and channel webhooks.
-2. **Computer Agent Flight Deck (`http://localhost:8000/computer/dashboard`):**
+2. **Jarvis Holographic Spatial HUD (`http://localhost:8000/jarvis`):**
+   * 3D Living holographic gyroscopic orb, infinite pan/zoom spatial canvas, reactive audio synthesizer, and multi-window workspace.
+3. **Computer Agent Flight Deck (`http://localhost:8000/computer/dashboard`):**
    * Autonomous browser execution deck with live viewport, real-time action telemetry, and DAG execution tracker.
-3. **Pocket Remote Control (`http://localhost:8000/remote`):**
+4. **Pocket Remote Control (`http://localhost:8000/remote`):**
    * Mobile deck designed for smartphones with Dynamic Island status, instant tactile approvals, voice input, and encrypted Tailscale pairing.
 
 ---

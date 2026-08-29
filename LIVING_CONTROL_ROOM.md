@@ -4,13 +4,14 @@ The gateway dashboard at `http://localhost:8000/dashboard` is a local-first,
 task-focused operations console for Hermus. Its HTML, CSS, and JavaScript are
 served entirely by the gateway; it does not require a CDN or hosted frontend.
 
-The original all-in-one dashboard remains available at `/dashboard/legacy`, and
+The main control room dashboard is at `/dashboard` (with `/dashboard/legacy` alias),
+the Jarvis 3D Holographic HUD is at `/jarvis`, and
 the detailed computer-agent interface remains at `/computer/dashboard`.
 
 ## Start it
 
 ```bash
-python -m gateway.gateway start
+./hermus-gateway
 # open http://localhost:8000/dashboard
 ```
 
@@ -113,7 +114,9 @@ transcription.
 | `/speech/synthesize` | POST | Generate a local WAV speech clip |
 | `/speech/audio/{audio_id}` | GET | Serve one traversal-safe generated clip |
 | `/speech/transcribe` | POST | Transcribe microphone audio locally |
-| `/dashboard/legacy` | GET | Original dashboard compatibility route |
+| `/dashboard` | GET | Main Control Center & Setup Wizard dashboard |
+| `/jarvis` | GET | Jarvis 3D Holographic Spatial HUD |
+| `/dashboard/legacy` | GET | Main dashboard compatibility alias route |
 | `/computer/dashboard` | GET | Detailed visual-computer control dashboard |
 
 `POST /command` accepts additive `talking: true` or `speak: true` fields and can

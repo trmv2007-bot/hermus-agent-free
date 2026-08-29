@@ -29,11 +29,13 @@ bash setup.sh
 
 ### Step 3: Launch the Server & Open Your Dashboard
 ```bash
-./bin/hermus-gateway
+./hermus-gateway
 ```
+*(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
 
 Open in your browser:
-* **🎛️ Control Center & Setup Wizard:** [`http://localhost:8000/dashboard/legacy`](http://localhost:8000/dashboard/legacy)
+* **🎛️ Control Center & Setup Wizard (Default):** [`http://localhost:8000/dashboard`](http://localhost:8000/dashboard)
+* **🌌 Jarvis 3D Holographic Spatial HUD:** [`http://localhost:8000/jarvis`](http://localhost:8000/jarvis)
 * **🖥️ Autonomous Computer Agent Deck:** [`http://localhost:8000/computer/dashboard`](http://localhost:8000/computer/dashboard)
 * **📱 Mobile Pocket Remote Deck:** [`http://localhost:8000/remote`](http://localhost:8000/remote)
 

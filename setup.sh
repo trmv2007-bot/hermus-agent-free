@@ -262,7 +262,8 @@ fi
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 PORT="${1:-8000}"
 echo -e "\033[0;36m☤ Hermus Live Gateway\033[0m"
-echo -e "  • Control Center:   \033[1mhttp://localhost:${PORT}/dashboard/legacy\033[0m"
+echo -e "  • Control Center:   \033[1;36mhttp://localhost:${PORT}/dashboard\033[0m"
+echo -e "  • Jarvis Spatial:   \033[1;35mhttp://localhost:${PORT}/jarvis\033[0m"
 echo -e "  • Computer Agent:   \033[1mhttp://localhost:${PORT}/computer/dashboard\033[0m"
 echo -e "  • Pocket Remote:    \033[1mhttp://localhost:${PORT}/remote\033[0m"
 echo ""
@@ -270,12 +271,6 @@ exec python "$ROOT/hermus.py" gateway start --port "$PORT"
 EOF
 chmod +x bin/hermus-gateway
 
-cat > activate.sh << 'EOF'
-#!/usr/bin/env bash
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$ROOT/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$ROOT/.venv/bin/activate"
 cat > activate.sh << 'EOF'
 #!/usr/bin/env bash
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

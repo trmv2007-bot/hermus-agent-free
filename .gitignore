@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.db
+data/
 data/memory.db
 data/scheduler.db
 data/*.jsonl

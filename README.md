@@ -315,13 +315,10 @@ The dashboard can expose:
 Start the gateway and open:
 
 ```text
-http://localhost:8000/dashboard
-```
-
-The legacy dashboard remains available at:
-
-```text
-http://localhost:8000/dashboard/legacy
+http://localhost:8000/dashboard          # Main Control Center (Default)
+http://localhost:8000/jarvis             # Jarvis 3D Spatial Holographic HUD
+http://localhost:8000/computer/dashboard # Autonomous Computer Agent Flight Deck
+http://localhost:8000/remote             # Mobile Pocket Remote Deck
 ```
 
 See [`LIVING_CONTROL_ROOM.md`](LIVING_CONTROL_ROOM.md) for the dashboard architecture.
@@ -430,11 +427,13 @@ bash setup.sh
 ### 2. Launch Gateway & Dashboards
 
 ```bash
-./bin/hermus-gateway
+./hermus-gateway
 ```
+*(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
 
 Open in your browser:
-* **🎛️ Control Center & Setup Wizard:** [`http://localhost:8000/dashboard/legacy`](http://localhost:8000/dashboard/legacy)
+* **🎛️ Control Center & Setup Wizard (Default):** [`http://localhost:8000/dashboard`](http://localhost:8000/dashboard)
+* **🌌 Jarvis 3D Holographic Spatial HUD:** [`http://localhost:8000/jarvis`](http://localhost:8000/jarvis)
 * **🖥️ Computer Agent Flight Deck:** [`http://localhost:8000/computer/dashboard`](http://localhost:8000/computer/dashboard)
 * **📱 Mobile Pocket Remote Deck:** [`http://localhost:8000/remote`](http://localhost:8000/remote)
 
