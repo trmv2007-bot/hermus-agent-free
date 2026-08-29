@@ -63,11 +63,14 @@ def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) 
     return None
 
 
-def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> dict:
+def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False,
+                steer_source=None) -> dict:
     """Call ``agent.chat`` with only the keyword arguments it actually accepts.
 
     Agents are pluggable here — custom API profiles, older builds, test fakes —
     so the gateway must not assume the streaming/event kwargs exist.
+    ``steer_source`` (drained mid-run instructions from the run bus) is passed
+    through when the agent supports it.
     """
     import inspect
 
@@ -77,13 +80,15 @@ def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False) -> dic
     except (TypeError, ValueError):
         params = {}
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        params = {name: None for name in ("on_event", "stream", "should_cancel")}
+        params = {name: None for name in ("on_event", "stream", "should_cancel", "steer_source")}
     if on_event is not None and "on_event" in params:
         kwargs["on_event"] = on_event
     if stream and "stream" in params:
         kwargs["stream"] = True
     if on_event is not None and "should_cancel" in params:
         kwargs["should_cancel"] = lambda: False
+    if steer_source is not None and "steer_source" in params:
+        kwargs["steer_source"] = steer_source
     try:
         return agent.chat(text, **kwargs) if kwargs else agent.chat(text)
     except TypeError:

@@ -128,14 +128,22 @@ class Governor:
 
     # ------------------------------------------------------------ Phase 3
 
-    _STEP_CAPS = {1: 2, 2: 4, 3: 6, 4: 8, 5: 12}
+    # Per-difficulty share of the configured budget (config.max_tool_steps).
+    # Absolute caps (2/4/6/8/12) starved hard tasks when max_tool_steps was
+    # raised: a difficulty-5 goal could never use more than 12 tool rounds no
+    # matter what HERMUS_MAX_TOOL_STEPS said. Shares scale with the budget.
+    _STEP_SHARES = {1: 0.0625, 2: 0.125, 3: 0.25, 4: 0.5, 5: 1.0}
+    _MIN_STEPS = {1: 2, 2: 2, 3: 4, 4: 6, 5: 8}
 
     def step_budget(self, text: str, mode: str = "agent") -> int:
         """Per-task max tool steps: easy tasks stay cheap, hard tasks get room."""
         if mode and str(mode).lower() in ("chat", "multi-chat"):
             return min(2, config.max_tool_steps)
+        budget = max(1, int(getattr(config, "max_tool_steps", 8)))
         diff = self.classify_difficulty(text)
-        return min(self._STEP_CAPS.get(diff, config.max_tool_steps), config.max_tool_steps)
+        share = self._STEP_SHARES.get(diff, 1.0)
+        cap = max(self._MIN_STEPS.get(diff, 1), int(round(budget * share)))
+        return min(cap, budget)
 
     def strategy_for(self, text: str, mode: str = "agent", council_used: bool = False) -> str:
         """Pick the deliberation strategy for a task (auto) or honor overrides.

@@ -2263,7 +2263,9 @@ function closeActiveStream(){
 }
 
 // Subscribe to the run's real event stream (steps, tool calls, live tokens).
-function openRunStream(runId, baseText){
+// `handlers` lets sendChat react to the authoritative final answer (agent_response)
+// and to terminal events when the turn runs queue-first (async job).
+function openRunStream(runId, baseText, handlers = {}){
   streamTokenChars = 0;
   streamStartTs = Date.now();
   let streamed = '';
@@ -2286,14 +2288,49 @@ function openRunStream(runId, baseText){
   es.addEventListener('tool_call', (ev) => {
     try { const d = JSON.parse(ev.data); $('streamStatusText').textContent = `🛠️ ${d.name || d.tool || 'tool'}…`; } catch(e){}
   });
+  es.addEventListener('mission_state', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      const label = {executing: '🚀 Executing mission…', verifying: '🔍 Verifying…',
+                     observing: '👁️ Observing…', repairing: '🔧 Repairing…',
+                     planning: '🧠 Planning…', diagnosing: '🩺 Diagnosing…'}[d.state];
+      if(label) $('streamStatusText').textContent = label;
+    } catch(e){}
+  });
+  es.addEventListener('node_started', (ev) => {
+    try { const d = JSON.parse(ev.data); if(d.stage) $('streamStatusText').textContent = `🤖 Stage: ${d.stage}…`; } catch(e){}
+  });
+  es.addEventListener('steer_applied', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      const notice = $('steerNotice');
+      if(notice) notice.innerHTML = `➕ <b>Steer applied</b> at step ${d.step || '?'} — the model received your instruction.`;
+    } catch(e){}
+  });
+  es.addEventListener('agent_response', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if(d.text && handlers.onFinal) handlers.onFinal(String(d.text));
+    } catch(e){}
+  });
   es.addEventListener('turn_started', () => { $('streamStatusText').textContent = 'Thinking…'; });
-  // Terminal events: the authoritative final answer still comes from /command.
-  const onDone = () => { closeActiveStream(); };
+  // Terminal events: with the queue-first path the job (not the HTTP POST)
+  // owns the turn, so the final answer arrives as an event.
+  const onDone = (ev) => {
+    try {
+      if(ev && handlers.onJobFinished){
+        const d = JSON.parse(ev.data);
+        handlers.onJobFinished(d);
+      }
+    } catch(e){}
+    closeActiveStream();
+  };
+  es.addEventListener('job_finished', onDone);
   es.addEventListener('run_finished', onDone);
   es.addEventListener('run_error', onDone);
   es.addEventListener('session_finished', onDone);
   es.addEventListener('stream_timeout', onDone);
-  es.onerror = () => { /* browser auto-reconnects; the POST resolves the turn */ };
+  es.onerror = () => { /* browser auto-reconnects; the job/POST resolves the turn */ };
   return { markStreamingHappened: () => sawDelta, getStreamed: () => streamed };
 }
 
@@ -2371,7 +2408,41 @@ async function sendChat(){
 
   // Stable run id so the SSE stream and the POST share one run.
   activeRunId = 'run_' + Math.random().toString(16).slice(2) + Date.now().toString(16);
-  const stream = openRunStream(activeRunId, baseText);
+
+  const finalize = (answerText, errMsg) => {
+    clearInterval(waitTimer);
+    closeActiveStream();
+    setWaitingUI(false);
+    if(errMsg){
+      $('chatResult').textContent = baseText + `⚠️ Error: ${errMsg}\n\nTip: Add an API key in the API Keys tab or start local Ollama.`;
+    } else if(answerText){
+      $('chatResult').textContent = baseText + 'Hermus AI:\n' + answerText;
+    } else if(stream.getStreamed()){
+      $('chatResult').textContent = baseText + 'Hermus AI:\n' + stream.getStreamed();
+    }
+  };
+
+  // Queue-first execution: the dashboard submits async:true so the turn runs
+  // as a gateway job. Closing this tab does NOT cancel the work — it keeps
+  // running server-side (durable queue) and the answer arrives over SSE here.
+  let gotFinal = false;
+  const stream = openRunStream(activeRunId, baseText, {
+    onFinal: (text) => { gotFinal = true; finalize(text); },
+    onJobFinished: (d) => {
+      // job_finished without agent_response → fetch the stored result.
+      if(gotFinal) return;
+      const jid = activeJobId;
+      if(jid){
+        fetch(`/jobs/${jid}/result`).then(r => r.json()).then(res => {
+          const ans = res && res.result && (res.result.response || res.result.final_answer);
+          finalize(ans || '', (res && res.result && res.result.error) || '');
+        }).catch(() => finalize('', 'job finished but result unavailable'));
+      } else if(d && d.error){
+        finalize('', d.error);
+      }
+    }
+  });
+  let activeJobId = null;
 
   setWaitingUI(true);
   streamStartTs = Date.now();
@@ -2385,7 +2456,8 @@ async function sendChat(){
 
   try {
     // Upload as multipart/form-data when files are present so their bytes
-    // actually reach the agent; JSON when there are none.
+    // actually reach the agent; JSON when there are none. async:'true' routes
+    // the turn through the gateway job queue (queue-first execution).
     let fetchOpts;
     if(currentFiles.length){
       const fd = new FormData();
@@ -2395,6 +2467,8 @@ async function sendChat(){
       fd.append('mode', $('modeSelector')?.value || 'agent');
       fd.append('run_id', activeRunId);
       fd.append('stream', 'true');
+      fd.append('async', 'true');
+      fd.append('timeout', '1800');
       if(modelOverride) fd.append('model', modelOverride);
       if(selProvider) fd.append('provider', selProvider);
       if(selKeyName) fd.append('key_name', selKeyName);
@@ -2410,7 +2484,8 @@ async function sendChat(){
           platform: 'dashboard', user_id: 'user-01', text,
           mode: $('modeSelector')?.value || 'agent', model: modelOverride,
           provider: selProvider, key_name: selKeyName,
-          run_id: activeRunId, stream: true
+          run_id: activeRunId, stream: true,
+          async: true, timeout: 1800
         })
       };
     }
@@ -2418,25 +2493,44 @@ async function sendChat(){
     const res = await fetch('/command', fetchOpts);
     const r = await res.json().catch(() => ({ error: `Bad response (HTTP ${res.status})` }));
 
-    clearInterval(waitTimer);
-    closeActiveStream();
-    setWaitingUI(false);
-
     if(r && r.error){
-      $('chatResult').textContent = baseText + `⚠️ Error: ${r.error}\n\nTip: Add an API key in the API Keys tab or start local Ollama.`;
+      finalize('', r.error);
+    } else if(r && r.async){
+      // Queued: the job owns the turn now. The SSE events above deliver the
+      // final answer (agent_response) and close the waiting state. If the
+      // stream dies, fall back to polling the job.
+      activeJobId = r.job_id;
+      $('streamStatusText').textContent = '⏳ Queued — running server-side (safe to close this tab)';
+      const jid = r.job_id;
+      const poll = setInterval(async () => {
+        if(!activeRunId){ clearInterval(poll); return; }
+        try {
+          const st = await (await fetch(`/jobs/${jid}`)).json();
+          if(st && st.status === 'succeeded'){
+            clearInterval(poll);
+            if(!gotFinal){
+              const res2 = await (await fetch(`/jobs/${jid}/result`)).json();
+              finalize((res2 && res2.result && (res2.result.response || res2.result.final_answer)) || '', '');
+            }
+          } else if(st && (st.status === 'failed' || st.status === 'cancelled')){
+            clearInterval(poll);
+            if(!gotFinal) finalize('', st.error || `job ${st.status}`);
+          }
+        } catch(e){ /* transient poll failure */ }
+      }, 2500);
     } else if(r && r.response){
-      // Prefer the full final answer from /command (complete + tool-aware).
-      $('chatResult').textContent = baseText + 'Hermus AI:\n' + r.response;
+      // Inline path (queue disabled): the HTTP response is authoritative.
+      finalize(r.response);
     } else if(stream.getStreamed()){
-      $('chatResult').textContent = baseText + 'Hermus AI:\n' + stream.getStreamed();
+      finalize(stream.getStreamed());
     } else {
       $('chatResult').textContent = baseText + 'Hermus AI:\n' + JSON.stringify(r, null, 2);
+      clearInterval(waitTimer);
+      closeActiveStream();
+      setWaitingUI(false);
     }
   } catch(e){
-    clearInterval(waitTimer);
-    closeActiveStream();
-    setWaitingUI(false);
-    $('chatResult').textContent = baseText + `❌ Connection Error: ${e.message}\nMake sure the gateway server is running.`;
+    finalize('', `Connection Error: ${e.message}. Make sure the gateway server is running.`);
   }
 }
 

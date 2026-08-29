@@ -116,7 +116,8 @@ def test_agent_autonomous_loop():
 
     agent = HermusAgent(model="mock/mock")
     report = agent.autonomous("summarize the plan", max_repairs=1)
-    assert report["status"] in ("done", "failed")
+    # blocked = no model backend configured (honest), not a fabricated success
+    assert report["status"] in ("done", "failed", "blocked")
     assert report["phases"][0] == "understand"
     assert report["phases"][-1] == "finish"
 

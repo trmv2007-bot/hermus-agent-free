@@ -4,12 +4,23 @@ Unifies the Mission Lifecycle directly with the Agent DAG and executes the full
 autonomous repair and replan loop:
 Goal → Requirements → DAG Plan → Execute → Observe → Verify (Structural + Behavioral) → Critic Panel →
 If verification fails: Diagnose → Repair → Re-plan → Re-execute → Repeat until success, blocked, or budget exhausted.
+
+This module is the **universal execution core**: every autonomous surface
+(``HermusAgent.autonomous``, ``/command?autonomous``, the gateway queue, the
+CLI, channels, the scheduler) runs through :class:`MissionEngine` via
+``core.runtime``, so behavior no longer depends on the entry point.
+
+Node executors are **evidence-gated**: a stage whose role implies performing
+work (coder/implementation/verification/…) only counts as successful when the
+agent actually did something — executed tools, changed files, produced
+artifacts — not when it merely described how the work would be done.
 """
 from __future__ import annotations
 
 import inspect
 import json
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -22,6 +33,7 @@ from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
 from .critic import critic_manager
 from .rollback import rollback_manager
+from .run_events import record_issue
 from .verifier_registry import verifier_registry
 from .workspace import workspace
 
@@ -37,6 +49,7 @@ class MissionState(str, Enum):
     REPAIRING = "repairing"
     CONTINUING = "continuing"
     BLOCKED = "blocked"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -175,8 +188,352 @@ class MissionReport:
         )
 
 
+# ============================================================================
+# Evidence-gated agent-backed node executor
+# ============================================================================
+# The executor must distinguish "the model described the work" from "the model
+# performed the work". A coder node that answers with a plan but never touches
+# a tool, a file, or a command is NOT a completed stage.
+
+#: roles whose job is to change the world (files/code/tests), not just analyze
+ACTION_ROLES = {
+    "coder", "developer", "implementer", "implementation", "engineer",
+    "integrator", "builder", "tester", "verifier", "fixer", "operator",
+    "deployer", "specialist",
+}
+
+#: goal verbs that imply performing work even for analysis-ish roles
+ACTION_GOAL_VERBS = (
+    "implement", "build", "write", "create", "fix", "repair", "refactor",
+    "deploy", "run ", "execute", "generate", "develop", "integrate", "patch",
+    "migrate", "install", "test", "apply",
+)
+
+#: tools that mutate state or execute commands (real work, not reading)
+ACTION_TOOLS = {
+    "file_write", "file_edit", "sandbox_run", "shell_execute", "backend_execute",
+    "swe_develop", "mission_start", "mission_resume", "rollback_checkpoint",
+    "rollback_restore", "slack_notify", "jira_create_issue", "linear_create_issue",
+    "github_integration_pr_comment", "custom_exploit_runtime", "browser_click",
+    "browser_type", "browser_navigate", "browser_close", "embeddings_add",
+    "embeddings_ingest", "memory_add", "memory2_remember", "subagent_spawn",
+    "delegate_tasks", "fleet_distribute_task", "skill_harvest",
+}
+ACTION_TOOL_PREFIXES = ("pentest_", "browser_", "screen_", "sast_", "dast_", "custom_")
+
+#: tools that literally execute commands/tests (strongest evidence)
+EXEC_TOOLS = {"sandbox_run", "shell_execute", "backend_execute"}
+
+#: directories never counted as workspace evidence
+_SCAN_SKIP_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", "dist", "build", "target", ".next", ".cache",
+    "data", ".tox", "site-packages",
+}
+_SCAN_MAX_FILES = 6000
+
+
+def _is_action_tool(name: str) -> bool:
+    n = str(name or "")
+    return n in ACTION_TOOLS or any(n.startswith(p) for p in ACTION_TOOL_PREFIXES)
+
+
+def _node_requires_action(node: Any) -> bool:
+    """Does this node's job description imply performing (not describing) work?"""
+    role = str(getattr(node, "role", "") or "").lower()
+    goal = str(getattr(node, "goal", "") or "").lower()
+    if any(v in goal for v in ACTION_GOAL_VERBS):
+        return True
+    return role in ACTION_ROLES
+
+
+def _scan_changed_files(since_ts: float, roots: Optional[list[Path]] = None) -> list[str]:
+    """Files modified under the given roots since ``since_ts`` (bounded walk)."""
+    if roots is None:
+        roots = []
+        try:
+            roots.append(Path(workspace.root))
+        except Exception:
+            pass
+        cwd = Path.cwd()
+        if cwd not in roots:
+            roots.append(cwd)
+    changed: list[str] = []
+    seen = 0
+    try:
+        for root in roots:
+            if not root or not Path(root).exists():
+                continue
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIRS]
+                for fname in filenames:
+                    seen += 1
+                    if seen > _SCAN_MAX_FILES:
+                        return changed[:50]
+                    fp = Path(dirpath) / fname
+                    try:
+                        if fp.stat().st_mtime >= since_ts:
+                            changed.append(str(fp))
+                            if len(changed) >= 50:
+                                return changed
+                    except OSError:
+                        continue
+    except Exception as exc:
+        record_issue("mission", "scan_changed_files", exc, fallback="skipped file evidence scan")
+    return changed
+
+
+def build_node_prompt(node: Any, parent_ctx: Optional[dict[str, Any]] = None) -> str:
+    """Compose the prompt for one DAG node, injecting upstream (parent) results.
+
+    Previously the executor only passed the node's own goal (+ repair hints), so
+    the 'coder' never received the researcher's/architect's actual output and
+    the DAG was a chain in name only. Upstream outputs and artifacts are now a
+    first-class section of the child prompt.
+    """
+    role = str(getattr(node, "role", "specialist") or "specialist")
+    parts = [
+        f"You are the '{role}' stage of a mission. Accomplish this goal using "
+        f"the available tools and report concrete results:\n{getattr(node, 'goal', '')}"
+    ]
+
+    parent_ctx = parent_ctx or {}
+    if parent_ctx:
+        blocks = []
+        for dep_id, ctx in parent_ctx.items():
+            dep_role = ""
+            outputs = ctx.get("outputs") if isinstance(ctx, dict) else None
+            if isinstance(outputs, dict):
+                dep_role = str(outputs.get("stage") or outputs.get("role") or "")
+                text = str(outputs.get("output") or outputs.get("result") or "")
+            else:
+                text = str(outputs or "")
+            if not text and isinstance(ctx, dict):
+                text = json.dumps(ctx, default=str)[:1500]
+            block = f"[upstream node '{dep_id}'" + (f" ({dep_role})" if dep_role else "") + "]"
+            if text.strip():
+                block += "\n" + text.strip()[:4000]
+            arts = ctx.get("artifacts") if isinstance(ctx, dict) else None
+            if arts:
+                block += "\nArtifacts produced: " + ", ".join(str(a) for a in arts[:10])
+            if block != f"[upstream node '{dep_id}']":
+                blocks.append(block)
+        if blocks:
+            parts.append(
+                "## Upstream results (already completed by previous stages — build on "
+                "these, do NOT redo or contradict them)\n" + "\n\n".join(blocks)
+            )
+
+    hints = (getattr(node, "inputs", None) or {}).get("repair_hints")
+    if hints:
+        parts.append(
+            "## Problems found by the previous verification round (fix these)\n- "
+            + "\n- ".join(str(h) for h in hints)
+        )
+    return "\n\n".join(parts)
+
+
+def _chat_compat(
+    agent: Any,
+    prompt: str,
+    *,
+    on_event: Optional[Callable[..., None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    steer_source: Optional[Callable[[], list[str]]] = None,
+) -> dict[str, Any]:
+    """Call ``agent.chat`` with only the kwargs that agent actually supports."""
+    kwargs: dict[str, Any] = {}
+    try:
+        params = inspect.signature(agent.chat).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        params = {name: None for name in ("on_event", "should_cancel", "steer_source")}
+    if on_event is not None and "on_event" in params:
+        kwargs["on_event"] = on_event
+    if should_cancel is not None and "should_cancel" in params:
+        kwargs["should_cancel"] = should_cancel
+    if steer_source is not None and "steer_source" in params:
+        kwargs["steer_source"] = steer_source
+    try:
+        return agent.chat(prompt, **kwargs) if kwargs else agent.chat(prompt)
+    except TypeError:
+        return agent.chat(prompt)
+
+
+def make_agent_backed_executor(
+    agent: Any = None,
+    *,
+    on_event: Optional[Callable[..., None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    steer_source: Optional[Callable[[], list[str]]] = None,
+    model: Optional[str] = None,
+) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
+    """Build an executor that actually runs each DAG node goal via an agent.
+
+    * ``agent`` — reuse a live agent (session memory/model/profile preserved
+      across stages). When omitted a fresh agent is created per node.
+    * ``on_event`` / ``should_cancel`` / ``steer_source`` — forwarded into every
+      node's ReAct loop so SSE streaming, cooperative cancellation and mid-run
+      steering work inside missions exactly like they do in plain chat.
+
+    Never fabricates success:
+    * no usable model/key/Ollama backend → the node is blocked, not completed;
+    * a node whose job implies performing work must show evidence (executed
+      tools / changed files / produced artifacts) — a prose description alone
+      fails with ``no_evidence_of_work`` so the repair loop can act.
+    """
+    from .config import config as _config
+
+    def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+        if on_event is not None:
+            try:
+                on_event(event_type, data or {})
+            except Exception:
+                pass
+
+    def executor(node: Any, parent_ctx: dict[str, Any]) -> dict[str, Any]:
+        stage = str(getattr(node, "role", "?") or "?")
+        node_started = time.time()
+        _emit("node_started", {"stage": stage, "goal": str(getattr(node, "goal", ""))[:200]})
+        try:
+            if should_cancel is not None and should_cancel():
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": "cancelled",
+                    "evidence": [{"stage": stage, "status": "cancelled"}],
+                }
+            if agent is not None:
+                node_agent = agent
+            else:
+                from .agent import HermusAgent
+
+                node_agent = HermusAgent(
+                    model=model or getattr(_config, "model", None) or "ollama/llama3.1:8b",
+                    session_id=f"mission_{os.urandom(4).hex()}",
+                    mode="agent",
+                )
+
+            prompt = build_node_prompt(node, parent_ctx)
+            res = _chat_compat(
+                node_agent, prompt,
+                on_event=on_event, should_cancel=should_cancel,
+                steer_source=steer_source,
+            )
+            text = str(res.get("response") or "")
+            provider = str(getattr(getattr(node_agent, "llm", None), "provider", "") or "")
+
+            # ---- honest no-backend detection (never fake success) ----
+            is_mock = (
+                provider == "mock"
+                or "Fallback mock" in text
+                or text.strip().startswith("⚠️")
+            )
+            if is_mock:
+                reason = ("No model backend reachable (no Ollama and no API key). "
+                          "Configure a model before running missions.")
+                _emit("node_finished", {"stage": stage, "status": "blocked"})
+                return {
+                    "success": False,
+                    "blocked": True,
+                    "blocker_reason": reason,
+                    "output": text,
+                    "error": "no_model_backend",
+                    "evidence": [{"stage": stage, "status": "blocked", "reason": reason}],
+                }
+
+            # ---- evidence collection: did the agent PERFORM the work? ----
+            tool_calls = list(res.get("tool_calls") or [])
+            action_tools = sorted({t for t in tool_calls if _is_action_tool(t)})
+            exec_tools = sorted({t for t in tool_calls if t in EXEC_TOOLS})
+            files_changed = _scan_changed_files(node_started)
+            # evidence the agent itself reported (tool_results carry per-tool outcomes)
+            tool_results = res.get("tool_results") or []
+            performed_work = bool(action_tools or exec_tools or files_changed)
+
+            requires_action = _node_requires_action(node)
+            evidence = [{
+                "stage": stage,
+                "status": "executed" if (performed_work or not requires_action) else "needs_evidence",
+                "model": provider,
+                "tools_used": len(tool_results),
+                "action_tools": action_tools,
+                "commands_executed": exec_tools,
+                "files_changed": files_changed[:20],
+                "performed_work": performed_work,
+            }]
+
+            if requires_action and not performed_work:
+                # The model *described* the work without *performing* it.
+                _emit("node_finished", {"stage": stage, "status": "needs_evidence",
+                                        "reason": "no_evidence_of_work"})
+                return {
+                    "success": False,
+                    "output": text,
+                    "error": "no_evidence_of_work",
+                    "evidence": evidence,
+                    "instructions": (
+                        "The stage answer contained no evidence of performed work "
+                        f"(no tools executed, no files changed). Re-run this stage and "
+                        "actually use the tools (write files, run commands/tests) to "
+                        "accomplish the goal; do not merely describe how to do it."
+                    ),
+                }
+
+            if not requires_action and len(text.strip()) < 120:
+                # analysis stages still need a substantive analysis product
+                _emit("node_finished", {"stage": stage, "status": "needs_evidence",
+                                        "reason": "empty_analysis"})
+                return {
+                    "success": False,
+                    "output": text,
+                    "error": "empty_analysis",
+                    "evidence": evidence,
+                    "instructions": (
+                        "Analysis stages must produce a substantive result (design, "
+                        "review findings, research summary). The answer was empty or trivial."
+                    ),
+                }
+
+            _emit("node_finished", {
+                "stage": stage, "status": "executed",
+                "tools": len(tool_results), "files_changed": len(files_changed),
+                "ms": int((time.time() - node_started) * 1000),
+            })
+            return {
+                "success": True,
+                "output": text,
+                "tool_calls": len(tool_calls),
+                "tool_results": len(tool_results),
+                "artifacts": files_changed[:20],
+                "evidence": evidence,
+            }
+        except Exception as exc:  # never fabricate success on error
+            record_issue("mission", "node_executor", exc,
+                         mission_id=None, retryable=True,
+                         fallback=f"node '{stage}' reported failed")
+            _emit("node_finished", {"stage": stage, "status": "failed",
+                                    "error": str(exc)[:200]})
+            return {
+                "success": False,
+                "output": "",
+                "error": f"{type(exc).__name__}: {exc}",
+                "evidence": [{"stage": stage, "status": "failed",
+                              "error": str(exc)[:300]}],
+            }
+
+    return executor
+
+
 class MissionEngine:
-    """Unified Mission Lifecycle & DAG Controller with Autonomous Repair Loop."""
+    """Unified Mission Lifecycle & DAG Controller with Autonomous Repair Loop.
+
+    ``start_mission`` accepts an optional bound ``agent`` plus streaming /
+    cancellation / steering hooks; all of them are threaded down into every
+    DAG node's ReAct loop (see :func:`make_agent_backed_executor`), so a
+    mission observed over SSE behaves exactly like a plain chat turn.
+    """
 
     def __init__(
         self,
@@ -184,7 +541,7 @@ class MissionEngine:
         storage_dir: Optional[Path] = None,
     ):
         # NOTE: a real agent-backed executor is wired lazily on first use
-        # (see ``_get_executor``). The old inline ``_default_node_executor``
+        # (see ``_raw_executor``). The old inline ``_default_node_executor``
         # merely *claimed* every stage succeeded without doing any work, which
         # let production missions "pass" without executing anything. It is now
         # only used as an explicit, clearly-labelled simulation for offline
@@ -193,6 +550,10 @@ class MissionEngine:
         self._real_executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        # per-run overrides (bound agent / events / control hooks). Missions run
+        # to completion inside one thread, so thread-local state is safe even
+        # though the engine singleton is shared across queue workers.
+        self._tls = threading.local()
 
     @property
     def _raw_executor(self) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
@@ -221,67 +582,8 @@ class MissionEngine:
         }
 
     def _build_real_executor(self) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
-        """Build an executor that actually runs each DAG node goal via an agent.
-
-        Unlike the previous default executor, this never fabricates success:
-        when no usable model/key/Ollama backend is reachable the node is
-        reported as failed so the mission correctly ends up BLOCKED/FAILED
-        instead of pretending the work was done.
-        """
-        def executor(node: Any, parent_ctx: dict[str, Any]) -> dict[str, Any]:
-            try:
-                from .agent import HermusAgent
-                from .config import config as _config
-
-                agent = HermusAgent(
-                    model=getattr(_config, "model", None) or "ollama/llama3.1:8b",
-                    session_id=f"mission_{os.urandom(4).hex()}",
-                    mode="agent",
-                )
-                repair_hints = ""
-                try:
-                    hints = (getattr(node, "inputs", None) or {}).get("repair_hints")
-                    if hints:
-                        repair_hints = "\n\nPrevious verification found these problems to fix:\n- " + \
-                            "\n- ".join(str(h) for h in hints)
-                except Exception:
-                    pass
-                goal = f"You are the '{getattr(node, 'role', 'specialist')}' stage of a mission. " \
-                       f"Accomplish this goal using the available tools and report concrete results:\n" \
-                       f"{node.goal}{repair_hints}"
-                res = agent.chat(goal)
-                text = str(res.get("response") or "")
-                provider = str(getattr(getattr(agent, "llm", None), "provider", "") or "")
-                is_mock = provider == "mock" or "Fallback mock" in text or text.strip().startswith("⚠️")
-                if is_mock:
-                    return {
-                        "success": False,
-                        "output": text,
-                        "error": "no_model_backend",
-                        "evidence": [{"stage": getattr(node, "role", "?"),
-                                      "status": "blocked",
-                                      "reason": "No model backend reachable (no Ollama and no API key). "
-                                                "Configure a model before running missions."}],
-                    }
-                tool_results = res.get("tool_results") or []
-                return {
-                    "success": True,
-                    "output": text,
-                    "tool_calls": len(res.get("tool_calls") or []),
-                    "tool_results": len(tool_results),
-                    "evidence": [{"stage": getattr(node, "role", "?"), "status": "executed",
-                                  "model": provider, "tools_used": len(tool_results)}],
-                }
-            except Exception as exc:  # never fabricate success on error
-                return {
-                    "success": False,
-                    "output": "",
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "evidence": [{"stage": getattr(node, "role", "?"), "status": "failed",
-                                  "error": str(exc)[:300]}],
-                }
-
-        return executor
+        """Lazily build the default agent-backed executor (fresh agent per node)."""
+        return make_agent_backed_executor()
 
     @staticmethod
     def _compute_progress(dag: AgentDAG) -> int:
@@ -300,22 +602,30 @@ class MissionEngine:
             with open(path, "rb") as f:
                 data = f.read(max_bytes)
             return data.decode("utf-8", errors="ignore")
-        except Exception:
+        except Exception as exc:
+            record_issue("mission", "read_artifact", exc, retryable=False,
+                         fallback=f"skipped unreadable artifact {path}")
             return ""
 
     def _call_executor(self, node: DAGNode, parent_ctx: dict[str, Any]) -> dict[str, Any]:
+        executor = getattr(self._tls, "executor", None) or self._raw_executor
         try:
-            sig = inspect.signature(self._raw_executor)
+            sig = inspect.signature(executor)
             params = list(sig.parameters.keys())
             if params and params[0] in ("goal", "task", "prompt", "subgoal"):
-                return self._raw_executor(node.goal, parent_ctx)
+                return executor(node.goal, parent_ctx)
         except Exception:
             pass
-        return self._raw_executor(node, parent_ctx)
+        return executor(node, parent_ctx)
 
     def _save_mission(self, report: MissionReport) -> None:
         p = self.storage_dir / f"{report.mission_id}.json"
-        p.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        try:
+            p.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        except Exception as exc:
+            record_issue("mission", "save_report", exc,
+                         mission_id=report.mission_id, retryable=True,
+                         fallback="mission report not persisted (run continues)")
 
     def get_mission(self, mission_id: str) -> Optional[MissionReport]:
         p = self.storage_dir / f"{mission_id}.json"
@@ -358,7 +668,21 @@ class MissionEngine:
         domain: Optional[str] = None,
         subgoals: Optional[list[str]] = None,
         budget_steps: int = 25,
+        max_repairs: Optional[int] = None,
+        executor: Optional[Callable[[Any, dict[str, Any]], dict[str, Any]]] = None,
+        agent: Any = None,
+        on_event: Optional[Callable[..., None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+        steer_source: Optional[Callable[[], list[str]]] = None,
     ) -> MissionReport:
+        """Plan and run a mission to completion.
+
+        ``agent`` (or a custom ``executor``) binds this run to a specific
+        execution surface — e.g. the runtime passes the user's live agent so
+        mission stages share its session, model and profile. ``on_event`` /
+        ``should_cancel`` / ``steer_source`` stream and control the mission the
+        same way a plain chat turn is streamed and controlled.
+        """
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
         detected_domain = domain or verifier_registry.auto_detect_domain(goal)
 
@@ -383,19 +707,67 @@ class MissionEngine:
             dag_state=dag.to_dict(),
             subgoals=[SubGoal(id=nid, role=n.role, goal=n.goal, status=n.status) for nid, n in dag.nodes.items()],
             checkpoint_id=cp.id,
-            budget=MissionBudget(initial_steps=budget_steps),
+            budget=MissionBudget(
+                initial_steps=budget_steps,
+                max_repairs=max_repairs if max_repairs is not None else 3,
+            ),
         )
         self._save_mission(report)
 
-        return self._run_autonomous_loop(report, dag)
+        # per-run executor override (bound agent / hooks), scoped to this thread
+        if executor is not None:
+            self._tls.executor = executor
+        elif agent is not None or on_event or should_cancel or steer_source:
+            self._tls.executor = make_agent_backed_executor(
+                agent=agent,
+                on_event=on_event,
+                should_cancel=should_cancel,
+                steer_source=steer_source,
+            )
+        else:
+            self._tls.executor = None
+        try:
+            return self._run_autonomous_loop(
+                report, dag,
+                on_event=on_event, should_cancel=should_cancel,
+            )
+        finally:
+            self._tls.executor = None
 
-    def _run_autonomous_loop(self, report: MissionReport, dag: AgentDAG) -> MissionReport:
+    def _run_autonomous_loop(
+        self,
+        report: MissionReport,
+        dag: AgentDAG,
+        *,
+        on_event: Optional[Callable[..., None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> MissionReport:
         budget = report.budget
         mission_start_ts = datetime.fromisoformat(report.started_at).timestamp()
         prev_completed = -1
 
+        def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+            if on_event is not None:
+                try:
+                    on_event(event_type, {"mission_id": report.mission_id, **(data or {})})
+                except Exception:
+                    pass
+
+        _emit("mission_started", {"goal": report.goal[:200], "domain": report.domain,
+                                  "budget_steps": budget.total_steps()})
+
         while budget.consumed_steps < budget.total_steps():
+            if should_cancel is not None and should_cancel():
+                report.state = MissionState.CANCELLED.value
+                report.finished_at = datetime.now().isoformat()
+                report.final_proof = "Mission cancelled before completion."
+                self._save_mission(report)
+                _emit("mission_finished", {"state": report.state})
+                return report
             report.state = MissionState.EXECUTING.value
+            _emit("mission_state", {"state": report.state,
+                                    "progress_pct": self._compute_progress(dag),
+                                    "steps_left": budget.total_steps() - budget.consumed_steps})
             self._save_mission(report)
 
             # A. EXECUTE DAG STAGES
@@ -429,10 +801,16 @@ class MissionEngine:
                 report.blocker_reason = blocked_nodes[0].error or "External prerequisite or authorization required"
                 report.blocker_instructions = "Please resolve the blocker and call `hermus mission resume <mission_id>`"
                 self._save_mission(report)
+                record_issue("mission", "node_blocked", report.blocker_reason,
+                             mission_id=report.mission_id, retryable=True,
+                             fallback="mission paused as BLOCKED; resume after resolving")
+                _emit("mission_finished", {"state": report.state,
+                                           "blocker_reason": report.blocker_reason})
                 return report
 
             # B. OBSERVE & GATHER EVIDENCE
             report.state = MissionState.OBSERVING.value
+            _emit("mission_state", {"state": report.state})
             all_node_outputs = []
             for n in dag.nodes.values():
                 if n.outputs:
@@ -465,14 +843,20 @@ class MissionEngine:
 
             # C. VERIFY (STRUCTURAL + BEHAVIORAL + CRITIC)
             report.state = MissionState.VERIFYING.value
-            v_res = verifier_registry.verify(
-                domain_or_auto=report.domain,
-                context={
-                    "task": report.goal,
-                    "output": combined_log,
-                    "artifacts": report.artifacts,
-                },
-            )
+            _emit("mission_state", {"state": report.state})
+            try:
+                v_res = verifier_registry.verify(
+                    domain_or_auto=report.domain,
+                    context={
+                        "task": report.goal,
+                        "output": combined_log,
+                        "artifacts": report.artifacts,
+                    },
+                )
+            except Exception as exc:
+                record_issue("mission", "verifier", exc, mission_id=report.mission_id,
+                             retryable=True, fallback="verification treated as failed")
+                raise
             for ev in v_res.evidence:
                 if ev not in report.evidence:
                     report.evidence.append(ev)
@@ -484,14 +868,27 @@ class MissionEngine:
                 if Path(a).suffix in (".py", ".js", ".ts", ".html", ".json") and Path(a).exists()
             }
 
-            critic_res = critic_manager.run_full_review(
-                task=report.goal,
-                files_content=files_content,
-                execution_log=combined_log,
-                artifacts=report.artifacts,
-                requirements=[r.description for r in report.requirements],
-                verification_evidence=v_res.evidence,
-            )
+            try:
+                critic_res = critic_manager.run_full_review(
+                    task=report.goal,
+                    files_content=files_content,
+                    execution_log=combined_log,
+                    artifacts=report.artifacts,
+                    requirements=[r.description for r in report.requirements],
+                    verification_evidence=v_res.evidence,
+                )
+            except Exception as exc:
+                record_issue("mission", "critic", exc, mission_id=report.mission_id,
+                             retryable=True, fallback="critic panel unavailable; treated as not approved")
+                critic_res = {"approved": False, "overall_score": 0, "verdict": "error",
+                              "summary": f"critic panel failed: {exc}"[:200],
+                              "repair_directives": [f"critic panel failed: {exc}"[:200]]}
+            _emit("mission_verification", {
+                "verified": bool(v_res.verified), "score": v_res.score,
+                "structural": v_res.structural_score, "behavioral": v_res.behavioral_score,
+                "critic_score": critic_res.get("overall_score"),
+                "errors": v_res.errors[:5],
+            })
 
             # Success condition
             all_dag_completed = all(n.status == DAGNodeStatus.COMPLETED.value for n in dag.nodes.values())
@@ -510,6 +907,11 @@ class MissionEngine:
                     f"Produced {len(report.artifacts)} verified deliverables."
                 )
                 self._save_mission(report)
+                _emit("mission_finished", {
+                    "state": report.state, "progress_pct": 100,
+                    "confidence_score": report.confidence_score,
+                    "artifacts": report.artifacts[:10],
+                })
                 return report
 
             # D. DIAGNOSE & REPAIR LOOP
@@ -533,6 +935,8 @@ class MissionEngine:
                     node.retries = 0
 
                 report.state = MissionState.PLANNING.value
+                _emit("mission_repair", {"round": budget.repairs_used,
+                                          "hints": [str(h)[:120] for h in repair_hints[:6]]})
                 self._save_mission(report)
                 continue
             else:
@@ -545,9 +949,19 @@ class MissionEngine:
         report.progress_pct = min(95, self._compute_progress(dag))
         report.final_proof = f"Mission failed to achieve verifiable behavioral completion after {budget.consumed_steps} steps and {budget.repairs_used} repair attempts."
         self._save_mission(report)
+        _emit("mission_finished", {"state": report.state,
+                                   "progress_pct": report.progress_pct})
         return report
 
-    def resume_mission(self, mission_id: str) -> MissionReport:
+    def resume_mission(
+        self,
+        mission_id: str,
+        *,
+        agent: Any = None,
+        on_event: Optional[Callable[..., None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+        steer_source: Optional[Callable[[], list[str]]] = None,
+    ) -> MissionReport:
         report = self.get_mission(mission_id)
         if not report:
             raise ValueError(f"Mission {mission_id} not found")
@@ -565,7 +979,19 @@ class MissionEngine:
         report.state = MissionState.CONTINUING.value
         report.blocker_reason = None
         report.blocker_instructions = None
-        return self._run_autonomous_loop(report, dag)
+        if agent is not None or on_event or should_cancel or steer_source:
+            self._tls.executor = make_agent_backed_executor(
+                agent=agent, on_event=on_event,
+                should_cancel=should_cancel, steer_source=steer_source,
+            )
+        else:
+            self._tls.executor = None
+        try:
+            return self._run_autonomous_loop(
+                report, dag, on_event=on_event, should_cancel=should_cancel
+            )
+        finally:
+            self._tls.executor = None
 
     def extend_budget(self, mission_id: str, steps: int = 10) -> MissionReport:
         """Grant extra steps to a running/blocked/failed mission.

@@ -1,9 +1,9 @@
 # GitHub Actions CI workflow for hermus-agent-free.
 #
-# Kept here (not in .github/workflows/) because the automation token that
-# pushes this branch lacks 'workflows' permission. To activate CI:
-#   cp docs/ci-workflow.yml .github/workflows/ci.yml
-#   git add .github && git commit -m 'ci: activate workflow' && git push
+# ACTIVE copy: .github/workflows/ci.yml  (kept in sync with this reference).
+# This file previously held the workflow only as a placeholder because the
+# automation token that pushed the branch lacked 'workflows' permission —
+# the workflow now lives in .github/workflows/ and runs on every push/PR.
 # -----------------------------------------------------------------------------
 name: CI
 
@@ -47,7 +47,8 @@ jobs:
             fastapi \
             "uvicorn[standard]" \
             apscheduler \
-            tiktoken
+            tiktoken \
+            python-multipart
 
       - name: Compile all sources (syntax gate)
         run: |

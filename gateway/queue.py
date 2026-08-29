@@ -21,9 +21,11 @@ This module decouples intake from execution:
 * Optional Redis Streams transport (``gateway_queue_backend=redis``) for
   multi-process workers; falls back to in-process lanes when redis is absent.
 
-Handlers are registered by kind: ``agent.chat``, ``agent.autonomous``,
-``agent.research``, ``subagent.delegate``, ``channel.telegram`` … so new async
-work never needs a new endpoint.
+Handlers are registered by kind: ``runtime.turn`` (canonical, auto-classified
+chat-or-mission), ``agent.chat``, ``agent.autonomous``, ``mission.start``,
+``swe.develop``, ``research.deep``, ``subagent.delegate``, ``channel.reply``,
+``memory.sweep`` … so new async work never needs a new endpoint. All
+work kinds execute through the universal mission runtime (``core.runtime``).
 """
 from __future__ import annotations
 
@@ -109,6 +111,10 @@ class JobContext:
 
     def should_cancel(self) -> bool:
         return self._bus.is_cancelled(self.run_id) or self.job.status == STATUS_CANCELLED
+
+    def pending_steers(self) -> list[str]:
+        """Drain mid-run steering instructions queued via POST /run/steer."""
+        return self._bus.pending_steers(self.run_id)
 
     def log(self, message: str, level: str = "info") -> None:
         self.emit("log", {"level": level, "message": str(message)[:1000]})
