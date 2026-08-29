@@ -276,13 +276,33 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$ROOT/.venv/bin/activate" ]; then
   # shellcheck disable=SC1091
   source "$ROOT/.venv/bin/activate"
+cat > activate.sh << 'EOF'
+#!/usr/bin/env bash
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+(return 0 2>/dev/null) && IS_SOURCED=1 || IS_SOURCED=0
+
+if [ "$IS_SOURCED" -eq 1 ]; then
+  if [ -f "$ROOT/.venv/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$ROOT/.venv/bin/activate"
+  fi
+  export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+  export PATH="$ROOT/bin:$ROOT:$PATH"
+  if [ -d "$HOME/.bun/bin" ]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
+  echo -e "\033[0;32m✓\033[0m \033[1;36mHermus environment activated!\033[0m"
+  echo -e "  Commands now available: \033[1mhermus-gateway\033[0m, \033[1mhermus\033[0m"
+else
+  echo -e "\033[1;33m⚠️  Notice:\033[0m 'activate.sh' must be \033[1mSOURCE-loaded\033[0m to persist in your current terminal:"
+  echo -e "  👉 \033[1;32msource activate.sh\033[0m   (or: \033[1;32m. activate.sh\033[0m)"
+  echo ""
+  echo -e "\033[1mAlternatively, launch directly without activating:\033[0m"
+  echo -e "  • Start Dashboard: \033[1;36m./bin/hermus-gateway\033[0m  (or \033[1;36m./hermus-gateway\033[0m)"
+  echo -e "  • Terminal CLI:    \033[1;36m./hermus\033[0m"
+  echo ""
 fi
-export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export PATH="$ROOT/bin:$PATH"
-if [ -d "$HOME/.bun/bin" ]; then
-  export PATH="$HOME/.bun/bin:$PATH"
-fi
-echo "☤ Hermus environment active! Run 'hermus --help' or 'hermus-gateway'"
 EOF
 chmod +x activate.sh
 
@@ -293,18 +313,27 @@ exec "$ROOT/bin/hermus" "$@"
 EOF
 chmod +x hermus
 
-step_ok "Generated executables: ./hermus, ./bin/hermus-gateway, source activate.sh"
+cat > hermus-gateway << 'EOF'
+#!/usr/bin/env bash
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+exec "$ROOT/bin/hermus-gateway" "$@"
+EOF
+chmod +x hermus-gateway
+
+step_ok "Generated executables: ./hermus, ./hermus-gateway, ./bin/hermus-gateway, source activate.sh"
 
 echo ""
 echo -e "${C_GREEN}${C_BOLD}═════════════════════════════════════════════════════════════════════════${C_RESET}"
 echo -e "${C_CYAN}${C_BOLD}  🎉 ALL-IN-ONE DEVELOPER STACK INSTALLED SUCCESSFULLY!${C_RESET}"
 echo -e "${C_GREEN}${C_BOLD}═════════════════════════════════════════════════════════════════════════${C_RESET}"
 echo ""
-echo -e "  ${C_BOLD}1. Start the Server & Dashboards:${C_RESET}"
-echo -e "     ${C_CYAN}./bin/hermus-gateway${C_RESET}"
+echo -e "  ${C_BOLD}1. Start the Server & Dashboards (pick one):${C_RESET}"
+echo -e "     ${C_GREEN}source activate.sh && hermus-gateway${C_RESET}"
+echo -e "     ${C_MUTED}or directly:${C_RESET} ${C_CYAN}./bin/hermus-gateway${C_RESET}  ${C_MUTED}(or ${C_CYAN}./hermus-gateway${C_MUTED})${C_RESET}"
 echo ""
 echo -e "  ${C_BOLD}2. Open in your Browser:${C_RESET}"
-echo -e "     • Setup Wizard & Chat:  ${C_CYAN}http://localhost:8000/dashboard/legacy${C_RESET}"
+echo -e "     • Setup Wizard & Chat:  ${C_CYAN}http://localhost:8000/dashboard${C_RESET}"
+echo -e "     • Jarvis Spatial HUD:   ${C_CYAN}http://localhost:8000/jarvis${C_RESET}"
 echo -e "     • Computer Agent Deck:  ${C_CYAN}http://localhost:8000/computer/dashboard${C_RESET}"
 echo -e "     • Mobile Pocket Remote: ${C_CYAN}http://localhost:8000/remote${C_RESET}"
 echo ""
