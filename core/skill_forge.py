@@ -689,7 +689,7 @@ class SkillForge:
         assert callable(mod.run), "skill must expose run()"
         steps = mod.plan()
         assert isinstance(steps, list) and steps, "skill must carry at least one step"
-        assert all({"tool"} <= set(s) for s in steps)
+        assert all("tool" in s for s in steps)
 
 
     def test_{cand.name}_dry_run():
