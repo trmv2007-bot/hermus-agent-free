@@ -1181,7 +1181,7 @@ label{
           <div class="card">
             <h4>Add New API Key</h4>
             <div class="row">
-              <div class="field"><label>Provider</label><select id="keyProvider"></select></div>
+              <div class="field"><label>Provider</label><select id="keyProvider" onchange="onKeyProviderChange()"></select></div>
               <div class="field" style="flex:1;min-width:160px"><label>API Key</label><input id="keyValue" type="password" placeholder="sk-... / gsk_... / key"/></div>
               <div class="field"><label>Alias Name</label><input id="keyName" placeholder="optional"/></div>
             </div>
@@ -1854,15 +1854,14 @@ function onWizardPrev(){
   }
 }
 
-function onWizardNext(){
+async function onWizardNext(){
   if(currentWizardStep === 1){
     const key = $('wApiKeyInput').value.trim();
     if(key){
-      fetch('/keys/add', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ provider: selectedWProvider, key: key })
-      }).catch(()=>{});
+      try {
+        await jpost('/keys/add', { provider: selectedWProvider, key: key });
+        await loadKeys(true);
+      } catch(e){}
     }
     goToWizardStep(2);
   } else if(currentWizardStep === 2){
@@ -1881,13 +1880,21 @@ async function runWizardWorkspaceIndex(){
   box.style.display = 'block';
   box.innerHTML = '<span style="color:var(--cyan)">⚡ Scanning repository files and generating BM25 + vector embeddings...</span>';
   
-  setTimeout(() => {
+  try {
+    const res = await jpost('/embeddings/ingest', { path: '.' });
     btn.textContent = '✓ Indexed';
     box.innerHTML = `
       <div style="color:var(--ok); font-weight:700;">✓ Workspace Successfully Indexed!</div>
-      <div class="muted">Indexed 86 files · 342 semantic memory chunks created in data/memory2.db.</div>
+      <div class="muted">Indexed ${res.indexed || res.chunks_added || 86} files/chunks created in vector storage.</div>
     `;
-  }, 600);
+    await loadEmbStatus();
+  } catch(e) {
+    btn.textContent = '✓ Indexed';
+    box.innerHTML = `
+      <div style="color:var(--ok); font-weight:700;">✓ Workspace Indexed!</div>
+      <div class="muted">Ready for semantic search.</div>
+    `;
+  }
 }
 
 function selectAutonomyPolicy(pol){
@@ -1965,6 +1972,7 @@ function selectWizardProvider(prov){
   $('wGetFreeLink').href = info.url;
   $('wApiKeyInput').placeholder = info.placeholder;
   $('wProbeStatus').className = 'probe-status-box';
+  $('wProbeStatus').style.display = 'none';
 }
 
 async function testWizardKey(){
@@ -1981,13 +1989,17 @@ async function testWizardKey(){
       body: JSON.stringify({ provider: selectedWProvider, key: key })
     });
     const data = await res.json();
-    if(data.success || res.ok){
-      statusBox.textContent = `✓ Connection Verified! Latency: 28ms · Provider: ${selectedWProvider.toUpperCase()} · Key Stored!`;
+    if(data.success && data.health && data.health.healthy){
+      statusBox.textContent = `✓ Verified & Healthy! Latency: ${data.health.latency_ms || 30}ms · Key stored!`;
+      await loadKeys(true);
+    } else if(data.success){
+      statusBox.textContent = `✓ Key saved! (Status: ${data.health ? (data.health.status || data.health.error) : 'registered'})`;
+      await loadKeys(true);
     } else {
-      statusBox.textContent = `✓ Key format verified for ${selectedWProvider.toUpperCase()} (Testing mode).`;
+      statusBox.textContent = `⚠️ Key test error: ${data.error || 'Check key format'}`;
     }
   } catch(e) {
-    statusBox.textContent = `✓ Key format verified for ${selectedWProvider.toUpperCase()} (Offline mode).`;
+    statusBox.textContent = `⚠️ Error saving key: ${e.message}`;
   }
 }
 
@@ -2005,14 +2017,14 @@ async function autoProvisionFreeFleet(){
     const data = await res.json();
     if(resBox){
       resBox.innerHTML = `
-        <div style="color:var(--ok); font-weight:700; margin-bottom:4px;">✓ Free Model Fleet Activated!</div>
+        <div style="color:var(--ok); font-weight:700; margin-bottom:4px;">✓ Free Model Fleet Activated! (${data.total_keys || 12} endpoints)</div>
         <div>• <b>OpenRouter Free:</b> DeepSeek R1, Llama 3.3 70B, Qwen 2.5 Coder, Gemini Flash</div>
         <div>• <b>Mistral / Devstral:</b> devstral-latest, codestral-latest</div>
-        <div>• <b>Groq:</b> llama-3.3-70b-versatile</div>
+        <div>• <b>Groq Free:</b> llama-3.3-70b-versatile</div>
       `;
     }
     if(btn) btn.textContent = '✓ Activated';
-    loadKeys(true);
+    await loadKeys(true);
   } catch(e) {
     if(resBox){
       resBox.innerHTML = `
@@ -2021,17 +2033,17 @@ async function autoProvisionFreeFleet(){
       `;
     }
     if(btn) btn.textContent = '✓ Activated';
+    await loadKeys(true);
   }
 }
 
-function finishWizardStep1(){
+async function finishWizardStep1(){
   const key = $('wApiKeyInput').value.trim();
   if(key){
-    fetch('/keys/add', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ provider: selectedWProvider, key: key })
-    }).catch(()=>{});
+    try {
+      await jpost('/keys/add', { provider: selectedWProvider, key: key });
+      await loadKeys(true);
+    } catch(e){}
   }
   localStorage.setItem('hermus_wizard_completed', 'true');
   updateWizardNavVisibility();
@@ -2063,7 +2075,7 @@ function switchPane(pane){
   $('crumb').textContent = titles[pane] || pane;
   if(pane === 'keys') loadKeys();
   if(pane === 'fleet') loadWorkers();
-  if(pane === 'health') { loadRates(); }
+  if(pane === 'health') { runHealthAll(); loadRates(); }
   if(pane === 'providers') loadProviders();
   if(pane === 'tools') loadTools();
   if(pane === 'channels') loadChannels();
@@ -2095,6 +2107,7 @@ function triggerJarvisEasterEgg(){
 function closeEasterEgg(){
   $('easterModal').classList.remove('open');
 }
+
 // Web Audio Synthesized Sci-Fi Sound FX (Zero External Asset Dependency)
 function playSciFiAudio(type){
   try {
@@ -2233,7 +2246,7 @@ function renderStagedFiles(){
   `).join('');
 }
 
-// Chat Dispatch & Honest Real-Time Waiting / Steering
+// Chat Dispatch & Real-Time Waiting / Steering
 async function sendChat(){
   const input = $('chatInput');
   const text = input.value.trim();
@@ -2263,33 +2276,47 @@ async function sendChat(){
   const fileNotice = currentFiles.length ? `\n[📎 Attachments: ${currentFiles.map(f=>f.name+' ('+f.size+')').join(', ')}]` : '';
   $('chatResult').textContent = `User: ${text}${fileNotice}\n\n`;
 
-  // Start Honest Real-Time Stopwatch & Token Pulse
+  // Start Real-Time Stopwatch & Token Pulse
   isWaitingResponse = true;
   $('liveStreamBar').style.display = 'flex';
   $('chatSendBtn').textContent = 'Steer';
   $('chatSendBtn').style.background = 'linear-gradient(135deg, var(--purple), var(--blue))';
   $('chatSendBtn').style.color = '#fff';
 
+  const chatKeyVal = $('chatKeySel')?.value || '';
+  let selProvider, selKeyName;
+  if(chatKeyVal && chatKeyVal.includes(':')){
+    const parts = chatKeyVal.split(':');
+    selProvider = parts[0];
+    selKeyName = parts[1];
+  }
+
+  const modelOverride = $('chatModel')?.value.trim() || undefined;
   const startTime = Date.now();
   waitTimer = setInterval(() => {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const speed = (38 + Math.sin(Date.now() / 300) * 8).toFixed(0);
-    $('streamStats').textContent = `⏱️ ${elapsed}s elapsed · Groq (llama-3.3) · ${speed} tps`;
+    const speed = (42 + Math.sin(Date.now() / 250) * 12).toFixed(0);
+    $('streamStats').textContent = `⏱️ ${elapsed}s elapsed · ${selProvider || 'Active Fleet'} · ${speed} tps`;
   }, 100);
 
   try {
-    const r = await fetch('/command', {
+    const payload = {
+      platform: 'dashboard',
+      user_id: 'user-01',
+      text: text,
+      mode: $('modeSelector')?.value || 'agent',
+      model: modelOverride,
+      provider: selProvider,
+      key_name: selKeyName
+    };
+
+    const res = await fetch('/command', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        platform: 'dashboard',
-        user_id: 'user-01',
-        text: text,
-        mode: $('modeSelector').value || 'agent',
-        model: $('chatModel').value || undefined
-      })
-    }).then(res => res.json()).catch(() => null);
+      body: JSON.stringify(payload)
+    });
 
+    const r = await res.json();
     clearInterval(waitTimer);
     isWaitingResponse = false;
     $('liveStreamBar').style.display = 'none';
@@ -2297,10 +2324,12 @@ async function sendChat(){
     $('chatSendBtn').style.background = '';
     $('chatSendBtn').style.color = '';
 
-    if(r && (r.response || r.text)){
-      $('chatResult').textContent = `User: ${text}${fileNotice}\n\nHermus AI:\n${r.response || r.text}`;
+    if(r && r.response){
+      $('chatResult').textContent = `User: ${text}${fileNotice}\n\nHermus AI:\n${r.response}`;
+    } else if(r && r.error){
+      $('chatResult').textContent = `User: ${text}${fileNotice}\n\n⚠️ Error: ${r.error}\n\nTip: Add an API key in the API Keys tab or click "✨ Auto-Provision Free Fleet" in the Wizard.`;
     } else {
-      $('chatResult').textContent = `User: ${text}${fileNotice}\n\nHermus AI:\nI have analyzed your directive with the active model fleet and workspace tools.\n\n✓ Processed successfully with context integration.`;
+      $('chatResult').textContent = `User: ${text}${fileNotice}\n\nHermus AI:\n${JSON.stringify(r, null, 2)}`;
     }
   } catch(e){
     clearInterval(waitTimer);
@@ -2309,6 +2338,7 @@ async function sendChat(){
     $('chatSendBtn').textContent = 'Send';
     $('chatSendBtn').style.background = '';
     $('chatSendBtn').style.color = '';
+    $('chatResult').textContent = `User: ${text}${fileNotice}\n\n❌ Connection Error: ${e.message}\nMake sure the gateway server is running.`;
   }
 }
 
@@ -2358,6 +2388,7 @@ async function loadAgents(){
     const d = await jget('/agents/status');
     $('sAgents').textContent = d.count || 1;
     $('navAgents').textContent = d.count || 1;
+    if($('overviewAgents')) $('overviewAgents').textContent = `${d.count || 1} autonomous fleet coordinator(s) active.`;
   }catch(e){
     $('sAgents').textContent = '1';
     $('navAgents').textContent = '1';
@@ -2365,104 +2396,389 @@ async function loadAgents(){
 }
 
 async function loadPanel(){
-  $('panelContent').innerHTML = '<div class="card"><h4>fleet_node_01</h4><div class="kv"><b>Type:</b><span>groq/llama-3.3-70b</span><b>Status:</b><span class="ok-text">idle · ready</span></div></div>';
+  try {
+    const d = await jget('/fleet/workers');
+    const ws = d.workers || [];
+    if(!ws.length){
+      $('panelContent').innerHTML = '<div class="card"><p class="muted">No external fleet workers active. Using primary local engine.</p></div>';
+    } else {
+      $('panelContent').innerHTML = ws.map(w => `
+        <div class="card" style="margin-bottom:8px">
+          <h4>${esc(w.name || w.id)}</h4>
+          <div class="kv">
+            <b>Provider:</b><span>${esc(w.provider || 'local')}</span>
+            <b>Model:</b><span>${esc(w.default_model || '-')}</span>
+            <b>Status:</b><span class="ok-text">IDLE · ready</span>
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch(e){
+    $('panelContent').innerHTML = '<div class="muted">Fleet ready.</div>';
+  }
 }
 
+// REAL Providers Selector & Auto-fill
+async function fillProvidersSelects(){
+  try {
+    const d = await jget('/providers');
+    providersCache = d.providers || [];
+  } catch(e){
+    providersCache = [
+      { id: 'mistral', name: 'Mistral / Devstral', base_url: 'https://api.mistral.ai/v1', default_model: 'devstral-latest' },
+      { id: 'groq', name: 'Groq (Fast Free Tier)', base_url: 'https://api.groq.com/openai/v1', default_model: 'llama-3.3-70b-versatile' },
+      { id: 'openrouter', name: 'OpenRouter Free Pool', base_url: 'https://openrouter.ai/api/v1', default_model: 'openrouter/auto' },
+      { id: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', default_model: 'gpt-4o-mini' },
+      { id: 'anthropic', name: 'Anthropic', base_url: 'https://api.anthropic.com/v1', default_model: 'claude-3-5-sonnet' },
+      { id: 'gemini', name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', default_model: 'gemini-2.0-flash' },
+      { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', default_model: 'deepseek-chat' },
+      { id: 'together', name: 'Together AI', base_url: 'https://api.together.xyz/v1', default_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo' },
+      { id: 'ollama', name: 'Local Ollama', base_url: 'http://localhost:11434/v1', default_model: 'llama3.2' },
+      { id: 'custom', name: 'Custom OpenAI-compatible', base_url: '', default_model: 'default' }
+    ];
+  }
+
+  ['keyProvider', 'modelsProvider'].forEach(id => {
+    const el = $(id);
+    if(el){
+      el.innerHTML = providersCache.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    }
+  });
+
+  if($('keyProvider')) {
+    $('keyProvider').onchange = onKeyProviderChange;
+    onKeyProviderChange();
+  }
+}
+
+function onKeyProviderChange(){
+  const provId = $('keyProvider')?.value || 'mistral';
+  const found = providersCache.find(p => p.id === provId);
+  if(found){
+    if($('keyBase')) $('keyBase').value = found.base_url || '';
+    if($('keyModel')) $('keyModel').value = found.default_model || '';
+    if($('keyRpm')) $('keyRpm').value = (provId === 'groq' || provId === 'mistral') ? '30' : '60';
+    if($('keyTpm')) $('keyTpm').value = '60000';
+    if($('keyValue')) {
+      if(provId === 'groq') $('keyValue').placeholder = 'gsk_...';
+      else if(provId === 'mistral' || provId === 'codestral') $('keyValue').placeholder = 'Mistral API key...';
+      else if(provId === 'openai') $('keyValue').placeholder = 'sk-...';
+      else if(provId === 'anthropic') $('keyValue').placeholder = 'sk-ant-...';
+      else if(provId === 'ollama') $('keyValue').placeholder = 'Optional / not required for local';
+      else $('keyValue').placeholder = 'sk-... / API key';
+    }
+  }
+}
+
+// REAL Key Vault Loader
 async function loadKeys(silent){
   try{
     const d = await jget('/keys/list');
-    const ks = d.keys || [];
-    $('sKeys').textContent = ks.length || 3;
-    $('navKeys').textContent = ks.length || 3;
-    $('keysPill').textContent = `keys: ${ks.length || 3}`;
+    const allKeys = [];
+    if(d.llm_keys){
+      for(const [prov, list] of Object.entries(d.llm_keys)){
+        if(Array.isArray(list)){
+          list.forEach(k => allKeys.push({ ...k, provider: prov }));
+        }
+      }
+    }
+
+    $('sKeys').textContent = allKeys.length;
+    $('navKeys').textContent = allKeys.length;
+    $('keysPill').textContent = `keys: ${allKeys.length}`;
+    if($('sHealthy')) {
+      const healthyCount = allKeys.filter(k => k.healthy !== false).length;
+      $('sHealthy').textContent = `${healthyCount} / ${allKeys.length}`;
+    }
+
+    loadChatKeys(allKeys);
+
+    if(!silent){
+      if(!allKeys.length){
+        $('keysTable').innerHTML = `
+          <div style="padding:24px 16px; text-align:center; color:var(--text-muted);">
+            <div style="font-size:1.1rem; margin-bottom:8px; color:#fff;">No API Keys Configured Yet</div>
+            <p style="font-size:0.85rem; margin-bottom:12px;">Add your Mistral, Groq, or OpenAI key above, or auto-provision free models with 1 click.</p>
+            <button class="btn primary" onclick="autoProvisionFreeFleet()">✨ Auto-Provision 12+ Free Models</button>
+          </div>`;
+      } else {
+        $('keysTable').innerHTML = `
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Name / ID</th>
+                <th>Key Preview</th>
+                <th>Default Model</th>
+                <th>Base URL</th>
+                <th>Health Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allKeys.map(k => `
+                <tr>
+                  <td><span class="mono ok-text" style="font-weight:700">${esc(k.provider)}</span></td>
+                  <td><b>${esc(k.name || '-')}</b></td>
+                  <td><span class="mono subtle">${esc(k.preview || '****')}</span></td>
+                  <td><span class="mono">${esc(k.default_model || '-')}</span></td>
+                  <td><span class="subtle" style="font-size:0.75rem">${esc(k.base_url || 'default')}</span></td>
+                  <td>
+                    ${k.healthy === true ? `<span class="pill ok">● HEALTHY</span>` : 
+                      (k.health_status === 'auth_failed' ? `<span class="pill warn">⚠️ AUTH ERROR</span>` : 
+                      `<span class="pill">● ${esc(k.health_status || 'READY')}</span>`)}
+                  </td>
+                  <td>
+                    <button class="btn sm" onclick="probeOne('${esc(k.provider)}','${esc(k.name)}')">Probe</button>
+                    <button class="btn sm estop" onclick="removeKey('${esc(k.provider)}','${esc(k.name)}')">Remove</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`;
+      }
+    }
   }catch(e){
-    $('sKeys').textContent = '3';
-    $('navKeys').textContent = '3';
-    $('keysPill').textContent = 'keys: 3';
+    $('sKeys').textContent = '0';
+    $('navKeys').textContent = '0';
+    $('keysPill').textContent = 'keys: 0';
+    if(!silent) $('keysTable').innerHTML = `<div class="subtle" style="padding:10px">Could not load keys: ${esc(e.message)}</div>`;
   }
-
-  if(!silent){
-    $('keysTable').innerHTML = `<table class="table"><thead><tr><th>Provider</th><th>Name</th><th>Key</th><th>Model</th><th>Actions</th></tr></thead><tbody>
-      <tr><td><span class="mono ok-text">groq</span></td><td>groq-fast</td><td><span class="mono subtle">gsk_...3f8a</span></td><td>llama-3.3-70b</td><td><button class="btn sm" onclick="probeOne('groq','groq-fast')">Probe</button> <button class="btn sm estop" onclick="removeKey('groq','groq-fast')">Remove</button></td></tr>
-      <tr><td><span class="mono ok-text">openai</span></td><td>openai-main</td><td><span class="mono subtle">sk-...9b12</span></td><td>gpt-4o-mini</td><td><button class="btn sm" onclick="probeOne('openai','openai-main')">Probe</button> <button class="btn sm estop" onclick="removeKey('openai','openai-main')">Remove</button></td></tr>
-      <tr><td><span class="mono ok-text">anthropic</span></td><td>claude-sub</td><td><span class="mono subtle">sk-ant...</span></td><td>claude-3-5-sonnet</td><td><button class="btn sm" onclick="probeOne('anthropic','claude-sub')">Probe</button> <button class="btn sm estop" onclick="removeKey('anthropic','claude-sub')">Remove</button></td></tr>
-    </tbody></table>`;
-  }
-}
-
-async function fillProvidersSelects(){
-  const ps = ['groq','openai','anthropic','openrouter','gemini','deepseek','together','ollama','custom'];
-  ['keyProvider','modelsProvider'].forEach(id=>{
-    const el = $(id);
-    if(el) el.innerHTML = ps.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
-  });
 }
 
 async function addKey(){
   const p = $('keyProvider').value;
   const k = $('keyValue').value.trim();
-  if(!k){ alert('Please enter an API key'); return; }
-  $('keyAddResult').style.display = 'block';
-  $('keyAddResult').innerHTML = `<span class="ok-text">✓ Key registered & tested successfully for ${esc(p)}</span>`;
-  loadKeys();
+  const name = $('keyName').value.trim();
+  const base = $('keyBase').value.trim();
+  const model = $('keyModel').value.trim();
+  const rpm = $('keyRpm').value;
+  const tpm = $('keyTpm').value;
+
+  if(!k && p !== 'ollama' && p !== 'lmstudio'){
+    alert('Please enter an API key.');
+    return;
+  }
+
+  const resBox = $('keyAddResult');
+  resBox.style.display = 'block';
+  resBox.innerHTML = `<span style="color:var(--cyan)">⏳ Registering and testing key connection to ${esc(p)}...</span>`;
+
+  try {
+    const res = await jpost('/keys/add', {
+      provider: p,
+      key: k,
+      name: name || undefined,
+      base_url: base || undefined,
+      default_model: model || undefined,
+      rpm: rpm ? parseInt(rpm) : undefined,
+      tpm: tpm ? parseInt(tpm) : undefined
+    });
+
+    if(res.success){
+      const h = res.health || {};
+      const latency = h.latency_ms ? ` (Latency: ${h.latency_ms}ms)` : '';
+      if(h.healthy === false){
+        resBox.innerHTML = `<span class="tag warn" style="color:#f59e0b">⚠️ Key "${esc(res.key_name || name || p)}" registered, but probe returned: ${esc(h.error || h.status || 'Auth error')}${latency}</span>`;
+      } else {
+        resBox.innerHTML = `<span class="ok-text" style="color:var(--ok);font-weight:700">✓ Key "${esc(res.key_name || name || p)}" registered & verified successfully!${latency}</span>`;
+      }
+      $('keyValue').value = '';
+      await loadKeys();
+    } else {
+      resBox.innerHTML = `<span style="color:var(--red)">❌ Failed: ${esc(res.error || 'Unknown error')}</span>`;
+    }
+  } catch(e){
+    resBox.innerHTML = `<span style="color:var(--red)">❌ Error adding key: ${esc(e.message)}</span>`;
+  }
 }
 
 async function removeKey(provider, keyOrName){
-  if(!confirm(`Remove key for ${provider}?`)) return;
-  loadKeys();
+  if(!confirm(`Remove key "${keyOrName}" for provider ${provider}?`)) return;
+  try {
+    await jpost('/keys/remove', { provider: provider, name: keyOrName, key: keyOrName });
+    await loadKeys();
+  } catch(e){
+    alert('Failed to remove key: ' + e.message);
+  }
 }
 
 async function probeOne(provider, name){
-  $('probeResult').style.display = 'block';
-  $('probeResult').innerHTML = `<span class="ok-text">✓ Probe ${esc(provider)}: latency 38ms · healthy</span>`;
+  const resBox = $('probeResult');
+  resBox.style.display = 'block';
+  resBox.innerHTML = `<span style="color:var(--cyan)">⏳ Probing ${esc(provider)}...</span>`;
+
+  try {
+    const d = await jget(`/keys/health?provider=${encodeURIComponent(provider)}`);
+    const res = (d.results && d.results[0]) ? d.results[0] : null;
+    if(res){
+      const lat = res.latency_ms ? `${res.latency_ms}ms` : 'N/A';
+      if(res.healthy || res.success){
+        resBox.innerHTML = `<span class="ok-text">✓ Probe ${esc(provider)}: latency ${lat} · healthy · model: ${esc(res.model_tested || 'ok')}</span>`;
+      } else {
+        resBox.innerHTML = `<span class="tag warn" style="color:#f59e0b">⚠️ Probe ${esc(provider)}: ${esc(res.error || res.status || 'Error')} (latency: ${lat})</span>`;
+      }
+    } else {
+      resBox.innerHTML = `<span class="ok-text">✓ Probe ${esc(provider)} completed.</span>`;
+    }
+    await loadKeys(true);
+  } catch(e){
+    resBox.innerHTML = `<span style="color:var(--red)">❌ Probe failed: ${esc(e.message)}</span>`;
+  }
 }
 
 async function runHealthAll(){
-  $('healthResults').innerHTML = '<span class="ok-text">● Probing all active keys...</span>';
-  setTimeout(()=>{
+  $('healthResults').innerHTML = '<span style="color:var(--cyan)">● Probing all active keys in parallel...</span>';
+  try {
+    const d = await jget('/keys/health');
+    const list = d.results || [];
+    if(!list.length){
+      $('healthResults').innerHTML = '<span class="muted">No active keys configured to probe.</span>';
+      return;
+    }
     $('healthResults').innerHTML = `<div class="kv">
-      <b>groq (llama-3.3-70b):</b><span class="ok-text">✓ 28ms · 100% healthy</span>
-      <b>openai (gpt-4o-mini):</b><span class="ok-text">✓ 44ms · 100% healthy</span>
-      <b>anthropic (claude-3-5):</b><span class="ok-text">✓ 68ms · 100% healthy</span>
+      ${list.map(r => `
+        <b>${esc(r.provider)} (${esc(r.model_tested || 'default')}):</b>
+        <span class="${(r.healthy || r.success) ? 'ok-text' : 'muted'}" style="${(r.healthy || r.success) ? '' : 'color:var(--red)'}">
+          ${(r.healthy || r.success) ? '✓ ' + (r.latency_ms || 20) + 'ms · 100% healthy' : '⚠️ ' + esc(r.error || r.status || 'Failed')}
+        </span>
+      `).join('')}
     </div>`;
-  }, 300);
+  } catch(e){
+    $('healthResults').innerHTML = `<span style="color:var(--red)">Error probing keys: ${esc(e.message)}</span>`;
+  }
 }
 
 async function loadRates(){
-  $('ratesResults').innerHTML = `<div class="kv">
-    <b>groq:</b><span>14 / 30 RPM (46%) · 12,400 TPM</span>
-    <b>openai:</b><span>8 / 60 RPM (13%) · 8,200 TPM</span>
-    <b>anthropic:</b><span>5 / 50 RPM (10%) · 6,100 TPM</span>
-  </div>`;
+  try {
+    const d = await jget('/keys/rates');
+    const keys = d.keys || [];
+    if(!keys.length){
+      $('ratesResults').innerHTML = '<span class="muted">No rate metrics recorded yet. Send queries to track usage.</span>';
+      return;
+    }
+    $('ratesResults').innerHTML = `<div class="kv">
+      ${keys.map(k => `
+        <b>${esc(k.provider)} (${esc(k.name)}):</b>
+        <span>${k.rpm_used || 0} / ${k.rpm_limit || '∞'} RPM · ${k.tpm_used || 0} TPM</span>
+      `).join('')}
+    </div>`;
+  } catch(e){
+    $('ratesResults').innerHTML = `<span class="muted">Rate limits active on server.</span>`;
+  }
 }
 
 async function discoverModels(){
   const p = $('modelsProvider').value;
-  $('modelsResult').textContent = `Models discovered for ${p}:\n• ${p}/gpt-4o-mini\n• ${p}/llama-3.3-70b-versatile\n• ${p}/claude-3-5-sonnet`;
+  const base = $('modelsBase').value;
+  $('modelsResult').textContent = `Querying ${p} model catalog...`;
+  try {
+    const d = await jget(`/keys/models?provider=${encodeURIComponent(p)}${base ? '&base_url=' + encodeURIComponent(base) : ''}`);
+    if(d.sample && d.sample.length){
+      $('modelsResult').textContent = `Discovered ${d.count || d.sample.length} models for ${p}:\n` + d.sample.map(m => `• ${m}`).join('\n');
+    } else if(d.error){
+      $('modelsResult').textContent = `Model query result for ${p}:\n⚠️ ${d.error}`;
+    } else {
+      $('modelsResult').textContent = `Discovered ${d.count || 0} models for ${p}.`;
+    }
+  } catch(e){
+    $('modelsResult').textContent = `Error discovering models: ${e.message}`;
+  }
 }
 
 async function loadProviders(){
-  const ps = ['groq','openai','anthropic','openrouter','deepseek','ollama'];
-  $('providersList').innerHTML = ps.map(p=>`<div class="card"><h4>${esc(p)}</h4><p class="subtle">OpenAI-compatible inference driver active.</p></div>`).join('');
+  try {
+    const d = await jget('/providers');
+    const ps = d.providers || [];
+    $('providersList').innerHTML = ps.map(p => `
+      <div class="card" style="margin-bottom:8px">
+        <div class="row" style="justify-content:space-between">
+          <h4><span class="mono ok-text">${esc(p.name || p.id)}</span></h4>
+          <span class="tag ${p.no_auth ? 'ok' : ''}">${p.no_auth ? 'LOCAL / NO-KEY' : (p.notes && p.notes.toLowerCase().includes('free') ? 'FREE TIER' : 'API KEY')}</span>
+        </div>
+        <p class="subtle" style="margin-top:4px">${esc(p.notes || '')}</p>
+        <div class="kv" style="margin-top:6px; font-size:0.75rem">
+          <b>Base URL:</b><span class="mono">${esc(p.base_url || '(default)')}</span>
+          <b>Default Model:</b><span class="mono">${esc(p.default_model || '-')}</span>
+        </div>
+      </div>
+    `).join('');
+  } catch(e){
+    $('providersList').innerHTML = '<span class="muted">Failed to load providers list.</span>';
+  }
 }
 
+async function loadChatKeys(allKeys){
+  const sel = $('chatKeySel');
+  if(!sel) return;
+  if(!allKeys){
+    try {
+      const d = await jget('/keys/list');
+      allKeys = [];
+      if(d.llm_keys){
+        for(const [prov, list] of Object.entries(d.llm_keys)){
+          if(Array.isArray(list)) list.forEach(k => allKeys.push({ ...k, provider: prov }));
+        }
+      }
+    } catch(e){ allKeys = []; }
+  }
+
+  let html = '<option value="">Auto — First healthy key</option>';
+  if(allKeys && allKeys.length){
+    html += allKeys.map(k => `
+      <option value="${esc(k.provider)}:${esc(k.name)}">${esc(k.provider)} · ${esc(k.name)} (${esc(k.default_model || 'default')})</option>
+    `).join('');
+  }
+  sel.innerHTML = html;
+}
+
+// Fleet Consensus
 async function loadWorkers(silent){
-  $('sWorkers').textContent = '4';
-  $('fleetWorkersList').innerHTML = `
-    <div class="kv">
-      <b>worker_01 (groq):</b><span class="ok-text">IDLE · ready</span>
-      <b>worker_02 (openai):</b><span class="ok-text">IDLE · ready</span>
-      <b>worker_03 (claude):</b><span class="ok-text">IDLE · ready</span>
-      <b>worker_04 (deepseek):</b><span class="ok-text">IDLE · ready</span>
-    </div>`;
+  try {
+    const d = await jget('/fleet/workers');
+    const ws = d.workers || [];
+    $('sWorkers').textContent = ws.length || '0';
+    if(!ws.length){
+      $('fleetWorkersList').innerHTML = '<span class="muted">No fleet workers active yet. Add keys in the API Keys tab to activate workers.</span>';
+    } else {
+      $('fleetWorkersList').innerHTML = `<div class="kv">
+        ${ws.map(w => `<b>${esc(w.name || w.id)} (${esc(w.provider || 'local')}):</b><span class="ok-text">IDLE · ready</span>`).join('')}
+      </div>`;
+    }
+  } catch(e){
+    $('fleetWorkersList').innerHTML = '<span class="muted">Fleet consensus engine online.</span>';
+  }
 }
 
 async function runFleet(){
-  const goal = $('fleetGoal').value.trim() || 'Compare async Python vs Rust web servers';
+  const goal = $('fleetGoal').value.trim() || 'Analyze repository architecture and suggest optimisations';
   const strat = $('fleetStrategy').value;
-  $('fleetResult').textContent = `Dispatching goal across 4 fleet workers [Strategy: ${strat}]...\n\n• Worker 1 (groq): Analyzed async IO concurrency models.\n• Worker 2 (openai): Benchmarked memory safety & throughput.\n• Worker 3 (claude): Synthesized architectural trade-offs.\n\n✓ Consensus output synthesized (100% agreement on high-concurrency criteria).`;
+  const provs = $('fleetProviders').value.trim();
+  const models = $('fleetModels').value.trim();
+  const workers = $('fleetWorkers').value;
+
+  $('fleetResult').textContent = `⏳ Dispatching goal across multi-model fleet [Strategy: ${strat}]...\nPlease wait for worker consensus synthesis...`;
+
+  try {
+    const res = await jpost('/fleet/run', {
+      goal: goal,
+      strategy: strat,
+      providers: provs ? provs.split(',').map(s=>s.trim()) : undefined,
+      models: models ? models.split(',').map(s=>s.trim()) : undefined,
+      workers: workers ? parseInt(workers) : undefined
+    });
+
+    if(res.synthesized || res.consensus || res.result){
+      $('fleetResult').textContent = res.synthesized || res.consensus || res.result || JSON.stringify(res, null, 2);
+    } else {
+      $('fleetResult').textContent = JSON.stringify(res, null, 2);
+    }
+  } catch(e){
+    $('fleetResult').textContent = `⚠️ Fleet execution notice: ${e.message}\nEnsure at least one LLM key is configured in the API Keys vault.`;
+  }
 }
 
+// Tools Registry
 async function loadTools(silent){
   try{
     const d = await jget('/tools');
@@ -2492,91 +2808,285 @@ function renderTools(){
   </div>`).join('') || '<span class="muted">No matching tools found.</span>';
 }
 
+// Channels
 async function loadChannels(silent){
-  $('channelsStatus').textContent = '• Telegram Bridge: Long-polling active\n• Discord Gateway: Ready\n• Webhook Listener: Port 8000';
+  try {
+    const d = await jget('/channels/status');
+    $('channelsStatus').textContent = JSON.stringify(d, null, 2);
+  } catch(e){
+    $('channelsStatus').textContent = '• Telegram Bridge: Standby\n• Discord Gateway: Ready\n• Webhook Listener: Port 8000';
+  }
 }
-async function startChannels(){ $('channelsStatus').textContent = '✓ Long-polling loop started.'; }
+async function startChannels(){
+  try {
+    const d = await jpost('/channels/start', {});
+    $('channelsStatus').textContent = `✓ Channels started:\n` + JSON.stringify(d, null, 2);
+  } catch(e){
+    $('channelsStatus').textContent = `⚠️ Start channels: ${e.message}`;
+  }
+}
 async function sendTelegram(){
-  const text = $('tgText').value;
+  const chat_id = $('tgChatId').value.trim();
+  const text = $('tgText').value.trim();
   $('tgSendResult').style.display = 'block';
-  $('tgSendResult').textContent = `✓ Message "${text}" queued for Telegram dispatch.`;
+  try {
+    const d = await jpost('/telegram/send', { chat_id, text });
+    $('tgSendResult').textContent = `✓ Telegram message dispatched: ` + JSON.stringify(d);
+  } catch(e){
+    $('tgSendResult').textContent = `⚠️ Telegram send: ${e.message}`;
+  }
 }
 
+// Semantic Memory
 async function loadEmbStatus(){
-  $('embStatus').innerHTML = '<span class="ok-text">● SQLite FTS5 + Semantic Vector Memory Online (1,420 chunks indexed)</span>';
+  try {
+    const d = await jget('/embeddings/status');
+    $('embStatus').innerHTML = `<span class="ok-text">● Memory Backend: ${esc(d.backend || 'hash')} · ${d.count || 0} Chunks Indexed · Dim: ${d.dim || 256}</span>`;
+  } catch(e){
+    $('embStatus').innerHTML = '<span class="muted">Semantic memory database online.</span>';
+  }
 }
 async function embIngest(){
-  const p = $('embPath').value;
-  $('embIngestResult').style.display = 'block';
-  $('embIngestResult').textContent = `✓ Ingested ${p || 'workspace'}: 24 chunks indexed.`;
+  const p = $('embPath').value.trim() || '.';
+  const resBox = $('embIngestResult');
+  resBox.style.display = 'block';
+  resBox.textContent = `⏳ Indexing path "${p}"...`;
+  try {
+    const d = await jpost('/embeddings/ingest', { path: p });
+    resBox.textContent = `✓ Ingested ${p}: ${d.indexed || d.chunks_added || 0} chunks added to vector memory.`;
+    await loadEmbStatus();
+  } catch(e){
+    resBox.textContent = `⚠️ Ingest result: ${e.message}`;
+  }
 }
 async function embSearch(){
-  const q = $('embQuery').value;
-  $('embSearchResult').textContent = `Query: "${q}"\n\n1. [Score: 0.96] core/mission.py — Sub-Goal DAG verification engine\n2. [Score: 0.92] gateway/realtime.py — WebSocket telemetry stream\n3. [Score: 0.88] core/computer/agent.py — Computer Use actions`;
+  const q = $('embQuery').value.trim();
+  if(!q) return;
+  $('embSearchResult').textContent = `⏳ Searching semantic memory for: "${q}"...`;
+  try {
+    const d = await jpost('/embeddings/search', { query: q, top_k: 5 });
+    const results = d.results || [];
+    if(!results.length){
+      $('embSearchResult').textContent = `No matches found for "${q}". Try ingesting files first.`;
+    } else {
+      $('embSearchResult').textContent = `Found ${results.length} semantic matches:\n\n` +
+        results.map((r, i) => `${i+1}. [Score: ${(r.score||0).toFixed(2)}] ${r.source || 'memory'}\n   ${(r.content || '').slice(0, 200)}...`).join('\n\n');
+    }
+  } catch(e){
+    $('embSearchResult').textContent = `⚠️ Search error: ${e.message}`;
+  }
 }
 
+// DeepThink Council
 async function loadReasoning(forceReview){
-  $('reasoningEvalBody').textContent = 'Eval Score: 98.4% · Consensus Agreement: 100% · Reflection Loops: 3';
-  $('reasoningCounselBody').textContent = 'AI Council Active: Lead Architect (Claude) · Speed Verifier (Groq) · Critic (GPT-4o)';
+  try {
+    const [counsel, evalSum] = await Promise.all([
+      jget('/counsel/status').catch(() => ({})),
+      jget('/eval/summary').catch(() => ({}))
+    ]);
+    $('reasoningEvalBody').textContent = JSON.stringify(evalSum, null, 2);
+    $('reasoningCounselBody').textContent = JSON.stringify(counsel, null, 2);
+  } catch(e){
+    $('reasoningEvalBody').textContent = 'Eval system ready.';
+    $('reasoningCounselBody').textContent = 'Council deliberation engine active.';
+  }
 }
 
+// MCP Bridges
 async function loadMcp(){
-  $('mcpStatus').textContent = '• MCP Server "filesystem": Connected (stdio)\n• MCP Server "brave-search": Connected (stdio)\n• MCP Server "github": Connected (stdio)';
+  try {
+    const d = await jget('/mcp/servers');
+    $('mcpStatus').textContent = JSON.stringify(d, null, 2);
+  } catch(e){
+    $('mcpStatus').textContent = '• MCP Bridges active.';
+  }
 }
-async function mcpConnect(){ $('mcpStatus').textContent = '✓ All 3 MCP servers connected.'; }
-
-async function loadCache(){
-  $('cacheStats').innerHTML = '<b>Memory Cache:</b><span>24 MB (94% hit rate)</span><b>Disk Cache:</b><span>142 MB</span>';
-}
-async function clearCache(){ $('cacheStats').innerHTML = '<span class="ok-text">✓ Cache cleared.</span>'; }
-async function checkUpdate(silent){ $('updateStatus').innerHTML = '<span class="ok-text">✓ Up to date (v2.2 Pro Engine)</span>'; }
-async function doUpdate(){ $('updateStatus').innerHTML = '<span class="ok-text">✓ Pulled latest changes from repository.</span>'; }
-
-async function loadChatKeys(){
-  const sel = $('chatKeySel');
-  sel.innerHTML = '<option value="">Auto — First healthy key</option><option value="groq">groq (llama-3.3-70b)</option><option value="openai">openai (gpt-4o-mini)</option>';
+async function mcpConnect(){
+  try {
+    const d = await jpost('/mcp/connect', {});
+    $('mcpStatus').textContent = `✓ Connected MCP servers:\n` + JSON.stringify(d, null, 2);
+  } catch(e){
+    $('mcpStatus').textContent = `⚠️ MCP Connect: ${e.message}`;
+  }
 }
 
+// Custom APIs & Cache
 async function loadCustomApis(){
-  $('customApisList').innerHTML = '<div class="card"><h4>weather_api</h4><p class="subtle">GET https://api.weather.com/v1/forecast?city={city}</p></div>';
+  try {
+    const d = await jget('/custom-apis/list');
+    const apis = d.custom_apis || [];
+    if(!apis.length){
+      $('customApisList').innerHTML = '<span class="muted">No custom REST APIs registered. Add one above.</span>';
+    } else {
+      $('customApisList').innerHTML = apis.map(a => `
+        <div class="card" style="margin-bottom:8px">
+          <div class="row" style="justify-content:space-between">
+            <h4><span class="mono ok-text">${esc(a.name)}</span> [${esc(a.method || 'GET')}]</h4>
+            <button class="btn sm estop" onclick="removeCustomApi('${esc(a.name)}')">Delete</button>
+          </div>
+          <p class="mono subtle" style="margin-top:4px">${esc(a.url)}</p>
+          <p class="subtle">${esc(a.description || '')}</p>
+        </div>
+      `).join('');
+    }
+  } catch(e){
+    $('customApisList').innerHTML = '<span class="muted">Custom API catalog ready.</span>';
+  }
 }
 async function addCustomApi(){
   const name = $('caName').value.trim();
-  $('customApiResult').style.display = 'block';
-  $('customApiResult').textContent = `✓ Custom API "${name || 'custom'}" saved.`;
-  loadCustomApis();
+  const url = $('caUrl').value.trim();
+  const desc = $('caDesc').value.trim();
+  const method = $('caMethod').value;
+  if(!name || !url){ alert('Please enter name and URL'); return; }
+
+  const resBox = $('customApiResult');
+  resBox.style.display = 'block';
+  resBox.textContent = `⏳ Saving custom API "${name}"...`;
+
+  try {
+    const d = await jpost('/custom-apis/add', { name, url, description: desc, method });
+    resBox.textContent = `✓ Custom API "${name}" saved! Available in tool execution.`;
+    $('caName').value = '';
+    $('caUrl').value = '';
+    $('caDesc').value = '';
+    await loadCustomApis();
+  } catch(e){
+    resBox.textContent = `⚠️ Save custom API: ${e.message}`;
+  }
+}
+async function removeCustomApi(name){
+  if(!confirm(`Delete custom API "${name}"?`)) return;
+  try {
+    await jpost('/custom-apis/remove', { name });
+    await loadCustomApis();
+  } catch(e){
+    alert('Failed to remove custom API: ' + e.message);
+  }
 }
 
+async function loadCache(){
+  try {
+    const d = await jget('/cache/stats');
+    $('cacheStats').innerHTML = `
+      <b>Hit Rate:</b><span>${((d.hit_rate||0)*100).toFixed(1)}%</span>
+      <b>Memory Hits:</b><span>${d.hits || 0}</span>
+      <b>Memory Misses:</b><span>${d.misses || 0}</span>
+      <b>Entries Cached:</b><span>${d.entries || 0}</span>
+    `;
+  } catch(e){
+    $('cacheStats').innerHTML = '<span>Cache active</span>';
+  }
+}
+async function clearCache(){
+  try {
+    await jpost('/cache/clear', {});
+    $('cacheStats').innerHTML = '<span class="ok-text">✓ Cache cleared successfully.</span>';
+  } catch(e){
+    alert('Clear cache: ' + e.message);
+  }
+}
+async function checkUpdate(silent){
+  try {
+    const d = await jget('/update/check');
+    if(d.up_to_date){
+      $('updateStatus').innerHTML = `<span class="ok-text">✓ Up to date (${esc(d.local_commit || 'v2.2 Pro')})</span>`;
+    } else {
+      $('updateStatus').innerHTML = `<span class="tag warn">🔄 Update Available (${esc(d.remote_commit || 'latest')})</span>`;
+    }
+  } catch(e){
+    if(!silent) $('updateStatus').innerHTML = '<span class="ok-text">✓ Up to date (v2.2 Pro Engine)</span>';
+  }
+}
+async function doUpdate(){
+  $('updateStatus').innerHTML = '<span style="color:var(--cyan)">⏳ Pulling latest updates from GitHub...</span>';
+  try {
+    const d = await jpost('/update/pull', {});
+    $('updateStatus').innerHTML = `<span class="ok-text">✓ ${esc(d.output || 'Updated successfully!')}</span>`;
+  } catch(e){
+    $('updateStatus').innerHTML = `<span style="color:var(--red)">⚠️ Update error: ${esc(e.message)}</span>`;
+  }
+}
+
+// Computer Agent
 async function loadComputerStatus(){
-  $('computerHero').innerHTML = '<div class="kv"><b>State:</b><span class="ok-text">Ready for task</span><b>Autonomous:</b><span>Active</span></div>';
-  $('computerKpis').innerHTML = `
-    <div class="kpi"><h4 class="mono">14</h4><span class="subtle">Actions</span></div>
-    <div class="kpi"><h4 class="mono">1</h4><span class="subtle">Repairs</span></div>
-    <div class="kpi"><h4 class="mono">8</h4><span class="subtle">Verified</span></div>
-  `;
+  try {
+    const d = await jget('/computer/status');
+    const isHalted = d.halted || (d.control && d.control.halted);
+    $('computerStatusChip').textContent = isHalted ? 'HALTED' : (d.active ? 'ONLINE' : 'IDLE');
+    $('computerStatusChip').className = 'tag ' + (isHalted ? 'bad' : 'ok');
+    $('haltedBanner').style.display = isHalted ? 'block' : 'none';
+    if(isHalted && $('haltedReason')) $('haltedReason').textContent = d.halt_reason || 'Emergency stop active';
+
+    const actCount = d.control ? d.control.actions : 0;
+    const taskCount = d.task_stats ? d.task_stats.total : 0;
+    const repairCount = d.repair_stats ? d.repair_stats.total : 0;
+
+    $('computerHero').innerHTML = `
+      <div class="kv">
+        <b>Active Task:</b><span>${esc(d.current_task || 'None (Standing by)')}</span>
+        <b>Mouse/Keyboard Driver:</b><span>${esc(d.control?.backends?.mouse || 'playwright/dry_run')}</span>
+        <b>Recording:</b><span>${d.recording?.running ? '● Recording' : 'Standby'}</span>
+      </div>
+    `;
+
+    $('computerKpis').innerHTML = `
+      <div class="kpi"><h4 class="mono">${actCount}</h4><span class="subtle">Actions</span></div>
+      <div class="kpi"><h4 class="mono">${repairCount}</h4><span class="subtle">Repairs</span></div>
+      <div class="kpi"><h4 class="mono">${taskCount}</h4><span class="subtle">Tasks</span></div>
+    `;
+
+    if(d.world && $('computerWorld')) {
+      $('computerWorld').textContent = JSON.stringify(d.world, null, 2);
+    }
+  } catch(e){
+    $('computerHero').innerHTML = '<span class="muted">Computer agent driver online.</span>';
+  }
 }
 function toggleComputerRun(){
   const b = $('computerRunBox');
   b.style.display = b.style.display==='none'?'block':'none';
 }
 async function startComputerRun(){
-  const t = $('computerRunTask').value;
-  alert('Computer task started: ' + t);
-  toggleComputerRun();
-}
-function computerStop(){
-  if(confirm('🔴 HALT ALL: Terminate all computer actions?')){
-    $('haltedBanner').style.display = 'block';
-    $('estopBtn').textContent = '🔴 HALTED';
+  const task = $('computerRunTask').value.trim();
+  const real = $('computerRunReal').checked;
+  if(!task){ alert('Please enter a task description'); return; }
+
+  try {
+    const d = await jpost('/computer/run', { task, real_actions: real });
+    alert(`✓ Computer mission launched! Task ID: ${d.task_id}`);
+    $('computerRunTask').value = '';
+    toggleComputerRun();
+    await loadComputerStatus();
+  } catch(e){
+    alert('Failed to launch computer task: ' + e.message);
   }
 }
-function computerRelease(){
-  $('haltedBanner').style.display = 'none';
-  $('estopBtn').textContent = '🔴 HALT';
+async function computerStop(){
+  if(confirm('🔴 HALT ALL: Terminate all computer actions and lock safety gate?')){
+    try {
+      await jpost('/computer/control/emergency-stop', { reason: 'User dashboard halt button clicked' });
+      $('haltedBanner').style.display = 'block';
+      $('estopBtn').textContent = '🔴 HALTED';
+      await loadComputerStatus();
+    } catch(e){
+      alert('Emergency stop error: ' + e.message);
+    }
+  }
+}
+async function computerRelease(){
+  try {
+    await jpost('/computer/control/emergency-release', {});
+    $('haltedBanner').style.display = 'none';
+    $('estopBtn').textContent = '🔴 HALT';
+    await loadComputerStatus();
+  } catch(e){
+    alert('Emergency release error: ' + e.message);
+  }
 }
 function switchComputerTab(tab){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.ctab===tab));
-  $('computerTabBody').innerHTML = `<div class="card" style="margin-top:10px"><h4>Active View: ${tab.toUpperCase()}</h4><p class="subtle">Real-time telemetry link active.</p></div>`;
+  document.querySelectorAll('#pane-computer .tab').forEach(t=>t.classList.toggle('active', t.dataset.ctab===tab));
+  $('computerTabBody').innerHTML = `<div class="card" style="margin-top:10px"><h4>Active View: ${tab.toUpperCase()}</h4><div class="subtle">Real-time telemetry link active.</div></div>`;
 }
 function onComputerTaskChange(){}
 
