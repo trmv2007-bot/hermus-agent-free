@@ -92,14 +92,14 @@ The final tree must not contain two competing implementations.
 | Events | 🟡 **bridged** (`core/dashboard_events.py`) | Every dashboard/gateway/speech event now funnels into the one canonical `core.events.EventBus` (durable, replayable). The dict API is kept only as a migration bridge. |
 | Memory | ✅ **DONE** — `MemoryFacade` is the single writable memory path | The facade owns the typed Memory2 store plus the v1 session/curated/user-model/token backend; no competing process-level v1 singleton. |
 | World state | ✅ **DONE** — `world_state_v2.py` **deleted** | `core/computer/world_state.WorldState` (v1) is canonical; `core.state.WorldStateFacade` is the single writable path. The dead V2 duplicate (exported only from `__init__`, used by no functional code) was removed. |
-| Models | 🟡 `providers`/`provider_resolver`/`model_fleet`/`router2`/`multi_key` hidden behind `ModelGateway` | one model-selection path. |
+| Models | ✅ **verified single stack — no duplicate** | The provider layer (`providers` → `multi_key` → `provider_resolver` → `model_capabilities`) is one mutually-dependent stack with `ModelGateway` (`core/models/gateway.py`) as its single public facade. Each capability (`select_usable_bundle`, `list_available_providers`, `discover_runtime_bundles`, `negotiate`, `select_compatible_model`, `diagnose`) has exactly **one** owner. `router2` (runtime task-type model swap) and `model_fleet` (multi-model distribution) are distinct higher-level features, not duplicates. No competing production implementation exists to delete. |
 | Setup | 🟡 `setup.sh`/`activate.sh` thin wrappers → `./hermus bootstrap` | one bootstrap. |
 
 ### Deletion milestones (follow-ups)
 1. ~~Migrate world-state consumers → `WorldStateFacade`; delete v1.~~ ✅ done (deleted the dead `world_state_v2` duplicate; v1 is canonical).
 2. Migrate run/dashboard/computer event producers + consumers to `EventEnvelope`; delete the legacy event modules.
 3. Migrate legacy memory consumers → `core.memory.get_memory()` entirely; retire `core/compat/legacy_memory.py` as a public path (facade already owns the v1 backend).
-4. Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway` — **next milestone** (callers still import them directly).
+4. ~~Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway`.~~ **resolved — no duplicate found.** Detect-first analysis verified these are ONE mutually-dependent provider stack, not competing implementations; `ModelGateway` is the single facade. No deletion warranted. (Future nicety, not a deletion: have the live runtime's model-selection path also go through `ModelGateway`.)
 5. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.
 6. Delete duplicate agent managers / orchestration concepts with no distinct contract.
 
