@@ -136,3 +136,42 @@ journal is a cross-process tail feed, not a competing authority.
 `tests/test_computer_agent_v1.py` (recording/verification) and
 `tests/test_computer_agent_v2.py` (agent/state-machine/repair) — distinct tests,
 not duplicate implementations.
+
+---
+
+## Verified progress (this consolidation pass)
+
+### Tool boundary — agent now routes through the canonical ToolGateway
+- `core/agent._execute_tool` now delegates every tool invocation to
+  `get_tool_gateway().execute()` (descriptor resolution, policy gating, typed
+  `ToolResult`, timeout handling, canonical event emission + trace correlation),
+  still backed by the same `core.tool_registry`. The runtime no longer calls
+  `tool_registry.execute()` directly.
+
+### Architecture gates (21 total in `tests/test_architecture_gates.py`)
+- `test_one_tool_gateway_agent_runtime_uses_it` / `..._control_room_uses_it` /
+  `..._no_duplicate_invoke_path` — one tool boundary, no agent bypass.
+- `test_autonomy_never_silently_falls_back_to_chat` /
+  `test_autonomy_crash_records_failed_not_completed` — autonomy reports explicit
+  BLOCKED/FAILED, never a silent downgrade or fabricated completion.
+- `test_runtime_uses_canonical_model_gateway` — capability surface uses ModelGateway.
+- `test_no_committed_secrets_in_production` — security gate.
+- `test_health_endpoint_probes_not_fabricated` / `test_doctor_reports_explicit_states_not_fake_ok`
+  — honesty gate.
+
+### Capability-flow integration tests (`tests/test_capability_flows.py`, 15 tests)
+Realistic offline flows through the canonical owners, mapped to spec Tasks 1-8:
+- T1 ModelGateway select + typed outcome recording (never fake success)
+- T2 ToolGateway execute + canonical event emission + typed failure; MissionEngine
+  drives a node through the gateway
+- T3 failure recovery: JobQueue retries a transient failure; exhausted retries
+  surface FAILED/BLOCKED (never 'completed')
+- T4 canonical JobQueue runs a job to a result; AgentManager surfaces queue='canonical'
+- T5 long-running backend: mission persists + EventBus durable log replays after a
+  new bus (reconnect)
+- T6 computer events bridge onto the canonical EventBus; verifier records
+  before/after evidence
+- T7 MemoryFacade round-trip: typed recall + session search + token usage
+- T8 ModelGateway fallback classifies a rate-limit as retryable (not fake ok)
+
+Suite: **626 passed** (baseline 590 → +36). Module import scan: 167 modules, 0 failures.
