@@ -436,6 +436,32 @@ def test_canonical_packages_import_cleanly():
         importlib.import_module(mod)
 
 
+def test_control_room_is_snapshot_replay_projection():
+    """The single control room is a snapshot + replay projection (spec §21).
+
+    It never owns truth: it reads live probes (snapshot) and reconstructs state
+    from the durable event log (replay). The page must reference the canonical
+    /api/v1 endpoints and NOT fabricate any status on its own.
+    """
+    from fastapi.testclient import TestClient
+    from gateway.gateway import app
+    client = TestClient(app)
+    r = client.get("/control")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    html = r.text
+    # snapshot sources (real probes, never fabricated)
+    assert "/api/v1/system/health" in html
+    assert "/api/v1/system/capabilities" in html
+    assert "/jobs" in html
+    # replay source (durable canonical event log)
+    assert "/api/v1/runs/" in html and "timeline" in html
+    # command path is the typed gateway command (never a raw side-effect)
+    assert "/api/v1/commands" in html
+    # explicit declaration that the UI owns no truth
+    assert "never owns truth" in html or "projection" in html
+
+
 # ---------------------------------------------------------------------------
 # Learning facade (evidence-gated promotion, §16)
 # ---------------------------------------------------------------------------

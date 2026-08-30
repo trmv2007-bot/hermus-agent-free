@@ -394,6 +394,25 @@ async def dashboard_legacy():
     )
 
 
+@app.get("/control", response_class=HTMLResponse)
+@app.get("/controlroom", response_class=HTMLResponse)
+async def control_room():
+    """Canonical single control room (Rebuild spec §21).
+
+    Pure snapshot + replay projection: state is either a live probe
+    (``/api/v1/system/*``, ``/jobs``, ``/queue/status``) or reconstructable from
+    the durable canonical event log (``/api/v1/runs/{id}/timeline``). It never
+    owns truth. This is the single UI surface the spec calls for.
+    """
+    html_path = Path(__file__).parent / "control.html"
+    if not html_path.exists():
+        return HTMLResponse("Control room not found", status_code=404)
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/jarvis", response_class=HTMLResponse)
 @app.get("/dashboard/jarvis", response_class=HTMLResponse)
 async def dashboard_jarvis():

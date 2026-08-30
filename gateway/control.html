@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HERMUS · Control Room</title>
+<style>
+  :root {
+    --bg:#0b0e14; --panel:#141924; --panel2:#1b2230; --line:#263041;
+    --fg:#e6edf3; --muted:#8b98a9; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+    --acc:#58a6ff;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    padding:16px 22px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px;
+  }
+  header .logo { font-weight:700; letter-spacing:.06em; color:var(--acc); }
+  header .health { margin-left:auto; display:flex; gap:10px; align-items:center; }
+  .pill {
+    padding:3px 10px; border-radius:999px; font-size:12px;
+    border:1px solid var(--line); color:var(--muted);
+  }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  .pill.err { color:var(--err); border-color:var(--err); }
+  main { padding:20px 22px; display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  section {
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:16px; min-width:0;
+  }
+  section h2 {
+    margin:0 0 12px; font-size:12px; text-transform:uppercase; letter-spacing:.12em;
+    color:var(--muted);
+  }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; }
+  .kpi {
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:12px;
+  }
+  .kpi .v { font-size:22px; font-weight:700; }
+  .kpi .l { font-size:11px; color:var(--muted); margin-top:4px; }
+  ul { list-style:none; margin:0; padding:0; }
+  li.row {
+    display:flex; justify-content:space-between; gap:12px; padding:8px 10px;
+    border-bottom:1px solid var(--line); font-size:13px;
+  }
+  li.row:last-child { border-bottom:none; }
+  .tag { color:var(--muted); }
+  code { color:var(--acc); }
+  .feed {
+    height:260px; overflow:auto; font-size:12.5px;
+    background:#0e1420; border:1px solid var(--line); border-radius:8px; padding:10px;
+  }
+  .feed div { padding:2px 0; border-bottom:1px dashed #1c2534; }
+  .feed .t { color:var(--muted); }
+  .feed .e { color:var(--acc); }
+  .feed .note { color:var(--muted); font-style:italic; }
+  input, button, select {
+    background:var(--panel2); color:var(--fg); border:1px solid var(--line);
+    border-radius:6px; padding:8px 10px; font:inherit;
+  }
+  input, select { width:100%; }
+  input:focus, select:focus { outline:none; border-color:var(--acc); }
+  button { cursor:pointer; background:var(--acc); color:#06121f; font-weight:600; }
+  button.ghost { background:transparent; color:var(--acc); }
+  .bar { display:flex; gap:8px; margin:10px 0; }
+  .bar input { flex:1; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; text-transform:uppercase; font-size:11px; }
+  .status { padding:1px 7px; border-radius:999px; font-size:11px; }
+  .s-queued{background:#20304a;color:#8fb7ff}.s-running{background:#173e24;color:#4ae27a}
+  .s-succeeded{background:#173e24;color:#4ae27a}.s-failed{background:#421c1c;color:#ff9a97}
+  .s-cancelled{background:#3a3444;color:#c9b8ff}
+  .hint { color:var(--muted); font-size:12px; }
+  footer { padding:12px 22px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
+  .col { display:flex; flex-direction:column; gap:18px; }
+  .full { grid-column:1 / -1; }
+  @media (max-width:900px){ main{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">HERMUS</div>
+  <div class="health">
+    <span id="conn" class="pill">connecting…</span>
+    <span id="rtt" class="pill">—</span>
+  </div>
+</header>
+
+<main>
+  <!-- SNAPSHOT: current truth from real probes (never fabricated) -->
+  <section>
+    <h2>Snapshot · System health</h2>
+    <div class="grid" id="health"></div>
+    <div class="hint">Snapshot = `GET /api/v1/system/health` — every value comes from a live probe.</div>
+  </section>
+
+  <section>
+    <h2>Snapshot · Capabilities</h2>
+    <div class="grid" id="caps"></div>
+    <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
+  </section>
+
+  <section class="full">
+    <h2>Snapshot · Job queue <span id="qstatus" class="tag"></span></h2>
+    <table id="jobs">
+      <thead><tr><th>id</th><th>kind</th><th>status</th><th>attempts</th><th>run</th><th>created</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="hint">Snapshot = `GET /jobs` · live = `EventSource /jobs/{id}/events`.</div>
+  </section>
+
+  <!-- REPLAY: reconstruct state from the durable canonical event log -->
+  <section class="col full" style="grid-column:1 / -1;">
+    <section>
+      <h2>Replay · Canonical event log</h2>
+      <div class="bar">
+        <input id="runId" placeholder="run / mission / trace id to replay (e.g. run_abc)" />
+        <button id="replayBtn">Replay timeline</button>
+      </div>
+      <div class="feed" id="log"><div class="note">No run selected — the log is a pure projection of the durable EventBus.</div></div>
+      <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` reconstructs state by re-reading the durable event log.</div>
+    </section>
+
+    <section>
+      <h2>Command · typed backend command</h2>
+      <div class="bar">
+        <input id="cmdName" placeholder="command e.g. mission.resume / keys.add" value="system.health" />
+      </div>
+      <div class="bar">
+        <input id="cmdArgs" placeholder='args JSON e.g. {"goal":"..."}' value="{}" />
+        <button id="cmdBtn">POST /api/v1/commands</button>
+      </div>
+      <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
+    </section>
+  </section>
+</main>
+
+<footer>
+  HERMUS control room — snapshot + replay projection only. The UI never owns truth:
+  state is either a real probe (snapshot) or reconstructable from the durable event
+  log (replay).
+</footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const conn = $("#conn");
+let lastSeenAt = Date.now();
+
+function healthy() {
+  conn.textContent = "live";
+  conn.className = "pill ok";
+}
+function down() {
+  conn.textContent = "offline (preview)";
+  conn.className = "pill err";
+}
+function getJSON(url) {
+  return fetch(url, { headers: { "Accept": "application/json" } }).then((r) => {
+    if (!r.ok) throw new Error(url + " -> " + r.status);
+    return r.json();
+  });
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+// ---------- SNAPSHOT: health ----------
+function renderHealth(h) {
+  const keys = ["python", "venv", "ok"];
+  let html = "";
+  html += kpi(esc(String(h.python || "-")), "python");
+  html += kpi(esc(String(h.venv || "-")), "venv");
+  html += kpi(h.ok ? "ok" : "degraded", "health");
+  const caps = h.capabilities || {};
+  Object.keys(caps).slice(0, 4).forEach((k) => {
+    html += kpi(esc(String(caps[k].status || caps[k].present)), k.replace(/^system\./, ""));
+  });
+  $("#health").innerHTML = html || '<div class="kpi"><div class="v">—</div><div class="l">no data</div></div>';
+}
+function kpi(v, l) { return `<div class="kpi"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`; }
+
+// ---------- SNAPSHOT: capabilities ----------
+function renderCaps(c) {
+  const providers = c.providers || [];
+  const tools = c.tools || {};
+  let html = kpi(String(c.tool_count ?? "?"), "tools");
+  html += kpi(String(providers.length), "providers");
+  const circ = c.circuit || {};
+  html += kpi(String(Object.keys(circ).length), "circuit entries");
+  $("#caps").innerHTML = html;
+}
+
+// ---------- SNAPSHOT: jobs ----------
+async function refreshJobs() {
+  const body = $("#jobs tbody");
+  try {
+    const jobs = await getJSON("/jobs");
+    const rows = (Array.isArray(jobs) ? jobs : jobs.jobs || []).slice(0, 30);
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="hint">queue idle</td></tr>'; return; }
+    body.innerHTML = rows.map((j) => `<tr>
+      <td><code>${esc(j.id)}</code></td>
+      <td>${esc(j.kind)}</td>
+      <td><span class="status s-${esc(j.status)}">${esc(j.status)}</span></td>
+      <td>${esc(j.attempts)}/${esc(j.max_attempts)}</td>
+      <td>${esc(j.run_id || "")}</td>
+      <td>${esc(j.created_at || "")}</td>
+    </tr>`).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6" class="hint">queue endpoint unavailable: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+// ---------- SNAPSHOT: queue/status (renders into the job table header area) ----------
+async function refreshStatus() {
+  try {
+    const st = await getJSON("/queue/status");
+    const strip = $("#qstatus");
+    if (!strip) return;
+    const bs = st.by_status || {};
+    strip.textContent = "backend=" + (st.backend || "?") +
+      " · workers=" + (st.workers || "?") +
+      " · " + Object.entries(bs).map(([k, v]) => (v + " " + k)).join(", ");
+  } catch (e) { /* queue status optional */ }
+}
+
+// ---------- REPLAY: canonical timeline ----------
+function replayTimeline(runId) {
+  const log = $("#log");
+  log.innerHTML = '<div class="note">replaying ' + esc(runId) + '…</div>';
+  getJSON("/api/v1/runs/" + encodeURIComponent(runId) + "/timeline")
+    .then((r) => {
+      const events = (r.timeline || []).slice(-60);
+      if (!events.length) { log.innerHTML = '<div class="note">no canonical events for ' + esc(runId) + '</div>'; return; }
+      log.innerHTML = events.map((e) =>
+        `<div><span class="t">${esc(e.ts || e.timestamp || "")}</span> ` +
+        `<span class="e">${esc(e.type)}</span> ${esc(e.command || e.status || e.session_id || "")}</div>`).join("") +
+        `<div class="note">${events.length} events (from the durable ledger)</div>`;
+    })
+    .catch((e) => { log.innerHTML = '<div class="note">replay failed: ' + esc(e.message) + '</div>'; });
+}
+
+// ---------- COMMAND ----------
+function postCommand() {
+  const out = $("#cmdOut");
+  const cmd = $("#cmdName").value.trim();
+  let args = {};
+  try { args = JSON.parse($("#cmdArgs").value || "{}"); } catch (e) {
+    out.innerHTML = '<div class="note">invalid args JSON: ' + esc(e.message) + '</div>'; return;
+  }
+  out.innerHTML = '<div class="note">sending ' + esc(cmd) + '…</div>';
+  fetch("/api/v1/commands", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command: cmd, args: args, source: "control" }),
+  }).then((r) => r.json()).then((d) => {
+    out.innerHTML = '<div>ok: <span class="e">' + esc(d.ok) + '</span> ' +
+      'trace <code>' + esc(d.trace_id) + '</code> command <code>' + esc(d.command_id) + '</code></div>';
+  }).catch((e) => { out.innerHTML = '<div class="note">command failed: ' + esc(e.message) + '</div>'; });
+}
+
+// ---------- bootstrap ----------
+async function bootstrap() {
+  refreshJobs();
+  try {
+    const h = await getJSON("/api/v1/system/health"); renderHealth(h); healthy();
+  } catch (e) { down(); $("#health").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">api offline</div></div>'; }
+  try {
+    const c = await getJSON("/api/v1/system/capabilities"); renderCaps(c);
+  } catch (e) { /* capability snapshot optional */ }
+  try { await refreshStatus(); } catch (e) {}
+  lastSeenAt = Date.now();
+}
+
+$("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
+$("#cmdBtn").addEventListener("click", postCommand);
+$("#runId").addEventListener("keydown", (e) => { if (e.key === "Enter") replayTimeline($("#runId").value.trim()); });
+$("#cmdName").addEventListener("keydown", (e) => { if (e.key === "Enter") postCommand(); });
+
+bootstrap();
+setInterval(() => { refreshJobs(); getJSON("/api/v1/system/health").then(renderHealth).catch(() => down()); }, 8000);
+</script>
+</body>
+</html>

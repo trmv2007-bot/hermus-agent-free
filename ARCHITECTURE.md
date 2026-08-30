@@ -103,7 +103,7 @@ The final tree must not contain two competing implementations.
 2. Migrate run/dashboard/computer event producers + consumers to `EventEnvelope`; delete the legacy event modules.
 3. Migrate legacy memory consumers → `core.memory.get_memory()` entirely; retire `core/compat/legacy_memory.py` as a public path (facade already owns the v1 backend).
 4. ~~Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway`.~~ **resolved — no duplicate found.** Detect-first analysis verified these are ONE mutually-dependent provider stack, not competing implementations; `ModelGateway` is the single facade. No deletion warranted. (Future nicety, not a deletion: have the live runtime's model-selection path also go through `ModelGateway`.)
-5. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.
+5. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces. **In progress**: the canonical projection is now served at `/control` (pure snapshot + replay). Deleting the four legacy surfaces is gated on migrating the ~6 dashboard test files + JS assets (`living-deck.js`, `hermus-client.js`, `jarvis-control.js`) and the `/dashboard*`, `/jarvis`, `/api/jarvis/*`, `/computer/dashboard`, `/dashboard-assets/*` routes.
 6. Delete duplicate agent managers / orchestration concepts with no distinct contract.
 
 ---
