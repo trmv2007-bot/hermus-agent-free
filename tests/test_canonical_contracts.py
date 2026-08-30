@@ -130,6 +130,23 @@ def test_legacy_event_bridge(tmp_path, monkeypatch):
     assert any(e.command == "mission.resume" for e in recent)
 
 
+def test_dashboard_events_bridge_to_canonical_bus(tmp_path):
+    """Dashboard events (dict API) are bridged onto the one canonical EventBus."""
+    from core.events.bus import configure_bus, get_bus
+    bus = configure_bus(tmp_path / "e.jsonl", reset=True)
+    from core.dashboard_events import dashboard_event_bus
+    dashboard_event_bus.publish("session_started", {"run_id": "r1", "label": "fix build"})
+    dashboard_event_bus.publish("tool_call", {"tool": "shell", "args": "pytest"})
+    # The dict API keeps working for realtime/speech consumers.
+    recent = dashboard_event_bus.recent(10)
+    assert recent[0]["type"] == "tool_call"
+    assert recent[0]["data"]["tool"] == "shell"
+    # And every event is also on the canonical durable bus.
+    canon = get_bus().snapshot()
+    assert any(c.command == "session_started" for c in canon)
+    assert any(c.command == "tool_call" for c in canon)
+
+
 # ---------------------------------------------------------------------------
 # Tool gateway
 # ---------------------------------------------------------------------------

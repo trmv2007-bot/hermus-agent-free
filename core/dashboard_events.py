@@ -1,11 +1,17 @@
-"""Live gateway event bus for the Hermus dashboard and Talking Mode.
+"""Dashboard event bus — bridged onto the canonical EventBus (Rebuild §4, §8).
 
-Unlike the computer-agent journal (``core.computer.events``), this bus covers
-short-lived gateway interactions: a user submits a directive, an agent starts
-or finishes, speech is synthesized, and the UI changes state.  The bus is
-intentionally dependency-free and in-memory; durable task history remains in
-the existing task tracker and computer task store.
+This module is a **migration bridge**: it keeps the exact ``{id, type, ts, data}``
+dict API that the gateway, speech and tests consume, so realtime streaming is
+unchanged, but every event is **also** canonicalized into an
+:class:`core.contracts.EventEnvelope` and published to the one durable
+:class:`core.events.EventBus`. That makes the canonical bus the single
+auditable/replayable event source while this bridge remains temporarily.
+
+Deletion milestone: once every event producer is migrated to
+``core.events.publish`` (and consumers read ``EventEnvelope``), this module is
+deleted and the dict adapter is gone.
 """
+
 from __future__ import annotations
 
 import threading
@@ -16,8 +22,30 @@ from typing import Any, Optional
 from collections.abc import Callable
 
 
+def _canonicalize(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+    from .contracts import EventEnvelope, EventType, CommandStatus
+    from .events import get_bus
+
+    # Map the free-form dashboard event_type into the canonical envelope while
+    # preserving the original label in `command`.
+    env = EventEnvelope(
+        type=EventType.STATE_CHANGED.value,
+        command=str(event_type or "dashboard.event"),
+        target=data.get("run_id") or data.get("session_id"),
+        args_redacted=data,
+        status=CommandStatus.PENDING.value,
+        source="dashboard",
+    )
+    get_bus().publish(env)
+    return env.to_dict()
+
+
 class DashboardEventBus:
-    """Small thread-safe publish/subscribe bus with a recent-event snapshot."""
+    """Small thread-safe publish/subscribe bus with a recent-event snapshot.
+
+    Keeps the historical dict shape for compatibility; every publish also lands on
+    the canonical EventBus (see :func:`_canonicalize`).
+    """
 
     def __init__(self, max_events: int = 300):
         self._events: deque[dict[str, Any]] = deque(maxlen=max(20, int(max_events)))
@@ -34,11 +62,16 @@ class DashboardEventBus:
         with self._lock:
             self._events.append(event)
             subscribers = list(self._subscribers)
+        # Bridge onto the canonical durable event source.
+        try:
+            _canonicalize(event_type, dict(data or {}))
+        except Exception:
+            # The bridge must never break the interactive event path.
+            pass
         for subscriber in subscribers:
             try:
                 subscriber(event)
             except Exception:
-                # Telemetry must never interrupt an agent request.
                 pass
         return event
 
