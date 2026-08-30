@@ -237,10 +237,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized", lifespan=lifespan)
 
+# --- CORS: secure-by-default, configurable -------------------------------------
+# The control room is served same-origin (relative URLs), so browser CORS is not
+# required for the UI. Wildcard + credentials is an insecure combination (the
+# spec §32 forbids leaving it on without a documented, authenticated model), so we
+# default to a restricted allow-list and credentials OFF. Operators may opt into a
+# broader set via HERMUS_CORS_ORIGINS (comma-separated); explicit "*" is allowed
+# but forces credentials OFF.
+def _cors_origins() -> list[str]:
+    raw = os.environ.get("HERMUS_CORS_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
+        "http://localhost:8000", "http://127.0.0.1:8000",
+        "http://localhost:3000", "http://127.0.0.1:3000",
+    ]
+
+
+def _cors_credentials() -> bool:
+    # Credentials are only safe with an explicit (non-wildcard) origin allow-list.
+    raw = os.environ.get("HERMUS_CORS_ORIGINS", "").strip()
+    if "*" in [o.strip() for o in raw.split(",") if o.strip()]:
+        return False
+    return os.environ.get("HERMUS_CORS_CREDENTIALS", "0") not in ("0", "false", "False")
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins(),
+    allow_credentials=_cors_credentials(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
