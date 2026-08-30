@@ -300,9 +300,9 @@ class DelegationWorker:
         query = str(params.get("query") or "")
         limit = int(params.get("limit", 5))
         try:
-            from .memory2 import memory2
+            from .memory import memory
 
-            hits = memory2.hybrid_recall(query, limit=limit)
+            hits = memory.hybrid_recall(query, limit=limit)
             return {"query": query, "hits": [
                 {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
                  "rrf": h.get("rrf_score"), "text": (h.get("content") or "")[:400]}

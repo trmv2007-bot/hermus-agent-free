@@ -79,11 +79,41 @@ class MemoryFacade:
         except Exception:
             return self.recall(query, project=project, kinds=kinds, limit=limit)
 
-    def recall_context(self, query: str, *, budget: int = 2000, **kw) -> str:
+    def recall_context(self, query: str, *, budget: int = 2000, **kw) -> Any:
+        """Ranked memories + eviction report from the typed backend.
+
+        Proxies the real ``memory2.recall_context(query, limit, max_tokens, hybrid,
+        per_kind_cap, project, ...)`` signature so callers get the exact dict-shaped
+        result (``text``/``kept``/``evicted``); ``budget`` maps to the store's token
+        budget. Never raises: on error it returns an explicit empty report rather
+        than pretending recall succeeded.
+        """
+        kw = dict(kw)
+        # `budget` is the facade's public knob; the store calls it `max_tokens`.
+        if "max_tokens" not in kw:
+            kw["max_tokens"] = budget
         try:
-            return self._store.recall_context(query, budget=budget, **kw)
-        except AttributeError:
-            return ""
+            return self._store.recall_context(query, **kw)
+        except TypeError:
+            # Store doesn't accept these kwargs — retry with the core ones only.
+            try:
+                subset = {k: kw[k] for k in ("limit", "hybrid", "per_kind_cap",
+                                             "project", "max_tokens") if k in kw}
+                return self._store.recall_context(query, **subset)
+            except Exception:
+                return {"text": "", "kept": [], "evicted": [], "tokens": 0,
+                        "budget_tokens": budget, "mode": "empty", "ids": [], "index": {}}
+        except Exception:
+            # Fall back to a text-only block when the typed backend is unavailable.
+            try:
+                text = self._store.recall_prompt_block(query, **{k: kw[k] for k in
+                                                                 ("limit", "project")
+                                                                 if k in kw})
+                return {"text": text or "", "kept": [], "evicted": [], "tokens": 0,
+                        "budget_tokens": budget, "mode": "fallback", "ids": [], "index": {}}
+            except Exception:
+                return {"text": "", "kept": [], "evicted": [], "tokens": 0,
+                        "budget_tokens": budget, "mode": "empty", "ids": [], "index": {}}
 
     def recall_prompt_block(self, *args, **kw) -> str:
         try:

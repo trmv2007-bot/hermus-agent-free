@@ -54,13 +54,13 @@ def register_architecture_tools(registry) -> None:
 
     # ---- Memory 2.0 --------------------------------------------------------
     def memory2_recall(query: str, limit: int = 10, kinds: str = "") -> dict[str, Any]:
-        from .memory2 import memory2, KINDS
+        from .memory import memory, KINDS
 
         k = [x.strip() for x in (kinds or "").split(",") if x.strip()] or None
         if k:
             k = [x for x in k if x in KINDS]
         project = resolve_active_project()
-        res = memory2.recall(query, limit=limit, kinds=k, project=project)
+        res = memory.recall(query, limit=limit, kinds=k, project=project)
         return {"query": query, "project": project, "results": res, "count": len(res)}
 
     registry.register(
@@ -87,11 +87,11 @@ def register_architecture_tools(registry) -> None:
 
     def memory2_remember(kind: str, content: str, importance: float = 5.0,
                          success: str = "none") -> dict[str, Any]:
-        from .memory2 import memory2
+        from .memory import memory
 
         s = None if success == "none" else (success == "true")
-        r = memory2.remember(kind, content, importance=importance, success=s,
-                             project=resolve_active_project())
+        r = memory.remember(kind, content, importance=importance, success=s,
+                            project=resolve_active_project())
         return r
 
     registry.register(
@@ -253,9 +253,9 @@ def register_architecture_tools(registry) -> None:
         )
         if remember and action and result.get("ok"):
             try:
-                from .memory2 import memory2
+                from .memory import memory as mem
 
-                memory2.remember(
+                mem.remember(
                     "procedural",
                     f"ACTION: {action}\nVISUAL RESULT: {result.get('visual_result')}\nCONFIDENCE: {result.get('confidence')}",
                     importance=7.0,
@@ -302,9 +302,9 @@ def register_architecture_tools(registry) -> None:
         memory = verification.get("memory") or {}
         if remember and memory.get("success"):
             try:
-                from .memory2 import memory2
+                from .memory import memory as mem
 
-                memory2.remember(
+                mem.remember(
                     "procedural",
                     f"ACTION: {memory.get('action')}\nVISUAL RESULT: {memory.get('visual_result')}\nCONFIDENCE: {memory.get('confidence')}",
                     importance=7.0,

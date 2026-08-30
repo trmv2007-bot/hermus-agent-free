@@ -42,9 +42,9 @@ def cascade_recall(query: str, limit: int = 5, project: str = "") -> dict[str, A
 
     if len(hits) < limit:
         try:
-            from ..memory2 import memory2
+            from ..memory import memory
 
-            extra = memory2.recall(query, limit=limit, project=project or None)
+            extra = memory.recall(query, limit=limit, project=project or None)
             for row in extra or []:
                 hits.append({
                     "content": str(row.get("content") or "")[:400],

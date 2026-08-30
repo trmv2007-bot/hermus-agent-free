@@ -212,14 +212,12 @@ class HermusAgent:
             record_issue("memory", "lessons_prompt", exc, retryable=False,
                          fallback="turn continues without lessons block")
 
-        # Memory 2.0 (architecture upgrade): hybrid recall + decay + eviction
+        # Typed memory: hybrid recall + decay + eviction via the canonical facade.
         memory2_block = ""
         if getattr(config, "memory2_enabled", True):
             try:
-                from .memory2 import memory2
-
-                ctx = memory2.recall_context(user_message, limit=5, project=self.project)
-                memory2_block = ctx.get("text") or ""
+                ctx = memory.recall_context(user_message, limit=5, project=self.project)
+                memory2_block = (ctx or {}).get("text") or ""
                 if emit is not None:
                     emit(
                         "memory_recalled",
@@ -937,13 +935,11 @@ Rules:
         if not getattr(config, "memory2_enabled", True):
             return
         try:
-            from .memory2 import memory2
-
             project = self.project
             # episodic: what happened this turn
             n_tools = len(tool_results)
             failed = sum(1 for tr in tool_results if "error" in str(tr.get("result", "")).lower()[:300])
-            memory2.remember(
+            memory.remember(
                 "episodic",
                 f"User asked: {user_message[:200]}. Agent used {n_tools} tool(s) "
                 f"and {'failed' if failed else 'succeeded'}.",
@@ -952,11 +948,11 @@ Rules:
             # semantic: explicit facts / preferences
             low = user_message.lower()
             if any(k in low for k in ("remember that", "i prefer", "i like", "my name is", "i use", "my favorite")):
-                memory2.remember("semantic", user_message[:300], project=project, importance=7)
+                memory.remember("semantic", user_message[:300], project=project, importance=7)
             # procedural: successful multi-tool sequences become recipes
             if n_tools >= 2 and failed == 0:
                 chain = " -> ".join(tr["tool"] for tr in tool_results[:5])
-                memory2.remember(
+                memory.remember(
                     "procedural",
                     f"For '{user_message[:120]}', a working tool sequence: {chain}",
                     project=project, success=True,

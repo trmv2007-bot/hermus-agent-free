@@ -1118,9 +1118,9 @@ class SkillForge:
         similar = self.find_similar(cand.description)
         if similar and similar.get("name"):
             try:
-                from .memory2 import memory2
+                from .memory import memory
 
-                memory2.remember(
+                memory.remember(
                     "procedural", cand.description,
                     importance=6.0, success=True, session=session_id,
                     metadata={"skill": similar["name"], "deduped": True},

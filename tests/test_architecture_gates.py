@@ -154,6 +154,26 @@ def test_one_memory_writer_no_public_legacy_import():
     assert not offenders, f"production imports the legacy memory impl outside core.memory: {offenders}"
 
 
+def test_no_app_level_memory2_direct_access():
+    """core.memory is the ONLY writable memory boundary; app-level code must not
+    reach into the typed backend (memory2) directly. The typed store (memory2) is
+    internal to core.memory and may only be imported there. (Config flag strings
+    like ``memory2_enabled`` are allowed; the *import* is what is forbidden.)"""
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel.startswith("core/memory/") or rel == "core/compat/legacy_memory.py":
+            continue
+        for mod in _imports(p):
+            base = mod.split(".")[0]
+            if base == "memory2" or mod.rstrip(".py") == "memory2":
+                offenders.append((rel, mod))
+    assert not offenders, (
+        "app-level code directly imports the typed memory backend (memory2); "
+        f"route through core.memory: {offenders}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # One world-state owner
 # ---------------------------------------------------------------------------
