@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from ..config import config
+from ..db_registry import using
 
 _CORRECTION_WORDS = (
     "wrong", "incorrect", "that's not", "thats not", "that is not", "not what i",
@@ -49,8 +51,32 @@ class LessonsStore:
             pass
         return conn
 
+    @contextmanager
+    def _db(self):
+        """Commit-on-success transaction on a *closed-after-use* connection.
+
+        The previous shape (``with self._conn() as conn``) relied on sqlite3's
+        connection context manager, which commits but never closes — so every
+        lesson read/write leaked a handle for the life of the process and
+        Python reported each one as an unclosed database at shutdown.
+        """
+        with using(self.db_path, owner="lessons") as conn:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+            except Exception:
+                pass
+            try:
+                yield conn
+                conn.commit()
+            except BaseException:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+
     def _init_db(self):
-        with self._conn() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS lessons (
@@ -87,7 +113,7 @@ class LessonsStore:
             keywords = " ".join(self._tokens(lesson)[:12])
         if dedupe and self._exists_recent(lesson, category):
             return {"success": False, "error": "duplicate recent lesson", "duplicate": True}
-        with self._conn() as conn:
+        with self._db() as conn:
             cur = conn.execute(
                 "INSERT INTO lessons (lesson, category, keywords, source, created_at) VALUES (?,?,?,?,?)",
                 (lesson, category, keywords, source, datetime.now().isoformat()),
@@ -98,7 +124,7 @@ class LessonsStore:
     def _exists_recent(self, lesson: str, category: str, window: int = 50) -> bool:
         norm = self._normalize(lesson)
         try:
-            with self._conn() as conn:
+            with self._db() as conn:
                 rows = conn.execute(
                     "SELECT lesson FROM lessons WHERE category=? ORDER BY id DESC LIMIT ?",
                     (category, window),
@@ -126,7 +152,7 @@ class LessonsStore:
         limit = limit or getattr(config, "lessons_in_prompt", 8)
         tokens = set(self._tokens(text))
         try:
-            with self._conn() as conn:
+            with self._db() as conn:
                 rows = conn.execute(
                     "SELECT id, lesson, category, keywords, times_applied, outcome_improved, created_at FROM lessons ORDER BY id DESC LIMIT 200"
                 ).fetchall()
@@ -155,7 +181,7 @@ class LessonsStore:
 
     def mark_applied(self, lesson_id: int):
         try:
-            with self._conn() as conn:
+            with self._db() as conn:
                 conn.execute(
                     "UPDATE lessons SET times_applied = times_applied + 1 WHERE id=?",
                     (lesson_id,),
@@ -165,7 +191,7 @@ class LessonsStore:
 
     def mark_improved(self, lesson_id: int):
         try:
-            with self._conn() as conn:
+            with self._db() as conn:
                 conn.execute(
                     "UPDATE lessons SET outcome_improved = outcome_improved + 1 WHERE id=?",
                     (lesson_id,),
@@ -175,7 +201,7 @@ class LessonsStore:
 
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         try:
-            with self._conn() as conn:
+            with self._db() as conn:
                 rows = conn.execute(
                     "SELECT id, lesson, category, times_applied, outcome_improved, created_at FROM lessons ORDER BY id DESC LIMIT ?",
                     (limit,),
@@ -196,7 +222,7 @@ class LessonsStore:
 
     def stats(self) -> dict[str, Any]:
         try:
-            with self._conn() as conn:
+            with self._db() as conn:
                 total = conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0]
                 by_cat = conn.execute(
                     "SELECT category, COUNT(*) FROM lessons GROUP BY category"

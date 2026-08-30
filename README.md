@@ -464,6 +464,40 @@ phi
 
 The exact model depends on what you install and what your hardware can handle.
 
+### Local engine routing (NPU + GPU)
+
+Hermus detects the accelerators in the machine and routes each *role* to the
+engine that can actually drive it — [NoLlama](https://github.com/aweussom/NoLlama)
+for Intel NPUs and Arc GPUs (Ollama cannot target an NPU at all), Ollama for
+NVIDIA/AMD and CPU-only boxes.
+
+On a machine with **both** an NPU and a GPU the work is pipelined rather than
+split by preference: the NPU runs the continuous, low-intensity jobs (Whisper
+voice transcription, indexing passes) cool and silent, while the GPU handles the
+agent's heavy generative turns at full token speed.
+
+Two things worth knowing before you use it:
+
+- **`setup.sh` installs no model weights.** It installs runtime dependencies
+  only. Model downloads (multi-GB) happen on demand from the dashboard's
+  **Local AI Engine** pane, or with `hermus engine download <id>`.
+- **The small local model serves Hermus, not you.** It is Hermus's own doctor: it
+  inspects Hermus's failures, clears work that is stuck, and reports what went
+  wrong and how to manage it (`hermus doctor --self-repair`, or the **Hermus
+  Doctor** pane).
+
+```bash
+hermus engine status              # detected hardware + routing plan
+hermus engine install             # NoLlama server, no weights
+hermus engine models              # catalog + what is already on disk
+hermus engine download minicpm    # the model the dashboard offers
+hermus doctor --self-repair       # diagnose Hermus and reap stuck work
+```
+
+Full design, routing table, configuration and honest limitations (embeddings are
+*not* served by NoLlama; the NPU has no tool-calling and a 4096-token prompt
+cap): [`docs/LOCAL_ENGINE.md`](docs/LOCAL_ENGINE.md).
+
 ### Hosted / Free Tier
 
 Compatible providers can be configured when desired, including providers offering free tiers. Free-tier limits, model availability and rate limits are controlled by those providers and can change.
@@ -642,6 +676,7 @@ The goal is to measure success rate, steps and tool failures instead of treating
 | [`QUICKSTART.md`](QUICKSTART.md) | Quick setup |
 | [`SIMPLE_GUIDE.md`](SIMPLE_GUIDE.md) | Beginner-oriented guide |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Third-party notices |
+| [`docs/LOCAL_ENGINE.md`](docs/LOCAL_ENGINE.md) | Local engine: NPU/GPU routing, NoLlama, on-demand model downloads, the Hermus doctor |
 
 ---
 

@@ -534,6 +534,51 @@ label{
 .tag.bad{color:var(--rose);border-color:rgba(244,63,94,0.4);background:rgba(244,63,94,0.1)}
 .tag.warn{color:var(--amber);border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.1)}
 
+/* Live telemetry feed (overview) */
+.feed{
+  max-height:230px;
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding-right:4px;
+}
+.feed-item{
+  display:grid;
+  grid-template-columns:58px 1fr;
+  gap:8px;
+  padding:6px 8px;
+  border:1px solid var(--border);
+  border-left:2px solid var(--cyan);
+  border-radius:8px;
+  background:rgba(10,15,29,0.55);
+  font-size:.76em;
+  line-height:1.35;
+  animation:feedIn .25s ease-out;
+}
+.feed-item .feed-time{color:var(--text-muted);font-family:var(--font-mono);font-size:.92em}
+.feed-item .feed-type{font-family:var(--font-mono);color:var(--cyan);font-size:.92em}
+.feed-item .feed-body{color:var(--text-dim);word-break:break-word}
+.feed-item.warn{border-left-color:var(--amber)}
+.feed-item.bad{border-left-color:var(--rose)}
+.feed-item.ok{border-left-color:var(--emerald)}
+@keyframes feedIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* Local engine + doctor */
+.role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px}
+.role-cell{border:1px solid var(--border);border-radius:8px;padding:8px;background:rgba(10,15,29,0.5)}
+.role-cell h5{margin:0 0 4px;font-size:.68em;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:600}
+.role-cell .role-engine{font-family:var(--font-mono);font-size:.8em;color:var(--text)}
+.role-cell .role-model{font-family:var(--font-mono);font-size:.7em;color:var(--text-muted);word-break:break-all}
+.progress{height:8px;border-radius:6px;background:rgba(255,255,255,0.07);overflow:hidden;margin:6px 0}
+.progress > span{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--emerald));transition:width .4s ease}
+.finding{border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:rgba(10,15,29,0.5)}
+.finding.critical,.finding.high{border-left-color:var(--rose)}
+.finding.low,.finding.info{border-left-color:var(--cyan)}
+.finding h5{margin:0 0 4px;font-size:.8em;color:var(--text)}
+.finding ul{margin:4px 0 0 16px;padding:0;font-size:.76em;color:var(--text-dim)}
+.finding .ev{font-size:.72em;color:var(--text-muted);font-family:var(--font-mono)}
+
 .muted{color:var(--text-muted);font-size:.8em}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.78em;align-items:baseline}
 .kv b{color:var(--text-muted);font-weight:400;font-family:var(--font-mono);white-space:nowrap}
@@ -971,6 +1016,7 @@ label{
         <div class="nav-group-title">Command</div>
         <div class="nav-item active" data-pane="chat" onclick="switchPane('chat')"><span>💬</span> Live Chat & Studio</div>
         <div class="nav-item" data-pane="overview" onclick="switchPane('overview')"><span>📊</span> System Overview</div>
+        <div class="nav-item" data-pane="doctor" onclick="switchPane('doctor')"><span>🩺</span> Hermus Doctor <span class="badge" id="navDoctor">—</span></div>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Intelligence & Fleet</div>
@@ -1016,6 +1062,7 @@ label{
           <div class="nav-group-title">All Panes</div>
           <div class="nav-item" onclick="switchPane('chat');toggleMobileDrawer()"><span>💬</span> Live Chat & Studio</div>
           <div class="nav-item" onclick="switchPane('overview');toggleMobileDrawer()"><span>📊</span> Overview</div>
+          <div class="nav-item" onclick="switchPane('doctor');toggleMobileDrawer()"><span>🩺</span> Hermus Doctor</div>
           <div class="nav-item" onclick="switchPane('keys');toggleMobileDrawer()"><span>🔑</span> API Keys Vault</div>
           <div class="nav-item" onclick="switchPane('fleet');toggleMobileDrawer()"><span>🚀</span> Multi-Model Fleet</div>
           <div class="nav-item" onclick="switchPane('health');toggleMobileDrawer()"><span>❤️</span> Key Health & Rates</div>
@@ -1130,6 +1177,7 @@ label{
             <div class="vitals-card"><h3 id="sKeys">3</h3><p>API Keys</p></div>
             <div class="vitals-card"><h3 id="sTools">18</h3><p>Tools Registered</p></div>
             <div class="vitals-card"><h3 id="sWorkers">4</h3><p>Fleet Workers</p></div>
+            <div class="vitals-card" onclick="switchPane('doctor')" style="cursor:pointer" title="Hermus Doctor — open self-repair"><h3 id="sDoctor">0</h3><p>Doctor Findings</p></div>
           </div>
 
           <div class="card" id="overviewComputerCard">
@@ -1140,10 +1188,36 @@ label{
             <div id="overviewComputerBody" class="muted" style="margin-top:6px">Standing by. Run an autonomous desktop or web task anytime.</div>
           </div>
 
+          <!-- Local AI engine: NPU/GPU routing. The banner below only exists
+               while something is missing, and is removed once it is installed. -->
+          <div class="card" id="engineCard">
+            <div class="row" style="justify-content:space-between">
+              <h3>🧠 Local AI Engine <span id="engineStatusTag" class="tag">checking…</span></h3>
+              <div class="row" style="margin:0">
+                <button class="btn sm" onclick="loadEngine(true)" title="Re-detect NPU/GPU hardware">Re-detect</button>
+                <button class="btn sm" onclick="switchPane('doctor')">🩺 Doctor</button>
+              </div>
+            </div>
+
+            <div id="engineActionBanner" class="banner" style="display:none;margin:10px 0 4px"></div>
+            <div id="engineBody" class="muted" style="margin-top:6px">Detecting accelerators (NPU / GPU / CPU)…</div>
+            <div id="engineRoles" class="role-grid"></div>
+            <div id="engineDownload" style="display:none;margin-top:10px">
+              <div class="row" style="justify-content:space-between;margin:0">
+                <span class="subtle" id="engineDownloadLabel">Downloading model…</span>
+                <span class="subtle mono" id="engineDownloadPct">0%</span>
+              </div>
+              <div class="progress"><span id="engineDownloadBar" style="width:0%"></span></div>
+            </div>
+          </div>
+
           <div class="two">
             <div class="card">
-              <h3>📡 Live Telemetry</h3>
-              <div id="overviewActivity" class="feed" style="margin-top:6px"><span class="muted">Loading activity feed…</span></div>
+              <div class="row" style="justify-content:space-between;margin:0">
+                <h3>📡 Live Telemetry</h3>
+                <span class="subtle mono" id="telemetryCount">0 events</span>
+              </div>
+              <div id="overviewActivity" class="feed" style="margin-top:6px"><span class="muted">Connecting to the event stream…</span></div>
             </div>
             <div class="card">
               <h3>🤖 Multi-Model Consensus</h3>
@@ -1169,6 +1243,58 @@ label{
               <h3>📡 Channel Bridges</h3>
               <div id="overviewChannels" class="muted" style="margin-top:6px">Telegram & Discord bridges idle.</div>
             </div>
+          </div>
+        </div>
+
+        <!-- 2b. HERMUS DOCTOR — Hermus's own physician -->
+        <div class="pane" id="pane-doctor">
+          <div class="row" style="justify-content:space-between">
+            <h3 style="margin-bottom:8px">🩺 Hermus Doctor <span class="subtle">self-repair for Hermus itself</span></h3>
+            <div class="row" style="margin:0">
+              <label class="row" style="margin:0;gap:4px"><input type="checkbox" id="doctorInternet" checked style="min-width:auto"/> Ask the internet</label>
+              <label class="row" style="margin:0;gap:4px"><input type="checkbox" id="doctorUseLlm" checked style="min-width:auto"/> Use the small model</label>
+              <button class="btn sm primary" onclick="runDoctor()">Run Check</button>
+            </div>
+          </div>
+          <div class="banner">
+            The doctor's patient is <b>Hermus, not you</b>. It reads runtime errors, stuck runs/jobs, install
+            diagnostics and engine health, explains <b>what went wrong</b> and <b>how to manage it</b>, and asks
+            the internet when it hits something it does not recognise. It runs on the accelerator the router
+            assigns it — the NPU on a Core Ultra box, so repairs never fight your main model for the GPU.
+          </div>
+
+          <div class="two">
+            <div class="card">
+              <h4>Current state</h4>
+              <div id="doctorSummary" class="muted" style="margin-top:6px">Loading doctor status…</div>
+            </div>
+            <div class="card">
+              <h4>Stuck work <span class="subtle">nothing stays in “processing”</span></h4>
+              <div id="doctorStuck" class="muted" style="margin-top:6px">Checking…</div>
+              <div class="row">
+                <button class="btn sm" onclick="reapStuck(true)">Preview reap</button>
+                <button class="btn sm estop" onclick="reapStuck(false)">Reap stuck runs/jobs</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h4>Findings</h4>
+            <div id="doctorFindings" class="muted" style="margin-top:6px">No examination run yet.</div>
+          </div>
+
+          <div class="card">
+            <h4>Report</h4>
+            <div class="pre" id="doctorReport" style="display:none"></div>
+            <div id="doctorReportEmpty" class="muted">Run a check to generate a report (saved to <span class="mono">data/doctor/</span>).</div>
+          </div>
+
+          <div class="card">
+            <div class="row" style="justify-content:space-between">
+              <h4>Past reports</h4>
+              <button class="btn sm" onclick="loadDoctor()">Refresh</button>
+            </div>
+            <div id="doctorReports" class="muted" style="margin-top:6px">None yet.</div>
           </div>
         </div>
 
@@ -1789,6 +1915,7 @@ label{
           <div class="cmd-list" id="cmdList">
             <div class="cmd-item" onclick="cmdJump('chat')"><span>💬</span> <b>Live Chat & Studio</b> <span class="cmd-badge">Daily Companion</span></div>
             <div class="cmd-item" onclick="cmdJump('overview')"><span>📊</span> <b>System Overview</b> <span class="cmd-badge">Vitals</span></div>
+            <div class="cmd-item" onclick="cmdJump('doctor')"><span>🩺</span> <b>Hermus Doctor</b> <span class="cmd-badge">Self-repair</span></div>
             <div class="cmd-item" onclick="cmdJump('keys')"><span>🔑</span> <b>API Keys</b> <span class="cmd-badge">Vault</span></div>
             <div class="cmd-item" onclick="cmdJump('fleet')"><span>🚀</span> <b>Multi-Model Fleet</b> <span class="cmd-badge">Consensus</span></div>
             <div class="cmd-item" onclick="cmdJump('health')"><span>❤️</span> <b>Key Health & Rates</b> <span class="cmd-badge">Diagnostics</span></div>
@@ -2130,7 +2257,8 @@ function switchPane(pane){
     chat:'Live Chat', overview:'Overview', keys:'API Key Vault', fleet:'Multi-Model Fleet',
     health:'Key Health & Rates', providers:'Providers Matrix', computer:'Computer Agent',
     agents:'Agents & Tasks', memory:'Semantic Memory RAG', mcp:'MCP Bridges',
-    reasoning:'DeepThink Council', tools:'Tool Registry', channels:'Channels', settings:'Settings'
+    reasoning:'DeepThink Council', tools:'Tool Registry', channels:'Channels', settings:'Settings',
+    doctor:'Hermus Doctor'
   };
   $('crumb').textContent = titles[pane] || pane;
   if(pane === 'keys') loadKeys();
@@ -2144,6 +2272,8 @@ function switchPane(pane){
   if(pane === 'reasoning') loadReasoning();
   if(pane === 'settings') { loadCache(); checkUpdate(true); loadCustomApis(); }
   if(pane === 'computer') { loadComputerStatus(); }
+  if(pane === 'doctor') { loadDoctor(); }
+  if(pane === 'overview') { loadEngine(); loadTelemetry(); }
 }
 
 function toggleMobileDrawer(){
@@ -2568,6 +2698,7 @@ async function refreshAll(){
   loadTools(true);
   loadChannels(true);
   loadComputerStatus();
+  loadEngine();
   if(panelOpen) loadPanel();
 }
 
@@ -3821,6 +3952,444 @@ async function onComputerTaskChange(){
   if(activeTab) await switchComputerTab(activeTab.dataset.ctab);
 }
 
+/* =========================================================================
+   LIVE TELEMETRY FEED (System Overview)
+   The feed was dead markup: nothing ever wrote to #overviewActivity and the
+   `.feed` class had no CSS. It now renders /events/recent immediately and
+   subscribes to the /dashboard/events WebSocket, with polling as fallback, so
+   the card always shows a real state instead of a permanent "Loading…".
+   ========================================================================= */
+let telemetryWs = null;
+let telemetryTimer = null;
+let telemetryCount = 0;
+const TELEMETRY_MAX = 40;
+
+function telemetryLabel(type){
+  const map = {
+    session_started: ['▶ RUN START', 'ok'],
+    session_finished: ['✓ RUN DONE', 'ok'],
+    session_failed: ['✗ RUN FAILED', 'bad'],
+    agent_response: ['💬 RESPONSE', ''],
+    tool_call: ['🛠 TOOL', ''],
+    mission_state: ['🎯 MISSION', ''],
+    node_started: ['• STAGE', ''],
+    llm_delta: ['· TOKEN', ''],
+    user_transcript: ['🎙 HEARD', ''],
+    speech_ready: ['🔊 SPOKE', ''],
+    speech_unavailable: ['🔇 NO VOICE', 'warn'],
+    run_started: ['▶ RUN', 'ok'],
+    run_finished: ['✓ RUN', 'ok'],
+    cancel_requested: ['⏹ CANCEL', 'warn'],
+  };
+  return map[type] || [String(type || 'event').toUpperCase(), ''];
+}
+
+function telemetryBody(ev){
+  const d = ev.data || {};
+  const bits = [];
+  if(d.label) bits.push(d.label);
+  if(d.tool) bits.push(d.tool + (d.args ? '(' + (typeof d.args === 'string' ? d.args : JSON.stringify(d.args)).slice(0, 60) + ')' : ''));
+  if(d.state) bits.push('state=' + d.state);
+  if(d.node) bits.push('node=' + d.node);
+  if(d.text) bits.push(String(d.text).slice(0, 120));
+  if(d.response) bits.push(String(d.response).slice(0, 120));
+  if(d.error) bits.push('error: ' + String(d.error).slice(0, 160));
+  if(d.duration_ms) bits.push(d.duration_ms + 'ms');
+  if(!bits.length) bits.push(JSON.stringify(d).slice(0, 140) || '—');
+  return bits.join(' · ');
+}
+
+function pushTelemetryEvent(ev){
+  const box = $('overviewActivity');
+  if(!box || !ev || !ev.type) return;
+  if(box.dataset.ready !== '1'){ box.innerHTML = ''; box.dataset.ready = '1'; }
+  const [label, cls] = telemetryLabel(ev.type);
+  const time = (ev.ts || '').split('T')[1] ? (ev.ts.split('T')[1] || '').slice(0, 8) : '';
+  const item = document.createElement('div');
+  item.className = 'feed-item ' + (cls || '');
+  item.innerHTML = `<span class="feed-time">${esc(time)}</span>
+    <span><span class="feed-type">${esc(label)}</span> <span class="feed-body">${esc(telemetryBody(ev))}</span></span>`;
+  box.prepend(item);
+  while(box.children.length > TELEMETRY_MAX) box.removeChild(box.lastChild);
+  telemetryCount++;
+  const counter = $('telemetryCount');
+  if(counter) counter.textContent = telemetryCount + ' events';
+}
+
+function telemetryEmpty(message){
+  const box = $('overviewActivity');
+  if(!box) return;
+  box.dataset.ready = '1';
+  box.innerHTML = `<span class="muted">${esc(message)}</span>`;
+}
+
+async function loadTelemetry(){
+  try{
+    const d = await jget('/events/recent?limit=30');
+    const box = $('overviewActivity');
+    if(box){ box.innerHTML = ''; box.dataset.ready = '1'; }
+    telemetryCount = d.count || 0;
+    const counter = $('telemetryCount');
+    if(counter) counter.textContent = telemetryCount + ' events';
+    if(!d.events || !d.events.length){
+      telemetryEmpty('No events yet. The feed fills as soon as Hermus starts a run, calls a tool, or speaks — try sending a command in Live Chat.');
+      return;
+    }
+    // /events/recent is newest-first; render oldest→newest so the top is latest.
+    d.events.slice().reverse().forEach(pushTelemetryEvent);
+  }catch(e){
+    telemetryEmpty('Telemetry unavailable: ' + e.message);
+  }
+}
+
+function connectTelemetry(){
+  try{
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    telemetryWs = new WebSocket(`${proto}//${location.host}/dashboard/events`);
+    telemetryWs.onmessage = (msg) => {
+      let ev;
+      try { ev = JSON.parse(msg.data); } catch(_){ return; }
+      if(!ev || ev.kind === 'ping') return;
+      if(ev.kind === 'snapshot'){
+        const box = $('overviewActivity');
+        if(box){ box.innerHTML = ''; box.dataset.ready = '1'; }
+        (ev.events || []).slice().reverse().forEach(pushTelemetryEvent);
+        return;
+      }
+      pushTelemetryEvent(ev);
+    };
+    telemetryWs.onclose = () => { telemetryWs = null; startTelemetryPolling(); };
+    telemetryWs.onerror = () => { try{ telemetryWs.close(); }catch(_){} };
+  }catch(e){
+    startTelemetryPolling();
+  }
+}
+
+function startTelemetryPolling(){
+  if(telemetryTimer) return;
+  telemetryTimer = setInterval(loadTelemetry, 5000);
+}
+
+/* =========================================================================
+   LOCAL AI ENGINE — NPU / GPU routing, NoLlama install + model downloads
+   ========================================================================= */
+let engineState = null;
+let engineDownloadTimer = null;
+
+const ENGINE_STATUS_LABEL = {
+  ready: ['READY', 'ok'],
+  needs_model: ['NEEDS MODEL', 'warn'],
+  needs_install: ['NEEDS INSTALL', 'warn'],
+  unavailable: ['OFFLINE', 'bad'],
+  not_applicable: ['API KEYS ONLY', ''],
+  unknown: ['UNKNOWN', 'bad'],
+};
+
+async function loadEngine(refresh){
+  const body = $('engineBody');
+  try{
+    if(refresh && body) body.innerHTML = '<span class="muted">Re-detecting hardware…</span>';
+    const d = await jget('/engine/status?probe=true' + (refresh ? '&refresh=true' : ''));
+    engineState = d;
+    renderEngine(d);
+  }catch(e){
+    const tag = $('engineStatusTag');
+    if(tag){ tag.textContent = 'UNKNOWN'; tag.className = 'tag bad'; }
+    if(body) body.innerHTML = `<span class="bad-text">⚠️ /engine/status failed: ${esc(e.message)}</span>`;
+  }
+}
+
+function renderEngine(d){
+  const tag = $('engineStatusTag'), body = $('engineBody'), roles = $('engineRoles'), banner = $('engineActionBanner');
+  const [label, cls] = ENGINE_STATUS_LABEL[d.status] || ENGINE_STATUS_LABEL.unknown;
+  if(tag){ tag.textContent = label; tag.className = 'tag ' + (cls || ''); }
+  if(!body || !roles) return;
+
+  const hw = (d.plan && d.plan.hardware) || {};
+  const npu = (hw.npu || []).map(x => x.name || x.kind).join(', ') || 'none detected';
+  const gpus = (hw.gpus || []).map(x => x.name || x.kind).join(', ') || 'none detected';
+  const nl = d.nollama || {};
+  const engines = d.engines || {};
+  const reachable = (e) => e && e.reachable ? `<span class="tag ok">answering</span>` : `<span class="tag bad">no response</span>`;
+
+  body.innerHTML = `
+    <div class="kv">
+      <b>NPU</b><span>${esc(npu)}</span>
+      <b>GPU</b><span>${esc(gpus)}</span>
+      <b>CPU / RAM</b><span>${esc(hw.cpu_count || '?')} cores · ${hw.ram_mb ? (hw.ram_mb/1024).toFixed(1) + ' GB' : '?'}</span>
+      <b>Routing</b><span class="mono">${esc((d.plan && d.plan.mode) || 'unknown')}</span>
+      <b>NoLlama</b><span class="mono">${esc(nl.base_url || '')}</span> ${nl.installed ? (nl.running ? reachable(engines.nollama) : '<span class="tag warn">installed, stopped</span>') : '<span class="tag warn">not installed</span>'}
+      <b>Ollama</b><span class="mono">${esc(d.ollama_base_url || '')}</span> ${reachable(engines.ollama)}
+      <b>Models</b><span>${nl.model_count || 0} on disk in <span class="mono">${esc(nl.models_dir || '')}</span></span>
+    </div>
+    ${((d.plan && d.plan.notes) || []).map(n => `<div class="subtle" style="margin-top:6px">• ${esc(n)}</div>`).join('')}`;
+
+  const roleOrder = ['reasoning', 'background', 'doctor', 'vision'];
+  roles.innerHTML = roleOrder.filter(r => d.plan && d.plan.roles && d.plan.roles[r]).map(r => {
+    const a = d.plan.roles[r];
+    return `<div class="role-cell">
+      <h5>${esc(r)}</h5>
+      <div class="role-engine">${esc(a.engine)} · ${esc(a.device)}</div>
+      <div class="role-model">${esc(a.model || '—')}</div>
+      <div class="subtle">${esc(a.reason || '')}</div>
+    </div>`;
+  }).join('');
+
+  renderEngineBanner(d, banner);
+}
+
+function renderEngineBanner(d, banner){
+  if(!banner) return;
+  const rec = d.recommended_model || {};
+  const actions = {
+    install: `<button class="btn sm primary" onclick="installEngine()">Install engine (NoLlama)</button>`,
+    download_model: `<button class="btn sm primary" onclick="downloadEngineModel('${esc(rec.id || 'minicpm')}')">⬇ Download ${esc(rec.name || 'MiniCPM')} (${rec.est_size_gb || '?'} GB)</button>`,
+    start: `<button class="btn sm primary" onclick="startEngine()">Start engine</button>
+            <button class="btn sm" onclick="switchPane('doctor')">Ask the doctor</button>`,
+    start_ollama: `<button class="btn sm primary" onclick="window.open('/engine/status','_blank')">Engine status</button>`,
+  };
+  const text = {
+    install: `Hardware detected that needs <b>NoLlama</b> (the OpenVINO engine for Intel NPU / Arc iGPU). Installing fetches the server only — <b>no model weights</b>, that is a separate step you control.`,
+    download_model: `<b>${esc(rec.name || 'The routed model')}</b> is not on disk yet, so the ${esc((d.plan && d.plan.mode) || 'routed')} engine has nothing to load. ${esc((rec.notes || '').slice(0, 180))}`,
+    start: `NoLlama is installed with a model on disk but is not answering. Start it, or ask the doctor what went wrong.`,
+    start_ollama: `Ollama is not answering on ${esc(d.ollama_base_url || '')} — run <span class="mono">ollama serve</span> (and <span class="mono">ollama pull ${esc((d.plan && d.plan.roles && d.plan.roles.reasoning && d.plan.roles.reasoning.model) || 'llama3.1:8b')}</span>).`,
+  };
+  if(d.status === 'ready' || d.status === 'not_applicable' || !d.action){
+    // Installed and serving: the call-to-action disappears, the state stays.
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  banner.style.display = 'block';
+  banner.innerHTML = `<div>${text[d.action] || 'Action needed.'}</div>
+    <div class="row" style="margin:8px 0 0">${actions[d.action] || ''}</div>
+    <div class="subtle" style="margin-top:6px">setup.sh installs the runtime only — models are downloaded here, on demand.</div>`;
+}
+
+async function installEngine(){
+  const banner = $('engineActionBanner');
+  if(banner){
+    banner.innerHTML = `<div>Installing NoLlama (git clone + venv + openvino-genai). No model weights are downloaded.</div>
+      <div class="progress"><span style="width:35%"></span></div>
+      <div class="subtle">This can take a few minutes on a slow link.</div>`;
+  }
+  try{
+    const d = await jpost('/engine/nollama/install', {});
+    if(!d.success) throw new Error(d.error || (d.hint || 'install failed'));
+    await loadEngine(true);
+    const b2 = $('engineActionBanner');
+    if(b2){
+      b2.style.display = 'block';
+      b2.innerHTML = `<div>Engine installed. Now download the model it will serve.</div>
+        <div class="row" style="margin:8px 0 0"><button class="btn sm primary" onclick="downloadEngineModel('minicpm')">⬇ Download MiniCPM</button></div>`;
+    }
+  }catch(e){
+    if(banner){
+      banner.style.display = 'block';
+      banner.innerHTML = `<div><span class="bad-text">Install failed:</span> ${esc(e.message)}</div>
+        <div class="row" style="margin:8px 0 0"><button class="btn sm" onclick="installEngine()">Retry</button></div>`;
+    }
+  }
+}
+
+async function startEngine(){
+  const banner = $('engineActionBanner');
+  if(banner){ banner.innerHTML = '<div>Starting the local engine…</div><div class="progress"><span style="width:30%"></span></div>'; }
+  try{
+    const d = await jpost('/engine/nollama/start', {});
+    if(!d.success) throw new Error(d.error || 'start failed');
+    setTimeout(() => loadEngine(true), 4000);
+  }catch(e){
+    if(banner){
+      banner.style.display = 'block';
+      banner.innerHTML = `<div><span class="bad-text">Start failed:</span> ${esc(e.message)}</div>`;
+    }
+  }
+}
+
+async function stopEngine(){
+  try{ await jpost('/engine/nollama/stop', {}); await loadEngine(true); }
+  catch(e){ alert('Stop failed: ' + e.message); }
+}
+
+async function downloadEngineModel(modelId){
+  const box = $('engineDownload'), banner = $('engineActionBanner');
+  try{
+    const res = await jpost('/engine/models/download', { model: modelId || 'minicpm' });
+    if(!res.success) throw new Error(res.error || 'download refused');
+    const job = res.job || {};
+    if(box){
+      box.style.display = 'block';
+      $('engineDownloadLabel').textContent = res.started
+        ? `Downloading ${modelId || 'minicpm'}…`
+        : `${modelId || 'minicpm'} is already on disk.`;
+    }
+    if(banner && res.started) banner.style.display = 'none';
+    if(res.started) pollEngineDownload(job.id);
+    else await loadEngine(true);
+  }catch(e){
+    alert('Download failed: ' + e.message);
+  }
+}
+
+function pollEngineDownload(jobId){
+  if(engineDownloadTimer) clearInterval(engineDownloadTimer);
+  engineDownloadTimer = setInterval(async () => {
+    try{
+      const job = await jget('/engine/downloads/' + encodeURIComponent(jobId));
+      const pct = Math.max(0, Math.min(100, Math.round((job.percent || 0))));
+      const bar = $('engineDownloadBar');
+      if(bar) bar.style.width = pct + '%';
+      const pctEl = $('engineDownloadPct');
+      if(pctEl) pctEl.textContent = pct + '%';
+      const label = $('engineDownloadLabel');
+      if(label) label.textContent = `${job.model_id} — ${job.state}${job.bytes_total ? ' · ' + (job.bytes_done/1048576).toFixed(0) + '/' + (job.bytes_total/1048576).toFixed(0) + ' MB' : ''}`;
+      if(job.terminal){
+        clearInterval(engineDownloadTimer);
+        engineDownloadTimer = null;
+        if(job.state !== 'ready' && label){
+          label.innerHTML = `<span class="bad-text">${esc(job.model_id)} — ${esc(job.state)}: ${esc(job.error || '')}</span>`;
+        }
+        await loadEngine(true);
+      }
+    }catch(e){
+      clearInterval(engineDownloadTimer);
+      engineDownloadTimer = null;
+    }
+  }, 2000);
+}
+
+/* =========================================================================
+   HERMUS DOCTOR — self-repair pane
+   ========================================================================= */
+async function loadDoctor(){
+  try{
+    const d = await jget('/doctor/status');
+    const sum = $('doctorSummary');
+    if(sum){
+      sum.innerHTML = `
+        <div class="kv">
+          <b>Status</b><span>${tag(d.worst_severity === 'info' && !d.finding_count, d.worst_severity.toUpperCase())} ${d.finding_count} finding(s)</span>
+          <b>Counts</b><span class="mono">${esc(JSON.stringify(d.counts || {}))}</span>
+          <b>Engine</b><span class="mono">${esc(d.engine_mode || '?')} / ${esc(d.engine_status || '?')}</span>
+          <b>Doctor model</b><span class="mono">${esc(d.model || 'none')}</span>
+          <b>Ask internet</b><span>${d.ask_internet ? 'on' : 'off'}</span>
+          <b>Auto-triage</b><span>${d.auto ? 'on' : 'off'}</span>
+        </div>`;
+    }
+    const stuck = d.stuck || {};
+    const stuckBox = $('doctorStuck');
+    if(stuckBox){
+      if(!stuck.count){
+        stuckBox.innerHTML = `<span class="ok-text">✓ Nothing stuck</span> <span class="subtle">(threshold ${esc(stuck.threshold_minutes)} min)</span>`;
+      }else{
+        const rows = [...(stuck.jobs || []), ...(stuck.runs || [])].slice(0, 6)
+          .map(x => `<div class="subtle mono">${esc(x.kind)} ${esc(x.id)} · ${esc(x.status)} · ${esc(x.age_minutes)} min</div>`).join('');
+        stuckBox.innerHTML = `<span class="bad-text">✗ ${esc(stuck.count)} item(s) never reached a terminal state</span>${rows}`;
+      }
+    }
+    const nav = $('navDoctor');
+    if(nav){
+      nav.textContent = d.finding_count || '0';
+      nav.className = 'badge ' + (d.finding_count ? 'warn' : '');
+    }
+    const vitals = $('sDoctor');
+    if(vitals){
+      vitals.textContent = d.finding_count || '0';
+      vitals.className = d.finding_count ? 'bad-text' : 'ok-text';
+    }
+    const reports = $('doctorReports');
+    if(reports){
+      const list = d.reports || [];
+      reports.innerHTML = list.length
+        ? list.map(r => `<div class="row" style="margin:4px 0">
+            <span class="mono subtle">${esc(r.ts || '')}</span>
+            ${tag(r.status === 'ok', String(r.status || '').toUpperCase())}
+            <span class="mono subtle">${esc(r.id)}</span>
+            <button class="btn sm" onclick="openDoctorReport('${esc(r.id)}')">Open</button>
+          </div>`).join('')
+        : 'None yet.';
+    }
+  }catch(e){
+    const sum = $('doctorSummary');
+    if(sum) sum.innerHTML = `<span class="bad-text">⚠️ /doctor/status failed: ${esc(e.message)}</span>`;
+  }
+}
+
+async function runDoctor(){
+  const findings = $('doctorFindings'), report = $('doctorReport');
+  if(findings) findings.innerHTML = '<span class="muted">Examining Hermus… (collecting runtime issues, stuck work, engine health)</span>';
+  try{
+    const d = await jpost('/doctor/run', {
+      ask_internet: !!($('doctorInternet') && $('doctorInternet').checked),
+      use_llm: !!($('doctorUseLlm') && $('doctorUseLlm').checked),
+    });
+    if(d.status === 'skipped'){
+      if(findings) findings.innerHTML = `<span class="muted">Skipped: ${esc(d.reason || '')}</span>`;
+      return;
+    }
+    renderDoctorReport(d);
+    loadDoctor();
+  }catch(e){
+    if(findings) findings.innerHTML = `<span class="bad-text">⚠️ Doctor run failed: ${esc(e.message)}</span>`;
+  }
+}
+
+function renderDoctorReport(d){
+  const findings = $('doctorFindings'), report = $('doctorReport'), empty = $('doctorReportEmpty');
+  if(findings){
+    const list = d.findings || [];
+    findings.innerHTML = list.length ? list.map(f => `
+      <div class="finding ${esc(f.severity)}">
+        <h5>${tag(f.severity === 'info' || f.severity === 'low', f.severity.toUpperCase())} ${esc(f.title)}</h5>
+        <div class="ev">${esc(f.evidence)}</div>
+        ${(f.fixes && f.fixes.length) ? `<ul>${f.fixes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="subtle">No built-in fix — use “Ask the internet”.</div>'}
+        ${(f.references && f.references.length) ? `<div class="subtle">refs: ${f.references.map(r => `<a href="${esc(r)}" target="_blank" rel="noreferrer">${esc(r)}</a>`).join(' · ')}</div>` : ''}
+      </div>`).join('')
+      : '<span class="ok-text">✓ No findings — every signal the doctor checks is clean.</span>';
+  }
+  if(report && empty){
+    const triage = d.triage || {};
+    report.style.display = 'block';
+    empty.style.display = 'none';
+    const plan = (triage.management_plan || []).map((s, i) => `${i + 1}. ${s}`).join('\n');
+    report.textContent =
+      `REPORT ${d.id}  ·  ${d.ts}  ·  ${String(d.status || '').toUpperCase()}\n` +
+      `ENGINE ${d.engine ? d.engine.mode : '?'} / doctor model ${d.engine ? (d.engine.doctor_model || 'none') : '?'}\n` +
+      `STUCK ${d.stuck ? d.stuck.count : 0} item(s)\n\n` +
+      `WHAT / HOW:\n${triage.summary || '(no summary)'}\n\n` +
+      (plan ? `MANAGEMENT PLAN:\n${plan}\n\n` : '') +
+      (d.research && d.research.performed
+        ? `INTERNET RESEARCH:\n${(d.research.queries || []).map(q => `- ${q.query}\n${(q.results || []).map(r => `    · ${r.title} ${r.url}`).join('\n')}`).join('\n')}`
+        : `INTERNET RESEARCH: not performed (${d.research ? d.research.reason : 'n/a'})`) +
+      (d.path ? `\n\nSaved to ${d.path}` : '');
+  }
+}
+
+async function reapStuck(dryRun){
+  try{
+    const d = await jpost('/doctor/reap', { dry_run: !!dryRun });
+    const box = $('doctorStuck');
+    const count = (d.candidates && d.candidates.count) || 0;
+    if(box){
+      box.innerHTML = dryRun
+        ? `<span class="warn-text">${esc(count)} candidate(s) would be closed.</span>`
+        : `<span class="ok-text">Reaped ${esc((d.reaped || []).length)} item(s); ${esc(count)} candidate(s) found.</span>`;
+    }
+    loadDoctor();
+  }catch(e){ alert('Reap failed: ' + e.message); }
+}
+
+async function openDoctorReport(id){
+  try{
+    const r = await fetch('/doctor/reports/' + encodeURIComponent(id) + '?fmt=md');
+    const text = await r.text();
+    const report = $('doctorReport'), empty = $('doctorReportEmpty');
+    if(report){ report.style.display = 'block'; report.textContent = text; }
+    if(empty) empty.style.display = 'none';
+  }catch(e){ alert('Could not open report: ' + e.message); }
+}
+
 // Initial Boots
 (function init(){
   // Restore the saved agent mode in the (now visible) selector.
@@ -3840,6 +4409,11 @@ async function onComputerTaskChange(){
   loadChannels(true);
   loadChatKeys();
   loadComputerStatus();
+  // System Overview: live telemetry feed + local engine (NPU/GPU) state.
+  loadTelemetry();
+  connectTelemetry();
+  loadEngine();
+  loadDoctor();
 })();
 </script>
 </body>

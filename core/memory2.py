@@ -87,13 +87,21 @@ class MemoryStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
+        self._conn_gen = -1              # db_registry generation this handle belongs to
         self._index_conn = None          # LockedConnection used by the retriever
         self._retriever = None
         self._index_enabled = bool(index)
         self._init()
 
     def _conn_new(self, shared: bool = False) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=15.0, check_same_thread=not shared)
+        from .db_registry import open_db
+
+        conn = open_db(
+            self.db_path,
+            owner="memory2",
+            timeout=15.0,
+            check_same_thread=not shared,
+        )
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
@@ -106,9 +114,20 @@ class MemoryStore:
 
     def conn(self) -> sqlite3.Connection:
         """Shared connection (thread-safe because every caller holds ``_lock``)."""
+        from .db_registry import db_registry
+
         with self._lock:
+            # Reopen after a shutdown sweep closed the handle (generation bump).
+            # The retriever caches the wrapper around this handle, so it must be
+            # dropped too — otherwise a later search silently queries a closed
+            # connection and returns zero rows.
+            if self._conn is not None and self._conn_gen != db_registry.generation:
+                self._conn = None
+                self._index_conn = None
+                self._retriever = None
             if self._conn is None:
                 self._conn = self._conn_new(shared=True)
+                self._conn_gen = db_registry.generation
             return self._conn
 
     def index_conn(self):
@@ -116,10 +135,10 @@ class MemoryStore:
         from .hybrid_search import LockedConnection
 
         with self._lock:
-            if self._index_conn is None:
-                if self._conn is None:
-                    self._conn = self._conn_new(shared=True)
-                self._index_conn = LockedConnection(self._conn, self._lock)
+            conn = self.conn()
+            # Rebuild the wrapper whenever the underlying handle was replaced.
+            if self._index_conn is None or getattr(self._index_conn, "raw", None) is not conn:
+                self._index_conn = LockedConnection(conn, self._lock)
             return self._index_conn
 
     def close(self) -> None:
@@ -127,6 +146,9 @@ class MemoryStore:
             self._retriever = None
             self._index_conn = None
             if self._conn is not None:
+                from .db_registry import db_registry
+
+                db_registry.unregister(self._conn)
                 try:
                     self._conn.close()
                 except Exception:
@@ -196,6 +218,11 @@ class MemoryStore:
         )
         conn.commit()
         conn.close()
+        # This one is opened and closed inside _init, so it must not linger in
+        # the shutdown registry (it would be reported as an unclosed database).
+        from .db_registry import db_registry
+
+        db_registry.unregister(conn)
         if self._index_enabled:
             self._ensure_retriever()
 

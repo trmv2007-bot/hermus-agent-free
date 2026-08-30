@@ -90,6 +90,56 @@ async def _background_agent_watchdog():
         await asyncio.sleep(30)
 
 
+async def _local_engine_watchdog():
+    """Keep the routed local engine alive, and let the doctor self-triage.
+
+    Two independent jobs on one slow tick:
+
+    * If the accelerator plan routes work to NoLlama and the server is
+      installed with a model on disk but not answering, restart it.  A dead
+      engine is otherwise silent until a user notices missing answers.
+    * If ``HERMUS_DOCTOR_AUTO=1``, run the doctor's bounded auto-triage
+      (cooldown + daily cap live in ``core.doctor``) so failures are explained
+      while the evidence is still fresh.
+    """
+    from core.accelerators import ENGINE_NOLLAMA, cached_plan
+    from core.nollama import nollama_manager
+
+    while True:
+        try:
+            plan = cached_plan()
+            wants_nollama = any(
+                role.get("engine") == ENGINE_NOLLAMA for role in (plan.get("roles") or {}).values()
+            )
+            if wants_nollama and nollama_manager.installed() and nollama_manager.installed_models():
+                if not nollama_manager.running():
+                    device = ""
+                    for role in (plan.get("roles") or {}).values():
+                        if role.get("engine") == ENGINE_NOLLAMA:
+                            device = role.get("device") or ""
+                            break
+                    started = await asyncio.to_thread(nollama_manager.start, device=device)
+                    print(f"[Gateway] local engine auto-start: {started.get('success')} (device={device or 'AUTO'})")
+        except Exception as e:
+            print(f"[Gateway] local engine watchdog error: {e}")
+
+        if getattr(config, "doctor_enabled", True) and getattr(config, "doctor_auto", False):
+            try:
+                from core.doctor import doctor
+
+                report = await asyncio.to_thread(doctor.run, auto=True)
+                if report.get("status") not in (None, "skipped", "ok"):
+                    print(
+                        f"[Gateway] hermus-doctor: {report.get('status')} "
+                        f"({report.get('finding_count', len(report.get('findings') or []))} findings) "
+                        f"-> {report.get('path', 'no report path')}"
+                    )
+            except Exception as e:
+                print(f"[Gateway] hermus-doctor error: {e}")
+
+        await asyncio.sleep(120)
+
+
 async def _memory_maintenance_loop():
     """Hourly decay/eviction pass so stale memories stop polluting prompts.
 
@@ -141,6 +191,12 @@ async def lifespan(app: FastAPI):
             watchdog_task = asyncio.create_task(_background_agent_watchdog())
         except Exception as e:
             print(f"[Gateway] background-agent watchdog failed to start: {e}")
+    engine_task = None
+    if getattr(config, "nollama_autostart", False) or getattr(config, "doctor_auto", False):
+        try:
+            engine_task = asyncio.create_task(_local_engine_watchdog())
+        except Exception as e:
+            print(f"[Gateway] local-engine watchdog failed to start: {e}")
     try:
         yield
     finally:
@@ -148,10 +204,36 @@ async def lifespan(app: FastAPI):
             maintenance_task.cancel()
         if watchdog_task and not watchdog_task.done():
             watchdog_task.cancel()
+        if engine_task and not engine_task.done():
+            engine_task.cancel()
         try:
             await _realtime.shutdown()
         except Exception:
             pass
+        # Release every SQLite handle Hermus still owns (memory, memory2,
+        # hybrid index, web-read cache, engine state). Without this, Ctrl+C
+        # ended with a screenful of "ResourceWarning: unclosed database".
+        try:
+            from core.db_registry import close_all as _close_dbs
+
+            report = _close_dbs("gateway_shutdown")
+            if report.get("closed") or report.get("errors"):
+                print(
+                    f"[Gateway] sqlite handles closed: {report.get('closed', 0)}"
+                    + (f" ({len(report['errors'])} errors)" if report.get("errors") else "")
+                )
+        except Exception as e:
+            print(f"[Gateway] sqlite shutdown cleanup failed: {e}")
+        # Stop the local NoLlama engine we may have started, so the NPU/GPU
+        # side is never left running without its parent gateway.
+        try:
+            from core.nollama import nollama_manager
+
+            stopped = nollama_manager.stop_if_managed()
+            if stopped.get("stopped"):
+                print(f"[Gateway] local engine stopped: {stopped.get('pid')}")
+        except Exception as e:
+            print(f"[Gateway] local engine shutdown failed: {e}")
 
 
 app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized", lifespan=lifespan)
@@ -187,6 +269,7 @@ from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_engine import router as _engine_router  # noqa: E402
 
 app.include_router(_channels_router)
 app.include_router(_registry_router)
@@ -195,6 +278,7 @@ app.include_router(_subsystems_router)
 app.include_router(_computer_router)
 app.include_router(_speech_router)
 app.include_router(_jarvis_router)
+app.include_router(_engine_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -228,6 +312,32 @@ async def favicon():
 async def api_status():
     """Machine-readable gateway status previously served from the root path."""
     from core.cache import get_cache_stats
+    # Local engine summary (NPU/GPU routing). Probe is off here: /api/status is
+    # polled by the dashboard, and the reachable-check lives on /engine/status.
+    try:
+        from core.accelerators import cached_plan
+        from core.nollama import nollama_manager
+
+        plan = cached_plan()
+        local_engine = {
+            "mode": plan.get("mode"),
+            "hardware": {
+                "npu": [d["name"] for d in plan.get("hardware", {}).get("npu", [])],
+                "gpus": [d["name"] for d in plan.get("hardware", {}).get("gpus", [])],
+            },
+            "roles": {
+                role: {"engine": a.get("engine"), "device": a.get("device"), "model": a.get("model")}
+                for role, a in (plan.get("roles") or {}).items()
+            },
+            "nollama": {
+                "installed": nollama_manager.installed(),
+                "running": nollama_manager.running(),
+                "models": len(nollama_manager.installed_models()),
+                "port": nollama_manager.port,
+            },
+        }
+    except Exception as e:  # noqa: BLE001 - status must still answer
+        local_engine = {"error": str(e)}
     return {
         "message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI - Optimized",
         "platforms": ["telegram", "discord", "cli"],
@@ -235,6 +345,7 @@ async def api_status():
         "channels": get_channel_status(),
         "optimized": True,
         "cache_stats": get_cache_stats(),
+        "local_engine": local_engine,
         "features": [
             "multi_step_agent_loop",
             "tool_registry",
@@ -259,6 +370,10 @@ async def api_status():
             "self_healing_watchdog",
             "workspace_projects",
             "profiles_personas",
+            "local_engine_routing_npu_gpu",
+            "nollama_openvino_engine",
+            "hermus_doctor_self_repair",
+            "sqlite_lifecycle_registry",
         ],
         "version": "2.2-free-architecture"
     }

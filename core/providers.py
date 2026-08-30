@@ -223,6 +223,22 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "notes": "No API key needed — local",
         "no_auth": True,
     },
+    "nollama": {
+        "name": "NoLlama (Intel NPU / Arc iGPU via OpenVINO)",
+        # 8010 rather than NoLlama's 8000 default: the Hermus gateway owns 8000.
+        "base_url": "http://localhost:8010/v1",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+        "default_model": "MiniCPM5-1B-int4-g128-ov",
+        # Tool calling works on GPU/CPU; the NPU has a hard prompt cap and
+        # cannot do it (core.accelerators strips tools for NPU roles).
+        "supports_tools": True,
+        "env_key": None,
+        "notes": "Local OpenVINO server for Intel NPU/Arc — no API key needed",
+        "no_auth": True,
+    },
     "lmstudio": {
         "name": "LM Studio",
         "base_url": "http://localhost:1234/v1",

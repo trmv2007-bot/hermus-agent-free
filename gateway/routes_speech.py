@@ -46,6 +46,29 @@ async def speech_status():
     return speech_engine.status()
 
 
+@router.get("/speech/transcription/status")
+async def speech_transcription_status():
+    """Which backend owns voice commands: the NPU engine, or faster-whisper.
+
+    The dashboard's Voice panel shows this so a user on an Intel NPU box can
+    see that transcription runs cool on the NPU while the GPU stays free.
+    """
+    from tools.voice import local_engine_status, FASTER_WHISPER_AVAILABLE
+
+    engine = local_engine_status()
+    return {
+        "backend": "nollama" if engine.get("ready") else "faster-whisper",
+        "local_engine": engine,
+        "faster_whisper_installed": FASTER_WHISPER_AVAILABLE,
+        "note": (
+            "Voice commands transcribe on the NPU; the GPU is left free for the agent."
+            if engine.get("ready")
+            else "Voice commands transcribe on the CPU (faster-whisper). "
+            "Download a Whisper model in the Local AI Engine pane to move it to the NPU."
+        ),
+    }
+
+
 @router.post("/speech/synthesize")
 async def speech_synthesize(payload: dict):
     """Generate local WAV speech and return a gateway URL, never a host path."""

@@ -18,6 +18,7 @@ from typing import Optional
 import requests
 
 from .config import config
+from .db_registry import using
 
 # Default free embedding model on Ollama
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
@@ -89,27 +90,26 @@ class EmbeddingStore:
         self._init_db()
 
     def _init_db(self):
-        conn = sqlite3.connect(str(self.db_path))
-        cur = conn.cursor()
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS embeddings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source TEXT,
-                chunk_id TEXT,
-                content TEXT,
-                metadata TEXT,
-                vector BLOB,
-                dim INTEGER,
-                backend TEXT,
-                created TEXT
+        with using(self.db_path, owner="embeddings") as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT,
+                    chunk_id TEXT,
+                    content TEXT,
+                    metadata TEXT,
+                    vector BLOB,
+                    dim INTEGER,
+                    backend TEXT,
+                    created TEXT
+                )
+                """
             )
-            """
-        )
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_emb_source ON embeddings(source);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_emb_chunk ON embeddings(chunk_id);")
-        conn.commit()
-        conn.close()
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_emb_source ON embeddings(source);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_emb_chunk ON embeddings(chunk_id);")
+            conn.commit()
 
     def available(self) -> bool:
         """Always available — hash fallback if Ollama embed model missing."""
@@ -174,12 +174,10 @@ class EmbeddingStore:
         return _hash_embed(text, self._dim)
 
     def count(self) -> int:
-        conn = sqlite3.connect(str(self.db_path))
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM embeddings")
-        n = cur.fetchone()[0]
-        conn.close()
-        return n
+        with using(self.db_path, owner="embeddings") as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM embeddings")
+            return cur.fetchone()[0]
 
     def add_text(
         self,
@@ -194,28 +192,27 @@ class EmbeddingStore:
 
         vec = self.embed(text)
         cid = chunk_id or hashlib.sha1(f"{source}:{text[:200]}".encode()).hexdigest()[:16]
-        conn = sqlite3.connect(str(self.db_path))
-        cur = conn.cursor()
-        # Upsert-ish: delete same chunk_id then insert
-        cur.execute("DELETE FROM embeddings WHERE chunk_id=?", (cid,))
-        cur.execute(
-            """
-            INSERT INTO embeddings (source, chunk_id, content, metadata, vector, dim, backend, created)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                source,
-                cid,
-                text,
-                json.dumps(metadata or {}),
-                _pack_vector(vec),
-                len(vec),
-                self._backend or "hash",
-                datetime.now().isoformat(),
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with using(self.db_path, owner="embeddings") as conn:
+            cur = conn.cursor()
+            # Upsert-ish: delete same chunk_id then insert
+            cur.execute("DELETE FROM embeddings WHERE chunk_id=?", (cid,))
+            cur.execute(
+                """
+                INSERT INTO embeddings (source, chunk_id, content, metadata, vector, dim, backend, created)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source,
+                    cid,
+                    text,
+                    json.dumps(metadata or {}),
+                    _pack_vector(vec),
+                    len(vec),
+                    self._backend or "hash",
+                    datetime.now().isoformat(),
+                ),
+            )
+            conn.commit()
         return {"success": True, "chunk_id": cid, "source": source, "dim": len(vec)}
 
     def add_chunks(self, texts: list[str], source: str = "manual", metadata: Optional[dict] = None) -> dict:
@@ -228,15 +225,16 @@ class EmbeddingStore:
 
     def search(self, query: str, limit: int = 5, source: str = None) -> dict:
         qvec = self.embed(query)
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        if source:
-            cur.execute("SELECT * FROM embeddings WHERE source=?", (source,))
-        else:
-            cur.execute("SELECT * FROM embeddings")
-        rows = cur.fetchall()
-        conn.close()
+        with using(self.db_path, owner="embeddings") as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            if source:
+                cur.execute("SELECT * FROM embeddings WHERE source=?", (source,))
+            else:
+                cur.execute("SELECT * FROM embeddings")
+            # Materialise before the handle closes: Row objects are read below,
+            # outside the connection's lifetime.
+            rows = [dict(r) for r in cur.fetchall()]
 
         scored: list[tuple[float, dict]] = []
         for r in rows:
@@ -388,15 +386,14 @@ class EmbeddingStore:
             return ""
 
     def clear(self, source: str = None) -> dict:
-        conn = sqlite3.connect(str(self.db_path))
-        cur = conn.cursor()
-        if source:
-            cur.execute("DELETE FROM embeddings WHERE source LIKE ?", (f"{source}%",))
-        else:
-            cur.execute("DELETE FROM embeddings")
-        conn.commit()
-        n = cur.rowcount
-        conn.close()
+        with using(self.db_path, owner="embeddings") as conn:
+            cur = conn.cursor()
+            if source:
+                cur.execute("DELETE FROM embeddings WHERE source LIKE ?", (f"{source}%",))
+            else:
+                cur.execute("DELETE FROM embeddings")
+            conn.commit()
+            n = cur.rowcount
         return {"success": True, "deleted": n}
 
 

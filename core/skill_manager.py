@@ -231,28 +231,28 @@ def test_{name}_entrypoint():
         """Log usage metrics and reliability evidence for self-improvement."""
         try:
             from .memory import memory
-            import sqlite3
+            from .db_registry import using
+
             db_path = memory.db_path
-            conn = sqlite3.connect(str(db_path))
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS skill_usage (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    skill_name TEXT,
-                    timestamp TEXT,
-                    success INTEGER,
-                    feedback TEXT,
-                    duration_ms REAL,
-                    failure_category TEXT,
-                    verification_score REAL
-                )
-            """)
-            cur.execute("""
-                INSERT INTO skill_usage (skill_name, timestamp, success, feedback, duration_ms, failure_category, verification_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (skill_name, datetime.now().isoformat(), 1 if success else 0, feedback, duration_ms, failure_category, verification_score))
-            conn.commit()
-            conn.close()
+            with using(db_path, owner="skill_usage") as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS skill_usage (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        skill_name TEXT,
+                        timestamp TEXT,
+                        success INTEGER,
+                        feedback TEXT,
+                        duration_ms REAL,
+                        failure_category TEXT,
+                        verification_score REAL
+                    )
+                """)
+                cur.execute("""
+                    INSERT INTO skill_usage (skill_name, timestamp, success, feedback, duration_ms, failure_category, verification_score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (skill_name, datetime.now().isoformat(), 1 if success else 0, feedback, duration_ms, failure_category, verification_score))
+                conn.commit()
         except Exception:
             pass
 
@@ -300,12 +300,12 @@ def test_{name}_entrypoint():
         """Compute usage health and reliability score for a skill."""
         try:
             from .memory import memory
-            import sqlite3
-            conn = sqlite3.connect(str(memory.db_path))
-            cur = conn.cursor()
-            cur.execute("SELECT success, verification_score FROM skill_usage WHERE skill_name=? ORDER BY id DESC LIMIT 20", (skill_name,))
-            rows = cur.fetchall()
-            conn.close()
+            from .db_registry import using
+
+            with using(memory.db_path, owner="skill_usage") as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT success, verification_score FROM skill_usage WHERE skill_name=? ORDER BY id DESC LIMIT 20", (skill_name,))
+                rows = cur.fetchall()
             if not rows:
                 return {"total": 0, "successes": 0, "success_rate": 1.0, "reliability_score": 1.0, "consecutive_failures": 0, "healthy": True}
             successes = sum(1 for r in rows if r[0])

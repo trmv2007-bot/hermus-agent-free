@@ -235,10 +235,11 @@ class Workspace:
             }
         )
         # bare SQLite db
-        conn = sqlite3.connect(str(path / "memory.db"))
-        conn.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT, ts TEXT)")
-        conn.commit()
-        conn.close()
+        from .db_registry import using
+
+        with using(path / "memory.db", owner="workspace") as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT, ts TEXT)")
+            conn.commit()
         return {"success": True, "name": name, "path": str(path)}
 
     def list_projects(self) -> list[dict[str, Any]]:
