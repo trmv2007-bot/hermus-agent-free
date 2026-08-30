@@ -16,9 +16,9 @@ NVIDIA / AMD GPU             reasoning → **Ollama** (llama.cpp's CUDA/ROCm
 Intel iGPU / Arc             **NoLlama** on the GPU (OpenVINO INT4 decodes
                              faster than Ollama's Vulkan path, and it is the
                              only local vision path for Intel)
-CPU only                     **Ollama** (llama.cpp's CPU backend beats
-                             OpenVINO on a strong desktop, per NoLlama's own
-                             device table)
+CPU only                     **NoLlama** if a downloaded OpenVINO model is
+                             present (MiniCPM doctors Hermus itself), else
+                             **Ollama** on the llama.cpp CPU backend
 ===========================  ==================================================
 
 The point of the split is *pipelining*, not fallback: a Core Ultra box has an
@@ -560,13 +560,56 @@ def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> d
         notes.append("No NPU detected, so background and generative work share one device.")
 
     else:  # MODE_CPU_ONLY
+        # A CPU-only box still has a working local option: downloaded OpenVINO
+        # models served by NoLlama. If the user has e.g. MiniCPM on disk, the
+        # Hermus doctor must use it instead of falling back to
+        # ollama/llama3.1:8b. Ollama remains the fallback when NoLlama has
+        # nothing to serve yet.
+        nollama_catalog: dict[str, dict[str, Any]] = {}
+        try:
+            from .nollama import nollama_manager
+
+            for row in nollama_manager.list_catalog():
+                if row.get("installed"):
+                    nollama_catalog[row.get("id")] = row
+        except Exception:
+            nollama_catalog = {}
+
+        def _nollama_cpu_model(role: str) -> str:
+            row = (nollama_catalog or {}).get("minicpm")
+            if row is None or role not in (row.get("roles") or []):
+                row = None
+                # Prefer the most relevant installed CPU model for this role.
+                try:
+                    from .nollama import nollama_manager as _nm
+
+                    row = _nm.best_installed_model("CPU", (role,))
+                except Exception:
+                    row = None
+            if not row:
+                return ""
+            return str(row.get("repo") or "").split("/")[-1] or row.get("path")
+
         for role in ALL_ROLES:
-            model = ollama_vision if role == ROLE_VISION else ollama_model
-            roles[role] = _role(
-                role, ENGINE_OLLAMA, "CPU", model,
-                "No accelerator — Ollama's llama.cpp CPU backend is the mature path",
-            )
-        notes.append("CPU-only: NoLlama is not the right engine here (Intel-only, and llama.cpp CPU is faster).")
+            if role == ROLE_VISION:
+                model = ollama_vision
+                engine = ENGINE_OLLAMA
+                reason = "No local OpenVINO vision model installed — Ollama vision on CPU"
+            else:
+                nollama_model = _nollama_cpu_model(role)
+                if nollama_model:
+                    model = nollama_model
+                    engine = ENGINE_NOLLAMA
+                    reason = f"Downloaded NoLlama model available on CPU (OpenVINO INT4) — role '{role}'"
+                else:
+                    model = ollama_model
+                    engine = ENGINE_OLLAMA
+                    reason = "No accelerator — Ollama's llama.cpp CPU backend is the mature path"
+            roles[role] = _role(role, engine, "CPU", model, reason)
+        notes.append(
+            "CPU-only: NoLlama is used when a downloaded OpenVINO model is present; "
+            "otherwise Ollama on CPU is the fallback."
+        )
 
     if has_npu:
         notes.append("NPU prompt cap is 4096 tokens and tool-calling is unavailable there.")

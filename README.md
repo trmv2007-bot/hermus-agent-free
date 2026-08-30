@@ -468,8 +468,9 @@ The exact model depends on what you install and what your hardware can handle.
 
 Hermus detects the accelerators in the machine and routes each *role* to the
 engine that can actually drive it — [NoLlama](https://github.com/aweussom/NoLlama)
-for Intel NPUs and Arc GPUs (Ollama cannot target an NPU at all), Ollama for
-NVIDIA/AMD and CPU-only boxes.
+for Intel NPUs, Arc GPUs and CPU-only boxes with a downloaded OpenVINO model
+(Ollama cannot target an NPU at all), and Ollama for NVIDIA/AMD GPUs or a
+CPU-only box with nothing downloaded yet.
 
 On a machine with **both** an NPU and a GPU the work is pipelined rather than
 split by preference: the NPU runs the continuous, low-intensity jobs (Whisper
