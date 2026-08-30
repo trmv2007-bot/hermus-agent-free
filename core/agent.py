@@ -134,8 +134,24 @@ class HermusAgent:
             return ""
 
     def _execute_tool(self, name: str, args: dict) -> dict:
-        """Execute via central registry — all tools including full pentest map."""
-        return tool_registry.execute(name, args or {})
+        """Execute via the canonical ToolGateway — the one invocation path.
+
+        The gateway performs descriptor resolution, policy gating, typed
+        :class:`ToolResult` classification, timeout handling and canonical event
+        emission (observability + trace correlation for the run/mission). It
+        delegates to the same ``core.tool_registry`` the legacy path used, so
+        tool discovery/fallback is unchanged. On success we return the tool's own
+        dict output; on failure we return the honest ``{error, error_code}`` dict
+        the agent loop reads, so a failed tool is never reported as success.
+        """
+        from .tools import get_tool_gateway
+        res = get_tool_gateway().execute(name, args or {})
+        if res.ok:
+            out = res.output
+            # registry.execute always returns a dict, but guard for robustness.
+            return out if isinstance(out, dict) else {"result": out}
+        return {"error": res.error_message or f"tool '{name}' failed",
+                "error_code": res.error_code}
 
     def _apply_router(self, user_message: str) -> Optional[dict]:
         """Model Router 2.0: swap the LLM to the best available model for this turn.
