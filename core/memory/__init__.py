@@ -1,28 +1,29 @@
-"""Canonical Memory subsystem (Rebuild spec §12).
+"""Canonical Memory subsystem (Rebuild spec §12, clean-slate §9).
 
-The canonical memory implementation lives in :mod:`core.memory2` (typed stores,
-hybrid retrieval, access tracking, decay, prompt-budget packing). This package is
-the single public facade. The legacy v1 store (``core.memory``) has been moved to
-:mod:`core.compat.legacy_memory` and is re-exported here **only** for backward
-compatibility during the migration window; it is never a writable production path.
+The **only** writable memory path is :class:`MemoryFacade`
+(:func:`get_memory()`), which owns the union of:
 
-``get_memory()`` returns one canonical facade. ``migrate_legacy()`` copies v1 data
-into the canonical schema once and marks the migration complete.
+* typed semantics/working/procedural memory (backed by ``core.memory2``), and
+* session history / curated memory / user model / token usage (backed by the
+  legacy v1 store, now a *private backend* of the facade, not a competing writer).
+
+``from core.memory import memory`` resolves to the canonical facade singleton, so
+every module that used the legacy singleton now shares one writable path. The
+legacy ``Memory`` class is still exported for tests that exercise the session/
+curated backend directly and is the implementation the facade owns.
 """
 
 from .store import MemoryFacade, get_memory
 from .migration import (MigrationReader, migrate_legacy, detect_legacy,
                         verify_migration)
 
-# Backward-compatible re-exports of the legacy v1 module. These keep
-# ``from core.memory import Memory`` and ``from core.memory import memory``
-# working until their consumers are migrated. Marked as legacy.
-from ..compat import legacy_memory  # noqa: F401  (module alias)
-from ..compat.legacy_memory import Memory  # noqa: F401  (legacy class)
-try:
-    from ..compat.legacy_memory import memory  # noqa: F401  (legacy singleton)
-except Exception:  # pragma: no cover
-    memory = None  # type: ignore
+# The public singleton is the canonical facade (single writable path).
+memory = get_memory()
+
+# The legacy session/curated/user-model/token backend class. It is the
+# implementation the facade owns; the raw process-level singleton is no longer a
+# public writer (use ``get_memory()`` / ``memory``).
+from ..compat.legacy_memory import Memory  # noqa: F401  (backend class)
 
 __all__ = [
     "MemoryFacade",
@@ -31,6 +32,6 @@ __all__ = [
     "migrate_legacy",
     "detect_legacy",
     "verify_migration",
-    "Memory",       # legacy v1, read-only during migration
-    "memory",       # legacy v1 singleton, read-only during migration
+    "Memory",   # legacy session/curated backend class (owned by the facade)
+    "memory",   # canonical facade singleton
 ]

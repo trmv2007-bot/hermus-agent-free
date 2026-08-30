@@ -290,11 +290,46 @@ def test_memory_facade_and_migration(tmp_path):
     assert res2.get("skipped") is True
 
 
-def test_legacy_memory_names_still_importable():
-    # Backward-compat re-exports keep `from core.memory import Memory, memory` working.
-    from core.memory import Memory, memory, get_memory
-    assert Memory.__name__ == "Memory"
-    assert get_memory() is not None
+def test_memory_facade_is_single_writable_owner(tmp_path):
+    """The facade is the ONLY writable path and delivers the full feature union."""
+    from core.memory import MemoryFacade
+    from core.memory2 import Memory2
+    from core.compat.legacy_memory import Memory as V1
+
+    v1 = V1(db_path=str(tmp_path / "sess.db"))
+    m = MemoryFacade(Memory2(db_path=str(tmp_path / "m2.db")), v1_store=v1)
+
+    # typed memory
+    assert m.remember("semantic", "the plan uses pytest", project="p")["success"] is True
+    assert m.recall("pytest", project="p")
+    # session history
+    m.add_session_message("s1", "user", "fix the failing test")
+    assert m.search_sessions("failing", limit=5)
+    assert m.summarize_search_results("failing", m.search_sessions("failing", limit=2))
+    # curated memory
+    m.curate_memory("key", "value", importance=5)
+    assert m.get_curated_memory(limit=5)
+    # user model
+    m.update_user_model({"preferences": {"skin": "dark"}})
+    assert m.load_user_model()["preferences"]["skin"] == "dark"
+    # token usage
+    m.add_token_usage("s1", {"prompt_tokens": 2, "completion_tokens": 2})
+    assert m.get_token_usage("s1", limit=5)["count"] >= 1
+    assert m.db_path  # the backend db path is exposed
+    # nudges
+    assert isinstance(m.periodic_nudges(), list)
+
+
+def test_legacy_memory_singleton_is_facade():
+    # `from core.memory import memory` is now the canonical facade (single owner).
+    from core.memory import memory, get_memory
+    assert type(memory).__name__ == "MemoryFacade"
+    assert memory is get_memory()
+    # facade exposes the union of typed + v1 methods
+    for meth in ("remember", "recall", "add_session_message", "search_sessions",
+                 "curate_memory", "get_curated_memory", "load_user_model",
+                 "update_user_model", "get_token_usage", "periodic_nudges"):
+        assert callable(getattr(memory, meth)), meth
 
 
 # ---------------------------------------------------------------------------

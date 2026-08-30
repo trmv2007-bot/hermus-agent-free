@@ -1,9 +1,21 @@
-"""Canonical memory facade.
+"""Canonical memory facade — the ONLY writable memory path.
 
-``Memory2`` (in :mod:`core.memory2`) is the canonical implementation. This facade
-exposes a single, stable API for the whole system and guarantees there is exactly
-one writable memory path in production. It never routes writes through the legacy
-:mod:`core.memory` v1 store.
+Clean-slate (spec §9): one memory owner. The facade exposes the full union of the
+system's memory concerns behind a single class:
+
+* **typed semantic/working/procedural memory** — backed by ``core.memory2``
+  (MemoryStore / Memory2) with hybrid retrieval, decay and prompt-budget packing;
+* **session history + curated memory + user model + token usage** — backed by the
+  legacy v1 store (now an *internal backend*, not a competing public writer).
+
+Every module that used to ``import memory`` from the legacy singleton now gets
+this facade, so there is exactly one writable production path and no parallel
+public ``Memory`` singleton.
+
+The legacy v1 store lives in ``core.compat.legacy_memory`` and is treated as a
+private backend: it is still instantiated (it owns the real SQLite schema the
+session/curated/user-model features need), but it is no longer exposed as a second
+public memory object.
 """
 
 from __future__ import annotations
@@ -16,28 +28,42 @@ KINDS: tuple[str, ...] = ("working", "episodic", "semantic", "procedural", "proj
 
 
 class MemoryFacade:
-    """One canonical memory API backed by Memory2."""
+    """One canonical memory API covering typed memory + session/curated/ui state."""
 
-    def __init__(self, store: Any = None, *, db_path: Optional[str] = None):
+    def __init__(self, store: Any = None, *, db_path: Optional[str] = None,
+                 v1_store: Any = None):
+        # --- typed memory backend (Memory2) -----------------------------------
         if store is None:
             from ..memory2 import Memory2  # type: ignore
             store = Memory2(db_path=db_path)
         self._store = store
+        # --- session / curated / user-model / token backend (legacy v1) --------
+        # Private backend owned by this facade; not a competing public singleton.
+        if v1_store is None:
+            from ..compat.legacy_memory import Memory as _V1  # type: ignore
+            try:
+                v1_store = _V1()
+            except Exception:
+                v1_store = None
+        self._v1 = v1_store
         self._lock = threading.RLock()
 
     @property
     def store(self) -> Any:
-        """The underlying canonical Memory2 store (used for advanced ops)."""
+        """The underlying typed Memory2 store (used for advanced ops)."""
         return self._store
 
-    # -- write -----------------------------------------------------------------
+    @property
+    def v1(self) -> Any:
+        """The underlying session/curated/user-model backend (private)."""
+        return self._v1
+
+    # -- typed memory (Memory2) -------------------------------------------------
     def remember(self, kind: str, content: str, **kwargs) -> dict[str, Any]:
-        """Store one memory in the canonical schema."""
         if kind not in KINDS:
             return {"success": False, "error": f"unknown kind '{kind}' (choose {KINDS})"}
         return self._store.remember(kind, content, **kwargs)
 
-    # -- read ------------------------------------------------------------------
     def recall(self, query: str, *, project: Optional[str] = None,
                kinds: Optional[list[str]] = None, limit: int = 10,
                record_access: bool = True) -> list[dict[str, Any]]:
@@ -78,7 +104,6 @@ class MemoryFacade:
         except Exception:
             return []
 
-    # -- lifecycle -------------------------------------------------------------
     def forget(self, memory_id: int, *, reason: str = "manual") -> dict[str, Any]:
         try:
             return self._store.forget(memory_id, reason=reason)
@@ -94,11 +119,53 @@ class MemoryFacade:
         except AttributeError:
             return {}
 
+    # -- session / curated / user-model / token (legacy v1 backend) --------------
+    @property
+    def db_path(self) -> Any:
+        if self._v1 is not None:
+            return getattr(self._v1, "db_path", None)
+        return getattr(self._store, "db_path", None)
+
+    def add_session_message(self, *args, **kw):
+        return self._v1.add_session_message(*args, **kw) if self._v1 else None
+
+    def search_sessions(self, *args, **kw):
+        return self._v1.search_sessions(*args, **kw) if self._v1 else []
+
+    def summarize_search_results(self, *args, **kw):
+        return self._v1.summarize_search_results(*args, **kw) if self._v1 else ""
+
+    def curate_memory(self, *args, **kw):
+        return self._v1.curate_memory(*args, **kw) if self._v1 else None
+
+    def get_curated_memory(self, *args, **kw):
+        return self._v1.get_curated_memory(*args, **kw) if self._v1 else []
+
+    def periodic_nudges(self, *args, **kw):
+        return self._v1.periodic_nudges(*args, **kw) if self._v1 else []
+
+    def load_user_model(self, *args, **kw):
+        return self._v1.load_user_model(*args, **kw) if self._v1 else {}
+
+    def update_user_model(self, *args, **kw):
+        return self._v1.update_user_model(*args, **kw) if self._v1 else None
+
+    def add_token_usage(self, *args, **kw):
+        return self._v1.add_token_usage(*args, **kw) if self._v1 else None
+
+    def get_token_usage(self, *args, **kw):
+        return self._v1.get_token_usage(*args, **kw) if self._v1 else {}
+
+    # -- lifecycle ---------------------------------------------------------------
     def close(self) -> None:
-        try:
-            self._store.store.close()
-        except Exception:
-            pass
+        for backend in (self._store, self._v1):
+            try:
+                if hasattr(backend, "store"):
+                    backend.store.close()
+                elif hasattr(backend, "close"):
+                    backend.close()
+            except Exception:
+                pass
 
 
 _facade: Optional[MemoryFacade] = None
@@ -106,7 +173,7 @@ _facade_lock = threading.Lock()
 
 
 def get_memory() -> MemoryFacade:
-    """Return the process-wide canonical memory facade."""
+    """Return the process-wide canonical memory facade (single writable path)."""
     global _facade
     with _facade_lock:
         if _facade is None:
