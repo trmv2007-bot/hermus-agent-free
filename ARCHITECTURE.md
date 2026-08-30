@@ -54,7 +54,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Tools** | `core.tools.ToolGateway` | ToolRegistry + evidence | only legal invocation path |
 | **Models** | `core.models.ModelGateway` | provider/credential state | only provider/select path |
 | **Memory** | `core.memory.MemoryFacade` | `core.memory2` MemoryStore | one writable path |
-| **World state** | `core.state.WorldStateFacade` | `core.computer.world_state_v2` | one writable path |
+| **World state** | `core.state.WorldStateFacade` | `core.computer.world_state` | one writable path |
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
 | **Jobs** | `core.contracts.Job` + queue | durable job store | lease/heartbeat/reaper |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
@@ -90,16 +90,16 @@ The final tree must not contain two competing implementations.
 |---|---|---|
 | Autonomy | ✅ **DONE** — `core/autonomous.py` **deleted** | `MissionEngine` is the only autonomy engine; disabling the runtime is a **BLOCKED** state, never a silent downgrade. The marker verifier/diagnoser was rehomed to `core/verifiers.py` (feature depth preserved). |
 | Events | 🟡 **bridged** (`core/dashboard_events.py`) | Every dashboard/gateway/speech event now funnels into the one canonical `core.events.EventBus` (durable, replayable). The dict API is kept only as a migration bridge. |
-| Memory | 🟡 `/core/memory.py` → `core/compat/legacy_memory.py` (read-only) | Memory 2.0 canonical; v1 is a migration source only. |
-| World state | 🟡 `core/computer/world_state.py` (v1) read-only | `WorldStateV2` canonical via `core/state`. |
+| Memory | ✅ **DONE** — `MemoryFacade` is the single writable memory path | The facade owns the typed Memory2 store plus the v1 session/curated/user-model/token backend; no competing process-level v1 singleton. |
+| World state | ✅ **DONE** — `world_state_v2.py` **deleted** | `core/computer/world_state.WorldState` (v1) is canonical; `core.state.WorldStateFacade` is the single writable path. The dead V2 duplicate (exported only from `__init__`, used by no functional code) was removed. |
 | Models | 🟡 `providers`/`provider_resolver`/`model_fleet`/`router2`/`multi_key` hidden behind `ModelGateway` | one model-selection path. |
 | Setup | 🟡 `setup.sh`/`activate.sh` thin wrappers → `./hermus bootstrap` | one bootstrap. |
 
 ### Deletion milestones (follow-ups)
-1. Migrate legacy memory consumers → `core.memory.get_memory()`; delete `core/compat/legacy_memory.py`.
+1. ~~Migrate world-state consumers → `WorldStateFacade`; delete v1.~~ ✅ done (deleted the dead `world_state_v2` duplicate; v1 is canonical).
 2. Migrate run/dashboard/computer event producers + consumers to `EventEnvelope`; delete the legacy event modules.
-3. Migrate world-state consumers → `WorldStateFacade`; delete v1.
-4. Delete/hide `providers`/`model_fleet`/`router2`/`multi_key` internals behind `ModelGateway`.
+3. Migrate legacy memory consumers → `core.memory.get_memory()` entirely; retire `core/compat/legacy_memory.py` as a public path (facade already owns the v1 backend).
+4. Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway` — **next milestone** (callers still import them directly).
 5. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.
 6. Delete duplicate agent managers / orchestration concepts with no distinct contract.
 
