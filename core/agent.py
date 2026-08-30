@@ -707,6 +707,19 @@ Rules:
         if not final_content:
             final_content = "(No response generated)"
 
+        # The model can only act agentically when the provider actually accepts
+        # tool definitions. When the provider stripped them (supports_tools
+        # false), say so instead of letting the model claim it "cannot do
+        # agentic tasks" with no visible reason.
+        tools_disabled = getattr(self.llm, "last_tools_disabled_reason", None)
+        if tools_disabled and self.tools:
+            emit("tools_disabled", {"reason": tools_disabled, "provider": getattr(self.llm, "provider", "")})
+            final_content += (
+                "\n\n---\n⚠️ *This reply ran without tool access: "
+                + tools_disabled
+                + ". Switch to a tool-calling provider (Groq, Ollama, or the local engine) to let Hermus act on your behalf.*"
+            )
+
         # DeepThink deliberation strategy (Phase 3): reflexion / verify / self-consistency
         strategy = "none"
         strategy_meta: dict = {}

@@ -48,6 +48,11 @@ class FreeLLM:
             self.provider, self.model_name = parse_model_ref(self.model)
         self.api_key_override = api_key
         self.base_url_override = base_url
+        # Set per-call when tools were requested but the chosen provider cannot
+        # accept them (preset ``supports_tools: False``). The agent surfaces
+        # this to the user instead of silently going tool-less — the model then
+        # answers "I can't do agentic tasks" with no visible reason otherwise.
+        self.last_tools_disabled_reason: Optional[str] = None
 
     def _parse_model(self, model_str: str) -> tuple:
         return parse_model_ref(model_str)
@@ -100,19 +105,26 @@ class FreeLLM:
         except Exception:
             return None
 
-    @staticmethod
-    def _tools_for_provider(tools: Optional[list[dict]], provider: str) -> Optional[list[dict]]:
+    def _tools_for_provider(self, tools: Optional[list[dict]], provider: str) -> Optional[list[dict]]:
         """Return a tool set accepted by the selected provider.
 
         The registry can contain more functions than hosted APIs permit.  In
         particular Groq validates ``tools`` at a hard maximum of 128 items.
         Keep the local registry intact, but advertise only the provider's
         supported maximum for each model request.
+
+        When the provider rejects tools outright, record why on the instance
+        (``last_tools_disabled_reason``) so callers can tell the user their
+        agent is running without tool access on this provider.
         """
         if not tools:
             return None
         preset = get_provider(provider)
         if preset.get("supports_tools") is False:
+            self.last_tools_disabled_reason = (
+                f"provider '{provider}' does not support tool calls "
+                f"(preset supports_tools=false) — the model saw zero tools this turn"
+            )
             return None
         max_tools = preset.get("max_tools")
         if max_tools:
@@ -456,6 +468,7 @@ class FreeLLM:
 
     def chat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Route to provider. Any unknown provider → OpenAI-compatible HTTP."""
+        self.last_tools_disabled_reason = None
         p = self.provider
         if p == "mock":
             return self._call_mock(messages, tools)
@@ -506,6 +519,7 @@ class FreeLLM:
         request whose text is emitted in small chunks, so downstream consumers
         (SSE, WebSocket, TUI) keep a uniform incremental contract.
         """
+        self.last_tools_disabled_reason = None
         if self.provider == "mock":
             resp = self._call_mock(messages, tools)
             _emit_chunks(resp.content, on_delta)
