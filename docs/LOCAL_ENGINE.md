@@ -25,7 +25,7 @@ both the OpenAI and the Ollama API. So neither engine covers every machine:
 | NPU **+** GPU | `pipelined` | GPU (Ollama for NVIDIA/AMD, NoLlama for Intel) | **NPU** via NoLlama |
 | NPU only | `npu_only` | NoLlama / NPU | NoLlama / NPU |
 | GPU only | `gpu_only` | Intel → NoLlama, else Ollama | same engine |
-| CPU only | `cpu_only` | Ollama | Ollama |
+| CPU only | `cpu_only` | NoLlama if a downloaded OpenVINO model exists, else Ollama | same |
 | `HERMUS_LOCAL_ENGINE=off` | `disabled` | — | — |
 
 That split is the whole point of `pipelined`: the NPU runs cool and silent while
@@ -84,6 +84,13 @@ Apache-2.0, ~755 MB of weights). On an NPU-only machine `recommended_model()`
 returns `npu-fast` instead: the NPU compiler rejects group-quantized INT4 and
 needs a channel-wise (`-int4-cw-ov`) build.
 
+`engine start` and the dashboard's **Start engine** button now auto-resolve the
+download directory from Hermus's own catalog, so a custom export such as
+MiniCPM does not need to be added to NoLlama's internal `models.json` first.
+That is why the flow is *download → start* (not *download → edit config*), and
+why a CPU-only box with MiniCPM downloaded routes the Hermus doctor to
+`nollama/MiniCPM5-1B-int4-g128-ov` instead of `ollama/llama3.1:8b`.
+
 Port plan: the gateway owns `8000`, so NoLlama runs on `8010`
 (`HERMUS_NOLLAMA_PORT`) with `--ollama-port 0`, so it never shadows the gateway
 or a real Ollama. `start()` refuses to bind the gateway port.
@@ -129,6 +136,15 @@ when a local model is reachable — asks it for triage. Because the model is sma
 (1–3 B), it may look things up online when it does not recognise a failure
 (`doctor_ask_internet`, via `tools/web_search`). Auto-runs are rate-limited by
 `doctor_cooldown_minutes` and `doctor_daily_cap`.
+
+If the routing plan says (or a downloaded OpenVINO model implies) the doctor
+should use NoLlama, Hermus will start the engine and wait briefly for it if a
+download is already on disk — so a box that has MiniCPM but has not been
+explicitly *started* still uses it instead of silently dropping to
+`ollama/llama3.1:8b`. If the local engine truly cannot run (not installed,
+model missing, server won't start), the doctor uses any configured API provider
+instead, and only if there is none does it fall back to a deterministic triage.
+When no OpenVINO model is on disk, it falls back to Ollama on CPU.
 
 The report is Markdown: overall status, the engine line, a numbered "what went
 wrong and how to manage it" plan, severity counts, then one block per finding

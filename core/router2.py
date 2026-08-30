@@ -163,10 +163,22 @@ class ModelRouter:
         wants_vision = wants_vision or profile["vision"]
         ranked = []
         for w in self._available_workers():
+            provider = (w.get("provider") or "").lower()
+            if needs_tools and not self._supports_tools(provider):
+                continue
             s, reason = self._score_worker(w, task_type, needs_tools, wants_vision, context_tokens)
             ranked.append({**w, "score": round(s, 2), "reason": reason, "task_type": task_type})
         ranked.sort(key=lambda x: x["score"], reverse=True)
         return ranked
+
+    @staticmethod
+    def _supports_tools(provider: str) -> bool:
+        try:
+            from .providers import get_provider
+
+            return get_provider(provider).get("supports_tools") is not False
+        except Exception:
+            return True
 
     def select(self, text: str, context_tokens: Optional[int] = None,
                needs_tools: bool = False, wants_vision: bool = False,
@@ -196,6 +208,21 @@ class ModelRouter:
                 ],
             }
         # graceful fallback to configured default
+        reason = "no workers discovered; using configured default"
+        try:
+            from .provider_resolver import diagnose
+
+            diag = diagnose(require_tools=needs_tools, model=config.model)
+            configured = [p["provider"] for p in diag.get("configured", [])]
+            if configured:
+                reason = (
+                    f"no usable workers discovered; configured providers: "
+                    f"{', '.join(configured)}. Using configured default."
+                )
+            else:
+                reason = "no usable workers discovered; no provider credentials"
+        except Exception:
+            pass
         return {
             "success": False,
             "task_type": task_type,
@@ -203,7 +230,7 @@ class ModelRouter:
             "context_tokens": ctx,
             "provider": config.model.split("/", 1)[0] if "/" in config.model else "ollama",
             "model": config.model,
-            "reason": "no workers discovered; using configured default",
+            "reason": reason,
             "alternatives": [],
         }
 

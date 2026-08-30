@@ -436,37 +436,65 @@ class MultiKeyManager:
             "tpm_limit": entry.get("tpm_limit"),
         }
 
-    def first_available_bundle(self, prefer: Optional[list[str]] = None) -> Optional[dict]:
+    def first_available_bundle(
+        self,
+        prefer: Optional[list[str]] = None,
+        require_tools: bool = False,
+    ) -> Optional[dict]:
         """
-        First usable key bundle across all providers (used as a fallback when
-        the requested provider has no key, e.g. Ollama not running but a
-        custom/groq/... key was added). Providers listed in `prefer` win;
-        providers with an explicit base_url (custom endpoints) rank next.
-        """
-        data = self._load()
-        providers = [p for p, keys in data.items() if keys]
-        if not providers:
-            return None
-        prefer = [p.lower() for p in (prefer or ["custom"])]
-        # Prefer explicitly listed providers, then ones with a base_url set,
-        # then everything else. Keep insertion order otherwise.
-        def rank(p: str) -> tuple:
-            base_set = any(
-                (isinstance(k, dict) and k.get("base_url")) for k in data.get(p, [])
-            )
-            pref = prefer.index(p) if p in prefer else len(prefer) + 1
-            return (pref, 0 if base_set else 1)
+        First usable key bundle across all configured providers (used as a
+        fallback when the requested provider has no key, e.g. Ollama not
+        running but a Groq/OpenRouter/... key was added).
 
-        for provider in sorted(providers, key=rank):
-            if provider in ("ollama", "lmstudio", "mock"):
-                continue
-            # Skip pseudo-providers created for custom-API tool round-robin
-            if provider.startswith("custom_"):
-                continue
-            bundle = self.get_key_bundle(provider)
-            if bundle and bundle.get("key") and bundle.get("base_url"):
-                return bundle
-        return None
+        Unlike the older store-only implementation this discovers credentials
+        from ``.env`` as well as ``data/api_keys.json``, so a provider that is
+        configured only through an environment variable is a valid fallback.
+
+        ``require_tools`` filters out providers whose preset rejects tool
+        calls (HuggingFace/router, mock) when the caller needs tools.
+        """
+        try:
+            from .provider_resolver import select_usable_bundle
+
+            return select_usable_bundle(
+                require_tools=require_tools,
+                prefer=prefer,
+                exclude_local=True,
+            )
+        except Exception:
+            # Fallback to the legacy store-only behavior if the resolver
+            # module is unavailable for some reason.
+            data = self._load()
+            providers = [p for p, keys in data.items() if keys]
+            if not providers:
+                return None
+            prefer = [p.lower() for p in (prefer or ["custom"])]
+
+            def rank(p: str) -> tuple:
+                base_set = any(
+                    (isinstance(k, dict) and k.get("base_url")) for k in data.get(p, [])
+                )
+                pref = prefer.index(p) if p in prefer else len(prefer) + 1
+                return (pref, 0 if base_set else 1)
+
+            for provider in sorted(providers, key=rank):
+                if provider in ("ollama", "lmstudio", "mock"):
+                    continue
+                # Skip pseudo-providers created for custom-API tool round-robin
+                if provider.startswith("custom_"):
+                    continue
+                bundle = self.get_key_bundle(provider)
+                if bundle and bundle.get("key") and bundle.get("base_url"):
+                    if require_tools and not self._provider_tools_enabled(provider):
+                        continue
+                    return bundle
+            return None
+
+    def _provider_tools_enabled(self, provider: str) -> bool:
+        try:
+            return get_provider(provider).get("supports_tools") is not False
+        except Exception:
+            return True
 
     def _adopt_reported_limits(self, provider: str, entry: dict, rate_limit: dict) -> None:
         """

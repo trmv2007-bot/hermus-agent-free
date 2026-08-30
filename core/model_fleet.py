@@ -44,12 +44,47 @@ def _split_tasks_from_goal(goal: str, n: int = 3) -> list[str]:
 def _available_workers(models: list[str] = None, providers: list[str] = None, limit: int = 8) -> list[dict]:
     """
     Build worker list: {provider, model, key, base_url, name}
-    Prefer healthy keys with discovered models.
+
+    Prefer healthy stored keys with discovered models, then .env-configured
+    providers that are visible to the provider resolver.
     """
     workers = []
     entries = multi_key_manager.get_all_entries()
     if providers:
+        providers = [p.lower() for p in providers]
         entries = [e for e in entries if e.get("provider") in providers]
+
+    # Add .env-only providers (stored entries are already handled above). This
+    # closes the provider-discovery split that made tool routing useless for a
+    # user with OPENROUTER_API_KEY / GEMINI_API_KEY / ... in .env but nothing
+    # added through `hermus multikey add`.
+    try:
+        from .provider_resolver import discover_runtime_bundles
+
+        env_bundles = discover_runtime_bundles(include_local=False)
+        if providers:
+            env_bundles = [b for b in env_bundles if b.get("provider") in providers]
+        for b in env_bundles:
+            # stored entries are already in ``entries``; only synthetic env
+            # bundles carry ``source == 'env'`` here.
+            if b.get("source") != "env":
+                continue
+            entries.append(
+                {
+                    "provider": b.get("provider"),
+                    "key": b.get("key"),
+                    "base_url": b.get("base_url"),
+                    "default_model": b.get("default_model"),
+                    "models": b.get("models") or [],
+                    "name": b.get("name"),
+                    "rpm_limit": b.get("rpm_limit"),
+                    "tpm_limit": b.get("tpm_limit"),
+                    "healthy": b.get("healthy"),
+                    "health_status": b.get("health_status"),
+                }
+            )
+    except Exception:
+        pass
 
     # Always offer ollama if reachable
     try:
@@ -71,8 +106,10 @@ def _available_workers(models: list[str] = None, providers: list[str] = None, li
         pass
 
     for e in entries:
-        p = e.get("provider")
+        p = (e.get("provider") or "").lower()
         if providers and p not in providers:
+            continue
+        if get_provider(p).get("retired"):
             continue
         if e.get("healthy") is False and e.get("health_status") == "auth_failed":
             continue
@@ -185,6 +222,13 @@ class ModelFleet:
 
     def list_workers(self, models: list[str] = None, providers: list[str] = None, limit: int = 12) -> dict:
         workers = _available_workers(models=models, providers=providers, limit=limit)
+        configured = list({e.get("provider") for e in multi_key_manager.get_all_entries()})
+        try:
+            from .provider_resolver import list_available_providers
+
+            configured = [p["provider"] for p in list_available_providers() if p.get("configured")]
+        except Exception:
+            pass
         return {
             "workers": [
                 {
@@ -197,7 +241,7 @@ class ModelFleet:
                 for w in workers
             ],
             "count": len(workers),
-            "providers_configured": list({e.get("provider") for e in multi_key_manager.get_all_entries()}),
+            "providers_configured": configured,
             "known_presets": [p["id"] for p in list_providers()],
         }
 

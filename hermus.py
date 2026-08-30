@@ -985,8 +985,19 @@ def main():
                     f" | avg response {rt} | model={k.get('default_model')}"
                 )
         elif args.multikey_action == "providers":
+            from core.provider_resolver import diagnose, list_available_providers
+
+            status = {p["provider"]: p for p in list_available_providers()}
+            diag = diagnose()
             for p in list_providers():
-                print(f" - {p['id']}: {p['name']} | default={p.get('default_model')} | {p.get('base_url')}")
+                try:
+                    info = status.get(p["id"]) or {}
+                except Exception:
+                    info = {}
+                mark = "✅" if info.get("configured") else "❔"
+                source = f" | source={info.get('credential_source')}" if info.get("credential_source") else ""
+                tools = f" | tools={'yes' if info.get('supports_tools') else 'no'}" if info.get("configured") else ""
+                print(f" {mark} {p['id']}: {p['name']} | default={p.get('default_model')} | {p.get('base_url')}{source}{tools}")
                 budget = " / ".join(
                     part
                     for part in (
@@ -998,6 +1009,11 @@ def main():
                 print(f"     rate budget: {budget or 'unmetered (no published per-minute limit)'}")
                 if p.get("notes"):
                     print(f"     {p['notes']}")
+            print(
+                "\nRecommended provider: "
+                f"{diag.get('recommended_provider') or 'none'} "
+                f"({diag.get('recommended_model') or '<no model>'})"
+            )
         else:
             parser.parse_args(["multikey", "--help"])
 

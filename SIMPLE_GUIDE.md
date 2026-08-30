@@ -72,6 +72,11 @@ On your first visit to the dashboard, Hermus walks you through:
 # Chat in terminal
 ./hermus
 
+# API keys in .env are auto-discovered (OPENROUTER_API_KEY, GEMINI_API_KEY,
+# NVIDIA_API_KEY, ...) — you do NOT have to add them again with `multikey add`.
+# Optional: show which providers Hermus sees as configured/usable.
+./hermus multikey providers
+
 # Add API keys
 ./hermus multikey add --provider mistral --key YOUR_KEY --model devstral-latest
 ./hermus multikey add --provider groq --key YOUR_KEY

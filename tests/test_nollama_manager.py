@@ -149,6 +149,53 @@ def test_start_never_binds_the_gateway_port(mgr, monkeypatch, tmp_path):
     assert "GPU" in captured["cmd"]
 
 
+def test_start_auto_resolves_downloaded_model_dir(mgr, monkeypatch):
+    """A downloaded custom OpenVINO export (e.g. MiniCPM) must be passed to
+    NoLlama automatically instead of relying on its internal registry."""
+    mgr.home.mkdir(parents=True, exist_ok=True)
+    (mgr.home / "nollama.py").write_text("# server\n", encoding="utf-8")
+    (mgr.home / "venv" / "bin").mkdir(parents=True)
+    (mgr.home / "venv" / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    (mgr.home / "venv" / "bin" / "python").chmod(0o755)
+
+    captured = {}
+
+    class FakeProc:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(nl.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        mgr,
+        "best_installed_model",
+        lambda device="", roles=None: {
+            "id": "minicpm",
+            "path": "/tmp/models/MiniCPM5-1B-int4-g128-ov",
+            "repo": "HarmenWessels/MiniCPM5-1B-int4-g128-ov",
+        },
+    )
+
+    result = mgr.start(device="CPU")
+    assert result["success"] is True
+    assert "--model-dir" in captured["cmd"]
+    idx = captured["cmd"].index("--model-dir")
+    assert captured["cmd"][idx + 1] == "/tmp/models/MiniCPM5-1B-int4-g128-ov"
+    assert result["model_dir"] == "/tmp/models/MiniCPM5-1B-int4-g128-ov"
+    assert result["model_id"] == "minicpm"
+
+
 # ---------------------------------------------------------------------------
 # Model directory sanity
 # ---------------------------------------------------------------------------

@@ -446,3 +446,74 @@ def test_status_is_cheap_and_shaped_for_the_dashboard(doc, monkeypatch):
                 "worst_severity", "counts", "finding_count", "stuck", "reports"):
         assert key in st
     assert st["model"] == "nollama/minicpm"
+
+
+def test_doctor_starts_downloaded_local_engine_instead_of_bailing(doc, monkeypatch):
+    """The doctor must start a downloaded MiniCPM model if the engine is off."""
+    import core.nollama as nl
+    import requests
+
+    started = {}
+
+    def fake_running():
+        return False
+
+    def fake_installed():
+        return True
+
+    def fake_venv():
+        return True
+
+    def fake_best(device="", roles=None):
+        return {"id": "minicpm", "path": "/tmp/models/MiniCPM5-1B-int4-g128-ov"}
+
+    def fake_start(**kwargs):
+        started.update(kwargs)
+        return {"success": True, "pid": 1234}
+
+    monkeypatch.setattr(nl.nollama_manager, "running", fake_running)
+    monkeypatch.setattr(nl.nollama_manager, "installed", fake_installed)
+    monkeypatch.setattr(nl.nollama_manager, "venv_ready", fake_venv)
+    monkeypatch.setattr(nl.nollama_manager, "best_installed_model", fake_best)
+    monkeypatch.setattr(nl.nollama_manager, "start", fake_start)
+    class _OK:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {"data": [{"id": "MiniCPM5-1B-int4-g128-ov"}]}
+
+    monkeypatch.setattr(requests, "get", lambda url, timeout=1.5: _OK())
+
+    assert doc._ensure_local_engine("nollama/MiniCPM5-1B-int4-g128-ov", timeout=3) is True
+    assert started, "doctor must start the local engine when MiniCPM is downloaded"
+
+
+def test_doctor_prefers_downloaded_minicpm_over_ollama(doc, monkeypatch):
+    import core.nollama as nl
+
+    monkeypatch.setattr(
+        nl.nollama_manager,
+        "best_installed_model",
+        lambda device="", roles=None: {
+            "id": "minicpm",
+            "repo": "HarmenWessels/MiniCPM5-1B-int4-g128-ov",
+            "path": "/tmp/models/MiniCPM5-1B-int4-g128-ov",
+        },
+    )
+    assert (
+        doc._prefer_downloaded_doctor("ollama/llama3.1:8b")
+        == "nollama/MiniCPM5-1B-int4-g128-ov"
+    )
+
+
+def test_doctor_falls_back_to_configured_provider_when_local_unavailable(doc, monkeypatch):
+    """If the local engine can't run, the doctor still works with any configured key."""
+    monkeypatch.setattr(doc, "_prefer_downloaded_doctor", lambda ref: "nollama/MiniCPM5-1B-int4-g128-ov")
+    monkeypatch.setattr(doc, "_ensure_local_engine", lambda ref, timeout=30.0: False)
+    monkeypatch.setattr(doc, "_configured_doctor_fallback", lambda: ("openrouter/auto", "openrouter"))
+
+    llm, ref = doc._doctor_llm()
+    assert ref == "openrouter/auto"
+    assert llm is not None
+    assert llm.model == "openrouter/auto"

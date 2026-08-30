@@ -53,6 +53,10 @@ class FreeLLM:
         # this to the user instead of silently going tool-less — the model then
         # answers "I can't do agentic tasks" with no visible reason otherwise.
         self.last_tools_disabled_reason: Optional[str] = None
+        # Record when the call actually used a different provider than the one
+        # requested (e.g. Ollama offline -> Groq/OpenRouter from .env). This
+        # makes runtime behavior observable instead of implicit.
+        self.last_fallback: Optional[dict] = None
 
     def _parse_model(self, model_str: str) -> tuple:
         return parse_model_ref(model_str)
@@ -96,12 +100,19 @@ class FreeLLM:
             "provider": self.provider,
         }
 
-    def _fallback_bundle(self) -> Optional[dict]:
-        """First usable API key bundle across providers (custom preferred)."""
+    def _fallback_bundle(self, require_tools: bool = False) -> Optional[dict]:
+        """First usable API key bundle across providers (custom preferred).
+
+        ``require_tools=True`` skips providers whose presets reject tool
+        calls, so a tool-required request lands on a provider that can
+        actually accept the tool definitions.
+        """
         try:
             from .multi_key import multi_key_manager
 
-            return multi_key_manager.first_available_bundle()
+            return multi_key_manager.first_available_bundle(
+                require_tools=require_tools,
+            )
         except Exception:
             return None
 
@@ -146,32 +157,67 @@ class FreeLLM:
         tools = self._tools_for_provider(requested_tools, used_provider)
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
 
-        if not api_key and not preset.get("no_auth"):
-            # No key for the requested provider → try any configured key when
-            # the user did not pin a specific known provider (default model,
-            # "custom", or an unknown OpenAI-compatible provider name).
-            from .providers import PROVIDER_PRESETS
-
-            fallback_allowed = (
-                self.model == config.model
-                or self.provider == "custom"
-                or self.provider not in PROVIDER_PRESETS
-            )
-            fb = self._fallback_bundle() if fallback_allowed else None
+        if not api_key and not preset.get("no_auth") and not self.base_url_override:
+            # No key for the requested provider → discover any configured key
+            # from the multikey store OR .env. This intentionally does NOT
+            # depend on whether the requested model equals ``config.model``:
+            # a tool-required request must recover to a tool-capable provider
+            # even when the user explicitly chose another model. A base_url
+            # override is left alone (the caller deliberately pointed at a
+            # specific endpoint).
+            fb = self._fallback_bundle(require_tools=bool(requested_tools))
             if fb:
-                used_provider = fb.get("provider") or self.provider
+                used_provider = (fb.get("provider") or self.provider).lower()
                 api_key = fb.get("key") or ""
                 base_url = fb.get("base_url") or base_url
                 fb_model = fb.get("default_model") or ""
-                if not model or model == preset.get("default_model") or model == "default":
+                # If we switched providers, a model name from the original
+                # provider is unlikely to exist on the fallback endpoint;
+                # prefer the fallback bundle's default model.
+                if used_provider != self.provider or not model or model in ("default", "", "auto"):
                     model = fb_model or model
+                self.last_fallback = {
+                    "from_provider": self.provider,
+                    "to_provider": used_provider,
+                    "model": model,
+                    "source": fb.get("source") or "stored",
+                    "require_tools": bool(requested_tools),
+                }
             if not api_key:
-                err = (
-                    f"No API key for provider '{self.provider}' and no other keys configured. "
-                    f"Add one: hermus multikey add --provider {self.provider} --key YOUR_KEY"
-                    + (f" --base-url https://..." if self.provider in ('custom','vllm','azure') else "")
+                from .provider_resolver import diagnose
+
+                diag = diagnose(
+                    require_tools=bool(requested_tools),
+                    model=f"{self.provider}/{self.model_name}",
                 )
-                usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}")
+                usable = [p["provider"] for p in diag.get("usable_providers", [])]
+                configured = [
+                    f"{p['provider']} — {p.get('reason') or 'configured'}"
+                    for p in diag.get("configured", [])
+                ]
+                if requested_tools:
+                    err = (
+                        "No tool-capable provider is currently usable.\n"
+                        f"Requested provider: {self.provider}\n"
+                        f"Detected:\n- " + "\n- ".join(configured or ["none"]) + "\n"
+                        f"Recommended provider: {diag.get('recommended_provider') or 'none'}\n"
+                        f"Model: {diag.get('recommended_model') or '<none>'}"
+                    )
+                else:
+                    err = (
+                        f"No usable provider for '{self.provider}'."
+                        + (f"\nDetected:\n- " + "\n- ".join(configured) if configured else "")
+                        + f"\nRecommended provider: {diag.get('recommended_provider') or 'none'}"
+                    )
+                    if not usable:
+                        err += (
+                            "\nAdd one: hermus multikey add --provider "
+                            f"{self.provider} --key YOUR_KEY"
+                            + (f" --base-url https://..." if self.provider in ('custom','vllm','azure') else "")
+                        )
+                usage = token_counter.estimate_cost(
+                    prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}"
+                )
                 return LLMResponse(err, usage=usage)
 
         # A fallback can change provider capabilities/limits (for example from
@@ -324,14 +370,21 @@ class FreeLLM:
         except requests.exceptions.ConnectionError:
             # Ollama is not running — fall back to any configured API key
             # (custom URL / groq / openai / ...) so chat keeps working.
-            fb = self._fallback_bundle()
+            fb = self._fallback_bundle(require_tools=bool(tools))
             if fb:
-                fb_provider = fb.get("provider") or "custom"
+                fb_provider = (fb.get("provider") or "custom").lower()
                 fb_model = fb.get("default_model") or ""
                 ollama_default = get_provider("ollama").get("default_model")
                 model = self.model_name
-                if not model or model == ollama_default:
+                if not model or model == ollama_default or fb_provider != "ollama":
                     model = fb_model or model
+                self.last_fallback = {
+                    "from_provider": "ollama",
+                    "to_provider": fb_provider,
+                    "model": model,
+                    "source": fb.get("source") or "stored",
+                    "require_tools": bool(tools),
+                }
                 try:
                     from .openai_compat import chat_completions, CompatAPIError
                     from .multi_key import multi_key_manager
@@ -362,12 +415,37 @@ class FreeLLM:
                         prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
                     )
                     return LLMResponse(fb_err, usage=usage)
-            mock_content = (
-                f"⚠️ Ollama not running at {config.ollama_base_url} and no API keys configured. "
-                f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
-                f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
-                f"Fallback mock for: {messages[-1].get('content','')[:100]}"
-            )
+            try:
+                from .provider_resolver import diagnose
+
+                diag = diagnose(
+                    require_tools=bool(tools),
+                    model=f"ollama/{self.model_name}",
+                )
+                configured = [
+                    f"{p['provider']} — {p.get('reason') or 'configured'}"
+                    for p in diag.get("configured", [])
+                ]
+                detail = "\n".join(configured) if configured else "none"
+                mock_content = (
+                    f"⚠️ Ollama not running at {config.ollama_base_url}. "
+                    "No usable hosted provider was found"
+                    + (" for tool calls." if tools else ".")
+                    + f"\n\nDetected:\n- {detail}"
+                    + f"\nRecommended provider: {diag.get('recommended_provider') or 'none'}"
+                    + f"\nRecommended model: {diag.get('recommended_model') or 'none'}"
+                    + "\nStart Ollama with: ollama serve && ollama pull "
+                    + f"{self.model_name} — or add any key: "
+                    + "hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
+                    + f"Fallback mock for: {messages[-1].get('content','')[:100]}"
+                )
+            except Exception:
+                mock_content = (
+                    f"⚠️ Ollama not running at {config.ollama_base_url} and no API keys configured. "
+                    f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
+                    f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
+                    f"Fallback mock for: {messages[-1].get('content','')[:100]}"
+                )
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(mock_content), model="ollama/mock")
             return LLMResponse(mock_content, usage=usage)
         except Exception as e:
@@ -469,6 +547,7 @@ class FreeLLM:
     def chat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Route to provider. Any unknown provider → OpenAI-compatible HTTP."""
         self.last_tools_disabled_reason = None
+        self.last_fallback = None
         p = self.provider
         if p == "mock":
             return self._call_mock(messages, tools)
@@ -481,7 +560,7 @@ class FreeLLM:
         return self._call_openai_compat(messages, tools)
 
     # ------------------------------------------------------------- streaming
-    def _stream_target(self) -> Optional[dict]:
+    def _stream_target(self, require_tools: bool = False) -> Optional[dict]:
         """Resolve (provider, model, base_url, api_key) for a streaming request.
 
         Returns None when the provider needs a key we do not have — the caller
@@ -498,11 +577,20 @@ class FreeLLM:
                 base = base + "/v1"
             return {"provider": "ollama", "model": model, "base_url": base,
                     "api_key": api_key or "ollama"}
-        if not api_key and not preset.get("no_auth"):
-            fb = self._fallback_bundle()
+        if not api_key and not preset.get("no_auth") and not self.base_url_override:
+            fb = self._fallback_bundle(require_tools=require_tools)
             if not fb:
                 return None
-            return {"provider": fb.get("provider") or self.provider, "model": fb.get("default_model") or model,
+            fb_provider = (fb.get("provider") or self.provider).lower()
+            fb_model = fb.get("default_model") or model
+            self.last_fallback = {
+                "from_provider": self.provider,
+                "to_provider": fb_provider,
+                "model": fb_model,
+                "source": fb.get("source") or "stored",
+                "require_tools": require_tools,
+            }
+            return {"provider": fb_provider, "model": fb_model,
                     "base_url": fb.get("base_url") or base_url, "api_key": fb.get("key") or ""}
         return {"provider": self.provider, "model": model, "base_url": base_url, "api_key": api_key}
 
@@ -520,12 +608,13 @@ class FreeLLM:
         (SSE, WebSocket, TUI) keep a uniform incremental contract.
         """
         self.last_tools_disabled_reason = None
+        self.last_fallback = None
         if self.provider == "mock":
             resp = self._call_mock(messages, tools)
             _emit_chunks(resp.content, on_delta)
             return resp
 
-        target = self._stream_target()
+        target = self._stream_target(require_tools=bool(tools))
         if target:
             try:
                 from .openai_compat import stream_chat_completions

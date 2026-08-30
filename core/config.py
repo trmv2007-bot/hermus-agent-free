@@ -1,6 +1,20 @@
 """Config for Hermus Free - No paywalls"""
+
 import os
 from pathlib import Path
+
+# Load the repository-local .env before Config reads any env var. Without this
+# a provider configured only through ``.env`` (OPENROUTER_API_KEY,
+# GEMINI_API_KEY, NVIDIA_API_KEY, ...) is invisible to the provider resolver,
+# model fleet and fallback logic even though it is "configured". ``override``
+# stays False so real exported environment variables still win.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+except Exception:  # python-dotenv is optional until setup.sh installs it
+    pass
+
 from pydantic import BaseModel
 from typing import Optional
 
@@ -33,9 +47,9 @@ class Config(BaseModel):
     # Start the local engine with the gateway when the hardware supports it.
     nollama_autostart: bool = os.getenv("HERMUS_NOLLAMA_AUTOSTART", "0") not in ("0", "false", "False")
     # Models the router asks NoLlama to serve (OpenVINO IR directory names).
-    nollama_npu_model: str = os.getenv("HERMUS_NOLLAMA_NPU_MODEL", "openvino/qwen3-8b-int4-cw-ov")
-    nollama_gpu_model: str = os.getenv("HERMUS_NOLLAMA_GPU_MODEL", "openvino/minicpm5-1b-int4-g128-ov")
-    nollama_vision_model: str = os.getenv("HERMUS_NOLLAMA_VISION_MODEL", "openvino/qwen3-vl-8b-instruct-int8-ov")
+    nollama_npu_model: str = os.getenv("HERMUS_NOLLAMA_NPU_MODEL", "Qwen3-8B-int4-cw-ov")
+    nollama_gpu_model: str = os.getenv("HERMUS_NOLLAMA_GPU_MODEL", "MiniCPM5-1B-int4-g128-ov")
+    nollama_vision_model: str = os.getenv("HERMUS_NOLLAMA_VISION_MODEL", "Qwen3-VL-8B-Instruct-int8-ov")
 
     # ---- Hermus doctor: the small model that repairs Hermus itself ---------
     doctor_enabled: bool = os.getenv("HERMUS_DOCTOR_ENABLED", "1") not in ("0", "false", "False")
@@ -87,7 +101,9 @@ class Config(BaseModel):
     # Pre-flight model capability negotiation (tools/vision/context/...).
     model_capability_check: bool = os.getenv("HERMUS_MODEL_CAPABILITY_CHECK", "1") not in ("0", "false", "False")
     # Auto-select a compatible model when the selected one cannot do the job.
-    auto_select_model: bool = os.getenv("HERMUS_AUTO_SELECT_MODEL", "0") not in ("0", "false", "False")
+    # On by default: a tool-required request must recover to a tool-capable
+    # provider instead of silently failing with "no model providers".
+    auto_select_model: bool = os.getenv("HERMUS_AUTO_SELECT_MODEL", "1") not in ("0", "false", "False")
 
 
     # DeepThink — plan-first thinking (Phase 0)

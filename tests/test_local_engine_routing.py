@@ -143,6 +143,30 @@ def test_cpu_only_routes_to_ollama():
     assert {r["device"] for r in p["roles"].values()} == {"CPU"}
 
 
+def test_cpu_only_uses_nollama_for_doctor_when_minicpm_installed(monkeypatch):
+    """A downloaded MiniCPM must not be shadowed by ollama/llama3.1:8b."""
+    import core.nollama as nl
+
+    fake_row = {
+        "id": "minicpm",
+        "name": "MiniCPM5 1B (INT4 g128) — Hermus doctor",
+        "repo": "HarmenWessels/MiniCPM5-1B-int4-g128-ov",
+        "roles": ["doctor", "background"],
+        "devices": ["GPU", "CPU"],
+        "installed": True,
+        "path": "/tmp/models/MiniCPM5-1B-int4-g128-ov",
+    }
+    monkeypatch.setattr(nl.nollama_manager, "list_catalog", lambda: [fake_row])
+
+    p = plan(snapshot())
+    assert p["mode"] == MODE_CPU_ONLY
+    doctor = p["roles"][ROLE_DOCTOR]
+    assert doctor["engine"] == ENGINE_NOLLAMA
+    assert doctor["device"] == "CPU"
+    assert doctor["model"] == "MiniCPM5-1B-int4-g128-ov"
+    assert p["roles"][ROLE_BACKGROUND]["engine"] == ENGINE_NOLLAMA
+
+
 def test_pipelined_splits_background_npu_and_reasoning_gpu():
     """NPU + Intel GPU: background stays cool on the NPU, GPU does the work."""
     p = plan(snapshot(npu=npu_intel(), gpus=gpu_intel()))

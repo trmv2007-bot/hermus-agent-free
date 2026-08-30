@@ -85,6 +85,22 @@ async def providers_list():
     return {"providers": list_providers()}
 
 
+@router.get("/providers/available")
+async def providers_available():
+    """Unified provider view: known vs configured vs usable (incl .env-only).
+
+    This is the resolver the agent/fallback/fleet use, so the dashboard, CLI
+    and setup wizard all see the same answer instead of re-implementing
+    provider discovery.
+    """
+    from core.provider_resolver import list_available_providers, diagnose
+
+    return {
+        "providers": list_available_providers(),
+        "diagnosis": diagnose(),
+    }
+
+
 @router.get("/eval/summary")
 async def eval_summary():
     """Eval harness summary (Phase 4) for the dashboard Reasoning pane."""

@@ -571,6 +571,114 @@ class HermusDoctor:
         return {"performed": True, "queries": queries}
 
     # ------------------------------------------------------------------ triage
+    def _ensure_local_engine(self, model_ref: str, timeout: float = 30.0) -> bool:
+        """Start a downloaded NoLlama model for the doctor and wait for it.
+
+        The doctor is supposed to be the small local model even on a CPU-only
+        box. If a user downloaded MiniCPM but the engine is not running, Hermus
+        should start it rather than silently routing the doctor to
+        ``ollama/llama3.1:8b``.
+        """
+        provider = str(model_ref or "").split("/", 1)[0].lower()
+        model = str(model_ref or "").split("/", 1)[1] if "/" in str(model_ref or "") else ""
+        if provider != "nollama":
+            return True  # nothing to ensure
+
+        import requests
+        from time import time as _now
+
+        def models_served() -> list[str]:
+            try:
+                from .nollama import nollama_manager as _nm
+
+                resp = requests.get(f"{_nm.base_url.rstrip('/')}/models", timeout=1.5)
+                if resp.status_code != 200:
+                    return []
+                data = resp.json() if resp.content else {}
+                return [str(m.get("id") or "") for m in (data.get("data") or []) if isinstance(m, dict)]
+            except Exception:
+                return []
+
+        def model_present() -> bool:
+            if not model:
+                return True
+            served = models_served()
+            return any(name == model or name == model.split(":")[0] for name in served)
+
+        try:
+            from .nollama import nollama_manager
+
+            if nollama_manager.running():
+                if model_present():
+                    return True
+                # Engine is up but it was started without the downloaded model
+                # (e.g. an older start without ``--model-dir``). Restart it with
+                # the catalog model before letting the doctor fail on it.
+                stopped = nollama_manager.stop()
+                if not stopped.get("stopped"):
+                    return False
+            if not nollama_manager.installed() or not nollama_manager.venv_ready():
+                return False
+            row = (
+                nollama_manager.best_installed_model("CPU", ("doctor",))
+                or nollama_manager.best_installed_model("GPU", ("doctor",))
+            )
+            if not row:
+                return False
+            result = nollama_manager.start(device="AUTO")
+            if not result.get("success"):
+                return False
+
+            deadline = _now() + timeout
+            while _now() < deadline:
+                if model_present():
+                    return True
+                import time as _time
+
+                _time.sleep(1.0)
+            return False
+        except Exception:
+            return False
+
+    def _prefer_downloaded_doctor(self, ref: str) -> str:
+        """Return a NoLlama doctor ref when MiniCPM/openvino IR is on disk.
+
+        Even on a CPU-only plan (which used to resolve to ``ollama/llama3.1:8b``
+        by default) the Hermus doctor should prefer the small model the user
+        downloaded for it.
+        """
+        provider = str(ref or "").split("/", 1)[0].lower()
+        if provider in ("nollama", "mock"):
+            return ref
+        try:
+            from .nollama import nollama_manager
+
+            row = (
+                nollama_manager.best_installed_model("CPU", ("doctor",))
+                or nollama_manager.best_installed_model("GPU", ("doctor",))
+            )
+            if row and row.get("repo"):
+                return f"nollama/{str(row['repo']).split('/')[-1]}"
+        except Exception:
+            pass
+        return ref
+
+    def _configured_doctor_fallback(self) -> Optional[tuple[str, str]]:
+        """A configured API provider to use if the local engine is unavailable."""
+        try:
+            from .provider_resolver import select_usable_bundle
+
+            bundle = select_usable_bundle(require_tools=False)
+            if not bundle:
+                return None
+            provider = (bundle.get("provider") or "").lower()
+            model = bundle.get("default_model") or ""
+            if provider and model:
+                return f"{provider}/{model}", provider
+        except Exception:
+            pass
+        return None
+
     def _doctor_llm(self, model: Optional[str] = None):
         """Build the LLM the doctor speaks through (its own engine role)."""
         from .accelerators import model_ref_for
@@ -579,6 +687,17 @@ class HermusDoctor:
         ref = model or getattr(config, "doctor_model", "") or model_ref_for("doctor")
         if not ref:
             return None, ""
+        ref = self._prefer_downloaded_doctor(ref)
+        if str(ref or "").split("/", 1)[0].lower() == "nollama":
+            if self._ensure_local_engine(ref):
+                return FreeLLM(model=ref), ref
+            # The download exists but NoLlama isn't installed/running (or was
+            # explicitly disabled). Never silently drop to ollama/llama3.1:8b;
+            # use any configured API provider instead, so the doctor keeps
+            # working with "anything" configured.
+            fb = self._configured_doctor_fallback()
+            if fb:
+                return FreeLLM(model=fb[0]), fb[0]
         return FreeLLM(model=ref), ref
 
     def triage(

@@ -687,6 +687,51 @@ class NollamaManager:
             "duration": None,
         }
 
+    def best_installed_model(self, device: str = "", roles: Optional[tuple[str, ...]] = None) -> Optional[dict[str, Any]]:
+        """Pick an *already-downloaded* catalog model for a device/role.
+
+        Used by ``start`` (so an engine actually serves the model a user
+        downloaded, even a custom OpenVINO export like MiniCPM) and by the
+        hardware router (so a CPU-only box with MiniCPM does not silently fall
+        back to ``ollama/llama3.1:8b``).
+        """
+        device = (device or "AUTO").upper()
+        wanted_roles = set(roles or ())
+        best: Optional[dict[str, Any]] = None
+        best_rank = 10_000
+        for row in self.list_catalog():
+            if not row.get("installed"):
+                continue
+            spec = CATALOG_BY_ID.get(row["id"])
+            if spec is None:
+                continue
+            devices = {str(d).upper() for d in spec.devices}
+            role_perf = {r: i for i, r in enumerate(("doctor", "background", "reasoning", "vision"))}
+            if device not in ("AUTO", "CPU", "GPU", "NPU"):
+                continue
+            if device != "AUTO" and device not in devices:
+                continue
+            if wanted_roles and not (wanted_roles & set(spec.roles)):
+                continue
+            rank = 0
+            # Prefer the model a given role wants most (e.g. MiniCPM for doctor).
+            if "doctor" in wanted_roles and "doctor" in spec.roles:
+                rank = 0
+            elif "background" in wanted_roles and "background" in spec.roles:
+                rank = 1
+            elif "reasoning" in wanted_roles and "reasoning" in spec.roles:
+                rank = 2
+            else:
+                rank = role_perf.get(next(iter(spec.roles or ()), ""), 10)
+            # Always prefer the small, locally-drivable model (MiniCPM/SmolLM)
+            # over a much larger build for the doctor/background roles.
+            if "doctor" in spec.roles or "background" in spec.roles:
+                rank -= 1
+            if best is None or rank < best_rank:
+                best = row
+                best_rank = rank
+        return best
+
     def start(
         self,
         *,
@@ -697,11 +742,34 @@ class NollamaManager:
         extra_args: Optional[list[str]] = None,
         idle_timeout: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Launch the server pinned to a device (defaults to auto-detect)."""
+        """Launch the server pinned to a device (defaults to auto-detect).
+
+        If ``model_dir``/``gpu_model_dir`` are omitted, Hermus auto-resolves
+        them from the installed model catalog. This is what makes a downloaded
+        MiniCPM/OpenVINO export usable without also knowing NoLlama's internal
+        registry — the server is pointed at the directory Hermus downloaded.
+        """
         if not self.installed():
             return {"success": False, "error": "NoLlama is not installed", "action": "install"}
         if not self.venv_ready():
             return {"success": False, "error": "NoLlama venv is missing", "action": "install"}
+        resolved: dict[str, Any] = {}
+        if not model_dir:
+            row = self.best_installed_model(device=device, roles=("doctor", "background", "reasoning"))
+            if row:
+                model_dir = str(row["path"])
+                resolved["model_dir"] = model_dir
+                resolved["model_id"] = row["id"]
+        if not gpu_model_dir:
+            row = self.best_installed_model(device="GPU", roles=("doctor", "background", "reasoning", "vision"))
+            if row:
+                candidate = str(row["path"])
+                if candidate != model_dir:
+                    gpu_model_dir = candidate
+                    resolved["gpu_model_dir"] = gpu_model_dir
+                    resolved["gpu_model_id"] = row["id"]
+        if resolved:
+            self._save_state(**resolved)
         port = int(port or self.port)
         if port == int(getattr(config, "gateway_port", 8000) or 8000):
             # The gateway owns 8000; starting NoLlama there would shadow it.
@@ -753,6 +821,9 @@ class NollamaManager:
             "device": device.upper() or "AUTO",
             "cmd": " ".join(map(shlex.quote, cmd)),
             "log": str(log_path),
+            "model_dir": model_dir,
+            "gpu_model_dir": gpu_model_dir,
+            "model_id": resolved.get("model_id") or resolved.get("gpu_model_id"),
             "note": "model load takes 30-60s; poll /engine/status until it reports ready",
         }
 
