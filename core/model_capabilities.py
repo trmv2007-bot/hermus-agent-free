@@ -349,22 +349,70 @@ def select_compatible_model(
     pool: list[str] = []
     if prefer_current:
         pool.append(str(getattr(config, "model", "") or ""))
+    # Providers configured only through .env (OpenRouter, Gemini, NVIDIA, ...)
+    # must be candidates even when they are not in the static list below and
+    # nothing was added through `hermus multikey add`.
+    configured_hosted: set[str] = set()
+    try:
+        from .provider_resolver import discover_runtime_bundles
+
+        env_bundles = discover_runtime_bundles(include_local=False)
+        configured_hosted = {b.get("provider") for b in env_bundles if b.get("provider") and not b.get("retired")}
+        for b in env_bundles:
+            provider = b.get("provider") or ""
+            model = b.get("default_model") or ""
+            if not provider or not model:
+                continue
+            if b.get("retired"):
+                continue
+            if "tools" in required and b.get("supports_tools") is False:
+                continue
+            cand = f"{provider}/{model}"
+            if cand not in pool:
+                pool.append(cand)
+    except Exception:
+        pass
     pool.extend([c for c in (candidates or AUTO_SELECT_CANDIDATES) if c not in pool])
 
     reports: list[dict[str, Any]] = []
     fallback: Optional[str] = None
-    for cand in pool:
+    best: Optional[str] = None
+    best_unknown: Optional[str] = None
+    for idx, cand in enumerate(pool):
         if not cand:
             continue
         rep = negotiate(cand, probe=probe)
         reports.append(rep.to_dict())
-        if rep.ok_for(required):
-            return cand, {"required": required, "reports": reports,
-                          "selected": cand, "reason": "all required capabilities available"}
-        if fallback is None and rep.unknown(required) and not rep.missing(required):
+        report = rep
+
+        # A known-missing/local-unreachable model can never be the winner.
+        if report.missing(required) or report.present is False or report.reachable is False:
+            if best_unknown is None and report.unknown(required) and not report.missing(required):
+                best_unknown = cand
+            continue
+
+        confirmed = all(report.capabilities.get(cap) == YES for cap in required)
+        provider, _name = _split_model(cand)
+        local_unproven = (
+            provider in ("ollama", "lmstudio", "nollama", "vllm")
+            and report.reachable is not True
+            and bool(configured_hosted)
+            and provider not in configured_hosted
+        )
+        # Prefer confirmed capabilities first, then a known-configured hosted
+        # provider over an unproven local runtime, then pool order.
+        candidate_key = (1 if local_unproven else 0, 0 if confirmed else 1, idx)
+        if best is None or candidate_key < best[0]:
+            best = (candidate_key, cand)
+        if fallback is None and report.unknown(required) and not report.missing(required):
             fallback = cand
-    return (fallback, {"required": required, "reports": reports, "selected": fallback,
-                       "reason": "no model with confirmed capabilities; using best unknown"})
+
+    if best is not None:
+        return best[1], {"required": required, "reports": reports,
+                         "selected": best[1], "reason": "preferred capability-compatible model"}
+    return (best_unknown or fallback, {"required": required, "reports": reports,
+                                       "selected": best_unknown or fallback,
+                                       "reason": "no model with confirmed capabilities; using best unknown"})
 
 
 def mission_capability_gate(

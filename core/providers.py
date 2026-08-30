@@ -360,6 +360,8 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "chat_path": "/chat/completions",
         "default_model": "default",
         "supports_tools": True,
+        # The default vLLM server serves localhost with no auth, same as Ollama.
+        "no_auth": True,
         "notes": "Point base_url at any OpenAI-compatible server",
     },
     "custom": {

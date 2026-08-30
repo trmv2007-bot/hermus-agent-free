@@ -3,8 +3,23 @@
 
 def list_ai_providers() -> dict:
     from core.providers import list_providers
+    from core.provider_resolver import list_available_providers
 
-    return {"providers": list_providers(), "count": len(list_providers())}
+    provider_list = list_providers()
+    status = {p["provider"]: p for p in list_available_providers()}
+    for p in provider_list:
+        info = status.get(p["id"]) or {}
+        p["configured"] = info.get("configured", False)
+        p["credential_source"] = info.get("credential_source")
+        p["supports_tools"] = info.get("supports_tools", p.get("supports_tools"))
+        p["models_available"] = info.get("models_available", False)
+        p["reachable"] = info.get("reachable")
+    return {
+        "providers": provider_list,
+        "count": len(provider_list),
+        "configured_count": sum(1 for p in provider_list if p.get("configured")),
+        "available": status,
+    }
 
 
 def list_api_keys(provider: str = None) -> dict:

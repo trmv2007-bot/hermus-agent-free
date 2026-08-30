@@ -219,9 +219,12 @@ Sources: provider presets → curated model-family matrix → live probe
 `select_compatible_model(required)` and `mission_capability_gate()` feed
 `GET /models/capabilities`, the runtime pre-flight event
 (`model_capability_warning`) and, with `HERMUS_AUTO_SELECT_MODEL=1`, an
-automatic recommendation. The free default stays `ollama/llama3.1:8b` — but
-Hermus now *says* when it cannot do the requested work instead of discovering
-it mid-mission.
+automatic recommendation. Auto-selection is on by default: when the current
+model cannot do tool work, Hermus searches the configured providers (including
+`.env`-only keys) and switches to a compatible one instead of failing with a
+vague "no model providers" error. The free default stays `ollama/llama3.1:8b` —
+but Hermus now *recovers* or *says* when it cannot do the requested work
+instead of discovering it mid-mission.
 
 ## 12. CI is local, not hosted
 
