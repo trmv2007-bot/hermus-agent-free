@@ -1,18 +1,17 @@
 # HERMUS Living Agent Control Room
 
-The gateway dashboard at `http://localhost:8000/dashboard` is a local-first,
+The gateway control room at `http://localhost:8000/control` is a local-first,
 task-focused operations console for Hermus. Its HTML, CSS, and JavaScript are
 served entirely by the gateway; it does not require a CDN or hosted frontend.
-
-The main control room dashboard is at `/dashboard` (with `/dashboard/legacy` alias),
-the Jarvis 3D Holographic HUD is at `/jarvis`, and
-the detailed computer-agent interface remains at `/computer/dashboard`.
+It is the single production UI (root `/` redirects to `/control`). The legacy
+`/dashboard`, `/jarvis`, `/computer/dashboard`, `/remote` surfaces were folded into
+it and their routes/assets removed.
 
 ## Start it
 
 ```bash
 ./hermus-gateway
-# open http://localhost:8000/dashboard
+# open http://localhost:8000/control
 ```
 
 If `HERMUS_GATEWAY_TOKEN` is configured, open the dashboard with `?token=...`.
@@ -114,10 +113,10 @@ transcription.
 | `/speech/synthesize` | POST | Generate a local WAV speech clip |
 | `/speech/audio/{audio_id}` | GET | Serve one traversal-safe generated clip |
 | `/speech/transcribe` | POST | Transcribe microphone audio locally |
-| `/dashboard` | GET | Main Control Center & Setup Wizard dashboard |
-| `/jarvis` | GET | Jarvis 3D Holographic Spatial HUD |
-| `/dashboard/legacy` | GET | Main dashboard compatibility alias route |
-| `/computer/dashboard` | GET | Detailed visual-computer control dashboard |
+| `/control` | GET | Single production control room (root `/` → `/control`) |
+| `/api/v1/system/health` | GET | Live system health probe |
+| `/api/v1/system/capabilities` | GET | Providers + tools + circuit status |
+| `/android/*` | — | Android control API (consent-gated, audited) |
 
 `POST /command` accepts additive `talking: true` or `speak: true` fields and can
 return `run_id`, `talking`, and `speech` metadata without breaking existing

@@ -102,9 +102,8 @@ USER / DASHBOARD / SCHEDULE / CHANNEL / CLI / API
   inbox; the active agent loop drains it at the next step boundary and injects
   it into the conversation (`steer_applied` event on the stream). Steering
   reaches the model, not just the UI.
-- **Queue-first dashboard**: every dashboard (`/dashboard` **and** `/jarvis`)
-  submits through the shared client
-  (`gateway/static/hermus-client.js`) with `async:true`, so a turn runs as a
+- **Queue-first control room**: the single production UI (`/control`)
+  submits through the shared backend client with `async:true`, so a turn runs as a
   durable gateway job — close the tab and the work keeps going; the answer
   streams back over SSE and, if the stream drops, from the job result.
 - **Model capability negotiation**: Hermus checks *before* starting whether the
@@ -397,11 +396,11 @@ The dashboard can expose:
 Start the gateway and open:
 
 ```text
-http://localhost:8000/dashboard          # Main Control Center (Default)
-http://localhost:8000/jarvis             # Jarvis 3D Spatial Holographic HUD
-http://localhost:8000/computer/dashboard # Autonomous Computer Agent Flight Deck
-http://localhost:8000/remote             # Mobile Pocket Remote Deck
+http://localhost:8000/control            # Control Room (single production UI; root / -> /control)
 ```
+
+`/control` is the one production UI — the legacy `/dashboard`, `/jarvis`,
+`/computer/dashboard`, `/remote` surfaces were consolidated into it.
 
 See [`LIVING_CONTROL_ROOM.md`](LIVING_CONTROL_ROOM.md) for the dashboard architecture.
 
@@ -555,10 +554,7 @@ bootstrap.)*
 *(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
 
 Open in your browser:
-* **🎛️ Control Center & Setup Wizard (Default):** [`http://localhost:8000/dashboard`](http://localhost:8000/dashboard)
-* **🌌 Jarvis 3D Holographic Spatial HUD:** [`http://localhost:8000/jarvis`](http://localhost:8000/jarvis)
-* **🖥️ Computer Agent Flight Deck:** [`http://localhost:8000/computer/dashboard`](http://localhost:8000/computer/dashboard)
-* **📱 Mobile Pocket Remote Deck:** [`http://localhost:8000/remote`](http://localhost:8000/remote)
+* **🎛️ Control Room (single production UI):** [`http://localhost:8000/control`](http://localhost:8000/control) — root `/` redirects here. The legacy `/dashboard`, `/jarvis`, `/computer/dashboard`, `/remote` surfaces were folded into it.
 
 ### 3. Interactive Terminal Agent
 

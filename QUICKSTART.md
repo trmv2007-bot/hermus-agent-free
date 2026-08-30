@@ -49,10 +49,7 @@ Recommended commands:
 *(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
 
 Open in your browser:
-* **🎛️ Control Center & Setup Wizard (Default):** [`http://localhost:8000/dashboard`](http://localhost:8000/dashboard)
-* **🌌 Jarvis 3D Holographic Spatial HUD:** [`http://localhost:8000/jarvis`](http://localhost:8000/jarvis)
-* **🖥️ Autonomous Computer Agent Deck:** [`http://localhost:8000/computer/dashboard`](http://localhost:8000/computer/dashboard)
-* **📱 Mobile Pocket Remote Deck:** [`http://localhost:8000/remote`](http://localhost:8000/remote)
+* **🎛️ Control Room (single production UI):** [`http://localhost:8000/control`](http://localhost:8000/control) — root `/` redirects here. The legacy `/dashboard`, `/jarvis`, `/computer/dashboard`, `/remote` surfaces were folded into it.
 
 ---
 

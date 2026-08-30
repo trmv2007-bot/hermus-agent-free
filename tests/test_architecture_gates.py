@@ -369,3 +369,34 @@ def test_doctor_reports_explicit_states_not_fake_ok():
     src = (ROOT / "core/doctor.py").read_text(encoding="utf-8")
     for token in ("worst_severity", "ok", "attention", "critical", "findings"):
         assert token in src
+
+
+# ---------------------------------------------------------------------------
+# One canonical setup / bootstrap: thin wrappers, honest required-dep detection
+# ---------------------------------------------------------------------------
+def test_setup_thin_wrappers_delegate_to_bootstrap():
+    """setup.sh / activate.sh / launchers must be thin — no duplicated business
+    logic and no '|| true' masking of the canonical bootstrap."""
+    setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+    # setup.sh handles OS packages then delegates to the one-command bootstrap.
+    assert "bootstrap" in setup.lower()
+    assert "exec python bootstrap.py" in setup or '"./bin/hermus" bootstrap' in setup
+    activate = (ROOT / "activate.sh").read_text(encoding="utf-8")
+    assert "NO business logic" in activate or "no business logic" in activate.lower()
+
+
+def test_bootstrap_probes_required_deps_honestly():
+    """bootstrap.py must distinguish required vs optional capabilities and report
+    missing required deps (so a fresh install never silently degrades)."""
+    src = (ROOT / "bootstrap.py").read_text(encoding="utf-8")
+    assert "REQUIRED_IMPORTS" in src and "REQUIRED_PIP" in src
+    assert "OPTIONAL" in src
+    assert "def doctor()" in src and "def run()" in src
+    # It must classify optional deps as 'unavailable' with a reason, not fake ok.
+    assert "unavailable" in src
+    assert "required" in src.lower()
+    # No '|| true' style masking of the required install.
+    assert "no ``|| true`` masking on required dependencies" in src
+
+
+
