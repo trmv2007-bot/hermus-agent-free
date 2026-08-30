@@ -104,9 +104,13 @@ def test_provider_tool_limit_and_chat_model_ranking():
         {"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}}
         for i in range(140)
     ]
-    assert len(FreeLLM._tools_for_provider(tools, "groq")) == 128
-    assert len(FreeLLM._tools_for_provider(tools, "openai")) == 140
-    assert FreeLLM._tools_for_provider(tools, "huggingface") is None
+    assert len(FreeLLM()._tools_for_provider(tools, "groq")) == 128
+    assert len(FreeLLM()._tools_for_provider(tools, "openai")) == 140
+    hf_llm = FreeLLM()
+    assert hf_llm._tools_for_provider(tools, "huggingface") is None
+    # Tool-less providers must record why, so the agent can tell the user
+    # instead of silently running without tool access.
+    assert "huggingface" in (hf_llm.last_tools_disabled_reason or "")
 
     # Mixed catalogs must prefer chat-capable models and exclude embedding /
     # multimodal-only IDs such as the NVIDIA models seen in the dashboard.

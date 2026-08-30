@@ -848,11 +848,35 @@ class ToolRegistry:
         return out
 
     def list_tools(self) -> dict:
+        """Registry snapshot for dashboards and CLIs.
+
+        ``tools`` stays a plain list of name strings — CLIs and older dashboards
+        iterate it directly (``t.startswith("mcp_")``, ``name in tools``).
+        ``catalog`` carries the display details (description, parameters,
+        source) the web dashboard renders; it is built lazily from the same
+        OpenAI-style definitions the agent loop already uses.
+        """
         self.load()
+        defs_by_name: dict[str, dict] = {}
+        for d in self.definitions:
+            fn = d.get("function") if isinstance(d, dict) else None
+            if isinstance(fn, dict) and fn.get("name"):
+                defs_by_name[str(fn["name"])] = fn
+        catalog = [
+            {
+                "name": name,
+                "description": defs_by_name.get(name, {}).get("description", ""),
+                "parameters": defs_by_name.get(name, {}).get("parameters")
+                or {"type": "object", "properties": {}},
+                "source": self.sources.get(name, ""),
+            }
+            for name in sorted(self.executors.keys())
+        ]
         return {
             "count": len(self.executors),
             "definitions": len(self.definitions),
             "tools": sorted(self.executors.keys()),
+            "catalog": catalog,
             "sources": dict(self.sources),
             "errors": self._errors,
         }

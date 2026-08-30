@@ -1209,6 +1209,7 @@ label{
               </div>
               <div class="progress"><span id="engineDownloadBar" style="width:0%"></span></div>
             </div>
+            <div id="engineModels" style="margin-top:10px"><span class="muted">Loading model catalog…</span></div>
           </div>
 
           <div class="two">
@@ -2684,6 +2685,15 @@ async function jpost(url, body){
   }
   return r.json();
 }
+// A 404 on a dashboard-only endpoint almost always means the dashboard HTML is
+// newer than the running gateway process (dashboard.html is re-read per
+// request, but Python routes load once at startup). Nudge the user to restart.
+function endpointFailHTML(path, e){
+  const stale = /\b404\b/.test(String((e && e.message) || ''));
+  let html = `<span class="bad-text">⚠️ ${esc(path)} failed: ${esc((e && e.message) || e)}</span>`;
+  if(stale) html += `<div class="subtle" style="margin-top:6px">404 = this gateway process predates the endpoint. Restart Hermus (stop the gateway, then start it again) and reload this page.</div>`;
+  return html;
+}
 
 function tag(ok, text){ return `<span class="tag ${ok?'ok':'bad'}">${esc(text)}</span>`; }
 function esc(s){
@@ -3294,10 +3304,19 @@ async function runFleet(){
 async function loadTools(silent){
   try{
     const d = await jget('/tools');
-    // The /tools endpoint returns different shapes depending on version:
-    // { tools: [...] } or { tools: { name: {desc, params}, ... } }
-    if(Array.isArray(d.tools)){
-      toolsCache = d.tools;
+    // Shapes seen across versions:
+    //  - { catalog: [{name, description, parameters, source}], tools: [names] }  (current)
+    //  - { tools: ['name', ...] }        (older builds: bare name strings)
+    //  - { tools: { name: {desc,...} } } (other builds: object map)
+    // Normalize everything to {name, description, parameters} so nothing renders as "unnamed".
+    if(Array.isArray(d.catalog) && d.catalog.length && typeof d.catalog[0] === 'object'){
+      toolsCache = d.catalog;
+    } else if(Array.isArray(d.tools)){
+      toolsCache = d.tools.map(t =>
+        typeof t === 'string'
+          ? { name: t, description: '', parameters: null }
+          : { name: (t.function && t.function.name) || t.name || '', description: (t.function && t.function.description) || t.description || '', parameters: (t.function && t.function.parameters) || t.parameters || null }
+      );
     } else if(d.tools && typeof d.tools === 'object'){
       // Convert object format to array
       toolsCache = Object.entries(d.tools).map(([name, info]) => ({
@@ -4038,7 +4057,7 @@ async function loadTelemetry(){
     // /events/recent is newest-first; render oldest→newest so the top is latest.
     d.events.slice().reverse().forEach(pushTelemetryEvent);
   }catch(e){
-    telemetryEmpty('Telemetry unavailable: ' + e.message);
+    telemetryEmpty(endpointFailHTML('/events/recent', e));
   }
 }
 
@@ -4086,6 +4105,7 @@ const ENGINE_STATUS_LABEL = {
 };
 
 async function loadEngine(refresh){
+  loadEngineModels(); // catalog card loads independently of the hardware probe
   const body = $('engineBody');
   try{
     if(refresh && body) body.innerHTML = '<span class="muted">Re-detecting hardware…</span>';
@@ -4095,7 +4115,46 @@ async function loadEngine(refresh){
   }catch(e){
     const tag = $('engineStatusTag');
     if(tag){ tag.textContent = 'UNKNOWN'; tag.className = 'tag bad'; }
-    if(body) body.innerHTML = `<span class="bad-text">⚠️ /engine/status failed: ${esc(e.message)}</span>`;
+    if(body) body.innerHTML = endpointFailHTML('/engine/status', e);
+  }
+}
+
+// Always-visible model catalog (MiniCPM lives here). Renders every catalog
+// entry with its on-disk state and a download button, so "download MiniCPM"
+// never depends on the /engine/status recommendation path alone.
+async function loadEngineModels(){
+  const box = $('engineModels');
+  if(!box) return;
+  try{
+    const d = await jget('/engine/models');
+    const catalog = Array.isArray(d.catalog) ? d.catalog : [];
+    const recId = (d.recommended && d.recommended.id) || '';
+    if(!catalog.length){
+      box.innerHTML = '<span class="subtle">Model catalog unavailable.</span>';
+      return;
+    }
+    box.innerHTML = `
+      <div class="row" style="justify-content:space-between;margin:2px 0 6px">
+        <b style="font-size:0.78rem;letter-spacing:0.08em">MODELS</b>
+        <span class="subtle mono">${(d.installed || []).length} on disk · ${esc(d.models_dir || '')}</span>
+      </div>
+      ${catalog.map(m => {
+        const done = !!m.installed;
+        return `<div class="row" style="justify-content:space-between;margin:4px 0;padding:6px 8px;border:1px solid var(--border);border-radius:8px;gap:8px">
+          <div style="min-width:0">
+            <div>${esc(m.name || m.id)}
+              ${done ? '<span class="tag ok">on disk</span>' : ''}
+              ${recId === m.id ? '<span class="tag">recommended</span>' : ''}
+            </div>
+            <div class="subtle" style="font-size:0.72rem">${esc((m.notes || '').slice(0, 140))}${(m.notes || '').length > 140 ? '…' : ''} · ~${esc(String(m.est_size_gb || '?'))} GB · ${esc((m.roles || []).join(' / ') || '—')}</div>
+          </div>
+          ${done
+            ? `<button class="btn sm" title="Re-download / verify the files on disk" onclick="downloadEngineModel('${esc(m.id)}')">Verify</button>`
+            : `<button class="btn sm primary" onclick="downloadEngineModel('${esc(m.id)}')">⬇ Download</button>`}
+        </div>`;
+      }).join('')}`;
+  }catch(e){
+    box.innerHTML = endpointFailHTML('/engine/models', e);
   }
 }
 
@@ -4251,6 +4310,7 @@ function pollEngineDownload(jobId){
           label.innerHTML = `<span class="bad-text">${esc(job.model_id)} — ${esc(job.state)}: ${esc(job.error || '')}</span>`;
         }
         await loadEngine(true);
+        loadEngineModels(); // flip the downloaded entry to "on disk"
       }
     }catch(e){
       clearInterval(engineDownloadTimer);
@@ -4312,7 +4372,7 @@ async function loadDoctor(){
     }
   }catch(e){
     const sum = $('doctorSummary');
-    if(sum) sum.innerHTML = `<span class="bad-text">⚠️ /doctor/status failed: ${esc(e.message)}</span>`;
+    if(sum) sum.innerHTML = endpointFailHTML('/doctor/status', e);
   }
 }
 
