@@ -107,6 +107,7 @@ class MultiKeyManager:
                 "default_model": preset.get("default_model"),
                 "rpm_limit": preset.get("default_rpm"),
                 "tpm_limit": preset.get("default_tpm"),
+                "rate_limit_source": "preset",
             }
         e = dict(entry)
         e.setdefault("provider", provider)
@@ -118,6 +119,17 @@ class MultiKeyManager:
             e["base_url"] = get_provider(provider).get("base_url") or ""
         if not e.get("default_model"):
             e["default_model"] = get_provider(provider).get("default_model")
+        # Backfill budgets for keys registered before their provider had a
+        # preset (or before presets existed at all), so an upgrade applies the
+        # recommended free-tier limits to keys already in the vault instead of
+        # leaving them unthrottled.
+        preset = get_provider(provider)
+        if e.get("rpm_limit") is None and preset.get("default_rpm") is not None:
+            e["rpm_limit"] = preset["default_rpm"]
+            e.setdefault("rate_limit_source", "preset")
+        if e.get("tpm_limit") is None and preset.get("default_tpm") is not None:
+            e["tpm_limit"] = preset["default_tpm"]
+            e.setdefault("rate_limit_source", "preset")
         return e
 
     def _load_queues(self):
@@ -220,6 +232,12 @@ class MultiKeyManager:
                 "models": [],
                 "rpm_limit": rpm_limit if rpm_limit is not None else preset.get("default_rpm"),
                 "tpm_limit": tpm_limit if tpm_limit is not None else preset.get("default_tpm"),
+                # Records where the budget came from so provider-reported
+                # limits can later refine a preset default without clobbering
+                # a number the user chose deliberately.
+                "rate_limit_source": (
+                    "manual" if (rpm_limit is not None or tpm_limit is not None) else "preset"
+                ),
             }
             if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
                 # custom without base_url is ok if they set later — warn
@@ -450,6 +468,45 @@ class MultiKeyManager:
                 return bundle
         return None
 
+    def _adopt_reported_limits(self, provider: str, entry: dict, rate_limit: dict) -> None:
+        """
+        Replace a key's budget with the limits the provider reports in its
+        response headers.
+
+        Headers beat presets: the preset is a guess at the free tier, while
+        the header is this key's actual quota (higher on a paid plan, lower
+        on a throttled one). A budget the user set by hand is left alone, and
+        so is a value already adopted from a header — this only overwrites a
+        preset-seeded default.
+
+        Groq's ``x-ratelimit-limit-requests`` is a *daily* figure, so it is
+        ignored for the per-minute request budget rather than being adopted
+        as a wildly permissive RPM.
+        """
+        from .providers import requests_header_window
+
+        origin = entry.get("rate_limit_source")
+        # "manual" = explicitly set by the user; "reported" = already taken
+        # from a header. Only overwrite defaults or a stale reported value.
+        if origin == "manual":
+            return
+
+        adopted = False
+        if requests_header_window(provider) == "minute" and rate_limit.get("limit_requests"):
+            try:
+                entry["rpm_limit"] = int(rate_limit["limit_requests"])
+                adopted = True
+            except (TypeError, ValueError):
+                pass
+        if rate_limit.get("limit_tokens"):
+            try:
+                entry["tpm_limit"] = int(rate_limit["limit_tokens"])
+                adopted = True
+            except (TypeError, ValueError):
+                pass
+        if adopted:
+            entry["rate_limit_source"] = "reported"
+
     def mark_key_success(self, provider: str, key: str, tokens: int = 0, latency_ms: int = None, rate_limit: dict = None):
         if not key:
             return
@@ -472,17 +529,7 @@ class MultiKeyManager:
                         k["last_response_time"] = latency_ms / 1000.0
                     if rate_limit:
                         k["last_rate_limit"] = rate_limit
-                        # adopt server-reported limits when present
-                        if rate_limit.get("limit_requests") and not k.get("rpm_limit"):
-                            try:
-                                k["rpm_limit"] = int(rate_limit["limit_requests"])
-                            except Exception:
-                                pass
-                        if rate_limit.get("limit_tokens") and not k.get("tpm_limit"):
-                            try:
-                                k["tpm_limit"] = int(rate_limit["limit_tokens"])
-                            except Exception:
-                                pass
+                        self._adopt_reported_limits(provider, k, rate_limit)
 
         try:
             self._update(_mutate)

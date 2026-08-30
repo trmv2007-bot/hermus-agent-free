@@ -42,7 +42,7 @@ FREE_MODEL_CATALOG = [
         "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
         "default_model": "llama-3.3-70b-versatile",
         "base_url": "https://api.groq.com/openai/v1",
-        "notes": "30 RPM free ultra-fast LPU inference",
+        "notes": "30 RPM / 6K-12K TPM free ultra-fast LPU inference (1,000 requests/day on 70B)",
     },
     {
         "provider": "ollama",
