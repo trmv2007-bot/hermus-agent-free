@@ -72,6 +72,29 @@ class ComputerEventBus:
             pass
 
     # -- publishing -----------------------------------------------------
+    def _canonicalize(self, event_type: str, data: dict[str, Any]) -> None:
+        """Mirror a computer event onto the one durable canonical EventBus.
+
+        The computer dict bus remains as an in-memory projection for realtime/feed
+        consumers and a cross-process JSONL journal; the canonical EventBus is the
+        single authoritative, replayable event source. Mirrors
+        ``core.dashboard_events``' bridge — the bridge must never break publishing.
+        """
+        from ..contracts import EventEnvelope, EventType, CommandStatus
+        from ..events import get_bus
+        try:
+            env = EventEnvelope(
+                type=EventType.STATE_CHANGED.value,
+                command=str(event_type or "computer.event"),
+                target=data.get("task_id") or data.get("run_id"),
+                args_redacted=data,
+                status=CommandStatus.PENDING.value,
+                source="computer",
+            )
+            get_bus().publish(env)
+        except Exception:
+            pass
+
     def publish(self, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         event = {
             "id": uuid.uuid4().hex,
@@ -88,6 +111,11 @@ class ComputerEventBus:
                     subscriber(event)
                 except Exception:  # noqa: BLE001 - telemetry must never break agents
                     pass
+        # Bridge onto the canonical durable event source (single authority).
+        try:
+            self._canonicalize(event_type, dict(data or {}))
+        except Exception:
+            pass
         self._append_journal(event)
         return event
 

@@ -118,14 +118,25 @@ def test_event_bus_publish_subscribe_replay(tmp_path):
     assert len(bus2.replay(since_cursor=2)) == 0
 
 
-def test_legacy_event_bridge(tmp_path, monkeypatch):
+def test_canonical_publish_from_dict_envelope(tmp_path, monkeypatch):
+    """The canonical publish() path accepts a dict envelope — no legacy bridge.
+
+    The old ``publish_legacy``/``LegacyEventBridge`` compatibility layer was removed
+    (it had no production consumers). Publishing an envelope dict directly to the
+    one bus is the canonical replacement.
+    """
     monkeypatch.setenv("HERMUS_EVENTS_DIR", str(tmp_path))
-    from core.events import EventBus, publish_legacy
+    from core.events import publish
     from core.events.bus import configure_bus, get_bus
-    bus = configure_bus(tmp_path / "events.jsonl", reset=True)
-    env = publish_legacy("run.started", {"command": "mission.resume", "status": "running"},
-                         source="dashboard")
+    configure_bus(tmp_path / "events.jsonl", reset=True)
+    env = publish({
+        "type": "command.requested",
+        "status": "running",
+        "command": "mission.resume",
+        "source": "dashboard",
+    })
     assert env.source == "dashboard"
+    assert env.command == "mission.resume"
     recent = get_bus().recent(10)
     assert any(e.command == "mission.resume" for e in recent)
 
