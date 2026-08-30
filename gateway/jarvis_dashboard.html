@@ -1193,7 +1193,7 @@
   <script src="/dashboard-assets/living-deck.js"></script>
 </div>
 
-<script src="/dashboard-assets/hermus-client.js"></script>
+<script src="/dashboard-assets/hermus-client.js?v=2.3-qf"></script>
 <script>
   // ==========================================
   // 1. BULLETPROOF SCI-FI WEB AUDIO ENGINE
@@ -1832,38 +1832,82 @@
       titleText = 'SWE STUDIO';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
       bodyContent = `
-        <div class="swe-split">
-          <div class="code-pane">
-            <div style="color: var(--text-muted); margin-bottom: 4px;"># core/mission.py</div>
-            <span> while steps &lt; budget:</span>
-            <span class="del">-  return report</span>
-            <span class="add">+  res = dag.execute()</span>
-            <span class="add">+  if res.ok: break</span>
-          </div>
-          <div class="terminal-pane">
-            <div style="color: var(--green);">➜ pytest tests/ -q</div>
-            <div>318 passed in 23.4s</div>
-            <div style="color: var(--cyan);">[CRITIC] APPROVED (98/100)</div>
-            <div style="color: #888;">Live code execution active.</div>
-          </div>
+        <div id="sweStudioBody_${winId}" style="font-size:11px;color:var(--text-muted);padding:8px">
+          Loading workspace data…
         </div>
       `;
+      // Load live workspace/tools data
+      setTimeout(async () => {
+        const el = document.getElementById(`sweStudioBody_${winId}`);
+        if (!el) return;
+        try {
+          const [toolsData, wsData] = await Promise.all([
+            fetch('/tools').then(r => r.json()).catch(() => ({})),
+            fetch('/workspace').then(r => r.json()).catch(() => ({}))
+          ]);
+          const tools = Array.isArray(toolsData.tools) ? toolsData.tools : (toolsData.tools ? Object.keys(toolsData.tools).map(n => ({name: n})) : []);
+          const codeTools = tools.filter(t => {
+            const n = (t.name || '').toLowerCase();
+            return n.includes('file') || n.includes('bash') || n.includes('shell') || n.includes('edit') || n.includes('write') || n.includes('read') || n.includes('process') || n.includes('search');
+          });
+          el.innerHTML = `
+            <div class="swe-split" style="display:flex;gap:8px;flex-direction:column">
+              <div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:8px;border-radius:6px">
+                <div style="color:var(--gold);margin-bottom:4px;font-weight:700">🛠️ Code Execution Tools</div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px">
+                  ${codeTools.map(t => `<span class="chip" style="font-size:9px;padding:3px 8px">${t.name || t}</span>`).join('')}
+                  ${!codeTools.length ? '<span class="subtle">No code tools detected. Start the gateway to load tools.</span>' : ''}
+                </div>
+              </div>
+              <div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:8px;border-radius:6px">
+                <div style="color:var(--cyan);margin-bottom:4px;font-weight:700">📂 Workspace</div>
+                <div style="font-size:10px;color:var(--text-muted)">
+                  ${wsData.current ? `Current: <b style="color:#fff">${wsData.current}</b>` : 'No workspace set'}<br>
+                  ${wsData.base_dir ? `Base: <span class="mono">${wsData.base_dir}</span>` : ''}<br>
+                  ${wsData.projects && wsData.projects.length ? `Projects: ${wsData.projects.join(', ')}` : ''}
+                </div>
+              </div>
+              <div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:8px;border-radius:6px">
+                <div style="color:var(--green);margin-bottom:4px;font-weight:700">💻 Send a coding task to the agent</div>
+                <div style="font-size:10px;color:var(--text-muted)">Type a coding request in the command box below (e.g. "Refactor core/mission.py to use async execution")</div>
+              </div>
+            </div>
+          `;
+        } catch(e) {
+          el.innerHTML = `<div style="color:var(--red)">⚠️ Could not load SWE data: ${e.message}</div>`;
+        }
+      }, 100);
     } else if (type === 'missions') {
       titleText = 'MISSION DAG';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>';
       bodyContent = `
-        <div class="dag-flow-compact">
-          <div class="dag-node-c passed" onclick="alert('Step 01 SPEC passed: Verified prompt requirements.')">01 · SPEC ✓</div>
-          <span>→</span>
-          <div class="dag-node-c passed" onclick="alert('Step 02 CODE passed: Synthesized architecture upgrades.')">02 · CODE ✓</div>
-          <span>→</span>
-          <div class="dag-node-c active" onclick="alert('Step 03 VERIFY in progress: Running autonomous test suite.')">03 · VERIFY ●</div>
-        </div>
-        <div style="font-family: var(--font-mono); font-size: 10px; color: var(--sky); background: rgba(3,7,18,0.6); padding: 8px; border-radius: 6px;">
-          • Progress: 100% | Confidence: 98%<br>
-          • Target: Autonomous Refactor Execution & Multi-Window OS
+        <div id="missionDagBody_${winId}" style="font-size:11px;color:var(--text-muted);padding:8px">
+          Loading live mission data…
         </div>
       `;
+      // Load live mission data
+      setTimeout(async () => {
+        const el = document.getElementById(`missionDagBody_${winId}`);
+        if (!el) return;
+        try {
+          const missions = await fetch('/missions').then(r => r.json()).catch(() => []);
+          const list = Array.isArray(missions) ? missions : (missions.missions || []);
+          if (!list.length) {
+            el.innerHTML = `<div style="text-align:center;padding:10px"><div style="color:#fff;margin-bottom:4px">No Active Missions</div><div class="subtle">Send a command to start a mission. Missions auto-track through SPEC → CODE → VERIFY stages.</div></div>`;
+          } else {
+            el.innerHTML = list.slice(0, 5).map(m => {
+              const state = m.state || m.status || 'unknown';
+              const color = state === 'completed' || state === 'succeeded' ? 'var(--green)' : (state === 'failed' ? 'var(--red)' : 'var(--sky)');
+              return `<div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:6px 8px;border-radius:6px;margin-bottom:4px">
+                <b style="color:${color}">● ${state.toUpperCase()}</b> — ${m.id || m.mission_id || 'mission'}<br>
+                <span class="subtle">${m.task ? m.task.slice(0, 80) : (m.goal || 'Active mission')}</span>
+              </div>`;
+            }).join('');
+          }
+        } catch(e) {
+          el.innerHTML = `<div style="color:var(--red)">⚠️ Could not load missions: ${e.message}</div>`;
+        }
+      }, 100);
     } else if (type === 'classic') {
       titleText = 'CLASSIC DASHBOARD';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>';
@@ -1871,24 +1915,16 @@
         <div class="classic-win-nav">
           <button class="classic-tab-btn active" onclick="setClassicTab('${winId}', 'overview')">Overview</button>
           <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'keys')">API Keys</button>
-          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'fleet')">Fleet</button>
           <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'tools')">Tools</button>
           <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'channels')">Channels</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'agents')">Agents</button>
         </div>
         <div id="cTabContent_${winId}">
-          <div class="classic-grid">
-            <div class="classic-stat-card"><h4>318</h4><p>Tests Passing</p></div>
-            <div class="classic-stat-card"><h4>100%</h4><p>Free / MIT</p></div>
-            <div class="classic-stat-card"><h4>Live</h4><p>Gateway Online</p></div>
-          </div>
-          <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;line-height:1.6;">
-            <b>☤ Hermus Agent Control Room</b><br>
-            • Multi-Model Fleet: Groq, OpenAI, OpenRouter, Gemini, Together, DeepSeek, Local Ollama<br>
-            • Channels: Telegram & Discord Autonomous Bots<br>
-            • Semantic Memory: SQLite FTS5 + Embeddings Vector RAG
-          </div>
+          <div style="padding:10px;font-size:11px;color:var(--text-muted)">Loading live data...</div>
         </div>
       `;
+      // Load live data after window is created
+      setTimeout(() => loadClassicWindowData(winId), 100);
     } else if (type === 'constellation') {
       titleText = 'NEURAL MAP';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3a9 9 0 0 0-9 9"/></svg>';
@@ -2091,60 +2127,129 @@
     box.innerHTML = `<div style="background:#161b22;padding:12px;border-radius:6px;border:1px solid #30363d;"><span style="color:var(--green);">✓ Loaded:</span> <b>${input.value}</b><p style="color:#8b949e;font-size:11px;margin-top:6px;">Page scrape active. Autonomous agent context extracted and indexed.</p></div>`;
   };
 
-  // Classic Dashboard interactive tab helper
+  // Classic Dashboard interactive tab helper — loads LIVE data from the backend
   window.setClassicTab = function(winId, tabKey) {
     const box = document.getElementById(`cTabContent_${winId}`);
     if (!box) return;
+    // Update active tab buttons
+    box.parentElement.querySelectorAll('.classic-tab-btn').forEach(b => {
+      b.classList.toggle('active', b.textContent.toLowerCase().includes(tabKey));
+    });
+    loadClassicTab(winId, tabKey, box);
+  };
+
+  // Load live data for a classic window tab
+  async function loadClassicTab(winId, tabKey, box) {
     if (tabKey === 'overview') {
-      box.innerHTML = `
-        <div class="classic-grid">
-          <div class="classic-stat-card"><h4>318</h4><p>Tests Passing</p></div>
-          <div class="classic-stat-card"><h4>100%</h4><p>Free / MIT</p></div>
-          <div class="classic-stat-card"><h4>Live</h4><p>Gateway Online</p></div>
-        </div>
-        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;line-height:1.6;">
-          <b>☤ Hermus Agent Control Room</b><br>
-          • Multi-Model Fleet: Groq, OpenAI, OpenRouter, Gemini, Together, DeepSeek, Local Ollama<br>
-          • Channels: Telegram & Discord Autonomous Bots<br>
-          • Semantic Memory: SQLite FTS5 + Embeddings Vector RAG
-        </div>
-      `;
+      try {
+        const status = await fetch('/api/status').then(r => r.json()).catch(() => ({}));
+        const keysData = await fetch('/keys/list').then(r => r.json()).catch(() => ({}));
+        const toolsData = await fetch('/tools').then(r => r.json()).catch(() => ({}));
+        const agentsData = await fetch('/agents').then(r => r.json()).catch(() => ({}));
+        const keyCount = keysData.total_llm_keys || 0;
+        const toolCount = Array.isArray(toolsData.tools) ? toolsData.tools.length : (toolsData.tools ? Object.keys(toolsData.tools).length : 0);
+        const agentCount = (agentsData.agents || []).length;
+        const statusText = (status.status === 'ok') ? 'Online' : (status.status || 'Local');
+        box.innerHTML = `
+          <div class="classic-grid">
+            <div class="classic-stat-card"><h4>${keyCount}</h4><p>API Keys</p></div>
+            <div class="classic-stat-card"><h4>${toolCount}</h4><p>Tools</p></div>
+            <div class="classic-stat-card"><h4>${agentCount}</h4><p>Agents</p></div>
+            <div class="classic-stat-card"><h4 style="color:var(--green)">${statusText}</h4><p>Gateway</p></div>
+          </div>
+          <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;line-height:1.6;margin-top:8px;">
+            <b>☤ Hermus Agent Control Room</b><br>
+            • Version: ${status.version || '2.3'}<br>
+            ${status.channels ? `• Channels: ${typeof status.channels === 'object' ? Object.keys(status.channels).join(', ') : status.channels}<br>` : ''}
+            • Job Queue: ${status.queue_enabled ? 'Enabled' : 'Not detected'}<br>
+            • Architecture: Queue-first execution with SSE streaming
+          </div>
+        `;
+      } catch(e) {
+        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load live data: ${e.message}</div>`;
+      }
     } else if (tabKey === 'keys') {
-      box.innerHTML = `
-        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-          <h4 style="color:var(--gold);margin-bottom:6px;">🔑 Stored API Keys</h4>
-          <table style="width:100%;border-collapse:collapse;font-size:10px;color:#cbd5e1;">
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;">Provider</th><th style="text-align:left;">Status</th><th style="text-align:left;">Model</th></tr>
-            <tr><td>Groq</td><td style="color:var(--green);">● Active</td><td>llama-3.3-70b-versatile</td></tr>
-            <tr><td>OpenRouter</td><td style="color:var(--green);">● Active</td><td>auto / multi</td></tr>
-            <tr><td>Local Ollama</td><td style="color:var(--cyan);">● Ready</td><td>qwen2.5-coder</td></tr>
-          </table>
-        </div>
-      `;
-    } else if (tabKey === 'fleet') {
-      box.innerHTML = `
-        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-          <h4 style="color:var(--gold);margin-bottom:6px;">🚀 Multi-Model Fleet Strategy</h4>
-          <p style="color:#8b949e;margin-bottom:8px;">Execute goals concurrently across models with consensus merge.</p>
-          <div style="display:flex;gap:6px;"><span class="chip">Fanout (Consensus)</span><span class="chip">Map (Subtasks)</span><span class="chip">Race (First Win)</span></div>
-        </div>
-      `;
+      try {
+        const d = await fetch('/keys/list').then(r => r.json());
+        const allKeys = [];
+        if(d.llm_keys){
+          for(const [prov, list] of Object.entries(d.llm_keys)){
+            if(Array.isArray(list)) list.forEach(k => allKeys.push({ ...k, provider: prov }));
+          }
+        }
+        if(!allKeys.length){
+          box.innerHTML = `<div style="padding:10px;font-size:11px;color:var(--text-muted)">No API keys configured. <a href="/dashboard" style="color:var(--cyan)">Open dashboard → API Keys</a> to add one.</div>`;
+        } else {
+          box.innerHTML = `
+            <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
+              <h4 style="color:var(--gold);margin-bottom:6px;">🔑 Configured Keys (${allKeys.length})</h4>
+              <table style="width:100%;border-collapse:collapse;font-size:10px;color:#cbd5e1;">
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;">Provider</th><th style="text-align:left;">Name</th><th style="text-align:left;">Model</th><th style="text-align:left;">Health</th></tr>
+                ${allKeys.map(k => `<tr><td>${k.provider}</td><td>${k.name || '-'}</td><td>${k.default_model || '-'}</td><td style="color:${k.healthy !== false ? 'var(--green)' : 'var(--amber)'}">● ${k.healthy !== false ? 'OK' : (k.health_status || 'UNKNOWN')}</td></tr>`).join('')}
+              </table>
+            </div>
+          `;
+        }
+      } catch(e) {
+        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load keys: ${e.message}</div>`;
+      }
     } else if (tabKey === 'tools') {
-      box.innerHTML = `
-        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-          <h4 style="color:var(--gold);margin-bottom:6px;">🛠️ Registered Tools</h4>
-          <div style="display:flex;flex-wrap:wrap;gap:4px;"><span class="chip">bash</span><span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">web_search</span><span class="chip">edit_file</span><span class="chip">start_process</span></div>
-        </div>
-      `;
+      try {
+        const d = await fetch('/tools').then(r => r.json());
+        const tools = Array.isArray(d.tools) ? d.tools : (d.tools ? Object.keys(d.tools).map(n => ({name: n})) : []);
+        if(!tools.length){
+          box.innerHTML = `<div style="padding:10px;font-size:11px;color:var(--text-muted)">No tools registered. Connect MCP servers or start the gateway to load tools.</div>`;
+        } else {
+          box.innerHTML = `
+            <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
+              <h4 style="color:var(--gold);margin-bottom:6px;">🛠️ Registered Tools (${tools.length})</h4>
+              <div style="display:flex;flex-wrap:wrap;gap:4px;">${tools.map(t => `<span class="chip" title="${(t.description||'').replace(/"/g,'&quot;')}">${t.name || t}</span>`).join('')}</div>
+            </div>
+          `;
+        }
+      } catch(e) {
+        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load tools: ${e.message}</div>`;
+      }
     } else if (tabKey === 'channels') {
-      box.innerHTML = `
-        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-          <h4 style="color:var(--gold);margin-bottom:6px;">📡 Messaging Channels</h4>
-          <p>Telegram: <span style="color:var(--green);">● Long-Polling Active</span></p>
-          <p>Discord: <span style="color:var(--green);">● Connected</span></p>
-        </div>
-      `;
+      try {
+        const d = await fetch('/channels/status').then(r => r.json());
+        const channels = d.channels || {};
+        box.innerHTML = `
+          <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
+            <h4 style="color:var(--gold);margin-bottom:6px;">📡 Messaging Channels</h4>
+            <p>Telegram: <span style="color:${d.telegram_token_set ? 'var(--green)' : 'var(--amber)'}">● ${d.telegram_token_set ? 'Token Configured' : 'Not Configured'}</span></p>
+            <p>Discord: <span style="color:${d.discord_token_set ? 'var(--green)' : 'var(--amber)'}">● ${d.discord_token_set ? 'Token Configured' : 'Not Configured'}</span></p>
+            ${channels.telegram ? `<p class="subtle" style="margin-top:4px">Telegram: ${channels.telegram.status || 'unknown'}${channels.telegram.messages_processed !== undefined ? ` · ${channels.telegram.messages_processed} messages` : ''}</p>` : ''}
+            ${channels.discord ? `<p class="subtle">Discord: ${channels.discord.status || 'unknown'}${channels.discord.guild_count !== undefined ? ` · ${channels.discord.guild_count} servers` : ''}</p>` : ''}
+          </div>
+        `;
+      } catch(e) {
+        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load channels: ${e.message}</div>`;
+      }
+    } else if (tabKey === 'agents') {
+      try {
+        const d = await fetch('/agents').then(r => r.json());
+        const agents = d.agents || [];
+        if(!agents.length){
+          box.innerHTML = `<div style="padding:10px;font-size:11px;color:var(--text-muted)">No background agents running. Create one from the dashboard's Agents tab.</div>`;
+        } else {
+          box.innerHTML = `
+            <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
+              <h4 style="color:var(--gold);margin-bottom:6px;">🤖 Active Agents (${agents.length})</h4>
+              ${agents.map(a => `<div style="margin-bottom:4px"><b>${a.name || a.id || 'agent'}</b> — <span style="color:var(--green)">${a.status || 'idle'}</span> · ${a.role || 'generic'} · ${a.model || 'auto'}</div>`).join('')}
+            </div>
+          `;
+        }
+      } catch(e) {
+        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load agents: ${e.message}</div>`;
+      }
     }
+  }
+
+  // Called when a classic window is first opened
+  window.loadClassicWindowData = function(winId) {
+    const box = document.getElementById(`cTabContent_${winId}`);
+    if (box) loadClassicTab(winId, 'overview', box);
   };
 
   // ==========================================
@@ -2487,21 +2592,51 @@
     document.getElementById('liveTranscript').textContent = `"${raw}"`;
     inputEl.value = '';
 
-    // Local UI directives (mode switches, module launches) stay local.
-    if (val.includes('red') || val.includes('aggressive')) { currentModeIndex = 0; cycleCoreMode(); return; }
-    if (val.includes('green') || val.includes('eco')) { currentModeIndex = 1; cycleCoreMode(); return; }
-    if (val.includes('blue') || val.includes('normal')) { currentModeIndex = 2; cycleCoreMode(); return; }
-    if (val.includes('shock') || val.includes('pulse')) { triggerShockwave(); return; }
-    if (val.includes('scratch') || val.includes('note')) { spawnSpatialWindow('scratchpad'); return; }
-    if (val.includes('time') || val.includes('chrono')) { spawnSpatialWindow('chrono'); return; }
-    if (val.includes('vis') || val.includes('spectrum')) { spawnSpatialWindow('audio-vis'); return; }
-    if (val.includes('map') || val.includes('neural')) { spawnSpatialWindow('constellation'); return; }
-    if (val.includes('classic') || val.includes('dash')) { spawnSpatialWindow('classic'); return; }
+    // ─── Explicit UI commands (slash-prefixed or exact short phrases) ──────
+    // Only match SHORT, explicit directives — never hijack natural-language
+    // requests that happen to contain words like "time", "map", "note", etc.
+    // A user typing "Research normal blood pressure ranges" should NOT be
+    // interpreted as a UI mode switch.
+    const isUiCommand = (
+      val.startsWith('/') ||
+      val.startsWith('jarvis ') ||
+      val.startsWith('open ') ||
+      val.startsWith('show ') ||
+      val.startsWith('switch ')
+    );
+
+    if (isUiCommand) {
+      // Strip the command prefix for matching
+      const cmd = val.replace(/^(\/|jarvis\s+|open\s+|show\s+|switch\s+)/, '').trim();
+
+      // Mode switches — only on very short, explicit commands
+      if (cmd === 'red' || cmd === 'aggressive' || cmd === 'overclock' || cmd === 'turbo') { currentModeIndex = 0; cycleCoreMode(); return; }
+      if (cmd === 'green' || cmd === 'eco' || cmd === 'stealth' || cmd === 'silent') { currentModeIndex = 1; cycleCoreMode(); return; }
+      if (cmd === 'blue' || cmd === 'normal' || cmd === 'balanced') { currentModeIndex = 2; cycleCoreMode(); return; }
+
+      // Window spawning — explicit commands only
+      if (cmd === 'shock' || cmd === 'shockwave' || cmd === 'pulse' || cmd === 'boom') { triggerShockwave(); return; }
+      if (cmd === 'scratch' || cmd === 'scratchpad' || cmd === 'note' || cmd === 'notepad') { spawnSpatialWindow('scratchpad'); return; }
+      if (cmd === 'time' || cmd === 'chrono' || cmd === 'clock' || cmd === 'chronometer') { spawnSpatialWindow('chrono'); return; }
+      if (cmd === 'vis' || cmd === 'spectrum' || cmd === 'audio' || cmd === 'visualizer') { spawnSpatialWindow('audio-vis'); return; }
+      if (cmd === 'map' || cmd === 'neural' || cmd === 'constellation' || cmd === 'neural map') { spawnSpatialWindow('constellation'); return; }
+      if (cmd === 'classic' || cmd === 'dashboard' || cmd === 'dash' || cmd === 'control room') { spawnSpatialWindow('classic'); return; }
+      if (cmd === 'code' || cmd === 'swe' || cmd === 'swe studio' || cmd === 'editor') { spawnSpatialWindow('swe'); return; }
+      if (cmd === 'dag' || cmd === 'mission' || cmd === 'missions' || cmd === 'pipeline') { spawnSpatialWindow('missions'); return; }
+      if (cmd === 'browser' || cmd === 'web' || cmd === 'navigator' || cmd === 'internet') { spawnSpatialWindow('browser'); return; }
+
+      // Unknown explicit command — send it to the runtime
+    }
 
     // Everything else is REAL work: run it through the universal runtime.
-    if (val.includes('code') || val.includes('swe')) spawnSpatialWindow('swe');
-    else if (val.includes('dag') || val.includes('mission')) spawnSpatialWindow('missions');
-    else if (val.includes('browser') || val.includes('web')) spawnSpatialWindow('browser');
+    // Only spawn visual windows for VERY short, clear topic commands —
+    // never for multi-word natural language requests.
+    const wordCount = val.split(/\s+/).length;
+    if (wordCount <= 2) {
+      if (val.includes('code') || val.includes('swe') || val.includes('editor')) spawnSpatialWindow('swe');
+      else if (val.includes('mission') || val.includes('dag') || val.includes('pipeline')) spawnSpatialWindow('missions');
+      else if (val === 'browser' || val === 'web' || val === 'internet') spawnSpatialWindow('browser');
+    }
 
     await jarvisRun(raw);
   }
