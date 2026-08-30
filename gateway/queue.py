@@ -35,13 +35,14 @@ import json
 import time
 import uuid
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from collections.abc import Callable
 
 from core.config import config
+from core.contracts.jobs import Job as _ContractJob
 from core.run_events import RunBus, run_bus
 
 JobHandler = Callable[["JobContext"], Any]
@@ -59,28 +60,83 @@ def _now() -> str:
 
 
 @dataclass
-class Job:
-    id: str
-    kind: str
-    payload: dict[str, Any] = field(default_factory=dict)
-    status: str = STATUS_QUEUED
+class Job(_ContractJob):
+    """One job = one canonical ``core.contracts.jobs.Job`` plus queue runtime state.
+
+    The durable/lease/recovery fields come from the single §14 Job contract
+    (``type``, ``attempt``, ``idempotency_key``, ``lease_owner``, ``heartbeat_at``,
+    ``next_run_at``, ``mission_id``, ``result_ref`` …). The queue only adds the
+    operational fields it needs to schedule and report. The legacy queue attribute
+    names (``kind``, ``attempts``, ``dedupe_key``, ``error``) are kept as aliases
+    so the live realtime/SSE consumers and the internal executor stay unchanged.
+    """
+
     session_key: str = ""
     run_id: str = ""
-    priority: int = 0
-    attempts: int = 0
     max_attempts: int = 1
     timeout: float = 0.0
-    created_at: float = field(default_factory=time.time)
+    # wall-clock epoch used for timing; the contract's ``created_at`` stays the
+    # canonical durable ISO timestamp.
+    created_ts: float = field(default_factory=time.time)
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     result: Optional[dict[str, Any]] = None
-    error: str = ""
-    dedupe_key: str = ""
     created: str = field(default_factory=_now)
 
+    # -- legacy queue attribute aliases (map onto the canonical contract) -----
+    @property
+    def kind(self) -> str:
+        return self.type
+
+    @kind.setter
+    def kind(self, value: str) -> None:
+        self.type = value
+
+    @property
+    def attempts(self) -> int:
+        return self.attempt
+
+    @attempts.setter
+    def attempts(self, value: int) -> None:
+        self.attempt = value
+
+    @property
+    def error(self) -> str:
+        return self.error_message or ""
+
+    @error.setter
+    def error(self, value: str) -> None:
+        self.error_message = value
+
+    @property
+    def dedupe_key(self) -> str:
+        return self.idempotency_key or ""
+
+    @dedupe_key.setter
+    def dedupe_key(self, value: str) -> None:
+        self.idempotency_key = value
+
     def brief(self) -> dict[str, Any]:
-        d = asdict(self)
-        d.pop("result", None)
+        # Explicit dict, NOT asdict(): this preserves the exact external shape the
+        # realtime/SSE + route consumers already read, regardless of subclassing.
+        d: dict[str, Any] = {
+            "id": self.id,
+            "kind": self.kind,
+            "payload": self.payload,
+            "status": self.status,
+            "session_key": self.session_key,
+            "run_id": self.run_id,
+            "priority": self.priority,
+            "attempts": self.attempts,
+            "max_attempts": self.max_attempts,
+            "timeout": self.timeout,
+            "created_at": self.created_ts,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+            "dedupe_key": self.dedupe_key,
+            "created": self.created,
+        }
         d["has_result"] = self.result is not None
         if self.started_at and self.finished_at:
             d["elapsed_ms"] = int((self.finished_at - self.started_at) * 1000)
@@ -88,8 +144,8 @@ class Job:
             d["elapsed_ms"] = int((time.time() - self.started_at) * 1000)
         else:
             d["elapsed_ms"] = None
-        d["duration_ms"] = int(((self.finished_at or time.time()) - (self.started_at or self.created_at)) * 1000)
-        d["wait_ms"] = int(((self.started_at or time.time()) - self.created_at) * 1000)
+        d["duration_ms"] = int(((self.finished_at or time.time()) - (self.started_at or self.created_ts)) * 1000)
+        d["wait_ms"] = int(((self.started_at or time.time()) - self.created_ts) * 1000)
         return d
 
 
@@ -266,14 +322,14 @@ class JobQueue:
         session_key = session_key or str(payload.get("session_key") or "default")
         job = Job(
             id=job_id or f"job_{uuid.uuid4().hex[:10]}",
-            kind=kind,
+            type=kind,
             payload=payload,
             session_key=session_key,
             run_id=run_id or f"run_{uuid.uuid4().hex[:8]}",
             priority=int(priority),
             timeout=float(timeout if timeout is not None else self.default_timeout),
             max_attempts=max(1, int(max_attempts if max_attempts is not None else 1)),
-            dedupe_key=dedupe_key,
+            idempotency_key=dedupe_key,
         )
         if dedupe_key and dedupe_key in self._recent_keys:
             existing_id = self._recent_keys[dedupe_key]
@@ -675,10 +731,10 @@ class JobQueue:
                 interrupted += 1
             if jid in self.jobs:
                 continue
-            job = Job(id=jid, kind=str(rec.get("kind") or "unknown"),
+            job = Job(id=jid, type=str(rec.get("kind") or "unknown"),
                       session_key=str(rec.get("session_key") or "default"),
                       run_id=str(rec.get("run_id") or jid), status=status,
-                      error=str(rec.get("error") or "") or
+                      error_message=str(rec.get("error") or "") or
                             ("interrupted by gateway restart" if status == STATUS_INTERRUPTED else ""))
             self.jobs[job.id] = job
             self._order.append(job.id)

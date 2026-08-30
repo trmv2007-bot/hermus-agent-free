@@ -56,7 +56,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Memory** | `core.memory.MemoryFacade` | `core.memory2` MemoryStore | one writable path |
 | **World state** | `core.state.WorldStateFacade` | `core.computer.world_state` | one writable path |
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
-| **Jobs** | `core.contracts.Job` + queue | durable job store | lease/heartbeat/reaper |
+| **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) | durable event log + results | lease/heartbeat/reaper |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |
 | **Gateway** | `gateway/gateway.py` | — | transport only |
@@ -76,7 +76,10 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
   selection contract. Keywords are a score feature, never proof of capability.
 - **MissionNode / MissionState** — the one node contract and state machine.
   Verification is a first-class phase; failures are typed before retry.
-- **Job** — the one durable background-work schema.
+- **Job** — the one durable background-work schema (`core.contracts.jobs.Job`). The
+  live queue's `gateway/queue.py::Job` is a subtype of it, so the §14 lease/heartbeat/
+  idempotency/attempt fields are the shared contract and the queue adds only runtime
+  operational fields.
 
 ---
 

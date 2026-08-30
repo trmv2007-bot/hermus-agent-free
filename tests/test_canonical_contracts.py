@@ -370,6 +370,51 @@ def test_world_state_v2_duplicate_removed():
 
 
 # ---------------------------------------------------------------------------
+# One durable Job schema (§14): the live queue Job is the canonical contract
+# ---------------------------------------------------------------------------
+def test_queue_job_is_canonical_contract_subtype():
+    """The live gateway queue Job subclasses the single §14 Job contract.
+
+    This is "one job system": the durable/lease/recovery fields come from
+    core.contracts.jobs.Job; the queue only adds runtime operational fields.
+    """
+    from core.contracts import Job as ContractJob
+    from gateway.queue import Job as QueueJob
+    assert issubclass(QueueJob, ContractJob)
+
+    job = QueueJob(id="job_1", type="agent.chat", payload={"q": 1},
+                   session_key="telegram:u", run_id="run_1",
+                   max_attempts=3, idempotency_key="dd", timeout=30.0)
+
+    # canonical contract fields present
+    assert job.type == "agent.chat"
+    assert job.attempt == 0
+    assert job.idempotency_key == "dd"
+    assert job.lease_owner is None
+    assert job.mission_id is None
+    assert job.created_at  # durable ISO timestamp from the contract
+
+    # legacy queue aliases preserve the runtime surface
+    assert job.kind == "agent.chat"
+    job.attempts += 1
+    assert job.attempt == 1
+    job.error = "boom"
+    assert job.error_message == "boom"
+    job.dedupe_key = "d2"
+    assert job.idempotency_key == "d2"
+
+    # brief() preserves the exact consumer-facing dict shape (kind/attempts/
+    # dedupe_key/error/created_at float) regardless of the subtype.
+    b = job.brief()
+    assert b["kind"] == "agent.chat"
+    assert b["attempts"] == 1
+    assert b["dedupe_key"] == "d2"
+    assert b["error"] == "boom"
+    assert isinstance(b["created_at"], float)
+    assert "duration_ms" in b and "wait_ms" in b
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap capability report
 # ---------------------------------------------------------------------------
 def test_bootstrap_doctor_reports(monkeypatch):
