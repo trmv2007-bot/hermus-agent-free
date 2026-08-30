@@ -56,7 +56,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Memory** | `core.memory.MemoryFacade` | `core.memory2` MemoryStore | one writable path |
 | **World state** | `core.state.WorldStateFacade` | `core.computer.world_state` | one writable path |
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
-| **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) | durable event log + results | lease/heartbeat/reaper |
+| **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |
 | **Gateway** | `gateway/gateway.py` | — | transport only |
@@ -104,7 +104,14 @@ The final tree must not contain two competing implementations.
 3. Migrate legacy memory consumers → `core.memory.get_memory()` entirely; retire `core/compat/legacy_memory.py` as a public path (facade already owns the v1 backend).
 4. ~~Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway`.~~ **resolved — no duplicate found.** Detect-first analysis verified these are ONE mutually-dependent provider stack, not competing implementations; `ModelGateway` is the single facade. No deletion warranted. (Future nicety, not a deletion: have the live runtime's model-selection path also go through `ModelGateway`.)
 5. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces. **In progress**: the canonical projection is now served at `/control` (pure snapshot + replay). Deleting the four legacy surfaces is gated on migrating the ~6 dashboard test files + JS assets (`living-deck.js`, `hermus-client.js`, `jarvis-control.js`) and the `/dashboard*`, `/jarvis`, `/api/jarvis/*`, `/computer/dashboard`, `/dashboard-assets/*` routes.
-6. Delete duplicate agent managers / orchestration concepts with no distinct contract.
+6. ~~Delete duplicate agent managers / orchestration concepts with no distinct contract.~~ ✅ **done** — `AgentManager` is now a thin named-agent registry + delegation facade; its detached subprocess `worker_loop`, and its own `state.json` heartbeat + `jobs/*.json`/`results/*.json` lifecycle were removed. Background work is executed by the canonical Job queue.
+
+### Remaining (Final One-Shot Spec §3/§7/§16)
+1. **Control-room cleanup** — make `/control` the only UI; root `/` → `/control`; migrate/delete the legacy dashboard HTML/JS/routes (`/dashboard*`, `/jarvis`, `/computer/dashboard`, `/dashboard-assets/*`, and the `dashboard.html`/`jarvis_dashboard.html`/`dashboard_computer.html`/`remote.html` + `hermus-client.js`/`jarvis-control.js`/`living-deck.*` assets).
+2. **Events** — migrate remaining `dashboard_events`/`run_bus` consumers to `EventEnvelope`/`EventBus` and delete the bridge.
+3. **Memory** — migrate remaining legacy `core.memory`/v1 imports to `MemoryFacade`; no second public writer.
+4. **Models** — add a static check that no code path calls a provider SDK directly outside the model subsystem; `ModelGateway` is the only public boundary.
+5. **Setup** — one idempotent `bootstrap`/`start`/`doctor`; confirm shell wrappers contain no business logic and never mask required dep failures.
 
 ---
 
