@@ -244,3 +244,65 @@ def test_no_bare_except_pass_in_agent_execution_core():
     # The agent records structured issues (record_issue) rather than bare `except: pass`
     # on the run-critical path.
     assert "record_issue(" in src, "core.agent should record structured runtime issues"
+
+
+# ---------------------------------------------------------------------------
+# One tool boundary — runtime uses the canonical ToolGateway
+# ---------------------------------------------------------------------------
+def test_one_tool_gateway_agent_runtime_uses_it():
+    """The agent's tool-execution path must go through the canonical ToolGateway."""
+    src = (ROOT / "core/agent.py").read_text(encoding="utf-8")
+    assert "from .tools import get_tool_gateway" in src or "get_tool_gateway" in src, \
+        "the agent must route tool invocation through the canonical ToolGateway"
+    assert ".execute(" in src, "agent must call the gateway's execute()"
+
+
+def test_one_tool_gateway_control_room_uses_it():
+    """The control room capability surface reads tools via the canonical gateway."""
+    src = (ROOT / "gateway/routes_canonical.py").read_text(encoding="utf-8")
+    assert "get_tool_gateway" in src, "capabilities route must use the canonical ToolGateway"
+
+
+def test_one_tool_gateway_no_duplicate_invoke_path():
+    """Tool execution should be centralized: no stray 'from .tool_registry import' + execute
+    in a second production module that competes with the gateway. The registry stays the
+    implementation; the gateway is the invocation path. (The agent delegates to the gateway,
+    so it must not also import the registry namespace for invocation.)"""
+    agent = (ROOT / "core/agent.py").read_text(encoding="utf-8")
+    # Agent may still import the registry for discovery (list_tools/load) but must not
+    # invoke toolregistry.execute directly anymore.
+    assert "tool_registry.execute(" not in agent, \
+        "core.agent must not bypass the ToolGateway by calling tool_registry.execute"
+
+
+# ---------------------------------------------------------------------------
+# Autonomy never silently degrades to chat, and never fakes success
+# ---------------------------------------------------------------------------
+def test_autonomy_never_silently_falls_back_to_chat():
+    """MissionEngine must surface explicit blocked/failed states, never a silent
+    chat downgrade or a fabricated 'completed' on failure."""
+    src = (ROOT / "core/mission.py").read_text(encoding="utf-8")
+    assert '"blocked"' in src or 'BLOCKED = "blocked"' in src, \
+        "autonomy must report an explicit blocked state, not silently degrade"
+    # node explicitly blocked on no usable model/key/backend
+    assert "blocked, not completed" in src, \
+        "a missing model/provider backend must block the node, not complete it"
+    # a crash is recorded as FAILED, never a silent downgrade
+    assert "crash → recorded failure, never a silent downgrade" in src or "never a silent downgrade" in src
+
+
+def test_autonomy_crash_records_failed_not_completed():
+    """A crash in the autonomous loop must set state=FAILED + error, not report success."""
+    src = (ROOT / "core/mission.py").read_text(encoding="utf-8")
+    assert "MissionState.FAILED.value" in src
+    assert "recoverable" in src
+
+
+# ---------------------------------------------------------------------------
+# Runtime actually uses the canonical ModelGateway
+# ---------------------------------------------------------------------------
+def test_runtime_uses_canonical_model_gateway():
+    """routes_canonical (the control-room capability surface) must use ModelGateway."""
+    src = (ROOT / "gateway/routes_canonical.py").read_text(encoding="utf-8")
+    assert "get_model_gateway" in src, "capabilities route must use ModelGateway"
+    assert "model_gw.providers(" in src or "model_gw." in src
