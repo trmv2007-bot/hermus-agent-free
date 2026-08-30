@@ -340,14 +340,33 @@ def test_world_state_facade_and_migration(tmp_path):
     ws = WorldStateFacade()
     ws.begin_task("open browser", "PLANNING")
     assert ws.task_state == "PLANNING"
+
+    # full V1-canonical surface is exposed through ONE facade (no second writer)
+    ws.update({"active_application": "chrome", "visible_targets": ["button"]})
+    assert ws.active_application == "chrome"
+    assert "button" in ws.visible_targets
+    ws.before_action("EXECUTING", {"click": "button"})
+    ws.mark_state("clicked", True)
+    assert ws.current_state == "clicked"
+    ws.finish_task(True)
+    assert ws.task_state == "SUCCESS"
     d = ws.to_dict()
+    assert d["active_application"] == "chrome"
 
     legacy_path = tmp_path / "world.json"
     legacy_path.write_text(json.dumps({"active_application": "chrome", "current_state": "IDLE"}))
     assert detect_legacy(str(legacy_path)) is True
-    res = migrate_world_state(str(legacy_path), marker_path=str(tmp_path / "marker"),
-                              out_path=str(tmp_path / "out.json"))
+    res = migrate_world_state(str(legacy_path), out_path=str(tmp_path / "out.json"))
     assert res.get("success") is True
+
+
+def test_world_state_v2_duplicate_removed():
+    # The dead parallel WorldStateV2 implementation was removed; V1 is canonical.
+    with pytest.raises(ImportError):
+        importlib.import_module("core.computer.world_state_v2")
+    from core.computer import WorldState
+    from core.state import get_world_state
+    assert get_world_state().canonical == "v1"
 
 
 # ---------------------------------------------------------------------------

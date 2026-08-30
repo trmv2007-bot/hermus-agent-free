@@ -109,16 +109,6 @@ from .benchmark import (
     list_tasks,
     run_benchmark,
 )
-from .world_state_v2 import (
-    CertaintyLevel,
-    DesktopContext,
-    GroundedTarget as GroundedTargetV2,
-    ObservationType,
-    RichObservation,
-    TaskContext,
-    WorldStateV2,
-    create_world_state,
-)
 from .window_manager import (
     DryRunWindowBackend,
     PyGetWindowBackend,
@@ -257,15 +247,9 @@ __all__ = [
     "get_task",
     "list_tasks",
     "run_benchmark",
-    # Enhanced World State
-    "WorldStateV2",
-    "ObservationType",
-    "CertaintyLevel",
-    "DesktopContext",
-    "TaskContext",
-    "RichObservation",
-    "GroundedTargetV2",
-    "create_world_state",
+    # World State (canonical V1 WorldState — V2 duplicate removed)
+    "WorldState",
+    "WorldObservation",
     # Phase C — Remote / approval control
     "RemoteApprovalGate",
     "RemoteControlHub",
