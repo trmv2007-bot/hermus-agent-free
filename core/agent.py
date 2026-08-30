@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 from .config import config
-from .llm import FreeLLM
 from .memory import memory
 from .skill_manager import skill_manager
 from .task_tracker import task_tracker
@@ -34,7 +33,11 @@ class HermusAgent:
     ):
         self.model_name = model or config.model
         self._model_pinned = model is not None
-        self.llm = FreeLLM(self.model_name, api_key=api_key, base_url=base_url)
+        from .models import get_model_gateway
+        # The canonical ModelGateway is the ONLY place a model client is built;
+        # it returns the concrete FreeLLM provider-call implementation.
+        self.llm = get_model_gateway().llm(model=self.model_name, api_key=api_key,
+                                           base_url=base_url)
         self.session_id = session_id or (
             f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
         )
@@ -163,7 +166,7 @@ class HermusAgent:
             if getattr(self.llm, "provider", "") == "mock":
                 return None
             from .router2 import router2
-            from .llm import FreeLLM
+            from .models import get_model_gateway
 
             sel = router2.select(user_message)
             if not sel.get("success"):
@@ -171,7 +174,7 @@ class HermusAgent:
             new_ref = sel["model"]
             if new_ref == self.model_name:
                 return sel
-            new_llm = FreeLLM(new_ref)
+            new_llm = get_model_gateway().llm(model=new_ref)
             self.llm = new_llm
             self.model_name = new_ref
             print(f"[Router] {sel['task_type']} -> {new_ref} ({sel['reason']})")
