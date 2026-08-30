@@ -987,6 +987,15 @@ def main():
         elif args.multikey_action == "providers":
             for p in list_providers():
                 print(f" - {p['id']}: {p['name']} | default={p.get('default_model')} | {p.get('base_url')}")
+                budget = " / ".join(
+                    part
+                    for part in (
+                        f"{p['default_rpm']:,} RPM" if p.get("default_rpm") else "",
+                        f"{p['default_tpm']:,} TPM" if p.get("default_tpm") else "",
+                    )
+                    if part
+                )
+                print(f"     rate budget: {budget or 'unmetered (no published per-minute limit)'}")
                 if p.get("notes"):
                     print(f"     {p['notes']}")
         else:

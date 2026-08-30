@@ -316,6 +316,156 @@ def test_multi_ai_diverse_team(tmp_path):
         server.shutdown()
 
 
+def test_free_tier_rate_budget_presets():
+    """Presets carry the recommended free-tier RPM/TPM for each provider."""
+    from core.providers import get_provider, list_providers
+
+    # Documented free-tier limits (verified against provider docs 2026-08).
+    expected = {
+        "groq": (30, 6000),
+        "gemini": (10, 250000),
+        "openrouter": (20, None),
+        "cerebras": (5, 30000),
+        "mistral": (60, 500000),
+        "codestral": (30, None),
+        "nvidia": (40, None),
+        "sambanova": (20, None),
+        "fireworks": (10, None),
+        "openai": (3, 40000),
+        "anthropic": (50, 30000),
+    }
+    for pid, (rpm, tpm) in expected.items():
+        preset = get_provider(pid)
+        assert preset.get("default_rpm") == rpm, f"{pid} RPM"
+        assert preset.get("default_tpm") == tpm, f"{pid} TPM"
+
+    # Providers with no published per-minute quota stay unmetered rather than
+    # getting an invented ceiling.
+    for pid in ("deepseek", "hf", "huggingface", "ollama", "lmstudio", "custom"):
+        preset = get_provider(pid)
+        assert preset.get("default_rpm") is None, f"{pid} should be unmetered"
+        assert preset.get("default_tpm") is None, f"{pid} should be unmetered"
+
+    # Budgets are exposed to the dashboard/CLI through list_providers().
+    by_id = {p["id"]: p for p in list_providers()}
+    assert by_id["groq"]["default_rpm"] == 30
+    assert by_id["groq"]["default_tpm"] == 6000
+    assert by_id["deepseek"]["default_rpm"] is None
+    assert by_id["github"]["retired"] is True
+
+
+def test_new_key_inherits_provider_free_tier_budget(tmp_path):
+    """Adding a key without --rpm/--tpm applies the provider's free-tier default."""
+    from core.multi_key import MultiKeyManager
+
+    mgr = MultiKeyManager(db_path=str(tmp_path / "keys.json"))
+    mgr.add_key("groq", "gsk-test-0000000001", name="g1", auto_discover=False)
+
+    entry = mgr.get_entry("groq", "gsk-test-0000000001")
+    assert entry["rpm_limit"] == 30
+    assert entry["tpm_limit"] == 6000
+    assert entry["rate_limit_source"] == "preset"
+
+    # An explicit budget always wins over the preset and is marked as such,
+    # so header adoption will not later overwrite it.
+    mgr.add_key(
+        "groq", "gsk-test-0000000002", name="g2", rpm_limit=5, tpm_limit=1000, auto_discover=False
+    )
+    manual = mgr.get_entry("groq", "gsk-test-0000000002")
+    assert manual["rpm_limit"] == 5
+    assert manual["tpm_limit"] == 1000
+    assert manual["rate_limit_source"] == "manual"
+
+
+def test_existing_keys_backfill_free_tier_budget(tmp_path):
+    """Keys stored before presets existed pick up the defaults on load."""
+    import json as json_mod
+    from core.multi_key import MultiKeyManager
+
+    db = tmp_path / "keys.json"
+    # A key persisted by an older build: no rpm_limit/tpm_limit at all.
+    db.write_text(
+        json_mod.dumps(
+            {"gemini": [{"key": "AIza-legacy-key-123", "name": "old", "provider": "gemini"}]}
+        )
+    )
+    mgr = MultiKeyManager(db_path=str(db))
+    entry = mgr.get_entry("gemini", "AIza-legacy-key-123")
+    assert entry["rpm_limit"] == 10
+    assert entry["tpm_limit"] == 250000
+
+
+def test_reported_limits_override_preset_defaults(tmp_path):
+    """Real limits from response headers beat the preset guess, but not user input."""
+    from core.multi_key import MultiKeyManager
+
+    mgr = MultiKeyManager(db_path=str(tmp_path / "keys.json"))
+    mgr.add_key("openai", "sk-openai-000000001", name="o1", auto_discover=False)
+    assert mgr.get_entry("openai", "sk-openai-000000001")["rpm_limit"] == 3
+
+    # This key is actually on a paid tier — the header says so.
+    mgr.mark_key_success(
+        "openai",
+        "sk-openai-000000001",
+        tokens=10,
+        rate_limit={"limit_requests": 500, "limit_tokens": 200000},
+    )
+    upgraded = mgr.get_entry("openai", "sk-openai-000000001")
+    assert upgraded["rpm_limit"] == 500
+    assert upgraded["tpm_limit"] == 200000
+    assert upgraded["rate_limit_source"] == "reported"
+
+    # A hand-set budget is deliberate and must survive header reports.
+    mgr.add_key("openai", "sk-openai-000000002", name="o2", rpm_limit=2, auto_discover=False)
+    mgr.mark_key_success(
+        "openai", "sk-openai-000000002", tokens=10, rate_limit={"limit_requests": 500}
+    )
+    pinned = mgr.get_entry("openai", "sk-openai-000000002")
+    assert pinned["rpm_limit"] == 2
+
+
+def test_groq_daily_request_header_is_not_adopted_as_rpm(tmp_path):
+    """Groq's x-ratelimit-limit-requests is per *day* — never a per-minute budget."""
+    from core.multi_key import MultiKeyManager
+    from core.providers import requests_header_window
+
+    assert requests_header_window("groq") == "day"
+    assert requests_header_window("openai") == "minute"
+
+    mgr = MultiKeyManager(db_path=str(tmp_path / "keys.json"))
+    mgr.add_key("groq", "gsk-daily-000000001", name="g", auto_discover=False)
+    # Groq reports RPD here (14,400) alongside a genuine per-minute TPM.
+    mgr.mark_key_success(
+        "groq",
+        "gsk-daily-000000001",
+        tokens=10,
+        rate_limit={"limit_requests": 14400, "limit_tokens": 12000},
+    )
+    entry = mgr.get_entry("groq", "gsk-daily-000000001")
+    # RPM stays at the documented 30 rather than jumping to the daily figure.
+    assert entry["rpm_limit"] == 30
+    # TPM is a real per-minute value, so it is adopted.
+    assert entry["tpm_limit"] == 12000
+
+
+def test_rate_budget_throttles_key_selection(tmp_path):
+    """The seeded budget actually gates round-robin key selection."""
+    from core.multi_key import MultiKeyManager
+
+    mgr = MultiKeyManager(db_path=str(tmp_path / "keys.json"))
+    # cerebras free tier is 5 RPM — the tightest preset.
+    mgr.add_key("cerebras", "csk-000000000001", name="c1", auto_discover=False)
+
+    for _ in range(5):
+        assert mgr.get_key("cerebras") == "csk-000000000001"
+        mgr._record_use("cerebras", "csk-000000000001")
+
+    # Budget exhausted for this minute and no sibling key to rotate to.
+    status = mgr.rate_status("cerebras")["keys"][0]
+    assert status["rpm_used"] == 5
+    assert status["rpm_limit"] == 5
+
+
 if __name__ == "__main__":
     import pytest
 

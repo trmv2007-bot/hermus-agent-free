@@ -2894,25 +2894,50 @@ function onKeyProviderChange(){
   if(found){
     if($('keyBase')) $('keyBase').value = found.base_url || '';
     if($('keyModel')) $('keyModel').value = found.default_model || '';
-    // Leave RPM/TPM blank by default — the backend auto-disovers actual rate limits
-    // from the provider. Hard-coding wrong values (e.g. "30 RPM") was misleading
-    // because most providers have different real limits.
+    // Leave RPM/TPM blank by default. Blank now means "use the provider's
+    // recommended free-tier budget" (core/providers.py), which the backend
+    // then refines from real rate-limit response headers.
     if($('keyRpm')) $('keyRpm').value = '';
     if($('keyTpm')) $('keyTpm').value = '';
     const hintEl = $('keyRpmTpmHint');
     if(hintEl){
-      const providerLimits = {
-        groq: 'Groq free tier: 30 RPM, 14,400 TPD (tokens/day)',
-        mistral: 'Mistral free tier: rate-limited per key, check console',
-        openai: 'OpenAI tier 1: 500 RPM, 30,000 TPM',
-        anthropic: 'Anthropic tier 1: 50 RPM, 100,000 TPM',
-        ollama: 'Local Ollama: no rate limits (runs on your hardware)',
-        openrouter: 'OpenRouter free: varies per model, no hard RPM',
-        gemini: 'Gemini free: 15 RPM, 1M TPM',
-        deepseek: 'DeepSeek: 500 RPM, 60,000 TPM',
-        together: 'Together: 60 RPM (free), higher with paid',
+      // Human-readable context per provider. The authoritative numbers live
+      // in core/providers.py and arrive on `found` via /providers.
+      const providerNotes = {
+        groq: 'free tier — TPM varies 6K–70K by model, 14,400 requests/day',
+        mistral: 'free "Experiment" tier — ~1 req/sec, ~1B tokens/month',
+        codestral: 'free Codestral endpoint — also capped at 2,000 requests/day',
+        openai: 'free tier — paid Tier 1 raises this to 500 RPM',
+        anthropic: 'no free tier — this is paid Tier 1 (50 RPM / 30K input TPM)',
+        ollama: 'local — no rate limits, bounded only by your hardware',
+        nollama: 'local — no rate limits, bounded only by your hardware',
+        lmstudio: 'local — no rate limits, bounded only by your hardware',
+        openrouter: "':free' model variants — also 50 requests/day (1,000/day after $10 topped up)",
+        gemini: 'free tier — Flash models; Pro is tighter at ~5 RPM',
+        deepseek: 'no published per-minute cap — throttles by concurrency instead',
+        together: 'limits are dynamic and read back from response headers',
+        cerebras: 'free trial — $5 credit, 30 days, 1M tokens/day',
+        sambanova: 'free tier — also 200K tokens/day per model',
+        nvidia: 'free endpoints — can request a raise to 200 RPM',
+        fireworks: 'no-card accounts — adding a payment method lifts this',
+        huggingface: 'credit-metered (<$0.10/month free), no documented RPM quota',
+        hf: 'credit-metered (<$0.10/month free), no documented RPM quota',
+        github: '⚠️ GitHub Models was retired on 2026-07-30 — this endpoint no longer serves requests',
       };
-      hintEl.textContent = providerLimits[provId] ? `💡 ${providerLimits[provId]}` : 'Rate limits: leave blank for provider defaults (auto-discovered on add)';
+      const budget = [
+        found.default_rpm ? `${found.default_rpm.toLocaleString()} RPM` : null,
+        found.default_tpm ? `${found.default_tpm.toLocaleString()} TPM` : null,
+      ].filter(Boolean).join(' / ');
+      const note = providerNotes[provId];
+      let hint;
+      if(found.retired){
+        hint = `⚠️ ${note || 'This provider has been retired and no longer serves requests.'}`;
+      } else if(budget){
+        hint = `💡 Defaults to ${budget}${note ? ` — ${note}` : ''}. Leave blank to use it.`;
+      } else {
+        hint = `💡 No default budget${note ? ` — ${note}` : ''}. Leave blank for unmetered.`;
+      }
+      hintEl.textContent = hint;
     }
     if($('keyValue')) {
       if(provId === 'groq') $('keyValue').placeholder = 'gsk_...';

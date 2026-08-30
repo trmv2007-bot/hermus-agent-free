@@ -3,6 +3,30 @@ Universal AI provider registry — any OpenAI-compatible API key works.
 
 Presets for popular free/cheap endpoints + fully custom base_url.
 Model discovery via GET /v1/models (or provider-specific).
+
+Free-tier rate budgets
+----------------------
+Every preset carries ``default_rpm`` / ``default_tpm``, which seed a key's
+per-minute request/token budget when it is registered without explicit
+``--rpm`` / ``--tpm``. The numbers below track each provider's *free* tier as
+published in its own docs (verified 2026-08), and are deliberately set to the
+**lowest limit a free key is likely to hit** rather than the best case:
+
+* A budget is per API key, but a provider's quota is usually per *organisation*
+  and per *model*. Groq, for example, allows 30 RPM everywhere but ranges from
+  6K TPM (``llama-3.1-8b-instant``) to 30K TPM (``llama-4-scout``) — so the
+  preset takes the 6K floor, which is safe whichever model a key ends up using.
+* Overshooting costs real throughput: a 429 burns the request, trips the
+  key's failure counter and forces a retry on another key. Undershooting only
+  makes the router rotate to another key a little earlier.
+
+Providers that publish no per-minute ceiling (DeepSeek, HuggingFace, local
+runtimes) intentionally leave these unset, which means "unmetered" to
+``MultiKeyManager`` — inventing a number there would throttle for no reason.
+
+Anything here is only a default. Precedence is:
+``explicit --rpm/--tpm`` > ``limits reported in provider response headers`` >
+``these presets``.
 """
 from __future__ import annotations
 
@@ -21,7 +45,13 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "gpt-4o-mini",
         "supports_tools": True,
         "env_key": "OPENAI_API_KEY",
-        "notes": "Official OpenAI API",
+        "notes": "Official OpenAI API — free tier ~3 RPM / 40K TPM; paid tiers far higher",
+        # Free tier is 3 RPM / 40K TPM. Paid Tier 1 jumps to 500 RPM, and the
+        # real limit arrives in x-ratelimit-* headers on the first call, which
+        # overwrites this. Seeding the free number keeps an unpaid key from
+        # spraying 429s before that first response lands.
+        "default_rpm": 3,
+        "default_tpm": 40000,
     },
     "groq": {
         "name": "Groq",
@@ -37,7 +67,16 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # callers must trim the advertised set before sending a request.
         "max_tools": 128,
         "env_key": "GROQ_API_KEY",
-        "notes": "Free tier ~30 RPM — very fast",
+        # Groq documents that x-ratelimit-limit-requests "always refers to
+        # Requests Per Day", unlike OpenAI where the same header is per
+        # minute. Without this flag we'd adopt 14400 as an RPM budget and
+        # effectively switch request throttling off for Groq keys.
+        "requests_header_window": "day",
+        "notes": "Free tier 30 RPM / 6K TPM (per-model TPM ranges 6K–70K) — very fast",
+        # Groq publishes 30 RPM on nearly every free model (60 on a few small
+        # ones). TPM is the binding limit and varies per model: 6K on
+        # llama-3.1-8b-instant and qwen3-32b, 8K on gpt-oss-*, 30K on
+        # llama-4-scout. 6K is the floor, so it holds for any model choice.
         "default_rpm": 30,
         "default_tpm": 6000,
     },
@@ -52,7 +91,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "max_tools": 128,
         "env_key": "NVIDIA_API_KEY",
-        "notes": "NVIDIA API Catalog; Hermus exposes only hosted Free Endpoint chat models",
+        "notes": "NVIDIA API Catalog free endpoints ~40 RPM; Hermus exposes only hosted Free Endpoint chat models",
+        # NVIDIA staff cite ~40 RPM per model on the free build.nvidia.com
+        # tier (raisable to 200 on request). No TPM is published, so none is
+        # set — the request cap is what actually binds here.
         "default_rpm": 40,
     },
     "openrouter": {
@@ -69,7 +111,12 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
             "HTTP-Referer": "https://github.com/trmv2007-bot/hermus-agent-free",
             "X-Title": "Hermus Agent Free",
         },
-        "notes": "Hundreds of models, free tier models available",
+        "notes": "Hundreds of models; ':free' variants capped at 20 RPM (50/day, 1000/day after $10 topped up)",
+        # OpenRouter caps :free model variants at 20 RPM. The tighter limit is
+        # the daily one (50 RPD, or 1000 RPD once $10 has ever been purchased),
+        # which is not a per-minute budget and so cannot be modelled here.
+        # Paid models have no platform-level RPM cap.
+        "default_rpm": 20,
     },
     "together": {
         "name": "Together AI",
@@ -81,7 +128,12 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
         "supports_tools": True,
         "env_key": "TOGETHER_API_KEY",
-        "notes": "Open models, free credits often",
+        "notes": "Open models; entry tier ~60 RPM, limits are dynamic and reported in response headers",
+        # Together moved to dynamic per-model limits that scale with sustained
+        # traffic and are returned in response headers, so there is no
+        # published free number. 60 RPM matches the commonly observed entry
+        # tier and is replaced by the header value after the first call.
+        "default_rpm": 60,
     },
     "fireworks": {
         "name": "Fireworks AI",
@@ -93,6 +145,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "accounts/fireworks/models/llama-v3p1-8b-instruct",
         "supports_tools": True,
         "env_key": "FIREWORKS_API_KEY",
+        "notes": "Free/no-card accounts throttled to ~10 RPM; adding a payment method lifts it to thousands",
+        # Fireworks hard-caps accounts without a payment method at ~10 RPM.
+        # Its paid limits are adaptive TPM rather than RPM, so only the free
+        # request cap is seeded here.
+        "default_rpm": 10,
     },
     "deepseek": {
         "name": "DeepSeek",
@@ -104,6 +161,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "deepseek-chat",
         "supports_tools": True,
         "env_key": "DEEPSEEK_API_KEY",
+        "notes": "No published RPM/TPM cap — DeepSeek throttles by concurrency and slows under load instead of 429ing",
+        # Deliberately no default_rpm/default_tpm: DeepSeek documents that it
+        # "does NOT constrain user's rate limit" and instead queues requests
+        # under load. A made-up ceiling would throttle a key that the provider
+        # is happy to serve.
     },
     "mistral": {
         "name": "Mistral / Devstral",
@@ -115,6 +177,12 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "devstral-latest",
         "supports_tools": True,
         "env_key": "MISTRAL_API_KEY",
+        "notes": "Free 'Experiment' tier ~1 req/sec (60 RPM) / 500K TPM, ~1B tokens/month",
+        # Mistral's free Experiment plan is throttled to roughly 1 request per
+        # second with a 500K TPM ceiling. Exact numbers are now per-workspace
+        # in the console, so treat this as the documented baseline.
+        "default_rpm": 60,
+        "default_tpm": 500000,
     },
     "codestral": {
         "name": "Codestral / Devstral",
@@ -126,6 +194,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "devstral-latest",
         "supports_tools": True,
         "env_key": "CODESTRAL_API_KEY",
+        "notes": "Free Codestral endpoint: 30 RPM / 2000 requests per day",
+        # The codestral.mistral.ai endpoint has its own quota, distinct from
+        # api.mistral.ai: 30 RPM and 2000 RPD. No TPM is published.
+        "default_rpm": 30,
     },
     "gemini": {
         "name": "Google Gemini (OpenAI-compatible)",
@@ -137,7 +209,14 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "gemini-2.0-flash",
         "supports_tools": True,
         "env_key": "GEMINI_API_KEY",
-        "notes": "Free tier available — use Google AI Studio key",
+        "notes": "Free tier 10 RPM / 250K TPM on Flash models (Pro is far tighter) — use a Google AI Studio key",
+        # Google's free tier is RPM-bound, not token-bound: Flash sits at
+        # 10-15 RPM with a roomy 250K TPM, Flash-Lite at 15-30 RPM, and Pro at
+        # ~5 RPM. 10 RPM covers the default gemini-2.0-flash and stays safe if
+        # a key is pointed at a Pro-class model. The real cap for heavy use is
+        # the daily RPD quota, which is outside this per-minute budget.
+        "default_rpm": 10,
+        "default_tpm": 250000,
     },
     "cerebras": {
         "name": "Cerebras",
@@ -149,8 +228,13 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "llama3.1-8b",
         "supports_tools": True,
         "env_key": "CEREBRAS_API_KEY",
-        "notes": "Very fast free tier",
-        "default_rpm": 30,
+        "notes": "Free trial tier 5 RPM / 30K TPM (1M tokens/day) — very fast, but credit-bounded",
+        # Cerebras tightened its free tier: the current docs list 5 RPM and
+        # 30K TPM per model (1M TPD), down from the 30 RPM / 60K TPM that this
+        # preset used to assume. It is now a $5/30-day credit trial rather
+        # than a standing free tier; the Developer tier is 1K RPM / 1M TPM.
+        "default_rpm": 5,
+        "default_tpm": 30000,
     },
     "sambanova": {
         "name": "SambaNova",
@@ -162,6 +246,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "Meta-Llama-3.1-8B-Instruct",
         "supports_tools": True,
         "env_key": "SAMBANOVA_API_KEY",
+        "notes": "Free tier 20 RPM / 200K tokens per day per model (10 RPM on 405B-class models)",
+        # SambaNova's free tier (no payment method linked) is 20 RPM with a
+        # 200K tokens/day per-model cap; the largest models drop to ~10 RPM.
+        # The daily token cap is not a per-minute budget, so only RPM is set.
+        "default_rpm": 20,
     },
     "huggingface": {
         "name": "HuggingFace Router (OpenAI-compatible)",
@@ -174,6 +263,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_tools": False,
         "env_key": "HF_TOKEN",
         "alias": ["hf"],
+        "notes": "Routed to third-party providers; free accounts get a small monthly credit (<$0.10) rather than an RPM quota",
+        # No default_rpm/default_tpm: HuggingFace bills Inference Providers by
+        # credit, and its per-tier rate limits are undocumented. The binding
+        # constraint is the monthly credit balance, not requests per minute.
     },
     "hf": {
         "name": "HuggingFace (alias)",
@@ -185,6 +278,7 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
         "supports_tools": False,
         "env_key": "HF_TOKEN",
+        "notes": "Alias of 'huggingface' — credit-metered, no documented RPM quota",
     },
     "github": {
         "name": "GitHub Models",
@@ -196,7 +290,12 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "gpt-4o-mini",
         "supports_tools": True,
         "env_key": "GITHUB_TOKEN",
-        "notes": "Free GitHub Models with PAT",
+        "notes": "RETIRED — GitHub Models shut down 2026-07-30 (inference API no longer served); use Azure AI Foundry instead",
+        # Kept as a preset so existing configs still resolve rather than
+        # erroring, but the endpoint is gone as of 2026-07-30. The old free
+        # tier was 10-15 RPM / 50-150 RPD depending on model class; no budget
+        # is seeded because no request will succeed.
+        "retired": True,
     },
     "azure": {
         "name": "Azure OpenAI",
@@ -220,8 +319,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_model": "llama3.1:8b",
         "supports_tools": True,
         "env_key": None,
-        "notes": "No API key needed — local",
+        "notes": "No API key needed — local, no rate limit (bounded by your hardware)",
         "no_auth": True,
+        # Local runtimes are intentionally unmetered: the only ceiling is the
+        # machine itself, and a synthetic RPM cap would just idle the GPU.
     },
     "nollama": {
         "name": "NoLlama (Intel NPU / Arc iGPU via OpenVINO)",
@@ -283,7 +384,12 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "env_key": "ANTHROPIC_API_KEY",
         "native_anthropic": True,
-        "notes": "Prefer an OpenAI-compatible proxy, or use native messages API",
+        "notes": "No free tier — entry (Tier 1) is 50 RPM / 30K input TPM. Prefer an OpenAI-compatible proxy, or use native messages API",
+        # Anthropic has no standing free tier; Tier 1 (after $5 paid) is
+        # 50 RPM with 30K input TPM on Sonnet-class models. Seeding Tier 1
+        # keeps a fresh key from burning through 429s on its first burst.
+        "default_rpm": 50,
+        "default_tpm": 30000,
     },
 }
 
@@ -300,9 +406,25 @@ def list_providers() -> list[dict[str, Any]]:
                 "notes": p.get("notes", ""),
                 "env_key": p.get("env_key"),
                 "no_auth": p.get("no_auth", False),
+                # Surfaced so the dashboard/CLI can show the budget a key will
+                # get before it is added. None means "unmetered by default".
+                "default_rpm": p.get("default_rpm"),
+                "default_tpm": p.get("default_tpm"),
+                "retired": p.get("retired", False),
             }
         )
     return out
+
+
+def requests_header_window(provider_id: str) -> str:
+    """
+    What ``x-ratelimit-limit-requests`` means for this provider: ``"minute"``
+    (OpenAI's convention, and the default) or ``"day"``.
+
+    Groq reuses the same header name for a *daily* quota, so callers must not
+    treat its value as an RPM budget.
+    """
+    return get_provider(provider_id).get("requests_header_window") or "minute"
 
 
 def get_provider(provider_id: str) -> dict[str, Any]:
