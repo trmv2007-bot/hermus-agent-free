@@ -31,6 +31,23 @@ from typing import Any, Optional
 
 from .workspace import workspace
 
+
+def _record_runtime_issue(component: str, operation: str, error: Any, *, run_id: str = "",
+                          fallback: str = "") -> None:
+    """Record a structured non-fatal runtime problem for an agent operation.
+
+    Replaces silent ``except Exception: pass`` so a real operational failure is
+    observable/diagnosable instead of being hidden behind a generic 'ok'. Never
+    raises (diagnostics must not break the operation they diagnose).
+    """
+    try:
+        from .run_events import record_issue  # local import avoids cycles
+
+        record_issue(component, operation, error, run_id=run_id or None,
+                     retryable=False, fallback=fallback)
+    except Exception:
+        pass
+
 ROLES = (
     "researcher", "coder", "system-monitor", "scheduler", "memory-manager",
     "watchdog", "computer-operator", "coordinator", "generic",
@@ -204,10 +221,18 @@ class AgentManager:
         if not _agent_dir(name).exists():
             return {"success": False, "error": f"agent '{name}' not found (create it first)"}
         try:
-            register_agent_handlers(self._queue())
-        except Exception:
-            pass
-        return {"success": True, "name": name, "status": "ready", "queue": "canonical"}
+            kinds = register_agent_handlers(self._queue())
+        except Exception as exc:
+            # A registration failure means this agent CANNOT actually execute on the
+            # canonical queue, yet it was previously silently reported 'ready'.
+            # Surface an explicit diagnostic state instead of hiding the failure.
+            _record_runtime_issue("agent_manager", "register_handlers", exc,
+                                  fallback="agent reported degraded; handlers not registered")
+            return {"success": False, "name": name, "status": "degraded",
+                    "error": f"handler registration failed: {exc}",
+                    "queue": "canonical", "registered": []}
+        return {"success": True, "name": name, "status": "ready", "queue": "canonical",
+                "registered": kinds}
 
     def stop(self, name: str) -> dict[str, Any]:
         """Mark an agent stopped (registry lifecycle). No signal is sent."""
