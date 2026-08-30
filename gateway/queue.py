@@ -463,9 +463,17 @@ class JobQueue:
             if not job:
                 recovered = self._lookup_logged_job(job_id)
                 if recovered is not None:
+                    recovered["found"] = True
                     return recovered
-                return {"error": f"unknown job '{job_id}'", "job_id": job_id}
+                # NOTE: ``found`` is explicit on purpose. Every Job.brief()
+                # carries an ``error`` field (empty string on success), so a
+                # caller cannot use `"error" in payload` to detect an unknown
+                # job — that mistake made /jobs/{id} answer 404 for jobs that
+                # had already succeeded, breaking the dashboard's poll loop.
+                return {"error": f"unknown job '{job_id}'", "job_id": job_id,
+                        "found": False}
             out = job.brief()
+            out["found"] = True
             out["result"] = _trim(job.result or {}, limit=6000) if job.status == STATUS_DONE else None
             out["result_path"] = str(self.results_dir / f"{job.id}.json") if job.status == STATUS_DONE else None
             out["events"] = self.bus.history(job.run_id, limit=20)
@@ -475,6 +483,7 @@ class JobQueue:
         for j in self.jobs.values():
             by_status[j.status] = by_status.get(j.status, 0) + 1
         return {
+            "found": True,
             "enabled": self.enabled,
             "started": self._started,
             "backend": self.backend,

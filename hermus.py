@@ -552,13 +552,20 @@ def main():
     m_start = mission_sub.add_parser('start', help='Start a new goal-driven mission')
     m_start.add_argument('goal', help='Mission goal')
     m_start.add_argument('--domain', default='auto', help='Domain verifier (python, android, web, git, linux, research, file, auto)')
-    m_start.add_argument('--budget', type=int, default=20, help='Dynamic step budget')
+    m_start.add_argument('--budget', type=int, default=48,
+                         help='Step budget for the whole lifecycle (planning/execution/verification/repair)')
     m_start.add_argument('--req', action='append', default=None, help='Specific requirement (can be repeated)')
     m_resume = mission_sub.add_parser('resume', help='Resume a mission by ID')
     m_resume.add_argument('mission_id')
+    m_resume.add_argument('--restart-failed', action='store_true',
+                          help='Restart a FAILED mission (failed is terminal by default)')
+    m_resume.add_argument('--extra-steps', type=int, default=None,
+                          help='Grant this many extra steps before resuming')
     m_extend = mission_sub.add_parser('extend', help='Grant extra step budget to a mission')
     m_extend.add_argument('mission_id')
     m_extend.add_argument('--steps', type=int, default=10, help='Extra steps to grant (default 10)')
+    m_extend.add_argument('--emergency', action='store_true',
+                          help='Use the emergency reserve (when normal extension slots are used up)')
     m_status = mission_sub.add_parser('status', help='Check status of a mission')
     m_status.add_argument('mission_id')
     mission_sub.add_parser('list', help='List all missions')
@@ -670,14 +677,25 @@ def main():
             )
             print(json_lib.dumps(report.to_dict(), indent=2))
         elif args.mission_action == 'resume':
-            report = mission_engine.resume_mission(args.mission_id)
-            print(json_lib.dumps(report.to_dict(), indent=2))
+            try:
+                report = mission_engine.resume_mission(
+                    args.mission_id,
+                    restart_failed=bool(getattr(args, 'restart_failed', False)),
+                    extra_steps=getattr(args, 'extra_steps', None),
+                )
+                print(json_lib.dumps(report.to_dict(), indent=2))
+            except ValueError as e:
+                print(f"Error: {e}")
         elif args.mission_action == 'extend':
             try:
-                report = mission_engine.extend_budget(args.mission_id, steps=args.steps)
+                report = mission_engine.extend_budget(
+                    args.mission_id, steps=args.steps,
+                    emergency=bool(getattr(args, 'emergency', False)),
+                )
                 print(f"Budget extended: +{args.steps} steps "
                       f"(extensions {report.budget.extensions_used}/{report.budget.max_extensions}, "
-                      f"step limit now {report.budget.initial_steps + report.budget.extensions_used * 10})")
+                      f"emergency {report.budget.emergency_extensions}/{report.budget.max_emergency_extensions}, "
+                      f"step limit now {report.budget.total_steps()})")
                 print(json_lib.dumps(report.budget.to_dict(), indent=2))
             except ValueError as e:
                 print(f"Error: {e}")

@@ -33,8 +33,18 @@ class Config(BaseModel):
     # Auto-promote goal-like messages ("build … and keep going until it works")
     # to full missions even when the caller did not set autonomous=true.
     mission_auto_classify: bool = os.getenv("HERMUS_MISSION_AUTO_CLASSIFY", "1") not in ("0", "false", "False")
-    # Default step budget for a mission (verifier + repair rounds draw from it).
-    mission_budget_steps: int = int(os.getenv("HERMUS_MISSION_BUDGET_STEPS", "25"))
+    # Default step budget for a mission. A mission owns the whole lifecycle
+    # (plan -> implement -> test -> inspect -> repair -> retest), so it must be
+    # larger than a single agent turn (max_tool_steps), not smaller.
+    mission_budget_steps: int = int(os.getenv("HERMUS_MISSION_BUDGET_STEPS", "48"))
+    # When the mission runtime crashes, report MISSION FAILED with diagnostics.
+    # Opt in to the old "answer with a chat turn instead" behaviour only for
+    # interactive demos — it hides failures behind plausible prose.
+    mission_fallback_to_chat: bool = os.getenv("HERMUS_MISSION_FALLBACK_TO_CHAT", "0") not in ("0", "false", "False")
+    # Pre-flight model capability negotiation (tools/vision/context/...).
+    model_capability_check: bool = os.getenv("HERMUS_MODEL_CAPABILITY_CHECK", "1") not in ("0", "false", "False")
+    # Auto-select a compatible model when the selected one cannot do the job.
+    auto_select_model: bool = os.getenv("HERMUS_AUTO_SELECT_MODEL", "0") not in ("0", "false", "False")
 
 
     # DeepThink — plan-first thinking (Phase 0)
@@ -117,6 +127,13 @@ class Config(BaseModel):
     skill_forge_use_llm: bool = os.getenv("HERMUS_SKILL_FORGE_LLM", "1") not in ("0", "false", "False")
     skill_forge_dedupe_similarity: float = float(os.getenv("HERMUS_SKILL_FORGE_DEDUPE", "0.72"))
     skill_forge_max_skills: int = int(os.getenv("HERMUS_SKILL_FORGE_MAX", "200"))
+    # Self-improvement safety: a procedure is only distilled into a skill after
+    # it has been observed to succeed this many times in *independent* runs
+    # (1 = learn from a single run, 2 = require a repeat — the default).
+    skill_forge_min_repeats: int = int(os.getenv("HERMUS_SKILL_FORGE_MIN_REPEATS", "2"))
+    # Require verified success (verifier verdict or clean independent evidence)
+    # before harvesting — never learn a procedure from a failed/bogus run.
+    skill_forge_require_verified: bool = os.getenv("HERMUS_SKILL_FORGE_REQUIRE_VERIFIED", "1") not in ("0", "false", "False")
 
     # ---- Gateway async queue + streaming ----------------------------------
     gateway_queue_enabled: bool = os.getenv("HERMUS_QUEUE_ENABLED", "1") not in ("0", "false", "False")
