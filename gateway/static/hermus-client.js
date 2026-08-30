@@ -1,292 +1,232 @@
-/*!
- * hermus-client.js — the single frontend runtime/API client for every Hermus
- * dashboard (main control room, JARVIS spatial HUD, computer deck, remote).
- *
- * Why this exists
- * ---------------
- * The repo grew four semi-independent frontends, each with its own copy of
- * "how to talk to the backend" (dashboard.html, jarvis_dashboard.html,
- * dashboard_computer.html, remote.html, living-deck.js). That is how the main
- * dashboard became queue-first while /jarvis quietly stayed a dead UI that
- * never issued a single request.
- *
- * Everything surfaces share now:
- *
- *   HermusClient.sendCommand({ text, files, ... })   queue-first execution
- *   HermusClient.openStream(runId, handlers)         SSE events
- *   HermusClient.missions.{list,get,resume,extend}   mission lifecycle
- *   HermusClient.capabilities()                      model capability report
- *   HermusClient.steer(runId, text)                  mid-run steering
- *
- * Queue-first contract
- * --------------------
- * A turn is always submitted with `async: true` so it runs as a durable
- * gateway job: closing the tab does not cancel the work, and every surface
- * (including attachments, which are uploaded as multipart/form-data) goes
- * through the same `runtime.turn` job kind and therefore the same universal
- * mission runtime. If the queue is unavailable the client falls back to the
- * inline HTTP response and labels it (`transport: 'inline'`).
- *
- * Mission failures are surfaced, not hidden: `sendCommand` resolves with
- * `{ ok: false, failure: { stage, reason, recoverable, resumable,
- * resume_command, resume_api } }` when the runtime reports MISSION FAILED.
- */
+/* Hermus' single browser transport: queue-first commands, SSE and control. */
 (function (global) {
   'use strict';
+  const DEFAULT_TIMEOUT = 1800;
+  const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 
-  var DEFAULT_TIMEOUT = 1800;
-  var POLL_MS = 2500;
-
-  function _rand(n) { return Math.random().toString(16).slice(2, 2 + (n || 8)); }
-
-  async function jget(path) {
-    const r = await fetch(path);
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    return r.json();
+  class HermusHttpError extends Error {
+    constructor(message, status, body) { super(message); this.name = 'HermusHttpError'; this.status = status; this.body = body; }
   }
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const randomId = () => 'run_' + Math.random().toString(16).slice(2, 10) + Date.now().toString(16);
 
-  async function jpost(path, body) {
-    const r = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`${r.status}: ${text.slice(0, 300)}`);
-    try { return JSON.parse(text); } catch (e) { return {}; }
+  async function request(path, options) {
+    options = Object.assign({}, options || {});
+    const timeoutMs = options.timeoutMs || 20000;
+    delete options.timeoutMs;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const external = options.signal;
+    let timer;
+    if (controller) {
+      options.signal = controller.signal;
+      if (external) external.addEventListener('abort', () => controller.abort(), { once: true });
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+    }
+    let response;
+    try { response = await fetch(path, options); }
+    catch (error) {
+      if (timer) clearTimeout(timer);
+      if (error && error.name === 'AbortError') throw new HermusHttpError(`Request timed out: ${path}`, 0, null);
+      throw new HermusHttpError(`Gateway unavailable: ${error.message || error}`, 0, null);
+    }
+    if (timer) clearTimeout(timer);
+    const raw = await response.text();
+    let body = null;
+    if (raw) {
+      try { body = JSON.parse(raw); }
+      catch (_) { if (response.ok) throw new HermusHttpError(`Malformed JSON from ${path}`, response.status, raw.slice(0, 500)); }
+    }
+    if (!response.ok) {
+      const detail = body && (body.error || body.detail);
+      throw new HermusHttpError(detail || `HTTP ${response.status} ${response.statusText}`, response.status, body || raw.slice(0, 500));
+    }
+    return body || {};
   }
+  const jget = (path, options) => request(path, options);
+  const jpost = (path, body, options) => request(path, Object.assign({}, options || {}, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
+  }));
 
-  /**
-   * Subscribe to a run's SSE stream.
-   *
-   * handlers: { onOpen, onDelta(text), onEvent(type, data), onFinal(text),
-   *             onJobFinished(data), onError(err) }
-   * Returns a handle with close().
-   */
+  const EVENT_TYPES = [
+    'llm_delta', 'agent_response', 'job_started', 'job_finished', 'run_finished', 'run_error',
+    'session_finished', 'stream_timeout', 'stream_end', 'turn_started', 'model_activity',
+    'tool_call', 'tool_result', 'command_execution', 'mission_runtime_started', 'mission_started',
+    'mission_state', 'mission_verification', 'mission_repair', 'mission_error', 'mission_finished',
+    'node_started', 'node_finished', 'verification', 'steer', 'steer_applied', 'cancel_requested',
+    'skill_created', 'model_capability_warning', 'swe_started', 'swe_coder_started', 'swe_repair_started',
+    'research_started', 'delegation_started', 'speech_ready', 'log'
+  ];
+
   function openStream(runId, handlers) {
     handlers = handlers || {};
-    let es = null;
-    try {
-      es = new EventSource(`/stream/run/${encodeURIComponent(runId)}`);
-    } catch (err) {
-      if (handlers.onError) handlers.onError(err);
-      return { close() {}, source: null };
+    if (!runId || typeof global.EventSource !== 'function') {
+      const error = new Error(!runId ? 'run_id is required' : 'EventSource is unavailable');
+      if (handlers.onError) handlers.onError(error);
+      return { source: null, close() {} };
     }
-    if (handlers.onOpen) handlers.onOpen(es);
-
-    const parse = (ev) => { try { return JSON.parse(ev.data); } catch (e) { return {}; } };
-    const seen = new Set();
-    const bind = (type, fn) => {
-      if (seen.has(type)) return;
-      seen.add(type);
-      es.addEventListener(type, (ev) => {
-        const data = parse(ev);
+    let closed = false;
+    let opened = false;
+    let source;
+    try { source = new global.EventSource(`/stream/run/${encodeURIComponent(runId)}`); }
+    catch (error) { if (handlers.onError) handlers.onError(error); return { source: null, close() {} }; }
+    source.onopen = () => {
+      const reconnected = opened; opened = true;
+      if (reconnected && handlers.onReconnect) handlers.onReconnect();
+      if (handlers.onOpen) handlers.onOpen(source);
+    };
+    const parse = (event, type) => {
+      try { return event.data ? JSON.parse(event.data) : {}; }
+      catch (error) {
+        if (handlers.onMalformed) handlers.onMalformed({ type, raw: event.data, error });
+        return null;
+      }
+    };
+    EVENT_TYPES.forEach((type) => source.addEventListener(type, (event) => {
+      const data = parse(event, type);
+      if (data === null) return;
+      try {
         if (handlers.onEvent) handlers.onEvent(type, data);
-        try { fn(data, ev); } catch (e) { /* a UI handler must never kill the stream */ }
-      });
+        if (type === 'llm_delta' && data.text && handlers.onDelta) handlers.onDelta(String(data.text));
+        if (type === 'agent_response' && data.text && handlers.onFinal) handlers.onFinal(String(data.text));
+        if (TERMINAL.has(String(data.status)) || ['job_finished', 'run_finished', 'run_error', 'session_finished', 'stream_timeout'].includes(type)) {
+          if (handlers.onJobFinished) handlers.onJobFinished(data, type);
+        }
+      } catch (error) { if (handlers.onHandlerError) handlers.onHandlerError(error, type, data); }
+    }));
+    source.onerror = (event) => {
+      if (closed) return;
+      if (handlers.onDisconnect) handlers.onDisconnect(event);
+      if (handlers.onError) handlers.onError(new Error('Stream disconnected — waiting for job result'));
+      // Native EventSource reconnects using the server retry directive.
     };
+    return { source, close() { closed = true; try { source.close(); } catch (_) {} } };
+  }
 
-    bind('llm_delta', (d) => { if (handlers.onDelta && d.text) handlers.onDelta(String(d.text)); });
-    bind('agent_response', (d) => { if (handlers.onFinal && d.text) handlers.onFinal(String(d.text)); });
-    const onDone = (type) => bind(type, (d) => {
-      if (handlers.onJobFinished) handlers.onJobFinished(d, type);
+  function normalise(result, meta) {
+    result = result || {};
+    const response = result.response || result.final_answer || result.final_proof || meta.streamedText || '';
+    const unavailable = /Fallback mock for:|Ollama not running and fallback key failed:|Ollama error:/i.test(response);
+    const failure = result.failure || (result.run_kind === 'mission_failed' ? {
+      stage: 'mission', reason: result.mission_error || 'mission failed'
+    } : null);
+    return Object.assign({}, meta, {
+      ok: !failure && !result.error && !unavailable, response: unavailable ? '' : response, run_kind: result.run_kind,
+      mission_id: result.mission_id, state: result.state, failure,
+      error: result.error || (unavailable ? 'Model not configured or provider offline. The backend returned its non-executing fallback; no result was produced.' : null), attachments: result.attachments || [], raw: result
     });
-    ['job_finished', 'run_finished', 'run_error', 'session_finished', 'stream_timeout'].forEach(onDone);
-    // generic mirror of everything else (tool calls, mission state, …)
-    ['tool_call', 'tool_result', 'mission_runtime_started', 'mission_started', 'mission_state',
-     'mission_verification', 'mission_repair', 'mission_error', 'mission_finished',
-     'node_started', 'node_finished', 'steer_applied', 'turn_started',
-     'model_capability_warning', 'skill_created', 'verification'].forEach((t) => bind(t, () => {}));
-
-    es.onerror = () => { /* EventSource auto-reconnects; the POST/job resolves the turn */ };
-    return {
-      source: es,
-      close() { try { es.close(); } catch (e) {} },
-    };
   }
 
-  function _buildBody(opts) {
-    const files = opts.files || [];
-    const runId = opts.runId || ('run_' + _rand(6) + Date.now().toString(16));
-    const fields = {
-      platform: opts.platform || 'dashboard',
-      user_id: opts.userId || 'user-01',
-      text: opts.text,
-      mode: opts.mode || 'agent',
-      run_id: runId,
-      stream: opts.stream === false ? 'false' : 'true',
-      // queue-first: the turn runs as a durable gateway job
-      async: 'true',
-      timeout: String(opts.timeout || DEFAULT_TIMEOUT),
-    };
-    if (opts.model) fields.model = opts.model;
-    if (opts.provider) fields.provider = opts.provider;
-    if (opts.keyName) fields.key_name = opts.keyName;
-    if (opts.prefer) fields.prefer = opts.prefer;
-    if (opts.autonomous) fields.autonomous = 'true';
-    return { runId, files, fields };
-  }
-
-  /**
-   * Submit a turn. Queue-first; resolves with a normalised result.
-   *
-   * { ok, response, run_kind, mission_id, state, jobId, runId, transport,
-   *   failure, error, raw }
-   */
   async function sendCommand(opts) {
     opts = opts || {};
-    const { runId, files, fields } = _buildBody(opts);
-    let stream = null;
-    let streamedText = '';
-    let gotFinal = false;
-
-    // 1. subscribe before submitting so no event is missed
-    stream = openStream(runId, {
-      onOpen: (es) => { if (opts.onStreamOpen) opts.onStreamOpen(es); },
-      onDelta: (piece) => {
-        streamedText += piece;
-        if (opts.onDelta) opts.onDelta(piece, streamedText);
-      },
-      onEvent: (type, data) => { if (opts.onEvent) opts.onEvent(type, data); },
-      onFinal: (text) => {
-        gotFinal = true;
-        if (text) streamedText = text;
-        if (opts.onFinal) opts.onFinal(text);
-      },
-      onJobFinished: (data, type) => { if (opts.onJobFinished) opts.onJobFinished(data, type); },
+    const files = Array.from(opts.files || []);
+    const runId = opts.runId || randomId();
+    const timeout = Number(opts.timeout || DEFAULT_TIMEOUT);
+    const fields = {
+      platform: opts.platform || 'dashboard', user_id: opts.userId || 'user-01', text: opts.text,
+      mode: opts.mode || 'agent', run_id: runId, stream: opts.stream === false ? 'false' : 'true',
+      async: 'true', timeout: String(timeout)
+    };
+    ['model', 'provider', 'keyName', 'prefer'].forEach((key) => {
+      const wire = key === 'keyName' ? 'key_name' : key;
+      if (opts[key]) fields[wire] = opts[key];
     });
-
-    // 2. submit (multipart when attachments are present so bytes reach the agent)
+    if (opts.autonomous) fields.autonomous = 'true';
+    let streamedText = '';
+    const stream = openStream(runId, {
+      onOpen: opts.onStreamOpen,
+      onReconnect: opts.onStreamReconnect,
+      onDisconnect: opts.onStreamDisconnect,
+      onMalformed: opts.onMalformedEvent,
+      onError: opts.onStreamError,
+      onDelta(piece) { streamedText += piece; if (opts.onDelta) opts.onDelta(piece, streamedText); },
+      onFinal(text) { if (text) streamedText = text; if (opts.onFinal) opts.onFinal(text); },
+      onEvent: opts.onEvent, onJobFinished: opts.onJobFinished
+    });
     let payload;
     try {
-      let fetchOpts;
+      let requestOptions;
       if (files.length) {
-        const fd = new FormData();
-        Object.keys(fields).forEach((k) => fd.append(k, fields[k]));
-        files.forEach((s) => { if (s && s.file) fd.append('files', s.file, s.name); });
-        fetchOpts = { method: 'POST', body: fd };
+        const form = new FormData();
+        Object.keys(fields).forEach((key) => form.append(key, fields[key]));
+        files.forEach((entry) => {
+          const file = entry && entry.file ? entry.file : entry;
+          if (file) form.append('files', file, entry.name || file.name || 'attachment');
+        });
+        requestOptions = { method: 'POST', body: form, timeoutMs: 30000, signal: opts.signal };
       } else {
-        fetchOpts = {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        requestOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(Object.assign({}, fields, { async: true, stream: fields.stream !== 'false' })),
-        };
+          timeoutMs: 30000, signal: opts.signal };
       }
-      const res = await fetch('/command', fetchOpts);
-      payload = await res.json().catch(() => ({ error: `Bad response (HTTP ${res.status})` }));
-    } catch (err) {
-      if (stream) stream.close();
-      return { ok: false, error: err.message || String(err), runId, transport: 'none' };
+      payload = await request('/command', requestOptions);
+    } catch (error) {
+      stream.close();
+      return { ok: false, error: error.message, status: error.status || 0, runId, transport: 'none' };
     }
-
-    if (payload && payload.error) {
-      if (stream) setTimeout(() => stream.close(), 1500);
-      return { ok: false, error: payload.error, runId, transport: 'inline', raw: payload };
-    }
-
-    // 3a. queued: the job owns the turn; poll until it settles
-    if (payload && payload.async && payload.job_id) {
+    if (payload.async && payload.job_id) {
       const jobId = payload.job_id;
-      if (opts.onJobId) opts.onJobId(jobId);
-      const deadline = Date.now() + (opts.timeout || DEFAULT_TIMEOUT) * 1000;
+      if (opts.onJobId) opts.onJobId(jobId, runId);
+      const deadline = Date.now() + timeout * 1000;
+      let interval = 1000;
       let missing = 0;
       while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, POLL_MS));
-        let st = null;
-        try {
-          st = await jget(`/jobs/${jobId}`);
-          missing = 0;
-        } catch (e) {
-          // A job the gateway does not know about will never appear: give up
-          // instead of spinning until the timeout (the SSE path already had
-          // its chance to deliver the answer).
-          missing += 1;
-          if (missing >= 5) {
-            if (stream) stream.close();
-            return {
-              ok: false, error: `job ${jobId} is unknown to the gateway`,
-              jobId, runId, transport: 'queue',
-            };
-          }
+        if (opts.signal && opts.signal.aborted) { stream.close(); return { ok: false, error: 'Observation cancelled', jobId, runId, transport: 'queue' }; }
+        await sleep(interval);
+        interval = Math.min(5000, Math.round(interval * 1.25));
+        let status;
+        try { status = await jget(`/jobs/${encodeURIComponent(jobId)}`, { timeoutMs: 15000, signal: opts.signal }); missing = 0; }
+        catch (error) {
+          if (error.status === 404) missing += 1;
+          if (missing >= 3) { stream.close(); return { ok: false, error: `Job ${jobId} is no longer known (gateway may have restarted)`, jobId, runId, transport: 'queue' }; }
+          if (opts.onPollError) opts.onPollError(error);
           continue;
         }
-        if (opts.onJobStatus) opts.onJobStatus(st);
-        if (st && st.status === 'succeeded') {
-          let result = null;
-          try { result = (await jget(`/jobs/${jobId}/result`)).result || {}; } catch (e) { result = {}; }
-          if (stream) setTimeout(() => stream.close(), 1200);
-          return _normalise(result, { jobId, runId, transport: 'queue', streamedText, gotFinal });
+        if (opts.onJobStatus) opts.onJobStatus(status);
+        if (status.status === 'succeeded') {
+          try {
+            const wrapped = await jget(`/jobs/${encodeURIComponent(jobId)}/result`, { timeoutMs: 15000 });
+            setTimeout(() => stream.close(), 750);
+            return normalise(wrapped.result || {}, { jobId, runId, transport: 'queue', streamedText });
+          } catch (error) { stream.close(); return { ok: false, error: error.message, jobId, runId, transport: 'queue' }; }
         }
-        if (st && (st.status === 'failed' || st.status === 'cancelled')) {
-          if (stream) setTimeout(() => stream.close(), 1200);
-          return { ok: false, error: st.error || `job ${st.status}`, jobId, runId, transport: 'queue' };
+        if (['failed', 'cancelled', 'interrupted'].includes(status.status)) {
+          stream.close(); return { ok: false, error: status.error || `Job ${status.status}`, state: status.status, jobId, runId, transport: 'queue' };
         }
       }
-      if (stream) stream.close();
-      return { ok: false, error: 'timed out waiting for job', jobId, runId, transport: 'queue' };
+      stream.close();
+      return { ok: false, error: `Timed out after ${timeout}s waiting for job`, jobId, runId, transport: 'queue' };
     }
-
-    // 3b. inline (queue disabled): the HTTP response is authoritative
-    if (stream) setTimeout(() => stream.close(), 1500);
-    return _normalise(payload || {}, { runId, transport: 'inline', streamedText, gotFinal });
+    setTimeout(() => stream.close(), 750);
+    return normalise(payload, { runId, transport: 'inline', streamedText });
   }
 
-  function _normalise(result, meta) {
-    const response = result.response || result.final_answer || result.final_proof || meta.streamedText || '';
-    const failure = result.failure || (result.run_kind === 'mission_failed' ? {
-      stage: 'mission', reason: result.mission_error || 'mission failed',
-    } : null);
-    const out = Object.assign({}, meta, {
-      ok: !failure && !result.error,
-      response,
-      run_kind: result.run_kind,
-      mission_id: result.mission_id,
-      state: result.state,
-      failure,
-      error: result.error || null,
-      raw: result,
-    });
-    return out;
-  }
-
-  /** Format a mission failure for a chat bubble (never hide it). */
   function formatFailure(result) {
-    const f = (result && result.failure) || {};
-    const lines = [
-      '⚠️ MISSION FAILED — the run stopped before completing the goal.',
-      f.stage ? `stage: ${f.stage}` : null,
-      f.reason ? `reason: ${f.reason}` : (result && result.error) || null,
-      f.recoverable === false ? 'recoverable: no' : null,
-      f.resume_command ? `resume: ${f.resume_command}` : null,
-    ].filter(Boolean);
-    return lines.join('\n');
+    const failure = (result && result.failure) || {};
+    return ['MISSION FAILED — the runtime did not complete the goal.',
+      failure.stage && `Stage: ${failure.stage}`,
+      failure.reason && `Reason: ${failure.reason}`,
+      failure.recoverable === false && 'Recoverable: no',
+      failure.resume_command && `Resume: ${failure.resume_command}`,
+      !failure.reason && result && result.error].filter(Boolean).join('\n');
   }
 
-  const HermusClient = {
-    version: '2.3-queue-first',
-    DEFAULT_TIMEOUT,
-    jget,
-    jpost,
-    openStream,
-    sendCommand,
-    formatFailure,
+  global.HermusClient = {
+    version: '3.0-control-plane', DEFAULT_TIMEOUT, HermusHttpError, request, jget, jpost,
+    openStream, sendCommand, formatFailure,
     steer: (runId, text) => jpost('/run/steer', { run_id: runId, text }),
-    cancel: (runId) => jpost(`/run/cancel/${encodeURIComponent(runId)}`, {}).catch(() => ({})),
+    cancelRun: (runId) => jpost(`/run/cancel/${encodeURIComponent(runId)}`, {}),
+    cancelJob: (jobId) => jpost(`/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
+    cancel: (runId) => jpost(`/run/cancel/${encodeURIComponent(runId)}`, {}),
     capabilities: (model) => jget('/models/capabilities' + (model ? `?model=${encodeURIComponent(model)}` : '')),
+    status: () => jget('/api/jarvis/status'),
+    navigate: (url) => jpost('/navigator/fetch', { url }, { timeoutMs: 45000 }),
     missions: {
-      list: () => jget('/missions'),
-      get: (id) => jget(`/missions/${encodeURIComponent(id)}`),
-      resume: (id, restartFailed) =>
-        jpost(`/missions/${encodeURIComponent(id)}/resume?restart_failed=${restartFailed ? 'true' : 'false'}`, {}),
-      extend: (id, steps, emergency) =>
-        jpost(`/missions/${encodeURIComponent(id)}/extend?steps=${steps || 10}&emergency=${emergency ? 'true' : 'false'}`, {}),
+      list: () => jget('/missions'), get: (id) => jget(`/missions/${encodeURIComponent(id)}`),
+      resume: (id, restart) => jpost(`/missions/${encodeURIComponent(id)}/resume?restart_failed=${restart ? 'true' : 'false'}`, {}),
+      extend: (id, steps, emergency) => jpost(`/missions/${encodeURIComponent(id)}/extend?steps=${Number(steps) || 10}&emergency=${emergency ? 'true' : 'false'}`, {})
     },
-    jobs: {
-      status: (id) => jget(`/jobs/${id}`),
-      result: (id) => jget(`/jobs/${id}/result`),
-    },
+    jobs: { list: () => jget('/jobs'), status: (id) => jget(`/jobs/${encodeURIComponent(id)}`), result: (id) => jget(`/jobs/${encodeURIComponent(id)}/result`) },
+    runs: { list: () => jget('/runs'), get: (id) => jget(`/runs/${encodeURIComponent(id)}`) }
   };
-
-  global.HermusClient = HermusClient;
-  if (typeof module !== 'undefined' && module.exports) module.exports = HermusClient;
+  if (typeof module !== 'undefined' && module.exports) module.exports = global.HermusClient;
 })(typeof window !== 'undefined' ? window : globalThis);

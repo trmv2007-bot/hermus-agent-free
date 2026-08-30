@@ -21,6 +21,7 @@ if [ -t 1 ]; then
   C_RED='\033[0;31m'
   C_BOLD='\033[1m'
   C_DIM='\033[2m'
+  C_MUTED='\033[2m'
   C_RESET='\033[0m'
 else
   C_CYAN=''
@@ -31,13 +32,14 @@ else
   C_RED=''
   C_BOLD=''
   C_DIM=''
+  C_MUTED=''
   C_RESET=''
 fi
 
 step_start() {
   local num="$1"
   local title="$2"
-  echo -e "\n${C_CYAN}${C_BOLD}[$num/8]${C_RESET} ${C_BOLD}$title${C_RESET}"
+  echo -e "\n${C_CYAN}${C_BOLD}[$num/9]${C_RESET} ${C_BOLD}$title${C_RESET}"
 }
 
 sub_step() {
@@ -189,9 +191,10 @@ python -m pip install -U pip setuptools wheel --quiet 2>/dev/null || true
 # -----------------------------------------------------------------------------
 step_start "5" "Hermus AI Core & FastAPI Web Gateway Stack"
 
-sub_step "Installing FastAPI, Uvicorn, Starlette, HTTPX..."
-pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0" "starlette>=0.46.0" "httpx>=0.24.0" --quiet
-step_ok "FastAPI & Real-time WebSockets engine ready"
+sub_step "Installing FastAPI, Uvicorn, multipart uploads, telemetry, Starlette, HTTPX..."
+pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0" "starlette>=0.46.0" \
+  "httpx>=0.24.0" "python-multipart>=0.0.9" "psutil>=5.9.0" --quiet
+step_ok "FastAPI, SSE/WebSockets, JARVIS attachments and live telemetry dependencies ready"
 
 sub_step "Installing Pydantic, Python-Dotenv, Requests..."
 pip install "pydantic>=2.0.0" "python-dotenv>=1.0.0" "requests>=2.31.0" --quiet
@@ -330,10 +333,40 @@ step_ok "Generated executables: ./hermus, ./hermus-gateway, ./bin/hermus-gateway
 # -----------------------------------------------------------------------------
 # STEP 9: Verify the core actually imports (do NOT declare success if broken).
 # -----------------------------------------------------------------------------
-step_start "9" "Verifying Hermus core imports"
-sub_step "Importing gateway + agent + mission runtime..."
-if python -c "import sys; sys.path.insert(0, '.'); from gateway.gateway import app; from core import agent, mission" 2>/dev/null; then
-  step_ok "Hermus gateway, agent and mission runtime import successfully"
+step_start "9" "Verifying Hermus and the JARVIS control plane"
+sub_step "Checking gateway/runtime imports, multipart uploads, telemetry, routes and dashboard assets..."
+if python - <<'PY' 2>/dev/null
+import sys
+from pathlib import Path
+sys.path.insert(0, ".")
+import multipart  # required by JARVIS FormData attachments
+import psutil     # live process telemetry
+from gateway.gateway import app
+from gateway import routes_jarvis
+from core import agent, mission
+
+routes = list(app.routes)
+for included in app.routes:
+    original = getattr(included, "original_router", None)
+    if original is not None:
+        routes.extend(original.routes)
+paths = {route.path for route in routes if getattr(route, "path", None)}
+required_routes = {
+    "/jarvis", "/command", "/api/jarvis/status", "/navigator/fetch",
+    "/run/steer", "/run/cancel/{run_id}", "/stream/run/{run_id}",
+}
+missing_routes = required_routes - paths
+required_assets = [
+    Path("gateway/jarvis_dashboard.html"),
+    Path("gateway/static/hermus-client.js"),
+    Path("gateway/static/jarvis-control.js"),
+]
+missing_assets = [str(path) for path in required_assets if not path.is_file()]
+if missing_routes or missing_assets:
+    raise SystemExit(f"missing routes={sorted(missing_routes)} assets={missing_assets}")
+PY
+then
+  step_ok "Hermus runtime and JARVIS command, SSE, control, telemetry and attachment surfaces are installed"
 else
   echo ""
   echo -e "${C_RED}${C_BOLD}  ✗ VERIFICATION FAILED: Hermus core did not import cleanly.${C_RESET}"

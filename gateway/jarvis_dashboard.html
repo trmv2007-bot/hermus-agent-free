@@ -999,6 +999,18 @@
       grid-template-columns: 1fr;
     }
   }
+  .jarvis-panel { padding:10px;font-size:11px;color:var(--text-muted);height:100%;overflow:auto; }
+  .jarvis-loading,.jarvis-empty,.jarvis-error,.jarvis-note { padding:10px;border-radius:6px;margin:6px 0; }
+  .jarvis-loading,.jarvis-empty { border:1px solid rgba(255,255,255,.12); }
+  .jarvis-error { border:1px solid var(--red);color:#fecaca;background:rgba(127,29,29,.25); }
+  .jarvis-note { border:1px solid rgba(0,242,254,.25);color:#bae6fd;background:rgba(8,47,73,.25); }
+  .jarvis-row { display:flex;justify-content:space-between;gap:12px;padding:5px 2px;border-bottom:1px solid rgba(255,255,255,.08); }
+  .jarvis-row span { text-align:right;overflow-wrap:anywhere; }
+  .jarvis-card { padding:9px;margin:7px 0;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(3,7,18,.62);overflow-wrap:anywhere; }
+  .jarvis-card pre,.jarvis-events { white-space:pre-wrap;max-height:180px;overflow:auto;font-size:10px; }
+  .jarvis-actions { display:flex;gap:7px;flex-wrap:wrap;margin:7px 0; }
+  .jarvis-actions button,.jarvis-actions a,.jarvis-card button { background:var(--mode-bg);border:1px solid var(--mode-color);color:#fff;padding:5px 8px;border-radius:4px;text-decoration:none;cursor:pointer; }
+  button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible { outline:2px solid #fff;outline-offset:2px; }
 </style>
 </head>
 <body class="mode-normal">
@@ -1022,7 +1034,7 @@
 
   <div class="hud-center-pill" id="modePill" title="Tap to Cycle Mode: Normal (Blue) -> Aggressive (Red) -> Eco (Green)">
     <i class="live-dot" id="modeLed"></i>
-    <span id="modeLabel">NORMAL // 2.4 GHz</span>
+    <span id="modeLabel">VISUAL: NORMAL</span>
   </div>
 
   <div class="hud-right">
@@ -1035,8 +1047,8 @@
       <span id="audioStatusText">SFX</span>
     </button>
     <div class="metric-item">
-      <div class="metric-label"><span>CPU</span><span id="cpuText">14%</span></div>
-      <div class="metric-bar"><div class="metric-fill" id="cpuFill" style="width: 14%;"></div></div>
+      <div class="metric-label"><span>GATEWAY CPU</span><span id="cpuText">Loading…</span></div>
+      <div class="metric-bar"><div class="metric-fill" id="cpuFill" style="width:0%;"></div></div>
     </div>
     <div class="metric-item">
       <div class="metric-label"><span>WINS</span><span id="activeWinCount" style="color:var(--cyan);">0</span></div>
@@ -1077,17 +1089,19 @@
 
 <!-- HOME PROMPT / VOICE STRIP (EMPTY CANVAS) -->
 <div class="voice-live-strip" id="voiceLiveStrip">
-  <div class="live-transcript-box" id="liveTranscript">"Jarvis Neural OS online. Tap below to launch modules or drag the grid."</div>
+  <div class="live-transcript-box" id="liveTranscript">Checking Hermus gateway…</div>
 
   <div class="command-input-glass">
     <input type="text" id="cmdInput" placeholder="Enter directive or tap modules below..." />
-    <button class="cmd-btn" id="micBtn" title="Toggle Voice Directive">
+    <input type="file" id="jarvisFiles" multiple hidden />
+    <button class="cmd-btn" id="attachBtn" title="Attach files" aria-label="Attach files">📎</button>
+    <button class="cmd-btn" id="micBtn" title="Toggle Voice Directive" aria-label="Voice input">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
         <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
       </svg>
     </button>
-    <button class="cmd-btn" id="sendBtn" title="Execute Directive">
+    <button class="cmd-btn" id="sendBtn" title="Execute Directive" aria-label="Send command">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="m22 2-7 20-4-9-9-4Z"/>
         <path d="M22 2 11 13"/>
@@ -1103,7 +1117,11 @@
     <button class="chip" data-spawn="audio-vis">📊 [ + SPECTRUM ]</button>
     <button class="chip" data-spawn="scratchpad">📝 [ + SCRATCHPAD ]</button>
     <button class="chip" data-spawn="chrono">⏱ [ + CHRONO ]</button>
-    <button class="chip" data-spawn="classic">🖥️ [ + CLASSIC DASH ]</button>
+    <button class="chip" data-spawn="classic">🖥️ [ + CONTROL CENTER ]</button>
+    <button class="chip" data-spawn="runtime">⚙️ [ + LIVE RUNS ]</button>
+    <button class="chip" data-spawn="models">◈ [ + MODELS ]</button>
+    <button class="chip" data-spawn="telemetry">📈 [ + TELEMETRY ]</button>
+    <button class="chip" data-spawn="artifacts">📦 [ + ARTIFACTS ]</button>
   </div>
 </div>
 
@@ -1182,7 +1200,14 @@
 <div id="jarvisRuntime" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:132px;z-index:9500;width:min(760px,92vw);max-height:34vh;overflow:auto;background:rgba(3,10,24,0.94);border:1px solid rgba(0,242,254,0.45);border-radius:14px;padding:12px 14px;box-shadow:0 0 34px rgba(0,242,254,0.22);backdrop-filter:blur(9px);font-family:var(--font-mono);">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
     <span style="color:var(--cyan);font-size:11px;letter-spacing:1.6px;">HERMUS RUNTIME</span>
-    <span id="jarvisRuntimeStatus" style="color:var(--text-muted);font-size:11px;">idle</span>
+    <span id="jarvisRuntimeStatus" role="status" aria-live="polite" style="color:var(--text-muted);font-size:11px;">idle</span>
+  </div>
+  <div id="jarvisRunMeta" style="font-size:10px;color:var(--text-muted);margin-bottom:5px"></div>
+  <div class="jarvis-actions" id="jarvisRunControls" style="display:none">
+    <button id="jarvisStopBtn" type="button">Stop backend run</button>
+    <button id="jarvisSteerBtn" type="button">Steer run</button>
+    <button id="jarvisRefreshRunBtn" type="button">Refresh status</button>
+    <button id="jarvisDismissBtn" type="button">Dismiss panel</button>
   </div>
   <pre id="jarvisRuntimeOut" style="margin:0;white-space:pre-wrap;color:var(--text-main);font-size:12px;line-height:1.5;"></pre>
 </div>
@@ -1193,8 +1218,21 @@
   <script src="/dashboard-assets/living-deck.js"></script>
 </div>
 
-<script src="/dashboard-assets/hermus-client.js?v=2.3-qf"></script>
+<script src="/dashboard-assets/hermus-client.js?v=3-control"></script>
+<script src="/dashboard-assets/jarvis-control.js?v=3-control"></script>
 <script>
+  // Dependencies are loaded before dashboard initialization. A failed asset is
+  // visible and does not turn into a cascade of misleading “working” panels.
+  if (!window.HermusClient || !window.JarvisControl) {
+    const missing = [!window.HermusClient && 'HermusClient', !window.JarvisControl && 'JarvisControl'].filter(Boolean).join(', ');
+    const runtime = document.getElementById('jarvisRuntime');
+    if (runtime) runtime.style.display = 'block';
+    const status = document.getElementById('jarvisRuntimeStatus');
+    const output = document.getElementById('jarvisRuntimeOut');
+    if (status) status.textContent = 'SYSTEM DEPENDENCY ERROR';
+    if (output) output.textContent = `Failed to load: ${missing}. Reload after checking /dashboard-assets.`;
+  }
+
   // ==========================================
   // 1. BULLETPROOF SCI-FI WEB AUDIO ENGINE
   // ==========================================
@@ -1463,9 +1501,9 @@
   let currentModeIndex = 0;
 
   const modeConfigs = {
-    normal: { name: 'NORMAL // 2.4 GHz', subtext: 'CORE: NORMAL BALANCED', cpu: 14 },
-    aggressive: { name: 'OVERCLOCK // 3.8 GHz', subtext: 'CORE: AGGRESSIVE TURBO', cpu: 89 },
-    eco: { name: 'STEALTH // 0.9 GHz', subtext: 'CORE: ECO SILENT', cpu: 4 }
+    normal: { name: 'VISUAL: NORMAL', subtext: 'DECORATIVE ORB // NORMAL' },
+    aggressive: { name: 'VISUAL: RED', subtext: 'DECORATIVE ORB // RED' },
+    eco: { name: 'VISUAL: GREEN', subtext: 'DECORATIVE ORB // GREEN' }
   };
 
   function cycleCoreMode() {
@@ -1476,9 +1514,7 @@
     const cfg = modeConfigs[modeKey];
     document.getElementById('modeLabel').textContent = cfg.name;
     document.getElementById('orbStateText').textContent = cfg.subtext;
-    document.getElementById('cpuText').textContent = cfg.cpu + '%';
-    document.getElementById('cpuFill').style.width = cfg.cpu + '%';
-
+    JarvisControl.set({ mode: modeKey });
     sfx.playModeSwitch(modeKey);
   }
 
@@ -1818,96 +1854,18 @@
           <input type="text" id="bUrl_${winId}" value="${url}" onkeydown="if(event.key==='Enter')handleBrowserNav('${winId}')" />
           <button style="background:var(--mode-bg);border:1px solid var(--mode-color);color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;" onclick="handleBrowserNav('${winId}')">Go</button>
         </div>
-        <div id="bContent_${winId}" style="color: #c9d1d9; font-size: 12px; line-height: 1.6;">
-          <h3 style="color: #58a6ff; font-size: 14px; margin-bottom: 4px;">trmv2007-bot / hermus-agent-free</h3>
-          <p style="color: #8b949e; font-size: 11px; margin-bottom: 8px;">Unified multi-agent framework with live DAG and SWE Mode.</p>
-          <div style="background: #161b22; padding: 10px; border-radius: 6px; border: 1px solid #30363d; font-size: 11px;">
-            • 318 Test Suites Verified Passing (FastAPI + Pytest)<br>
-            • Multi-Window Spatial Isolation & Unlimited Window Spawning Active<br>
-            • Dual Operating Profiles: Aggressive (Red), Normal (Blue), Eco (Green)
-          </div>
+        <div id="bContent_${winId}" style="color:#c9d1d9;font-size:12px;line-height:1.6;" role="status">
+          <div class="jarvis-note">URL entered. It has not been retrieved. Press Go to perform a real server-side Playwright navigation.</div>
         </div>
       `;
     } else if (type === 'swe') {
-      titleText = 'SWE STUDIO';
-      iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
-      bodyContent = `
-        <div id="sweStudioBody_${winId}" style="font-size:11px;color:var(--text-muted);padding:8px">
-          Loading workspace data…
-        </div>
-      `;
-      // Load live workspace/tools data
-      setTimeout(async () => {
-        const el = document.getElementById(`sweStudioBody_${winId}`);
-        if (!el) return;
-        try {
-          const [toolsData, wsData] = await Promise.all([
-            fetch('/tools').then(r => r.json()).catch(() => ({})),
-            fetch('/workspace').then(r => r.json()).catch(() => ({}))
-          ]);
-          const tools = Array.isArray(toolsData.tools) ? toolsData.tools : (toolsData.tools ? Object.keys(toolsData.tools).map(n => ({name: n})) : []);
-          const codeTools = tools.filter(t => {
-            const n = (t.name || '').toLowerCase();
-            return n.includes('file') || n.includes('bash') || n.includes('shell') || n.includes('edit') || n.includes('write') || n.includes('read') || n.includes('process') || n.includes('search');
-          });
-          el.innerHTML = `
-            <div class="swe-split" style="display:flex;gap:8px;flex-direction:column">
-              <div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:8px;border-radius:6px">
-                <div style="color:var(--gold);margin-bottom:4px;font-weight:700">🛠️ Code Execution Tools</div>
-                <div style="display:flex;flex-wrap:wrap;gap:4px">
-                  ${codeTools.map(t => `<span class="chip" style="font-size:9px;padding:3px 8px">${t.name || t}</span>`).join('')}
-                  ${!codeTools.length ? '<span class="subtle">No code tools detected. Start the gateway to load tools.</span>' : ''}
-                </div>
-              </div>
-              <div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:8px;border-radius:6px">
-                <div style="color:var(--cyan);margin-bottom:4px;font-weight:700">📂 Workspace</div>
-                <div style="font-size:10px;color:var(--text-muted)">
-                  ${wsData.current ? `Current: <b style="color:#fff">${wsData.current}</b>` : 'No workspace set'}<br>
-                  ${wsData.base_dir ? `Base: <span class="mono">${wsData.base_dir}</span>` : ''}<br>
-                  ${wsData.projects && wsData.projects.length ? `Projects: ${wsData.projects.join(', ')}` : ''}
-                </div>
-              </div>
-              <div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:8px;border-radius:6px">
-                <div style="color:var(--green);margin-bottom:4px;font-weight:700">💻 Send a coding task to the agent</div>
-                <div style="font-size:10px;color:var(--text-muted)">Type a coding request in the command box below (e.g. "Refactor core/mission.py to use async execution")</div>
-              </div>
-            </div>
-          `;
-        } catch(e) {
-          el.innerHTML = `<div style="color:var(--red)">⚠️ Could not load SWE data: ${e.message}</div>`;
-        }
-      }, 100);
+      titleText = 'SWE STUDIO — LIVE RUN';
+      iconSvg = '⚡';
+      bodyContent = `<div id="sweStudioBody_${winId}" class="jarvis-panel"><div class="jarvis-loading">Loading selected run evidence…</div></div>`;
     } else if (type === 'missions') {
-      titleText = 'MISSION DAG';
-      iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>';
-      bodyContent = `
-        <div id="missionDagBody_${winId}" style="font-size:11px;color:var(--text-muted);padding:8px">
-          Loading live mission data…
-        </div>
-      `;
-      // Load live mission data
-      setTimeout(async () => {
-        const el = document.getElementById(`missionDagBody_${winId}`);
-        if (!el) return;
-        try {
-          const missions = await fetch('/missions').then(r => r.json()).catch(() => []);
-          const list = Array.isArray(missions) ? missions : (missions.missions || []);
-          if (!list.length) {
-            el.innerHTML = `<div style="text-align:center;padding:10px"><div style="color:#fff;margin-bottom:4px">No Active Missions</div><div class="subtle">Send a command to start a mission. Missions auto-track through SPEC → CODE → VERIFY stages.</div></div>`;
-          } else {
-            el.innerHTML = list.slice(0, 5).map(m => {
-              const state = m.state || m.status || 'unknown';
-              const color = state === 'completed' || state === 'succeeded' ? 'var(--green)' : (state === 'failed' ? 'var(--red)' : 'var(--sky)');
-              return `<div style="background:rgba(3,7,18,0.6);border:1px solid rgba(255,255,255,0.1);padding:6px 8px;border-radius:6px;margin-bottom:4px">
-                <b style="color:${color}">● ${state.toUpperCase()}</b> — ${m.id || m.mission_id || 'mission'}<br>
-                <span class="subtle">${m.task ? m.task.slice(0, 80) : (m.goal || 'Active mission')}</span>
-              </div>`;
-            }).join('');
-          }
-        } catch(e) {
-          el.innerHTML = `<div style="color:var(--red)">⚠️ Could not load missions: ${e.message}</div>`;
-        }
-      }, 100);
+      titleText = 'MISSION LIFECYCLE — LIVE';
+      iconSvg = '🎯';
+      bodyContent = `<div id="missionDagBody_${winId}" class="jarvis-panel"><div class="jarvis-loading">Loading mission state…</div></div>`;
     } else if (type === 'classic') {
       titleText = 'CLASSIC DASHBOARD';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>';
@@ -1918,6 +1876,12 @@
           <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'tools')">Tools</button>
           <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'channels')">Channels</button>
           <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'agents')">Agents</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'models')">Models</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'runtime')">Runs</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'artifacts')">Artifacts</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'memory')">Memory</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'telemetry')">Telemetry</button>
+          <button class="classic-tab-btn" onclick="setClassicTab('${winId}', 'settings')">Settings</button>
         </div>
         <div id="cTabContent_${winId}">
           <div style="padding:10px;font-size:11px;color:var(--text-muted)">Loading live data...</div>
@@ -1925,18 +1889,22 @@
       `;
       // Load live data after window is created
       setTimeout(() => loadClassicWindowData(winId), 100);
+    } else if (['runtime','status','tools','agents','keys','models','channels','artifacts','telemetry','memory','settings'].includes(type)) {
+      titleText = ({runtime:'RUNTIME / LIVE RUNS',status:'SYSTEM STATUS',tools:'TOOLS',agents:'AGENTS',keys:'API KEYS',models:'MODELS',channels:'CHANNELS',artifacts:'ARTIFACTS',telemetry:'TELEMETRY',memory:'MEMORY',settings:'SETTINGS'})[type];
+      iconSvg = '☤';
+      bodyContent = `<div id="jarvisPanel_${winId}" class="jarvis-panel"><div class="jarvis-loading">Loading live backend state…</div></div>`;
     } else if (type === 'constellation') {
-      titleText = 'NEURAL MAP';
+      titleText = 'MEMORY / NEURAL VISUALIZATION';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3a9 9 0 0 0-9 9"/></svg>';
-      bodyContent = `<canvas id="constelCanvas_${winId}" style="width:100%;height:100%;background:#02050f;display:block;"></canvas>`;
+      bodyContent = `<div id="jarvisPanel_${winId}" class="jarvis-panel"><div class="jarvis-loading">Loading real memory state…</div></div>`;
     } else if (type === 'audio-vis') {
-      titleText = 'AUDIO SPECTRUM';
+      titleText = 'DECORATIVE SPECTRUM (NO AUDIO INPUT)';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5v14M7 9v6"/></svg>';
       bodyContent = `<canvas id="visCanvas_${winId}" style="width:100%;height:100%;background:#02050f;display:block;"></canvas>`;
     } else if (type === 'scratchpad') {
       titleText = 'SCRATCHPAD';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
-      bodyContent = `<textarea class="scratchpad-textarea">// Hermus Neural Memory Scratchpad\n- Target: Spatial HUD Multi-Window Engine\n- Mode: Turbo Active\n- Autonomy: 100%</textarea>`;
+      bodyContent = `<textarea class="scratchpad-textarea" aria-label="Local scratchpad" placeholder="Local notes only — not Hermus memory"></textarea><div class="jarvis-note">This scratchpad is local UI state and is not backend memory.</div>`;
     } else if (type === 'chrono') {
       titleText = 'CHRONOMETER';
       iconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
@@ -2097,9 +2065,15 @@
     updateWindowState();
 
     if (type === 'constellation') {
-      initConstellationWidget(`constelCanvas_${winId}`);
+      if (window.JarvisControl) JarvisControl.mount(document.getElementById(`jarvisPanel_${winId}`), 'memory');
     } else if (type === 'audio-vis') {
       initAudioVisualizerWidget(`visCanvas_${winId}`);
+    } else if (type === 'swe') {
+      setTimeout(() => { if (window.JarvisControl) JarvisControl.mount(document.getElementById(`sweStudioBody_${winId}`), 'swe'); }, 180);
+    } else if (type === 'missions') {
+      setTimeout(() => { if (window.JarvisControl) JarvisControl.mount(document.getElementById(`missionDagBody_${winId}`), 'missions'); }, 180);
+    } else if (['runtime','status','tools','agents','keys','models','channels','artifacts','telemetry','memory','settings'].includes(type)) {
+      if (window.JarvisControl) JarvisControl.mount(document.getElementById(`jarvisPanel_${winId}`), type);
     }
   }
 
@@ -2107,24 +2081,23 @@
   window.setBrowserTab = function(winId, tabKey) {
     const box = document.getElementById(`bContent_${winId}`);
     const input = document.getElementById(`bUrl_${winId}`);
-    if (!box) return;
-    if (tabKey === 'repo') {
-      input.value = 'https://github.com/trmv2007-bot/hermus-agent-free';
-      box.innerHTML = `<h3 style="color:#58a6ff;font-size:14px;margin-bottom:4px;">trmv2007-bot / hermus-agent-free</h3><p style="color:#8b949e;font-size:11px;margin-bottom:8px;">Unified multi-agent framework with live DAG and SWE Mode.</p><div style="background:#161b22;padding:10px;border-radius:6px;border:1px solid #30363d;">• 318 Test Suites Verified Passing<br>• Fully Multi-Window Spatial Isolation</div>`;
-    } else if (tabKey === 'arxiv') {
-      input.value = 'https://arxiv.org/abs/2301.00000';
-      box.innerHTML = `<h3 style="color:#58a6ff;font-size:14px;margin-bottom:4px;">Autonomous Agent Reasoning Architectures</h3><p style="color:#8b949e;font-size:11px;margin-bottom:8px;">ArXiv Computer Science Research Paper</p><div style="background:#161b22;padding:10px;border-radius:6px;border:1px solid #30363d;">Abstract: Analyzing dynamic topological planning, self-healing reflection loops, and spatial user environments for agentic execution.</div>`;
-    } else if (tabKey === 'docs') {
-      input.value = 'https://hermus-agent.io/docs/architecture';
-      box.innerHTML = `<h3 style="color:#58a6ff;font-size:14px;margin-bottom:4px;">Hermus Agent System Architecture</h3><p style="color:#8b949e;font-size:11px;margin-bottom:8px;">Core Technical Manual</p><div style="background:#161b22;padding:10px;border-radius:6px;border:1px solid #30363d;">Architecture components: 3-mode operating core, infinite zoom spatial grid, multi-agent delegator, and Web Audio synthesis engine.</div>`;
-    }
+    if (!box || !input) return;
+    const urls = { repo: 'https://github.com/trmv2007-bot/hermus-agent-free', arxiv: 'https://arxiv.org/', docs: 'https://github.com/trmv2007-bot/hermus-agent-free#readme' };
+    input.value = urls[tabKey] || urls.repo;
+    box.innerHTML = `<div class="jarvis-note">URL entered: ${JarvisControl.esc(input.value)}. Not retrieved yet — press Go.</div>`;
   };
 
-  window.handleBrowserNav = function(winId) {
+  window.handleBrowserNav = async function(winId) {
     const input = document.getElementById(`bUrl_${winId}`);
     const box = document.getElementById(`bContent_${winId}`);
     if (!input || !box) return;
-    box.innerHTML = `<div style="background:#161b22;padding:12px;border-radius:6px;border:1px solid #30363d;"><span style="color:var(--green);">✓ Loaded:</span> <b>${input.value}</b><p style="color:#8b949e;font-size:11px;margin-top:6px;">Page scrape active. Autonomous agent context extracted and indexed.</p></div>`;
+    box.innerHTML = `<div class="jarvis-loading">Retrieving with the Hermus browser backend…</div>`;
+    try {
+      const result = await HermusClient.navigate(input.value);
+      box.innerHTML = `<div class="jarvis-card"><b>${JarvisControl.esc(result.title || 'Untitled page')}</b><div>${JarvisControl.esc(result.url)}</div><div>Retrieved by: ${JarvisControl.esc(result.retrieval)}</div></div><pre style="white-space:pre-wrap">${JarvisControl.esc(result.text || 'Page returned no extractable text.')}</pre>`;
+    } catch (error) {
+      box.innerHTML = `<div class="jarvis-error" role="alert">Retrieval failed: ${JarvisControl.esc(error.message)}</div><div class="jarvis-note">The URL remains entered, but no page content was claimed as loaded.</div>`;
+    }
   };
 
   // Classic Dashboard interactive tab helper — loads LIVE data from the backend
@@ -2140,110 +2113,11 @@
 
   // Load live data for a classic window tab
   async function loadClassicTab(winId, tabKey, box) {
-    if (tabKey === 'overview') {
-      try {
-        const status = await fetch('/api/status').then(r => r.json()).catch(() => ({}));
-        const keysData = await fetch('/keys/list').then(r => r.json()).catch(() => ({}));
-        const toolsData = await fetch('/tools').then(r => r.json()).catch(() => ({}));
-        const agentsData = await fetch('/agents').then(r => r.json()).catch(() => ({}));
-        const keyCount = keysData.total_llm_keys || 0;
-        const toolCount = Array.isArray(toolsData.tools) ? toolsData.tools.length : (toolsData.tools ? Object.keys(toolsData.tools).length : 0);
-        const agentCount = (agentsData.agents || []).length;
-        const statusText = (status.status === 'ok') ? 'Online' : (status.status || 'Local');
-        box.innerHTML = `
-          <div class="classic-grid">
-            <div class="classic-stat-card"><h4>${keyCount}</h4><p>API Keys</p></div>
-            <div class="classic-stat-card"><h4>${toolCount}</h4><p>Tools</p></div>
-            <div class="classic-stat-card"><h4>${agentCount}</h4><p>Agents</p></div>
-            <div class="classic-stat-card"><h4 style="color:var(--green)">${statusText}</h4><p>Gateway</p></div>
-          </div>
-          <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;line-height:1.6;margin-top:8px;">
-            <b>☤ Hermus Agent Control Room</b><br>
-            • Version: ${status.version || '2.3'}<br>
-            ${status.channels ? `• Channels: ${typeof status.channels === 'object' ? Object.keys(status.channels).join(', ') : status.channels}<br>` : ''}
-            • Job Queue: ${status.queue_enabled ? 'Enabled' : 'Not detected'}<br>
-            • Architecture: Queue-first execution with SSE streaming
-          </div>
-        `;
-      } catch(e) {
-        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load live data: ${e.message}</div>`;
-      }
-    } else if (tabKey === 'keys') {
-      try {
-        const d = await fetch('/keys/list').then(r => r.json());
-        const allKeys = [];
-        if(d.llm_keys){
-          for(const [prov, list] of Object.entries(d.llm_keys)){
-            if(Array.isArray(list)) list.forEach(k => allKeys.push({ ...k, provider: prov }));
-          }
-        }
-        if(!allKeys.length){
-          box.innerHTML = `<div style="padding:10px;font-size:11px;color:var(--text-muted)">No API keys configured. <a href="/dashboard" style="color:var(--cyan)">Open dashboard → API Keys</a> to add one.</div>`;
-        } else {
-          box.innerHTML = `
-            <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-              <h4 style="color:var(--gold);margin-bottom:6px;">🔑 Configured Keys (${allKeys.length})</h4>
-              <table style="width:100%;border-collapse:collapse;font-size:10px;color:#cbd5e1;">
-                <tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;">Provider</th><th style="text-align:left;">Name</th><th style="text-align:left;">Model</th><th style="text-align:left;">Health</th></tr>
-                ${allKeys.map(k => `<tr><td>${k.provider}</td><td>${k.name || '-'}</td><td>${k.default_model || '-'}</td><td style="color:${k.healthy !== false ? 'var(--green)' : 'var(--amber)'}">● ${k.healthy !== false ? 'OK' : (k.health_status || 'UNKNOWN')}</td></tr>`).join('')}
-              </table>
-            </div>
-          `;
-        }
-      } catch(e) {
-        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load keys: ${e.message}</div>`;
-      }
-    } else if (tabKey === 'tools') {
-      try {
-        const d = await fetch('/tools').then(r => r.json());
-        const tools = Array.isArray(d.tools) ? d.tools : (d.tools ? Object.keys(d.tools).map(n => ({name: n})) : []);
-        if(!tools.length){
-          box.innerHTML = `<div style="padding:10px;font-size:11px;color:var(--text-muted)">No tools registered. Connect MCP servers or start the gateway to load tools.</div>`;
-        } else {
-          box.innerHTML = `
-            <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-              <h4 style="color:var(--gold);margin-bottom:6px;">🛠️ Registered Tools (${tools.length})</h4>
-              <div style="display:flex;flex-wrap:wrap;gap:4px;">${tools.map(t => `<span class="chip" title="${(t.description||'').replace(/"/g,'&quot;')}">${t.name || t}</span>`).join('')}</div>
-            </div>
-          `;
-        }
-      } catch(e) {
-        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load tools: ${e.message}</div>`;
-      }
-    } else if (tabKey === 'channels') {
-      try {
-        const d = await fetch('/channels/status').then(r => r.json());
-        const channels = d.channels || {};
-        box.innerHTML = `
-          <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-            <h4 style="color:var(--gold);margin-bottom:6px;">📡 Messaging Channels</h4>
-            <p>Telegram: <span style="color:${d.telegram_token_set ? 'var(--green)' : 'var(--amber)'}">● ${d.telegram_token_set ? 'Token Configured' : 'Not Configured'}</span></p>
-            <p>Discord: <span style="color:${d.discord_token_set ? 'var(--green)' : 'var(--amber)'}">● ${d.discord_token_set ? 'Token Configured' : 'Not Configured'}</span></p>
-            ${channels.telegram ? `<p class="subtle" style="margin-top:4px">Telegram: ${channels.telegram.status || 'unknown'}${channels.telegram.messages_processed !== undefined ? ` · ${channels.telegram.messages_processed} messages` : ''}</p>` : ''}
-            ${channels.discord ? `<p class="subtle">Discord: ${channels.discord.status || 'unknown'}${channels.discord.guild_count !== undefined ? ` · ${channels.discord.guild_count} servers` : ''}</p>` : ''}
-          </div>
-        `;
-      } catch(e) {
-        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load channels: ${e.message}</div>`;
-      }
-    } else if (tabKey === 'agents') {
-      try {
-        const d = await fetch('/agents').then(r => r.json());
-        const agents = d.agents || [];
-        if(!agents.length){
-          box.innerHTML = `<div style="padding:10px;font-size:11px;color:var(--text-muted)">No background agents running. Create one from the dashboard's Agents tab.</div>`;
-        } else {
-          box.innerHTML = `
-            <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:6px;font-size:11px;">
-              <h4 style="color:var(--gold);margin-bottom:6px;">🤖 Active Agents (${agents.length})</h4>
-              ${agents.map(a => `<div style="margin-bottom:4px"><b>${a.name || a.id || 'agent'}</b> — <span style="color:var(--green)">${a.status || 'idle'}</span> · ${a.role || 'generic'} · ${a.model || 'auto'}</div>`).join('')}
-            </div>
-          `;
-        }
-      } catch(e) {
-        box.innerHTML = `<div style="color:var(--red);font-size:11px;padding:10px;">⚠️ Could not load agents: ${e.message}</div>`;
-      }
+    if (!window.JarvisControl) {
+      box.innerHTML = `<div class="jarvis-error">JarvisControl dependency is unavailable.</div>`;
+      return;
     }
+    await JarvisControl.mount(box, tabKey);
   }
 
   // Called when a classic window is first opened
@@ -2263,13 +2137,9 @@
       c.width = c.parentElement.clientWidth || 450;
       c.height = c.parentElement.clientHeight || 280;
 
-      const nodes = [
-        { label: 'Python Stack', x: 0.25, y: 0.35, r: 5 },
-        { label: 'Work Habits', x: 0.7, y: 0.3, r: 6 },
-        { label: 'Sci-Fi UI Prefs', x: 0.5, y: 0.65, r: 7 },
-        { label: 'Agent Autonomy', x: 0.2, y: 0.75, r: 5 },
-        { label: 'Code Critic', x: 0.8, y: 0.7, r: 6 }
-      ];
+      // Never invent memory relationships. The live memory panel is mounted
+      // instead; this renderer intentionally has no nodes without backend data.
+      const nodes = [];
 
       function render() {
         if (!document.getElementById(canvasId)) return;
@@ -2519,9 +2389,55 @@
   });
 
   // Command Input Execution
+  document.getElementById('attachBtn').addEventListener('click', () => document.getElementById('jarvisFiles').click());
+  document.getElementById('jarvisFiles').addEventListener('change', (event) => {
+    const files = Array.from(event.target.files || []);
+    jarvisOut(files.length ? 'ATTACHMENTS READY' : 'NO ATTACHMENTS', files.map((f) => `${f.name} · ${f.size} bytes`).join('\n'));
+  });
   document.getElementById('sendBtn').addEventListener('click', executeCommand);
   document.getElementById('cmdInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') executeCommand();
+  });
+  document.getElementById('jarvisDismissBtn').addEventListener('click', jarvisDismiss);
+  document.getElementById('jarvisSteerBtn').addEventListener('click', async () => {
+    if (!selectedRunId) return jarvisOut('STEERING REJECTED', 'No run is selected.');
+    const instruction = window.prompt('Instruction for the running agent:');
+    if (!instruction || !instruction.trim()) return;
+    try {
+      const result = await HermusClient.steer(selectedRunId, instruction.trim());
+      jarvisOut(result.queued_for_agent ? 'STEERING QUEUED' : 'STEERING REJECTED', result.note || JSON.stringify(result));
+    } catch (error) { jarvisOut('STEERING FAILED', error.message); }
+  });
+  document.getElementById('jarvisStopBtn').addEventListener('click', async () => {
+    if (!selectedRunId && !selectedJobId) return jarvisOut('STOP REJECTED', 'No active run or job is selected.');
+    jarvisOut('STOP REQUESTED', 'Waiting for backend cancellation confirmation…');
+    try {
+      const result = selectedJobId ? await HermusClient.cancelJob(selectedJobId) : await HermusClient.cancelRun(selectedRunId);
+      const confirmed = result.cancelled === true;
+      if (!confirmed) return jarvisOut('STOP REJECTED', result.reason || result.error || 'Backend did not confirm cancellation.');
+      JarvisControl.trackRun(selectedRunId, { status: 'cancel_requested' });
+      jarvisOut('CANCELLATION ACCEPTED', result.note || `Backend accepted cancellation at ${result.stage || 'run'} stage; waiting for terminal state.`);
+      if (selectedJobId) {
+        for (let attempt = 0; attempt < 15; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const status = await HermusClient.jobs.status(selectedJobId);
+          if (['cancelled','failed','succeeded','interrupted'].includes(status.status)) {
+            JarvisControl.trackRun(selectedRunId, { status: status.status });
+            jarvisOut(status.status === 'cancelled' ? 'BACKEND CANCELLATION CONFIRMED' : `RUN FINISHED AS ${status.status.toUpperCase()}`, status.error || 'Terminal backend state observed.');
+            const local = jarvisControllers.get(selectedRunId); if (local) local.abort();
+            return;
+          }
+        }
+        jarvisOut('CANCELLATION PENDING', 'Backend accepted cancellation but has not reached a terminal state. It will stop at the next cooperative boundary.');
+      }
+    } catch (error) { jarvisOut('STOP FAILED', error.message); }
+  });
+  document.getElementById('jarvisRefreshRunBtn').addEventListener('click', async () => {
+    if (!selectedJobId) return jarvisOut('NO DURABLE JOB SELECTED', 'Submit a command or select a job in Live Runs.');
+    try {
+      const status = await HermusClient.jobs.status(selectedJobId);
+      jarvisOut(`JOB ${String(status.status || 'unknown').toUpperCase()}`, JSON.stringify(status, null, 2));
+    } catch(error) { jarvisOut('JOB LOOKUP FAILED', error.message); }
   });
 
   // ---- shared runtime client ------------------------------------------------
@@ -2530,7 +2446,10 @@
   // turn is submitted with async:true, runs as a durable gateway job and
   // streams its answer back — closing this tab does not cancel the work.
   const JARVIS_RUNTIME = document.getElementById('jarvisRuntime');
-  let jarvisBusy = false;
+  const jarvisControllers = new Map();
+  let jarvisBusy = false; // reflects whether any observed run is active, not a submission lock
+  let selectedRunId = JarvisControl.state.selectedRun;
+  let selectedJobId = JarvisControl.state.selectedJob;
 
   function jarvisOut(status, text) {
     if (!JARVIS_RUNTIME) return;
@@ -2552,35 +2471,53 @@
     continuing: '♻️ CONTINUING', blocked: '⛔ BLOCKED', failed: '⚠️ MISSION FAILED',
   };
 
-  async function jarvisRun(text) {
-    if (jarvisBusy) { jarvisOut('⚠️ BUSY', 'A directive is already running server-side.'); return; }
-    jarvisBusy = true;
+  async function jarvisRun(text, files = []) {
+    const runId = `run_jarvis_${Date.now().toString(16)}_${Math.random().toString(16).slice(2,8)}`;
+    const controller = new AbortController();
+    jarvisControllers.set(runId, controller);
+    selectedRunId = runId; selectedJobId = null; jarvisBusy = true;
+    JarvisControl.trackRun(runId, { status: 'submitting', text, events: [] });
+    JarvisControl.set({ selectedRun: runId, selectedJob: null,
+      commandHistory: JarvisControl.state.commandHistory.concat([{ text, runId, at: new Date().toISOString() }]).slice(-50) });
+    document.getElementById('jarvisRunControls').style.display = 'flex';
+    document.getElementById('jarvisRunMeta').textContent = `Run: ${runId} · submitting`;
     let streamed = '';
-    jarvisOut('⏳ QUEUED — running server-side (safe to close this tab)', '');
+    jarvisOut('SUBMITTING TO HERMUS', 'Waiting for durable job acknowledgement…');
     try {
       const out = await HermusClient.sendCommand({
-        text, platform: 'jarvis', userId: 'jarvis-01', mode: 'agent', timeout: 1800,
-        onDelta: (piece, acc) => { streamed = acc; jarvisOut('⚡ GENERATING', acc); },
-        onEvent: (type, d) => {
-          if (type === 'mission_state' && JARVIS_MISSION_LABELS[d.state]) jarvisOut(JARVIS_MISSION_LABELS[d.state], streamed);
-          else if (type === 'node_started' && d.stage) jarvisOut(`🤖 STAGE: ${d.stage}`, streamed);
-          else if (type === 'tool_call') jarvisOut(`🛠️ ${d.name || d.tool || 'tool'}`, streamed);
-          else if (type === 'model_capability_warning') jarvisOut('⚠️ MODEL CAPABILITY', (d.warnings || []).join('\n'));
-        },
+        text, files, runId, signal: controller.signal, platform: 'jarvis', userId: 'jarvis-01', mode: 'agent', timeout: 1800,
+        onJobId: (jobId) => { selectedJobId = jobId; JarvisControl.set({ selectedJob: jobId }); JarvisControl.trackRun(runId, { job_id: jobId, status: 'queued' }); document.getElementById('jarvisRunMeta').textContent = `Run: ${runId} · Job: ${jobId}`; },
+        onJobStatus: (status) => JarvisControl.trackRun(runId, { status: status.status, job_id: status.id || selectedJobId }),
+        onStreamOpen: () => { JarvisControl.set({ streamState: 'connected' }); jarvisOut('STREAM CONNECTED', streamed || 'Waiting for runtime events…'); },
+        onStreamReconnect: () => JarvisControl.set({ streamState: 'connected' }),
+        onStreamDisconnect: () => { JarvisControl.set({ streamState: 'disconnected' }); jarvisOut('STREAM DISCONNECTED — WAITING FOR JOB RESULT', streamed); },
+        onMalformedEvent: (info) => JarvisControl.event(runId, 'malformed_sse', { type: info.type }),
+        onDelta: (piece, acc) => { streamed = acc; if (selectedRunId === runId) jarvisOut('MODEL STREAMING', acc); },
+        onEvent: (type, data) => {
+          JarvisControl.event(runId, type, data);
+          if (selectedRunId !== runId) return;
+          if (type === 'mission_state' && JARVIS_MISSION_LABELS[data.state]) jarvisOut(JARVIS_MISSION_LABELS[data.state], streamed);
+          else if (type === 'node_started') jarvisOut(`STAGE: ${data.stage || data.node_id || 'executing'}`, streamed);
+          else if (type === 'tool_call') jarvisOut(`TOOL: ${data.name || data.tool || 'unknown'}`, streamed);
+          else if (type === 'tool_result' && data.error) jarvisOut('TOOL FAILED', data.error);
+          else if (type === 'mission_error' || type === 'run_error') jarvisOut('RUNTIME FAILURE', data.error || JSON.stringify(data));
+        }
       });
-      if (out.failure) {
-        // A failed mission is reported with diagnostics — never dressed up as advice.
-        jarvisOut('⚠️ MISSION FAILED', HermusClient.formatFailure(out));
-      } else if (!out.ok) {
-        jarvisOut('⚠️ ERROR', out.error || 'unknown error');
-      } else {
-        const tag = (out.run_kind || 'done').toUpperCase();
-        jarvisOut(`✔ ${tag}${out.mission_id ? ' · ' + out.mission_id : ''}`, out.response || '(no answer)');
+      JarvisControl.trackRun(runId, { status: out.ok ? 'succeeded' : (out.state || 'failed'), result: out.response, error: out.error, mission_id: out.mission_id });
+      JarvisControl.set({ lastResponse: out.ok ? out.response : '', lastError: out.ok ? '' : (out.error || '') });
+      if (selectedRunId === runId) {
+        if (out.failure) jarvisOut('MISSION FAILED', HermusClient.formatFailure(out));
+        else if (!out.ok) jarvisOut(out.state === 'cancelled' ? 'CANCELLED' : 'ERROR', out.error || 'The runtime returned no error detail.');
+        else jarvisOut(`COMPLETED · ${(out.run_kind || 'run').toUpperCase()}${out.mission_id ? ' · ' + out.mission_id : ''}`, out.response || 'Completed without a textual response.');
       }
+      return out;
     } catch (err) {
-      jarvisOut('⚠️ CONNECTION ERROR', `${err.message}\nIs the gateway running?`);
+      JarvisControl.trackRun(runId, { status: 'failed', error: err.message });
+      if (selectedRunId === runId) jarvisOut('CONNECTION ERROR', err.message);
+      return { ok: false, error: err.message, runId };
     } finally {
-      jarvisBusy = false;
+      jarvisControllers.delete(runId);
+      jarvisBusy = jarvisControllers.size > 0;
     }
   }
 
@@ -2597,17 +2534,10 @@
     // requests that happen to contain words like "time", "map", "note", etc.
     // A user typing "Research normal blood pressure ranges" should NOT be
     // interpreted as a UI mode switch.
-    const isUiCommand = (
-      val.startsWith('/') ||
-      val.startsWith('jarvis ') ||
-      val.startsWith('open ') ||
-      val.startsWith('show ') ||
-      val.startsWith('switch ')
-    );
+    const isUiCommand = val.startsWith('/');
 
     if (isUiCommand) {
-      // Strip the command prefix for matching
-      const cmd = val.replace(/^(\/|jarvis\s+|open\s+|show\s+|switch\s+)/, '').trim();
+      const cmd = val.slice(1).trim().replace(/^open\s+/, '').replace(/^theme\s+/, '');
 
       // Mode switches — only on very short, explicit commands
       if (cmd === 'red' || cmd === 'aggressive' || cmd === 'overclock' || cmd === 'turbo') { currentModeIndex = 0; cycleCoreMode(); return; }
@@ -2624,25 +2554,59 @@
       if (cmd === 'code' || cmd === 'swe' || cmd === 'swe studio' || cmd === 'editor') { spawnSpatialWindow('swe'); return; }
       if (cmd === 'dag' || cmd === 'mission' || cmd === 'missions' || cmd === 'pipeline') { spawnSpatialWindow('missions'); return; }
       if (cmd === 'browser' || cmd === 'web' || cmd === 'navigator' || cmd === 'internet') { spawnSpatialWindow('browser'); return; }
-
-      // Unknown explicit command — send it to the runtime
+      if (cmd === 'home') { openWindows.forEach(w => w.remove()); openWindows.clear(); updateWindowState(); return; }
+      if (cmd === 'reset') { localStorage.removeItem('hermus.jarvis.state.v3'); window.location.reload(); return; }
+      const panels = { runtime:'runtime', runs:'runtime', status:'status', agents:'agents', tools:'tools', keys:'keys', models:'models', channels:'channels', memory:'memory', telemetry:'telemetry', artifacts:'artifacts', settings:'settings' };
+      if (panels[cmd]) { spawnSpatialWindow(panels[cmd]); return; }
+      jarvisOut('UNKNOWN UI COMMAND', `/${cmd} is not a JARVIS UI command. Remove the slash to send it to Hermus.`);
+      return;
     }
 
-    // Everything else is REAL work: run it through the universal runtime.
-    // Only spawn visual windows for VERY short, clear topic commands —
-    // never for multi-word natural language requests.
-    const wordCount = val.split(/\s+/).length;
-    if (wordCount <= 2) {
-      if (val.includes('code') || val.includes('swe') || val.includes('editor')) spawnSpatialWindow('swe');
-      else if (val.includes('mission') || val.includes('dag') || val.includes('pipeline')) spawnSpatialWindow('missions');
-      else if (val === 'browser' || val === 'web' || val === 'internet') spawnSpatialWindow('browser');
-    }
-
-    await jarvisRun(raw);
+    // Every non-slash command is an agent request. No keyword heuristics.
+    const fileInput = document.getElementById('jarvisFiles');
+    const files = Array.from(fileInput.files || []);
+    await jarvisRun(raw, files);
+    fileInput.value = '';
   }
 
   // dismiss the runtime panel with Escape
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') jarvisDismiss(); });
+
+  // Initial factual connectivity/telemetry check. Failure remains visible.
+  JarvisControl.refresh().then((status) => {
+    document.getElementById('liveTranscript').textContent = 'Hermus gateway reachable. Enter a request or use /open status.';
+    const cpu = status.telemetry && status.telemetry.cpu_percent;
+    document.getElementById('cpuText').textContent = cpu == null ? 'Not available' : `${cpu}%`;
+    document.getElementById('cpuFill').style.width = cpu == null ? '0%' : `${Math.max(0, Math.min(100, cpu))}%`;
+  }).catch((error) => {
+    document.getElementById('liveTranscript').textContent = `OFFLINE — ${error.message}`;
+    document.getElementById('cpuText').textContent = 'Offline';
+  });
+
+  // Reconnect to a durable job after refresh; never imply it vanished.
+  if (selectedJobId) {
+    document.getElementById('jarvisRunControls').style.display = 'flex';
+    HermusClient.jobs.status(selectedJobId).then(async (status) => {
+      selectedRunId = status.run_id || selectedRunId;
+      document.getElementById('jarvisRunMeta').textContent = `Run: ${selectedRunId || 'unknown'} · Job: ${selectedJobId}`;
+      if (status.status === 'succeeded') {
+        const wrapped = await HermusClient.jobs.result(selectedJobId);
+        const result = wrapped.result || {};
+        jarvisOut('RESTORED COMPLETED JOB', result.response || result.final_answer || result.final_proof || 'Completed without textual response.');
+      } else jarvisOut(`RESTORED JOB · ${String(status.status).toUpperCase()}`, 'This durable job was found after refresh. Use Refresh status to observe it.');
+    }).catch((error) => jarvisOut('SAVED JOB UNAVAILABLE', error.message));
+  }
+
+  // Voice input uses the browser's real speech-recognition API when present.
+  document.getElementById('micBtn').addEventListener('click', () => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return jarvisOut('VOICE INPUT NOT AVAILABLE', 'This browser does not provide SpeechRecognition. Type the command instead.');
+    const recognition = new Recognition(); recognition.interimResults = false; recognition.lang = navigator.language || 'en-US';
+    jarvisOut('LISTENING', 'Speak one command…');
+    recognition.onresult = (event) => { document.getElementById('cmdInput').value = event.results[0][0].transcript; jarvisOut('VOICE CAPTURED', event.results[0][0].transcript); };
+    recognition.onerror = (event) => jarvisOut('VOICE INPUT FAILED', event.error || 'Recognition error');
+    recognition.start();
+  });
 
   // Live Clock & Chronometer updater
   function updateClock() {
@@ -2654,7 +2618,7 @@
     const h = now.getHours().toString().padStart(2, '0');
     const min = now.getMinutes().toString().padStart(2, '0');
     const s = now.getSeconds().toString().padStart(2, '0');
-    document.getElementById('hudClock').textContent = `${d} ${m} ${y} // ${h}:${min}:${s} IST`;
+    document.getElementById('hudClock').textContent = `${d} ${m} ${y} // ${h}:${min}:${s} LOCAL`;
 
     document.querySelectorAll('[id^="chronoUTC_"]').forEach(el => el.textContent = now.toISOString().substring(11, 19));
     document.querySelectorAll('[id^="chronoIST_"]').forEach(el => el.textContent = `${h}:${min}:${s}`);
