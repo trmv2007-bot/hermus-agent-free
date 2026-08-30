@@ -269,11 +269,20 @@ class RunBus:
         """Return (queue, unsubscribe). Items are event dicts; ``__closed__`` ends the stream."""
         aq: "asyncio.Queue" = asyncio.Queue(maxsize=queue_max)
         key = (loop, aq) if loop is not None else aq
-        run = self.get(run_id) or self.start(run_id)
-        if replay:
-            for ev in self.history(run_id, after=after):
-                _put_nowait(aq, ev)
+        # Snapshot + registration must be atomic w.r.t. publish(): an event
+        # published between the replay snapshot and subscribers.add(key) would
+        # be neither replayed nor delivered live — a late joiner could miss
+        # ``job_finished``/``run_finished``/``__closed__`` and hang on a dead
+        # stream until stream_timeout. Holding the run lock across both makes
+        # every event land in exactly one of the two paths.
         with self._lock:
+            run = self._runs.get(run_id)
+            if run is None:
+                run = self.start(run_id)
+            if replay:
+                history = [e for e in list(run.events) if int(e["id"] or 0) > int(after)]
+                for ev in history[-500:]:
+                    _put_nowait(aq, ev)
             run.subscribers.add(key)
 
         def unsubscribe() -> None:

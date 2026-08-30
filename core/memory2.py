@@ -60,6 +60,21 @@ def _overlap(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
+def _coverage(query: str, content: str) -> float:
+    """Fraction of (stopword-filtered) query tokens the content addresses.
+
+    Asymmetric by design: recall relevance asks "how much of the query does
+    this memory answer?", so a long memory containing every query term scores
+    1.0. The symmetric Jaccard in ``_overlap`` punished exactly that case —
+    two query tokens inside a twenty-token memory scored ~0.09, which let
+    zero-match memories outrank the only lexically relevant one.
+    """
+    tq, tc = _tokens(query), _tokens(content)
+    if not tq:
+        return 0.0
+    return len(tq & tc) / len(tq)
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -531,7 +546,7 @@ class MemoryScorer:
         except Exception:
             freq_count = float(memory.get("access_count") or meta.get("frequency", 1) or 1)
         frequency = min(freq_count, 10.0) / 10.0
-        relevance = _overlap(query, memory.get("content") or "")
+        relevance = _coverage(query, memory.get("content") or "")
         success = memory.get("success")
         success_signal = 0.5  # neutral (None)
         if success is not None:
@@ -614,7 +629,7 @@ class Memory2:
                 mem["signals"] = {
                     "importance": mem.get("importance"),
                     "recency": self.scorer.recency(mem.get("ts") or "", now),
-                    "relevance": _overlap(query, mem.get("content") or ""),
+                    "relevance": _coverage(query, mem.get("content") or ""),
                     "success": mem.get("success"),
                     "access_count": mem.get("access_count") or 0,
                     "band": d.get("band"),
@@ -698,7 +713,7 @@ class Memory2:
                 continue
             mem = dict(mem)
             mem["content"] = mem.get("content") or h.content or ""
-            lexical = _overlap(query, mem.get("content") or "")
+            lexical = _coverage(query, mem.get("content") or "")
             mem["score"] = self.scorer.score(mem, query, user_preferences, now)
             mem["rrf_score"] = round(float(h.score), 6)
             mem["signals"] = {

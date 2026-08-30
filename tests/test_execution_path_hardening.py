@@ -684,19 +684,23 @@ def test_shared_client_is_served_and_mounts_assets(client):
 # ===========================================================================
 # 11. CI is committed, not just documented
 # ===========================================================================
-def test_ci_workflow_is_committed():
+def test_ci_is_local_not_hosted():
+    """Hosted CI is intentionally not part of this repo (local gates only).
+
+    Guard against dangling references: no workflow files, no CI badge in the
+    README, and the local gate commands stay documented.
+    """
     root = pathlib.Path(__file__).resolve().parent.parent
-    wf = root / ".github" / "workflows" / "ci.yml"
-    assert wf.exists(), "CI must live in .github/workflows/ (docs/ copy is only a reference)"
-    text = wf.read_text(encoding="utf-8")
-    assert "python -m pytest tests/" in text
-    assert "ruff check" in text
-    try:
-        import yaml  # optional: validate when pyyaml is installed
-    except ImportError:
-        return
-    data = yaml.safe_load(text)
-    assert set(data["jobs"]) >= {"test", "lint"}
+    workflows = root / ".github" / "workflows"
+    assert not workflows.exists(), (
+        "GitHub Actions was intentionally removed; if you want hosted CI back, "
+        "re-add it deliberately and update this test"
+    )
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "actions/workflows" not in readme, "README still references a CI badge"
+    assert "docs/ci-workflow.yml" not in readme, "README points at a removed file"
+    hardening = (root / "docs" / "EXECUTION_PATH_HARDENING.md").read_text(encoding="utf-8")
+    assert "python -m pytest tests/" in hardening, "local pytest gate must stay documented"
 
 
 # ===========================================================================

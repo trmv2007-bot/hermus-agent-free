@@ -135,6 +135,33 @@ def test_sensitivity_of_rrf_k():
 # --------------------------------------------------------------------------
 # MemoryStore hybrid path
 # --------------------------------------------------------------------------
+def test_recall_ranks_the_only_matching_memory_first():
+    """Regression: relevance must be query coverage, not symmetric Jaccard.
+
+    A long memory containing every query term used to score ~0.09 relevance
+    (Jaccard punishes long content), so high-importance/high-frequency
+    memories with ZERO lexical overlap outranked the only matching row —
+    recall degraded to importance×recency ranking that ignored the query.
+    """
+    m = _fresh("coverage")
+    r = m.remember(
+        "semantic",
+        "e2e check 2026-08-30: gateway live, SSE job_finished contract fixed, "
+        "mission honest blocking verified, token deltas streamed end to end",
+        importance=5)
+    # strongly-signalled decoys that do NOT match the query at all
+    for i in range(6):
+        m.remember("procedural", f"Research run {i}: compare Postgres vs MySQL vs SQLite",
+                   importance=8, success=True)
+    m.remember("episodic", "User asked: Say one. Agent used 0 tool(s) and succeeded.",
+               importance=6, success=True)
+
+    hits = m.recall("job_finished SSE contract", limit=10)
+    assert hits, "recall returned nothing"
+    assert hits[0]["id"] == r["id"], [h["content"][:40] for h in hits[:3]]
+    assert hits[0]["signals"]["relevance"] == 1.0, hits[0]["signals"]
+
+
 def test_hybrid_recall_survives_paraphrase_where_keywords_fail():
     m = _fresh("para")
     m.remember("semantic", "PostgreSQL connection string is stored in the vault, never in .env",
