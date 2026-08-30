@@ -647,6 +647,13 @@ class ToolRegistry:
             register_android_tools(self)
         except Exception as e:
             self._errors.append(f"android: {e}")
+        # Computer control tools (honest computer_control_unavailable reporting)
+        try:
+            from .computer.tools import register_computer_tools
+
+            register_computer_tools(self)
+        except Exception as e:
+            self._errors.append(f"computer: {e}")
         # Custom APIs as tools
         try:
             from core.custom_api import custom_api_manager

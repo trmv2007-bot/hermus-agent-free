@@ -19,7 +19,7 @@ important frames are promoted to local vision analysis. Real pointer/keyboard
 control uses ``pyautogui``/``pygetwindow`` when present and degrades to an
 auditable dry-run otherwise, so every path is testable offline.
 """
-from .controller import ComputerActionController
+from .controller import ComputerActionController, detect_computer_capability
 from .computer_agent import ComputerAgent
 from .control_center import ControlCenter
 from .delegation import DelegationPlan, MultiAgentDelegator, WorkUnit

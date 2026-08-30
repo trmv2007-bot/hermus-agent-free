@@ -227,3 +227,49 @@ class ComputerActionController:
         return {**click, "action": "click_target", "target": target,
                 "located_x": detection["x"], "located_y": detection["y"],
                 "confidence": detection.get("confidence", 0.0)}
+
+    # -- honest capability --------------------------------------------------
+    def backend_capability(self) -> dict[str, Any]:
+        """Report whether REAL control is available vs dry-run-only, with a reason.
+
+        ``available`` is True only when a real (non-dry-run) backend is present for
+        every controller class (mouse/keyboard/window). A dry-run backend chosen as
+        a *fallback* (real control unavailable) makes ``available`` False and carries
+        the exact reason, so the autonomy layer surfaces
+        ``computer_control_unavailable`` instead of silently pretending it acted.
+        Explicit dry-run (offline tests / audit) is reported as ``dry_run=True``.
+        """
+        backends = {}
+        for name, backend in (("mouse", self.mouse), ("keyboard", self.keyboard),
+                              ("window", self.windows)):
+            try:
+                avail = backend.available() or {}
+            except Exception:  # noqa: BLE001
+                avail = {"available": False, "error": "backend probe failed"}
+            backends[name] = {
+                "backend": type(backend).__name__,
+                "available": bool(avail.get("available")),
+                "real": getattr(backend, "name", "") != "dry_run",
+                "dry_run": getattr(backend, "name", "") == "dry_run",
+                "fallback_reason": avail.get("fallback_reason") or avail.get("error") or None,
+            }
+        real = all(b["real"] for b in backends.values())
+        fallback_reasons = [b["fallback_reason"] for b in backends.values() if b["fallback_reason"]]
+        reasons = list(dict.fromkeys(fallback_reasons))
+        return {
+            "available": real,
+            "dry_run_only": not real,
+            "reason": "" if real else (reasons[0] if reasons else "real computer control unavailable"),
+            "backends": backends,
+        }
+
+
+def detect_computer_capability(controller: Optional["ComputerActionController"] = None) -> dict[str, Any]:
+    """Truthful top-level computer-control capability probe.
+
+    With no controller passed, it builds a real default (which falls back to dry-run
+    when pyautogui/pygetwindow is missing) and reports the real state. Never claims
+    availability it cannot prove.
+    """
+    ctl = controller or ComputerActionController()
+    return ctl.backend_capability()

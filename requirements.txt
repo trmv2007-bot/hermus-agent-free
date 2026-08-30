@@ -76,3 +76,11 @@ rich>=13.0.0
 pytest>=8.0.0
 httpx>=0.24.0
 
+
+# Computer control (OPTIONAL — real desktop automation; degrades to a reported
+# dry-run/unavailable capability when absent). Install for host computer control:
+#   pip install pyautogui pygetwindow
+# Hermus detects these and reports `computer_control_unavailable` (with reason) when
+# they (or a display) are not present, rather than silently pretending real control.
+pyautogui>=0.9.54; platform_system=="Linux" or platform_system=="Darwin" or platform_system=="Windows"
+pygetwindow>=0.0.9; platform_system=="Windows"
