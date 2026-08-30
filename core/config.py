@@ -10,6 +10,49 @@ class Config(BaseModel):
     # process tree — sub-agent workers inherit it.)
     model: str = os.getenv("HERMUS_MODEL", "ollama/llama3.1:8b")
     ollama_base_url: str = "http://localhost:11434"
+    # Default model Ollama is asked for when the accelerator router picks it
+    # (GPU reasoning / CPU-only boxes).
+    ollama_default_model: str = os.getenv("HERMUS_OLLAMA_MODEL", "llama3.1:8b")
+    ollama_vision_model: str = os.getenv("HERMUS_OLLAMA_VISION_MODEL", "llava:7b")
+
+    # ---- Local engine routing (NPU via NoLlama / GPU via Ollama) -----------
+    # auto | pipelined | npu | gpu | cpu | off
+    #   auto       → detect hardware and pick (NPU+GPU = pipelined)
+    #   pipelined  → NPU keeps background work, GPU does heavy reasoning
+    #   npu / gpu  → force every role onto one accelerator
+    #   cpu        → Ollama on CPU (NoLlama is Intel-only and slower there)
+    local_engine_mode: str = os.getenv("HERMUS_LOCAL_ENGINE", "auto")
+    # NoLlama (https://github.com/aweussom/NoLlama) — OpenVINO server for the
+    # Intel NPU / Arc iGPU. Port 8010, NOT its 8000 default: the Hermus gateway
+    # already serves 8000.
+    nollama_port: int = int(os.getenv("HERMUS_NOLLAMA_PORT", "8010"))
+    nollama_dir: str = os.getenv("HERMUS_NOLLAMA_DIR", "~/.hermus/nollama")
+    nollama_models_dir: str = os.getenv("HERMUS_NOLLAMA_MODELS", "~/models")
+    nollama_state_path: str = os.getenv("HERMUS_NOLLAMA_STATE", "data/nollama_state.json")
+    nollama_log_path: str = os.getenv("HERMUS_NOLLAMA_LOG", "data/nollama.log")
+    # Start the local engine with the gateway when the hardware supports it.
+    nollama_autostart: bool = os.getenv("HERMUS_NOLLAMA_AUTOSTART", "0") not in ("0", "false", "False")
+    # Models the router asks NoLlama to serve (OpenVINO IR directory names).
+    nollama_npu_model: str = os.getenv("HERMUS_NOLLAMA_NPU_MODEL", "openvino/qwen3-8b-int4-cw-ov")
+    nollama_gpu_model: str = os.getenv("HERMUS_NOLLAMA_GPU_MODEL", "openvino/minicpm5-1b-int4-g128-ov")
+    nollama_vision_model: str = os.getenv("HERMUS_NOLLAMA_VISION_MODEL", "openvino/qwen3-vl-8b-instruct-int8-ov")
+
+    # ---- Hermus doctor: the small model that repairs Hermus itself ---------
+    doctor_enabled: bool = os.getenv("HERMUS_DOCTOR_ENABLED", "1") not in ("0", "false", "False")
+    # Auto-triage when a run/job fails (bounded by cooldown + daily cap).
+    doctor_auto: bool = os.getenv("HERMUS_DOCTOR_AUTO", "0") not in ("0", "false", "False")
+    # Let the doctor look things up online when it does not recognise a failure.
+    doctor_ask_internet: bool = os.getenv("HERMUS_DOCTOR_INTERNET", "1") not in ("0", "false", "False")
+    # "" = follow the accelerator plan's "doctor" role.
+    doctor_model: str = os.getenv("HERMUS_DOCTOR_MODEL", "")
+    doctor_cooldown_minutes: int = int(os.getenv("HERMUS_DOCTOR_COOLDOWN_MIN", "15"))
+    doctor_daily_cap: int = int(os.getenv("HERMUS_DOCTOR_DAILY_CAP", "12"))
+    # Anything still "running"/"queued" after this many minutes is treated as
+    # stuck work and reported (and optionally reaped) — nothing is left in a
+    # processing state forever.
+    doctor_stuck_minutes: int = int(os.getenv("HERMUS_DOCTOR_STUCK_MIN", "20"))
+    doctor_reports_dir: str = os.getenv("HERMUS_DOCTOR_REPORTS", "data/doctor")
+
     groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY")
     hf_token: Optional[str] = os.getenv("HF_TOKEN")
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")

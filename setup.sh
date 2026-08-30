@@ -2,6 +2,11 @@
 # =============================================================================
 # Hermus Agent Free — Complete Developer Stack & Master Installer (WSL / Linux)
 # Installs A-to-Z: System APTs, Node.js, npm, Bun, Python Stack, Playwright & Launchers
+#
+# RUNTIME ONLY. This script deliberately downloads no AI model weights and does
+# not install a local model server. Models are multi-GB and hardware-specific, so
+# they are pulled on demand from the dashboard (Local AI Engine pane) or with
+# `hermus engine download <id>` — see docs/LOCAL_ENGINE.md.
 # =============================================================================
 
 # Auto-re-exec in bash if invoked via sh/dash
@@ -392,4 +397,9 @@ echo -e "     • Mobile Pocket Remote: ${C_CYAN}http://localhost:8000/remote${C
 echo ""
 echo -e "  ${C_BOLD}3. Use in Terminal (CLI):${C_RESET}"
 echo -e "     ${C_CYAN}./hermus${C_RESET}"
+echo ""
+echo -e "  ${C_BOLD}4. Optional local AI engine (no weights were downloaded here):${C_RESET}"
+echo -e "     ${C_MUTED}Dashboard → Local AI Engine, or:${C_RESET} ${C_CYAN}./hermus engine status${C_RESET}"
+echo -e "     ${C_MUTED}NPU/GPU routing, on-demand model downloads and the Hermus doctor:${C_RESET}"
+echo -e "     ${C_MUTED}docs/LOCAL_ENGINE.md${C_RESET}"
 echo ""

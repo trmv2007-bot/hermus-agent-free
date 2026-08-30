@@ -33,9 +33,13 @@ _WEB_CACHE_DB = None
 def _get_web_cache_db():
     global _WEB_CACHE_DB
     if _WEB_CACHE_DB is None:
+        from core.db_registry import open_db
+
         cache_path = Path("data/web_read_cache.db")
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        _WEB_CACHE_DB = sqlite3.connect(str(cache_path), check_same_thread=False)
+        # Registered so the gateway shutdown closes it (it lives for the whole
+        # process and used to be reported as an unclosed database at exit).
+        _WEB_CACHE_DB = open_db(cache_path, owner="internet_eyes", check_same_thread=False)
         with _WEB_CACHE_DB:
             _WEB_CACHE_DB.execute("""
                 CREATE TABLE IF NOT EXISTS web_cache (

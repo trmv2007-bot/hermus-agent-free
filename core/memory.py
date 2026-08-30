@@ -29,9 +29,29 @@ class Memory:
         a writer commits; ``busy_timeout`` makes concurrent writers wait
         briefly instead of raising 'database is locked'.
         """
+        from .db_registry import db_registry, open_db
+
         conn = getattr(self._local, "conn", None)
+        # A gateway shutdown closes every registered handle; the generation
+        # bump is how this thread learns its cached handle is dead and must
+        # reopen instead of raising "Cannot operate on a closed database".
+        if conn is not None and getattr(self._local, "gen", -1) != db_registry.generation:
+            conn = None
         if conn is None:
-            conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+            # Registered with the process-wide registry so the gateway shutdown
+            # can release it. ``check_same_thread=False`` is safe *and*
+            # necessary here: the handle is still created per thread and used
+            # by that thread only (that is what ``self._local`` guarantees), so
+            # nothing gains a second concurrent user — but sqlite's default
+            # same-thread check would make the shutdown path unable to close
+            # another worker's handle, leaving exactly the unclosed-database
+            # ResourceWarning this registry exists to prevent.
+            conn = open_db(
+                self.db_path,
+                owner="memory",
+                timeout=10.0,
+                check_same_thread=False,
+            )
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("PRAGMA busy_timeout=10000;")
@@ -40,12 +60,16 @@ class Memory:
             except sqlite3.Error:
                 pass
             self._local.conn = conn
+            self._local.gen = db_registry.generation
         return conn
 
     def close(self) -> None:
         """Close this thread's cached connection (safe to call repeatedly)."""
         conn = getattr(self._local, "conn", None)
         if conn is not None:
+            from .db_registry import db_registry
+
+            db_registry.unregister(conn)
             try:
                 conn.close()
             except sqlite3.Error:
