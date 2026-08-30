@@ -7,15 +7,25 @@ from fastapi.testclient import TestClient
 from gateway.gateway import app
 
 
-def test_jarvis_page_dependency_order_and_no_fake_claims():
-    text = TestClient(app).get('/jarvis').text
-    assert text.index('hermus-client.js') < text.index('jarvis-control.js') < text.index('class HermusAudioEngine')
-    assert '318 Test Suites Verified Passing' not in text
-    assert 'Page scrape active' not in text
-    assert 'Autonomy: 100%' not in text
-    assert 'const isUiCommand = val.startsWith' in text
-    assert 'await jarvisRun(raw, files)' in text
-    assert 'Stop backend run' in text
+def test_single_control_room_replaces_the_jarvis_page():
+    """The Jarvis page is consolidated into the single /control room.
+
+    The control room is a snapshot + replay + typed-command projection that
+    exposes the real /api/jarvis/status aggregate and makes no fake claims
+    (no hard-coded 'test suites passing' / 'autonomy 100%' / fabricated state).
+    """
+    text = TestClient(app).get('/control').text
+    # No fake claims that the old Jarvis surface hard-coded.
+    for banner in ("318 Test Suites Verified Passing", "Page scrape active",
+                   "Autonomy: 100%"):
+        assert banner not in text
+    # Real canonical projections.
+    assert "Snapshot" in text
+    assert "Replay" in text
+    assert "/api/v1/commands" in text
+    assert "never simulates success" in text
+    # The old Jarvis page route is gone.
+    assert TestClient(app).get('/jarvis').status_code == 404
 
 
 def test_jarvis_status_is_real_aggregate_and_secret_free():
@@ -102,16 +112,18 @@ def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
         assert any(event['type'] == 'run_finished' for event in events)
 
 
-def test_javascript_sources_parse_with_node():
-    """A repeatable browser-init smoke prerequisite (syntax/runtime assets)."""
-    import shutil, subprocess, tempfile
+def test_control_room_inline_javascript_parses_with_node():
+    """The single control room's inline JS is syntactically valid.
+
+    The legacy jarvis-control.js / hermus-client.js assets were removed with the
+    surfaces they drove; /control is self-contained inline JS.
+    """
+    import subprocess, tempfile
+    html = Path('gateway/control.html').read_text()
+    inline = html.split('<script>')[1].split('</script>', 1)[0]
+    import shutil
     if not shutil.which('node'):
         return
-    subprocess.run(['node', '--check', 'gateway/static/hermus-client.js'], check=True)
-    subprocess.run(['node', '--check', 'gateway/static/jarvis-control.js'], check=True)
-    subprocess.run(['node', '--test', 'tests/js/jarvis-client.test.js'], check=True)
-    html = Path('gateway/jarvis_dashboard.html').read_text()
-    inline = html.split('<script>')[1].split('</script>', 1)[0]
     with tempfile.NamedTemporaryFile('w', suffix='.js') as fh:
         fh.write(inline); fh.flush()
         subprocess.run(['node', '--check', fh.name], check=True)

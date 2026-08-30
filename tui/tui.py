@@ -294,7 +294,7 @@ Tip: Type /mode multi-agent for difficult goals, /mode multi-chat for accurate i
                     print(status_text)
                 print("\n" + "="*70)
                 print("Panel auto-refreshes every 2 sec in bottom toolbar")
-                print("Gateway dashboard with slide panel: http://localhost:8000/dashboard -> Click 'Agents Panel' button")
+                print("Gateway dashboard with slide panel: http://localhost:8000/control")
                 print("API: GET /agents/status for JSON")
             except Exception as e:
                 print(f"Panel error: {e} - No active agents, idle")

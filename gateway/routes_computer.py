@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core.config import config
 from gateway.context import _token_matches
@@ -786,25 +786,9 @@ async def computer_control_task(task_id: str):
 # Phase C & D — remote control, resources, delegation, skill profiles, plugins
 # ===========================================================================
 
-@router.get("/computer/dashboard", response_class=HTMLResponse)
-async def computer_dashboard_page():
-    """Serve the live computer-agent dashboard (Phase A UI)."""
-    html_path = Path(__file__).parent / "dashboard_computer.html"
-    if html_path.exists():
-        return HTMLResponse(html_path.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store, max-age=0"})
-    return HTMLResponse("<!DOCTYPE html><html><body><h1>dashboard_computer.html missing</h1></body></html>")
-
-
-@router.get("/remote", response_class=HTMLResponse)
-async def remote_control_page():
-    """Mobile-friendly remote control page (Phase C remote Android/web)."""
-    html_path = Path(__file__).parent / "remote.html"
-    if html_path.exists():
-        return HTMLResponse(html_path.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store, max-age=0"})
-    return HTMLResponse("<!DOCTYPE html><html><body><h1>remote.html missing</h1></body></html>")
-
+# The HTML-only computer / remote UI surfaces were removed in the single
+# control-room consolidation. Real capability is served by the /computer/* and
+# /remote/* data APIs below and projected by /control.
 
 @router.get("/computer/live-frame")
 async def computer_live_frame():

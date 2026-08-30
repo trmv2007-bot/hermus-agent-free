@@ -658,27 +658,30 @@ def test_extend_budget_emergency_slot(tmp_path):
 # ===========================================================================
 # 10. one shared frontend runtime client
 # ===========================================================================
-def test_every_dashboard_uses_the_shared_queue_first_client():
+def test_single_control_room_is_queue_first_and_failure_aware():
+    """The one production UI (/control) submits via the canonical command path.
+
+    It must surface mission failures rather than simulate success, drive the
+    typed command gateway, and never own truth. There is no second legacy
+    dashboard surface or shared JS runtime anymore.
+    """
+    from fastapi.testclient import TestClient
+    from gateway.gateway import app
     root = pathlib.Path(__file__).resolve().parent.parent / "gateway"
-    client = (root / "static" / "hermus-client.js").read_text(encoding="utf-8")
-    assert "async: 'true'" in client  # queue-first submission
-    assert "runtime.turn" in client or "/command" in client
-    assert "formatFailure" in client  # mission failures are surfaced
-
-    for name in ("dashboard.html", "jarvis_dashboard.html"):
-        html = (root / name).read_text(encoding="utf-8")
-        assert "hermus-client.js" in html, f"{name} must load the shared client"
-        assert "HermusClient.sendCommand" in html, f"{name} must send through the client"
-
-    jarvis = (root / "jarvis_dashboard.html").read_text(encoding="utf-8")
-    assert "jarvisRuntime" in jarvis
-    assert "hermus-client.js" in jarvis
-
-
-def test_shared_client_is_served_and_mounts_assets(client):
-    r = client.get("/dashboard-assets/hermus-client.js")
-    assert r.status_code == 200
-    assert "HermusClient" in r.text
+    html = (root / "control.html").read_text(encoding="utf-8")
+    # queue-first / command submission
+    assert "/api/v1/commands" in html
+    assert "typed Command" in html
+    # failure awareness is surfaced in the UI (not fake success)
+    assert "error" in html.lower() or "failed" in html.lower()
+    # snapshot + replay projection, no UI-owned truth
+    assert "Snapshot" in html and "Replay" in html
+    assert "never owns truth" in html and "never simulates success" in html
+    # no legacy surfaces/static remain reachable
+    client = TestClient(app)
+    assert client.get("/control").status_code == 200
+    assert client.get("/dashboard", follow_redirects=False).status_code == 404
+    assert client.get("/dashboard-assets/hermus-client.js").status_code == 404
 
 
 # ===========================================================================

@@ -100,13 +100,13 @@ def run_diagnostics() -> dict[str, Any]:
     except OSError as exc:
         checks.append(_check("data_dir", False, str(data_root), f"data/ not writable: {exc}"))
 
-    # Gateway token (recommended when exposing the dashboard/remote control)
+    # Gateway token (recommended when exposing the control room / remote control)
     token = os.getenv("HERMUS_GATEWAY_TOKEN") or os.getenv("HERMUS_TOKEN")
     checks.append(_check(
         "gateway_auth",
         bool(token),
         "gateway token configured" if token else "no gateway token (open local access)",
-        "Set HERMUS_GATEWAY_TOKEN before exposing /remote or /computer/dashboard beyond localhost.",
+        "Set HERMUS_GATEWAY_TOKEN before exposing /control (or /remote, /computer APIs) beyond localhost.",
         level="recommended",
     ))
 

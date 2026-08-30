@@ -208,17 +208,16 @@ def test_events_recent_limit_is_clamped(client):
     assert body["count"] <= 5
 
 
-def test_dashboard_wires_the_telemetry_feed():
-    """The feed must actually be fed: JS writes to #overviewActivity."""
-    html = Path("gateway/dashboard.html").read_text(encoding="utf-8")
-    assert 'id="overviewActivity"' in html
-    assert "function pushTelemetryEvent" in html
-    assert "function loadTelemetry" in html
+def test_control_room_wires_the_telemetry_feed():
+    """The canonical control room must actually consume the live telemetry feed."""
+    html = Path("gateway/control.html").read_text(encoding="utf-8")
+    # Live event stream (WS /dashboard/events) + polling fallback (/events/recent).
     assert "/events/recent?limit=" in html
-    assert "/dashboard/events" in html, "WebSocket is the primary telemetry path"
-    assert ".feed-item" in html, "the feed needs real CSS"
-    # The permanent placeholder text is gone from the served markup.
+    assert "/dashboard/events" in html, "the live event stream is the telemetry path"
+    assert "telemetry" in html.lower()
+    # No simulated success / placeholder text.
     assert "Loading activity feed…" not in html
+    assert "never simulates success" in html or "never owns truth" in html
 
 
 # ---------------------------------------------------------------------------
@@ -263,13 +262,16 @@ def test_doctor_report_round_trip(client, monkeypatch):
     assert client.get("/doctor/reports").json()["count"] >= 1
 
 
-def test_dashboard_has_the_engine_card_and_doctor_pane():
-    html = Path("gateway/dashboard.html").read_text(encoding="utf-8")
-    assert 'id="engineCard"' in html
-    assert 'id="engineActionBanner"' in html
-    assert 'id="engineRoles"' in html
-    assert "downloadEngineModel(" in html
-    assert 'id="pane-doctor"' in html
-    assert "switchPane('doctor')" in html
-    # setup.sh must stay runtime-only: models are the dashboard's job.
-    assert "setup.sh installs the runtime only" in html
+def test_control_room_has_doctor_and_computer_panels():
+    """The canonical control room surfaces the real engine/computer/doctor capability."""
+    html = Path("gateway/control.html").read_text(encoding="utf-8")
+    # The control room drives the real /doctor/* and /computer/* backend APIs.
+    assert "/doctor/run" in html
+    assert "/doctor/status" in html
+    assert "/computer/status" in html
+    assert "/computer/run" in html
+    # Real snapshot + command paths, not decorative UI.
+    assert "/api/v1/commands" in html
+    assert "Snapshot" in html and "Replay" in html
+    # No legacy engine card / pane markup remains.
+    assert 'id="engineCard"' not in html and 'id="pane-doctor"' not in html

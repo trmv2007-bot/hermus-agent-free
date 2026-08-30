@@ -11,75 +11,65 @@
     --acc:#58a6ff;
   }
   * { box-sizing:border-box; }
-  body {
-    margin:0; background:var(--bg); color:var(--fg);
-    font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  header {
-    padding:16px 22px; border-bottom:1px solid var(--line);
-    display:flex; align-items:center; gap:14px;
-  }
-  header .logo { font-weight:700; letter-spacing:.06em; color:var(--acc); }
-  header .health { margin-left:auto; display:flex; gap:10px; align-items:center; }
-  .pill {
-    padding:3px 10px; border-radius:999px; font-size:12px;
-    border:1px solid var(--line); color:var(--muted);
-  }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header { padding:16px 22px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .logo { font-weight:700; letter-spacing:.06em; color:var(--acc); }
+  .health { margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .pill { padding:3px 10px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
   .pill.ok { color:var(--ok); border-color:var(--ok); }
   .pill.err { color:var(--err); border-color:var(--err); }
-  main { padding:20px 22px; display:grid; grid-template-columns:1fr 1fr; gap:18px; }
-  section {
-    background:var(--panel); border:1px solid var(--line); border-radius:10px;
-    padding:16px; min-width:0;
-  }
-  section h2 {
-    margin:0 0 12px; font-size:12px; text-transform:uppercase; letter-spacing:.12em;
-    color:var(--muted);
-  }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; }
-  .kpi {
-    background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:12px;
-  }
+  nav { display:flex; gap:6px; padding:10px 22px; border-bottom:1px solid var(--line); }
+  nav button { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  nav button.on { color:var(--acc); border-color:var(--acc); }
+  main { padding:20px 22px; }
+  .tab { display:none; }
+  .tab.on { display:block; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:900px){ .grid{grid-template-columns:1fr;} }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+  section h2 { margin:0 0 12px; font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); }
+  .cells { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; }
+  .kpi { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:12px; }
   .kpi .v { font-size:22px; font-weight:700; }
   .kpi .l { font-size:11px; color:var(--muted); margin-top:4px; }
   ul { list-style:none; margin:0; padding:0; }
-  li.row {
-    display:flex; justify-content:space-between; gap:12px; padding:8px 10px;
-    border-bottom:1px solid var(--line); font-size:13px;
-  }
+  li.row { display:flex; justify-content:space-between; gap:12px; padding:8px 10px;
+    border-bottom:1px solid var(--line); font-size:13px; }
   li.row:last-child { border-bottom:none; }
   .tag { color:var(--muted); }
   code { color:var(--acc); }
-  .feed {
-    height:260px; overflow:auto; font-size:12.5px;
-    background:#0e1420; border:1px solid var(--line); border-radius:8px; padding:10px;
-  }
+  .feed { height:300px; overflow:auto; font-size:12.5px; background:#0e1420;
+    border:1px solid var(--line); border-radius:8px; padding:10px; }
   .feed div { padding:2px 0; border-bottom:1px dashed #1c2534; }
   .feed .t { color:var(--muted); }
   .feed .e { color:var(--acc); }
   .feed .note { color:var(--muted); font-style:italic; }
-  input, button, select {
-    background:var(--panel2); color:var(--fg); border:1px solid var(--line);
-    border-radius:6px; padding:8px 10px; font:inherit;
-  }
+  input, button, select { background:var(--panel2); color:var(--fg); border:1px solid var(--line);
+    border-radius:6px; padding:8px 10px; font:inherit; }
   input, select { width:100%; }
   input:focus, select:focus { outline:none; border-color:var(--acc); }
   button { cursor:pointer; background:var(--acc); color:#06121f; font-weight:600; }
   button.ghost { background:transparent; color:var(--acc); }
+  button.danger { background:var(--err); }
   .bar { display:flex; gap:8px; margin:10px 0; }
   .bar input { flex:1; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
   th { color:var(--muted); font-weight:600; text-transform:uppercase; font-size:11px; }
   .status { padding:1px 7px; border-radius:999px; font-size:11px; }
-  .s-queued{background:#20304a;color:#8fb7ff}.s-running{background:#173e24;color:#4ae27a}
-  .s-succeeded{background:#173e24;color:#4ae27a}.s-failed{background:#421c1c;color:#ff9a97}
+  .s-queued,.s-idle,.s-created{background:#20304a;color:#8fb7ff}
+  .s-running,.s-active{background:#173e24;color:#4ae27a}
+  .s-succeeded,.s-completed{background:#173e24;color:#4ae27a}
+  .s-failed,.s-critical{background:#421c1c;color:#ff9a97}
   .s-cancelled{background:#3a3444;color:#c9b8ff}
   .hint { color:var(--muted); font-size:12px; }
   footer { padding:12px 22px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
   .col { display:flex; flex-direction:column; gap:18px; }
   .full { grid-column:1 / -1; }
-  @media (max-width:900px){ main{grid-template-columns:1fr;} }
+  details { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; }
+  summary { cursor:pointer; color:var(--acc); }
 </style>
 </head>
 <body>
@@ -88,200 +78,368 @@
   <div class="health">
     <span id="conn" class="pill">connecting…</span>
     <span id="rtt" class="pill">—</span>
+    <span id="jobcount" class="pill">—</span>
   </div>
 </header>
+<nav>
+  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="jobs">Jobs</button>
+  <button data-tab="telemetry">Telemetry</button>
+  <button data-tab="computer">Computer</button>
+  <button data-tab="remote">Remote</button>
+  <button data-tab="doctor">Doctor</button>
+</nav>
 
 <main>
-  <!-- SNAPSHOT: current truth from real probes (never fabricated) -->
-  <section>
-    <h2>Snapshot · System health</h2>
-    <div class="grid" id="health"></div>
-    <div class="hint">Snapshot = `GET /api/v1/system/health` — every value comes from a live probe.</div>
-  </section>
+  <!-- ============ OVERVIEW ============ -->
+  <div class="tab on" id="tab-overview">
+    <div class="grid">
+      <section>
+        <h2>Snapshot · System health</h2>
+        <div class="cells" id="health"></div>
+        <div class="hint">Snapshot = `GET /api/v1/system/health` — every value from a live probe.</div>
+      </section>
+      <section>
+        <h2>Snapshot · Capabilities</h2>
+        <div class="cells" id="caps"></div>
+        <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
+      </section>
+      <section class="full">
+        <h2>Replay · Canonical event log</h2>
+        <div class="bar">
+          <input id="runId" placeholder="run / mission / trace id (e.g. run_abc)" />
+          <button id="replayBtn">Replay timeline</button>
+        </div>
+        <div class="feed" id="log"><div class="note">No run selected — reconstructs state from the durable EventBus.</div></div>
+        <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` re-reads the durable event log.</div>
+      </section>
+      <section class="full">
+        <h2>Command · typed backend command</h2>
+        <div class="bar">
+          <input id="cmdName" placeholder="command e.g. system.health / computer.run" value="system.health" />
+        </div>
+        <div class="bar">
+          <input id="cmdArgs" placeholder='args JSON e.g. {"goal":"..."}' value="{}" />
+          <button id="cmdBtn">POST /api/v1/commands</button>
+        </div>
+        <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
+      </section>
+    </div>
+  </div>
 
-  <section>
-    <h2>Snapshot · Capabilities</h2>
-    <div class="grid" id="caps"></div>
-    <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
-  </section>
-
-  <section class="full">
-    <h2>Snapshot · Job queue <span id="qstatus" class="tag"></span></h2>
-    <table id="jobs">
-      <thead><tr><th>id</th><th>kind</th><th>status</th><th>attempts</th><th>run</th><th>created</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="hint">Snapshot = `GET /jobs` · live = `EventSource /jobs/{id}/events`.</div>
-  </section>
-
-  <!-- REPLAY: reconstruct state from the durable canonical event log -->
-  <section class="col full" style="grid-column:1 / -1;">
+  <!-- ============ JOBS ============ -->
+  <div class="tab" id="tab-jobs">
     <section>
-      <h2>Replay · Canonical event log</h2>
-      <div class="bar">
-        <input id="runId" placeholder="run / mission / trace id to replay (e.g. run_abc)" />
-        <button id="replayBtn">Replay timeline</button>
-      </div>
-      <div class="feed" id="log"><div class="note">No run selected — the log is a pure projection of the durable EventBus.</div></div>
-      <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` reconstructs state by re-reading the durable event log.</div>
+      <h2>Snapshot · Job queue <span id="qstatus" class="tag"></span></h2>
+      <table id="jobs">
+        <thead><tr><th>id</th><th>kind</th><th>status</th><th>attempts</th><th>run</th><th>created</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="hint">Snapshot = `GET /jobs` · live per-job = `EventSource /jobs/{id}/events`.</div>
     </section>
+  </div>
 
+  <!-- ============ TELEMETRY ============ -->
+  <div class="tab" id="tab-telemetry">
     <section>
-      <h2>Command · typed backend command</h2>
+      <h2>Live telemetry · dashboard event bus → canonical EventBus</h2>
       <div class="bar">
-        <input id="cmdName" placeholder="command e.g. mission.resume / keys.add" value="system.health" />
+        <input id="tmSearch" placeholder="filter by type…" />
+        <button id="tmClear">Clear</button>
       </div>
-      <div class="bar">
-        <input id="cmdArgs" placeholder='args JSON e.g. {"goal":"..."}' value="{}" />
-        <button id="cmdBtn">POST /api/v1/commands</button>
-      </div>
-      <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
+      <div class="feed" id="tmFeed"><div class="note">Live stream via `WS /dashboard/events`; fallback poll `GET /events/recent`.</div></div>
+      <div class="hint">All events are bridged onto the one durable `core.events.EventBus`; UI never invents state.</div>
     </section>
-  </section>
+  </div>
+
+  <!-- ============ COMPUTER ============ -->
+  <div class="tab" id="tab-computer">
+    <div class="grid">
+      <section>
+        <h2>Computer agent · status</h2>
+        <div class="cells" id="compStatus"></div>
+        <div class="hint">Snapshot = `GET /computer/status` (real control center + task store).</div>
+      </section>
+      <section>
+        <h2>Run a computer task</h2>
+        <div class="bar"><input id="compTask" placeholder="objective e.g. open the browser" /></div>
+        <div class="bar"><button id="compRun">POST /computer/run</button><button id="compStop" class="danger">Emergency stop</button></div>
+        <div class="feed" id="compOut"><div class="note">Runs through the canonical queue; observes real outcome.</div></div>
+      </section>
+      <section class="full">
+        <h2>Computer tasks · real task store</h2>
+        <table id="compTasks">
+          <thead><tr><th>id</th><th>status</th><th>updated</th><th>summary</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ REMOTE ============ -->
+  <div class="tab" id="tab-remote">
+    <div class="grid">
+      <section>
+        <h2>Remote control · snapshot</h2>
+        <div class="cells" id="remoteStatus"></div>
+        <div class="hint">Snapshot = `GET /remote/status` + `GET /remote/approvals`.</div>
+      </section>
+      <section>
+        <h2>Approvals · pending prompts</h2>
+        <ul id="approvals"></ul>
+        <div class="feed" id="remoteOut" style="height:120px"><div class="note">Approve / reject a real pending action prompt.</div></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ DOCTOR ============ -->
+  <div class="tab" id="tab-doctor">
+    <section>
+      <h2>Doctor · real diagnostics</h2>
+      <div class="cells" id="doctor"></div>
+      <div class="bar"><button id="docRun">POST /doctor/run</button></div>
+      <div class="feed" id="docOut" style="height:180px"><div class="note">Doctor probes real dependencies and reports exact unavailable capabilities.</div></div>
+    </section>
+  </div>
 </main>
 
 <footer>
-  HERMUS control room — snapshot + replay projection only. The UI never owns truth:
-  state is either a real probe (snapshot) or reconstructable from the durable event
-  log (replay).
+  HERMUS control room — the single production UI. Snapshot (live probe) + replay (durable
+  event log) + typed commands only. The UI never owns truth and never simulates success.
 </footer>
 
 <script>
 const $ = (s) => document.querySelector(s);
 const conn = $("#conn");
-let lastSeenAt = Date.now();
+const rtt = $("#rtt");
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+  (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+function healthy(){ conn.textContent="live"; conn.className="pill ok"; }
+function down(){ conn.textContent="offline (preview)"; conn.className="pill err"; }
 
-function healthy() {
-  conn.textContent = "live";
-  conn.className = "pill ok";
-}
-function down() {
-  conn.textContent = "offline (preview)";
-  conn.className = "pill err";
-}
-function getJSON(url) {
+function getJSON(url){
+  const t0 = Date.now();
   return fetch(url, { headers: { "Accept": "application/json" } }).then((r) => {
+    const ms = Date.now() - t0;
     if (!r.ok) throw new Error(url + " -> " + r.status);
-    return r.json();
+    return r.json().then((j) => ({ j, ms }));
   });
 }
-function esc(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+function kpi(v,l){ return `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`; }
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
+  document.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
+  b.classList.add("on");
+  const tab = document.getElementById("tab-" + b.dataset.tab);
+  if (tab) tab.classList.add("on");
+  refreshTab(b.dataset.tab);
+}));
+function refreshTab(name){
+  if (name === "jobs") refreshJobs();
+  else if (name === "telemetry") refreshTelemetry(true);
+  else if (name === "computer") refreshComputer();
+  else if (name === "remote") refreshRemote();
+  else if (name === "doctor") refreshDoctor();
 }
 
-// ---------- SNAPSHOT: health ----------
-function renderHealth(h) {
-  const keys = ["python", "venv", "ok"];
-  let html = "";
-  html += kpi(esc(String(h.python || "-")), "python");
-  html += kpi(esc(String(h.venv || "-")), "venv");
-  html += kpi(h.ok ? "ok" : "degraded", "health");
+// ---------- OVERVIEW ----------
+function renderHealth(h){
   const caps = h.capabilities || {};
-  Object.keys(caps).slice(0, 4).forEach((k) => {
-    html += kpi(esc(String(caps[k].status || caps[k].present)), k.replace(/^system\./, ""));
-  });
+  let html = kpi(h.ok ? "ok" : "degraded", "health");
+  html += kpi(esc(h.python || "-"), "python");
+  html += kpi(esc(h.venv || "-"), "venv");
+  Object.keys(caps).slice(0, 5).forEach((k) =>
+    html += kpi(esc(caps[k].status || caps[k].present), k.replace(/^system\./, "")));
   $("#health").innerHTML = html || '<div class="kpi"><div class="v">—</div><div class="l">no data</div></div>';
 }
-function kpi(v, l) { return `<div class="kpi"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`; }
-
-// ---------- SNAPSHOT: capabilities ----------
-function renderCaps(c) {
+function renderCaps(c){
   const providers = c.providers || [];
-  const tools = c.tools || {};
+  const circ = c.circuit || {};
   let html = kpi(String(c.tool_count ?? "?"), "tools");
   html += kpi(String(providers.length), "providers");
-  const circ = c.circuit || {};
   html += kpi(String(Object.keys(circ).length), "circuit entries");
   $("#caps").innerHTML = html;
 }
-
-// ---------- SNAPSHOT: jobs ----------
-async function refreshJobs() {
-  const body = $("#jobs tbody");
-  try {
-    const jobs = await getJSON("/jobs");
-    const rows = (Array.isArray(jobs) ? jobs : jobs.jobs || []).slice(0, 30);
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="hint">queue idle</td></tr>'; return; }
-    body.innerHTML = rows.map((j) => `<tr>
-      <td><code>${esc(j.id)}</code></td>
-      <td>${esc(j.kind)}</td>
-      <td><span class="status s-${esc(j.status)}">${esc(j.status)}</span></td>
-      <td>${esc(j.attempts)}/${esc(j.max_attempts)}</td>
-      <td>${esc(j.run_id || "")}</td>
-      <td>${esc(j.created_at || "")}</td>
-    </tr>`).join("");
-  } catch (e) {
-    body.innerHTML = `<tr><td colspan="6" class="hint">queue endpoint unavailable: ${esc(e.message)}</td></tr>`;
-  }
+async function refreshOverview(){
+  try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; healthy(); }
+  catch(e){ down(); $("#health").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">api offline</div></div>'; }
+  try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); } catch(e){}
 }
 
-// ---------- SNAPSHOT: queue/status (renders into the job table header area) ----------
-async function refreshStatus() {
-  try {
-    const st = await getJSON("/queue/status");
-    const strip = $("#qstatus");
-    if (!strip) return;
-    const bs = st.by_status || {};
-    strip.textContent = "backend=" + (st.backend || "?") +
-      " · workers=" + (st.workers || "?") +
-      " · " + Object.entries(bs).map(([k, v]) => (v + " " + k)).join(", ");
-  } catch (e) { /* queue status optional */ }
-}
-
-// ---------- REPLAY: canonical timeline ----------
-function replayTimeline(runId) {
+function replayTimeline(runId){
   const log = $("#log");
+  if (!runId) { log.innerHTML = '<div class="note">enter a run/mission id</div>'; return; }
   log.innerHTML = '<div class="note">replaying ' + esc(runId) + '…</div>';
   getJSON("/api/v1/runs/" + encodeURIComponent(runId) + "/timeline")
-    .then((r) => {
-      const events = (r.timeline || []).slice(-60);
-      if (!events.length) { log.innerHTML = '<div class="note">no canonical events for ' + esc(runId) + '</div>'; return; }
-      log.innerHTML = events.map((e) =>
-        `<div><span class="t">${esc(e.ts || e.timestamp || "")}</span> ` +
-        `<span class="e">${esc(e.type)}</span> ${esc(e.command || e.status || e.session_id || "")}</div>`).join("") +
-        `<div class="note">${events.length} events (from the durable ledger)</div>`;
+    .then(({ j }) => {
+      const ev = (j.timeline || []).slice(-60);
+      if (!ev.length) { log.innerHTML = '<div class="note">no canonical events for ' + esc(runId) + '</div>'; return; }
+      log.innerHTML = ev.map((e) => `<div><span class="t">${esc(e.ts || e.timestamp || "")}</span> <span class="e">${esc(e.type)}</span> ${esc(e.command || e.status || e.session_id || "")}</div>`).join("")
+        + `<div class="note">${ev.length} events (durable ledger)</div>`;
     })
     .catch((e) => { log.innerHTML = '<div class="note">replay failed: ' + esc(e.message) + '</div>'; });
 }
 
-// ---------- COMMAND ----------
-function postCommand() {
+function postCommand(){
   const out = $("#cmdOut");
   const cmd = $("#cmdName").value.trim();
   let args = {};
-  try { args = JSON.parse($("#cmdArgs").value || "{}"); } catch (e) {
-    out.innerHTML = '<div class="note">invalid args JSON: ' + esc(e.message) + '</div>'; return;
-  }
+  try { args = JSON.parse($("#cmdArgs").value || "{}"); }
+  catch(e){ out.innerHTML = '<div class="note">invalid args JSON: ' + esc(e.message) + '</div>'; return; }
   out.innerHTML = '<div class="note">sending ' + esc(cmd) + '…</div>';
-  fetch("/api/v1/commands", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ command: cmd, args: args, source: "control" }),
-  }).then((r) => r.json()).then((d) => {
-    out.innerHTML = '<div>ok: <span class="e">' + esc(d.ok) + '</span> ' +
-      'trace <code>' + esc(d.trace_id) + '</code> command <code>' + esc(d.command_id) + '</code></div>';
-  }).catch((e) => { out.innerHTML = '<div class="note">command failed: ' + esc(e.message) + '</div>'; });
+  fetch("/api/v1/commands", { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ command: cmd, args, source: "control" }) })
+    .then((r) => r.json()).then((d) => {
+      out.innerHTML = '<div>ok: <span class="e">' + esc(d.ok) + '</span> trace <code>' + esc(d.trace_id) + '</code> command <code>' + esc(d.command_id) + '</code></div>';
+    })
+    .catch((e) => { out.innerHTML = '<div class="note">command failed: ' + esc(e.message) + '</div>'; });
 }
 
-// ---------- bootstrap ----------
-async function bootstrap() {
-  refreshJobs();
+// ---------- JOBS ----------
+async function refreshJobs(){
+  const body = $("#jobs tbody");
   try {
-    const h = await getJSON("/api/v1/system/health"); renderHealth(h); healthy();
-  } catch (e) { down(); $("#health").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">api offline</div></div>'; }
-  try {
-    const c = await getJSON("/api/v1/system/capabilities"); renderCaps(c);
-  } catch (e) { /* capability snapshot optional */ }
-  try { await refreshStatus(); } catch (e) {}
-  lastSeenAt = Date.now();
+    const { j } = await getJSON("/jobs");
+    const rows = (Array.isArray(j) ? j : j.jobs || []).slice(0, 60);
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="hint">queue idle</td></tr>'; }
+    else body.innerHTML = rows.map((x) => `<tr><td><code>${esc(x.id)}</code></td><td>${esc(x.kind)}</td><td><span class="status s-${esc(x.status)}">${esc(x.status)}</span></td><td>${esc(x.attempts)}/${esc(x.max_attempts)}</td><td>${esc(x.run_id || "")}</td><td>${esc(x.created_at || "")}</td></tr>`).join("");
+    const n = Array.isArray(j) ? j.length : (j.jobs || []).length;
+    $("#jobcount").textContent = n + " jobs";
+    const { j: st } = await getJSON("/queue/status");
+    const bs = st.by_status || {};
+    $("#qstatus").textContent = "backend=" + (st.backend || "?") + " · workers=" + (st.workers || "?") + " · " + Object.entries(bs).map(([k,v])=>v+" "+k).join(", ");
+  } catch(e){ body.innerHTML = `<tr><td colspan="6" class="hint">queue unavailable: ${esc(e.message)}</td></tr>`; }
 }
 
+// ---------- TELEMETRY ----------
+let tmWs = null;
+function tmAppend(e){
+  const feed = $("#tmFeed");
+  const f = $("#tmSearch").value.trim();
+  const t = (e && e.type) || "";
+  if (f && !t.includes(f)) return;
+  const el = document.createElement("div");
+  el.innerHTML = `<span class="t">${esc(e.ts || e.timestamp || "")}</span> <span class="e">${esc(t)}</span> ${esc(e.command || e.status || "")}`;
+  feed.prepend(el);
+  while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+}
+async function refreshTelemetry(force){
+  try {
+    const { j } = await getJSON("/events/recent?limit=50");
+    const feed = $("#tmFeed");
+    if (force || !feed.dataset.ready) {
+      feed.innerHTML = "";
+      (j.events || []).slice().reverse().forEach(tmAppend);
+      feed.dataset.ready = "1";
+    }
+  } catch(e){}
+}
+function openTmStream(){
+  try {
+    tmWs = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/dashboard/events");
+    tmWs.onmessage = (ev) => {
+      try { const msg = JSON.parse(ev.data); if (msg && msg.kind === "snapshot") msg.events.forEach(tmAppend); else if (msg && msg.id) tmAppend(msg); } catch(e){}
+    };
+  } catch(e){ /* poll fallback below */ }
+  // poll fallback in case the WS is unavailable (e.g. static preview / no token)
+  setInterval(() => { try { refreshTelemetry(false); } catch(e){} }, 5000);
+}
+
+// ---------- COMPUTER ----------
+async function refreshComputer(){
+  try {
+    const { j: st } = await getJSON("/computer/status");
+    const cells = $("#compStatus");
+    cells.innerHTML = kpi(st.active ? "active" : "halted", "control") + kpi(String(st.stats?.running ?? st.running ?? 0), "running")
+      + kpi(String(st.stats?.total ?? 0), "total tasks") + kpi(String((st.recorder||{}).running ? "on" : "off"), "recorder");
+    const body = $("#compTasks tbody");
+    const tasks = st.tasks || st.list || [];
+    body.innerHTML = tasks.slice(0, 30).map((t) => `<tr><td><code>${esc(t.task_id || t.id || "")}</code></td><td><span class="status s-${esc(t.status)}">${esc(t.status)}</span></td><td>${esc(t.updated_at || "")}</td><td>${esc(t.goal || t.task || t.summary || "")}</td></tr>`).join("")
+      || '<tr><td colspan="4" class="hint">no computer tasks</td></tr>';
+  } catch(e){ $("#compStatus").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">computer api unavailable</div></div>'; }
+}
+function compRun(){
+  const out = $("#compOut");
+  const task = $("#compTask").value.trim();
+  if (!task) { out.innerHTML = '<div class="note">enter an objective first</div>'; return; }
+  out.innerHTML = '<div class="note">submitting ' + esc(task) + '…</div>';
+  fetch("/computer/run", { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ objective: task }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>ok: <span class="e">' + esc(d.ok ?? d.success) + '</span> task <code>' + esc(d.task_id || d.run_id || "") + '</code></div>'; refreshComputer(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">run failed: ' + esc(e.message) + '</div>'; });
+}
+function compStop(){
+  const out = $("#compOut");
+  fetch("/computer/control/emergency-stop", { method:"POST", headers:{ "Content-Type":"application/json" }, body:"{}" })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>emergency stop: <span class="e">' + esc(d.ok ?? d.halted) + '</span></div>'; refreshComputer(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">stop failed: ' + esc(e.message) + '</div>'; });
+}
+
+// ---------- REMOTE ----------
+async function refreshRemote(){
+  try {
+    const { j: st } = await getJSON("/remote/status");
+    $("#remoteStatus").innerHTML = kpi(esc(String(st.approval?.enabled ?? st.enabled ?? false)), "approval gate")
+      + kpi(esc(String(st.control?.active ?? st.active ?? false)), "active")
+      + kpi(esc(String((st.control?.halted ?? st.halted) ? "halted" : "round")), "state");
+    const { j: ap } = await getJSON("/remote/approvals");
+    const hist = ap.history || [];
+    const pending = (hist || []).filter((x) => x && x.status === "pending");
+    const ul = $("#approvals");
+    if (!pending.length) { ul.innerHTML = '<li class="hint">no pending approvals</li>'; return; }
+    ul.innerHTML = pending.map((p) => `<li class="row">
+      <span><code>${esc(p.prompt_id || p.id || "")}</code> · ${esc(p.summary || p.action || p.description || p.kind || "")}</span>
+      <span><button class="ghost" data-act="approve" data-id="` + esc(p.prompt_id || p.id || "") + `">approve</button>
+      <button class="ghost" data-act="reject" data-id="` + esc(p.prompt_id || p.id || "") + `">reject</button></span>
+    </li>`).join("");
+    ul.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => remoteAct(b.dataset.act, b.dataset.id)));
+  } catch(e){ $("#remoteStatus").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">remote api unavailable</div></div>'; }
+}
+function remoteAct(act, id){
+  const out = $("#remoteOut");
+  fetch("/remote/" + act, { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ prompt_id: id, by: "control" }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>' + esc(act) + ' ' + esc(id) + ': <span class="e">' + esc(d.ok ?? d.success ?? d.result ?? "done") + '</span></div>'; refreshRemote(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">' + esc(act) + ' failed: ' + esc(e.message) + '</div>'; });
+}
+
+// ---------- DOCTOR ----------
+async function refreshDoctor(){
+  try {
+    const { j: d } = await getJSON("/doctor/status");
+    $("#doctor").innerHTML = kpi(esc(String(d.engine_status || d.status || "-")), "engine")
+      + kpi(esc(String(d.worst_severity || "-")), "worst") + kpi(String(d.finding_count ?? d.counts?.total ?? 0), "findings")
+      + kpi(String(d.stuck?.length ?? 0), "stuck");
+  } catch(e){ $("#doctor").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">doctor api unavailable</div></div>'; }
+}
+function docRun(){
+  const out = $("#docOut");
+  out.innerHTML = '<div class="note">running doctor…</div>';
+  fetch("/doctor/run", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ use_llm:false, ask_internet:false }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>status: <span class="e">' + esc(d.status) + '</span> findings: <span class="e">' + esc(d.findings?.length ?? 0) + '</span></div>'; refreshDoctor(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">doctor failed: ' + esc(e.message) + '</div>'; });
+}
+
+// ---------- wiring ----------
 $("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
 $("#cmdBtn").addEventListener("click", postCommand);
 $("#runId").addEventListener("keydown", (e) => { if (e.key === "Enter") replayTimeline($("#runId").value.trim()); });
 $("#cmdName").addEventListener("keydown", (e) => { if (e.key === "Enter") postCommand(); });
+$("#tmClear").addEventListener("click", () => { const f = $("#tmFeed"); f.innerHTML = ""; f.dataset.ready = ""; refreshTelemetry(true); });
+$("#compRun").addEventListener("click", compRun);
+$("#compStop").addEventListener("click", compStop);
+$("#docRun").addEventListener("click", docRun);
 
-bootstrap();
-setInterval(() => { refreshJobs(); getJSON("/api/v1/system/health").then(renderHealth).catch(() => down()); }, 8000);
+async function boot(){
+  await refreshOverview();
+  await refreshJobs();
+  refreshTelemetry(true);
+  openTmStream();
+}
+boot();
+setInterval(() => { refreshOverview(); refreshJobs(); try { refreshTelemetry(false); } catch(e){} }, 8000);
 </script>
 </body>
 </html>

@@ -200,8 +200,11 @@ def client():
 
 
 def test_gateway_phase_c_d_endpoints(client):
-    assert client.get("/computer/dashboard").status_code == 200
-    assert client.get("/remote").status_code == 200
+    # Real capability is exposed via the /computer/* and /remote/* data APIs;
+    # the HTML-only UI surfaces were consolidated into /control.
+    assert client.get("/control").status_code == 200
+    assert client.get("/computer/dashboard").status_code == 404
+    assert client.get("/remote").status_code == 404
     assert client.get("/computer/resources").status_code == 200
     assert client.get("/remote/status").json()["emergency"]["halted"] is False
     assert client.get("/remote/approvals").status_code == 200

@@ -281,9 +281,9 @@ fi
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 PORT="${1:-8000}"
 echo -e "\033[0;36m☤ Hermus Live Gateway\033[0m"
-echo -e "  • Control Center:   \033[1;36mhttp://localhost:${PORT}/dashboard\033[0m"
-echo -e "  • Jarvis Spatial:   \033[1;35mhttp://localhost:${PORT}/jarvis\033[0m"
-echo -e "  • Computer Agent:   \033[1mhttp://localhost:${PORT}/computer/dashboard\033[0m"
+echo -e "  • Control Center:   \033[1;36mhttp://localhost:${PORT}/control\033[0m"
+echo -e "  • Jarvis Spatial:   \033[1;35mhttp://localhost:${PORT}/control#telemetry\033[0m"
+echo -e "  • Computer Agent:   \033[1mhttp://localhost:${PORT}/control#computer\033[0m"
 echo -e "  • Pocket Remote:    \033[1mhttp://localhost:${PORT}/remote\033[0m"
 echo ""
 exec python "$ROOT/hermus.py" gateway start --port "$PORT"
@@ -358,14 +358,13 @@ for included in app.routes:
         routes.extend(original.routes)
 paths = {route.path for route in routes if getattr(route, "path", None)}
 required_routes = {
-    "/jarvis", "/command", "/api/jarvis/status", "/navigator/fetch",
+    "/control", "/command", "/api/jarvis/status", "/navigator/fetch",
     "/run/steer", "/run/cancel/{run_id}", "/stream/run/{run_id}",
+    "/api/v1/system/health", "/jobs", "/queue/status",
 }
 missing_routes = required_routes - paths
 required_assets = [
-    Path("gateway/jarvis_dashboard.html"),
-    Path("gateway/static/hermus-client.js"),
-    Path("gateway/static/jarvis-control.js"),
+    Path("gateway/control.html"),
 ]
 missing_assets = [str(path) for path in required_assets if not path.is_file()]
 if missing_routes or missing_assets:
@@ -391,9 +390,9 @@ echo -e "     ${C_GREEN}source activate.sh && hermus-gateway${C_RESET}"
 echo -e "     ${C_MUTED}or directly:${C_RESET} ${C_CYAN}./bin/hermus-gateway${C_RESET}  ${C_MUTED}(or ${C_CYAN}./hermus-gateway${C_MUTED})${C_RESET}"
 echo ""
 echo -e "  ${C_BOLD}2. Open in your Browser:${C_RESET}"
-echo -e "     • Setup Wizard & Chat:  ${C_CYAN}http://localhost:8000/dashboard${C_RESET}"
-echo -e "     • Jarvis Spatial HUD:   ${C_CYAN}http://localhost:8000/jarvis${C_RESET}"
-echo -e "     • Computer Agent Deck:  ${C_CYAN}http://localhost:8000/computer/dashboard${C_RESET}"
+echo -e "     • Setup Wizard & Chat:  ${C_CYAN}http://localhost:8000/control${C_RESET}"
+echo -e "     • Jarvis Spatial HUD:   ${C_CYAN}http://localhost:8000/control#telemetry${C_RESET}"
+echo -e "     • Computer Agent Deck:  ${C_CYAN}http://localhost:8000/control#computer${C_RESET}"
 echo -e "     • Mobile Pocket Remote: ${C_CYAN}http://localhost:8000/remote${C_RESET}"
 echo ""
 echo -e "  ${C_BOLD}3. Use in Terminal (CLI):${C_RESET}"

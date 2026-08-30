@@ -8,9 +8,9 @@ from core.evolution import (
 
 def proposal(**kwargs):
     values = {
-        "title": "Improve dashboard",
+        "title": "Improve control room",
         "description": "Make task state easier to understand",
-        "files": ["gateway/dashboard.html"],
+        "files": ["gateway/control.html"],
         "tests": ["pytest -q tests/test_living_dashboard.py"],
     }
     values.update(kwargs)

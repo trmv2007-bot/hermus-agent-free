@@ -499,7 +499,7 @@ def test_gateway_router_split_surface():
 
     expected = {
         ("/command", "POST"), ("/platforms", "GET"), ("/api/status", "GET"),
-        ("/dashboard", "GET"), ("/webhook/telegram", "POST"),
+        ("/control", "GET"), ("/webhook/telegram", "POST"),
         ("/channels/status", "GET"), ("/telegram/send", "POST"),
         ("/tools", "GET"), ("/mcp/servers", "GET"), ("/fleet/run", "POST"),
         ("/keys/list", "GET"), ("/keys/add", "POST"), ("/custom-apis/add", "POST"),

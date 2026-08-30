@@ -12,21 +12,17 @@ from core.speech import SpeechEngine, prepare_speech_text
 from gateway.gateway import app
 
 
-def test_dashboard_and_local_assets_are_served():
+def test_single_control_room_is_served_projection():
+    """The one production UI is /control; legacy dashboard surfaces are gone."""
     client = TestClient(app)
-    page = client.get("/dashboard")
+    page = client.get("/control")
     assert page.status_code == 200
-    assert "LIVE MISSION CONTROL" in page.text
-    assert 'id="talkMode"' in page.text
-    assert "/dashboard-assets/living-deck.js" in page.text
-
-    css = client.get("/dashboard-assets/living-deck.css")
-    js = client.get("/dashboard-assets/living-deck.js")
-    assert css.status_code == 200 and "theatre" in css.text
-    assert js.status_code == 200 and "openTalkingMode" in js.text
-
-    legacy = client.get("/dashboard/legacy")
-    assert legacy.status_code == 200 and "Hermus" in legacy.text
+    assert "HERMUS" in page.text and "Snapshot" in page.text and "Replay" in page.text
+    # No legacy dashboard/static surface remains reachable.
+    assert client.get("/dashboard").status_code == 404
+    assert client.get("/dashboard/legacy").status_code == 404
+    assert client.get("/dashboard-assets/living-deck.js").status_code == 404
+    assert client.get("/dashboard-assets/living-deck.css").status_code == 404
 
 
 def test_dashboard_status_and_event_websocket():

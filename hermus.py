@@ -2094,7 +2094,7 @@ def main():
                 print(f"Behind by: {result.get('behind_by',1)} commit(s)")
                 print(f"Remote URL: {result.get('remote_url','')}")
                 print("\nTo update: Run 'hermus update' without --check or 'git pull' - shows in dashboard and CLI")
-                print("Dashboard will show banner if update available at http://localhost:8000/dashboard")
+                print("Dashboard will show banner if update available at http://localhost:8000/control")
             elif result.get("up_to_date"):
                 print(f"\n✅ Up to date! {result.get('message')}")
             else:
@@ -2123,7 +2123,7 @@ def main():
             if result.get("update_available"):
                 print(f"\n🚀 Update available! {result.get('message')}")
                 print(f"   Run 'hermus update' to update - shows in dashboard and CLI")
-                print(f"   Dashboard http://localhost:8000/dashboard will show banner")
+                print(f"   Dashboard http://localhost:8000/control will show banner")
         except Exception:
             pass
         print("Starting TUI (full terminal interface with slash commands)...")
