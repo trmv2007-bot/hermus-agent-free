@@ -80,27 +80,28 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 
 ---
 
-## 4. Legacy components — relocated to compat / read-only
+## 4. Legacy components — relocated to compat / read-only / deleted
 
-These were **not deleted** (their consumers and the test suite still reference
-them) but are no longer a writable production path for a canonical subsystem. Each
-has an explicit removal milestone once its consumers are migrated.
+Clean-slate rule: **one responsibility = one production implementation.** Compatibility
+code may exist only during a controlled migration and must have a deletion milestone.
+The final tree must not contain two competing implementations.
 
-| Legacy | Now | Why it moved |
+| Subsystem | State | Detail |
 |---|---|---|
-| `core/memory.py` | `core/compat/legacy_memory.py` (read-only) | Memory 2.0 is canonical; v1 is a migration source only |
-| `core/computer/world_state.py` (v1) | read-only migration source | `WorldStateV2` is canonical |
-| `AutonomousRunner` (`core/autonomous.py`) | behind `mission_runtime_enabled` flag | `MissionEngine` is the only autonomy engine |
-| `run_events` / `dashboard_events` / `computer.events` | bridged via `core.events.LegacyEventBridge` | one EventBus is canonical |
-| `providers` / `provider_resolver` / `model_fleet` / `router2` / `multi_key` | hidden behind `ModelGateway` | one model-selection path |
-| `setup.sh` / `activate.sh` | thin wrappers delegating to `./hermus bootstrap` | one bootstrap |
+| Autonomy | ✅ **DONE** — `core/autonomous.py` **deleted** | `MissionEngine` is the only autonomy engine; disabling the runtime is a **BLOCKED** state, never a silent downgrade. The marker verifier/diagnoser was rehomed to `core/verifiers.py` (feature depth preserved). |
+| Events | 🟡 **bridged** (`core/dashboard_events.py`) | Every dashboard/gateway/speech event now funnels into the one canonical `core.events.EventBus` (durable, replayable). The dict API is kept only as a migration bridge. |
+| Memory | 🟡 `/core/memory.py` → `core/compat/legacy_memory.py` (read-only) | Memory 2.0 canonical; v1 is a migration source only. |
+| World state | 🟡 `core/computer/world_state.py` (v1) read-only | `WorldStateV2` canonical via `core/state`. |
+| Models | 🟡 `providers`/`provider_resolver`/`model_fleet`/`router2`/`multi_key` hidden behind `ModelGateway` | one model-selection path. |
+| Setup | 🟡 `setup.sh`/`activate.sh` thin wrappers → `./hermus bootstrap` | one bootstrap. |
 
-### Removal milestones (follow-ups)
+### Deletion milestones (follow-ups)
 1. Migrate legacy memory consumers → `core.memory.get_memory()`; delete `core/compat/legacy_memory.py`.
-2. Migrate run/dashboard/computer event publishers → `core.events`; delete the legacy event modules.
+2. Migrate run/dashboard/computer event producers + consumers to `EventEnvelope`; delete the legacy event modules.
 3. Migrate world-state consumers → `WorldStateFacade`; delete v1.
-4. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.
-5. Delete `core/autonomous.py` once no caller uses the legacy runner.
+4. Delete/hide `providers`/`model_fleet`/`router2`/`multi_key` internals behind `ModelGateway`.
+5. Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.
+6. Delete duplicate agent managers / orchestration concepts with no distinct contract.
 
 ---
 
