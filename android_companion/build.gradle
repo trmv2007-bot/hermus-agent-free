@@ -1,0 +1,7 @@
+// Hermus Android Agent Companion — root Gradle build.
+// Build with:   cd android_companion && ./gradlew assembleDebug
+// (Requires the Android SDK + JDK 17 on the host; see README for device setup.)
+plugins {
+    id 'com.android.application' version '8.2.2' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
+}

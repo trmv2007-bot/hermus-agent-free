@@ -16,7 +16,8 @@ from typing import Any, Optional
 
 #: Op classes that require consent. A broader "meta" grant can cover all of them.
 OP_CLASSES = ("screen_capture", "ui_control", "launch_app", "device_info", "notification")
-_ALLOWED_OPS = {"connect", "get_screen", "get_ui_tree", "tap", "type", "back", "launch_app"}
+_ALLOWED_OPS = {"connect", "get_screen", "get_ui_tree", "tap", "type", "back",
+                "launch_app", "observe", "current_app"}
 
 
 class PermissionDenied(RuntimeError):
@@ -113,8 +114,10 @@ class AndroidPermissionManager:
     # -- op -> class --------------------------------------------------------
     @staticmethod
     def op_class(op: str) -> Optional[str]:
-        if op in ("get_screen",):
+        if op in ("get_screen", "observe"):
             return "screen_capture"
+        if op == "current_app":
+            return "device_info"
         if op in ("get_ui_tree", "tap", "type", "back"):
             return "ui_control"
         if op == "launch_app":

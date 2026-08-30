@@ -24,7 +24,10 @@ from .transport import AndroidTransport, AndroidUnavailable, detect_capability
 
 _OP_ALIASES = {"type": "type_text", "connect": "connect", "get_screen": "get_screen",
                "get_ui_tree": "get_ui_tree", "tap": "tap", "back": "back",
-               "launch_app": "launch_app"}
+               "launch_app": "launch_app", "observe": "_observe_transport"}
+
+#: composite ops handled at the facade (not a single transport method)
+_COMPOSITE_OPS = {"observe"}
 
 
 class AndroidTool:
@@ -39,6 +42,28 @@ class AndroidTool:
 
     def _authorize(self, op: str) -> str:
         return self._permissions.require_access(op)
+
+    def observe(self, **kw) -> dict[str, Any]:
+        """Semantic observation: UI hierarchy + screenshot + a model-friendly summary.
+
+        This is the primary intelligence path (§7) — the agent reasons about visible
+        text/buttons/fields and labels, not raw coordinates. Accessible even when only
+        ``ui_control``/``screen_capture`` consent is present (observation is read-only).
+        """
+        if self._transport is None:
+            cap = detect_capability()
+            return {"ok": False, "error": "android_control_unavailable",
+                    "reason": cap.get("reason") or "no Android transport configured"}
+        from .observe import build_observation
+        try:
+            tree = self._transport.get_ui_tree(**kw)
+            screen = self._transport.get_screen(**kw)
+            return {"ok": True, **build_observation(tree, screen=screen)}
+        except AndroidUnavailable as exc:
+            return {"ok": False, "error": "android_control_unavailable", "reason": exc.reason}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": "android_control_unavailable",
+                    "reason": f"{type(exc).__name__}: {exc}"[:300]}
 
     def _dispatch(self, op: str, args: dict[str, Any]) -> dict[str, Any]:
         if self._transport is None:
@@ -73,7 +98,10 @@ class AndroidTool:
                    run_id=run_id)
             return {"ok": False, "error": "android_control_unavailable", "reason": reason}
         try:
-            result = self._dispatch(op, args)
+            if op in _COMPOSITE_OPS:
+                result = self.observe(**args)
+            else:
+                result = self._dispatch(op, args)
         except AndroidUnavailable as exc:
             reason = exc.reason
             record(op, args, ok=False, reason=reason, device=device, op_class=op_class,

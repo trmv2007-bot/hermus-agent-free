@@ -18,8 +18,8 @@ def _tool_def(name: str, desc: str, params: dict[str, Any]) -> dict[str, Any]:
                                              "parameters": params}}
 
 
-def register_android_tools(registry) -> None:
-    tool = get_android_tool()
+def register_android_tools(registry, tool=None) -> None:
+    tool = tool or get_android_tool()
     perms = tool._permissions
 
     # -- device control (permission-gated, audited) --------------------------
@@ -43,6 +43,13 @@ def register_android_tools(registry) -> None:
 
     def android_launch_app(package: str) -> dict[str, Any]:
         return tool.launch_app(package)
+
+    def android_observe() -> dict[str, Any]:
+        # Consent-gated composite observation (screen_capture class).
+        return tool.run("observe", {})
+
+    def android_current_app() -> dict[str, Any]:
+        return tool.run("current_app", {})
 
     def android_capability() -> dict[str, Any]:
         return tool.capability()
@@ -113,6 +120,19 @@ def register_android_tools(registry) -> None:
         "Launch an app by package/activity. Requires 'launch_app' consent.",
         {"type": "object", "properties": {"package": {"type": "string"}},
          "required": ["package"]}), source="core.android")
+
+    registry.register("android_observe", android_observe, _tool_def(
+        "android_observe",
+        "Observe the device screen semantically: visible text, buttons, fields, labels, "
+        "bounds, focused/enabled state, package + screenshot reference. The model should "
+        "reason from this (\"There are three buttons; the target is the one labeled X\") "
+        "rather than raw coordinates. Requires 'screen_capture' consent.",
+        {"type": "object", "properties": {}}), source="core.android")
+
+    registry.register("android_current_app", android_current_app, _tool_def(
+        "android_current_app",
+        "Report the foreground application/package. Requires 'device_info' consent.",
+        {"type": "object", "properties": {}}), source="core.android")
 
     registry.register("android_permission_grant", android_permission_grant, _tool_def(
         "android_permission_grant",
