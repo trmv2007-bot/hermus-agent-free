@@ -24,7 +24,8 @@ from .transport import AndroidTransport, AndroidUnavailable, detect_capability
 
 _OP_ALIASES = {"type": "type_text", "connect": "connect", "get_screen": "get_screen",
                "get_ui_tree": "get_ui_tree", "tap": "tap", "back": "back",
-               "launch_app": "launch_app", "observe": "_observe_transport"}
+               "launch_app": "launch_app", "current_app": "current_app",
+               "observe": "_observe_transport"}
 
 #: composite ops handled at the facade (not a single transport method)
 _COMPOSITE_OPS = {"observe"}
