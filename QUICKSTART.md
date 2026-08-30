@@ -12,18 +12,33 @@ git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
 ```
 
-### Step 2: Run the Single Master Installer
+### Step 2: Bootstrap with One Command
 ```bash
-bash setup.sh
+./hermus bootstrap
 ```
-*(Or run non-interactively in one shot: `bash setup.sh -y`)*
+*(No need to `source` multiple files. If you need OS-level system packages first —
+Node, Bun, Playwright Chromium, ffmpeg, graphics libs — run `bash setup.sh`, which
+now delegates all Python/dependency/layout/health work to this canonical bootstrap.)*
 
-**What this automatically does:**
-1. Installs all required system dependencies (`python3-venv`, `python3-pip`, `git`, `curl`, `ffmpeg`, browser graphics libs).
-2. Sets up the Python virtual environment (`.venv`).
-3. Installs the complete A-to-Z Python stack (`fastapi`, `uvicorn`, `httpx`, `groq`, `pydantic`, `tiktoken`, `rich`, `pytest`, etc.).
-4. Sets up Playwright Chromium binaries for the Computer Agent.
-5. Generates ready-to-run executables (`./hermus`, `./bin/hermus-gateway`, `source activate.sh`).
+**What the canonical bootstrap does (idempotent — safe to run again):**
+1. Detects OS / Python / permissions.
+2. Creates or updates the Python virtual environment (`.venv`).
+3. Installs the pinned runtime dependencies (required set gate the exit code).
+4. Initializes the canonical data/home layout (`data`, `workspace`, `artifacts`, `skills`, `migrations`, `logs`).
+5. Migrates legacy memory/state if present.
+6. Runs health probes and prints one capability summary.
+7. Exits `0` only when **required** capabilities are ready.
+   Optional deps (Playwright, vision, voice, channels, backends) degrade into an
+   explicit `unavailable` state with the exact reason — never a fake success.
+
+Recommended commands:
+```bash
+./hermus bootstrap            # one-command setup + health
+./hermus doctor               # health/diagnostics report
+./hermus start                # dashboard + gateway
+./hermus mission "goal"       # autonomous mission
+./hermus status --live        # live capability state
+```
 
 ---
 

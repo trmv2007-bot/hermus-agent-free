@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any
-from .config import config
+from ..config import config
 
 class Memory:
     """Free memory system: SQLite FTS5 for session search + curated memory + nudges + user model"""
@@ -29,7 +29,7 @@ class Memory:
         a writer commits; ``busy_timeout`` makes concurrent writers wait
         briefly instead of raising 'database is locked'.
         """
-        from .db_registry import db_registry, open_db
+        from ..db_registry import db_registry, open_db
 
         conn = getattr(self._local, "conn", None)
         # A gateway shutdown closes every registered handle; the generation
@@ -67,7 +67,7 @@ class Memory:
         """Close this thread's cached connection (safe to call repeatedly)."""
         conn = getattr(self._local, "conn", None)
         if conn is not None:
-            from .db_registry import db_registry
+            from ..db_registry import db_registry
 
             db_registry.unregister(conn)
             try:
@@ -261,7 +261,7 @@ class Memory:
         context = "\n".join([f"[{r['timestamp']}] {r['role']}: {r['content'][:500]}" for r in results])
         # Use free LLM to summarize
         try:
-            from .llm import free_llm
+            from ..llm import free_llm
             messages = [
                 {"role": "system", "content": "You are a memory summarizer. Summarize prior sessions relevant to query."},
                 {"role": "user", "content": f"Query: {query}\n\nPrior sessions:\n{context}\n\nSummarize what is relevant for cross-session recall."}

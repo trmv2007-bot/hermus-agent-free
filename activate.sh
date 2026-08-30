@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
+# DEPRECATED COMPATIBILITY SHIM (Rebuild §18).
+# The canonical, one-command bootstrap is:  ./hermus bootstrap
+# This file exists only so existing workflows that `source activate.sh` keep
+# working. It contains NO business logic — it only activates the venv and
+# points users at the canonical command surface.
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Check if script is being sourced vs executed
+# Detect if sourced vs executed.
 (return 0 2>/dev/null) && IS_SOURCED=1 || IS_SOURCED=0
 
 if [ "$IS_SOURCED" -eq 1 ]; then
@@ -11,18 +17,12 @@ if [ "$IS_SOURCED" -eq 1 ]; then
   fi
   export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
   export PATH="$ROOT/bin:$ROOT:$PATH"
-  if [ -d "$HOME/.bun/bin" ]; then
-    export PATH="$HOME/.bun/bin:$PATH"
-  fi
-  echo -e "\033[0;32m✓\033[0m \033[1;36mHermus environment activated!\033[0m"
-  echo -e "  Commands now available: \033[1mhermus-gateway\033[0m, \033[1mhermus\033[0m"
+  echo -e "\033[0;32m✓\033[0m \033[1mHermus ready (compat shim).\033[0m"
+  echo -e "   Deprecated: use \033[1;36m./hermus bootstrap\033[0m (one command) instead."
 else
-  # User ran 'bash activate.sh' or './activate.sh' instead of 'source activate.sh'
-  echo -e "\033[1;33m⚠️  Notice:\033[0m 'activate.sh' must be \033[1mSOURCE-loaded\033[0m to persist in your current terminal:"
-  echo -e "  👉 \033[1;32msource activate.sh\033[0m   (or: \033[1;32m. activate.sh\033[0m)"
+  echo -e "\033[1;33m⚠️  'activate.sh' is a deprecated compatibility shim.\033[0m"
+  echo -e "   The one-command setup is: \033[1;36m./hermus bootstrap\033[0m"
   echo ""
-  echo -e "\033[1mAlternatively, launch directly without activating:\033[0m"
-  echo -e "  • Start Dashboard: \033[1;36m./bin/hermus-gateway\033[0m  (or \033[1;36m./hermus-gateway\033[0m)"
-  echo -e "  • Terminal CLI:    \033[1;36m./hermus\033[0m"
-  echo ""
+  echo -e "   Start the gateway:  \033[1;36m./hermus-gateway\033[0m  (or \033[1;36m./bin/hermus-gateway\033[0m)"
+  echo -e "   Terminal CLI:       \033[1;36m./hermus\033[0m"
 fi

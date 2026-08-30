@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Hermus Agent Free — Complete Developer Stack & Master Installer (WSL / Linux)
-# Installs A-to-Z: System APTs, Node.js, npm, Bun, Python Stack, Playwright & Launchers
+# Hermus Agent Free — SYSTEM INSTALLER (WSL / Linux)
+# Installs OS packages (APTs, Node, Bun, Playwright system deps).
 #
-# RUNTIME ONLY. This script deliberately downloads no AI model weights and does
-# not install a local model server. Models are multi-GB and hardware-specific, so
-# they are pulled on demand from the dashboard (Local AI Engine pane) or with
-# `hermus engine download <id>` — see docs/LOCAL_ENGINE.md.
+# NOTE (Rebuild §6, §18): the canonical ONE-COMMAND bootstrap is `./hermus bootstrap`,
+# which creates the venv, installs the pinned Python dependencies, initializes the
+# data layout, migrates legacy state and runs health probes. This script handles the
+# OS-level packages only and then delegates to that canonical bootstrap at the end.
+# It does NOT duplicate launchers or Python dependency logic.
 # =============================================================================
 
 # Auto-re-exec in bash if invoked via sh/dash
@@ -403,3 +404,14 @@ echo -e "     ${C_MUTED}Dashboard → Local AI Engine, or:${C_RESET} ${C_CYAN}./
 echo -e "     ${C_MUTED}NPU/GPU routing, on-demand model downloads and the Hermus doctor:${C_RESET}"
 echo -e "     ${C_MUTED}docs/LOCAL_ENGINE.md${C_RESET}"
 echo ""
+
+# -----------------------------------------------------------------------------
+# STEP 9: Delegate to the canonical one-command bootstrap (Rebuild §6, §18)
+# -----------------------------------------------------------------------------
+step_start "9" "Running canonical bootstrap (./hermus bootstrap)"
+if [ -x "./bin/hermus" ]; then
+  bash "./bin/hermus" bootstrap
+else
+  echo -e "${C_YELLOW}⚠ launcher not generated yet; running bootstrap directly${C_RESET}"
+  ( exec python bootstrap.py )
+fi

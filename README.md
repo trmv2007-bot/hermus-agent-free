@@ -533,13 +533,19 @@ For the project-specific setup flow, see [`QUICKSTART.md`](QUICKSTART.md) and [`
 
 # ⚡ Quick Start & Installation
 
-### 1. 1-Step Master Installation (Linux / WSL / macOS)
+### 1. One-Command Bootstrap (Linux / WSL / macOS)
 
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
-bash setup.sh
+./hermus bootstrap
 ```
+*(`./hermus bootstrap` is the canonical one-command setup: it creates/updates the
+venv, installs the pinned dependencies, initializes the data layout, migrates
+legacy state and prints a capability summary — idempotent and exit-0 only when
+required capabilities are ready. Need OS-level system packages first? Run
+`bash setup.sh`, which delegates the Python/deps/layout/health work to this same
+bootstrap.)*
 
 ### 2. Launch Gateway & Dashboards
 
@@ -668,7 +674,8 @@ The goal is to measure success rate, steps and tool failures instead of treating
 
 | Document | Purpose |
 |---|---|
-| [`ARCHITECTURE_UPGRADES.md`](ARCHITECTURE_UPGRADES.md) | Architecture and reliability upgrades |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | **Post-consolidation architecture (canonical ownership model)** |
+| [`ARCHITECTURE_UPGRADES.md`](ARCHITECTURE_UPGRADES.md) | Historical architecture narrative (superseded, kept for reference) |
 | [`THINKING_SYSTEM_PLAN.md`](THINKING_SYSTEM_PLAN.md) | Counsel/deep-thinking design |
 | [`LIVING_CONTROL_ROOM.md`](LIVING_CONTROL_ROOM.md) | Dashboard/control-room design |
 | [`AUTONOMY_BOUNDARIES.md`](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |

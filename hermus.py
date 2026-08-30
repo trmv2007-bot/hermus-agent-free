@@ -38,6 +38,12 @@ def main():
     gateway_start = gateway_sub.add_parser("start", help="Start gateway")
     gateway_start.add_argument("--port", type=int, default=config.gateway_port)
 
+    # bootstrap subcommand - one idempotent setup/health operation (Rebuild §6, §18)
+    bootstrap_parser = subparsers.add_parser(
+        "bootstrap", help="One-command idempotent setup: venv, deps, layout, migration, health"
+    )
+    bootstrap_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     # doctor subcommand - install/health wizard (Phase D) + Hermus self-repair
     doctor_parser = subparsers.add_parser("doctor", help="Health/installation check for Hermus")
     doctor_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
@@ -632,6 +638,14 @@ def main():
     rb_sub.add_parser('list', help='List saved checkpoints')
 
     args = parser.parse_args()
+
+    if args.command == "bootstrap":
+        import json as _json
+        from bootstrap import run as bootstrap_run, doctor as bootstrap_doctor
+        if getattr(args, "json", False):
+            print(_json.dumps(bootstrap_doctor(), indent=2, default=str))
+            raise SystemExit(bootstrap_doctor().get("exit", 0))
+        raise SystemExit(bootstrap_run())
 
     if args.command == "doctor":
         if getattr(args, "self_repair", False):
