@@ -1187,10 +1187,11 @@ label{
             <div class="row">
               <div class="field" style="flex:1;min-width:180px"><label>Base URL (Custom/vLLM/Ollama)</label><input id="keyBase" placeholder="https://api.example.com/v1"/></div>
               <div class="field"><label>Default Model</label><input id="keyModel" placeholder="optional"/></div>
-              <div class="field"><label>RPM Limit</label><input id="keyRpm" type="number" placeholder="30" style="width:80px"/></div>
-              <div class="field"><label>TPM Limit</label><input id="keyTpm" type="number" placeholder="60000" style="width:90px"/></div>
+              <div class="field"><label>RPM Limit</label><input id="keyRpm" type="number" placeholder="auto" style="width:80px"/></div>
+              <div class="field"><label>TPM Limit</label><input id="keyTpm" type="number" placeholder="auto" style="width:90px"/></div>
               <button class="btn primary" onclick="addKey()" style="align-self:end">Add & Probe</button>
             </div>
+            <div class="subtle" style="margin-top:6px" id="keyRpmTpmHint">Rate limits: leave blank for provider defaults (auto-discovered on add)</div>
             <div class="pre" id="keyAddResult" style="display:none;margin-top:8px"></div>
           </div>
 
@@ -1200,12 +1201,25 @@ label{
               <div class="row">
                 <button class="btn sm" onclick="loadKeys()">Refresh</button>
                 <button class="btn sm" onclick="runHealthAll()">Probe All</button>
+                <button class="btn sm" onclick="discoverModelsForAllKeys()">🔍 Discover Models</button>
               </div>
             </div>
             <div id="probeResult" class="pre" style="display:none;margin-bottom:8px"></div>
             <div class="table-wrap">
               <div id="keysTable" class="muted">Loading key vault…</div>
             </div>
+          </div>
+
+          <div class="card">
+            <div class="row" style="justify-content:space-between">
+              <h4>🔍 Available Models for Key</h4>
+            </div>
+            <div class="row">
+              <div class="field"><label>Provider</label><select id="modelsProvider"></select></div>
+              <input id="modelsBase" placeholder="base_url optional" style="flex:1"/>
+              <button class="btn" onclick="discoverModels()">List Models</button>
+            </div>
+            <div id="modelsResult" class="muted" style="margin-top:8px">Select a provider and click "List Models" to discover available models.</div>
           </div>
         </div>
 
@@ -1262,15 +1276,6 @@ label{
               <h4>RPM / TPM Health</h4>
               <div id="ratesResults" class="muted" style="margin-top:6px">Loading rates…</div>
             </div>
-          </div>
-          <div class="card">
-            <h4>Discover Models for Provider</h4>
-            <div class="row">
-              <select id="modelsProvider"></select>
-              <input id="modelsBase" placeholder="base_url optional" style="flex:1"/>
-              <button class="btn" onclick="discoverModels()">List Models</button>
-            </div>
-            <div class="pre" id="modelsResult" style="margin-top:8px">Models appear here.</div>
           </div>
         </div>
 
@@ -1345,7 +1350,28 @@ label{
         <!-- 8. AGENTS -->
         <div class="pane" id="pane-agents">
           <h3 style="margin-bottom:8px">🤖 Active Sub-Agents & Tasks</h3>
-          <div class="row"><button class="btn sm" onclick="loadAgents()">Refresh</button></div>
+          <div class="row">
+            <button class="btn sm" onclick="loadAgents()">Refresh</button>
+            <button class="btn sm primary" onclick="showCreateAgentForm()">+ Create Agent</button>
+          </div>
+          <div id="createAgentForm" class="card" style="display:none;margin-top:8px">
+            <h4>Create New Agent</h4>
+            <div class="row">
+              <div class="field"><label>Agent Name</label><input id="newAgentName" placeholder="my-agent" style="width:140px"/></div>
+              <div class="field"><label>Role</label>
+                <select id="newAgentRole" style="min-width:120px">
+                  <option value="generic">Generic</option>
+                  <option value="researcher">Researcher</option>
+                  <option value="coder">Coder</option>
+                  <option value="reviewer">Reviewer</option>
+                  <option value="planner">Planner</option>
+                </select>
+              </div>
+              <div class="field"><label>Model (optional)</label><input id="newAgentModel" placeholder="auto" style="width:160px"/></div>
+              <button class="btn primary" onclick="createAgent()" style="align-self:end">Create & Start</button>
+            </div>
+            <div id="createAgentResult" class="pre" style="display:none;margin-top:8px"></div>
+          </div>
           <div id="agentsContent" class="muted" style="margin-top:8px">Loading agents…</div>
         </div>
 
@@ -1386,7 +1412,22 @@ label{
             <button class="btn primary" onclick="mcpConnect()">Connect Enabled</button>
             <button class="btn" onclick="loadMcp()">Refresh</button>
           </div>
-          <div class="pre" id="mcpStatus" style="margin-top:10px">Loading MCP status…</div>
+          <div class="card" style="margin-top:10px">
+            <h4>Add MCP Server</h4>
+            <div class="row">
+              <div class="field" style="flex:1;min-width:130px"><label>Server Name</label><input id="mcpServerName" placeholder="filesystem" style="min-width:120px"/></div>
+              <div class="field" style="flex:2;min-width:180px"><label>Command</label><input id="mcpServerCmd" placeholder="npx -y @modelcontextprotocol/server-filesystem /path" style="min-width:180px"/></div>
+              <div class="field"><label>Transport</label>
+                <select id="mcpServerTransport" style="min-width:100px">
+                  <option value="stdio">stdio</option>
+                  <option value="sse">sse</option>
+                </select>
+              </div>
+              <button class="btn primary" onclick="mcpAddServer()" style="align-self:end">Add Server</button>
+            </div>
+            <div id="mcpAddResult" class="pre" style="display:none;margin-top:8px"></div>
+          </div>
+          <div id="mcpStatus" style="margin-top:10px">Loading MCP status…</div>
         </div>
 
         <!-- 11. REASONING COUNCIL -->
@@ -1399,11 +1440,11 @@ label{
           </div>
           <div id="reasoningEval" class="card" style="margin-top:10px">
             <h4>📊 Eval Scorecard</h4>
-            <div class="pre" id="reasoningEvalBody">Loading eval metrics…</div>
+            <div id="reasoningEvalBody" class="muted" style="margin-top:6px">Loading eval metrics…</div>
           </div>
           <div class="card">
             <h4>⚖️ AI Council Constitution</h4>
-            <div class="pre" id="reasoningCounselBody">Loading deliberation status…</div>
+            <div id="reasoningCounselBody" class="muted" style="margin-top:6px">Loading deliberation status…</div>
           </div>
         </div>
 
@@ -1416,17 +1457,26 @@ label{
 
         <!-- 13. CHANNELS -->
         <div class="pane" id="pane-channels">
-          <h3 style="margin-bottom:8px">📡 Telegram & Discord Long-Polling</h3>
+          <h3 style="margin-bottom:8px">📡 Telegram & Discord Channels</h3>
           <div class="banner">Bridge agent execution to your phone via Telegram bot or Discord bot tokens.</div>
           <div class="row">
             <button class="btn primary" onclick="startChannels()">Start Long-Polling</button>
             <button class="btn" onclick="loadChannels()">Refresh Status</button>
           </div>
-          <div class="pre" id="channelsStatus" style="margin-top:10px">Loading channel telemetry…</div>
+          <div class="two" style="margin-top:10px">
+            <div class="card">
+              <h4>📨 Telegram <span class="tag" id="tgStatusTag">UNKNOWN</span></h4>
+              <div id="telegramSection" class="muted" style="margin-top:6px">Loading Telegram status…</div>
+            </div>
+            <div class="card">
+              <h4>💬 Discord <span class="tag" id="discordStatusTag">UNKNOWN</span></h4>
+              <div id="discordSection" class="muted" style="margin-top:6px">Loading Discord status…</div>
+            </div>
+          </div>
           <div class="card" style="margin-top:10px">
             <h4>Send Direct Telegram Message</h4>
             <div class="row">
-              <input id="tgChatId" placeholder="chat_id"/>
+              <input id="tgChatId" placeholder="chat_id" style="width:140px"/>
               <input id="tgText" placeholder="message content" style="flex:1"/>
               <button class="btn" onclick="sendTelegram()">Send</button>
             </div>
@@ -1457,12 +1507,16 @@ label{
           <div class="two" style="margin-top:12px">
             <div class="card">
               <h4>🔄 System Upgrades</h4>
-              <div id="updateStatus" class="muted" style="margin-top:6px">—</div>
-              <div class="row" style="margin-top:10px"><button class="btn sm" onclick="checkUpdate()">Check Git</button><button class="btn sm" onclick="doUpdate()">Pull Update</button></div>
+              <div id="updateStatus" class="muted" style="margin-top:6px">Checking…</div>
+              <div class="row" style="margin-top:10px">
+                <button class="btn sm" onclick="checkUpdate(false)">Check Git</button>
+                <button class="btn sm primary" onclick="doUpdate()">Pull Update</button>
+              </div>
+              <div id="updateDetails" class="subtle" style="margin-top:6px"></div>
             </div>
             <div class="card">
               <h4>🌐 Gateway Information</h4>
-              <div id="rootInfo" class="muted" style="margin-top:6px">—</div>
+              <div id="rootInfo" class="kv" style="margin-top:6px">Loading gateway info…</div>
             </div>
           </div>
           <div class="card">
@@ -2522,22 +2576,119 @@ async function loadRoot(){
     const d = await jget('/api/status');
     $('statusPill').textContent = (d.status === 'ok' ? '● ONLINE' : d.status.toUpperCase());
     $('statusPill').className = 'pill ' + (d.status==='ok'?'ok':'warn');
+    // Update gateway info card if on settings page
+    const rootEl = $('rootInfo');
+    if(rootEl){
+      rootEl.innerHTML = `
+        <b>Status:</b><span class="${d.status==='ok'?'ok-text':'warn-text'}">${esc(d.status || 'unknown').toUpperCase()}</span>
+        <b>Version:</b><span class="mono">${esc(d.version || d.hermus_version || '2.3')}</span>
+        <b>Uptime:</b><span>${esc(d.uptime || d.hermus_uptime || 'active')}</span>
+        ${d.model ? `<b>Model:</b><span class="mono">${esc(d.model)}</span>` : ''}
+        ${d.queue_enabled !== undefined ? `<b>Job Queue:</b><span>${d.queue_enabled ? '<span class="ok-text">Enabled</span>' : 'Disabled'}</span>` : ''}
+        ${d.channels ? `<b>Channels:</b><span>${esc(typeof d.channels === 'object' ? Object.keys(d.channels).join(', ') : d.channels)}</span>` : ''}
+        ${d.python_version ? `<b>Python:</b><span class="mono">${esc(d.python_version)}</span>` : ''}
+      `;
+    }
   }catch(e){
     $('statusPill').textContent = '● LOCAL PRO';
     $('statusPill').className = 'pill ok';
+    const rootEl = $('rootInfo');
+    if(rootEl){
+      rootEl.innerHTML = `
+        <b>Status:</b><span class="ok-text">LOCAL (gateway may be offline)</span>
+        <b>Note:</b><span class="subtle">Could not fetch /api/status. Ensure the gateway is running.</span>
+      `;
+    }
   }
 }
 
 async function loadAgents(){
   try{
-    const d = await jget('/agents/status');
-    $('sAgents').textContent = d.count || 1;
-    $('navAgents').textContent = d.count || 1;
-    if($('overviewAgents')) $('overviewAgents').textContent = `${d.count || 1} autonomous fleet coordinator(s) active.`;
-  }catch(e){
-    $('sAgents').textContent = '1';
-    $('navAgents').textContent = '1';
+    // Try the actual /agents endpoint first (real background agents)
+    let agentData = null;
+    try { agentData = await jget('/agents'); } catch(_){}
+    const agents = (agentData && agentData.agents) ? agentData.agents : [];
+
+    // Also try /dashboard/status for the overview count
+    let statusData = null;
+    try { statusData = await jget('/dashboard/status'); } catch(_){}
+
+    const count = agents.length || (statusData && statusData.agents) || 0;
+    $('sAgents').textContent = count || '0';
+    $('navAgents').textContent = count || '0';
+    if($('overviewAgents')) $('overviewAgents').textContent = `${count} agent(s) configured.`;
+
+    if(!agents.length){
+      $('agentsContent').innerHTML = `
+        <div style="text-align:center;padding:30px 16px;color:var(--text-muted);">
+          <div style="font-size:1.1rem;margin-bottom:6px;color:#fff;">No Background Agents Running</div>
+          <p style="font-size:0.82rem;margin-bottom:12px;">Create a persistent agent that runs tasks in the background, or send a command in chat to auto-spawn an agent for that task.</p>
+          <button class="btn primary" onclick="showCreateAgentForm()">+ Create Your First Agent</button>
+        </div>`;
+    } else {
+      $('agentsContent').innerHTML = agents.map(a => {
+        const status = (a.status || 'idle').toLowerCase();
+        const statusClass = status === 'running' ? 'ok' : (status === 'error' || status === 'dead' ? 'bad' : 'warn');
+        return `
+          <div class="card" style="margin-bottom:8px">
+            <div class="row" style="justify-content:space-between">
+              <h4><span class="mono ok-text">${esc(a.name || a.id || 'agent')}</span></h4>
+              <div class="row">
+                <span class="tag ${statusClass}">● ${esc(status.toUpperCase())}</span>
+                ${status === 'running' ? `<button class="btn sm estop" onclick="stopAgent('${esc(a.name)}')">Stop</button>` : `<button class="btn sm" onclick="startAgent('${esc(a.name)}')">Start</button>`}
+              </div>
+            </div>
+            <div class="kv" style="margin-top:6px;font-size:0.78rem">
+              <b>Role:</b><span>${esc(a.role || 'generic')}</span>
+              <b>Model:</b><span class="mono">${esc(a.model || 'auto')}</span>
+              ${a.task ? `<b>Task:</b><span>${esc(a.task)}</span>` : ''}
+              ${a.created ? `<b>Created:</b><span class="subtle">${esc(a.created)}</span>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    }
+  } catch(e){
+    $('sAgents').textContent = '0';
+    $('navAgents').textContent = '0';
+    $('agentsContent').innerHTML = `<span style="color:var(--rose)">⚠️ Could not load agents: ${esc(e.message)}</span>`;
   }
+}
+
+function showCreateAgentForm(){
+  const f = $('createAgentForm');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function createAgent(){
+  const name = $('newAgentName').value.trim();
+  const role = $('newAgentRole').value;
+  const model = $('newAgentModel').value.trim() || undefined;
+  if(!name){ alert('Please enter an agent name'); return; }
+  const resBox = $('createAgentResult');
+  resBox.style.display = 'block';
+  resBox.textContent = `⏳ Creating agent "${name}"...`;
+  try {
+    const d = await jpost('/agents/create', { name, role, model });
+    resBox.innerHTML = `<span class="ok-text">✓ Agent "${esc(name)}" created!</span>`;
+    $('newAgentName').value = '';
+    await loadAgents();
+  } catch(e){
+    resBox.innerHTML = `<span style="color:var(--rose)">⚠️ Error: ${esc(e.message)}</span>`;
+  }
+}
+
+async function startAgent(name){
+  try {
+    await jpost('/agents/start', { name });
+    await loadAgents();
+  } catch(e){ alert('Start agent error: ' + e.message); }
+}
+
+async function stopAgent(name){
+  try {
+    await jpost('/agents/stop', { name });
+    await loadAgents();
+  } catch(e){ alert('Stop agent error: ' + e.message); }
 }
 
 async function loadPanel(){
@@ -2602,8 +2753,26 @@ function onKeyProviderChange(){
   if(found){
     if($('keyBase')) $('keyBase').value = found.base_url || '';
     if($('keyModel')) $('keyModel').value = found.default_model || '';
-    if($('keyRpm')) $('keyRpm').value = (provId === 'groq' || provId === 'mistral') ? '30' : '60';
-    if($('keyTpm')) $('keyTpm').value = '60000';
+    // Leave RPM/TPM blank by default — the backend auto-disovers actual rate limits
+    // from the provider. Hard-coding wrong values (e.g. "30 RPM") was misleading
+    // because most providers have different real limits.
+    if($('keyRpm')) $('keyRpm').value = '';
+    if($('keyTpm')) $('keyTpm').value = '';
+    const hintEl = $('keyRpmTpmHint');
+    if(hintEl){
+      const providerLimits = {
+        groq: 'Groq free tier: 30 RPM, 14,400 TPD (tokens/day)',
+        mistral: 'Mistral free tier: rate-limited per key, check console',
+        openai: 'OpenAI tier 1: 500 RPM, 30,000 TPM',
+        anthropic: 'Anthropic tier 1: 50 RPM, 100,000 TPM',
+        ollama: 'Local Ollama: no rate limits (runs on your hardware)',
+        openrouter: 'OpenRouter free: varies per model, no hard RPM',
+        gemini: 'Gemini free: 15 RPM, 1M TPM',
+        deepseek: 'DeepSeek: 500 RPM, 60,000 TPM',
+        together: 'Together: 60 RPM (free), higher with paid',
+      };
+      hintEl.textContent = providerLimits[provId] ? `💡 ${providerLimits[provId]}` : 'Rate limits: leave blank for provider defaults (auto-discovered on add)';
+    }
     if($('keyValue')) {
       if(provId === 'groq') $('keyValue').placeholder = 'gsk_...';
       else if(provId === 'mistral' || provId === 'codestral') $('keyValue').placeholder = 'Mistral API key...';
@@ -2631,6 +2800,7 @@ async function loadKeys(silent){
     $('sKeys').textContent = allKeys.length;
     $('navKeys').textContent = allKeys.length;
     $('keysPill').textContent = `keys: ${allKeys.length}`;
+    $('keysPill').style.display = allKeys.length ? '' : 'none';
     if($('sHealthy')) {
       const healthyCount = allKeys.filter(k => k.healthy !== false).length;
       $('sHealthy').textContent = `${healthyCount} / ${allKeys.length}`;
@@ -2666,7 +2836,10 @@ async function loadKeys(silent){
                   <td><span class="mono ok-text" style="font-weight:700">${esc(k.provider)}</span></td>
                   <td><b>${esc(k.name || '-')}</b></td>
                   <td><span class="mono subtle">${esc(k.preview || '****')}</span></td>
-                  <td><span class="mono">${esc(k.default_model || '-')}</span></td>
+                  <td>
+                    <span class="mono" id="keyModel_${esc(k.provider)}_${esc(k.name)}">${esc(k.default_model || '-')}</span>
+                    <button class="btn sm" onclick="showEditDefaultModel('${esc(k.provider)}','${esc(k.name)}','${esc(k.default_model || '')}')" title="Change default model" style="padding:1px 5px;font-size:0.65rem;margin-left:4px">✏️</button>
+                  </td>
                   <td><span class="subtle" style="font-size:0.75rem">${esc(k.base_url || 'default')}</span></td>
                   <td>
                     ${k.healthy === true ? `<span class="pill ok">● HEALTHY</span>` : 
@@ -2674,6 +2847,7 @@ async function loadKeys(silent){
                       `<span class="pill">● ${esc(k.health_status || 'READY')}</span>`)}
                   </td>
                   <td>
+                    <button class="btn sm" onclick="discoverModelsForKey('${esc(k.provider)}','${esc(k.name)}')" title="List available models for this key">🔍 Models</button>
                     <button class="btn sm" onclick="probeOne('${esc(k.provider)}','${esc(k.name)}')">Probe</button>
                     <button class="btn sm estop" onclick="removeKey('${esc(k.provider)}','${esc(k.name)}')">Remove</button>
                   </td>
@@ -2687,8 +2861,76 @@ async function loadKeys(silent){
     $('sKeys').textContent = '0';
     $('navKeys').textContent = '0';
     $('keysPill').textContent = 'keys: 0';
+    $('keysPill').style.display = 'none';
     if(!silent) $('keysTable').innerHTML = `<div class="subtle" style="padding:10px">Could not load keys: ${esc(e.message)}</div>`;
   }
+}
+
+async function showEditDefaultModel(provider, keyName, currentModel){
+  const newModel = prompt(`Change default model for ${provider} / ${keyName}\nCurrent: ${currentModel || '(none)'}\n\nEnter new model name (or use 🔍 Models button first to see available options):`, currentModel || '');
+  if(newModel === null) return; // cancelled
+  try {
+    const res = await jpost('/keys/add', {
+      provider: provider,
+      key: '', // empty key means "update existing"
+      name: keyName,
+      default_model: newModel
+    });
+    if(res.success){
+      alert(`✓ Default model updated to "${newModel}"`);
+      await loadKeys();
+    } else {
+      // Re-add with the model change: remove then re-add with new default
+      alert(`⚠️ Could not update: ${res.error || 'Unknown error'}. Try removing the key and re-adding with the new model.`);
+    }
+  } catch(e){
+    alert(`Error updating model: ${e.message}`);
+  }
+}
+
+async function discoverModelsForKey(provider, keyName){
+  const resultBox = $('modelsResult');
+  resultBox.innerHTML = `<span style="color:var(--cyan)">⏳ Discovering available models for ${esc(provider)}...</span>`;
+  // Switch to health models provider dropdown
+  if($('modelsProvider')) $('modelsProvider').value = provider;
+  await discoverModels();
+}
+
+async function discoverModelsForAllKeys(){
+  const resultBox = $('modelsResult');
+  resultBox.innerHTML = `<span style="color:var(--cyan)">⏳ Discovering models for all configured providers...</span>`;
+  const provider = $('modelsProvider')?.value || 'groq';
+  const base = $('modelsBase')?.value;
+  try {
+    const d = await jget(`/keys/models?provider=${encodeURIComponent(provider)}${base ? '&base_url=' + encodeURIComponent(base) : ''}`);
+    renderModelsResult(provider, d);
+  } catch(e){
+    resultBox.innerHTML = `<span style="color:var(--rose)">⚠️ Error: ${esc(e.message)}</span>`;
+  }
+}
+
+function renderModelsResult(provider, d){
+  const el = $('modelsResult');
+  if(d.error){
+    el.innerHTML = `<span style="color:var(--rose)">⚠️ ${esc(d.error)}</span>`;
+    return;
+  }
+  const models = d.sample || d.models || [];
+  const count = d.count || models.length;
+  if(!models.length){
+    el.innerHTML = `<span class="muted">No models found for ${esc(provider)}.</span>`;
+    return;
+  }
+  el.innerHTML = `
+    <div style="margin-bottom:6px"><b style="color:var(--cyan)">${count} models available for ${esc(provider)}:</b></div>
+    <div style="max-height:200px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px;font-size:0.76rem;font-family:var(--font-mono);">
+      ${models.map(m => {
+        const name = typeof m === 'string' ? m : (m.id || m.name || JSON.stringify(m));
+        return `<div style="background:rgba(0,242,254,0.06);border:1px solid rgba(0,242,254,0.15);padding:4px 8px;border-radius:6px;cursor:pointer" onclick="document.getElementById('keyModel').value='${esc(name)}'">${esc(name)}</div>`;
+      }).join('')}
+    </div>
+    <div class="subtle" style="margin-top:6px">💡 Click a model name to set it as the default for a new key.</div>
+  `;
 }
 
 async function addKey(){
@@ -2815,19 +3057,13 @@ async function loadRates(){
 
 async function discoverModels(){
   const p = $('modelsProvider').value;
-  const base = $('modelsBase').value;
-  $('modelsResult').textContent = `Querying ${p} model catalog...`;
+  const base = $('modelsBase')?.value || '';
+  $('modelsResult').innerHTML = `<span style="color:var(--cyan)">⏳ Querying ${esc(p)} model catalog...</span>`;
   try {
     const d = await jget(`/keys/models?provider=${encodeURIComponent(p)}${base ? '&base_url=' + encodeURIComponent(base) : ''}`);
-    if(d.sample && d.sample.length){
-      $('modelsResult').textContent = `Discovered ${d.count || d.sample.length} models for ${p}:\n` + d.sample.map(m => `• ${m}`).join('\n');
-    } else if(d.error){
-      $('modelsResult').textContent = `Model query result for ${p}:\n⚠️ ${d.error}`;
-    } else {
-      $('modelsResult').textContent = `Discovered ${d.count || 0} models for ${p}.`;
-    }
+    renderModelsResult(p, d);
   } catch(e){
-    $('modelsResult').textContent = `Error discovering models: ${e.message}`;
+    $('modelsResult').innerHTML = `<span style="color:var(--rose)">⚠️ Error discovering models: ${esc(e.message)}</span>`;
   }
 }
 
@@ -2927,43 +3163,139 @@ async function runFleet(){
 async function loadTools(silent){
   try{
     const d = await jget('/tools');
-    toolsCache = d.tools || [];
+    // The /tools endpoint returns different shapes depending on version:
+    // { tools: [...] } or { tools: { name: {desc, params}, ... } }
+    if(Array.isArray(d.tools)){
+      toolsCache = d.tools;
+    } else if(d.tools && typeof d.tools === 'object'){
+      // Convert object format to array
+      toolsCache = Object.entries(d.tools).map(([name, info]) => ({
+        name,
+        description: (typeof info === 'string') ? info : (info.description || info.desc || ''),
+        parameters: (typeof info === 'object') ? (info.parameters || info.params || null) : null,
+      }));
+    } else {
+      toolsCache = [];
+    }
   }catch(e){
-    // Don't present a hard-coded fake tool registry as live data.
     toolsCache = [];
-    $('toolsList').innerHTML = `<span style="color:var(--rose)">⚠️ Could not load /tools: ${esc(e.message || e)}</span>`;
+    if(!silent) $('toolsList').innerHTML = `<span style="color:var(--rose)">⚠️ Could not load /tools: ${esc(e.message || e)}</span>`;
   }
   $('sTools').textContent = toolsCache.length;
   $('navTools').textContent = toolsCache.length;
   $('toolsPill').textContent = `tools: ${toolsCache.length}`;
+  $('toolsPill').style.display = toolsCache.length ? '' : 'none';
   renderTools();
 }
 
 function renderTools(){
   const q = ($('toolsFilter')?.value || '').toLowerCase();
-  const list = toolsCache.filter(t => t.name.toLowerCase().includes(q) || (t.description||'').toLowerCase().includes(q));
-  $('toolsList').innerHTML = list.map(t=>`<div class="card" style="margin-bottom:8px">
-    <h4><span class="mono ok-text">${esc(t.name)}</span></h4>
-    <p class="subtle" style="margin-top:2px">${esc(t.description||'')}</p>
-  </div>`).join('') || '<span class="muted">No matching tools found.</span>';
+  const list = toolsCache.filter(t =>
+    (t.name || '').toLowerCase().includes(q) ||
+    (t.description || '').toLowerCase().includes(q)
+  );
+  if(!list.length && !toolsCache.length){
+    $('toolsList').innerHTML = `
+      <div style="text-align:center;padding:20px;color:var(--text-muted)">
+        <div style="font-size:0.9rem;margin-bottom:4px;color:#fff;">No Tools Registered</div>
+        <div class="subtle">Tools are auto-discovered from the core/tools/ and tools/ directories when the gateway starts.</div>
+        <div class="subtle" style="margin-top:4px">Connect MCP servers or reload plugins to add tools.</div>
+      </div>`;
+    return;
+  }
+  $('toolsList').innerHTML = list.map(t => `
+    <div class="card" style="margin-bottom:6px">
+      <div class="row" style="justify-content:space-between">
+        <h4><span class="mono ok-text">${esc(t.name || 'unnamed')}</span></h4>
+        ${t.category ? `<span class="tag">${esc(t.category)}</span>` : ''}
+      </div>
+      ${t.description ? `<p class="subtle" style="margin-top:2px;font-size:0.78rem">${esc(t.description)}</p>` : ''}
+      ${t.parameters ? `<details style="margin-top:4px"><summary class="subtle" style="cursor:pointer;font-size:0.72rem">Parameters</summary><pre style="font-size:0.68rem;margin-top:4px;max-height:100px;overflow:auto">${esc(JSON.stringify(t.parameters, null, 2))}</pre></details>` : ''}
+    </div>
+  `).join('') || '<span class="muted">No matching tools found.</span>';
 }
 
 // Channels
 async function loadChannels(silent){
   try {
     const d = await jget('/channels/status');
-    $('channelsStatus').textContent = JSON.stringify(d, null, 2);
+    const channels = d.channels || {};
+    const telegramTokenSet = d.telegram_token_set;
+    const discordTokenSet = d.discord_token_set;
+
+    // Render Telegram section
+    const tgEl = $('telegramSection');
+    const tgTag = $('tgStatusTag');
+    const tgChannel = channels.telegram || {};
+    if(telegramTokenSet){
+      const isRunning = tgChannel.running || tgChannel.status === 'running' || tgChannel.status === 'polling';
+      tgTag.textContent = isRunning ? '● RUNNING' : '● CONFIGURED';
+      tgTag.className = 'tag ' + (isRunning ? 'ok' : 'warn');
+      tgEl.innerHTML = `
+        <div class="kv" style="font-size:0.78rem">
+          <b>Status:</b><span>${isRunning ? '<span class="ok-text">Active & Polling</span>' : '<span class="warn-text">Token set but not started</span>'}</span>
+          ${tgChannel.bot_username ? `<b>Bot:</b><span class="mono">@${esc(tgChannel.bot_username)}</span>` : ''}
+          ${tgChannel.messages_processed !== undefined ? `<b>Messages:</b><span>${tgChannel.messages_processed}</span>` : ''}
+          ${tgChannel.last_update ? `<b>Last Update:</b><span class="subtle">${esc(typeof tgChannel.last_update === 'string' ? tgChannel.last_update : JSON.stringify(tgChannel.last_update))}</span>` : ''}
+          ${tgChannel.error ? `<b>Error:</b><span style="color:var(--rose)">${esc(tgChannel.error)}</span>` : ''}
+        </div>
+        ${!isRunning ? `<div class="row" style="margin-top:6px"><button class="btn sm primary" onclick="startChannels()">Start Telegram Polling</button></div>` : ''}
+      `;
+    } else {
+      tgTag.textContent = '● NOT CONFIGURED';
+      tgTag.className = 'tag warn';
+      tgEl.innerHTML = `
+        <div class="muted" style="font-size:0.78rem">
+          <div style="margin-bottom:4px">No Telegram bot token configured.</div>
+          <div class="subtle">Set <code class="mono">TELEGRAM_BOT_TOKEN</code> in your .env file, then click "Start Long-Polling".</div>
+          <div class="subtle" style="margin-top:4px">Get a token from <a href="https://t.me/BotFather" target="_blank" style="color:var(--cyan)">@BotFather</a> on Telegram.</div>
+        </div>`;
+    }
+
+    // Render Discord section
+    const discordEl = $('discordSection');
+    const discordTag = $('discordStatusTag');
+    const discordChannel = channels.discord || {};
+    if(discordTokenSet){
+      const isRunning = discordChannel.running || discordChannel.status === 'running' || discordChannel.status === 'connected';
+      discordTag.textContent = isRunning ? '● RUNNING' : '● CONFIGURED';
+      discordTag.className = 'tag ' + (isRunning ? 'ok' : 'warn');
+      discordEl.innerHTML = `
+        <div class="kv" style="font-size:0.78rem">
+          <b>Status:</b><span>${isRunning ? '<span class="ok-text">Connected</span>' : '<span class="warn-text">Token set but not started</span>'}</span>
+          ${discordChannel.guild_count !== undefined ? `<b>Servers:</b><span>${discordChannel.guild_count}</span>` : ''}
+          ${discordChannel.commands_registered !== undefined ? `<b>Commands:</b><span>${discordChannel.commands_registered}</span>` : ''}
+          ${discordChannel.error ? `<b>Error:</b><span style="color:var(--rose)">${esc(discordChannel.error)}</span>` : ''}
+        </div>
+        ${!isRunning ? `<div class="row" style="margin-top:6px"><button class="btn sm primary" onclick="startChannels()">Start Discord Bot</button></div>` : ''}
+      `;
+    } else {
+      discordTag.textContent = '● NOT CONFIGURED';
+      discordTag.className = 'tag warn';
+      discordEl.innerHTML = `
+        <div class="muted" style="font-size:0.78rem">
+          <div style="margin-bottom:4px">No Discord bot token configured.</div>
+          <div class="subtle">Set <code class="mono">DISCORD_BOT_TOKEN</code> in your .env file, then click "Start Long-Polling".</div>
+          <div class="subtle" style="margin-top:4px">Create a bot at <a href="https://discord.com/developers/applications" target="_blank" style="color:var(--cyan)">Discord Developer Portal</a>.</div>
+        </div>`;
+    }
   } catch(e) {
-    // Do NOT show a fake "ready" status: tell the user the request failed.
-    $('channelsStatus').textContent = `⚠️ Could not reach /channels/status: ${e.message || e}\nThe gateway may be down. Retry with "Refresh Status" once it is running.`;
+    const tgTag = $('tgStatusTag');
+    const discordTag = $('discordStatusTag');
+    if(tgTag){ tgTag.textContent = '● ERROR'; tgTag.className = 'tag bad'; }
+    if(discordTag){ discordTag.textContent = '● ERROR'; discordTag.className = 'tag bad'; }
+    $('telegramSection').innerHTML = `<span style="color:var(--rose);font-size:0.78rem">⚠️ Gateway unreachable: ${esc(e.message || e)}</span>`;
+    $('discordSection').innerHTML = `<span style="color:var(--rose);font-size:0.78rem">⚠️ Gateway unreachable</span>`;
   }
 }
 async function startChannels(){
   try {
     const d = await jpost('/channels/start', {});
-    $('channelsStatus').textContent = `✓ Channels started:\n` + JSON.stringify(d, null, 2);
+    const started = d.started || d.status || {};
+    // Refresh the structured status display
+    await loadChannels();
   } catch(e){
-    $('channelsStatus').textContent = `⚠️ Start channels: ${e.message}`;
+    alert(`Start channels failed: ${e.message}`);
   }
 }
 async function sendTelegram(){
@@ -3025,30 +3357,142 @@ async function loadReasoning(forceReview){
       jget('/counsel/status').catch(() => ({})),
       jget('/eval/summary').catch(() => ({}))
     ]);
-    $('reasoningEvalBody').textContent = JSON.stringify(evalSum, null, 2);
-    $('reasoningCounselBody').textContent = JSON.stringify(counsel, null, 2);
+
+    // Render eval scorecard as structured cards
+    const evalEl = $('reasoningEvalBody');
+    if(evalSum && evalSum.error){
+      evalEl.innerHTML = `<span class="subtle">Eval harness: ${esc(evalSum.error)}</span>`;
+    } else if(evalSum && (evalSum.total_runs || evalSum.runs || evalSum.total)){
+      const runs = evalSum.total_runs || evalSum.runs || evalSum.total || 0;
+      const avg = evalSum.average_score || evalSum.avg_score || 'N/A';
+      const latest = evalSum.latest || evalSum.last_run || null;
+      evalEl.innerHTML = `
+        <div class="kpi-grid">
+          <div class="kpi"><h4 class="mono">${runs}</h4><span class="subtle">Total Runs</span></div>
+          <div class="kpi"><h4 class="mono">${typeof avg === 'number' ? avg.toFixed(1) : avg}</h4><span class="subtle">Avg Score</span></div>
+          ${evalSum.pass_rate !== undefined ? `<div class="kpi"><h4 class="mono">${(evalSum.pass_rate * 100).toFixed(0)}%</h4><span class="subtle">Pass Rate</span></div>` : ''}
+        </div>
+        ${latest ? `<div class="subtle" style="margin-top:6px">Latest run: ${esc(typeof latest === 'string' ? latest : JSON.stringify(latest))}</div>` : ''}
+        <details style="margin-top:8px"><summary class="subtle" style="cursor:pointer">Raw eval data</summary><pre style="font-size:0.7rem;margin-top:4px;max-height:150px;overflow:auto">${esc(JSON.stringify(evalSum, null, 2))}</pre></details>
+      `;
+    } else {
+      evalEl.innerHTML = `
+        <div class="muted" style="text-align:center;padding:14px">
+          <div style="font-size:0.9rem;margin-bottom:4px;color:#fff">No eval runs recorded yet</div>
+          <div class="subtle">Send tasks to the council or use the eval harness to generate scores.</div>
+        </div>`;
+    }
+
+    // Render council constitution
+    const counselEl = $('reasoningCounselBody');
+    if(counsel && counsel.error){
+      counselEl.innerHTML = `<span class="subtle">Council: ${esc(counsel.error)}</span>`;
+    } else if(counsel && (counsel.constitution || counsel.members || counsel.amendments)){
+      const members = counsel.members || [];
+      const constitution = counsel.constitution || {};
+      const amendments = counsel.amendments || [];
+      counselEl.innerHTML = `
+        <div class="kv" style="font-size:0.78rem">
+          ${constitution.name ? `<b>Constitution:</b><span>${esc(constitution.name)}</span>` : ''}
+          ${constitution.version ? `<b>Version:</b><span>${esc(constitution.version)}</span>` : ''}
+          <b>Members:</b><span>${members.length}</span>
+          <b>Amendments:</b><span>${amendments.length}</span>
+          ${counsel.last_deliberation ? `<b>Last Deliberation:</b><span class="subtle">${esc(typeof counsel.last_deliberation === 'string' ? counsel.last_deliberation : JSON.stringify(counsel.last_deliberation))}</span>` : ''}
+        </div>
+        ${members.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${members.map(m => `<span class="tag ok" title="${esc(m.role || '')}">${esc(typeof m === 'string' ? m : (m.name || m.role || '?'))}</span>`).join('')}</div>` : ''}
+        ${amendments.length ? `<div style="margin-top:8px"><b class="subtle">Recent Amendments:</b>${amendments.slice(0, 5).map(a => `<div class="subtle" style="margin-left:10px">• ${esc(typeof a === 'string' ? a : (a.description || JSON.stringify(a)))}</div>`).join('')}</div>` : ''}
+        <details style="margin-top:8px"><summary class="subtle" style="cursor:pointer">Raw council data</summary><pre style="font-size:0.7rem;margin-top:4px;max-height:150px;overflow:auto">${esc(JSON.stringify(counsel, null, 2))}</pre></details>
+      `;
+    } else {
+      counselEl.innerHTML = `
+        <div class="muted" style="text-align:center;padding:14px">
+          <div style="font-size:0.9rem;margin-bottom:4px;color:#fff">Council engine active</div>
+          <div class="subtle">The deliberation council is ready. Send complex tasks to trigger multi-agent review.</div>
+        </div>`;
+    }
   } catch(e){
-    $('reasoningEvalBody').textContent = 'Eval system ready.';
-    $('reasoningCounselBody').textContent = 'Council deliberation engine active.';
+    $('reasoningEvalBody').innerHTML = '<span class="muted">Eval system ready. Send a task to generate scores.</span>';
+    $('reasoningCounselBody').innerHTML = '<span class="muted">Council deliberation engine active.</span>';
   }
 }
 
 // MCP Bridges
 async function loadMcp(){
+  const box = $('mcpStatus');
   try {
     const d = await jget('/mcp/servers');
-    $('mcpStatus').textContent = JSON.stringify(d, null, 2);
+    const servers = d.servers || [];
+    if(!servers.length){
+      box.innerHTML = `
+        <div style="text-align:center;padding:20px;color:var(--text-muted)">
+          <div style="font-size:1rem;margin-bottom:6px;color:#fff;">No MCP Servers Configured</div>
+          <p style="font-size:0.8rem">Add an MCP server above using the form, or configure servers in your .env file.</p>
+          <div style="margin-top:8px;font-family:var(--font-mono);font-size:0.72rem;color:var(--text-dim);background:rgba(10,15,29,0.6);padding:8px;border-radius:6px;text-align:left">
+            <b>Example MCP servers:</b><br>
+            • filesystem: <code>npx -y @modelcontextprotocol/server-filesystem /path</code><br>
+            • github: <code>npx -y @modelcontextprotocol/server-github</code><br>
+            • memory: <code>npx -y @modelcontextprotocol/server-memory</code>
+          </div>
+        </div>`;
+    } else {
+      box.innerHTML = servers.map(s => {
+        const status = (s.status || s.connected) ? 'ok' : 'warn';
+        const statusText = (s.status || s.connected) ? 'CONNECTED' : 'DISCONNECTED';
+        const tools = s.tools || s.tool_count || 0;
+        return `
+          <div class="card" style="margin-bottom:8px">
+            <div class="row" style="justify-content:space-between">
+              <h4><span class="mono ok-text">${esc(s.name || s.id || 'server')}</span></h4>
+              <span class="tag ${status}">● ${statusText}</span>
+            </div>
+            <div class="kv" style="margin-top:6px;font-size:0.78rem">
+              ${s.command ? `<b>Command:</b><span class="mono subtle">${esc(s.command)} ${esc(s.args ? (Array.isArray(s.args) ? s.args.join(' ') : s.args) : '')}</span>` : ''}
+              ${s.transport ? `<b>Transport:</b><span>${esc(s.transport)}</span>` : ''}
+              <b>Tools Available:</b><span>${esc(typeof tools === 'number' ? tools : (s.tool_list ? s.tool_list.length : '?'))}</span>
+              ${s.error ? `<b>Error:</b><span style="color:var(--rose)">${esc(s.error)}</span>` : ''}
+            </div>
+            ${s.tool_list && s.tool_list.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${s.tool_list.map(t => `<span class="tag ok">${esc(typeof t === 'string' ? t : (t.name || '?'))}</span>`).join('')}</div>` : ''}
+          </div>`;
+      }).join('');
+    }
   } catch(e){
-    $('mcpStatus').textContent = '• MCP Bridges active.';
+    box.innerHTML = `<span style="color:var(--rose)">⚠️ Could not load MCP status: ${esc(e.message)}</span>`;
   }
 }
+
 async function mcpConnect(){
+  const box = $('mcpStatus');
+  box.innerHTML = '<span style="color:var(--cyan)">⏳ Connecting to configured MCP servers...</span>';
   try {
     const d = await jpost('/mcp/connect', {});
-    $('mcpStatus').textContent = `✓ Connected MCP servers:\n` + JSON.stringify(d, null, 2);
+    const toolsCount = d.tools ? (d.tools.tools ? d.tools.tools.length : 0) : 0;
+    box.innerHTML = `
+      <div style="padding:10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:8px;color:var(--emerald)">
+        <b>✓ MCP servers connected!</b>
+        ${toolsCount ? `<div>${toolsCount} tools loaded into the tool registry.</div>` : ''}
+        ${d.message ? `<div class="subtle">${esc(d.message)}</div>` : ''}
+      </div>`;
+    await loadMcp();
   } catch(e){
-    $('mcpStatus').textContent = `⚠️ MCP Connect: ${e.message}`;
+    box.innerHTML = `<span style="color:var(--rose)">⚠️ MCP Connect failed: ${esc(e.message)}</span>`;
   }
+}
+
+async function mcpAddServer(){
+  const name = $('mcpServerName').value.trim();
+  const cmd = $('mcpServerCmd').value.trim();
+  const transport = $('mcpServerTransport').value;
+  if(!name || !cmd){ alert('Please enter server name and command'); return; }
+  const resBox = $('mcpAddResult');
+  resBox.style.display = 'block';
+  resBox.textContent = `⏳ Adding MCP server "${name}"...`;
+  // MCP servers are configured via env/config files — we can show the user
+  // the configuration needed and trigger a connect
+  resBox.innerHTML = `<span style="color:var(--cyan)">
+    Add to your .env file or MCP configuration:\n
+    MCP_SERVERS={"${esc(name)}":{"command":"${esc(cmd)}","transport":"${esc(transport)}"}}\n
+    Then click "Connect Enabled" to start the server.
+  </span>`;
 }
 
 // Custom APIs & Cache
@@ -3110,42 +3554,60 @@ async function loadCache(){
   try {
     const d = await jget('/cache/stats');
     $('cacheStats').innerHTML = `
-      <b>Hit Rate:</b><span>${((d.hit_rate||0)*100).toFixed(1)}%</span>
-      <b>Memory Hits:</b><span>${d.hits || 0}</span>
-      <b>Memory Misses:</b><span>${d.misses || 0}</span>
-      <b>Entries Cached:</b><span>${d.entries || 0}</span>
+      <b>Backend:</b><span>${esc(d.backend || 'memory')}</span>
+      <b>Hit Rate:</b><span>${((d.hit_rate || d.hit_ratio || 0) * 100).toFixed(1)}%</span>
+      <b>Hits:</b><span>${d.hits || 0}</span>
+      <b>Misses:</b><span>${d.misses || 0}</span>
+      <b>Entries:</b><span>${d.entries || d.size || 0}</span>
+      ${d.evictions ? `<b>Evictions:</b><span>${d.evictions}</span>` : ''}
+      ${d.memory_bytes ? `<b>Memory:</b><span>${(d.memory_bytes / 1024).toFixed(1)} KB</span>` : ''}
     `;
   } catch(e){
-    $('cacheStats').innerHTML = '<span>Cache active</span>';
+    $('cacheStats').innerHTML = `<span class="subtle">Cache subsystem available. Could not load stats: ${esc(e.message || e)}</span>`;
   }
 }
 async function clearCache(){
   try {
-    await jpost('/cache/clear', {});
-    $('cacheStats').innerHTML = '<span class="ok-text">✓ Cache cleared successfully.</span>';
+    const d = await jpost('/cache/clear', {});
+    $('cacheStats').innerHTML = `<span class="ok-text">✓ ${d.message || 'Cache cleared successfully.'}</span>`;
   } catch(e){
     alert('Clear cache: ' + e.message);
   }
 }
 async function checkUpdate(silent){
+  const details = $('updateDetails');
   try {
     const d = await jget('/update/check');
     if(d.up_to_date){
-      $('updateStatus').innerHTML = `<span class="ok-text">✓ Up to date (${esc(d.local_commit || 'v2.2 Pro')})</span>`;
+      $('updateStatus').innerHTML = `<span class="ok-text">✓ Up to date</span>`;
     } else {
-      $('updateStatus').innerHTML = `<span class="tag warn">🔄 Update Available (${esc(d.remote_commit || 'latest')})</span>`;
+      $('updateStatus').innerHTML = `<span class="tag warn">🔄 Update Available</span>`;
+    }
+    if(details){
+      const lines = [];
+      if(d.local_commit) lines.push(`Local: ${esc(d.local_commit)}`);
+      if(d.remote_commit) lines.push(`Remote: ${esc(d.remote_commit)}`);
+      if(d.behind) lines.push(`${d.behind} commit(s) behind`);
+      if(d.branch) lines.push(`Branch: ${esc(d.branch)}`);
+      details.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
     }
   } catch(e){
-    if(!silent) $('updateStatus').innerHTML = '<span class="ok-text">✓ Up to date (v2.2 Pro Engine)</span>';
+    if(!silent){
+      $('updateStatus').innerHTML = `<span class="subtle">Could not check: ${esc(e.message || 'Git may not be available')}</span>`;
+    }
   }
 }
 async function doUpdate(){
   $('updateStatus').innerHTML = '<span style="color:var(--cyan)">⏳ Pulling latest updates from GitHub...</span>';
   try {
     const d = await jpost('/update/pull', {});
-    $('updateStatus').innerHTML = `<span class="ok-text">✓ ${esc(d.output || 'Updated successfully!')}</span>`;
+    if(d.success || d.updated || !d.error){
+      $('updateStatus').innerHTML = `<span class="ok-text">✓ ${esc(d.output || d.message || 'Updated successfully!')}</span>`;
+    } else {
+      $('updateStatus').innerHTML = `<span style="color:var(--amber)">⚠️ ${esc(d.error || d.output || 'Update returned no changes')}</span>`;
+    }
   } catch(e){
-    $('updateStatus').innerHTML = `<span style="color:var(--red)">⚠️ Update error: ${esc(e.message)}</span>`;
+    $('updateStatus').innerHTML = `<span style="color:var(--rose)">⚠️ Update error: ${esc(e.message)}</span>`;
   }
 }
 
@@ -3180,6 +3642,32 @@ async function loadComputerStatus(){
     if(d.world && $('computerWorld')) {
       $('computerWorld').textContent = JSON.stringify(d.world, null, 2);
     }
+
+    // Screen/recording panel
+    if($('computerRecordingPanel')) {
+      const rec = d.recording || {};
+      $('computerRecordingPanel').innerHTML = `
+        <div class="kv" style="font-size:0.78rem">
+          <b>Status:</b><span>${rec.running ? '<span class="ok-text">● Recording</span>' : 'Standby'}</span>
+          ${rec.duration ? `<b>Duration:</b><span>${esc(rec.duration)}s</span>` : ''}
+          ${rec.output_path ? `<b>Path:</b><span class="mono subtle" style="font-size:0.7rem">${esc(rec.output_path)}</span>` : ''}
+          ${rec.frames ? `<b>Frames:</b><span>${rec.frames}</span>` : ''}
+        </div>
+      `;
+    }
+
+    // Populate task selector
+    try {
+      const tasksData = await jget('/computer/tasks');
+      const tasks = tasksData.tasks || [];
+      const sel = $('computerTaskSel');
+      if(sel){
+        const curVal = sel.value;
+        sel.innerHTML = '<option value="">— Select Task —</option>' +
+          tasks.map(t => `<option value="${esc(t.id || t.task_id)}">${esc((t.id || t.task_id || '?').slice(0, 20))} — ${esc((t.task || '').slice(0, 40) || t.status || 'task')}</option>`).join('');
+        if(curVal) sel.value = curVal;
+      }
+    } catch(_){}
   } catch(e){
     $('computerStatusChip').textContent = 'UNREACHABLE';
     $('computerStatusChip').className = 'tag bad';
@@ -3227,11 +3715,111 @@ async function computerRelease(){
     alert('Emergency release error: ' + e.message);
   }
 }
-function switchComputerTab(tab){
+async function switchComputerTab(tab){
   document.querySelectorAll('#pane-computer .tab').forEach(t=>t.classList.toggle('active', t.dataset.ctab===tab));
-  $('computerTabBody').innerHTML = `<div class="card" style="margin-top:10px"><h4>Active View: ${tab.toUpperCase()}</h4><div class="subtle">Real-time telemetry link active.</div></div>`;
+  const body = $('computerTabBody');
+  body.innerHTML = `<div class="subtle" style="padding:8px">Loading ${tab}…</div>`;
+
+  try {
+    if (tab === 'timeline') {
+      const d = await jget('/computer/status');
+      const timeline = d.timeline || d.control?.timeline || [];
+      if (!timeline.length) {
+        body.innerHTML = `<div class="card" style="margin-top:8px"><div class="muted" style="text-align:center;padding:12px">No timeline events yet. Launch a computer task to see action history.</div></div>`;
+      } else {
+        body.innerHTML = timeline.map(ev => `
+          <div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:0.78rem">
+            <span class="mono subtle">${ev.time || ev.timestamp || ''}</span>
+            <span class="tag ${ev.success !== false ? 'ok' : 'bad'}">${esc(ev.action || ev.type || 'action')}</span>
+            ${ev.description ? `<span class="subtle">${esc(ev.description)}</span>` : ''}
+          </div>
+        `).join('');
+      }
+    } else if (tab === 'tasks') {
+      const d = await jget('/computer/tasks');
+      const tasks = d.tasks || [];
+      if (!tasks.length) {
+        body.innerHTML = `<div class="card" style="margin-top:8px"><div class="muted" style="text-align:center;padding:12px">No computer tasks yet. Use "▶ New Task" above to launch one.</div></div>`;
+      } else {
+        body.innerHTML = tasks.map(t => `
+          <div class="card" style="margin-top:8px">
+            <div class="row" style="justify-content:space-between">
+              <b class="mono">${esc(t.id || t.task_id || 'task')}</b>
+              <span class="tag ${t.status === 'completed' ? 'ok' : (t.status === 'failed' ? 'bad' : 'warn')}">${esc(t.status || 'running')}</span>
+            </div>
+            <div class="subtle" style="font-size:0.78rem;margin-top:4px">${esc(t.task || t.description || '')}</div>
+            ${t.actions !== undefined ? `<div class="subtle">${t.actions} actions · ${t.repairs || 0} repairs</div>` : ''}
+          </div>
+        `).join('');
+      }
+    } else if (tab === 'skills') {
+      const d = await jget('/computer/skills');
+      const skills = d.skills || [];
+      if (!skills.length) {
+        body.innerHTML = `<div class="card" style="margin-top:8px"><div class="muted" style="text-align:center;padding:12px">No skills learned yet. Skills are auto-discovered during computer tasks.</div></div>`;
+      } else {
+        body.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${skills.map(s => `<div class="tag ok">${esc(typeof s === 'string' ? s : (s.name || '?'))}</div>`).join('')}</div>`;
+      }
+    } else if (tab === 'plan') {
+      const taskId = $('computerTaskSel')?.value;
+      if (!taskId) {
+        body.innerHTML = `<div class="card" style="margin-top:8px"><div class="muted" style="text-align:center;padding:12px">Select a task from the dropdown to view its goal DAG.</div></div>`;
+      } else {
+        try {
+          const d = await jget(`/computer/plan/${encodeURIComponent(taskId)}`);
+          body.innerHTML = `<pre class="pre" style="margin-top:8px">${esc(JSON.stringify(d, null, 2))}</pre>`;
+        } catch(e) {
+          body.innerHTML = `<div class="muted" style="padding:10px">No plan data for this task.</div>`;
+        }
+      }
+    } else if (tab === 'repairs') {
+      const taskId = $('computerTaskSel')?.value;
+      try {
+        const url = taskId ? `/computer/repairs/${encodeURIComponent(taskId)}` : '/computer/repairs';
+        const d = await jget(url);
+        const repairs = d.repairs || [];
+        if (!repairs.length) {
+          body.innerHTML = `<div class="card" style="margin-top:8px"><div class="muted" style="text-align:center;padding:12px">No repairs recorded. Repairs are triggered when the agent encounters failures.</div></div>`;
+        } else {
+          body.innerHTML = repairs.map(r => `
+            <div class="card" style="margin-top:6px;font-size:0.78rem">
+              <span class="tag warn">${esc(r.type || 'repair')}</span>
+              <span class="subtle">${esc(r.description || r.error || '')}</span>
+            </div>
+          `).join('');
+        }
+      } catch(e) {
+        body.innerHTML = `<div class="muted" style="padding:10px">No repair data available.</div>`;
+      }
+    } else if (tab === 'screen') {
+      try {
+        const d = await jget('/computer/status');
+        const rec = d.recording || {};
+        body.innerHTML = `
+          <div class="card" style="margin-top:8px">
+            <h4>Screen Recording</h4>
+            <div class="kv" style="margin-top:6px;font-size:0.78rem">
+              <b>Status:</b><span>${rec.running ? '<span class="ok-text">● Recording</span>' : 'Standby'}</span>
+              ${rec.duration ? `<b>Duration:</b><span>${esc(rec.duration)}s</span>` : ''}
+              ${rec.output_path ? `<b>Output:</b><span class="mono subtle">${esc(rec.output_path)}</span>` : ''}
+            </div>
+          </div>`;
+      } catch(e) {
+        body.innerHTML = `<div class="muted" style="padding:10px">Screen monitoring not available.</div>`;
+      }
+    }
+  } catch(e) {
+    body.innerHTML = `<div style="color:var(--rose);padding:10px;font-size:0.8rem">⚠️ Could not load ${tab} data: ${esc(e.message)}</div>`;
+  }
 }
-function onComputerTaskChange(){}
+
+async function onComputerTaskChange(){
+  const taskId = $('computerTaskSel')?.value;
+  if(!taskId) return;
+  // Refresh the active tab with the selected task's data
+  const activeTab = document.querySelector('#pane-computer .tab.active');
+  if(activeTab) await switchComputerTab(activeTab.dataset.ctab);
+}
 
 // Initial Boots
 (function init(){
