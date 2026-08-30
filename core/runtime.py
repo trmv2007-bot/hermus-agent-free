@@ -21,8 +21,10 @@ Callers wired today: ``HermusAgent.autonomous`` (→ prefer="mission"),
 ``POST /command`` (inline + queued), ``POST /stream/command``, the gateway
 queue job kinds ``agent.chat`` / ``agent.autonomous`` / ``runtime.turn`` /
 ``channel.reply``, background agents, the cron scheduler and the SWE
-lifecycle's coder phase. The legacy ``AutonomousRunner`` remains available
-only as an explicit offline fallback (``mission_runtime_enabled=0``).
+lifecycle's coder phase. ``MissionEngine`` is the **only** autonomy engine:
+there is no second ``AutonomousRunner`` path. The legacy runner was removed;
+``mission_runtime_enabled=0`` now raises a clear ``BLOCKED`` result rather than
+degrading autonomy into a different execution path.
 """
 from __future__ import annotations
 
@@ -534,16 +536,29 @@ def execute(
     elif prefer == "auto":
         kind = classify_request(text)
 
-    # Feature flag off (or explicitly-legacy callers): behave exactly like the
-    # pre-runtime code paths — chat stays chat, missions fall back to the
-    # AutonomousRunner loop.
+    # Feature flag off: the mission runtime is the *only* autonomy engine, so
+    # disabling it is a BLOCKED state — it must never silently downgrade an
+    # executable objective into chat or into a second, weaker autonomy path.
     if kind == "mission" and not runtime_on:
-        return _legacy_autonomous(
-            text, agent=agent, agent_getter=agent_getter, platform=platform,
-            user_id=user_id, model=model, mode=mode, api_key=api_key,
-            base_url=base_url, max_repairs=max_repairs, on_event=on_event,
-            should_cancel=should_cancel,
+        from .mission_files import MissionFileScope  # noqa: F401
+        blocked = mission_failure_result(
+            text,
+            stage="blocked",
+            reason="HERMUS_MISSION_RUNTIME is disabled; the mission runtime is the "
+                   "only autonomy engine and cannot be downgraded.",
+            error_type="mission_runtime_disabled",
+            recoverable=True,
         )
+        blocked["run_kind"] = "mission_blocked"
+        blocked["state"] = "blocked"
+        if isinstance(blocked.get("failure"), dict):
+            blocked["failure"]["state"] = "blocked"
+        if on_event is not None:
+            try:
+                on_event("mission_finished", {"state": "blocked", "failure": blocked["failure"]})
+            except Exception:
+                pass
+        return blocked
 
     resolved_agent = _resolve_agent(
         agent, agent_getter, platform=platform, user_id=user_id,
@@ -667,39 +682,3 @@ def execute(
                              "state": result.get("state")})
     return result
 
-
-def _legacy_autonomous(
-    text: str,
-    *,
-    agent: Any = None,
-    agent_getter: Optional[Callable[..., Any]] = None,
-    platform: str = "api",
-    user_id: str = "anonymous",
-    model: Optional[str] = None,
-    mode: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    max_repairs: int = 2,
-    on_event=None,
-    should_cancel=None,
-) -> dict[str, Any]:
-    """Pre-runtime behavior: plan→execute→verify→repair via AutonomousRunner."""
-    from .autonomous import AutonomousRunner, Verifier
-
-    resolved = _resolve_agent(
-        agent, agent_getter, platform=platform, user_id=user_id,
-        model=model, mode=mode, api_key=api_key, base_url=base_url,
-    )
-
-    def executor(goal: str) -> str:
-        res = _chat_with_compat(
-            resolved, goal, on_event=on_event,
-            should_cancel=should_cancel,
-        )
-        return str(res.get("response") or "")
-
-    runner = AutonomousRunner(executor=executor, verifier=Verifier(), max_repairs=max_repairs)
-    report = runner.run(text)
-    out = report.to_dict()
-    out["run_kind"] = "mission-legacy"
-    return out

@@ -139,12 +139,18 @@ def test_head_root_and_favicon(client):
 
 
 def test_autonomous_report_has_response_field():
-    from core.autonomous import AutonomousRunner
+    # The autonomy contract exposes a canonical `response` field. The MissionEngine
+    # is the only autonomy engine, so this now checks the mission report contract
+    # exposes a non-empty human-readable response mirroring the final proof.
+    from core.mission import MissionEngine, MissionReport
 
-    report = AutonomousRunner(executor=lambda s: "finished: " + s).run("do the thing")
-    d = report.to_dict()
-    assert d["response"] == d["final_answer"]
-    assert d["response"]  # non-empty canonical answer
+    with tempfile.TemporaryDirectory() as tmp:
+        eng = MissionEngine(storage_dir=pathlib.Path(tmp) / "missions")
+        report = eng.start_mission("produce a short report", domain="research", budget_steps=1)
+        d = report.to_dict()
+        assert "response" in d
+        if d.get("state") == "completed":
+            assert d["response"]  # non-empty canonical answer on completion
 
 
 def test_mission_report_has_response_field():

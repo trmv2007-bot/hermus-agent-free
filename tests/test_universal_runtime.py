@@ -92,7 +92,8 @@ def test_agent_autonomous_routes_through_mission_runtime():
     assert report["response"]
 
 
-def test_agent_autonomous_legacy_fallback_flag():
+def test_agent_autonomous_no_silent_downgrade_when_runtime_disabled():
+    """Disabling the mission runtime is a BLOCKED state, never a silent downgrade."""
     from core.agent import HermusAgent
     from core.config import config
 
@@ -101,8 +102,9 @@ def test_agent_autonomous_legacy_fallback_flag():
     try:
         agent = HermusAgent(model="mock/mock")
         report = agent.autonomous("summarize the plan", max_repairs=1)
-        assert report["run_kind"] == "mission-legacy"
-        assert report["status"] in ("done", "failed")
+        assert report["run_kind"] == "mission_blocked"
+        assert report["state"] == "blocked"
+        assert not report.get("verified", False)
     finally:
         config.mission_runtime_enabled = old
 

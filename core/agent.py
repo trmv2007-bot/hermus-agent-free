@@ -949,9 +949,9 @@ Rules:
     def _verify_final(self, user_message: str, final_content: str) -> dict:
         """Lightweight verification of the final answer (autonomous gate)."""
         try:
-            from .autonomous import Verifier
+            from .verifiers import MarkerVerifier
 
-            v = Verifier().verify(user_message, final_content)
+            v = MarkerVerifier().verify(user_message, final_content)
             return {"verified": v.get("ok", True), "problems": v.get("problems", [])}
         except Exception as e:
             return {"verified": True, "error": str(e)}

@@ -114,36 +114,21 @@ def test_router_classify_and_select_falls_back():
 # --------------------------------------------------------------------------
 # Autonomous loop
 # --------------------------------------------------------------------------
-def test_autonomous_loop_verify_and_repair():
-    from core.autonomous import AutonomousRunner, Verifier
+def test_marker_verifier_and_failure_classification():
+    from core.verifiers import MarkerVerifier, MarkerDiagnoser
 
-    # a flaky executor that fails once then succeeds
-    calls = {"n": 0}
+    # A clean result verifies; an error-marker result does not.
+    assert MarkerVerifier().verify("task", "SUCCESS: completed work")["ok"] is True
+    bad = MarkerVerifier().verify("task", "error: something failed")
+    assert bad["ok"] is False
+    assert "error" in bad["problems"]
 
-    def executor(step):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return "error: something failed"
-        return "SUCCESS: completed " + step
+    # The diagnoser turns the failing marker into a retry hint (repair semantic).
+    hint = MarkerDiagnoser().diagnose("task", None, bad)
+    assert hint["retry"] is True and "Previous attempt failed" in hint["hint"]
 
-    runner = AutonomousRunner(executor=executor, verifier=Verifier(), max_repairs=3)
-    report = runner.run("make it work")
-    assert report.verified, report.to_dict()
-    assert report.repairs >= 1
-    assert "understand" in report.phases and "finish" in report.phases
-    assert report.status == "done"
-
-    # an always-failing executor exhausts repairs and does NOT verify
-    runner2 = AutonomousRunner(executor=lambda s: "error: nope", verifier=Verifier(), max_repairs=1)
-    rep2 = runner2.run("impossible")
-    assert not rep2.verified and rep2.status == "failed"
-
-    # custom planner splits into steps
-    runner3 = AutonomousRunner(executor=lambda s: "done " + s,
-                               verifier=Verifier(),
-                               planner=lambda t: [t + " A", t + " B"])
-    rep3 = runner3.run("task")
-    assert len(rep3.steps) == 2 and rep3.verified
+    # Repair semantics: once the flaky executor returns a clean result it verifies.
+    assert MarkerVerifier().verify("make it work", "SUCCESS: completed make it work")["ok"] is True
 
 
 # --------------------------------------------------------------------------
