@@ -79,3 +79,34 @@ When you open the dashboard for the first time, the interactive wizard walks you
 # Distribute hard coding & research tasks across the multi-model fleet
 ./hermus fleet run "Analyze this repository and refactor routes"
 ```
+
+---
+
+## 📱 Android Agent Companion (on-device)
+
+Hermus can observe and drive an Android device through a **user-consented** on-device
+companion app. It does **not** bypass Android security — it uses the documented
+accessibility + MediaProjection APIs.
+
+```bash
+cd android_companion
+./gradlew assembleDebug                      # needs Android SDK + JDK 17
+adb install app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:8080 tcp:8080
+# On the device, in the Pairing screen: enable the accessibility service,
+# grant screen capture, then start the bridge.
+```
+
+> ⚠️ **Status: reference implementation — NOT verified on a device.** The host-side
+> Android backend, consent, audit and secure pairing are unit-tested, and a deterministic
+> simulated device drives the full agentic loop. Building the companion and running the
+> real device/with-emulator E2E here was **not possible** (no Android SDK / device). See
+> `FINAL_REPORT.md` §50–§52 for exact verification steps and the honest capability matrix.
+
+### Backend-only / autonomous operation
+
+Hermus is backend-first: give it a high-level goal and the backend plans, observes, acts,
+verifies and continues **without the dashboard being open**. Closing/reloading the control
+room during a mission recovers state from the backend (there is no client-owned mission
+state). Battery — the control room is a *client* of backend state, never the owner of the
+autonomy loop, tool execution or device state.
