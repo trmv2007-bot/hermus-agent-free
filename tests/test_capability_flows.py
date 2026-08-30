@@ -278,16 +278,19 @@ def test_task5_event_bus_replays_after_bus_recreated():
 # ---------------------------------------------------------------------------
 # Task 6 — Computer control: plan → action → observe → verify
 # ---------------------------------------------------------------------------
-def test_task6_computer_events_bridge_to_canonical_bus():
+def test_task6_computer_events_bridge_to_canonical_bus(tmp_path):
     from core.events.bus import configure_bus, get_bus
     from core.computer.events import computer_event_bus
 
-    bus = configure_bus(os.path.join(os.environ.get("HERMUS_EVENTS_DIR", "/tmp"), "t6_events.jsonl"),
-                        reset=True)
-    ev = computer_event_bus.publish("task_started", {"task_id": "t6", "task": "open app"})
-    assert ev["type"] == "task_started"
-    # Mirrored onto the canonical durable authority.
-    assert any(getattr(e, "command", None) == "task_started" for e in get_bus().snapshot())
+    log = tmp_path / "t6_events.jsonl"
+    bus = configure_bus(str(log), reset=True)
+    try:
+        ev = computer_event_bus.publish("task_started", {"task_id": "t6", "task": "open app"})
+        assert ev["type"] == "task_started"
+        # Mirrored onto the canonical durable authority.
+        assert any(getattr(e, "command", None) == "task_started" for e in get_bus().snapshot())
+    finally:
+        bus.close()
 
 
 def test_task6_computer_verifier_records_before_after():

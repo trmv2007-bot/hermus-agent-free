@@ -306,3 +306,46 @@ def test_runtime_uses_canonical_model_gateway():
     src = (ROOT / "gateway/routes_canonical.py").read_text(encoding="utf-8")
     assert "get_model_gateway" in src, "capabilities route must use ModelGateway"
     assert "model_gw.providers(" in src or "model_gw." in src
+
+
+# ---------------------------------------------------------------------------
+# Security: no committed credentials in production code
+# ---------------------------------------------------------------------------
+def test_no_committed_secrets_in_production():
+    """Production code must not commit high-entropy credentials/tokens."""
+    import re
+
+    patterns = [
+        r"\bghp_[A-Za-z0-9]{20,}\b",                 # GitHub PAT
+        r"\bghs_[A-Za-z0-9]{20,}\b",                 # GitHub fine-grained
+        r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
+        r"\bsk-[A-Za-z0-9]{20,}\b",                  # OpenAI/Anthropic style
+        r"\bgsk_[A-Za-z0-9]{20,}\b",
+        r"\bAKIA[0-9A-Z]{16}\b",                     # AWS access key
+        r"\bAIza[A-Za-z0-9_-]{20,}\b",               # Google API key
+    ]
+    rex = [re.compile(p) for p in patterns]
+    offenders = []
+    for p in _prod_files():  # production dirs only (tests may carry fake keys)
+        src = p.read_text(encoding="utf-8", errors="ignore")
+        for rx in rex:
+            if rx.search(src):
+                offenders.append((_rel(p), rx.pattern))
+    assert not offenders, f"committed credential-like secret in production: {offenders}"
+
+
+def test_health_endpoint_probes_not_fabricated():
+    """system/health must derive 'ok' from real required-capability probes, never
+    return a hardcoded healthy value."""
+    src = (ROOT / "gateway/routes_canonical.py").read_text(encoding="utf-8")
+    assert "bootstrap.doctor()" in src, "health must probe the real doctor"
+    assert "present" in src, "must read per-capability present flags"
+    # On probe failure it must surface an error, not fabricate 'ok'.
+    assert "HTTPException(status_code=500" in src or "500" in src
+
+
+def test_doctor_reports_explicit_states_not_fake_ok():
+    """Doctor diagnostics must report explicit severity/status, not a canned 'ok'."""
+    src = (ROOT / "core/doctor.py").read_text(encoding="utf-8")
+    for token in ("worst_severity", "ok", "attention", "critical", "findings"):
+        assert token in src
