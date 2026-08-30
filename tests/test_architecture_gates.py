@@ -77,8 +77,24 @@ def _rel(p: Path) -> str:
         return str(p)
 
 
+def _resolve_relative(p: Path, module: str) -> str:
+    """Resolve a relative ``ImportFrom.module`` (e.g. ``..memory2``) to an absolute
+    dotted module using the importing file's package, or return the raw value if the
+    file is not inside the repo package root."""
+    if not module.startswith("."):
+        return module
+    rel = os.path.relpath(p, ROOT)
+    parts = rel.split(os.sep)[:-1]  # directory components of the importing file
+    # Package of the importing module: replace slashes with dots.
+    pkg = ".".join(x for x in parts if x != "" and x != "..")
+    up = len(module) - len(module.lstrip("."))
+    base = pkg.split(".")[:-up] if pkg else []
+    tail = module.lstrip(".")
+    return ".".join(base + ([tail] if tail else [])) if (base or tail) else module
+
+
 def _imports(p: Path) -> list[str]:
-    """Return dotted module names imported by a file (static)."""
+    """Return dotted module names imported by a file (static, relative-resolved)."""
     mods: list[str] = []
     try:
         tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
@@ -90,9 +106,9 @@ def _imports(p: Path) -> list[str]:
                 mods.append(a.name)
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                mods.append(node.module)
+                mods.append(_resolve_relative(p, node.module))
             for a in node.names:
-                mods.append(f"{node.module or '.'}.{a.name}")
+                mods.append(f"{_resolve_relative(p, node.module or '.')}.{a.name}")
     return mods
 
 
@@ -165,8 +181,10 @@ def test_no_app_level_memory2_direct_access():
         if rel.startswith("core/memory/") or rel == "core/compat/legacy_memory.py":
             continue
         for mod in _imports(p):
-            base = mod.split(".")[0]
-            if base == "memory2" or mod.rstrip(".py") == "memory2":
+            # Matches ``memory2``, ``core.memory2``, and relative ``.memory2``/
+            # ``..memory2`` (after resolution) — i.e. the typed backend by final segment.
+            last = mod.split(".")[-1]
+            if last == "memory2" and not rel.startswith("core/memory/"):
                 offenders.append((rel, mod))
     assert not offenders, (
         "app-level code directly imports the typed memory backend (memory2); "

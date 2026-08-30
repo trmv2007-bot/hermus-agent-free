@@ -288,7 +288,7 @@ async def ws_agent(websocket: WebSocket):
         "kinds": sorted(job_queue.handlers),
         "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled},
         "sandbox": _safe(lambda: __import__("core.sandbox", fromlist=["sandbox"]).sandbox.status()["backend"]),
-        "memory_index": _safe(lambda: __import__("core.memory2", fromlist=["memory2"]).memory2.store.index_stats()),
+        "memory_index": _safe(lambda: _memory_index_stats()),
         "ts": _ts(),
     })
 
@@ -380,10 +380,10 @@ async def ws_agent(websocket: WebSocket):
 
             if action == "memory":
                 try:
-                    from core.memory2 import memory2
+                    from core.memory import memory
 
                     out = await asyncio.to_thread(
-                        memory2.hybrid_recall,
+                        memory.hybrid_recall,
                         str(msg.get("query") or ""),
                         limit=int(msg.get("limit") or 6),
                     )
@@ -412,7 +412,7 @@ async def ws_agent(websocket: WebSocket):
 def _hello(job_queue) -> dict[str, Any]:
     """Capabilities frame sent right after a WS handshake."""
     from core.sandbox import sandbox as jail
-    from core.memory2 import memory2
+    from core.memory import memory
 
     return {
         "type": "hello",
@@ -422,9 +422,17 @@ def _hello(job_queue) -> dict[str, Any]:
         "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled,
                   "backend": job_queue.backend},
         "sandbox": _safe(lambda: jail.status()["backend"]),
-        "memory_index": _safe(lambda: memory2.store.index_stats()),
+        "memory_index": _safe(lambda: memory.index_stats()),
         "ts": _ts(),
     }
+
+
+def _memory_index_stats() -> dict[str, Any]:
+    try:
+        from core.memory import memory
+        return memory.index_stats()
+    except Exception:
+        return {}
 
 
 def _safe(fn: Callable[[], Any]) -> Any:
@@ -439,7 +447,7 @@ def _safe(fn: Callable[[], Any]) -> Any:
 async def memory_hybrid(payload: dict[str, Any] = None):
     """Hybrid recall over typed memory (BM25 + vectors + RRF + decay)."""
     payload = payload or {}
-    from core.memory2 import memory2
+    from core.memory import memory
 
     query = str(payload.get("query") or "")
     if not query.strip():
@@ -448,11 +456,11 @@ async def memory_hybrid(payload: dict[str, Any] = None):
     project = payload.get("project") or None
     kinds = payload.get("kinds") or None
     if payload.get("explain"):
-        return await asyncio.to_thread(memory2.explain, query, limit, project=project, kinds=kinds)
-    hits = await asyncio.to_thread(memory2.hybrid_recall, query, project=project, kinds=kinds, limit=limit)
+        return await asyncio.to_thread(memory.explain, query, limit, project=project, kinds=kinds)
+    hits = await asyncio.to_thread(memory.hybrid_recall, query, project=project, kinds=kinds, limit=limit)
     return {
         "query": query, "mode": "hybrid", "count": len(hits),
-        "index": memory2.store.index_stats(),
+        "index": memory.index_stats(),
         "results": [
             {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
              "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
@@ -465,11 +473,11 @@ async def memory_hybrid(payload: dict[str, Any] = None):
 
 @router.post("/memory/remember")
 async def memory_remember(payload: dict[str, Any] = None):
-    from core.memory2 import memory2
+    from core.memory import memory
 
     payload = payload or {}
     res = await asyncio.to_thread(
-        memory2.remember, str(payload.get("kind") or "semantic"), str(payload.get("content") or ""),
+        memory.remember, str(payload.get("kind") or "semantic"), str(payload.get("content") or ""),
         project=payload.get("project"), importance=float(payload.get("importance", 5.0)),
         success=payload.get("success"), ttl_hours=payload.get("ttl_hours"),
         pinned=bool(payload.get("pinned")), metadata=payload.get("metadata") or None,
@@ -482,34 +490,34 @@ async def memory_sweep(payload: dict[str, Any] = None):
     payload = payload or {}
     if not payload.get("confirm"):
         return JSONResponse({"error": "sweep archives/purges memory; send confirm=true"}, status_code=400)
-    from core.memory2 import memory2
+    from core.memory import memory
 
     return await asyncio.to_thread(
-        memory2.sweep, project=payload.get("project") or None,
+        memory.sweep, project=payload.get("project") or None,
         dry_run=bool(payload.get("dry_run", False)),
     )
 
 
 @router.get("/memory/stats")
 async def memory_stats():
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return await asyncio.to_thread(memory2.stats)
+    return await asyncio.to_thread(memory.stats)
 
 
 @router.post("/memory/reindex")
 async def memory_reindex(payload: dict[str, Any] = None):
     """Rebuild the FTS + vector indexes (after switching embedding model)."""
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return await asyncio.to_thread(memory2.reindex)
+    return await asyncio.to_thread(memory.reindex)
 
 
 @router.get("/memory/access-log")
 async def memory_access_log(memory_id: int, limit: int = 20):
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return {"memory_id": memory_id, "access": memory2.store.access_log(memory_id, limit=limit)}
+    return {"memory_id": memory_id, "access": memory.access_log(memory_id, limit=limit)}
 
 
 # ---- skill forge ---------------------------------------------------------------

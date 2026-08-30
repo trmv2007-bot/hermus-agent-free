@@ -318,16 +318,16 @@ class ToolRegistry:
         ) -> dict:
             """Hybrid (BM25 + vectors, RRF-fused) recall over typed memory 2.0."""
             try:
-                from core.memory2 import memory2
+                from core.memory import memory
 
                 if explain:
-                    return memory2.explain(query, limit=int(limit),
-                                           project=project or None, kinds=kinds or None)
-                hits = memory2.hybrid_recall(query, limit=int(limit),
-                                             project=project or None, kinds=kinds or None)
+                    return memory.explain(query, limit=int(limit),
+                                          project=project or None, kinds=kinds or None)
+                hits = memory.hybrid_recall(query, limit=int(limit),
+                                            project=project or None, kinds=kinds or None)
                 return {
                     "query": query, "mode": "hybrid", "count": len(hits),
-                    "index": memory2.store.index_stats(),
+                    "index": memory.index_stats(),
                     "results": [
                         {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
                          "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
@@ -342,9 +342,9 @@ class ToolRegistry:
         def memory_sweep(dry_run: bool = True, project: str = "") -> dict:
             """Run the decay lifecycle pass (archive stale, purge dead, consolidate dupes)."""
             try:
-                from core.memory2 import memory2
+                from core.memory import memory
 
-                return memory2.sweep(project=project or None, dry_run=bool(dry_run))
+                return memory.sweep(project=project or None, dry_run=bool(dry_run))
             except Exception as e:
                 return {"error": str(e)}
 

@@ -149,6 +149,29 @@ class MemoryFacade:
         except AttributeError:
             return {}
 
+    def sweep(self, *, project: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
+        """Run the typed backend's decay lifecycle pass (archive/purge/consolidate)."""
+        if self._store is not None and hasattr(self._store, "sweep"):
+            return self._store.sweep(project=project, dry_run=bool(dry_run))
+        return {"ok": True, "note": "sweep unavailable"}
+
+    def reindex(self) -> dict[str, Any]:
+        if self._store is not None and hasattr(self._store, "reindex"):
+            return self._store.reindex()
+        return {"ok": False, "note": "reindex unavailable"}
+
+    def index_stats(self) -> dict[str, Any]:
+        st = getattr(self._store, "store", None)
+        if st is not None and hasattr(st, "index_stats"):
+            return st.index_stats()
+        return {}
+
+    def access_log(self, memory_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        st = getattr(self._store, "store", None)
+        if st is not None and hasattr(st, "access_log"):
+            return st.access_log(memory_id, limit=limit)
+        return []
+
     # -- session / curated / user-model / token (legacy v1 backend) --------------
     @property
     def db_path(self) -> Any:

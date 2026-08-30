@@ -358,10 +358,10 @@ def make_delegate_handler():
 
 def make_memory_sweep_handler():
     def sweep(ctx) -> dict[str, Any]:
-        from core.memory2 import memory2
+        from core.memory import memory
 
         payload = dict(ctx.payload)
-        report = memory2.sweep(
+        report = memory.sweep(
             project=payload.get("project") or None,
             dry_run=bool(payload.get("dry_run", False)),
         )

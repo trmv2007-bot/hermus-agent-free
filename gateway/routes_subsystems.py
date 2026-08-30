@@ -75,18 +75,18 @@ async def workspace_use(payload: dict):
 
 @router.post("/memory2/remember")
 async def memory2_remember(payload: dict):
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return memory2.remember(payload.get("kind", "semantic"), payload.get("content", ""),
+    return memory.remember(payload.get("kind", "semantic"), payload.get("content", ""),
                             importance=payload.get("importance", 5.0),
                             success=payload.get("success"), project=payload.get("project"))
 
 
 @router.post("/memory2/recall")
 async def memory2_recall(payload: dict):
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return {"results": memory2.recall(payload.get("query", ""), limit=int(payload.get("limit", 10)),
+    return {"results": memory.recall(payload.get("query", ""), limit=int(payload.get("limit", 10)),
                                       kinds=payload.get("kinds"), project=payload.get("project"))}
 
 
