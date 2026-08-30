@@ -186,6 +186,7 @@ from gateway.routes_management import router as _management_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
+from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 
 app.include_router(_channels_router)
 app.include_router(_registry_router)
@@ -193,6 +194,7 @@ app.include_router(_management_router)
 app.include_router(_subsystems_router)
 app.include_router(_computer_router)
 app.include_router(_speech_router)
+app.include_router(_jarvis_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -692,6 +694,22 @@ async def command_endpoint(request: Request):
     except Exception:
         pass
     return result
+
+@app.post("/run/cancel/{run_id}")
+async def run_cancel(run_id: str):
+    """Cooperatively cancel a real run and its owning queue job, if any."""
+    job_result = None
+    for job in _job_queue.list_jobs(limit=500):
+        if job.get("run_id") == run_id and job.get("status") in {"queued", "running"}:
+            job_result = _job_queue.cancel(job["id"])
+            break
+    cancelled = _run_bus.cancel(run_id)
+    if not cancelled and not (job_result and job_result.get("cancelled")):
+        return JSONResponse({"cancelled": False, "run_id": run_id,
+                             "error": "active run not found"}, status_code=404)
+    return {"cancelled": True, "run_id": run_id, "job": job_result,
+            "stage": (job_result or {}).get("stage", "cooperative")}
+
 
 @app.post("/run/steer")
 async def run_steer(payload: dict = None):
