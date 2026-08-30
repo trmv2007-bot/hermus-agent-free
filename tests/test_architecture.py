@@ -134,37 +134,79 @@ def test_marker_verifier_and_failure_classification():
 # --------------------------------------------------------------------------
 # Persistent background agents
 # --------------------------------------------------------------------------
-def test_agent_manager_lifecycle():
+def _new_agents_dir(tmp_path):
+    from core.workspace import workspace
+    ag = tmp_path / "agents"
+    workspace.dirs["agents"] = ag
+    ag.mkdir(parents=True, exist_ok=True)
+    return ag
+
+
+def test_agent_manager_lifecycle(tmp_path):
+    """AgentManager is a registry + delegation facade; the canonical Job queue owns execution."""
     import time
-    from core.agent_manager import AgentManager, worker_loop
+    from core.agent_manager import AgentManager
+    _new_agents_dir(tmp_path)
 
     am = AgentManager()
     assert am.create("tester", role="generic")["success"]
     assert not am.create("tester", role="generic")["success"]  # duplicate
 
+    # start/stop are registry lifecycle flags — no child subprocess, no pid, no heartbeat file.
     st = am.start("tester")
-    assert st["success"] and st["pid"]
-    # wait for worker to write a running heartbeat
-    for _ in range(50):
-        if am.status("tester").get("status") == "running":
-            break
-        time.sleep(0.05)
-    assert am.status("tester")["alive"] is True
-
+    assert st["success"] and st["queue"] == "canonical"
+    status = am.status("tester")
+    assert status["success"] and status["status"] == "registered"
+    assert status["alive"] is True
     am.stop("tester")
-    assert am.status("tester")["status"] == "stopped"
+    # The removed protocol left no bespoke state.json / jobs / results lifecycle files.
+    ag = tmp_path / "agents" / "tester"
+    assert not (ag / "state.json").exists()
+    assert not (ag / "state.json").exists()
 
-    # job queue drains via worker_loop run inline
-    from core.workspace import workspace
-    adir = workspace.dirs["agents"] / "tester" / "jobs"
-    adir.mkdir(parents=True, exist_ok=True)
-    (adir / "0001.json").write_text('{"task": "hello"}')
-    worker_loop("tester", handler=lambda j: {"ok": True, "got": j["task"]}, max_idle=0.05)
-    assert am.status("tester")["jobs_done"] >= 1
+    # Job submission is a canonical Job; the registry does NOT write jobs/*.json.
+    job = am.submit_job("tester", {"task": "hello"})
+    assert job.get("success") is True
+    assert (ag / "jobs").exists() is False
 
-    # watchdog detects nothing stale after clean stop (status != created/running)
+    # The watchdog reports honestly and delegates recovery to the canonical queue.
     tick = am.watchdog_tick(restart=False)
+    assert tick["recovery_owner"] == "canonical-job-queue"
     assert isinstance(tick["stale"], list)
+
+
+def test_no_production_path_creates_agent_json_jobs():
+    """Architecture gate: AgentManager no longer owns a jobs/*.json/results/*.json lifecycle.
+
+    Agent job execution is owned by the canonical Job system. The agent registry
+    (core/agent_manager.py) must not reference a ``jobs`` or ``results``
+    sub-directory behind the agent dir, and no other module may define its own
+    per-agent JSON job queue.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    src = (root / "core" / "agent_manager.py").read_text(encoding="utf-8")
+    # Strip the module docstring so checks operate on code, not narrative.
+    if src.startswith('"""'):
+        end = src.index('"""', 3)
+        am = src[end + 3:]
+    else:
+        am = src
+    # No bespoke file-based job/result queue remains.
+    assert '"jobs"' not in am and "'jobs'" not in am
+    assert '"results"' not in am and "'results'" not in am
+    assert "worker_loop" not in am and "worker_entry" not in am
+    # The registry writes only identity metadata.
+    assert "agent.json" in am
+    # No other production module spawns its own background worker subprocess protocol.
+    for p in list((root / "core").rglob("*.py")) + list((root / "gateway").rglob("*.py")):
+        if p.name in ("agent_manager.py", "handlers.py", "queue.py"):
+            continue
+        text = p.read_text(encoding="utf-8")
+        assert "worker_loop" not in text, f"{p} references removed worker_loop"
+    # The only public agent-role Job kinds reach the canonical queue via the gateway.
+    hp = (root / "gateway" / "handlers.py").read_text(encoding="utf-8")
+    assert "agent.general" in hp and "agent.computer" in hp
 
 
 # --------------------------------------------------------------------------

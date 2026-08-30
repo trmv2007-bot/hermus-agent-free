@@ -459,8 +459,11 @@ class _PseudoCtx:
 
 def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: bool = True) -> dict[str, str]:
     """Register every gateway job kind. Returns the kind → description map."""
+    from core.agent_manager import make_agent_computer_handler, make_agent_general_handler
     kinds = {
         "runtime.turn": (make_runtime_turn_handler(agent_getter), "canonical runtime turn: auto-classified chat or full mission (universal core)"),
+        "agent.general": (make_agent_general_handler(), "named-agent general task through the universal runtime (role dispatch)"),
+        "agent.computer": (make_agent_computer_handler(), "named-agent desktop/computer task (role dispatch)"),
         "agent.chat": (make_chat_handler(agent_getter), "run one agent turn (ReAct loop, streamed events)"),
         "agent.autonomous": (make_autonomous_handler(agent_getter), "goal through the universal mission runtime (plan→execute→verify→repair)"),
         "mission.start": (make_mission_start_handler(agent_getter), "objective-driven mission with verifiers & dynamic budgets"),

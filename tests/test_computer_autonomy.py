@@ -244,23 +244,42 @@ class _FakeAgentManager:
                 "result": {"success": True, "result": f"done by {name}"}}
 
 
-def test_background_agent_jobs_persist_queryable_results(tmp_path, monkeypatch):
-    import core.agent_manager as manager_module
+def test_background_agent_jobs_persist_queryable_results(tmp_path):
+    """Agent background work is a canonical Job drained by the canonical queue."""
+    import asyncio
+    import time
 
-    monkeypatch.setattr(manager_module.workspace, "base_dir", tmp_path)
-    manager = manager_module.AgentManager()
+    from gateway.queue import JobQueue
+    from core.workspace import workspace
+    workspace.dirs["agents"] = tmp_path / "agents"
+    (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
+
+    from core.agent_manager import AgentManager
+    q = JobQueue(workers=1, maxsize=100, default_timeout=15, persist=str(tmp_path / "jobs.log"))
+    # Inject a deterministic handler so no live model is required.
+    q.register("agent.general", lambda ctx: {"ok": True, "answer": ctx.payload["task"].upper()})
+    manager = AgentManager(queue=q)
     assert manager.create("worker", role="generic")["success"]
-    queued = manager.submit_job("worker", {"task": "background work"})
-    manager_module.worker_loop(
-        "worker",
-        handler=lambda job: {"ok": True, "answer": job["task"].upper()},
-        heartbeat_interval=0.01,
-        max_idle=0.02,
-    )
-    status = manager.job_status("worker", queued["job_id"])
-    assert status["status"] == "finished"
+
+    async def main():
+        await q.start()
+        queued = manager.submit_job("worker", {"task": "background work"})
+        job_id = queued["job_id"]
+        deadline = time.time() + 20
+        status = {"status": "queued"}
+        while time.time() < deadline:
+            status = manager.job_status("worker", job_id)
+            if status["status"] in ("succeeded", "failed"):
+                break
+            await asyncio.sleep(0.05)
+        await q.stop()
+        return status
+
+    status = asyncio.run(main())
+    assert status["status"] == "succeeded", status
     assert status["result"]["answer"] == "BACKGROUND WORK"
-    assert (tmp_path / "agents" / "worker" / "results" / f"{queued['job_id']}.json").exists()
+    # The canonical durable result is queryable by job id — no per-agent results/*.json.
+    assert not (tmp_path / "agents" / "worker" / "results").exists()
 
 
 def test_multi_agent_delegation_respects_dependencies_and_routes_roles(tmp_path):

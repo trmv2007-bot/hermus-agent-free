@@ -1803,14 +1803,13 @@ def main():
             print(f"{'✅' if r.get('success') else '❌'} {r.get('name') or r.get('error')} (role={r.get('role','')})")
         elif args.agent_action == "start":
             r = agent_manager.start(args.name)
-            print(f"{'✅' if r.get('success') else '❌'} {args.name} started (pid={r.get('pid')})" if r.get("success") else f"❌ {r.get('error')}")
+            print(f"{'✅' if r.get('success') else '❌'} {args.name} ready (execution on canonical job queue)" if r.get("success") else f"❌ {r.get('error')}")
         elif args.agent_action == "status":
             s = agent_manager.status(args.name)
             if not s.get("success"):
                 print(f"❌ {s.get('error')}")
             else:
-                print(f" {args.name} | role={s.get('role')} status={s.get('status')} pid={s.get('pid')} alive={s.get('alive')}")
-                print(f"   heartbeat={s.get('heartbeat')} jobs_done={s.get('jobs_done')} last={s.get('last_result')}")
+                print(f" {args.name} | role={s.get('role')} status={s.get('status')} queue={s.get('queue')}")
         elif args.agent_action == "stop":
             r = agent_manager.stop(args.name)
             print(f"{'✅' if r.get('success') else '❌'} {args.name} stopped")
