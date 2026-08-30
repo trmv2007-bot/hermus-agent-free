@@ -640,6 +640,13 @@ class ToolRegistry:
             register_architecture_tools(self)
         except Exception as e:
             self._errors.append(f"integrations: {e}")
+        # Android control tools (consent-gated, audited; single Android boundary)
+        try:
+            from .android.tools import register_android_tools
+
+            register_android_tools(self)
+        except Exception as e:
+            self._errors.append(f"android: {e}")
         # Custom APIs as tools
         try:
             from core.custom_api import custom_api_manager

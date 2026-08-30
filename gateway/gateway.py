@@ -293,6 +293,7 @@ from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
+from gateway.routes_android import router as _android_router  # noqa: E402
 
 app.include_router(_channels_router)
 app.include_router(_registry_router)
@@ -303,6 +304,7 @@ app.include_router(_speech_router)
 app.include_router(_jarvis_router)
 app.include_router(_engine_router)
 app.include_router(_canonical_router)
+app.include_router(_android_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
