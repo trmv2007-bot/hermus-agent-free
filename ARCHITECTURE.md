@@ -92,7 +92,7 @@ The final tree must not contain two competing implementations.
 | Subsystem | State | Detail |
 |---|---|---|
 | Autonomy | ✅ **DONE** — `core/autonomous.py` **deleted** | `MissionEngine` is the only autonomy engine; disabling the runtime is a **BLOCKED** state, never a silent downgrade. The marker verifier/diagnoser was rehomed to `core/verifiers.py` (feature depth preserved). |
-| Events | 🟡 **bridged** (`core/dashboard_events.py`) | Every dashboard/gateway/speech event now funnels into the one canonical `core.events.EventBus` (durable, replayable). The dict API is kept only as a migration bridge. |
+| Events | ✅ **single canonical event authority** | The canonical `core.events.EventBus` (durable, replayable) is the single authoritative source. `dashboard_events` + `computer/events` mirror every event onto it (computer bridge added Phase 1); the dead `core/events/legacy.py` bridge was removed (zero production consumers). The dict APIs remain only as in-memory projections for realtime/SSE consumers. |
 | Memory | ✅ **DONE** — `MemoryFacade` is the single writable memory path | The facade owns the typed Memory2 store plus the v1 session/curated/user-model/token backend; no competing process-level v1 singleton. |
 | World state | ✅ **DONE** — `world_state_v2.py` **deleted** | `core/computer/world_state.WorldState` (v1) is canonical; `core.state.WorldStateFacade` is the single writable path. The dead V2 duplicate (exported only from `__init__`, used by no functional code) was removed. |
 | Models | ✅ **verified single stack — no duplicate** | The provider layer (`providers` → `multi_key` → `provider_resolver` → `model_capabilities`) is one mutually-dependent stack with `ModelGateway` (`core/models/gateway.py`) as its single public facade. Each capability (`select_usable_bundle`, `list_available_providers`, `discover_runtime_bundles`, `negotiate`, `select_compatible_model`, `diagnose`) has exactly **one** owner. `router2` (runtime task-type model swap) and `model_fleet` (multi-model distribution) are distinct higher-level features, not duplicates. No competing production implementation exists to delete. |
@@ -100,7 +100,7 @@ The final tree must not contain two competing implementations.
 
 ### Deletion milestones (follow-ups)
 1. ~~Migrate world-state consumers → `WorldStateFacade`; delete v1.~~ ✅ done (deleted the dead `world_state_v2` duplicate; v1 is canonical).
-2. Migrate run/dashboard/computer event producers + consumers to `EventEnvelope`; delete the legacy event modules.
+2. ~~Migrate run/dashboard/computer event producers + consumers to `EventEnvelope`; delete the legacy event modules.~~ ✅ **done** — the canonical `EventBus` is the authority; `dashboard_events` + `computer/events` mirror onto it; the dead `core/events/legacy.py` bridge was removed. `run_events.RunBus` retained as the genuine per-run live-stream/steer/cancel owner (mirrors onto canonical bus).
 3. Migrate legacy memory consumers → `core.memory.get_memory()` entirely; retire `core/compat/legacy_memory.py` as a public path (facade already owns the v1 backend).
 4. ~~Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway`.~~ **resolved — no duplicate found.** Detect-first analysis verified these are ONE mutually-dependent provider stack, not competing implementations; `ModelGateway` is the single facade. No deletion warranted. (Future nicety, not a deletion: have the live runtime's model-selection path also go through `ModelGateway`.)
 5. ~~Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.~~ ✅ **done** — the single production control room is `/control`; root `/` → `/control`. Real feature depth is preserved through the backend APIs it drives (`/computer/*`, `/remote/*`, `/api/jarvis/status`, `/events/recent`, `/dashboard/status`, `/dashboard/events`, `/jobs`, `/api/v1/*`, `/doctor/*`, `/speech/*`). The four legacy HTML surfaces + the `living-deck.*`/`hermus-client.js`/`jarvis-control.js` assets and the `/dashboard*`, `/jarvis`, `/dashboard-assets/*`, and the HTML-only `/computer/dashboard` + `/remote` routes were **deleted**.
@@ -108,9 +108,9 @@ The final tree must not contain two competing implementations.
 
 ### Remaining (Final One-Shot Spec §3/§7/§16)
 1. ~~**Control-room cleanup**~~ ✅ **done** — `/control` is the only production control room; root → `/control`; legacy dashboard HTML/JS/routes deleted; all real capability preserved through backend APIs.
-2. **Events** — migrate remaining `dashboard_events`/`run_bus` consumers to `EventEnvelope`/`EventBus` and delete the bridge.
-3. **Memory** — migrate remaining legacy `core.memory`/v1 imports to `MemoryFacade`; no second public writer.
-4. **Models** — add a static check that no code path calls a provider SDK directly outside the model subsystem; `ModelGateway` is the only public boundary.
+2. ~~**Events**~~ ✅ **single canonical event authority** — the canonical `core.events.EventBus` is the durable/replayable source; `dashboard_events` + `computer/events` mirror every event onto it (computer bridge added). The dead `core/events/legacy.py` bridge (`publish_legacy`/`LegacyEventBridge`) was removed — it had zero production consumers. `run_events.RunBus` kept as the genuine per-run live-stream/steer/cancel owner that also mirrors onto the canonical bus.
+3. ~~**Memory**~~ ✅ **single public writer** — `MemoryFacade` (`core.memory.get_memory`) is the only public writable path; `core.compat.legacy_memory` is a private backend owned by the facade (intentionally retained, not a duplicate) and no production code imports it outside `core.memory` (enforced by gate).
+4. ~~**Models**~~ ✅ **static boundary gate** — `tests/test_architecture_gates.py::test_one_model_boundary_no_direct_provider_sdk` rejects any direct provider SDK import outside the canonical model subsystem; `ModelGateway` is the public selection facade and `routes_canonical` uses it. (Enforced by gate.)
 5. **Setup** — one idempotent `bootstrap`/`start`/`doctor`; confirm shell wrappers contain no business logic and never mask required dep failures.
 
 ---
