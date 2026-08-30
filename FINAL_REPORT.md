@@ -171,9 +171,9 @@ Both verified on `origin/clean-slate/final-consolidation` by `git fetch` (local 
 
 ### Full-suite re-run (after this turn's changes)
 
-`tests/` (excluding `tests/js`, `tests/eval`): **660 passed, 2 skipped, 12 warnings**,
-0 failures. The +8 from the prior 652 are `tests/test_android_agentic_loop.py` (9 tests,
-one counting already in the baseline set elsewhere). The 2 skipped are the two host-E2E
+`tests/` (excluding `tests/js`, `tests/eval`): **661 passed, 2 skipped, 10 warnings**,
+0 failures. The +9 from the prior 652 are `tests/test_android_agentic_loop.py` (9 tests).
+The 2 skipped are the two host-E2E
 tests (Android + computer) which are correctly gated on device/display availability.
 
 ### What was actually built this turn
