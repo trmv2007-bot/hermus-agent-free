@@ -567,6 +567,6 @@ A review-driven pass over the universal runtime. Full details and rationale:
 | 9 | Frontends | one shared queue-first client (`gateway/static/hermus-client.js`) used by `/dashboard` **and** `/jarvis`; fixed `GET /jobs/{id}` 404-for-succeeded-jobs |
 | 10 | Self-improvement | skill distillation gated by verified success **and** repeatability (independent sessions) |
 | 11 | Models | capability negotiation (tools/vision/context/structured/streaming/computer) via `core/model_capabilities.py` + `GET /models/capabilities` |
-| 12 | CI | `.github/workflows/ci.yml` committed — green checks are GitHub results, not local claims |
+| 12 | Local gates | no hosted CI by design — `pytest` + `compileall` + error-class `ruff` run locally before any merge |
 
 Tests: `tests/test_execution_path_hardening.py` (46 new) — suite is **399 passed / 1 skipped**.

@@ -126,6 +126,88 @@ def test_subscriber_receives_events_from_another_thread():
     assert _drive(main()) == [0, 1, 2, 3, 4]
 
 
+def test_subscribe_never_loses_events_published_during_replay():
+    """Regression: snapshot+registration in subscribe() must be atomic.
+
+    The old code took the replay snapshot and registered the subscriber in two
+    separate lock sections, so an event published in between (e.g. the
+    back-to-back ``job_finished`` → ``run_finished`` pair emitted when a queued
+    job finalizes) was neither replayed nor delivered live. A late-joining SSE
+    client then missed the end of the run and hung on a dead stream until
+    stream_timeout.
+
+    Deterministic reproduction: ``_put_nowait`` runs inside the replay loop of
+    both implementations. From that hook we (a) probe whether the bus lock is
+    held — the fix's contract — and (b) if it is not (old behavior), publish
+    into the open window exactly like a finalizing job would, then require the
+    subscriber still received it.
+    """
+    import core.run_events as re_mod
+
+    bus = RunBus()
+    bus.start("atomic")                      # run_started → id 1
+    for i in range(5):                       # ticks → ids 2..6
+        bus.publish("atomic", "tick", {"i": i})
+
+    orig_put = re_mod._put_nowait
+    probe = {"held": None, "injected": None}
+
+    def _lock_held_by_subscriber() -> bool:
+        got: list[bool] = []
+
+        def try_take():
+            if bus._lock.acquire(timeout=0.3):
+                bus._lock.release()
+                got.append(True)
+
+        t = threading.Thread(target=try_take)
+        t.start()
+        t.join()
+        return not got                        # nobody else could take it
+
+    def hooked(aq, event):
+        if probe["held"] is None and event.get("type") == "tick":
+            probe["held"] = _lock_held_by_subscriber()
+            if not probe["held"]:
+                # OLD behavior: the snapshot→registration window is open.
+                # Publish exactly here, like job finalization does.
+                probe["injected"] = bus.publish("atomic", "injected", {})
+        return orig_put(aq, event)
+
+    re_mod._put_nowait = hooked
+    try:
+
+        async def main():
+            loop = asyncio.get_running_loop()
+            aq, unsub = bus.subscribe("atomic", loop=loop)
+            # live delivery must still work for post-registration events
+            bus.publish("atomic", "after", {})
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            unsub()
+            await asyncio.sleep(0)            # let any in-flight offers land
+            drained = []
+            while not aq.empty():
+                drained.append(aq.get_nowait())
+            return drained
+
+        drained = _drive(main())
+    finally:
+        re_mod._put_nowait = orig_put
+
+    # The fix's contract: replay runs while holding the bus lock, so no
+    # publish can squeeze between the snapshot and the registration.
+    assert probe["held"] is True, (
+        "subscribe() replayed history without holding the bus lock — events "
+        "published during replay can be lost"
+    )
+    ids = [ev["id"] for ev in drained]
+    types = [ev["type"] for ev in drained]
+    # replay (1..6) + the post-registration live event, in order, no gaps
+    assert ids == list(range(1, 8)), (ids, types)
+    assert "after" in types, types
+
+
 # --------------------------------------------------------------------------
 # Queue mechanics (no HTTP)
 # --------------------------------------------------------------------------

@@ -9,7 +9,6 @@ Build with local models or free-tier providers. Keep your data, tools and runtim
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/stargazers"><img src="https://img.shields.io/github/stars/trmv2007-bot/hermus-agent-free?style=for-the-badge" alt="Stars"></a>
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
 <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
-<a href="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/ci.yml"><img src="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 > **Hermus Agent Free** is a self-hosted agent platform focused on practical autonomy: it can reason over tasks, use tools, delegate work, write and test software, maintain project memory, create reusable skills, run scheduled jobs, and expose a gateway/dashboard for interacting with the agent.
