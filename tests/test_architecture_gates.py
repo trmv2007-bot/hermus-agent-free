@@ -219,6 +219,30 @@ def test_one_model_boundary_no_direct_provider_sdk():
     assert not offenders, f"direct provider SDK import outside model subsystem: {offenders}"
 
 
+def test_one_model_boundary_no_direct_free_llm_construction():
+    """Every production model invocation is obtained via ModelGateway.
+
+    Application code must not construct a ``FreeLLM`` (the provider-call
+    implementation) directly nor use the module-level ``free_llm`` singleton —
+    both bypass the canonical ModelGateway (selection/capability/fallback/health).
+    Only the model subsystem owner modules may.
+    """
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if any(rel.startswith(m.rstrip("/*")) or rel == m for m in _MODEL_SUBSYSTEM):
+            continue
+        src = p.read_text(encoding="utf-8")
+        # Direct construction: FreeLLM(...)  and  free_llm.<method>(
+        for pat in ("FreeLLM(", "free_llm."):
+            if pat in src:
+                offenders.append((rel, pat))
+    assert not offenders, (
+        "application code constructs FreeLLM / uses the free_llm singleton directly; "
+        f"route through get_model_gateway(): {offenders}"
+    )
+
+
 def test_model_gateway_is_the_selection_facade():
     """ModelGateway is real: routes_canonical uses get_model_gateway()."""
     src = (ROOT / "gateway/routes_canonical.py").read_text(encoding="utf-8")

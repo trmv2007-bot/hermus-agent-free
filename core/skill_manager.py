@@ -121,12 +121,12 @@ class SkillManager:
         ])
 
         try:
-            from .llm import free_llm
+            from .models import get_model_gateway
             messages = [
                 {"role": "system", "content": "You are a skill creator. Given a successful trajectory of tool calls, create a reusable Python skill. Output JSON with name, description, capabilities list, and python code."},
                 {"role": "user", "content": f"Trajectory:\n{traj_text}\n\nCreate a skill. Return JSON: {{\"name\": \"skill_name_snake_case\", \"description\": \"...\", \"capabilities\": [\"read\"], \"code\": \"def ...\"}}"}
             ]
-            resp = free_llm.chat(messages)
+            resp = get_model_gateway().chat(messages)
             content = resp.content
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:

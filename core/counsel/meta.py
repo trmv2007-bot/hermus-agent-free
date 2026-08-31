@@ -90,9 +90,9 @@ class MetaCounsel:
         )
         proposed = []
         try:
-            from ..llm import FreeLLM
+            from ..models import get_model_gateway
 
-            resp = FreeLLM(config.model).chat([{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}])
+            resp = get_model_gateway().chat([{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}], model=config.model)
             proposed = self._parse_amendments(resp.content or "")
         except Exception as e:
             print(f"[🕯️ Meta-Counsel] review LLM failed: {e}")

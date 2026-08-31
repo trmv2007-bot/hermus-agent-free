@@ -765,9 +765,9 @@ class SkillForge:
         if self._llm:
             return self._llm(messages)
         try:
-            from .llm import free_llm
+            from .models import get_model_gateway
 
-            resp = free_llm.chat(messages)
+            resp = get_model_gateway().chat(messages)
             return getattr(resp, "content", "") or ""
         except Exception:
             return ""

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from .config import config
-from .llm import FreeLLM
+from .models import get_model_gateway
 from .memory import memory
 
 # re-export for type hints used in helpers
@@ -26,7 +26,7 @@ class AgentPersona:
         self.api_key = api_key
         self.base_url = base_url
         self.provider = provider
-        self.llm = FreeLLM(self.model, api_key=api_key, base_url=base_url, provider=provider)
+        self.llm = get_model_gateway().llm(model=self.model, api_key=api_key, base_url=base_url, provider=provider)
         self.color = color
         self.agent_id = f"{name}_{uuid.uuid4().hex[:4]}"
 
@@ -220,7 +220,7 @@ class MultiAIChat:
 
         # Use first agent's LLM as judge (or free mock)
         try:
-            judge_llm = FreeLLM(self.agents[0].model if self.agents else config.model)
+            judge_llm = get_model_gateway().llm(model=self.agents[0].model if self.agents else config.model)
             resp = judge_llm.chat(judge_messages)
             final = resp.content
 

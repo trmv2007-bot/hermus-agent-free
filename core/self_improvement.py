@@ -101,7 +101,7 @@ class SelfImprovement:
         improvements = []
         try:
             from tools.web_search import web_search
-            from .llm import free_llm
+            from .models import get_model_gateway
 
             for mistake in mistakes[:3]:  # Search for top 3 mistakes
                 # Search web for how to improve
@@ -118,7 +118,7 @@ class SelfImprovement:
                         {"role": "system", "content": "You are a self-improvement expert for AI agents. Given a mistake the agent made, search results for best practices, suggest how to fix itself."},
                         {"role": "user", "content": f"Mistake: {mistake}\n\nSearch results for best practices:\n{search_text[:1000]}\n\nSuggest how agent should fix itself in background - e.g., improve skill, add error handling, update tool, etc."}
                     ]
-                    resp = free_llm.chat(messages)
+                    resp = get_model_gateway().chat(messages)
                     improvements.append({
                         "mistake": mistake,
                         "search_query": query,

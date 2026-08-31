@@ -17,7 +17,8 @@ from enum import Enum
 from typing import Any, Optional
 from collections.abc import Sequence
 
-from ..llm import FreeLLM, free_llm
+from ..llm import FreeLLM
+from ..models import get_model_gateway
 
 
 class FailureKind(str, Enum):
@@ -127,7 +128,7 @@ class RepairEngine:
         max_steps: int = 3,
         use_llm: bool = True,
     ):
-        self.llm = llm or free_llm
+        self.llm = llm or get_model_gateway().llm()
         self.max_steps = max(1, min(int(max_steps), 5))
         self.use_llm = bool(use_llm)
         self.known_repairs: list[dict[str, Any]] = []
