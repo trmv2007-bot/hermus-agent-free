@@ -285,16 +285,14 @@ class ToolRegistry:
         ) -> dict:
             """Plan → fan out parallel sub-agents → aggregate structured results."""
             try:
-                from core.delegation import delegation
+                # Canonical path: delegation runs as a ``subagent.delegate`` Job on the
+                # JobQueue (execution lifecycle owned by the queue), never by calling the
+                # delegation module directly from a tool.
+                from subagents.subagent import delegate
 
-                if tasks:
-                    return delegation.fanout(
-                        [str(t) for t in tasks], goal=goal, max_children=int(max_children),
-                        aggregate=str(aggregate or "synthesize"),
-                    )
-                return delegation.decompose_and_run(
-                    goal, max_children=int(max_children), aggregate=str(aggregate or "synthesize")
-                )
+                return delegate(str(goal), tasks=list(tasks) if tasks else None,
+                                max_children=int(max_children),
+                                aggregate=str(aggregate or "synthesize"))
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 

@@ -335,6 +335,14 @@ def make_delegate_handler():
         goal = payload.get("goal") or payload.get("text") or ""
         from core.delegation import delegation
 
+        # Canonical correlation IDs: the Job carries mission_id/run_id (set on
+        # submit), and the job id is parent_task_id. They trace into the delegation
+        # tree and onto every worker/EventBus event so a parent mission can follow
+        # a delegated child end-to-end.
+        mission_id = getattr(ctx.job, "mission_id", None) or payload.get("mission_id")
+        run_id = getattr(ctx.job, "run_id", None) or payload.get("run_id")
+        parent_task_id = payload.get("parent_task_id") or payload.get("task_id") or ctx.id
+
         ctx.emit("delegation_started", {"tasks": len(tasks or []), "goal": str(goal)[:200]})
         if tasks:
             out = delegation.fanout(
@@ -343,14 +351,22 @@ def make_delegate_handler():
                 depth=int(payload.get("depth", 1)),
                 on_event=ctx.emit,
                 should_cancel=ctx.should_cancel,
+                mission_id=mission_id,
+                run_id=run_id,
+                parent_task_id=parent_task_id,
             )
         else:
             out = delegation.decompose_and_run(
                 str(goal),
                 max_children=int(payload.get("max_children", 4)),
                 on_event=ctx.emit,
+                mission_id=mission_id,
+                run_id=run_id,
+                parent_task_id=parent_task_id,
             )
         out["job_id"] = ctx.id
+        out["run_id"] = run_id
+        out["mission_id"] = mission_id
         return out
 
     return delegate

@@ -207,6 +207,21 @@ def get_tool_gateway(registry: Any = None) -> ToolGateway:
         return _gateway
 
 
+def gateway_result_dict(res: 'ToolResult') -> dict[str, Any]:
+    """Flatten a ToolResult into a plain dict shaped like the registry's raw tool output.
+
+    This is the *one* place callers that previously read ``tool_registry.execute(...)``
+    output (which returned the tool's own dict) get a compatible dict: on success the
+    tool's ``output`` is returned verbatim; on failure a ``{error, error_code}`` dict.
+    Centralizing this keeps invocation paths uniform and preserves the contract.
+    """
+    if res.ok:
+        out = res.output
+        return out if isinstance(out, dict) else {"result": out}
+    return {"error": res.error_message or res.error_code or "tool failed",
+            "error_code": res.error_code}
+
+
 def tool_response(ok: bool, output: Any = None, **kw) -> ToolResult:
     return ToolResult(ok=ok, output=output, **kw)
 
@@ -299,8 +314,12 @@ def _classify_registry_result(raw: Any) -> tuple[bool, Any, dict]:
     """
     if not isinstance(raw, dict):
         return True, raw, {"ok": True}
-    if raw.get("error") is not None:
-        err = str(raw.get("error"))
+    # ``error`` may be absent, ``None``, or empty string — none of those is a failure.
+    # Only a truthy error value means the tool failed. This matters because several
+    # tools (e.g. sandbox_run) use ``"error": ""`` to mean "no error" in their shape.
+    err = raw.get("error")
+    if err:
+        err = str(err)
         errmsg = raw.get("error_message") or raw.get("hint") or err
         # Tool-not-found marker: registry returns available_sample/hint.
         if "Unknown tool" in err or "not found" in err.lower() or "available_sample" in raw:

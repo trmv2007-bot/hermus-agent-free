@@ -369,10 +369,15 @@ async def ws_agent(websocket: WebSocket):
                 name = str(msg.get("name") or msg.get("tool") or "")
                 args = msg.get("args") or msg.get("arguments") or {}
                 try:
-                    from core.tool_registry import tool_registry
+                    # §5 canonical path: gateway tool calls go through ToolGateway.
+                    from core.tools import get_tool_gateway, gateway_result_dict
 
-                    result = await asyncio.to_thread(tool_registry.execute, name,
-                                                     args if isinstance(args, dict) else {})
+                    def _run():
+                        r = get_tool_gateway().execute(name,
+                                                       args if isinstance(args, dict) else {},
+                                                       actor="realtime")
+                        return gateway_result_dict(r)
+                    result = await asyncio.to_thread(_run)
                     await send({"type": "tool_result", "tool": name, "result": result})
                 except Exception as e:
                     await send({"type": "error", "error": str(e)[:300], "tool": name})
@@ -622,10 +627,13 @@ async def sandbox_recent(limit: int = 20):
 # ---- delegation ---------------------------------------------------------------
 @router.post("/delegate")
 async def delegate(payload: dict[str, Any] = None):
-    """Fan out work to parallel sub-agents (processes + JSON-RPC) and aggregate."""
-    payload = payload or {}
-    from core.delegation import delegation
+    """Fan out work to parallel sub-agents (processes + JSON-RPC) and aggregate.
 
+    The delegation always runs as a canonical ``subagent.delegate`` Job on the
+    JobQueue (async: return the job id; sync: block for its structured result) so
+    the lifecycle is owned by the queue.
+    """
+    payload = payload or {}
     tasks = payload.get("tasks")
     goal = str(payload.get("goal") or payload.get("text") or "")
     if payload.get("async"):
@@ -634,21 +642,27 @@ async def delegate(payload: dict[str, Any] = None):
         job = job_queue.submit("subagent.delegate", payload, session_key=f"delegate:{goal[:40]}")
         return {"job_id": job.id, "run_id": job.run_id, "status": job.status,
                 "events_url": f"/jobs/{job.id}/events"}
-    if tasks:
-        return await asyncio.to_thread(
-            delegation.fanout, [str(t) for t in tasks], goal=goal,
-            aggregate=str(payload.get("aggregate") or "synthesize"),
-            max_children=int(payload.get("max_children") or delegation.max_workers),
-            timeout=payload.get("timeout"),
-        )
-    if not goal:
+    if not (tasks or goal):
         return JSONResponse({"error": "goal or tasks required"}, status_code=400)
-    return await asyncio.to_thread(
-        delegation.decompose_and_run, goal,
-        max_children=int(payload.get("max_children") or 4),
-        aggregate=str(payload.get("aggregate") or "synthesize"),
-        timeout=payload.get("timeout"),
+    # Canonical path: even the synchronous form of the /delegate endpoint runs the
+    # delegation as a ``subagent.delegate`` Job on the JobQueue (lifecycle owned by
+    # the queue), then blocks for its structured result — never calling the
+    # delegation module directly.
+    from subagents.subagent import DELEGATE_JOB, submit_and_wait
+
+    # Run the blocking submit+wait off the event loop so a live gateway (whose
+    # queue owns a running loop) can drive the job without deadlocking.
+    st = await asyncio.to_thread(
+        submit_and_wait, DELEGATE_JOB, payload,
+        session_key=f"delegate:{str(goal)[:40]}",
+        timeout=float(payload.get("timeout") or 300.0),
     )
+    if st.get("status") == "failed":
+        return {"ok": False, "error": st.get("error") or "delegate job failed",
+                "job_id": st.get("job_id")}
+    res = st.get("result") or {"ok": False, "error": "no result"}
+    res["job_id"] = st.get("job_id") or res.get("job_id")
+    return res
 
 
 @router.get("/delegation/status")

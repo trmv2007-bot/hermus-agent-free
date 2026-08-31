@@ -154,6 +154,30 @@ class AndroidTool:
         return cap
 
 
+#: transport factory seam (overridable in tests)
+_transport_factory = None
+
+
+def set_transport_factory(factory):
+    """Override the factory the singleton uses to provision its transport (test seam)."""
+    global _transport_factory
+    _transport_factory = factory
+
+
+def get_android_transport() -> Optional[AndroidTransport]:
+    """Return the provisioned transport for the singleton, or None if unavailable.
+
+    Uses the canonical :func:`core.android.transport.build_default_transport` so the
+    production singleton is genuinely connected to a real ADB/bridge transport when one
+    is available (§7) — it is never left as ``AndroidTool(transport=None)`` when a
+    transport can be built. ``set_transport_factory`` overrides this in tests.
+    """
+    if _transport_factory is not None:
+        return _transport_factory()
+    from .transport import build_default_transport
+    return build_default_transport()
+
+
 #: process-wide canonical instance (single Android boundary)
 _android_tool: Optional[AndroidTool] = None
 
@@ -161,5 +185,11 @@ _android_tool: Optional[AndroidTool] = None
 def get_android_tool() -> AndroidTool:
     global _android_tool
     if _android_tool is None:
-        _android_tool = AndroidTool()
+        _android_tool = AndroidTool(transport=get_android_transport())
     return _android_tool
+
+
+def reset_android_tool() -> None:
+    """Clear the singleton (test seam so a fresh tool can be provisioned)."""
+    global _android_tool
+    _android_tool = None

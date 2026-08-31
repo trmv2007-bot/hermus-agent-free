@@ -313,6 +313,92 @@ def test_one_tool_gateway_no_duplicate_invoke_path():
         "core.agent must not bypass the ToolGateway by calling tool_registry.execute"
 
 
+def _tool_registry_aliases(p: Path) -> set[str]:
+    """Return the local names bound to the tool-registry module in ``p`` (AST).
+
+    Handles ``from .tool_registry import tool_registry``, ``from ..tool_registry import
+    tool_registry as tr``, ``import tool_registry``, ``from core.tool_registry import ...
+    ``; returns the set of *call-site names* that actually reference the registry.
+    """
+    try:
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+    except SyntaxError:
+        return set()
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            # Normalize to see if the source module is a tool_registry module.
+            resolved = _resolve_relative(p, module)
+            if not (resolved.endswith(".tool_registry") or resolved == "tool_registry"
+                    or resolved == "core.tool_registry"):
+                continue
+            for alias in node.names:
+                local = alias.asname or alias.name
+                aliases.add(local)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.endswith(".tool_registry"):
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+#: modules that legitimately own/drive the registry directly (gateway is the public path;
+#: the registry implementation itself is exempt).
+_REGISTRY_OWNERS = {"core/tool_registry.py", "core/tools/gateway.py", "core/tools/__init__.py"}
+
+
+def test_no_tool_gateway_bypass_in_production():
+    """§31: no production module may invoke tools by calling ``tool_registry.execute(...)``
+    directly, bypassing the ToolGateway. AST-based (catches aliases), not string matching."""
+    offenders: list[str] = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in _REGISTRY_OWNERS:
+            continue
+        aliases = _tool_registry_aliases(p)
+        if not aliases:
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            attr = getattr(func, "attr", None)
+            value = getattr(func, "value", None)
+            if attr != "execute":
+                continue
+            name = getattr(value, "id", None)
+            if name in aliases:
+                offenders.append(f"{rel}:{getattr(node, 'lineno', '?')} {name}.execute(...)")
+    assert not offenders, (
+        "production bypassing the ToolGateway via tool_registry.execute (route via "
+        f"get_tool_gateway().execute()): {offenders}"
+    )
+
+
+def test_android_tool_default_transport_is_factory_provisioned():
+    """§31: the production Android singleton must not be left as AndroidTool(transport=None)
+    when a transport can be built — it must provision via the canonical transport factory."""
+    src = (ROOT / "core/android/tool.py").read_text(encoding="utf-8")
+    assert "build_default_transport" in src, \
+        "get_android_tool() must provision its transport via build_default_transport()"
+    assert "get_android_transport()" in src or "build_default_transport()" in src
+    # The factory (in the transport module) supplies the configured ADB/bridge transport.
+    transport_src = (ROOT / "core/android/transport.py").read_text(encoding="utf-8")
+    assert "def build_default_transport" in transport_src
+
+
+def test_android_no_duplicate_tool_impl():
+    """§31: exactly one AndroidTool facade class and one transport-factory function."""
+    tool_src = (ROOT / "core/android/tool.py").read_text(encoding="utf-8")
+    assert tool_src.count("class AndroidTool") == 1, "must be a single AndroidTool class"
+    assert "def get_android_tool" in tool_src
+
+
 # ---------------------------------------------------------------------------
 # Autonomy never silently degrades to chat, and never fakes success
 # ---------------------------------------------------------------------------
@@ -418,3 +504,79 @@ def test_bootstrap_probes_required_deps_honestly():
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# One delegation entry point — must go through the canonical JobQueue
+# ---------------------------------------------------------------------------
+# The ONLY production code allowed to call the delegation engine directly is
+# (a) the delegation module itself and (b) the canonical ``subagent.delegate``
+# Job handler in gateway/handlers.py. Every other caller must submit a Job.
+_DELEGATION_ENGINE_OWNERS = {"core/delegation.py", "gateway/handlers.py"}
+_DELEGATION_DIRECT_CALLS = (
+    "delegation.fanout(",
+    "delegation.decompose_and_run(",
+    "delegation.delegate(",
+)
+
+
+def test_delegation_entered_only_through_canonical_queue():
+    """Delegation is a JobQueue owner: no tool/route/mission may invoke the
+    delegation engine directly, bypassing the queue lifecycle."""
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in _DELEGATION_ENGINE_OWNERS:
+            continue
+        src = p.read_text(encoding="utf-8")
+        for pat in _DELEGATION_DIRECT_CALLS:
+            if pat in src:
+                offenders.append((rel, pat))
+    assert not offenders, (
+        "delegation must be entered through the canonical JobQueue "
+        f"(submit a subagent.delegate job); direct engine calls bypass its "
+        f"lifecycle: {offenders}"
+    )
+
+
+def test_subagents_facade_submits_through_queue_not_direct_engine():
+    """subagents.subagent is a queue facade: it must submit jobs via
+    submit_and_wait, not call the delegation engine directly."""
+    src = (ROOT / "subagents/subagent.py").read_text(encoding="utf-8")
+    assert "submit_and_wait(" in src and "DELEGATE_JOB" in src, \
+        "the subagent facade must enqueue delegation on the canonical JobQueue"
+    # No direct engine fan-out/decompose calls in the facade.
+    for pat in ("_engine().fanout(", "_engine().decompose_and_run(", "engine.fanout(",
+                "engine.decompose_and_run("):
+        assert pat not in src, f"subagent facade bypasses the queue via {pat}"
+
+
+# ---------------------------------------------------------------------------
+# Subagent worker canonical boundaries
+# ---------------------------------------------------------------------------
+def test_subagent_worker_runs_through_canonical_boundaries():
+    """The sub-agent execution path must use the canonical boundaries: HermusAgent
+    (ModelGateway/ToolGateway/MemoryFacade) and the canonical EventBus — never a
+    second provider, tool or event path."""
+    dlg = (ROOT / "core/delegation.py").read_text(encoding="utf-8")
+    # The single worker engine builds the real agent (which routes model/tools/memory).
+    assert ("HermusAgent(" in dlg) or ("from .agent import HermusAgent" in dlg), \
+        "the sub-agent worker must run through HermusAgent"
+    # Worker must not construct a provider client directly.
+    assert "FreeLLM(" not in dlg, "delegation worker must not build a provider client directly"
+    # Synthesis/planning LLM calls route through the canonical ModelGateway.
+    assert "get_model_gateway().chat(" in dlg or "get_model_gateway()" in dlg, \
+        "delegation synthesis/planning must use the canonical ModelGateway"
+    # Delegation lifecycle events mirror onto the canonical EventBus.
+    assert "get_bus().publish(" in dlg, "delegation must emit events via the canonical EventBus"
+
+
+# ---------------------------------------------------------------------------
+# JobQueue lifecycle mirrors onto the canonical EventBus
+# ---------------------------------------------------------------------------
+def test_jobqueue_lifecycle_mirrors_onto_canonical_event_bus():
+    """The JobQueue is the canonical job lifecycle owner AND mirrors every job
+    transition onto the EventEnvelope EventBus (no second event authority)."""
+    q = (ROOT / "gateway/queue.py").read_text(encoding="utf-8")
+    assert "get_bus().publish(" in q, "JobQueue must mirror lifecycle onto the canonical EventBus"
+    assert "_lifecycle_event_type" in q, "JobQueue must map terminal statuses to lifecycle names"

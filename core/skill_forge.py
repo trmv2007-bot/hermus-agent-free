@@ -875,7 +875,10 @@ class SkillForge:
             if query and "query" not in args:
                 args["query"] = query
             try:
-                out = tool_registry.execute(name, args)
+                # §5 canonical path: skills execute tools through the ToolGateway.
+                from .tools import get_tool_gateway, gateway_result_dict
+                res = get_tool_gateway().execute(name, args, actor="skill_forge")
+                out = gateway_result_dict(res)
             except Exception as e:
                 out = {{"error": str(e)}}
             failed = isinstance(out, dict) and (

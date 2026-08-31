@@ -173,10 +173,13 @@ def verify_with_tools(
     verified = []
     for claim in claims:
         try:
-            from ..tool_registry import tool_registry
-
-            res = tool_registry.execute("web_search", {"query": claim, "max_results": 3})
-            text = json.dumps(res, ensure_ascii=False, default=str)[:400]
+            # §5 canonical path: route the search through the ToolGateway.
+            from ..tools import get_tool_gateway, gateway_result_dict
+            gw = get_tool_gateway()
+            res = gw.execute("web_search", {"query": claim, "max_results": 3},
+                             actor="reasoning")
+            out = gateway_result_dict(res)
+            text = json.dumps(out, ensure_ascii=False, default=str)[:400]
             verified.append(f"Claim: {claim}\nSearch: {text}")
         except Exception as e:
             verified.append(f"Claim: {claim}\nSearch failed: {e}")

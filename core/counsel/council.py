@@ -441,7 +441,11 @@ class CouncilSession:
                             targs = {}
                     try:
                         print(f"[⚙️ {tname}({json.dumps(targs)[:120]})]")
-                        result = tool_registry.execute(tname, targs)
+                        # §5 canonical path: execute through the ToolGateway so policy,
+                        # audit and tracing stay centralized.
+                        from ..tools import get_tool_gateway, gateway_result_dict
+                        cres = get_tool_gateway().execute(tname, targs, actor="counsel")
+                        result = gateway_result_dict(cres)
                         text = json.dumps(result, default=str, ensure_ascii=False)[:600]
                     except Exception as e:
                         result = {"error": str(e)}

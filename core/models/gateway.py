@@ -235,11 +235,100 @@ class ModelGateway:
                             ("api_key", "base_url", "temperature") if k in kw})
         try:
             gen = llm_obj.stream_chat(messages, tools=tools, on_delta=on_delta)
-            return gen
         except Exception as exc:
             raise ModelGatewayError(str(exc), failure_class=self._classify_failure(exc),
                                     provider=getattr(llm_obj, "provider", provider or "unknown"),
                                     model=getattr(llm_obj, "model_name", model or "")) from exc
+        # §4.3 A failure during *iteration* (not generation) must be classified too —
+        # a bare generator would let a late provider error propagate as a raw exception.
+        def _guarded() -> Any:
+            try:
+                for chunk in gen:
+                    yield chunk
+            except Exception as exc:  # noqa: BLE001 - classified below
+                raise ModelGatewayError(
+                    str(exc), failure_class=self._classify_failure(exc),
+                    provider=getattr(llm_obj, "provider", provider or "unknown"),
+                    model=getattr(llm_obj, "model_name", model or ""),
+                ) from exc
+        return _guarded()
+
+    def chat_with_fallback(self, messages: list[dict[str, Any]], *,
+                           req: Optional[ModelRequirement] = None,
+                           tools: Optional[list[dict[str, Any]]] = None,
+                           max_retries: int = 2, max_fallbacks: int = 3,
+                           trace_id: Optional[str] = None) -> Any:
+        """Real retry + fallback execution (§4.2).
+
+        Given a task requirement, this actually *executes* the completion:
+          1. ranks candidates (primary selection first, then ordered fallbacks);
+          2. for each candidate, retries up to ``max_retries`` on a retryable failure;
+          3. if a candidate exhausts its retries, moves to the next candidate
+             (``used_fallback`` is recorded);
+          4. returns the first successful response, or raises a single
+             :class:`ModelGatewayError` listing every attempt (provider/model/failure).
+
+        This is NOT just a list of candidates — it drives real completion via
+        ``self.llm().chat()`` and records outcomes/circuit state per attempt. A test
+        injects a deterministic ``llm_builder`` to prove provider-A-unavailable ->
+        provider-B-selected -> response returned.
+        """
+        req = req or ModelRequirement(task="chat", tools=bool(tools))
+        order: list[tuple[str, str]] = []
+        primary = self.select(req)
+        if primary:
+            sel = primary[0]
+            order.append((sel.provider, sel.model))
+        for sel in self.fallback(req, max_depth=max_fallbacks, exclude=[p for p, _ in order]):
+            order.append((sel.provider, sel.model))
+        if not order:
+            raise ModelGatewayError(
+                "no candidate model available for the requirement",
+                failure_class=FailureClass.PROVIDER_UNAVAILABLE.value)
+
+        attempts: list[dict[str, Any]] = []
+        for i, (provider, model) in enumerate(order):
+            used_fallback = i > 0
+            llm_obj = self.llm(model=model, provider=provider)
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    # Only retry when the previous failure was retryable.
+                    prev = attempts[-1]
+                    if not prev["retryable"]:
+                        break
+                started = time.time()
+                try:
+                    resp = llm_obj.chat(messages, tools=tools)
+                    self._record_outcome(provider, ModelGatewayResult(
+                        provider=provider, model=model, ok=True,
+                        content=resp.content, tool_calls=resp.tool_calls,
+                        latency_ms=int((time.time() - started) * 1000),
+                        used_fallback=used_fallback, trace_id=trace_id))
+                    return resp
+                except Exception as exc:
+                    fc = self._classify_failure(exc)
+                    retryable = self._retryable_failure(fc)
+                    attempts.append({
+                        "provider": provider, "model": model,
+                        "failure_class": fc, "error": str(exc),
+                        "retryable": retryable, "attempt": attempt + 1,
+                        "retries": max_retries,
+                    })
+                    self._record_outcome(provider, ModelGatewayResult(
+                        provider=provider, model=model, ok=False, failure_class=fc,
+                        error_message=str(exc), retryable=retryable,
+                        latency_ms=int((time.time() - started) * 1000),
+                        used_fallback=used_fallback, trace_id=trace_id))
+                    if not retryable:
+                        break  # unrecoverable for this provider -> try next fallback
+
+        last = attempts[-1] if attempts else {}
+        raise ModelGatewayError(
+            f"all {len(attempts)} model attempt(s) failed: "
+            + "; ".join(f"{a['provider']}/{a['model']}={a['failure_class']}" for a in attempts),
+            failure_class=last.get("failure_class") or FailureClass.UNKNOWN.value,
+            provider=last.get("provider", ""), model=last.get("model", ""),
+            retryable=any(a["retryable"] for a in attempts))
 
     def fallback(self, req: ModelRequirement, *, exclude: Optional[list[str]] = None,
                  max_depth: Optional[int] = None) -> list[ModelSelection]:
@@ -252,11 +341,15 @@ class ModelGateway:
         """
         max_depth = max_depth or self._fallback_max_depth
         exclude = set(exclude or [])
-        cands = self.select(req)
+        # `select()` surfaces the single resolver choice (+ vision/router candidates);
+        # `fallback()` must ALSO enumerate every other available bundle so a provider
+        # that just failed can genuinely be replaced by another, not by the same one.
+        cands = list(self.select(req))
+        cands += self._enumerate_bundle_candidates(req)
         out: list[ModelSelection] = []
         seen: set[str] = set()
         for c in cands:
-            if c.provider in exclude or c.model in exclude:
+            if c.provider in exclude or c.model in exclude or c.provider == "" or c.model == "":
                 continue
             key = f"{c.provider}:{c.model}"
             if key in seen:
@@ -265,6 +358,33 @@ class ModelGateway:
             out.append(c)
             if len(out) >= max_depth:
                 break
+        return out
+
+    def _enumerate_bundle_candidates(self, req: ModelRequirement) -> list[ModelSelection]:
+        """Build selection candidates from every resolver-reported bundle (not just the
+        single ``select_usable_bundle`` choice), so fallback has real alternatives."""
+        mod = self._resolver_mod()
+        bundles: list[dict[str, Any]] = []
+        for fn_name, kwargs in (("discover_runtime_bundles", {"include_local": True}),
+                                ("list_available_providers", {})):
+            fn = getattr(mod, fn_name, None)
+            if not callable(fn):
+                continue
+            try:
+                bundles = fn(**kwargs) or []
+            except Exception:
+                bundles = []
+            if bundles:
+                break
+        out: list[ModelSelection] = []
+        for b in bundles:
+            if not isinstance(b, dict):
+                continue
+            provider = b.get("provider") or ""
+            model = b.get("default_model") or ""
+            if not provider or not model:
+                continue
+            out.append(self._bundle_to_selection(b, req, reason="resolver.enumeration"))
         return out
 
     def health_check(self) -> dict[str, Any]:

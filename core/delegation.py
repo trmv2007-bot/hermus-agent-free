@@ -128,6 +128,122 @@ def normalize_result(raw: Any) -> dict[str, Any]:
     }
 
 
+def _emit_delegation_event(etype: str, data: Optional[dict[str, Any]] = None, *,
+                           mission_id: Optional[str] = None, run_id: Optional[str] = None,
+                           source: str = "delegation") -> None:
+    """Publish a delegation lifecycle event onto the canonical EventBus.
+
+    Correlation IDs (mission_id / run_id) are carried on the envelope so a
+    control room or parent mission can trace a delegated task. This is the ONE
+    event channel for delegation (besides the per-run RunBus the JobQueue owns).
+    """
+    try:
+        from .events import get_bus
+        from .contracts import EventEnvelope
+        env = EventEnvelope(
+            mission_id=mission_id, run_id=run_id, source=source,
+            type="delegation.activity", command=etype,
+            target=str((data or {}).get("node") or (data or {}).get("job_id") or "delegation"),
+            args_redacted=(data or {}),
+            status="ok" if (data or {}).get("status") in (None, "done", "completed") else str((data or {}).get("status") or "running"),
+        )
+        get_bus().publish(env)
+    except Exception:
+        pass
+
+
+def run_subagent_task(
+    task: str,
+    *,
+    model: str = "",
+    max_steps: int = 4,
+    autonomous: bool = False,
+    stream: bool = False,
+    max_repairs: int = 2,
+    depth: int = 1,
+    session_id: str = "",
+    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    mission_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    parent_task_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """THE one sub-agent execution engine.
+
+    Builds the :class:`core.agent.HermusAgent`, which itself routes the model via
+    ``ModelGateway``, tools via ``ToolGateway`` and memory via ``MemoryFacade``,
+    then runs ``task`` (autonomous or chat). Every sub-agent execution — whether
+    a subprocess worker, the in-process fallback, or a canonical ``agent.delegate``
+    job — runs through THIS function so there is a single worker implementation.
+
+    Emits both the legacy ``on_event`` callback stream (``agent_started`` /
+    ``agent_finished`` / progress) and canonical EventBus events carrying the
+    correlation IDs, so delegated work is observable/recoverable by the parent.
+    """
+    from .agent import HermusAgent
+
+    emit = on_event or (lambda t, d: None)
+    max_depth = int(getattr(config, "delegation_max_depth", 2))
+    sub_session = session_id or f"sub_{uuid.uuid4().hex[:8]}"
+    emit("agent_started", {"task": str(task)[:300], "depth": depth, "max_steps": max_steps,
+                           "mission_id": mission_id, "run_id": run_id, "job_id": job_id})
+    try:
+        agent = HermusAgent(model=model or None, session_id=sub_session, max_steps=max_steps)
+        # A child may not delegate further than the depth budget allows.
+        if depth >= max_depth:
+            try:
+                agent.tools = [t for t in agent.tools
+                               if t.get("function", {}).get("name") not in
+                               ("subagent_spawn", "delegate_tasks")]
+            except Exception:
+                pass
+        if autonomous:
+            report = agent.autonomous(task, max_repairs=int(max_repairs))
+            result = {
+                "answer": report.get("summary") or report.get("response") or "",
+                "status": "done" if report.get("verified") else "partial",
+                "steps": report.get("steps"),
+                "evidence": [f"[{s.get('status')}] {str(s.get('goal'))[:120]}"
+                             for s in (report.get("steps") or [])][:10],
+                "tool_calls": [], "usage": {}, "artifacts": [],
+            }
+        else:
+            out = agent.chat(
+                task,
+                on_event=lambda t, d: emit(t, {**d, "depth": depth, "mission_id": mission_id,
+                                               "run_id": run_id, "job_id": job_id}),
+                stream=bool(stream),
+                should_cancel=should_cancel,
+            )
+            result = {
+                "answer": out.get("response", ""),
+                "evidence": [f"{tr.get('tool')}: {json.dumps(tr.get('result'), default=str)[:160]}"
+                             for tr in (out.get("tool_results") or [])[:8]],
+                "tool_calls": out.get("tool_calls") or [],
+                "usage": out.get("usage") or {},
+                "steps": out.get("steps"),
+                "status": "failed" if out.get("error") else "done",
+                "error": out.get("error") or "",
+                "artifacts": out.get("artifacts") or [],
+                "skill_created": (out.get("skill_created") or {}).get("name")
+                if isinstance(out.get("skill_created"), dict) else None,
+            }
+        emit("agent_finished", {"depth": depth, "chars": len(str(result.get("answer") or ""))})
+        _emit_delegation_event("task.completed", {
+            "status": result.get("status"), "depth": depth, "chars": len(str(result.get("answer") or "")),
+            "parent_task_id": parent_task_id, "job_id": job_id,
+        }, mission_id=mission_id, run_id=run_id)
+        return normalize_result(result)
+    except Exception as e:  # never swallow a child failure silently
+        emit("agent_failed", {"error": str(e)[:400], "depth": depth})
+        _emit_delegation_event("task.failed", {"error": str(e)[:300], "depth": depth,
+                                               "parent_task_id": parent_task_id,
+                                               "job_id": job_id},
+                               mission_id=mission_id, run_id=run_id)
+        return normalize_result({"error": f"worker agent failed: {e}", "status": "failed"})
+
+
 # ------------------------------------------------------------- worker (child)
 class DelegationWorker:
     """The child side: serve JSON-RPC on stdin/stdout until EOF/shutdown."""
@@ -235,51 +351,22 @@ class DelegationWorker:
             return normalize_result({"error": "task required"})
         max_steps = int(params.get("max_steps") or self.max_steps)
         model = params.get("model") or None
-        try:
-            from .agent import HermusAgent
-
-            agent = HermusAgent(model=model, session_id=f"{self.session_id}_{uuid.uuid4().hex[:4]}",
-                                max_steps=max_steps)
-            # depth guard: a child may not delegate further than the budget allows
-            if self.depth >= int(getattr(config, "delegation_max_depth", 2)):
-                try:
-                    agent.tools = [t for t in agent.tools
-                                   if t.get("function", {}).get("name") not in ("subagent_spawn", "delegate_tasks")]
-                except Exception:
-                    pass
-            self.emit("agent_started", {"task": task[:300], "depth": self.depth, "max_steps": max_steps})
-            if autonomous:
-                report = agent.autonomous(task, max_repairs=int(params.get("max_repairs", 2)))
-                result = {"answer": report.get("summary") or report.get("response") or "",
-                          "status": "done" if report.get("verified") else "partial",
-                          "steps": report.get("steps"), "evidence": [
-                              f"[{s.get('status')}] {str(s.get('goal'))[:120]}" for s in (report.get("steps") or [])][:10]}
-            else:
-                out = agent.chat(
-                    task,
-                    on_event=lambda t, d: self.emit(t, {**d, "depth": self.depth}),
-                    stream=bool(params.get("stream", False)),
-                    should_cancel=lambda: self.cancelled(req_id),
-                )
-                result = {
-                    "answer": out.get("response", ""),
-                    "evidence": [
-                        f"{tr.get('tool')}: {json.dumps(tr.get('result'), default=str)[:160]}"
-                        for tr in (out.get("tool_results") or [])[:8]
-                    ],
-                    "tool_calls": out.get("tool_calls") or [],
-                    "usage": out.get("usage") or {},
-                    "steps": out.get("steps"),
-                    "status": "failed" if out.get("error") else "done",
-                    "error": out.get("error") or "",
-                    "artifacts": out.get("artifacts") or [],
-                    "skill_created": (out.get("skill_created") or {}).get("name") if isinstance(out.get("skill_created"), dict) else None,
-                }
-            self.emit("agent_finished", {"depth": self.depth, "chars": len(str(result.get("answer") or ""))})
-            return normalize_result(result)
-        except Exception as e:
-            self.emit("agent_failed", {"error": str(e)[:400], "depth": self.depth})
-            return normalize_result({"error": f"worker agent failed: {e}", "status": "failed"})
+        # Single execution engine (shared with the in-process path and the canonical
+        # ``agent.delegate`` job handler) — the RPC worker is only the transport shell.
+        return run_subagent_task(
+            task,
+            model=model, max_steps=max_steps, autonomous=autonomous,
+            stream=bool(params.get("stream", False)),
+            max_repairs=int(params.get("max_repairs", 2)),
+            depth=self.depth,
+            session_id=self.session_id,
+            on_event=lambda t, d: self.emit(t, d),
+            should_cancel=lambda: self.cancelled(req_id),
+            mission_id=params.get("mission_id"),
+            run_id=params.get("run_id"),
+            parent_task_id=params.get("parent_task_id"),
+            job_id=params.get("job_id"),
+        )
 
     @staticmethod
     def call_tool(params: dict[str, Any]) -> dict[str, Any]:
@@ -288,10 +375,16 @@ class DelegationWorker:
         if not name:
             return {"error": "tool required"}
         try:
-            from .tool_registry import tool_registry
+            # §5 canonical path: delegated workers must execute tools through the
+            # ToolGateway (centralized authorization/tracing/audit/timeout/policy),
+            # never by calling tool_registry.execute directly.
+            from .tools import get_tool_gateway
 
-            result = tool_registry.execute(name, args if isinstance(args, dict) else {"input": str(args)})
-            return {"tool": name, "result": result}
+            res = get_tool_gateway().execute(
+                name, args if isinstance(args, dict) else {"input": str(args)},
+                actor="delegation")
+            from .tools import gateway_result_dict
+            return {"tool": name, "result": gateway_result_dict(res)}
         except Exception as e:
             return {"tool": name, "error": str(e)[:500]}
 
@@ -327,6 +420,11 @@ class DelegationNode:
     started: float = 0.0
     finished: float = 0.0
     events: list[dict[str, Any]] = field(default_factory=list)
+    # Canonical correlation IDs propagated to the worker/job so a parent mission can
+    # trace every delegated child (mission_id/run_id/job_id/parent_task_id).
+    mission_id: Optional[str] = None
+    run_id: Optional[str] = None
+    job_id: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -338,6 +436,7 @@ class DelegationNode:
             "tool_calls": (self.result or {}).get("tool_calls", [])[:20],
             "evidence": (self.result or {}).get("evidence", [])[:6],
             "event_count": len(self.events),
+            "mission_id": self.mission_id, "run_id": self.run_id, "job_id": self.job_id,
         }
 
 
@@ -574,14 +673,22 @@ class Delegation:
                 with self._lock:
                     self._active.setdefault(node.parent or "root", []).append(client)
                 client.request("initialize", {"node": node.id}, timeout=min(15.0, timeout))
+                # Pass correlation IDs down so every child event is traceable.
                 result = client.request("agent.run", {
                     "task": node.task, "max_steps": max_steps, "model": model, "stream": stream,
+                    "mission_id": node.mission_id, "run_id": node.run_id,
+                    "parent_task_id": node.parent, "job_id": node.job_id,
                 }, timeout=timeout)
                 out = normalize_result(result)
             else:
                 node.backend = "inprocess"
-                out = self._run_inprocess(node, model=model, max_steps=max_steps, emit=emit,
-                                          should_cancel=should_cancel)
+                out = run_subagent_task(
+                    node.task, model=model, max_steps=max_steps, stream=stream,
+                    depth=node.depth, session_id=node.id, on_event=emit,
+                    should_cancel=should_cancel,
+                    mission_id=node.mission_id, run_id=node.run_id,
+                    parent_task_id=node.parent, job_id=node.job_id,
+                )
             node.result = out
             node.status = "done" if out.get("status") in ("done", "partial") else "failed"
             if out.get("status") == "failed":
@@ -590,8 +697,13 @@ class Delegation:
             # RPC broke → degrade once, don't lose the work
             emit("delegation_fallback", {"node": node.id, "reason": str(e)[:200], "code": e.code})
             try:
-                out = self._run_inprocess(node, model=model, max_steps=max_steps, emit=emit,
-                                          should_cancel=should_cancel)
+                out = run_subagent_task(
+                    node.task, model=model, max_steps=max_steps, stream=stream,
+                    depth=node.depth, session_id=node.id, on_event=emit,
+                    should_cancel=should_cancel,
+                    mission_id=node.mission_id, run_id=node.run_id,
+                    parent_task_id=node.parent, job_id=node.job_id,
+                )
                 node.backend = "inprocess-fallback"
                 node.result = out
                 node.status = "done" if out.get("status") in ("done", "partial") else "failed"
@@ -615,26 +727,6 @@ class Delegation:
             node.finished = time.time()
         return out
 
-    @staticmethod
-    def _run_inprocess(node: DelegationNode, *, model: str = "", max_steps: int = 4,
-                       emit: Callable[[str, dict[str, Any]], None] = lambda t, d: None,
-                       should_cancel: Optional[Callable[[], bool]] = None) -> dict[str, Any]:
-        """Fallback path: run the child agent in this process (no isolation)."""
-        from .agent import HermusAgent
-
-        agent = HermusAgent(model=model or None, session_id=f"{node.id}", max_steps=max_steps)
-        out = agent.chat(node.task, on_event=emit, should_cancel=should_cancel)
-        return normalize_result({
-            "answer": out.get("response", ""),
-            "tool_calls": out.get("tool_calls") or [],
-            "evidence": [f"{tr.get('tool')}: {json.dumps(tr.get('result'), default=str)[:160]}"
-                         for tr in (out.get("tool_results") or [])[:8]],
-            "steps": out.get("steps"),
-            "error": out.get("error") or "",
-            "status": "failed" if out.get("error") else "done",
-            "usage": out.get("usage") or {},
-        })
-
     # ------------------------------------------------------------------ fan-out
     def fanout(
         self,
@@ -650,6 +742,9 @@ class Delegation:
         should_cancel: Optional[Callable[[], bool]] = None,
         tree_id: str = "",
         max_children: Optional[int] = None,
+        mission_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        parent_task_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Run N workstreams in parallel and aggregate their structured results."""
         if not self.can_delegate() and self._depth() >= self.max_depth:
@@ -664,13 +759,18 @@ class Delegation:
             tasks = tasks[:limit]
         tree_id = tree_id or f"tree_{uuid.uuid4().hex[:8]}"
         parent_id = f"{tree_id}"
-        nodes = [DelegationNode(id=f"{tree_id}_{i+1}", task=t, depth=depth, parent=parent_id)
+        nodes = [DelegationNode(id=f"{tree_id}_{i+1}", task=t, depth=depth, parent=parent_id,
+                                mission_id=mission_id, run_id=run_id, job_id=None)
                  for i, t in enumerate(tasks)]
         tree = {"tree_id": tree_id, "goal": goal, "status": "running", "nodes": nodes,
                 "started": time.time(), "aggregate": aggregate}
         with self._lock:
             self.trees[tree_id] = tree
         emit("delegation_fanout", {"tree": tree_id, "children": len(nodes), "goal": goal[:200]})
+        _emit_delegation_event("task.queued", {
+            "tree_id": tree_id, "children": len(nodes), "depth": depth,
+            "parent_task_id": parent_task_id,
+        }, mission_id=mission_id, run_id=run_id)
 
         workers = max(1, min(len(nodes), self.max_workers))
         results: dict[str, dict[str, Any]] = {}
@@ -722,6 +822,10 @@ class Delegation:
             "nodes": [n.to_dict() for n in nodes],
         }
         emit("delegation_finished", {k: out[k] for k in ("tree_id", "status", "children", "succeeded", "failed")})
+        _emit_delegation_event("task.completed", {
+            "tree_id": tree_id, "status": out.get("status"), "succeeded": done,
+            "failed": len(nodes) - done, "depth": depth, "parent_task_id": parent_task_id,
+        }, mission_id=mission_id, run_id=run_id)
         with self._lock:
             self.trees[tree_id] = {**tree, "result": out}
         return out
@@ -736,6 +840,9 @@ class Delegation:
         on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
         aggregate: str = "synthesize",
         timeout: Optional[float] = None,
+        mission_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        parent_task_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Plan → split into workstreams → run in parallel → aggregate."""
         plan = plan_workstreams(goal, max_children=max_children)
@@ -745,6 +852,7 @@ class Delegation:
         return self.fanout(
             plan.get("tasks") or [goal], goal=goal, model=model, aggregate=aggregate,
             on_event=emit, timeout=timeout, max_children=max_children,
+            mission_id=mission_id, run_id=run_id, parent_task_id=parent_task_id,
         )
 
     # ------------------------------------------------------------------ status
@@ -844,7 +952,9 @@ def _synthesize(goal: str, answers: Sequence[str], results: Sequence[dict[str, A
     """Merge child answers — LLM when available, deterministic otherwise."""
     joined = "\n\n".join(f"[child {i+1}] {a}" for i, a in enumerate(answers))
     try:
-        from .llm import free_llm
+        # Canonical boundary: synthesis goes through the ModelGateway, never a
+        # directly-constructed LLM/FreeLLM.
+        from .models import get_model_gateway
 
         messages = [
             {"role": "system", "content": (
@@ -855,7 +965,7 @@ def _synthesize(goal: str, answers: Sequence[str], results: Sequence[dict[str, A
             {"role": "user", "content": f"Goal: {goal[:600]}\n\nConfidences: "
                                         f"{[r.get('confidence') for r in results]}\n\n{joined[:12000]}"},
         ]
-        resp = free_llm.chat(messages)
+        resp = get_model_gateway().chat(messages)
         text = (getattr(resp, "content", "") or "").strip()
         if text and "[MOCK" not in text[:20]:
             return text
@@ -874,7 +984,8 @@ def plan_workstreams(goal: str, *, max_children: int = 4) -> dict[str, Any]:
     if not goal:
         return {"tasks": [], "planner": "empty"}
     try:
-        from .llm import free_llm
+        # Canonical boundary: planning goes through the ModelGateway.
+        from .models import get_model_gateway
 
         messages = [
             {"role": "system", "content": (
@@ -885,7 +996,7 @@ def plan_workstreams(goal: str, *, max_children: int = 4) -> dict[str, Any]:
             )},
             {"role": "user", "content": goal[:1200]},
         ]
-        resp = free_llm.chat(messages)
+        resp = get_model_gateway().chat(messages)
         text = getattr(resp, "content", "") or ""
         import re
 
