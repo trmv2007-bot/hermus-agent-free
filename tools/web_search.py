@@ -2,10 +2,16 @@
 from core.cache import web_search_cache
 
 try:
-    from duckduckgo_search import DDGS
+    # The package was renamed duckduckgo_search -> ddgs (v9+); prefer the new
+    # name to avoid the deprecation warning, fall back for older installs.
+    from ddgs import DDGS   # type: ignore
     DDG_AVAILABLE = True
 except ImportError:
-    DDG_AVAILABLE = False
+    try:
+        from duckduckgo_search import DDGS  # type: ignore
+        DDG_AVAILABLE = True
+    except ImportError:
+        DDG_AVAILABLE = False
 
 def web_search(query: str, max_results: int = 5) -> list[dict]:
     """Free web search via DuckDuckGo - no API key - Optimized with caching"""
