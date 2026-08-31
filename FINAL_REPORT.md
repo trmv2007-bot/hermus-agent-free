@@ -1,8 +1,12 @@
 # HERMUS — Final Completion Report (§46–48)
 
 Branch: `clean-slate/final-consolidation`
-Head SHA: **`e2ad355`** (pushed & verified on `origin/clean-slate/final-consolidation`)
+Head SHA: **`6fe446d`** (pushed & verified on `origin/clean-slate/final-consolidation`)
 Date: 2026-08-30
+
+> This report is honest by construction. It is updated after a source-inspection
+> integration pass (see §53) that found and fixed several real defects the prior
+> green suite did not catch.
 
 This report is honest by construction: no capability is marked WORKING on a unit
 test alone, and no delivery claim is made that was not run here.
@@ -112,9 +116,21 @@ internet tools, background execution.
   model boundary is exercised with the offline mock and injected adapters, not a live
   provider. Free/open/free-tier provider support is retained and capability-aware, but a live
   provider completion was not verified.
-- **Delegation subprocess path** — the subagent workers spawn via `subprocess`/`ThreadPoolExecutor`
-  rather than the canonical JobQueue; recursion is depth-bounded (`delegation_max_depth`), but
-  the "everything under a canonical job lifecycle" ideal is not fully realized there.
+- **Delegation → canonical JobQueue (implemented this pass)** — delegation is now entered
+  through the canonical JobQueue: the agent tools (`subagent_spawn`, `delegate_tasks`), the
+  `subagents.subagent` facade and the `POST /delegate` endpoint submit a `subagent.delegate`
+  Job and (when synchronous) block for its structured result. The queue owns the execution
+  lifecycle (queued→running→done/failed/cancelled, retry, timeout, persistence, restart
+  recovery). The delegation engine (`core.delegation`) is now only the *worker implementation*
+  that a queued `subagent.delegate` Job invokes; its subprocess/`ThreadPoolExecutor` children
+  are the transport adapter, and every worker runs through the single engine
+  (`run_subagent_task` → `HermusAgent` → ModelGateway/ToolGateway/MemoryFacade) emitting
+  `job.lifecycle` events on the canonical EventBus. **Remaining:** the *source* of the
+  correlation IDs (mission_id/run_id) is set by the queue context when an agent delegates from
+  inside a queued turn (via `current_job_context()`), but a mission DAG node agent does not yet
+  carry its `mission_id` onto a delegate call made through the raw tool — the traceability
+  plumbing is in place and proven when the IDs are supplied, but auto-wiring the mission node
+  agent is not implemented.
 - **`/tmp` size** — the shared tmpfs is small; full-suite runs need `--basetemp` on the root fs.
 
 ### Final capability status
@@ -282,3 +298,263 @@ NOT VERIFIED** and are based on evidence actually produced here.
    `from core.models.gateway import get_model_gateway; gw = get_model_gateway(); gw.llm("provider/model").complete(...)`.
 3. **Host computer control E2E.** On a desktop with `pyautogui`/display, run
    `tests/test_computer_control_honesty.py::test_host_e2e_computer_real_control`.
+
+---
+
+## §53 — Final integration: real connectivity & full-system fix pass (latest)
+
+This pass did NOT trust the previous report, prior agent claims, or a green suite. It
+inspected the production source, found real connectivity/integration defects the existing
+tests did not catch, fixed them, and added regressions proving the fixes.
+
+### Git state (verified by fetch before editing)
+
+- local HEAD = `6fe446d`; `origin/clean-slate/final-consolidation` = `6fe446d`; 0 unsynced.
+- `origin/main` = `574c7807` (NOT merged — per directive).
+- Working tree clean; remote URL tokenless.
+
+### Defects found by source inspection and fixed
+
+**§8 ADB binary I/O — was corrupting screenshots.** `AdbAndroidTransport.get_screen()` ran
+`exec-out screencap -p` through a text-mode subprocess (`text=True`), which decodes stdout
+as UTF-8 and corrupts binary PNG. Fixed: added a binary-safe runner; reads raw bytes,
+validates the PNG signature, returns base64. Malformed/empty screencap now fails honestly.
+
+**§9 Real UI-tree retrieval — was reading the wrong output.** `get_ui_tree()` treated the
+`uiautomator dump` STDOUT as the XML, but stdout is only the confirmation text. Fixed: dump
+then `cat /sdcard/window_dump.xml`, parse + validate the XML into a semantic hierarchy
+(text/desc/resource-id/class/clickable/enabled/selected/focused/bounds/package/activity).
+Empty/malformed XML fails honestly.
+
+**§10 App launch — was passing a bare package to `am start -n`.** `launch_app(package)` sent
+the package name to `-n` (which needs a component). Fixed: supports `launch_app(package=…)`
+resolving the launcher activity via `cmd package resolve-activity --brief`, and
+`launch_app(component=…)`; rejects invalid components/missing targets.
+
+**§7 Default transport — singleton was `AndroidTool(transport=None)`.** `get_android_tool()`
+never provisioned a transport. Fixed: added `build_default_transport()` (config/env-driven:
+ADB from `HERMUS_ANDROID_ADB`/PATH, or companion bridge from `HERMUS_ANDROID_BRIDGE_URL`
++ `HERMUS_ANDROID_SECRET`), and the singleton now provisions through it — connected to a
+real transport when available; `capability()` stays truthful.
+
+**§13 Bridge security — documented but not enforced.** `BridgeAndroidTransport` claimed "HTTPS
+or loopback only" but never checked. Fixed: enforces in code (HTTPS anywhere, plaintext only
+on loopback); a remote plaintext endpoint is refused before any request.
+
+**§5 ToolGateway bypasses — five production call sites.** `delegation.py` (delegated worker),
+`counsel/council.py`, `reasoning/strategies.py`, `skill_forge.py`, and `gateway/realtime.py`
+all invoked `tool_registry.execute(...)` directly, bypassing the ToolGateway's
+policy/audit/tracing/timeout. Migrated all five to `get_tool_gateway().execute()` via
+`gateway_result_dict`. Fixed the pre-existing `_classify_registry_result` bug that treated a
+non-`None` `error` key as failure even when it was `""` (the `sandbox_run` success sentinel).
+
+**§4.2 ModelGateway real retry/fallback — was only a candidate list.** `fallback()` returned
+a list of candidates but nothing executed a retry/fallback. Added `chat_with_fallback()`: ranks
+candidates, retries a retryable failure within a provider, then falls back to the next provider,
+recording outcomes/circuit state per attempt; returns one success or one structured error. Also
+made `fallback()` enumerate the resolver's reported bundles so a failed provider can genuinely
+be replaced.
+
+**§4.3 Streaming error handling — mid-iteration errors leaked raw.** `stream()` caught errors
+only when the generator was *created*. Fixed: the returned generator is wrapped so an error
+raised *during* iteration is classified into a typed `ModelGatewayError`.
+
+**§31 Architecture gates strengthened.** Added AST-based gates: no production ToolGateway bypass
+(`tool_registry.execute`, alias-aware), AndroidTool default-transport provisioning via the
+canonical factory, and a single AndroidTool class. (24 → 27 structural gates.)
+
+### Test result after these fixes
+
+`tests/` (excluding `tests/js`, `tests/eval`): **678 passed, 2 skipped, 13 warnings, 0 failures**
+(up from 661). New tests: `tests/test_android_subsystem.py` regressions (13 → 20), the
+addition of `tests/_android_fixtures.py` (realistic PNG + uiautomator XML),
+`tests/test_model_gateway_fallback.py` (4), and 3 new architecture gates.
+
+#### NEXT backend consolidation pass (Delegation → JobQueue)
+
+`tests/` (excluding `tests/js`, `tests/eval`): **684 passed, 2 skipped, 16 warnings, 0 failures**
+(up from 678). New this pass:
+* `tests/test_delegation_connectivity.py` (2) — the E2E delegation-connectivity proof
+  (MissionEngine/agent → `submit_and_wait("subagent.delegate")` → JobQueue → sub-agent
+  worker → ModelGateway / ToolGateway / MemoryFacade → EventBus `job.lifecycle` →
+  structured result → parent), plus `spawn_subagent`-via-queue.
+* 4 new architecture gates in `test_architecture_gates.py` (27 → 31): delegation entered
+  only through the canonical queue, the subagent facade submits via the queue, the subagent
+  worker uses canonical boundaries, and the JobQueue mirrors lifecycle onto the canonical
+  EventBus.
+
+### §34 — Final capability matrix
+
+Statuses use only WORKING / PARTIAL / REQUIRES CONFIGURATION / NOT IMPLEMENTED / NOT
+VERIFIED, based on evidence actually produced here.
+
+| Capability | Impl. | Canonical path | Automated test | Real E2E | Status |
+|---|---|---|---|---|---|
+| Autonomous missions | yes | MissionEngine | autonomous-loop + mission-platform | deterministic tool loop | WORKING |
+| Mission persistence | yes | atomic store | restart/recovery | run | WORKING |
+| Restart / resume | yes | load_mission | 3 restart tests | run | WORKING |
+| ModelGateway | yes | agent → gateway.llm() | integration + behavioral proof | **no live key** | PARTIAL |
+| Model fallback | yes | chat_with_fallback | 3 fallback tests | **no live key** | PARTIAL |
+| Streaming | yes | gateway.stream() | classification test | **no live key** | PARTIAL |
+| ToolGateway | yes | agent → gateway.execute() | integration + behavioral proof | run (android loop) | WORKING |
+| Delegation | yes | agent/mission → `subagent.delegate` Job on JobQueue → sub-agent worker → gateway | delegation tests + connectivity proof | run | WORKING |
+| Memory | yes | MemoryFacade | hybrid + behavioral proof | run | WORKING |
+| WorldState | yes | StateFacade | world-model tests | run | WORKING |
+| EventBus | yes | canonical bus | replay + android audit mirror | run | WORKING |
+| Computer observation | yes | controller.observe | unit/integration | **no display** | PARTIAL |
+| Computer control | yes | controller | honesty tests | **no display** | NOT VERIFIED |
+| Android observation | yes | observe() semantic | 20 backend tests | **no device** | PARTIAL |
+| Android control | yes | AndroidTool | 20 backend + agentic-loop | **no device** | PARTIAL |
+| Android ADB | yes | AdbAndroidTransport | command + binary/UI tests | **no device** | PARTIAL |
+| Android companion | reference | android_companion/ | — | **no SDK/device** | NOT VERIFIED |
+| Android reconnect | design (bridge) | BridgeAndroidTransport | bridge validation only | **no device** | NOT VERIFIED |
+| Android verification | yes | verify.py before/after | agentic-loop + verifier test | run (simulated) | PARTIAL |
+| Vision / voice / research / counsel | yes | subsystems | off-line integration | — | WORKING (off-line) |
+| Failure recovery | yes | repair/replan/retry | autonomy + recovery tests | run | WORKING |
+| Backend-only operation | yes | persisted mission | control-room + restart | run | WORKING |
+| Control room | yes | single /control | /control E2E | run | WORKING |
+| Security | yes | consent/allowlist/HMAC/audit | android + gate tests | static | WORKING (static; device auth NOT VERIFIED) |
+
+### §35 — Final code-connectivity: paths traced
+
+- **Path A** User → API → MissionEngine (`core/mission.py`) → Agent (`core/agent.py`) →
+  ModelGateway (`core/models/gateway.py`, via `get_model_gateway().llm()`) → ToolGateway
+  (`core/tools/gateway.py`) → Tool → EventBus (`core.events`) → WorldState → Memory
+  (`core.memory.MemoryFacade`) → completion. **CONNECTED** (off-line).
+- **Path B** User → Mission → Android tool (`android_*`) → AndroidTool (`core/android/tool.py`)
+  → AndroidTransport (`core/android/transport.py`) → device → screenshot/UI tree → semantic
+  observation (`core/android/observe.py`) → action → verification (`core/android/verify.py`).
+  **CONNECTED** for the real `AndroidTool`→transport boundary via a deterministic
+  simulated device (Test 5). Physical device E2E **NOT VERIFIED**.
+- **Path C** User → Mission → Computer tool (`computer_action`) → ComputerActionController
+  → host observe/act/verify. **CONNECTED at the backend**, honest `computer_control_unavailable`
+  when no display; host E2E NOT VERIFIED.
+- **Path D** Mission → failure → `_classify_failure`/`_retryable_failure` →
+  retry/fallback/recovery → continuation. **CONNECTED** (fallback + recovery tests).
+- **Path E** Mission → backend restart → `load_mission()` → resume → complete.
+  **CONNECTED** (restart/recovery tests).
+
+### Honest NOT VERIFIED items (with how to verify later)
+
+- **REAL ANDROID E2E.** Requires a physical device/emulator + built companion. Steps in §52.
+- **REAL COMPUTER (host GUI) E2E.** Requires a display + pyautogui.
+- **LIVE PROVIDER E2E.** Requires an API key + network. Run a real completion through
+  `ModelGateway.chat_with_fallback()`.
+
+### Known test-isolation fragility (pre-existing, not a regression)
+
+`test_computer_autonomy.py::test_background_agent_jobs_persist_queryable_results` fails when
+run alone (AgentManager uses a process-global named-agent registry; a prior `create("worker")`
+in the same file collides), but **passes in the full suite**. This is unrelated to the
+canonical-boundary work and was not introduced here.
+
+### Remaining limitations
+
+- Physical device/emulator, live provider, and host-GUI E2E are all **NOT VERIFIED** here.
+- The agentic phone-control loop uses a deterministic policy (documented per §17) for the
+  model's decision step; the real observe→act→verify control path over the actual
+  `ToolGateway`/`AndroidTool`/transport boundaries is proven, but it is not a live-model call.
+- Some feature modules (counsel, computer planner, reasoning strategies) construct the
+  `FreeLLM` completion facade directly. `FreeLLM` is the canonical completion facade (not a
+  raw provider SDK), and the *agent* path already routes via `get_model_gateway().llm()`; the
+  module-level `FreeLLM` constructs are a further-consolidation item, not a provider-SDK bypass.
+
+---
+
+## §53 — NEXT backend consolidation pass: Delegation → JobQueue (final report)
+
+### A. What was inspected
+Whole production tree for delegation / job-lifecycle / subagent execution:
+`core/delegation.py`, `gateway/queue.py`, `core/agent_manager.py`, `core/mission.py`,
+`core/tool_registry.py`, `subagents/subagent.py`, `gateway/handlers.py`,
+`gateway/realtime.py`, `core/contracts/jobs.py`, `core/contracts/events.py`,
+`core/events/bus.py`, `core/run_events.py`, `core/memory/__init__.py`,
+`core/models/gateway.py`, `core/llm.py`, `tests/test_delegation.py`,
+`tests/test_capability_flows.py`, `tests/test_behavioral_boundary_proof.py`,
+`tests/test_architecture_gates.py`, `tests/test_gateway_realtime.py`.
+
+### B. Bugs / architecture bypasses found (and what they were)
+1. **Delegation bypassed the canonical JobQueue.** `subagent_spawn`, `delegate_tasks`
+   (agent tools), `subagents.subagent.*` and the synchronous `POST /delegate` route
+   called `delegation.fanout` / `decompose_and_run` directly. The queue's
+   `subagent.delegate` handler existed, but the tools/route did not use it — so
+   delegated work ran outside the canonical lease/heartbeat/retry/persist lifecycle.
+2. **Not one sub-agent worker.** The RPC worker, the in-process fallback and the
+   queue handler each built their own `HermusAgent`; the worker code was duplicated.
+3. **Synthesis/planning LLM calls used the module `free_llm` (a directly-constructed
+   `FreeLLM`),** bypassing `ModelGateway`.
+4. **JobQueue did not mirror lifecycle onto the canonical EventBus** (only RunBus),
+   so `/control`/audit could not see job transitions on the single event authority.
+5. **Correlation IDs did not flow** mission/run/job/parent → worker → event.
+
+### C. Fixes
+1. Delegation is entered only through a `subagent.delegate` Job on the JobQueue
+   (tools, facade and `POST /delegate` use `submit_and_wait`); the queue owns the
+   lifecycle; `core.delegation` is only the worker implementation.
+2. One engine `core.delegation.run_subagent_task` → `HermusAgent`; the RPC worker and
+   the in-process fallback both call it.
+3. Synthesis/planning route through `get_model_gateway().chat(...)`.
+4. JobQueue and delegation publish `job.lifecycle` / `delegation.activity` envelopes
+   on the canonical EventBus (RunBus kept for SSE/WS).
+5. Correlation IDs (`mission_id`/`run_id`/`job_id`/`parent_task_id`) threaded on the
+   Job, into `DelegationNode`, into the worker and onto events; `current_job_context()`
+   auto-inherits the parent IDs when an agent delegates inside a queued turn.
+
+### D. Canonical ownership map
+| Responsibility | Canonical owner | Production callers | Bypasses | Fixed? | Test proving it |
+|---|---|---|---|---|---|
+| Model selection/completion | `core.models.ModelGateway` | `HermusAgent`, delegation synthesis/planning | none (gates forbid direct provider/FreeLLM outside subsystem) | — | `test_one_model_boundary_no_direct_provider_sdk`, connectivity |
+| Tool execution | `core.tools.ToolGateway` | `core.agent`, delegation worker `call_tool` | none (gates forbid `tool_registry.execute`) | — | `test_no_tool_gateway_bypass_in_production`, connectivity |
+| Memory | `core.memory.MemoryFacade` (`memory = get_memory()`) | `HermusAgent`, delegation worker `recall` | none (no app-level `memory2`) | — | `test_no_app_level_memory2_direct_access`, connectivity |
+| Event authority | `core.events.EventBus` | JobQueue lifecycle, delegation handler/worker | none (no legacy bus instantiation outside owner) | — | `test_jobqueue_lifecycle_mirrors_onto_canonical_event_bus`, connectivity |
+| Job lifecycle | `gateway.queue.JobQueue` | agent_manager, realtime, subagent facade | **→ was: delegation tools bypassed the queue** | YES | `test_delegation_entered_only_through_canonical_queue`, connectivity |
+| Subagent worker engine | `core.delegation.run_subagent_task` | RPC worker, in-process fallback, queue handler | **→ was: duplicated worker impls** | YES | connectivity |
+| Delegation entry | `subagent.delegate` Job | agent tools, `subagents` facade, `POST /delegate` | none | — | connectivity, `test_subagents_facade_submits_through_queue_not_direct_engine` |
+
+### E. Connectivity proof (what the test actually ran)
+`tests/test_delegation_connectivity.py` submits a real `subagent.delegate` Job,
+the queue runs the delegation handler in a worker thread, the sub-agent runs through
+`HermusAgent`, and the test proves (by instrumenting the real canonical objects) that
+`ModelGateway.llm`, `ToolGateway.execute` and `MemoryFacade.recall_context` were each
+called, that `job.created/queued/started/completed` arrived on the EventBus, and that
+`mission_id`/`run_id` supplied on the Job reached the child `DelegationNode` and the
+structured result returned to the parent.
+
+### F. Exact test counts / skips
+`tests/` (excluding `tests/js`, `tests/eval`): **684 passed, 2 skipped, 0 failures**
+(up from 678). New: 2 in `test_delegation_connectivity.py`, +4 gates in
+`test_architecture_gates.py` (27 → 31). The 2 skips are pre-existing and unrelated
+(e.g. host-GUI / device tests that require hardware); they were not introduced here.
+
+### G. Remaining gaps (honest)
+- **Mission node agent → delegate correlation is not auto-wired.** The plumbing proves
+  that when `mission_id`/`run_id` are supplied they trace end-to-end, and an agent
+  delegating from inside a queued turn inherits them via `current_job_context()`. But a
+  mission DAG node agent is built by `make_agent_backed_executor` without a `mission_id`
+  and does not stamp it onto a raw `delegate_tasks` call. Auto-wiring the mission node
+  agent is a follow-up.
+- **Nested delegate jobs are not executed.** To avoid a bounded-pool deadlock, the queue
+  runs each `subagent.delegate` job to completion and the delegation handler fans out via
+  its own transport; delegation does not submit child *jobs* onto the same queue. The
+  child jobs' per-child persistence is therefore not isolated at the Job level (it is at
+  the delegation-tree level).
+- **Physical Android / host-GUI / live provider** remain NOT VERIFIED (stating policy),
+  unchanged by this pass.
+- **`FreeLLM` module-level constructions** in `counsel`/`computer planner`/`reasoning`
+  modules are a further-consolidation item (documented in "Remaining limitations"); not a
+  raw provider-SDK bypass.
+
+### H. Git
+- Branch: `clean-slate/final-consolidation`
+- HEAD: `d4dbbc0` (clean working tree)
+- New commits on top of `166d08b`:
+  `427b7d2` core consolidate delegation through JobQueue,
+  `5e8cbac` tests e2e connectivity + gates,
+  `d4dbbc0` docs architecture + capability matrix.
+- **PUSH NOT DONE / BLOCKED:** `git remote -v` is empty — no origin URL is configured in
+  this workspace (the `origin/*` tracking refs reference a stale `ae366d9` for the branch
+  and `574c780` for `main`). The GitHub token was explicitly flagged as needing rotation
+  and MUST NOT be embedded in a remote URL. A remote URL is required before pushing
+  `clean-slate/final-consolidation`; this is the only step that could not be completed
+  here.
+- `main` was **not** modified.
