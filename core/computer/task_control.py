@@ -392,6 +392,24 @@ class TaskControlManager:
                 "timestamp": self._emergency_stop_time,
             })
     
+    def reset(self) -> None:
+        """Clear all interrupt + task state so the next execution starts clean.
+
+        This manager is a process-wide singleton. Without a reset, an emergency
+        stop or an unregistered/torn-down task leaks into the next execution and,
+        in a shared test run, into unrelated tests (e.g. a later
+        ``VisualStateMachine.run`` aborting because a prior test left the
+        emergency-stop flag set). Called at shutdown and between tests.
+        """
+        with self._lock:
+            self._emergency_stop_active = False
+            self._emergency_stop_reason = ""
+            self._emergency_stop_time = None
+            self._task_contexts.clear()
+            self._active_task_id = None
+            self._cancel_event.clear()
+            self._pause_event.clear()
+
     def release_emergency_stop(self) -> bool:
         """Release emergency stop - re-enable computer actions."""
         with self._lock:
