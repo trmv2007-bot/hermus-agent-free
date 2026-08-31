@@ -1003,5 +1003,35 @@ def test_http_routes_enforce_gateway_token_when_configured():
             assert ok.status_code != 401, ok.status_code
             # The inbound channel webhook must remain open (external service).
             assert c.post("/webhook/telegram", json={}).status_code != 401
+            # Channel *control* actions are control-plane: gated like everything else.
+            assert c.get("/channels/status").status_code == 401
+            assert c.post("/telegram/send", json={}).status_code == 401
+            assert c.get("/channels/status",
+                         headers={"X-Hermus-Token": "unit-token"}).status_code != 401
     finally:
         del os.environ["HERMUS_GATEWAY_TOKEN"]
+
+
+def test_telegram_webhook_optional_secret():
+    """When HERMUS_TELEGRAM_WEBHOOK_SECRET is set, /webhook/telegram requires the
+    matching X-Telegram-Bot-Api-Secret-Token header; when unset it stays open."""
+    from fastapi.testclient import TestClient
+
+    import gateway.gateway as g
+
+    os.environ["HERMUS_TELEGRAM_WEBHOOK_SECRET"] = "wh-1"
+    try:
+        with TestClient(g.app) as c:
+            # Missing / wrong secret -> rejected before the handler runs.
+            assert c.post("/webhook/telegram", json={}).status_code == 401
+            assert c.post("/webhook/telegram", json={},
+                          headers={"X-Telegram-Bot-Api-Secret-Token": "nope"}).status_code == 401
+            # Correct secret -> passes the gate (no message => skipped/no-op).
+            assert c.post("/webhook/telegram", json={},
+                          headers={"X-Telegram-Bot-Api-Secret-Token": "wh-1"}).status_code != 401
+    finally:
+        del os.environ["HERMUS_TELEGRAM_WEBHOOK_SECRET"]
+
+    # Unset secret => webhook stays open (legacy poll/webhook).
+    with TestClient(g.app) as c:
+        assert c.post("/webhook/telegram", json={}).status_code != 401

@@ -242,6 +242,10 @@ class Config(BaseModel):
     # Gateway + channels
     telegram_bot_token: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
     discord_bot_token: Optional[str] = os.getenv("DISCORD_BOT_TOKEN")
+    # Optional secret for the Telegram *webhook* route (setWebhook secret_token).
+    # When set, /webhook/telegram requires the matching X-Telegram-Bot-Api-Secret-Token
+    # header; when unset the webhook stays open (legacy poll/webhook setups).
+    telegram_webhook_secret: Optional[str] = os.getenv("HERMUS_TELEGRAM_WEBHOOK_SECRET")
     gateway_port: int = 8000
     # auto | polling | webhook
     telegram_mode: str = os.getenv("HERMUS_TELEGRAM_MODE", "auto")

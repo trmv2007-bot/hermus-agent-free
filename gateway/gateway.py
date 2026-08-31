@@ -285,6 +285,7 @@ _realtime.install(app)
 # Per-concern routers (extracted from this module; see gateway/routes_*.py).
 # Mounted after the realtime layer so its routes keep precedence.
 from gateway.routes_channels import router as _channels_router  # noqa: E402
+from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
@@ -297,12 +298,14 @@ from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_android import router as _android_router  # noqa: E402
 
-# `_channels_router` (Telegram/Discord webhooks) is intentionally NOT gated: an
-# external service cannot attach an auth header, so gating it would break inbound
-# channel delivery. Every control-plane router is gated by the optional gateway
-# token (no-op when HERMUS_GATEWAY_TOKEN is unset → open local default).
+# The channel *webhook* router is intentionally NOT gated: an external service
+# (Telegram/Discord) cannot attach an auth header, so gating it would break
+# inbound channel delivery. The channel *control* router (status/start/send) IS
+# gated like every other control-plane router, and each gated router opens when
+# HERMUS_GATEWAY_TOKEN is unset (local default).
 _gate_control = [Depends(_check_gateway_auth)]
 app.include_router(_channels_router)
+app.include_router(_channels_control_router, dependencies=_gate_control)
 app.include_router(_registry_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
