@@ -221,6 +221,56 @@ class ModelGateway:
                                                 trace_id=trace_id))
         return resp
 
+    def vision_complete(self, image_base64: str, prompt: str, *,
+                        model: Optional[str] = None, provider: str = "ollama",
+                        api_key: Optional[str] = None, base_url: Optional[str] = None,
+                        temperature: Optional[float] = None) -> str:
+        """Vision completion (image -> text) through the canonical boundary.
+
+        Resolves the model (default the free-local Ollama LLaVA path), builds the
+        provider client via ``llm()`` so the caller never constructs one, sends
+        the image, records a typed outcome, and returns the text. On failure it
+        raises a :class:`ModelGatewayError` carrying a structured ``failure_class``
+        (``model_unavailable`` for a missing Ollama model, ``network`` when Ollama
+        is not running). It never fabricates a description.
+        """
+        from .. import llm  # type: ignore
+
+        model = model or "llava:7b"
+        llm_obj = self.llm(model=model, provider=provider, api_key=api_key,
+                           base_url=base_url, temperature=temperature)
+        started = time.time()
+        try:
+            resp = llm_obj.generate_image(prompt, image_base64)
+        except Exception as exc:  # noqa: BLE001 - classified below
+            fc = self._classify_failure(exc)
+            self._record_outcome(llm_obj.provider, ModelGatewayResult(
+                provider=llm_obj.provider, model=model, ok=False, failure_class=fc,
+                error_message=str(exc), retryable=self._retryable_failure(fc),
+                latency_ms=int((time.time() - started) * 1000)))
+            raise ModelGatewayError(str(exc), failure_class=fc,
+                                    provider=llm_obj.provider, model=model) from exc
+        self._record_outcome(llm_obj.provider, ModelGatewayResult(
+            provider=llm_obj.provider, model=model, ok=True,
+            content=resp.content, latency_ms=int((time.time() - started) * 1000)))
+        return resp.content
+
+    def vision_models(self, base_url: Optional[str] = None) -> list[str]:
+        """List the models exposed by the configured free-local Ollama node.
+
+        This is discovery (not generation) and lives in the model subsystem;
+        callers go through this one entry point instead of issuing a request to
+        a model backend themselves.
+        """
+        from .. import llm  # type: ignore
+
+        try:
+            return llm.list_ollama_models(base_url=base_url)
+        except Exception as exc:  # noqa: BLE001 - classified below
+            fc = self._classify_failure(exc)
+            raise ModelGatewayError(str(exc), failure_class=fc, provider="ollama",
+                                    model="") from exc
+
     def stream(self, messages: list[dict[str, Any]], *, model: Optional[str] = None,
                provider: Optional[str] = None, tools: Optional[list[dict[str, Any]]] = None,
                on_delta: Optional[Any] = None, **kw):

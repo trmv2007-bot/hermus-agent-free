@@ -225,8 +225,11 @@ def test_one_model_boundary_no_direct_free_llm_construction():
     Application code must not construct a ``FreeLLM`` (the provider-call
     implementation) directly nor use the module-level ``free_llm`` singleton —
     both bypass the canonical ModelGateway (selection/capability/fallback/health).
-    Only the model subsystem owner modules may.
+    It must also not issue a request to a model backend endpoint directly
+    (``/api/generate``, ``/api/chat``, ``/chat/completions``) — that is the same
+    bypass via a different door. Only the model subsystem owner modules may.
     """
+    model_endpoints = ("/api/generate", "/api/chat", "/chat/completions")
     offenders = []
     for p in _prod_files():
         rel = _rel(p)
@@ -237,8 +240,12 @@ def test_one_model_boundary_no_direct_free_llm_construction():
         for pat in ("FreeLLM(", "free_llm."):
             if pat in src:
                 offenders.append((rel, pat))
+        for ep in model_endpoints:
+            if ep in src:
+                offenders.append((rel, f"direct model endpoint {ep}"))
     assert not offenders, (
-        "application code constructs FreeLLM / uses the free_llm singleton directly; "
+        "application code constructs FreeLLM / uses the free_llm singleton / "
+        "calls a model endpoint directly; "
         f"route through get_model_gateway(): {offenders}"
     )
 
