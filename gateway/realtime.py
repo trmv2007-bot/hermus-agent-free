@@ -25,13 +25,19 @@ from datetime import datetime
 from typing import Any, Optional
 from collections.abc import Callable
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.config import config
 from core.run_events import RunBus, run_bus, sse_format
 
 router = APIRouter()
+
+# The bidirectional WebSocket is mounted on its own router so the control-plane
+# HTTP/SSE router above can be gated by the optional gateway token WITHOUT the
+# dependency running ahead of the WS handler's own 1008-close auth (a failing
+# router dependency on a WebSocket closes it with the wrong code).
+ws_router = APIRouter()
 
 _agent_getter: Optional[Callable[..., Any]] = None
 
@@ -251,7 +257,7 @@ async def queue_status():
 
 
 # ---------------------------------------------------------------- bi-directional WS
-@router.websocket("/ws/agent")
+@ws_router.websocket("/ws/agent")
 async def ws_agent(websocket: WebSocket):
     """Bidirectional agent channel.
 
@@ -970,9 +976,20 @@ async def shutdown() -> None:
 
 
 def install(app, *, agent_getter: Optional[Callable[..., Any]] = None) -> dict[str, str]:
-    """Mount the realtime router on the app and wire queue ⇄ app lifecycle."""
+    """Mount the realtime router on the app and wire queue ⇄ app lifecycle.
+
+    The control-plane HTTP/SSE router is gated by the optional gateway token
+    (``_check_gateway_auth``: no-op when HERMUS_GATEWAY_TOKEN is unset, else every
+    job/command/delegate/memory/skill/sandbox/mission/swe/rollback endpoint
+    requires it). The single WebSocket is mounted separately on ``ws_router`` so
+    it keeps its own 1008-close token check rather than a router dependency that
+    would close it with the wrong code.
+    """
+    from .context import _check_gateway_auth
+
     global _agent_getter
     if agent_getter is not None:
         _agent_getter = agent_getter
-    app.include_router(router)
+    app.include_router(router, dependencies=[Depends(_check_gateway_auth)])
+    app.include_router(ws_router)
     return {"mounted": True}

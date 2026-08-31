@@ -35,7 +35,7 @@ if __package__ in (None, ""):
         sys.path.remove(_here)
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -289,22 +289,31 @@ from gateway.routes_registry import router as _registry_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
+from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
+from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_android import router as _android_router  # noqa: E402
 
+# `_channels_router` (Telegram/Discord webhooks) is intentionally NOT gated: an
+# external service cannot attach an auth header, so gating it would break inbound
+# channel delivery. Every control-plane router is gated by the optional gateway
+# token (no-op when HERMUS_GATEWAY_TOKEN is unset → open local default).
+_gate_control = [Depends(_check_gateway_auth)]
 app.include_router(_channels_router)
-app.include_router(_registry_router)
-app.include_router(_management_router)
-app.include_router(_subsystems_router)
-app.include_router(_computer_router)
-app.include_router(_speech_router)
-app.include_router(_jarvis_router)
-app.include_router(_engine_router)
-app.include_router(_canonical_router)
-app.include_router(_android_router)
+app.include_router(_registry_router, dependencies=_gate_control)
+app.include_router(_management_router, dependencies=_gate_control)
+app.include_router(_subsystems_router, dependencies=_gate_control)
+app.include_router(_computer_router, dependencies=_gate_control)
+app.include_router(_computer_ws_router)
+app.include_router(_speech_router, dependencies=_gate_control)
+app.include_router(_speech_ws_router)
+app.include_router(_jarvis_router, dependencies=_gate_control)
+app.include_router(_engine_router, dependencies=_gate_control)
+app.include_router(_canonical_router, dependencies=_gate_control)
+app.include_router(_android_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
