@@ -51,6 +51,19 @@ class Config(BaseModel):
     nollama_gpu_model: str = os.getenv("HERMUS_NOLLAMA_GPU_MODEL", "MiniCPM5-1B-int4-g128-ov")
     nollama_vision_model: str = os.getenv("HERMUS_NOLLAMA_VISION_MODEL", "Qwen3-VL-8B-Instruct-int8-ov")
 
+    # ---- Optional speech / avatar integrations -----------------------------
+    omnivoice_enabled: bool = os.getenv("HERMUS_OMNIVOICE_ENABLED", "1") not in ("0", "false", "False")
+    omnivoice_model: str = os.getenv("HERMUS_OMNIVOICE_MODEL", "k2-fsa/OmniVoice")
+    omnivoice_device: str = os.getenv("HERMUS_OMNIVOICE_DEVICE", "auto")
+    omnivoice_prompt_dir: str = os.getenv("HERMUS_OMNIVOICE_PROMPTS", "data/speech/prompts")
+    heygem_tts_url: str = os.getenv("HERMUS_HEYGEM_TTS_URL", "http://127.0.0.1:18180")
+    heygem_face2face_url: str = os.getenv("HERMUS_HEYGEM_FACE2FACE_URL", "http://127.0.0.1:8383/easy")
+    heygem_timeout_s: float = float(os.getenv("HERMUS_HEYGEM_TIMEOUT", "120"))
+    avatar_output_dir: str = os.getenv("HERMUS_AVATAR_DIR", "data/avatar")
+    handy_model_dirs: str = os.getenv("HERMUS_HANDY_MODELS_DIRS", "")
+    stt_normalize_default: bool = os.getenv("HERMUS_STT_NORMALIZE", "1") not in ("0", "false", "False")
+    stt_strip_fillers_default: bool = os.getenv("HERMUS_STT_STRIP_FILLERS", "0") not in ("0", "false", "False")
+
     # ---- Hermus doctor: the small model that repairs Hermus itself ---------
     doctor_enabled: bool = os.getenv("HERMUS_DOCTOR_ENABLED", "1") not in ("0", "false", "False")
     # Auto-triage when a run/job fails (bounded by cooldown + daily cap).

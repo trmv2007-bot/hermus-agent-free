@@ -34,6 +34,13 @@ imageio-ffmpeg>=0.5.1
 # Voice Memo Transcription faster-whisper Free - Local Whisper, no API key
 faster-whisper>=0.9.0
 
+# Optional advanced speech/avatar integrations
+# OmniVoice is intentionally not a hard dependency. Install separately if you
+# want advanced multilingual TTS / voice cloning / voice design support:
+#   pip install omnivoice torch soundfile
+# HeyGem-style avatar support uses the optional local HTTP connector in
+# core/avatar.py and targets an already-running localhost stack.
+
 # Backends - Seven terminal backends free
 # local always available
 # docker - requires docker binary free

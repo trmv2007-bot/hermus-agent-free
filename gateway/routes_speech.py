@@ -24,7 +24,9 @@ router = APIRouter()
 @router.get("/dashboard/status")
 async def dashboard_status():
     """Small, fast status aggregate used by the futuristic command deck."""
+    from core.avatar import get_avatar_service
     from core.speech import speech_engine
+    from tools.voice import voice_available_models
 
     return {
         "gateway": "online",
@@ -34,6 +36,8 @@ async def dashboard_status():
         "tasks": task_tracker.get_status(),
         "channels": get_channel_status(),
         "speech": speech_engine.status(),
+        "transcription": voice_available_models(),
+        "avatar": get_avatar_service().status(),
         "local": True,
     }
 
@@ -53,13 +57,18 @@ async def speech_transcription_status():
     The dashboard's Voice panel shows this so a user on an Intel NPU box can
     see that transcription runs cool on the NPU while the GPU stays free.
     """
-    from tools.voice import local_engine_status, FASTER_WHISPER_AVAILABLE
+    from tools.voice import local_engine_status, FASTER_WHISPER_AVAILABLE, voice_available_models
 
     engine = local_engine_status()
+    catalog = voice_available_models()
     return {
         "backend": "nollama" if engine.get("ready") else "faster-whisper",
         "local_engine": engine,
         "faster_whisper_installed": FASTER_WHISPER_AVAILABLE,
+        "discovered_models": catalog.get("discovered_models") or [],
+        "discovered_count": int(catalog.get("discovered_count") or 0),
+        "search_dirs": catalog.get("search_dirs") or [],
+        "postprocess": catalog.get("postprocess") or {},
         "note": (
             "Voice commands transcribe on the NPU; the GPU is left free for the agent."
             if engine.get("ready")
@@ -69,20 +78,39 @@ async def speech_transcription_status():
     }
 
 
+@router.get("/speech/transcription/models")
+async def speech_transcription_models():
+    """Discover local STT model assets in conventional Handy-style directories."""
+    from tools.voice import voice_available_models
+
+    return voice_available_models()
+
+
 @router.post("/speech/synthesize")
 async def speech_synthesize(payload: dict):
     """Generate local WAV speech and return a gateway URL, never a host path."""
     from core.dashboard_events import dashboard_event_bus
     from core.speech import speech_engine
 
-    text = str((payload or {}).get("text") or "")
+    payload = payload or {}
+    text = str(payload.get("text") or "")
     if not text.strip():
         return JSONResponse({"success": False, "error": "text required"}, status_code=400)
     result = await asyncio.to_thread(
         speech_engine.synthesize,
         text,
-        (payload or {}).get("voice"),
-        int((payload or {}).get("rate") or 165),
+        payload.get("voice"),
+        int(payload.get("rate") or 165),
+        backend=payload.get("backend"),
+        language=payload.get("language"),
+        ref_audio=payload.get("ref_audio") or payload.get("reference_audio"),
+        ref_text=payload.get("ref_text") or payload.get("reference_text"),
+        instruct=payload.get("instruct"),
+        duration=payload.get("duration"),
+        speed=payload.get("speed"),
+        prompt_id=payload.get("prompt_id"),
+        create_prompt_id=payload.get("create_prompt_id"),
+        normalize_text=bool(payload.get("normalize_text", False)),
     )
     if not result.get("success"):
         return JSONResponse(result, status_code=503)
@@ -93,7 +121,10 @@ async def speech_synthesize(payload: dict):
         "audio_id": result["audio_id"],
         "backend": result.get("backend"),
         "estimated_duration": result.get("estimated_duration"),
-        "session_id": (payload or {}).get("session_id"),
+        "session_id": payload.get("session_id"),
+        "prompt_id": result.get("prompt_id"),
+        "voice_clone": result.get("voice_clone"),
+        "voice_design": result.get("voice_design"),
     })
     return result
 
@@ -113,12 +144,22 @@ async def speech_audio(audio_id: str):
 
 
 @router.post("/speech/transcribe")
-async def speech_transcribe(request: Request, model: str = "base", language: str = None):
+async def speech_transcribe(
+    request: Request,
+    model: str = "base",
+    language: str = None,
+    remember: bool = False,
+    session_id: str = "",
+    project: str = "",
+    normalize: bool = True,
+    strip_fillers: bool = False,
+):
     """Transcribe raw browser microphone audio with local faster-whisper.
 
     The browser sends the recorded Blob directly (not multipart), avoiding an
-    additional python-multipart dependency.  Input is capped and deleted after
-    transcription.
+    additional python-multipart dependency. Input is capped and deleted after
+    transcription. Successful transcripts can optionally be written into the
+    canonical MemoryFacade session history.
     """
     from core.dashboard_events import dashboard_event_bus
     from core.speech import speech_root
@@ -139,7 +180,17 @@ async def speech_transcribe(request: Request, model: str = "base", language: str
     path = input_dir / f"mic_{os.urandom(8).hex()}{suffix}"
     path.write_bytes(body)
     try:
-        result = await asyncio.to_thread(transcribe_audio, str(path), model, language)
+        result = await asyncio.to_thread(
+            transcribe_audio,
+            str(path),
+            model,
+            language,
+            normalize=normalize,
+            strip_fillers=strip_fillers,
+            remember=remember,
+            session_id=session_id,
+            project=project,
+        )
     finally:
         try:
             path.unlink()
@@ -147,7 +198,81 @@ async def speech_transcribe(request: Request, model: str = "base", language: str
             pass
     if result.get("success"):
         result.pop("audio_path", None)
-        dashboard_event_bus.publish("user_transcript", {"text": result.get("text", "")})
+        dashboard_event_bus.publish("user_transcript", {
+            "text": result.get("text", ""),
+            "session_id": session_id,
+            "remembered": bool((result.get("memory") or {}).get("remembered")),
+        })
+        return result
+    return JSONResponse(result, status_code=503)
+
+
+@router.get("/speech/avatar/status")
+async def speech_avatar_status(probe: bool = False):
+    """Status of the optional local talking-avatar connector."""
+    from core.avatar import get_avatar_service
+
+    return get_avatar_service().status(probe=probe)
+
+
+@router.post("/speech/avatar/prepare-voice")
+async def speech_avatar_prepare_voice(payload: dict):
+    """Create a reusable local avatar voice profile from reference audio."""
+    from core.avatar import get_avatar_service
+    from core.dashboard_events import dashboard_event_bus
+
+    payload = payload or {}
+    result = await asyncio.to_thread(
+        get_avatar_service().prepare_voice,
+        str(payload.get("reference_audio") or payload.get("ref_audio") or ""),
+        lang=str(payload.get("lang") or payload.get("language") or "en"),
+        fmt=str(payload.get("format") or ""),
+    )
+    if result.get("success"):
+        profile = result.get("voice_profile") or {}
+        dashboard_event_bus.publish("avatar_voice_prepared", {
+            "voice_profile_id": profile.get("voice_profile_id"),
+            "lang": profile.get("lang"),
+            "reference_audio": profile.get("reference_audio"),
+        })
+        return result
+    return JSONResponse(result, status_code=503)
+
+
+@router.post("/speech/avatar/render")
+async def speech_avatar_render(payload: dict):
+    """Submit a talking-avatar render via the local HeyGem-style connector."""
+    from core.avatar import get_avatar_service
+    from core.dashboard_events import dashboard_event_bus
+
+    payload = payload or {}
+    result = await asyncio.to_thread(
+        get_avatar_service().render_from_text,
+        str(payload.get("text") or ""),
+        str(payload.get("avatar_video_path") or payload.get("video_path") or ""),
+        voice_profile_id=str(payload.get("voice_profile_id") or ""),
+        reference_audio=str(payload.get("reference_audio") or payload.get("ref_audio") or ""),
+        reference_text=str(payload.get("reference_text") or payload.get("ref_text") or ""),
+        lang=str(payload.get("lang") or payload.get("language") or "en"),
+        code=str(payload.get("code") or ""),
+    )
+    if result.get("success"):
+        dashboard_event_bus.publish("avatar_render_submitted", {
+            "code": result.get("code"),
+            "backend": result.get("backend"),
+            "voice_profile_id": (result.get("audio") or {}).get("voice_profile_id"),
+        })
+        return result
+    return JSONResponse(result, status_code=503)
+
+
+@router.get("/speech/avatar/jobs/{code}")
+async def speech_avatar_job_status(code: str):
+    """Query a submitted local avatar render by task code."""
+    from core.avatar import get_avatar_service
+
+    result = await asyncio.to_thread(get_avatar_service().query_video, code)
+    if result.get("success") or result.get("terminal"):
         return result
     return JSONResponse(result, status_code=503)
 

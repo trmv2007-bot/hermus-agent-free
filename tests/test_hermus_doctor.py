@@ -46,6 +46,18 @@ def signals(**overrides):
                     "recommended_model": {"id": "minicpm", "name": "MiniCPM5 1B"},
                     "nollama_base_url": "http://localhost:8010/v1",
                     "ollama_base_url": "http://localhost:11434/v1"},
+        "media": {
+            "speech": {"available": True, "detail": {}},
+            "avatar": {
+                "configured": False,
+                "available": False,
+                "services": {
+                    "tts": {"reachable": None, "detail": None},
+                    "face2face": {"reachable": None, "detail": None},
+                },
+            },
+            "transcription": {"local_engine": {"ready": True}, "discovered_count": 1},
+        },
         "resources": {"disk_free_gb": 40.0, "disk_percent": 40, "ram_free_gb": 8.0, "ram_percent": 40},
     }
     base.update(overrides)
@@ -180,6 +192,31 @@ def test_low_disk_and_ram_are_findings(doc):
     cats = {f.category for f in findings}
     assert cats == {"disk", "memory"}
     assert next(f for f in findings if f.category == "disk").severity == SEVERITY_HIGH
+
+
+def test_optional_media_findings_are_honest(doc):
+    media = {
+        "speech": {"available": False, "detail": {"setup": "install piper or omnivoice"}},
+        "avatar": {
+            "configured": True,
+            "available": False,
+            "services": {
+                "tts": {"reachable": False, "detail": "ConnectionError"},
+                "face2face": {"reachable": True, "detail": "http 200"},
+            },
+        },
+        "transcription": {"local_engine": {"ready": False}, "discovered_count": 0},
+    }
+    findings = doc.analyze(signals(media=media))
+    cats = {f.category for f in findings}
+    assert {"speech_optional", "avatar_optional", "transcription_optional"} <= cats
+
+
+def test_media_probe_failure_is_reported(doc):
+    findings = doc.analyze(signals(media={"error": "ImportError: boom"}))
+    finding = next(f for f in findings if f.category == "media_status")
+    assert finding.severity == "low"
+    assert "boom" in finding.evidence
 
 
 def test_findings_are_sorted_worst_first(doc):
@@ -443,7 +480,7 @@ def test_status_is_cheap_and_shaped_for_the_dashboard(doc, monkeypatch):
     monkeypatch.setattr(doc, "_doctor_llm", lambda model=None: (None, "nollama/minicpm"))
     st = doc.status()
     for key in ("enabled", "auto", "ask_internet", "model", "engine_status",
-                "worst_severity", "counts", "finding_count", "stuck", "reports"):
+                "media", "worst_severity", "counts", "finding_count", "stuck", "reports"):
         assert key in st
     assert st["model"] == "nollama/minicpm"
 

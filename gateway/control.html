@@ -257,9 +257,15 @@ function renderHealth(h){
 function renderCaps(c){
   const providers = c.providers || [];
   const circ = c.circuit || {};
+  const speech = c.speech || {};
+  const avatar = c.avatar || {};
+  const tx = c.transcription || {};
   let html = kpi(String(c.tool_count ?? "?"), "tools");
   html += kpi(String(providers.length), "providers");
   html += kpi(String(Object.keys(circ).length), "circuit entries");
+  html += kpi(esc(speech.backend || (speech.available ? "ready" : "off")), "speech");
+  html += kpi(String(tx.discovered_count ?? 0), "local stt models");
+  html += kpi(avatar.available ? "ready" : "optional", "avatar");
   $("#caps").innerHTML = html;
 }
 async function refreshOverview(){

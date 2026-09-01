@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -107,7 +108,7 @@ class PythonVerifier(BaseVerifier):
             behav_total += 1
             try:
                 res = subprocess.run(
-                    ["pytest", "-v"] + [str(p) for p in test_files],
+                    [sys.executable, "-m", "pytest", "-v"] + [str(p) for p in test_files],
                     cwd=str(root_dir),
                     capture_output=True,
                     text=True,

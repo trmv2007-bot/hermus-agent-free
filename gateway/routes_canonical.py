@@ -52,8 +52,11 @@ async def system_health():
 @router.get("/system/capabilities")
 async def system_capabilities(payload: bool = False):
     """Live provider/model/tool capability state from the canonical gateways."""
+    from core.avatar import get_avatar_service
     from core.models import get_model_gateway
+    from core.speech import speech_engine
     from core.tools import get_tool_gateway
+    from tools.voice import voice_available_models
     try:
         model_gw = get_model_gateway()
         providers = model_gw.providers(probe=bool(payload))
@@ -64,6 +67,9 @@ async def system_capabilities(payload: bool = False):
             "tools": {name: d.to_dict() for name, d in tools.items()},
             "tool_count": len(tools),
             "circuit": model_gw.health(),
+            "speech": speech_engine.status(),
+            "transcription": voice_available_models(),
+            "avatar": get_avatar_service().status(probe=bool(payload)),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"capability probe failed: {exc}")

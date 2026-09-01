@@ -443,7 +443,7 @@ def test_bootstrap_doctor_reports(monkeypatch):
 def test_canonical_packages_import_cleanly():
     for mod in ("core.contracts", "core.events", "core.tools", "core.models",
                 "core.memory", "core.state", "core.compat", "core.learning",
-                "bootstrap"):
+                "core.avatar", "bootstrap"):
         importlib.import_module(mod)
 
 
