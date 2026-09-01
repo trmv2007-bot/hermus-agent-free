@@ -446,7 +446,103 @@ def main():
     perms_set.add_argument("tool")
     perms_set.add_argument("decision", choices=["allow", "ask", "deny"])
     perms_set.add_argument("--agent", default=None)
+    perms_approve = perms_sub.add_parser("approve", help="Create a scoped approval grant for yellow red-line actions")
+    perms_approve.add_argument("title")
+    perms_approve.add_argument("--tool", default="*")
+    perms_approve.add_argument("--red-line", dest="red_lines", type=int, action="append", default=[])
+    perms_approve.add_argument("--resource", dest="resources", action="append", default=[])
+    perms_approve.add_argument("--purpose", default="")
+    perms_approve.add_argument("--ttl-minutes", type=int, default=None)
+    perms_approve.add_argument("--max-uses", type=int, default=None)
+    perms_approve.add_argument("--notes", default="")
+    perms_revoke = perms_sub.add_parser("revoke", help="Revoke an approval grant")
+    perms_revoke.add_argument("id")
+    perms_pending = perms_sub.add_parser("pending", help="List pending yellow-action approval prompts")
+    perms_pending.add_argument("--all", action="store_true", help="Include resolved prompts")
+    perms_resolve = perms_sub.add_parser("resolve", help="Resolve a pending approval prompt")
+    perms_resolve.add_argument("id")
+    perms_resolve.add_argument("decision", choices=["approve", "deny"])
+    perms_resolve.add_argument("--resource", dest="resources", action="append", default=[])
+    perms_resolve.add_argument("--purpose", default="")
+    perms_resolve.add_argument("--ttl-minutes", type=int, default=None)
+    perms_resolve.add_argument("--max-uses", type=int, default=None)
+    perms_resolve.add_argument("--notes", default="")
+    perms_resolve.add_argument("--retry", action="store_true", help="Retry the approved action immediately through the ToolGateway")
+    perms_retry = perms_sub.add_parser("retry", help="Retry an approved pending action through the ToolGateway")
+    perms_retry.add_argument("id")
+    perms_bundles = perms_sub.add_parser("bundles", help="List pending approval bundles")
+    perms_bundles.add_argument("--all", action="store_true", help="Include resolved bundles")
+    perms_bundle_resolve = perms_sub.add_parser("resolve-bundle", help="Approve or deny an approval bundle")
+    perms_bundle_resolve.add_argument("id")
+    perms_bundle_resolve.add_argument("decision", choices=["approve", "deny"])
+    perms_bundle_resolve.add_argument("--ttl-minutes", type=int, default=None)
+    perms_bundle_resolve.add_argument("--max-uses", type=int, default=None)
+    perms_bundle_resolve.add_argument("--notes", default="")
+    perms_bundle_resolve.add_argument("--resume", action="store_true", help="Resume the mission attached to the bundle after approval")
+    perms_sub.add_parser("approvals", help="List active approval grants")
     perms_sub.add_parser("list", help="Recent audit log")
+
+    # powers / capability ledger
+    powers_parser = subparsers.add_parser("powers", help="Capability ledger - current, missing and discovered powers")
+    powers_sub = powers_parser.add_subparsers(dest="powers_action")
+    powers_sub.add_parser("list", help="List discovered possible powers")
+    powers_add = powers_sub.add_parser("add", help="Add a discovered possible power to CAPABILITY_LEDGER.md")
+    powers_add.add_argument("power")
+    powers_add.add_argument("--use", default="")
+    powers_add.add_argument("--risk", default="")
+    powers_add.add_argument("--approval", default="")
+    powers_add.add_argument("--status", default="not_granted")
+    powers_propose = powers_sub.add_parser("propose", help="Generate a safe setup proposal for a missing/not-granted power")
+    powers_propose.add_argument("power")
+    powers_propose.add_argument("--write", action="store_true", help="Write docs/capability_proposals/<power>.md")
+    powers_registry = powers_sub.add_parser("registry", help="List capability readiness/activation registry")
+    powers_register = powers_sub.add_parser("register", help="Register/update capability readiness")
+    powers_register.add_argument("power")
+    powers_register.add_argument("--category", default="generic")
+    powers_register.add_argument("--status", default="missing")
+    powers_register.add_argument("--notes", default="")
+    powers_setup = powers_sub.add_parser("setup", help="Generate setup proposal and planning command for a capability")
+    powers_setup.add_argument("power")
+    powers_setup.add_argument("--no-write", action="store_true")
+    powers_activate_req = powers_sub.add_parser("request-activation", help="Create pending activation approval request")
+    powers_activate_req.add_argument("power")
+    powers_activate_req.add_argument("--reason", default="")
+    powers_activate = powers_sub.add_parser("activate", help="Activate only after approved activation request")
+    powers_activate.add_argument("power")
+    powers_activate.add_argument("--approval-id", required=True)
+
+    # safety reports
+    safety_parser = subparsers.add_parser("safety", help="Autonomy safety reports and audit exports")
+    safety_sub = safety_parser.add_subparsers(dest="safety_action")
+    safety_report_p = safety_sub.add_parser("report", help="Generate an Autonomy Safety Report")
+    safety_report_p.add_argument("--write", action="store_true", help="Write docs/safety_reports/autonomy-safety-report-*.md")
+    safety_report_p.add_argument("--output", help="Write report to this markdown path")
+    safety_report_p.add_argument("--json", action="store_true", help="Print JSON instead of Markdown")
+    safety_preflight_p = safety_sub.add_parser("preflight", help="Check a mission/action before starting it")
+    safety_preflight_p.add_argument("goal", nargs="+", help="Goal/action to pre-flight")
+    safety_preflight_p.add_argument("--json", action="store_true", help="Print JSON instead of Markdown")
+    safety_preflight_p.add_argument("--create-approval-prompts", action="store_true", help="Create draft pending approval prompts suggested by pre-flight")
+    safety_scan_p = safety_sub.add_parser("scan-folder", help="Run read-only local defensive folder scanner")
+    safety_scan_p.add_argument("path")
+    safety_scan_p.add_argument("--max-files", type=int, default=500)
+    safety_scan_p.add_argument("--save-report", action="store_true", help="Write a Markdown scan report artifact")
+    safety_scan_p.add_argument("--mission-id", default="", help="Attach saved scan report to a mission")
+    safety_scan_p.add_argument("--json", action="store_true")
+    safety_scan_mission_p = safety_sub.add_parser("scan-mission", help="Create a gated local folder scan mission")
+    safety_scan_mission_p.add_argument("path")
+    safety_scan_mission_p.add_argument("--purpose", default="malware")
+    safety_scan_mission_p.add_argument("--max-files", type=int, default=500)
+    safety_scan_mission_run_p = safety_sub.add_parser("scan-mission-run", help="Run an approved local folder scan mission")
+    safety_scan_mission_run_p.add_argument("mission_id")
+
+    # emergency stop
+    emergency_parser = subparsers.add_parser("emergency", help="Global Red Line 1 emergency stop")
+    emergency_sub = emergency_parser.add_subparsers(dest="emergency_action")
+    emergency_stop_p = emergency_sub.add_parser("stop", help="Activate global emergency stop")
+    emergency_stop_p.add_argument("reason", nargs="*", default=[])
+    emergency_resume_p = emergency_sub.add_parser("resume", help="Clear global emergency stop")
+    emergency_resume_p.add_argument("reason", nargs="*", default=[])
+    emergency_sub.add_parser("status", help="Show global emergency stop state")
 
     # research pipeline
     research_parser = subparsers.add_parser("research", help="Web research - multi-source with citations")
@@ -585,6 +681,8 @@ def main():
     m_start.add_argument('--budget', type=int, default=48,
                          help='Step budget for the whole lifecycle (planning/execution/verification/repair)')
     m_start.add_argument('--req', action='append', default=None, help='Specific requirement (can be repeated)')
+    m_start.add_argument('--skip-preflight', action='store_true', help='Start without the autonomy pre-flight checklist')
+    m_start.add_argument('--allow-planning-blocked', action='store_true', help='Record NEEDS_APPROVAL/MISSING_CAPABILITY as a blocked planning-mode mission; red-line/emergency blockers still refuse')
     m_resume = mission_sub.add_parser('resume', help='Resume a mission by ID')
     m_resume.add_argument('mission_id')
     m_resume.add_argument('--restart-failed', action='store_true',
@@ -788,11 +886,21 @@ def main():
         from core.mission import mission_engine
         import json as json_lib
         if args.mission_action == 'start':
+            if not args.skip_preflight:
+                try:
+                    from core.autonomy_preflight import preflight_goal
+                    pf = preflight_goal(args.goal)
+                    print(pf.to_markdown())
+                    print("\n--- mission start ---")
+                except Exception as exc:
+                    print(f"Pre-flight unavailable; mission engine will fail closed: {exc}")
             report = mission_engine.start_mission(
                 goal=args.goal,
                 requirements=args.req,
                 domain=None if args.domain == 'auto' else args.domain,
                 budget_steps=args.budget,
+                preflight=not args.skip_preflight,
+                allow_preflight_planning=bool(args.allow_planning_blocked),
             )
             print(json_lib.dumps(report.to_dict(), indent=2))
         elif args.mission_action == 'resume':
@@ -1835,15 +1943,202 @@ def main():
         from core.permissions import permission_manager
         if args.perms_action == "check":
             r = permission_manager.check(args.tool)
-            print(f"{args.tool}: risk={r['risk']} decision={r['decision']}")
+            safety = r.get("safety") or {}
+            print(f"{args.tool}: risk={r['risk']} decision={r['decision']} safety={safety.get('zone', 'green')} red_lines={safety.get('red_lines', [])}")
+            if r.get("approval"):
+                print(f" approval={r['approval'].get('grant', {}).get('id')}")
         elif args.perms_action == "set":
             r = permission_manager.set_policy(args.tool, args.decision, agent=args.agent)
             print(f"{'✅' if r.get('success') else '❌'} {args.tool} -> {args.decision}" + (f" (agent={args.agent})" if args.agent else ""))
+        elif args.perms_action == "approve":
+            r = permission_manager.approval_grant(
+                args.title,
+                tool=args.tool,
+                red_lines=args.red_lines,
+                resources=args.resources,
+                purpose=args.purpose,
+                ttl_minutes=args.ttl_minutes,
+                max_uses=args.max_uses,
+                notes=args.notes,
+            )
+            grant = r.get("grant", {})
+            print(f"{'✅' if r.get('success') else '❌'} approval {grant.get('id', '')} {grant.get('title', args.title)}")
+        elif args.perms_action == "revoke":
+            r = permission_manager.approval_revoke(args.id)
+            print(f"{'✅' if r.get('success') else '❌'} revoked {args.id}")
+        elif args.perms_action == "pending":
+            for req in permission_manager.approval_pending(include_resolved=args.all):
+                print(f" {req.get('id')} status={req.get('status')} tool={req.get('tool')} safety={req.get('safety', {}).get('zone')} red_lines={req.get('safety', {}).get('red_lines')} resources={req.get('suggested_resources')}")
+        elif args.perms_action == "resolve":
+            r = permission_manager.approval_resolve(
+                args.id,
+                args.decision,
+                resources=args.resources or None,
+                purpose=args.purpose,
+                ttl_minutes=args.ttl_minutes,
+                max_uses=args.max_uses,
+                notes=args.notes,
+            )
+            retry = None
+            if args.retry and r.get("success") and args.decision == "approve":
+                retry = permission_manager.approval_retry(args.id)
+            print(f"{'✅' if r.get('success') else '❌'} {args.decision} {args.id}" + (f" grant={r.get('grant', {}).get('id')}" if r.get('grant') else ""))
+            if retry is not None:
+                print(f" retry={'✅' if retry.get('success') else '❌'}")
+        elif args.perms_action == "retry":
+            r = permission_manager.approval_retry(args.id)
+            print(f"{'✅' if r.get('success') else '❌'} retry {args.id}")
+            if r.get("error"):
+                print(r.get("error"))
+        elif args.perms_action == "bundles":
+            for bundle in permission_manager.approval_bundles(include_resolved=args.all):
+                print(f" {bundle.get('id')} status={bundle.get('status')} mission={bundle.get('mission_id')} requests={len(bundle.get('request_ids') or [])} title={bundle.get('title')}")
+        elif args.perms_action == "resolve-bundle":
+            r = permission_manager.approval_bundle_resolve(
+                args.id,
+                args.decision,
+                ttl_minutes=args.ttl_minutes,
+                max_uses=args.max_uses,
+                notes=args.notes,
+            )
+            print(f"{'✅' if r.get('success') else '❌'} {args.decision} bundle {args.id}")
+            bundle = r.get("bundle") or {}
+            if args.resume and args.decision == "approve" and bundle.get("mission_id"):
+                try:
+                    from core.mission import mission_engine
+                    resumed = mission_engine.resume_mission(bundle["mission_id"], extra_steps=8)
+                    print(f" resume={resumed.state} mission={resumed.mission_id}")
+                except Exception as exc:
+                    print(f" resume=❌ {exc}")
+        elif args.perms_action == "approvals":
+            for grant in permission_manager.approvals_list():
+                print(f" {grant.get('id')} tool={grant.get('tool')} red_lines={grant.get('red_lines')} resources={grant.get('resources')} uses={grant.get('uses')}/{grant.get('max_uses')}")
         elif args.perms_action == "list":
             for e in permission_manager.recent():
                 print(f" {e.get('ts','')[:19]} {e.get('tool')} -> {e.get('decision')} (risk={e.get('risk')}, agent={e.get('agent')})")
         else:
             parser.parse_args(["perms", "--help"])
+
+    elif args.command == "powers":
+        from core.capability_ledger import CapabilityEntry, get_capability_ledger
+        ledger = get_capability_ledger()
+        if args.powers_action == "list":
+            rows = ledger.list_discovered()
+            if not rows:
+                print("No discovered possible powers recorded yet.")
+            for row in rows:
+                print(f" - {row.get('power')} | status={row.get('status')} | approval={row.get('needed_approval_setup')}")
+        elif args.powers_action == "add":
+            r = ledger.add_discovered(CapabilityEntry.create(
+                power=args.power,
+                use=args.use,
+                risk=args.risk,
+                needed_approval_setup=args.approval,
+                status=args.status,
+                source="cli",
+            ))
+            print(f"{'✅' if r.get('success') else '❌'} capability {args.power}" + (" (already listed)" if r.get("deduped") else ""))
+        elif args.powers_action == "propose":
+            r = ledger.propose(args.power, write=args.write)
+            if args.write and r.get("path"):
+                print(f"✅ proposal written: {r['path']}")
+            else:
+                print(r.get("markdown", ""))
+        elif args.powers_action in {"registry", "register", "setup", "request-activation", "activate"}:
+            from core.capability_registry import get_capability_registry
+            registry = get_capability_registry()
+            if args.powers_action == "registry":
+                for rec in registry.list():
+                    print(f" - {rec.get('name')} | status={rec.get('status')} | category={rec.get('category')} | activation={rec.get('activation_request_id')}")
+            elif args.powers_action == "register":
+                r = registry.register(args.power, category=args.category, status=args.status, source="cli", notes=args.notes)
+                print(f"{'✅' if r.get('success') else '❌'} {args.power} -> {r.get('record', {}).get('status')}")
+            elif args.powers_action == "setup":
+                r = registry.setup_plan(args.power, write_proposal=not args.no_write)
+                rec = r.get("record", {})
+                print(f"{'✅' if r.get('success') else '❌'} setup {args.power}: status={rec.get('status')} proposal={rec.get('proposal_path')}")
+                if rec.get("planning_command"):
+                    print(f" planning: {rec.get('planning_command')}")
+            elif args.powers_action == "request-activation":
+                r = registry.request_activation(args.power, reason=args.reason)
+                print(f"{'✅' if r.get('success') else '❌'} activation request {r.get('request', {}).get('id', '')}")
+            elif args.powers_action == "activate":
+                r = registry.activate(args.power, approval_id=args.approval_id)
+                print(f"{'✅' if r.get('success') else '❌'} activate {args.power}: {r.get('record', {}).get('status') or r.get('error')}")
+        else:
+            parser.parse_args(["powers", "--help"])
+
+    elif args.command == "safety":
+        from pathlib import Path as _Path
+        import json as _json
+        from core.safety_report import generate_safety_report, write_safety_report
+
+        if args.safety_action == "report":
+            report = generate_safety_report()
+            if args.write or args.output:
+                result = write_safety_report(report, output=_Path(args.output) if args.output else None)
+                print(f"✅ safety report written: {result['path']}")
+            elif args.json:
+                print(_json.dumps(report.to_dict(), indent=2, default=str))
+            else:
+                print(report.to_markdown())
+        elif args.safety_action == "preflight":
+            from core.autonomy_preflight import create_preflight_approval_requests, preflight_goal
+
+            goal = " ".join(args.goal)
+            report = preflight_goal(goal)
+            if args.json:
+                print(_json.dumps(report.to_dict(), indent=2, default=str))
+            else:
+                print(report.to_markdown())
+            if args.create_approval_prompts:
+                prompts = create_preflight_approval_requests(goal)
+                print("\n--- draft approval prompts ---")
+                print(_json.dumps({"success": prompts.get("success"), "created": prompts.get("created"), "errors": prompts.get("errors")}, indent=2, default=str))
+        elif args.safety_action == "scan-folder":
+            try:
+                from core.permissions import Decision, permission_manager
+                check = permission_manager.check("local_folder_defensive_scan", args={"path": args.path, "max_files": args.max_files, "purpose": "defensive_scan", "save_report": args.save_report, "mission_id": args.mission_id})
+                if check.get("decision") != Decision.ALLOW.value:
+                    print(_json.dumps({"success": False, "error": "approval required", "permission": check}, indent=2, default=str))
+                    return
+            except Exception as exc:
+                print(_json.dumps({"success": False, "error": f"permission check failed closed: {exc}"}, indent=2, default=str))
+                return
+            from core.local_defense_scanner import scan_folder
+
+            result = scan_folder(args.path, max_files=args.max_files, save_report=args.save_report, mission_id=args.mission_id)
+            if args.json:
+                print(_json.dumps(result, indent=2, default=str))
+            else:
+                print(result.get("markdown") or _json.dumps(result, indent=2, default=str))
+        elif args.safety_action == "scan-mission":
+            from core.local_defense_workflow import start_local_scan_mission
+            report = start_local_scan_mission(args.path, purpose=args.purpose, max_files=args.max_files)
+            print(_json.dumps(report.to_dict(), indent=2, default=str))
+        elif args.safety_action == "scan-mission-run":
+            from core.local_defense_workflow import run_local_scan_mission
+            try:
+                print(_json.dumps(run_local_scan_mission(args.mission_id).to_dict(), indent=2, default=str))
+            except ValueError as exc:
+                print(f"Error: {exc}")
+        else:
+            parser.parse_args(["safety", "--help"])
+
+    elif args.command == "emergency":
+        from core.emergency_stop import get_emergency_stop
+        brake = get_emergency_stop()
+        if args.emergency_action == "stop":
+            r = brake.activate(" ".join(args.reason) or "manual emergency stop", set_by="cli")
+            print(f"✅ emergency stop active: {r['state'].get('reason')}")
+        elif args.emergency_action == "resume":
+            r = brake.clear(" ".join(args.reason) or "manual resume", set_by="cli")
+            print(f"✅ emergency stop cleared: {r['state'].get('reason')}")
+        elif args.emergency_action == "status":
+            s = brake.state().to_dict()
+            print(f"emergency_stop={s.get('active')} reason={s.get('reason')} updated={s.get('updated_at')}")
+        else:
+            parser.parse_args(["emergency", "--help"])
 
     elif args.command == "research":
         from core.research import research_pipeline

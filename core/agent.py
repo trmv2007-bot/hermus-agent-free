@@ -150,8 +150,17 @@ class HermusAgent:
             out = res.output
             # registry.execute always returns a dict, but guard for robustness.
             return out if isinstance(out, dict) else {"result": out}
-        return {"error": res.error_message or f"tool '{name}' failed",
-                "error_code": res.error_code}
+        out = {"error": res.error_message or f"tool '{name}' failed",
+               "error_code": res.error_code}
+        if res.status:
+            out["status"] = res.status
+        if res.retryable:
+            out["retryable"] = True
+        if res.next_action:
+            out["next_action"] = res.next_action
+        if res.data:
+            out.update(res.data)
+        return out
 
     def _apply_router(self, user_message: str) -> Optional[dict]:
         """Model Router 2.0: swap the LLM to the best available model for this turn.
@@ -544,6 +553,7 @@ Rules:
         all_tool_results: list[dict] = []
         steps = 0
         final_content = ""
+        pending_approval = None
         last_usage = {}
 
         # ---- Multi-step ReAct loop ----
@@ -655,6 +665,15 @@ Rules:
                         "preview": _preview(result),
                     },
                 )
+                if isinstance(result, dict) and result.get("error_code") == "APPROVAL_REQUIRED":
+                    pending_approval = result.get("approval_request") or result
+                    emit("approval_required", {
+                        "step": steps,
+                        "tool": tool_name,
+                        "approval_request": result.get("approval_request"),
+                        "safety": result.get("safety"),
+                        "next_action": result.get("next_action"),
+                    })
                 try:
                     from .harness import harness as _harness
 
@@ -691,6 +710,17 @@ Rules:
                         "tool_calls": [tc],
                     }
                 )
+                if pending_approval is not None:
+                    break
+
+            if pending_approval is not None:
+                req_id = pending_approval.get("id") if isinstance(pending_approval, dict) else None
+                final_content = (
+                    "Waiting for approval before continuing. "
+                    + (f"Approval request: {req_id}. " if req_id else "")
+                    + "Open the Safety tab or use `hermus perms pending` to approve, deny, or scope this action."
+                )
+                break
 
             # Feed observations back for next reasoning step
             messages.append(
@@ -925,6 +955,8 @@ Rules:
             "router": routed,
             "project": self.project,
             "verification": verification,
+            "waiting_for_approval": pending_approval,
+            "status": "waiting_for_approval" if pending_approval else "done",
             "events": None,
         }
 

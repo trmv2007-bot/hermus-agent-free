@@ -55,7 +55,7 @@ class ChangeProposal:
         """Return repository-relative, POSIX-style paths for deterministic checks."""
         out: list[str] = []
         for value in self.files:
-            path = str(value).replace("\\", "/").lstrip("./")
+            path = _normalize_repo_path(value)
             if path and path not in out:
                 out.append(path)
         return out
@@ -75,13 +75,39 @@ RED_LINE_PATTERNS: tuple[str, ...] = (
     # The independent control plane: changes require review, but may be
     # proposed. Ordinary agent, UI, skill, test, and deployment code remains
     # green-line work.
+    "RED_LINES.md",
+    "AUTONOMY_BOUNDARIES.md",
+    "CAPABILITY_LEDGER.md",
+    "policies/**",
     "core/evolution.py",
     "core/permissions.py",
+    "core/safety_policy.py",
+    "core/emergency_stop.py",
+    "core/capability_ledger.py",
+    "core/autonomy_preflight.py",
+    "core/capability_registry.py",
+    "core/local_defense_scanner.py",
+    "core/local_defense_workflow.py",
+    "core/safety_report.py",
     "core/rollback.py",
     "core/sandbox.py",
     "core/computer/permissions.py",
     "core/computer/remote.py",
     "core/counsel/constitution.py",
+    "tests/test_red_lines_policy.py",
+    "tests/test_emergency_stop.py",
+    "tests/test_execution_path_guards.py",
+    "tests/test_approval_waiting_flow.py",
+    "tests/test_capability_ledger.py",
+    "tests/test_safety_events_timeline.py",
+    "tests/test_safety_report.py",
+    "tests/test_autonomy_preflight.py",
+    "tests/test_mission_preflight.py",
+    "tests/test_approval_bundles.py",
+    "tests/test_capability_activation.py",
+    "tests/test_local_defense_scanner.py",
+    "tests/test_local_defense_workflow.py",
+    "tests/test_*safety*.py",
     "deploy/secrets/**",
     "scripts/emergency_stop*",
     "scripts/rollback*",
@@ -96,12 +122,26 @@ RED_LINE_CONTENT: tuple[tuple[str, str], ...] = (
 )
 
 
+def _normalize_repo_path(value: object) -> str:
+    """Normalize a path without stripping leading dots from filenames.
+
+    ``str.lstrip('./')`` treats its argument as a character set, so it turns
+    ``.env.example`` into ``env.example``. Red-line path checks must preserve
+    leading dots while removing only explicit ``./`` prefixes.
+    """
+    path = str(value).replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
 def _matches(path: str, pattern: str) -> bool:
     # fnmatch's ** behavior differs slightly across Python versions; checking
-    # both the full path and each suffix makes the policy predictable.
+    # both the full path and the same path under an arbitrary parent makes the
+    # policy predictable for root and nested files.
     if fnmatch.fnmatch(path, pattern):
         return True
-    return any(fnmatch.fnmatch(path, f"*/{pattern}") for _ in [0])
+    return fnmatch.fnmatch(f"x/{path}", pattern)
 
 
 class EvolutionPolicy:
@@ -113,7 +153,7 @@ class EvolutionPolicy:
     def protected_files(self, files: Iterable[str]) -> list[str]:
         protected: list[str] = []
         for raw in files:
-            path = str(raw).replace("\\", "/").lstrip("./")
+            path = _normalize_repo_path(raw)
             if any(_matches(path, pattern) for pattern in self.protected_patterns):
                 protected.append(path)
         return sorted(set(protected))

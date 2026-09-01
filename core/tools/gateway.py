@@ -172,7 +172,8 @@ class ToolGateway:
         if decision in (True, None, "allow", "ALLOW"):
             return None
         return ToolResult.error("POLICY_DENIED", f"policy denied tool '{name}'",
-                                retryable=False, status="blocked")
+                                retryable=False, status="blocked",
+                                next_action="blocked_by_policy")
 
     def _emit(self, name: str, args: dict[str, Any], result: ToolResult, trace_id: str,
               mission_id: Optional[str], run_id: Optional[str], actor: str) -> None:
@@ -243,7 +244,10 @@ def _coerce_result(output: Any, *, ok: bool = True, trace_id: Optional[str] = No
         return ToolResult.error(meta["error_code"],
                                 str(meta.get("error_message") or meta.get("error") or "failed"),
                                 retryable=bool(meta.get("retryable", False)),
-                                trace_id=trace_id)
+                                trace_id=trace_id,
+                                status=str(meta.get("status") or "error"),
+                                next_action=meta.get("next_action"),
+                                data=dict(meta.get("data") or {}))
     if isinstance(output, dict) and ("ok" in output or "error" in output) and "status" in output:
         try:
             return ToolResult(
@@ -261,7 +265,10 @@ def _coerce_result(output: Any, *, ok: bool = True, trace_id: Optional[str] = No
         if meta and meta.get("error_code"):
             return ToolResult.error(meta["error_code"],
                                     str(meta.get("error_message") or output.get("error") or "failed"),
-                                    retryable=bool(meta.get("retryable", False)), trace_id=trace_id)
+                                    retryable=bool(meta.get("retryable", False)), trace_id=trace_id,
+                                    status=str(meta.get("status") or "error"),
+                                    next_action=meta.get("next_action"),
+                                    data=dict(meta.get("data") or {}))
         return ToolResult.error((output.get("error_code") or "TOOL_ERROR"),
                                 str(output.get("error") or output.get("error_message") or "failed"),
                                 retryable=_retryable_from_meta(meta), trace_id=trace_id)
@@ -302,8 +309,37 @@ def _classify_registry_result(raw: Any) -> tuple[bool, Any, dict]:
     if raw.get("error") is not None:
         err = str(raw.get("error"))
         errmsg = raw.get("error_message") or raw.get("hint") or err
+        permission = raw.get("permission") if isinstance(raw.get("permission"), dict) else {}
+        approval_request = permission.get("approval_request") if isinstance(permission, dict) else None
+        if approval_request or str(permission.get("decision", "")).lower() == "ask":
+            return False, raw, {
+                "error": err,
+                "error_code": "APPROVAL_REQUIRED",
+                "error_message": errmsg,
+                "retryable": True,
+                "status": "blocked",
+                "next_action": "wait_for_approval",
+                "data": {
+                    "approval_request": approval_request,
+                    "safety": permission.get("safety"),
+                    "permission": permission,
+                },
+            }
         # Tool-not-found marker: registry returns available_sample/hint.
         if "Unknown tool" in err or "not found" in err.lower() or "available_sample" in raw:
+            try:
+                from ..capability_ledger import CapabilityEntry, get_capability_ledger
+
+                get_capability_ledger().add_discovered(CapabilityEntry.create(
+                    power=f"Tool capability: {str(raw.get('tool') or err).replace('Unknown tool', '').strip() or 'unknown'}",
+                    use="Needed because a requested tool/capability was not registered",
+                    risk="unknown until connector/tool is implemented and scoped",
+                    needed_approval_setup=f"Implement/register the tool behind ToolGateway with permissions and tests. Reason: {errmsg}",
+                    status="missing",
+                    source="tool_gateway",
+                ))
+            except Exception:
+                pass
             return False, raw, {"error": err, "error_code": "TOOL_NOT_FOUND",
                                 "error_message": errmsg, "retryable": False}
         if "denied" in err.lower() or "DENY" in err.upper():

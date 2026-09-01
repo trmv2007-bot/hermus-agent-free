@@ -288,6 +288,9 @@ class MissionReport:
     artifacts: list[str] = field(default_factory=list)
     blocker_reason: Optional[str] = None
     blocker_instructions: Optional[str] = None
+    approval_request: Optional[dict[str, Any]] = None
+    preflight: Optional[dict[str, Any]] = None
+    create_prompts_action: Optional[dict[str, Any]] = None
     checkpoint_id: Optional[str] = None
     started_at: str = field(default_factory=lambda: datetime.now().isoformat())
     finished_at: Optional[str] = None
@@ -347,6 +350,9 @@ class MissionReport:
             "resume_with_restart": self.is_resumable(allow_restart=True),
             "restarts_used": self.restarts_used,
             "budget": self.budget.to_dict(),
+            "approval_request": self.approval_request,
+            "preflight": self.preflight,
+            "create_prompts_action": self.create_prompts_action,
             "resume_command": f"hermus mission resume {self.mission_id}"
             + (" --restart-failed" if self.state == MissionState.FAILED.value else ""),
         }
@@ -366,6 +372,9 @@ class MissionReport:
             "artifacts": self.artifacts,
             "blocker_reason": self.blocker_reason,
             "blocker_instructions": self.blocker_instructions,
+            "approval_request": self.approval_request,
+            "preflight": self.preflight,
+            "create_prompts_action": self.create_prompts_action,
             "checkpoint_id": self.checkpoint_id,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -410,6 +419,9 @@ class MissionReport:
             artifacts=data.get("artifacts", []),
             blocker_reason=data.get("blocker_reason"),
             blocker_instructions=data.get("blocker_instructions"),
+            approval_request=data.get("approval_request"),
+            preflight=data.get("preflight"),
+            create_prompts_action=data.get("create_prompts_action"),
             checkpoint_id=data.get("checkpoint_id"),
             started_at=data.get("started_at", datetime.now().isoformat()),
             finished_at=data.get("finished_at"),
@@ -903,6 +915,27 @@ def make_agent_backed_executor(
             text = str(res.get("response") or "")
             provider = str(getattr(getattr(node_agent, "llm", None), "provider", "") or "")
 
+            if res.get("status") == "waiting_for_approval" or res.get("waiting_for_approval"):
+                approval_request = res.get("waiting_for_approval") or {}
+                req_id = approval_request.get("id") if isinstance(approval_request, dict) else None
+                reason = "Approval required before continuing"
+                if req_id:
+                    reason += f" ({req_id})"
+                _emit("node_finished", {"stage": stage, "status": "blocked",
+                                        "reason": reason,
+                                        "approval_request": approval_request})
+                return {
+                    "success": False,
+                    "blocked": True,
+                    "blocker_reason": reason,
+                    "blocker_instructions": "Approve or deny the pending request in the Safety tab, then resume the mission.",
+                    "approval_request": approval_request,
+                    "output": text,
+                    "error": "approval_required",
+                    "evidence": [{"stage": stage, "status": "blocked", "reason": reason,
+                                  "approval_request": approval_request}],
+                }
+
             # ---- honest no-backend detection (never fake success) ----
             is_mock = (
                 provider == "mock"
@@ -1181,6 +1214,49 @@ class MissionEngine:
                          retryable=False, fallback="mission workspace unavailable")
             return Path.cwd()
 
+    def _preflight_blocked_report(self, mission_id: str, goal: str, domain: str, preflight_data: dict[str, Any], *, persist: bool) -> MissionReport:
+        status = str(preflight_data.get("status") or "BLOCKED_BY_RED_LINE")
+        suggested_prompts = list(preflight_data.get("suggested_approval_prompts") or [])
+        create_action = None
+        if suggested_prompts and status in {"NEEDS_APPROVAL", "MISSING_CAPABILITY"}:
+            create_action = {
+                "label": "Create approval prompts for this blocked mission",
+                "method": "POST",
+                "endpoint": f"/missions/{mission_id}/preflight/approvals",
+                "fallback_endpoint": "/safety/preflight/approvals",
+                "payload": {"goal": goal},
+                "cli": f"hermus safety preflight {goal!r} --create-approval-prompts",
+            }
+        report = MissionReport(
+            mission_id=mission_id,
+            goal=goal,
+            domain=domain,
+            state=MissionState.BLOCKED.value,
+            progress_pct=0,
+            preflight=preflight_data,
+            create_prompts_action=create_action,
+            blocker_reason=f"Mission pre-flight status: {status}",
+            blocker_instructions=(
+                "Resolve pre-flight blockers before mission execution. "
+                "Use `hermus safety preflight <goal>` for details. "
+                + ("This blocker was recorded as an explicit planning-mode mission. " if persist else "Mission execution was refused before creation. ")
+                + "NEEDS_APPROVAL/MISSING_CAPABILITY may be recorded with `--allow-planning-blocked`; red-line or emergency-stop blockers cannot be overridden."
+            ),
+            final_proof=f"MISSION BLOCKED BY PRE-FLIGHT: {status}",
+            evidence=[{"stage": "preflight", "status": status, "persisted": persist}],
+            budget=MissionBudget(initial_steps=0),
+            recoverable=status in {"NEEDS_APPROVAL", "MISSING_CAPABILITY"},
+        )
+        if persist:
+            self._save_mission(report)
+        try:
+            _emit = getattr(self._tls, "on_event", None)
+            if _emit:
+                _emit("mission_finished", {"mission_id": mission_id, "state": report.state, "preflight": preflight_data})
+        except Exception:
+            pass
+        return report
+
     def get_mission(self, mission_id: str) -> Optional[MissionReport]:
         p = self.storage_dir / f"{mission_id}.json"
         if not p.exists():
@@ -1228,6 +1304,8 @@ class MissionEngine:
         on_event: Optional[Callable[..., None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         steer_source: Optional[Callable[[], list[str]]] = None,
+        preflight: bool = True,
+        allow_preflight_planning: bool = False,
     ) -> MissionReport:
         """Plan and run a mission to completion.
 
@@ -1247,6 +1325,28 @@ class MissionEngine:
 
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
         detected_domain = domain or verifier_registry.auto_detect_domain(goal)
+        preflight_data = None
+        if preflight:
+            try:
+                from .autonomy_preflight import preflight_goal
+
+                preflight_report = preflight_goal(goal)
+                preflight_data = preflight_report.to_dict()
+                if preflight_report.status in {"EMERGENCY_STOP_ACTIVE", "BLOCKED_BY_RED_LINE"}:
+                    return self._preflight_blocked_report(mid, goal, detected_domain, preflight_data, persist=False)
+                if preflight_report.status in {"NEEDS_APPROVAL", "MISSING_CAPABILITY"}:
+                    return self._preflight_blocked_report(
+                        mid, goal, detected_domain, preflight_data,
+                        persist=bool(allow_preflight_planning),
+                    )
+            except Exception as exc:
+                preflight_data = {
+                    "status": "EMERGENCY_STOP_ACTIVE",
+                    "can_start": False,
+                    "error": f"pre-flight failed closed: {exc}",
+                    "generated_at": datetime.now().isoformat(),
+                }
+                return self._preflight_blocked_report(mid, goal, detected_domain, preflight_data, persist=False)
 
         req_objs = []
         raw_reqs = requirements or [f"Complete: {goal}"]
@@ -1282,6 +1382,7 @@ class MissionEngine:
                 initial_steps=budget_steps,
                 max_repairs=max_repairs if max_repairs is not None else 3,
             ),
+            preflight=preflight_data,
         )
         self._save_mission(report)
 
@@ -1448,14 +1549,27 @@ class MissionEngine:
             blocked_nodes = [n for n in dag.nodes.values() if n.status == DAGNodeStatus.BLOCKED.value]
             if blocked_nodes:
                 report.state = MissionState.BLOCKED.value
-                report.blocker_reason = blocked_nodes[0].error or "External prerequisite or authorization required"
-                report.blocker_instructions = "Please resolve the blocker and call `hermus mission resume <mission_id>`"
+                blocked = blocked_nodes[0]
+                blocked_output = blocked.outputs if isinstance(blocked.outputs, dict) else {}
+                approval_request = blocked_output.get("approval_request")
+                report.approval_request = approval_request if isinstance(approval_request, dict) else None
+                report.blocker_reason = blocked.error or "External prerequisite or authorization required"
+                if report.approval_request:
+                    req_id = report.approval_request.get("id")
+                    report.blocker_instructions = (
+                        "Approve or deny the pending request in the Safety tab "
+                        f"or with `hermus perms resolve {req_id} approve --retry`, then call "
+                        f"`hermus mission resume {report.mission_id}`."
+                    )
+                else:
+                    report.blocker_instructions = "Please resolve the blocker and call `hermus mission resume <mission_id>`"
                 self._save_mission(report)
                 record_issue("mission", "node_blocked", report.blocker_reason,
                              mission_id=report.mission_id, retryable=True,
                              fallback="mission paused as BLOCKED; resume after resolving")
                 _emit("mission_finished", {"state": report.state,
-                                           "blocker_reason": report.blocker_reason})
+                                           "blocker_reason": report.blocker_reason,
+                                           "approval_request": report.approval_request})
                 return report
 
             # B. OBSERVE & GATHER EVIDENCE
@@ -1718,6 +1832,7 @@ class MissionEngine:
         report.state = MissionState.CONTINUING.value
         report.blocker_reason = None
         report.blocker_instructions = None
+        report.approval_request = None
         scope = self._mission_file_scope(report.mission_id)
         if self._injected_executor is not None and agent is None:
             self._tls.executor = self._bind_control_hooks(

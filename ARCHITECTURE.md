@@ -61,6 +61,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
 | **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
+| **Red-line policy / approvals** | `RED_LINES.md` + `core.safety_policy` + `core.approval` | `policies/red_lines.json` + capability ledger + scoped approval grants | deterministic green/yellow/red classification plus scoped grants for yellow actions |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |
 | **Gateway** | `gateway/gateway.py` | — | transport only |
 

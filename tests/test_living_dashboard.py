@@ -18,6 +18,19 @@ def test_single_control_room_is_served_projection():
     page = client.get("/control")
     assert page.status_code == 200
     assert "HERMUS" in page.text and "Snapshot" in page.text and "Replay" in page.text
+    assert "Emergency stop" in page.text
+    assert "Missions" in page.text and "approval-aware lifecycle" in page.text
+    assert "Pre-flight mission" in page.text and "Record planning-mode blocker" in page.text and "create prompts" in page.text
+    assert "Safety" in page.text and "Create scoped approval grant" in page.text
+    assert "Pending yellow-action approval prompts" in page.text
+    assert "Approval bundles" in page.text and "approve all" in page.text and "deny all" in page.text
+    assert "Jarvis Safety Core" in page.text and "pendingCount" in page.text and "blockedMissionCount" in page.text
+    assert "Allow Downloads malware scan" in page.text and "Start Downloads scan mission" in page.text and "Run approved Downloads scan" in page.text and "List scan reports" in page.text and "Propose Gmail delegated send" in page.text
+    assert "Safety Event Timeline" in page.text and "/safety/events" in page.text
+    assert "Generate safety report" in page.text and "/safety/report" in page.text
+    assert "Pre-flight autonomy check" in page.text and "/safety/preflight" in page.text and "Create draft approval prompts" in page.text
+    assert "Capability ledger" in page.text and "Record power" in page.text and "Propose setup" in page.text
+    assert "Capability readiness / activation registry" in page.text and "Request activation" in page.text
     # No legacy dashboard/static surface remains reachable.
     assert client.get("/dashboard").status_code == 404
     assert client.get("/dashboard/legacy").status_code == 404

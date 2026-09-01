@@ -29,6 +29,7 @@ DISCOVER_MODULES = [
     "tools.speech_tools",
     "tools.heygem",
     "tools.internet_eyes",
+    "tools.local_defense",
     "tools.agent_reach_doctor",
     "tools.facebook",
     "tools.updater",

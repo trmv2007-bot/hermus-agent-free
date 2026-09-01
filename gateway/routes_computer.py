@@ -23,6 +23,23 @@ from gateway.context import _token_matches
 router = APIRouter()
 
 
+def _permission_guard(tool: str, args: dict | None = None):
+    """Route-level guard for computer actions that bypass ToolGateway wrappers."""
+    try:
+        from core.permissions import Decision, permission_manager
+
+        check = permission_manager.check(tool, args=args or {})
+        if check.get("decision") == Decision.ALLOW.value:
+            return None
+        return JSONResponse({
+            "success": False,
+            "error": f"Permission {check.get('decision')} for route action '{tool}'",
+            "permission": check,
+        }, status_code=403)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"permission check failed closed: {exc}"}, status_code=403)
+
+
 # Computer Agent dashboard API - autonomous desktop agent (live status,
 # tasks/checkpoints, plan graphs, world state, repairs, skills, recordings)
 # ===========================================================================
@@ -526,8 +543,13 @@ async def computer_benchmark_run(payload: dict = None):
     """Run the benchmark and return results."""
     from core.computer.benchmark import run_benchmark
     payload = payload or {}
+    dry_run = bool(payload.get("dry_run", True))
+    if not dry_run:
+        denied = _permission_guard("computer_task", {"task": "computer benchmark", **payload})
+        if denied is not None:
+            return denied
     result = run_benchmark(
-        dry_run=bool(payload.get("dry_run", True)),
+        dry_run=dry_run,
         max_tasks=int(payload.get("max_tasks", 0)),
         categories=payload.get("categories"),
         max_difficulty=int(payload.get("max_difficulty", 3)),
@@ -557,6 +579,9 @@ async def computer_run(payload: dict = None):
         return JSONResponse({"success": False, "error": "task is required"}, status_code=400)
     dry_run = bool(payload.get("dry_run", True))
     task_id = str(payload.get("task_id") or "").strip() or None
+    denied = _permission_guard("computer_task", {"task": task, "task_id": task_id, "dry_run": dry_run})
+    if denied is not None:
+        return denied
 
     def _run() -> None:
         try:
@@ -580,7 +605,11 @@ async def computer_resume(task_id: str, payload: dict = None):
 
     if TaskStore().load(task_id) is None:
         return JSONResponse({"success": False, "error": f"task '{task_id}' not found"}, status_code=404)
-    dry_run = bool((payload or {}).get("dry_run", True))
+    payload = payload or {}
+    dry_run = bool(payload.get("dry_run", True))
+    denied = _permission_guard("computer_task", {"task_id": task_id, "action": "resume", "dry_run": dry_run})
+    if denied is not None:
+        return denied
 
     def _run() -> None:
         try:
@@ -601,6 +630,9 @@ async def computer_task_delete(task_id: str):
     store = _computer_task_store()
     if store.load(task_id) is None:
         return JSONResponse({"success": False, "error": f"task '{task_id}' not found"}, status_code=404)
+    denied = _permission_guard("delete_file", {"path": str(store.directory(task_id)), "target": "computer task artifacts"})
+    if denied is not None:
+        return denied
     directory = store.directory(task_id)
     try:
         shutil.rmtree(directory)
@@ -613,8 +645,10 @@ async def computer_task_delete(task_id: str):
 async def computer_stop(payload: dict = None):
     """Emergency stop - halt all mouse/keyboard/autonomous control."""
     from core.computer import emergency_stop
+    from core.emergency_stop import get_emergency_stop
 
     reason = (payload or {}).get("reason") or "emergency stop from dashboard"
+    get_emergency_stop().activate(reason, set_by="computer-route")
     emergency_stop.halt(reason)
     return {"success": True, "halted": True, "reason": reason,
             "note": "Computer actions are halted. Release via POST /computer/release."}
@@ -624,7 +658,9 @@ async def computer_stop(payload: dict = None):
 async def computer_release():
     """Release the emergency stop latch (re-enables computer control)."""
     from core.computer import emergency_stop
+    from core.emergency_stop import get_emergency_stop
 
+    get_emergency_stop().clear("computer release", set_by="computer-route")
     emergency_stop.release()
     return {"success": True, "halted": False}
 
@@ -735,8 +771,11 @@ async def computer_emergency_stop(payload: dict = None):
     """
     from core.computer.task_control import get_task_control
 
+    from core.emergency_stop import get_emergency_stop
+
     control = get_task_control()
     reason = (payload or {}).get("reason", "")
+    get_emergency_stop().activate(reason or "computer control emergency stop", set_by="computer-route")
     control.emergency_stop(reason)
     
     return {
@@ -755,7 +794,10 @@ async def computer_emergency_release():
     """
     from core.computer.task_control import get_task_control
 
+    from core.emergency_stop import get_emergency_stop
+
     control = get_task_control()
+    get_emergency_stop().clear("computer control emergency release", set_by="computer-route")
     success = control.release_emergency_stop()
     
     return {
@@ -835,6 +877,9 @@ async def computer_delegate(payload: dict = None):
     ``plan`` dict with ``units`` (WorkUnit records) for full control.
     """
     payload = payload or {}
+    denied = _permission_guard("computer_task", {"task": payload.get("task", ""), "action": "delegate", "dry_run": payload.get("dry_run", False)})
+    if denied is not None:
+        return denied
     from core.computer import MultiAgentDelegator, DelegationPlan, WorkUnit
 
     delegator = MultiAgentDelegator()
@@ -949,8 +994,12 @@ async def remote_control_action(payload: dict = None):
     if action == "cancel":
         return remote_control.cancel(task_id, reason)
     if action in ("emergency-stop", "stop"):
+        from core.emergency_stop import get_emergency_stop
+        get_emergency_stop().activate(reason, set_by="remote-route")
         return remote_control.emergency_stop(reason)
     if action == "release":
+        from core.emergency_stop import get_emergency_stop
+        get_emergency_stop().clear("remote release", set_by="remote-route")
         return remote_control.release()
     return JSONResponse({"success": False, "error": f"unknown remote action '{action}'"}, status_code=400)
 

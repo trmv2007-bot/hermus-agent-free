@@ -699,6 +699,8 @@ async def mission_start_api(payload: dict[str, Any] = None):
         subgoals=payload.get("subgoals"),
         budget_steps=(int(payload["budget_steps"]) if payload.get("budget_steps")
                       not in (None, "") else None),
+        preflight=str(payload.get("preflight", True)).lower() not in {"0", "false", "no"},
+        allow_preflight_planning=str(payload.get("allow_preflight_planning", False)).lower() in {"1", "true", "yes"},
     )
     return report.to_dict()
 
@@ -715,6 +717,17 @@ async def mission_get_api(mission_id: str):
     if not report:
         return JSONResponse({"error": f"Mission {mission_id} not found"}, status_code=404)
     return report.to_dict()
+
+@router.post("/missions/{mission_id}/preflight/approvals")
+async def mission_preflight_approvals_api(mission_id: str):
+    from core.autonomy_preflight import create_preflight_approval_requests
+    from core.mission import mission_engine
+    report = await asyncio.to_thread(mission_engine.get_mission, mission_id)
+    if not report:
+        return JSONResponse({"error": f"Mission {mission_id} not found"}, status_code=404)
+    result = await asyncio.to_thread(create_preflight_approval_requests, report.goal, mission_id=mission_id, bundle=True)
+    result["mission_id"] = mission_id
+    return result
 
 @router.post("/missions/{mission_id}/resume")
 async def mission_resume_api(
