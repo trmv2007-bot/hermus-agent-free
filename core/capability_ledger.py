@@ -6,6 +6,7 @@ of letting arbitrary file writes modify the ledger.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -13,9 +14,21 @@ from pathlib import Path
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_LEDGER_PATH = ROOT / "CAPABILITY_LEDGER.md"
 DISCOVERED_HEADER = "## Discovered possible powers"
 REQUESTED_HEADER = "## Requested powers"
+
+
+def _default_ledger_path() -> Path:
+    """Resolve the ledger location.
+
+    ``HERMUS_CAPABILITY_LEDGER_PATH`` redirects the ledger to a caller-chosen file
+    (used by the test suite so runtime side effects never write into the tracked
+    ``CAPABILITY_LEDGER.md``); otherwise the repository-root ledger is used.
+    """
+    env = os.environ.get("HERMUS_CAPABILITY_LEDGER_PATH", "").strip()
+    if env:
+        return Path(env).expanduser()
+    return ROOT / "CAPABILITY_LEDGER.md"
 
 
 @dataclass(frozen=True)
@@ -122,8 +135,8 @@ approval, audit logging, and revocation controls.
 
 
 class CapabilityLedger:
-    def __init__(self, path: Path = DEFAULT_LEDGER_PATH):
-        self.path = Path(path)
+    def __init__(self, path: Optional[Path] = None):
+        self.path = Path(path) if path is not None else _default_ledger_path()
 
     def read(self) -> str:
         return self.path.read_text(encoding="utf-8") if self.path.exists() else ""
@@ -224,7 +237,7 @@ class CapabilityLedger:
 
 
 def get_capability_ledger(path: Optional[Path] = None) -> CapabilityLedger:
-    return CapabilityLedger(path or DEFAULT_LEDGER_PATH)
+    return CapabilityLedger(path) if path is not None else CapabilityLedger()
 
 
 def capability_setup_proposal(power: str) -> CapabilityProposal:

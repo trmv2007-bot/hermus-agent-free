@@ -24,9 +24,10 @@ Two independent isolation concerns are handled here:
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from core.capability_ledger import CapabilityLedger
 from core.computer.task_control import get_task_control
 
 
@@ -42,11 +43,19 @@ def _ledger_tmp_path(tmp_path_factory: pytest.TempPathFactory):
     return tmp_path_factory.mktemp("capability_ledger") / "CAPABILITY_LEDGER.md"
 
 
-@pytest.fixture(autouse=True)
-def _redirect_capability_ledger(_ledger_tmp_path, monkeypatch):
-    ledger_path = _ledger_tmp_path
+@pytest.fixture(scope="session", autouse=True)
+def _redirect_capability_ledger(_ledger_tmp_path):
+    """Redirect the capability ledger to a temp file for the whole session.
 
-    def _get_ledger(path=None):
-        return CapabilityLedger(path or ledger_path)
-
-    monkeypatch.setattr("core.capability_ledger.get_capability_ledger", _get_ledger)
+    Setting the env var (rather than monkeypatching) also covers tests that
+    shell out to subprocesses (e.g. the delegation worker tests): the child
+    inherits ``os.environ``, so its ToolGateway unknown-tool path writes to the
+    temp ledger instead of the tracked ``CAPABILITY_LEDGER.md``.
+    """
+    previous = os.environ.get("HERMUS_CAPABILITY_LEDGER_PATH")
+    os.environ["HERMUS_CAPABILITY_LEDGER_PATH"] = str(_ledger_tmp_path)
+    yield
+    if previous is None:
+        os.environ.pop("HERMUS_CAPABILITY_LEDGER_PATH", None)
+    else:
+        os.environ["HERMUS_CAPABILITY_LEDGER_PATH"] = previous
