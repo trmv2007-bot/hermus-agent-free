@@ -679,6 +679,9 @@ The goal is to measure success rate, steps and tool failures instead of treating
 | [`THINKING_SYSTEM_PLAN.md`](THINKING_SYSTEM_PLAN.md) | Counsel/deep-thinking design |
 | [`LIVING_CONTROL_ROOM.md`](LIVING_CONTROL_ROOM.md) | Dashboard/control-room design |
 | [`AUTONOMY_BOUNDARIES.md`](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
+| [`RED_LINES.md`](RED_LINES.md) | Human-readable red-line constitution for Jarvis-style reach without Ultron drift (`hermus safety report`, `hermus safety preflight`) |
+| [`CAPABILITY_LEDGER.md`](CAPABILITY_LEDGER.md) | Visible ledger of current, missing, discovered and blocked powers (`hermus powers list/add/propose`) |
+| [`policies/red_lines.json`](policies/red_lines.json) | Machine-readable red-line policy for tests and future enforcement |
 | [`PHASE_A_ROADMAP.md`](PHASE_A_ROADMAP.md) | Development roadmap |
 | [`PHASE_C_D.md`](PHASE_C_D.md) | Later architecture phases |
 | [`QUICKSTART.md`](QUICKSTART.md) | Quick setup |

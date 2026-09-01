@@ -58,6 +58,7 @@ DEFAULT_POLICY: dict[str, tuple] = {
     "browser_navigate": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
     "browser_screenshot": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
     "vision_analyze": (Risk.READ, Decision.ALLOW, [Capability.READ]),
+    "local_folder_defensive_scan": (Risk.READ, Decision.ASK, [Capability.READ]),
     "speech_status": (Risk.READ, Decision.ALLOW, [Capability.READ]),
     "speech_clone_prompts": (Risk.READ, Decision.ALLOW, [Capability.READ]),
     "voice_available_models": (Risk.READ, Decision.ALLOW, [Capability.READ]),
@@ -142,9 +143,15 @@ DEFAULT_CAPS = [Capability.READ]
 
 
 class PermissionManager:
-    def __init__(self, overrides_path: Optional[Path] = None):
+    def __init__(self, overrides_path: Optional[Path] = None, approvals_path: Optional[Path] = None):
         self.overrides_path = overrides_path or (workspace.dirs["memory"] / "permissions.json")
         self.overrides = self._load_overrides()
+        try:
+            from .approval import ApprovalStore
+
+            self.approvals = ApprovalStore(approvals_path or (self.overrides_path.parent / "approval_grants.json"))
+        except Exception:
+            self.approvals = None
 
     # -- persistence ----------------------------------------------------
     def _load_overrides(self) -> dict[str, Any]:
@@ -216,12 +223,33 @@ class PermissionManager:
                     risk, decision = Risk.ADMIN, Decision.DENY
                     caps = [Capability.ADMIN]
 
+        safety_info: dict[str, Any] = {"zone": "green", "red_lines": [], "reasons": [], "suggested_decision": "allow"}
+        try:
+            from .safety_policy import assess_tool_action
+
+            safety = assess_tool_action(tool_name, args)
+            safety_info = safety.to_dict()
+            if safety.zone == "red":
+                risk, decision = Risk.ADMIN, Decision.DENY
+                caps = [Capability.ADMIN]
+            elif safety.zone == "yellow" and decision == Decision.ALLOW:
+                # Yellow actions are valid power, not forbidden. They should be
+                # explicitly approved or covered by a configured automation rule.
+                decision = Decision.ASK
+        except Exception as exc:
+            # The red-line classifier is part of the safety path; if it fails on
+            # an obviously powerful action, require approval rather than greenlighting it.
+            safety_info = {"zone": "unknown", "red_lines": [], "reasons": [f"safety classifier unavailable: {exc}"], "suggested_decision": "ask"}
+            if decision == Decision.ALLOW and risk in (Risk.ADMIN, Risk.EXECUTE, Risk.NETWORK, Risk.GUI):
+                decision = Decision.ASK
+
         return {
             "tool": tool_name,
             "risk": risk.value,
             "default": decision.value,
             "immutable": bool(tool_name in ("write_file", "create_file", "append_file") and decision == Decision.DENY and risk == Risk.ADMIN),
             "capabilities": [c.value if isinstance(c, Capability) else str(c) for c in caps],
+            "safety": safety_info,
         }
 
     def check(
@@ -247,16 +275,72 @@ class PermissionManager:
         if tool_name in self.overrides.get("tools", {}):
             decision = Decision(str(self.overrides["tools"][tool_name]))
 
-        # Immutable red-line paths cannot be re-enabled by an allowlist or
-        # per-agent override. They must go through the evolution proposal and
-        # independent review path instead.
-        if info.get("immutable"):
+        safety = info.get("safety") or {}
+        approval_match = None
+        emergency = self._emergency_stop_decision(tool_name, info)
+
+        # Red-zone safety findings, immutable control-plane paths, and active
+        # emergency stop cannot be re-enabled by allowlists or per-agent
+        # overrides. Emergency stop is the Red Line 1 brake.
+        if safety.get("zone") == "red":
             decision = Decision.DENY
+            self._record_capability_need(tool_name, args or {}, safety,
+                                         reason="red-line action blocked")
+        elif info.get("immutable"):
+            decision = Decision.DENY
+            self._record_capability_need(tool_name, args or {}, safety,
+                                         reason="protected safety/control-plane change requires independent review")
+        elif emergency is not None:
+            decision = Decision.DENY
+            info["emergency_stop"] = emergency
+        elif decision == Decision.ASK and safety.get("zone") == "yellow" and self.approvals is not None:
+            approval_match = self.approvals.allowed(tool_name, args or {}, safety, consume=True)
+            if approval_match:
+                decision = Decision.ALLOW
+            else:
+                request = self.approvals.create_request(tool_name, args or {}, safety)
+                if request.get("success"):
+                    info["approval_request"] = request.get("request")
+                    self._record_capability_need(tool_name, args or {}, safety,
+                                                 reason="yellow action needs scoped approval")
 
         info["decision"] = decision.value
         info["agent"] = agent
-        self.audit(tool_name, decision.value, agent, info["risk"])
+        if approval_match:
+            info["approval"] = approval_match
+        self.audit(tool_name, decision.value, agent, info["risk"], extra={"safety": safety, "approval": approval_match, "approval_request": info.get("approval_request"), "emergency_stop": info.get("emergency_stop")})
         return info
+
+    def _emergency_stop_decision(self, tool_name: str, info: dict[str, Any]) -> Optional[dict[str, Any]]:
+        # Status/stop/read-only actions must remain available so the user can
+        # inspect and recover the system after hitting the brake.
+        safe_tools = {
+            "read_file", "list_files", "memory_search", "memory2", "sandbox_status",
+            "screen_record_status", "screen_get_recent", "computer_stop",
+            "emergency_stop", "emergency_status", "emergency_resume",
+        }
+        if tool_name in safe_tools or tool_name.endswith("_status") or tool_name.endswith("_stop"):
+            return None
+        if info.get("risk") == Risk.READ.value and info.get("safety", {}).get("zone") == "green":
+            return None
+        try:
+            from .emergency_stop import get_emergency_stop
+
+            state = get_emergency_stop().state()
+            if state.active:
+                return state.to_dict()
+        except Exception:
+            return {"active": True, "reason": "emergency stop check failed closed"}
+        return None
+
+    def _record_capability_need(self, tool_name: str, args: dict[str, Any], safety: dict[str, Any], *, reason: str) -> None:
+        try:
+            from .capability_ledger import get_capability_ledger
+
+            get_capability_ledger().record_blocked_action(tool_name, args, safety, reason=reason)
+        except Exception:
+            # Ledger updates are important but must not break permission checks.
+            pass
 
     def set_policy(
         self,
@@ -294,6 +378,111 @@ class PermissionManager:
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         return path
+
+    def approvals_list(self, include_inactive: bool = False) -> list[dict[str, Any]]:
+        if self.approvals is None:
+            return []
+        return self.approvals.list(include_inactive=include_inactive)
+
+    def approval_grant(
+        self,
+        title: str,
+        *,
+        tool: str = "*",
+        red_lines: Optional[list[int]] = None,
+        resources: Optional[list[str]] = None,
+        purpose: str = "",
+        ttl_minutes: Optional[int] = None,
+        max_uses: Optional[int] = None,
+        notes: str = "",
+    ) -> dict[str, Any]:
+        if self.approvals is None:
+            return {"success": False, "error": "approval store unavailable"}
+        return self.approvals.create(
+            title=title,
+            tool=tool,
+            red_lines=red_lines or [],
+            resources=resources or [],
+            purpose=purpose,
+            ttl_minutes=ttl_minutes,
+            max_uses=max_uses,
+            notes=notes,
+        )
+
+    def approval_revoke(self, grant_id: str) -> dict[str, Any]:
+        if self.approvals is None:
+            return {"success": False, "error": "approval store unavailable", "id": grant_id}
+        return self.approvals.revoke(grant_id)
+
+    def approval_pending(self, include_resolved: bool = False) -> list[dict[str, Any]]:
+        if self.approvals is None:
+            return []
+        return self.approvals.pending(include_resolved=include_resolved)
+
+    def approval_bundles(self, include_resolved: bool = False) -> list[dict[str, Any]]:
+        if self.approvals is None or not hasattr(self.approvals, "bundles"):
+            return []
+        return self.approvals.bundles(include_resolved=include_resolved)
+
+    def approval_bundle_resolve(
+        self,
+        bundle_id: str,
+        decision: str,
+        *,
+        ttl_minutes: Optional[int] = None,
+        max_uses: Optional[int] = None,
+        notes: str = "",
+    ) -> dict[str, Any]:
+        if self.approvals is None or not hasattr(self.approvals, "resolve_bundle"):
+            return {"success": False, "error": "approval bundle store unavailable", "id": bundle_id}
+        return self.approvals.resolve_bundle(bundle_id, decision, ttl_minutes=ttl_minutes, max_uses=max_uses, notes=notes)
+
+    def approval_resolve(
+        self,
+        request_id: str,
+        decision: str,
+        *,
+        resources: Optional[list[str]] = None,
+        purpose: str = "",
+        ttl_minutes: Optional[int] = None,
+        max_uses: Optional[int] = None,
+        notes: str = "",
+    ) -> dict[str, Any]:
+        if self.approvals is None:
+            return {"success": False, "error": "approval store unavailable", "id": request_id}
+        return self.approvals.resolve_request(
+            request_id,
+            decision,
+            resources=resources,
+            purpose=purpose,
+            ttl_minutes=ttl_minutes,
+            max_uses=max_uses,
+            notes=notes,
+        )
+
+    def approval_retry(self, request_id: str) -> dict[str, Any]:
+        """Retry an approved pending action through the canonical ToolGateway.
+
+        This is intentionally conservative: it retries only requests that are
+        already resolved as approved, and it uses the stored redacted args. The
+        normal permission path runs again, so the freshly-created scoped grant is
+        consumed and red-zone actions remain denied.
+        """
+        if self.approvals is None:
+            return {"success": False, "error": "approval store unavailable", "id": request_id}
+        req = self.approvals.get_request(request_id)
+        if req is None:
+            return {"success": False, "error": "approval request not found", "id": request_id}
+        if req.status != "approved":
+            return {"success": False, "error": f"approval request is {req.status}, not approved", "request": req.to_dict()}
+        try:
+            from .tools import get_tool_gateway
+
+            result = get_tool_gateway().execute(req.tool, dict(req.args_redacted), actor="approval-retry")
+            payload = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+            return {"success": bool(payload.get("ok", False)), "request": req.to_dict(), "result": payload}
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "request": req.to_dict()}
 
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         path = workspace.dirs["logs"] / "permissions.jsonl"

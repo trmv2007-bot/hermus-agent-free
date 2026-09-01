@@ -20,6 +20,7 @@
   .pill { padding:3px 10px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
   .pill.ok { color:var(--ok); border-color:var(--ok); }
   .pill.err { color:var(--err); border-color:var(--err); }
+  .pill.warn { color:var(--warn); border-color:var(--warn); }
   nav { display:flex; gap:6px; padding:10px 22px; border-bottom:1px solid var(--line); }
   nav button { background:transparent; color:var(--muted); border:1px solid var(--line); }
   nav button.on { color:var(--acc); border-color:var(--acc); }
@@ -62,9 +63,14 @@
   .s-queued,.s-idle,.s-created{background:#20304a;color:#8fb7ff}
   .s-running,.s-active{background:#173e24;color:#4ae27a}
   .s-succeeded,.s-completed{background:#173e24;color:#4ae27a}
-  .s-failed,.s-critical{background:#421c1c;color:#ff9a97}
+  .s-failed,.s-critical,.s-blocked{background:#421c1c;color:#ff9a97}
   .s-cancelled{background:#3a3444;color:#c9b8ff}
   .hint { color:var(--muted); font-size:12px; }
+  .zone { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid var(--line); margin-right:4px; }
+  .z-green { color:var(--ok); border-color:var(--ok); }
+  .z-yellow { color:var(--warn); border-color:var(--warn); }
+  .z-red { color:var(--err); border-color:var(--err); }
+  .quick { display:flex; gap:8px; flex-wrap:wrap; }
   footer { padding:12px 22px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
   .col { display:flex; flex-direction:column; gap:18px; }
   .full { grid-column:1 / -1; }
@@ -79,14 +85,21 @@
     <span id="conn" class="pill">connecting…</span>
     <span id="rtt" class="pill">—</span>
     <span id="jobcount" class="pill">—</span>
+    <span id="pendingCount" class="pill">approvals: —</span>
+    <span id="blockedMissionCount" class="pill">blocked missions: —</span>
+    <span id="safetyCore" class="pill">safety core: —</span>
+    <span id="emergencyState" class="pill">brake: —</span>
+    <button id="emergencyBtn" class="danger">Emergency stop</button>
   </div>
 </header>
 <nav>
   <button data-tab="overview" class="on">Overview</button>
   <button data-tab="jobs">Jobs</button>
+  <button data-tab="missions">Missions</button>
   <button data-tab="telemetry">Telemetry</button>
   <button data-tab="computer">Computer</button>
   <button data-tab="remote">Remote</button>
+  <button data-tab="safety">Safety</button>
   <button data-tab="doctor">Doctor</button>
 </nav>
 
@@ -136,6 +149,22 @@
         <tbody></tbody>
       </table>
       <div class="hint">Snapshot = `GET /jobs` · live per-job = `EventSource /jobs/{id}/events`.</div>
+    </section>
+  </div>
+
+  <!-- ============ MISSIONS ============ -->
+  <div class="tab" id="tab-missions">
+    <section>
+      <h2>Autonomous missions · approval-aware lifecycle</h2>
+      <div class="bar"><input id="missionGoal" placeholder="mission goal" /></div>
+      <div class="bar"><button id="missionPreflight" class="ghost">Pre-flight mission</button><button id="missionStart" class="ghost">Start mission if ready</button><button id="missionPlanBlocked" class="ghost">Record planning-mode blocker</button></div>
+      <div class="feed" id="missionPreflightOut" style="height:160px"><div class="note">Mission launch uses pre-flight. Red-line and emergency blockers refuse; approval/capability blockers can be recorded as planning-mode blocked missions.</div></div>
+      <table id="missions">
+        <thead><tr><th>id</th><th>state</th><th>progress</th><th>approval / blocker</th><th>actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="feed" id="missionOut" style="height:140px"><div class="note">Blocked missions with approval requests can approve+retry, then resume.</div></div>
+      <div class="hint">Snapshot = `GET /missions`. Resume = `POST /missions/{id}/resume`. Approval = `POST /permissions/pending/resolve`.</div>
     </section>
   </div>
 
@@ -192,6 +221,100 @@
     </div>
   </div>
 
+  <!-- ============ SAFETY ============ -->
+  <div class="tab" id="tab-safety">
+    <div class="grid">
+      <section class="full">
+        <h2>Jarvis Safety Core · live authority state</h2>
+        <div class="cells" id="jarvisSafetyCore"></div>
+        <div class="hint"><span class="zone z-green">green</span> autonomous safe actions <span class="zone z-yellow">yellow</span> scoped approval required <span class="zone z-red">red</span> blocked even with grants.</div>
+      </section>
+      <section>
+        <h2>Red lines · green / yellow / red gate</h2>
+        <div class="cells" id="safetySummary"></div>
+        <table id="redLines">
+          <thead><tr><th>#</th><th>red line</th><th>summary</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="hint">Policy = `GET /red-lines/policy`. Yellow actions need a matching scoped grant; red actions are blocked.</div>
+      </section>
+      <section>
+        <h2>Create scoped approval grant</h2>
+        <div class="bar"><input id="grantTitle" placeholder="title e.g. Allow Downloads malware scan" /></div>
+        <div class="bar"><input id="grantTool" placeholder="tool e.g. shell_execute or *" value="*" /></div>
+        <div class="bar"><input id="grantLines" placeholder="red lines e.g. 3,8" /></div>
+        <div class="bar"><input id="grantResources" placeholder="resources e.g. ~/Downloads,192.168.1.0/24" /></div>
+        <div class="bar"><input id="grantPurpose" placeholder="purpose e.g. malware, incident_response, daily_report" /></div>
+        <div class="bar">
+          <input id="grantTtl" placeholder="ttl minutes e.g. 30" />
+          <input id="grantUses" placeholder="max uses e.g. 3" />
+          <button id="grantCreate">Approve scope</button>
+        </div>
+        <div class="feed" id="grantOut" style="height:120px"><div class="note">Approvals authorize matching yellow-zone actions only; red-zone actions stay blocked.</div></div>
+      </section>
+      <section class="full">
+        <h2>Pre-flight autonomy check</h2>
+        <div class="bar"><input id="preflightGoal" placeholder="goal e.g. scan ~/Downloads for malware, then email me a report" /></div>
+        <div class="bar"><button id="preflightRun" class="ghost">Run pre-flight</button><button id="preflightApprovals" class="ghost">Create draft approval prompts</button></div>
+        <div class="feed" id="preflightOut" style="height:220px"><div class="note">Pre-flight = `POST /safety/preflight`; approval drafts = `POST /safety/preflight/approvals`; predicts READY / NEEDS_APPROVAL / BLOCKED_BY_RED_LINE / MISSING_CAPABILITY before execution.</div></div>
+      </section>
+      <section class="full">
+        <h2>One-click safety examples</h2>
+        <div class="quick">
+          <button class="ghost" data-safety-example="downloads_scan">Allow Downloads malware scan</button>
+          <button class="ghost" id="startDownloadsScanMission">Start Downloads scan mission</button>
+          <button class="ghost" id="runDownloadsScan">Run approved Downloads scan</button>
+          <button class="ghost" id="refreshScanReports">List scan reports</button>
+          <button class="ghost" data-safety-example="local_network_scan">Allow local network incident scan</button>
+          <button class="ghost" data-safety-example="gmail_proposal">Propose Gmail delegated send</button>
+          <button class="ghost" data-safety-example="wallet_proposal">Propose agent wallet trading</button>
+        </div>
+        <div class="hint">Examples only prefill grants/proposals; nothing executes automatically.</div>
+      </section>
+      <section class="full">
+        <h2>Safety Event Timeline</h2>
+        <div class="bar"><button id="safetyEventsRefresh" class="ghost">Refresh safety events</button><button id="safetyReportBtn" class="ghost">Generate safety report</button></div>
+        <div class="feed" id="safetyEvents" style="height:240px"><div class="note">Shows approvals, grants, emergency brake, mission blockers, policy denials, and capability ledger changes from the canonical EventBus.</div></div>
+        <div class="feed" id="safetyReport" style="height:220px;margin-top:10px"><div class="note">Report = `GET /safety/report?format=markdown` summarizing approvals, grants, blockers, discoveries, and emergency-stop state.</div></div>
+      </section>
+      <section class="full">
+        <h2>Approval bundles</h2>
+        <table id="approvalBundles">
+          <thead><tr><th>id</th><th>mission</th><th>requests</th><th>title</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="hint">Bundles approve/deny multiple draft prompts while preserving individual scoped grants.</div>
+      </section>
+      <section class="full">
+        <h2>Pending yellow-action approval prompts</h2>
+        <table id="pendingApprovals">
+          <thead><tr><th>id</th><th>tool</th><th>red lines</th><th>suggested scope</th><th>purpose</th><th>created</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="hint">Pending prompts are created when a yellow action has no matching grant. Approving creates a scoped grant for retry; denying closes the prompt.</div>
+      </section>
+      <section class="full">
+        <h2>Active approval grants</h2>
+        <table id="approvalGrants">
+          <thead><tr><th>id</th><th>tool</th><th>red lines</th><th>resources</th><th>purpose</th><th>uses</th><th>expires</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+      <section class="full">
+        <h2>Capability readiness / activation registry</h2>
+        <div class="bar"><button id="capRegistryRefresh" class="ghost">Refresh registry</button><button id="capSetup" class="ghost">Setup selected power</button><button id="capActivationRequest" class="ghost">Request activation</button></div>
+        <div class="feed" id="capRegistry" style="height:180px"><div class="note">Registry = `GET /capabilities/registry`. Setup proposes implementation; activation requires explicit approval.</div></div>
+      </section>
+      <section class="full">
+        <h2>Capability ledger</h2>
+        <div class="bar"><input id="powerName" placeholder="discovered power e.g. Gmail delegated send" /></div>
+        <div class="bar"><input id="powerUse" placeholder="use e.g. reply to approved emails" /><input id="powerRisk" placeholder="risk e.g. reputation/privacy" /></div>
+        <div class="bar"><input id="powerApproval" placeholder="needed approval/setup" /><button id="powerAdd">Record power</button><button id="powerPropose" class="ghost">Propose setup</button></div>
+        <div class="feed" id="capLedger" style="height:340px"><div class="note">Ledger = `GET /capabilities/ledger` from CAPABILITY_LEDGER.md.</div></div>
+      </section>
+    </div>
+  </div>
+
   <!-- ============ DOCTOR ============ -->
   <div class="tab" id="tab-doctor">
     <section>
@@ -216,6 +339,19 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
   (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 function healthy(){ conn.textContent="live"; conn.className="pill ok"; }
 function down(){ conn.textContent="offline (preview)"; conn.className="pill err"; }
+function setPill(id, text, cls){ const el = $(id); if (el) { el.textContent = text; el.className = "pill " + (cls || ""); } }
+function updateSafetyCore(){
+  const brake = $("#emergencyState")?.textContent || "brake: —";
+  const pending = $("#pendingCount")?.textContent || "approvals: —";
+  const blocked = $("#blockedMissionCount")?.textContent || "blocked missions: —";
+  const activeBrake = brake.includes("ACTIVE");
+  const pendingN = parseInt((pending.match(/\d+/)||["0"])[0],10) || 0;
+  const blockedN = parseInt((blocked.match(/\d+/)||["0"])[0],10) || 0;
+  const label = activeBrake ? "safety core: BRAKE" : (pendingN || blockedN ? "safety core: needs review" : "safety core: clear");
+  setPill("#safetyCore", label, activeBrake ? "err" : (pendingN || blockedN ? "warn" : "ok"));
+  const core = $("#jarvisSafetyCore");
+  if (core) core.innerHTML = kpi(activeBrake ? "ACTIVE" : "clear", "emergency brake") + kpi(String(pendingN), "pending approvals") + kpi(String(blockedN), "blocked missions") + kpi("visible", "capability ledger");
+}
 
 function getJSON(url){
   const t0 = Date.now();
@@ -238,9 +374,11 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
 }));
 function refreshTab(name){
   if (name === "jobs") refreshJobs();
+  else if (name === "missions") refreshMissions();
   else if (name === "telemetry") refreshTelemetry(true);
   else if (name === "computer") refreshComputer();
   else if (name === "remote") refreshRemote();
+  else if (name === "safety") refreshSafety();
   else if (name === "doctor") refreshDoctor();
 }
 
@@ -272,6 +410,24 @@ async function refreshOverview(){
   try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; healthy(); }
   catch(e){ down(); $("#health").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">api offline</div></div>'; }
   try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); } catch(e){}
+  try { await refreshEmergency(); } catch(e){}
+}
+async function refreshEmergency(){
+  const { j } = await getJSON("/emergency/status");
+  const st = j.emergency_stop || {};
+  const pill = $("#emergencyState");
+  pill.textContent = st.active ? "brake: ACTIVE" : "brake: clear";
+  pill.className = st.active ? "pill err" : "pill ok";
+  $("#emergencyBtn").textContent = st.active ? "Resume" : "Emergency stop";
+  updateSafetyCore();
+}
+function toggleEmergency(){
+  getJSON("/emergency/status").then(({j}) => {
+    const active = !!(j.emergency_stop || {}).active;
+    const url = active ? "/emergency/resume" : "/emergency/stop";
+    const reason = active ? "dashboard resume" : "dashboard emergency stop";
+    return fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ reason, set_by:"control" }) });
+  }).then(()=>refreshEmergency()).catch(()=>refreshEmergency());
 }
 
 function replayTimeline(runId){
@@ -317,6 +473,75 @@ async function refreshJobs(){
     const bs = st.by_status || {};
     $("#qstatus").textContent = "backend=" + (st.backend || "?") + " · workers=" + (st.workers || "?") + " · " + Object.entries(bs).map(([k,v])=>v+" "+k).join(", ");
   } catch(e){ body.innerHTML = `<tr><td colspan="6" class="hint">queue unavailable: ${esc(e.message)}</td></tr>`; }
+}
+
+// ---------- MISSIONS ----------
+async function refreshMissions(){
+  const body = $("#missions tbody");
+  try {
+    const { j } = await getJSON("/missions");
+    const rows = (j.missions || []).slice(0, 80);
+    const blockedN = rows.filter((m) => String(m.state).toLowerCase() === "blocked" || m.approval_request).length;
+    setPill("#blockedMissionCount", "blocked missions: " + blockedN, blockedN ? "warn" : "ok");
+    updateSafetyCore();
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="hint">no missions yet</td></tr>'; return; }
+    body.innerHTML = rows.map((m) => {
+      const ap = m.approval_request || {};
+      const failure = m.failure || {};
+      const createPrompts = m.create_prompts_action || {};
+      const blocker = ap.id ? ('approval <code>' + esc(ap.id) + '</code>') : esc(m.blocker_reason || failure.reason || '');
+      const approveBtn = ap.id ? `<button class="ghost" data-mission-approve="${esc(m.mission_id)}" data-approval-id="${esc(ap.id)}">approve+retry</button>` : '';
+      const promptsBtn = createPrompts.endpoint ? `<button class="ghost" data-mission-prompts="${esc(m.mission_id)}">create prompts</button>` : '';
+      const resumeBtn = ['blocked','failed','executing','pending','continuing'].includes(String(m.state)) ? `<button class="ghost" data-mission-resume="${esc(m.mission_id)}">resume</button>` : '';
+      return `<tr><td><code>${esc(m.mission_id)}</code></td><td><span class="status s-${esc(m.state)}">${esc(m.state)}</span></td><td>${esc(m.progress_pct ?? 0)}%</td><td>${blocker}</td><td>${approveBtn} ${promptsBtn} ${resumeBtn}</td></tr>`;
+    }).join("");
+    body.querySelectorAll("button[data-mission-approve]").forEach((b) => b.addEventListener("click", () => approveMission(b.dataset.missionApprove, b.dataset.approvalId)));
+    body.querySelectorAll("button[data-mission-prompts]").forEach((b) => b.addEventListener("click", () => createMissionPrompts(b.dataset.missionPrompts)));
+    body.querySelectorAll("button[data-mission-resume]").forEach((b) => b.addEventListener("click", () => resumeMission(b.dataset.missionResume)));
+  } catch(e){ setPill("#blockedMissionCount", "blocked missions: ?", "warn"); updateSafetyCore(); body.innerHTML = `<tr><td colspan="5" class="hint">missions unavailable: ${esc(e.message)}</td></tr>`; }
+}
+function missionPreflight(){
+  const goal = $("#missionGoal").value.trim();
+  const out = $("#missionPreflightOut");
+  if (!goal) { out.innerHTML = '<div class="note">mission goal required</div>'; return; }
+  out.innerHTML = '<div class="note">running mission pre-flight…</div>';
+  fetch("/safety/preflight", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal, format:"markdown" }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">mission pre-flight failed: ' + esc(e.message) + '</div>'; });
+}
+function startMission(allowPlanningBlocked){
+  const goal = $("#missionGoal").value.trim();
+  const out = $("#missionPreflightOut");
+  if (!goal) { out.innerHTML = '<div class="note">mission goal required</div>'; return; }
+  out.innerHTML = '<div class="note">starting mission with pre-flight…</div>';
+  fetch("/missions", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal, preflight:true, allow_preflight_planning: !!allowPlanningBlocked }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>mission <code>' + esc(d.mission_id || '') + '</code>: <span class="e">' + esc(d.state || d.status || d.error) + '</span></div>' + (d.preflight ? '<div>pre-flight: <span class="e">' + esc(d.preflight.status) + '</span></div>' : ''); refreshMissions(); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">mission start failed: ' + esc(e.message) + '</div>'; });
+}
+function createMissionPrompts(missionId){
+  const out = $("#missionOut");
+  out.innerHTML = '<div class="note">creating draft approval prompts for <code>' + esc(missionId) + '</code>…</div>';
+  fetch("/missions/" + encodeURIComponent(missionId) + "/preflight/approvals", { method:"POST", headers:{ "Content-Type":"application/json" }, body:"{}" })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>created prompts for <code>' + esc(missionId) + '</code>: <span class="e">' + esc((d.created||[]).length) + '</span></div>'; refreshSafety(); refreshMissions(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">create prompts failed: ' + esc(e.message) + '</div>'; });
+}
+function approveMission(missionId, approvalId){
+  const out = $("#missionOut");
+  out.innerHTML = '<div class="note">approving ' + esc(approvalId) + ' and retrying…</div>';
+  fetch("/permissions/pending/resolve", { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ id: approvalId, decision:"approve", ttl_minutes:30, max_uses:1, retry:true }) })
+    .then((r)=>r.json()).then((d)=>{
+      out.innerHTML = '<div>approval <code>' + esc(approvalId) + '</code>: <span class="e">' + esc(d.success) + '</span>; resuming mission…</div>';
+      return fetch("/missions/" + encodeURIComponent(missionId) + "/resume", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ extra_steps: 8 }) });
+    })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML += '<div>resume <code>' + esc(missionId) + '</code>: <span class="e">' + esc(d.state || d.status || d.success || d.error) + '</span></div>'; refreshMissions(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">approve/resume failed: ' + esc(e.message) + '</div>'; });
+}
+function resumeMission(missionId){
+  const out = $("#missionOut");
+  fetch("/missions/" + encodeURIComponent(missionId) + "/resume", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ extra_steps: 8 }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>resume <code>' + esc(missionId) + '</code>: <span class="e">' + esc(d.state || d.status || d.success || d.error) + '</span></div>'; refreshMissions(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">resume failed: ' + esc(e.message) + '</div>'; });
 }
 
 // ---------- TELEMETRY ----------
@@ -372,7 +597,7 @@ function compRun(){
   if (!task) { out.innerHTML = '<div class="note">enter an objective first</div>'; return; }
   out.innerHTML = '<div class="note">submitting ' + esc(task) + '…</div>';
   fetch("/computer/run", { method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ objective: task }) })
+    body: JSON.stringify({ task: task }) })
     .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>ok: <span class="e">' + esc(d.ok ?? d.success) + '</span> task <code>' + esc(d.task_id || d.run_id || "") + '</code></div>'; refreshComputer(); })
     .catch((e)=>{ out.innerHTML = '<div class="note">run failed: ' + esc(e.message) + '</div>'; });
 }
@@ -411,6 +636,254 @@ function remoteAct(act, id){
     .catch((e)=>{ out.innerHTML = '<div class="note">' + esc(act) + ' failed: ' + esc(e.message) + '</div>'; });
 }
 
+// ---------- SAFETY ----------
+function splitCsv(v){ return String(v || "").split(",").map((x)=>x.trim()).filter(Boolean); }
+function mdLite(md){
+  return esc(md || "")
+    .replace(/^### (.*)$/gm, "<b>$1</b>")
+    .replace(/^## (.*)$/gm, "<b class='e'>$1</b>")
+    .replace(/^# (.*)$/gm, "<b class='e'>$1</b>")
+    .replace(/\n/g, "<br>");
+}
+function safetyEventLabel(e){
+  const cmd = e.command || e.type || "event";
+  const args = e.args_redacted || {};
+  const parts = [];
+  if (args.id) parts.push(args.id);
+  if (args.tool) parts.push(args.tool);
+  if (args.power) parts.push(args.power);
+  if (args.state) parts.push(args.state);
+  if (e.mission_id) parts.push("mission " + e.mission_id);
+  if (e.error_code) parts.push(e.error_code);
+  return parts.length ? cmd + " · " + parts.join(" · ") : cmd;
+}
+async function refreshSafetyEvents(){
+  const feed = $("#safetyEvents");
+  if (!feed) return;
+  try {
+    const { j } = await getJSON("/safety/events?limit=80");
+    const rows = j.events || [];
+    feed.innerHTML = rows.slice().reverse().map((e) => `<div><span class="t">${esc(e.timestamp || "")}</span> <span class="e">${esc(safetyEventLabel(e))}</span> <span class="tag">${esc(e.status || "")}</span></div>`).join("")
+      || '<div class="note">no safety events recorded yet</div>';
+  } catch(e){ feed.innerHTML = '<div class="note">safety events unavailable: ' + esc(e.message) + '</div>'; }
+}
+async function refreshSafetyReport(){
+  const feed = $("#safetyReport");
+  if (!feed) return;
+  feed.innerHTML = '<div class="note">generating safety report…</div>';
+  try {
+    const { j } = await getJSON("/safety/report?format=markdown");
+    feed.innerHTML = mdLite(j.markdown || JSON.stringify(j, null, 2));
+  } catch(e){ feed.innerHTML = '<div class="note">safety report unavailable: ' + esc(e.message) + '</div>'; }
+}
+async function refreshSafety(){
+  try {
+    const { j: policy } = await getJSON("/red-lines/policy");
+    const rules = policy.rules || [];
+    $("#safetySummary").innerHTML = kpi(rules.length, "red lines") + kpi("green", "safe actions") + kpi("yellow", "scoped approvals") + kpi("red", "blocked");
+    const body = $("#redLines tbody");
+    body.innerHTML = rules.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.title)}</td><td>${esc(r.rule)}</td></tr>`).join("")
+      || '<tr><td colspan="3" class="hint">policy unavailable</td></tr>';
+  } catch(e){ $("#safetySummary").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">red-line policy unavailable</div></div>'; }
+  try {
+    const { j: bundles } = await getJSON("/permissions/bundles");
+    const rows = bundles.bundles || [];
+    const body = $("#approvalBundles tbody");
+    body.innerHTML = rows.map((b) => `<tr>
+      <td><code>${esc(b.id)}</code></td><td>${esc(b.mission_id || "")}</td><td>${esc((b.request_ids||[]).length)}</td><td>${esc(b.title || "")}</td>
+      <td><button class="ghost" data-bundle-act="approve" data-bundle-id="${esc(b.id)}">approve all</button>
+      <button class="ghost" data-bundle-act="deny" data-bundle-id="${esc(b.id)}">deny all</button></td>
+    </tr>`).join("") || '<tr><td colspan="5" class="hint">no pending approval bundles</td></tr>';
+    body.querySelectorAll("button[data-bundle-id]").forEach((b) => b.addEventListener("click", () => resolveBundle(b.dataset.bundleId, b.dataset.bundleAct)));
+  } catch(e){ $("#approvalBundles tbody").innerHTML = `<tr><td colspan="5" class="hint">approval bundles unavailable: ${esc(e.message)}</td></tr>`; }
+  try {
+    const { j: pending } = await getJSON("/permissions/pending");
+    const rows = pending.pending || [];
+    const body = $("#pendingApprovals tbody");
+    setPill("#pendingCount", "approvals: " + rows.length, rows.length ? "warn" : "ok");
+    updateSafetyCore();
+    body.innerHTML = rows.map((p) => `<tr>
+      <td><code>${esc(p.id)}</code></td><td>${esc(p.tool)}</td><td>${esc((p.safety?.red_lines||[]).join(","))}</td>
+      <td>${esc((p.suggested_resources||[]).join(", "))}</td><td>${esc(p.suggested_purpose || "")}</td><td>${esc(p.created_at || "")}</td>
+      <td><button class="ghost" data-pending-act="approve" data-pending-id="${esc(p.id)}">approve</button>
+      <button class="ghost" data-pending-act="deny" data-pending-id="${esc(p.id)}">deny</button></td>
+    </tr>`).join("") || '<tr><td colspan="7" class="hint">no pending yellow actions</td></tr>';
+    body.querySelectorAll("button[data-pending-id]").forEach((b) => b.addEventListener("click", () => resolvePending(b.dataset.pendingId, b.dataset.pendingAct)));
+  } catch(e){ setPill("#pendingCount", "approvals: ?", "warn"); updateSafetyCore(); $("#pendingApprovals tbody").innerHTML = `<tr><td colspan="7" class="hint">pending prompts unavailable: ${esc(e.message)}</td></tr>`; }
+  try {
+    const { j: grants } = await getJSON("/permissions/approvals");
+    const rows = grants.approvals || [];
+    const body = $("#approvalGrants tbody");
+    body.innerHTML = rows.map((g) => `<tr>
+      <td><code>${esc(g.id)}</code></td><td>${esc(g.tool)}</td><td>${esc((g.red_lines||[]).join(","))}</td>
+      <td>${esc((g.resources||[]).join(", "))}</td><td>${esc(g.purpose || "")}</td>
+      <td>${esc(g.uses)}/${esc(g.max_uses ?? "∞")}</td><td>${esc(g.expires_at || "never")}</td>
+      <td><button class="ghost" data-revoke="${esc(g.id)}">revoke</button></td>
+    </tr>`).join("") || '<tr><td colspan="8" class="hint">no active scoped grants</td></tr>';
+    body.querySelectorAll("button[data-revoke]").forEach((b) => b.addEventListener("click", () => revokeGrant(b.dataset.revoke)));
+  } catch(e){ $("#approvalGrants tbody").innerHTML = `<tr><td colspan="8" class="hint">approvals unavailable: ${esc(e.message)}</td></tr>`; }
+  try {
+    const { j: ledger } = await getJSON("/capabilities/ledger");
+    $("#capLedger").innerHTML = mdLite(ledger.markdown || "");
+  } catch(e){ $("#capLedger").innerHTML = '<div class="note">ledger unavailable: ' + esc(e.message) + '</div>'; }
+  try { await refreshCapabilityRegistry(); } catch(e){}
+  try { await refreshSafetyEvents(); } catch(e){}
+}
+async function refreshCapabilityRegistry(){
+  const feed = $("#capRegistry");
+  if (!feed) return;
+  try {
+    const { j } = await getJSON("/capabilities/registry");
+    const rows = j.capabilities || [];
+    feed.innerHTML = rows.map((r) => `<div><span class="status s-${esc(r.status)}">${esc(r.status)}</span> <span class="e">${esc(r.name)}</span> ${esc(r.category || '')} ${r.activation_request_id ? 'activation <code>' + esc(r.activation_request_id) + '</code>' : ''}</div>`).join("") || '<div class="note">no registered capabilities yet</div>';
+  } catch(e){ feed.innerHTML = '<div class="note">capability registry unavailable: ' + esc(e.message) + '</div>'; }
+}
+function setupCapability(){
+  const power = $("#powerName").value.trim();
+  const out = $("#capRegistry");
+  if (!power) { out.innerHTML = '<div class="note">power name required</div>'; return; }
+  fetch("/capabilities/registry/setup", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name: power, write_proposal: true }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>setup proposal: <span class="e">' + esc(d.success) + '</span> status=' + esc(d.record?.status || '') + '</div><div><code>' + esc(d.record?.planning_command || '') + '</code></div>'; refreshCapabilityRegistry(); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">setup failed: ' + esc(e.message) + '</div>'; });
+}
+function requestCapabilityActivation(){
+  const power = $("#powerName").value.trim();
+  const out = $("#capRegistry");
+  if (!power) { out.innerHTML = '<div class="note">power name required</div>'; return; }
+  fetch("/capabilities/registry/request-activation", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name: power, reason: "dashboard activation request" }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>activation request: <code>' + esc(d.request?.id || '') + '</code> <span class="e">' + esc(d.success) + '</span></div>'; refreshSafety(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">activation request failed: ' + esc(e.message) + '</div>'; });
+}
+function createGrant(){
+  const out = $("#grantOut");
+  const title = $("#grantTitle").value.trim();
+  if (!title) { out.innerHTML = '<div class="note">title required</div>'; return; }
+  const lines = splitCsv($("#grantLines").value).map((x)=>parseInt(x,10)).filter((x)=>Number.isFinite(x));
+  const payload = {
+    title,
+    tool: $("#grantTool").value.trim() || "*",
+    red_lines: lines,
+    resources: splitCsv($("#grantResources").value),
+    purpose: $("#grantPurpose").value.trim(),
+    ttl_minutes: parseInt($("#grantTtl").value || "0", 10) || null,
+    max_uses: parseInt($("#grantUses").value || "0", 10) || null,
+  };
+  fetch("/permissions/approve", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>grant: <code>' + esc(d.grant?.id || "") + '</code> <span class="e">' + esc(d.success) + '</span></div>'; refreshSafety(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">approval failed: ' + esc(e.message) + '</div>'; });
+}
+function revokeGrant(id){
+  fetch("/permissions/revoke", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) })
+    .then((r)=>r.json()).then(()=>refreshSafety()).catch(()=>refreshSafety());
+}
+function addPower(){
+  const out = $("#grantOut");
+  const power = $("#powerName").value.trim();
+  if (!power) { out.innerHTML = '<div class="note">power name required</div>'; return; }
+  fetch("/capabilities/ledger/discover", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({
+    power,
+    use: $("#powerUse").value.trim(),
+    risk: $("#powerRisk").value.trim(),
+    needed_approval_setup: $("#powerApproval").value.trim(),
+    status: "not_granted",
+    source: "control",
+  }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>recorded power <span class="e">' + esc(d.success) + '</span>' + (d.deduped ? ' already listed' : '') + '</div>'; refreshSafety(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">record power failed: ' + esc(e.message) + '</div>'; });
+}
+function proposePower(){
+  const power = $("#powerName").value.trim();
+  const out = $("#capLedger");
+  if (!power) { out.innerHTML = '<div class="note">power name required</div>'; return; }
+  out.innerHTML = '<div class="note">generating setup proposal…</div>';
+  fetch("/capabilities/ledger/propose", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ power }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">proposal failed: ' + esc(e.message) + '</div>'; });
+}
+function runPreflight(){
+  const goal = $("#preflightGoal").value.trim();
+  const out = $("#preflightOut");
+  if (!goal) { out.innerHTML = '<div class="note">goal required</div>'; return; }
+  out.innerHTML = '<div class="note">running pre-flight…</div>';
+  fetch("/safety/preflight", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal, format:"markdown" }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">pre-flight failed: ' + esc(e.message) + '</div>'; });
+}
+function runDownloadsScan(){
+  const out = $("#preflightOut");
+  out.innerHTML = '<div class="note">running approved Downloads defensive scan…</div>';
+  fetch("/local-defense/scan", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ path:"~/Downloads", purpose:"malware", max_files:500, save_report:true }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">scan failed: ' + esc(e.message) + '</div>'; });
+}
+function startDownloadsScanMission(){
+  const out = $("#preflightOut");
+  out.innerHTML = '<div class="note">creating gated Downloads scan mission…</div>';
+  fetch("/local-defense/missions", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ path:"~/Downloads", purpose:"malware", max_files:500 }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>scan mission <code>' + esc(d.mission_id || '') + '</code>: <span class="e">' + esc(d.state || d.error) + '</span></div>'; refreshMissions(); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">scan mission failed: ' + esc(e.message) + '</div>'; });
+}
+async function listScanReports(){
+  const out = $("#preflightOut");
+  out.innerHTML = '<div class="note">loading scan reports…</div>';
+  try {
+    const { j } = await getJSON("/local-defense/reports?limit=20");
+    const rows = j.reports || [];
+    out.innerHTML = rows.map((r) => `<div><a href="${esc(r.url)}" target="_blank"><code>${esc(r.name)}</code></a> ${esc(r.updated_at || '')} ${esc(r.size_bytes || '')} bytes</div>`).join("") || '<div class="note">no local defense scan reports yet</div>';
+  } catch(e){ out.innerHTML = '<div class="note">scan reports unavailable: ' + esc(e.message) + '</div>'; }
+}
+function createPreflightApprovals(){
+  const goal = $("#preflightGoal").value.trim();
+  const out = $("#preflightOut");
+  if (!goal) { out.innerHTML = '<div class="note">goal required</div>'; return; }
+  out.innerHTML = '<div class="note">creating draft approval prompts…</div>';
+  fetch("/safety/preflight/approvals", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>draft prompts created: <span class="e">' + esc((d.created||[]).length) + '</span></div>' + (d.errors?.length ? '<div class="note">errors: ' + esc(JSON.stringify(d.errors)) + '</div>' : ''); refreshSafety(); refreshSafetyEvents(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">approval prompt creation failed: ' + esc(e.message) + '</div>'; });
+}
+function applySafetyExample(kind){
+  const out = $("#grantOut");
+  if (kind === "downloads_scan") {
+    $("#grantTitle").value = "Allow Downloads malware scan";
+    $("#grantTool").value = "local_folder_defensive_scan";
+    $("#grantLines").value = "3";
+    $("#grantResources").value = "~/Downloads";
+    $("#grantPurpose").value = "malware";
+    $("#grantTtl").value = "30";
+    $("#grantUses").value = "3";
+    out.innerHTML = '<div class="note">Prefilled scoped grant. Review, then click Approve scope if correct.</div>';
+  } else if (kind === "local_network_scan") {
+    $("#grantTitle").value = "Allow local network incident scan";
+    $("#grantTool").value = "*";
+    $("#grantLines").value = "4,8";
+    $("#grantResources").value = "192.168.0.0/16,10.0.0.0/8";
+    $("#grantPurpose").value = "incident_response";
+    $("#grantTtl").value = "30";
+    $("#grantUses").value = "5";
+    out.innerHTML = '<div class="note">Prefilled local-network defensive scope. Narrow it before approving if needed.</div>';
+  } else if (kind === "gmail_proposal") {
+    $("#powerName").value = "Gmail delegated send";
+    $("#preflightGoal").value = "Use Gmail delegated send to reply to approved emails";
+    proposePower();
+  } else if (kind === "wallet_proposal") {
+    $("#powerName").value = "Agent wallet trading";
+    $("#preflightGoal").value = "Trade from the isolated agent wallet under risk limits";
+    proposePower();
+  }
+}
+function resolveBundle(id, decision){
+  fetch("/permissions/bundles/resolve", { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ id, decision, ttl_minutes: decision === "approve" ? 30 : null, max_uses: decision === "approve" ? 1 : null, resume: decision === "approve", extra_steps: 8 }) })
+    .then((r)=>r.json()).then((d)=>{ $("#grantOut").innerHTML = '<div>' + esc(decision) + ' bundle <code>' + esc(id) + '</code> <span class="e">' + esc(d.success) + '</span>' + (d.resume ? ' resume <span class="e">' + esc(d.resume.state || d.resume.error) + '</span>' : '') + '</div>'; refreshSafety(); refreshMissions(); })
+    .catch((e)=>{ $("#grantOut").innerHTML = '<div class="note">resolve bundle failed: ' + esc(e.message) + '</div>'; });
+}
+function resolvePending(id, decision){
+  fetch("/permissions/pending/resolve", { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ id, decision, ttl_minutes: decision === "approve" ? 30 : null, max_uses: decision === "approve" ? 1 : null, retry: decision === "approve" }) })
+    .then((r)=>r.json()).then((d)=>{ $("#grantOut").innerHTML = '<div>' + esc(decision) + ' pending <code>' + esc(id) + '</code> ' + (d.grant ? 'grant <code>' + esc(d.grant.id) + '</code>' : '') + (d.retry ? ' retry <span class="e">' + esc(d.retry.success) + '</span>' : '') + '</div>'; refreshSafety(); })
+    .catch((e)=>{ $("#grantOut").innerHTML = '<div class="note">resolve failed: ' + esc(e.message) + '</div>'; });
+}
+
 // ---------- DOCTOR ----------
 async function refreshDoctor(){
   try {
@@ -431,21 +904,40 @@ function docRun(){
 // ---------- wiring ----------
 $("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
 $("#cmdBtn").addEventListener("click", postCommand);
+$("#missionPreflight").addEventListener("click", missionPreflight);
+$("#missionStart").addEventListener("click", () => startMission(false));
+$("#missionPlanBlocked").addEventListener("click", () => startMission(true));
 $("#runId").addEventListener("keydown", (e) => { if (e.key === "Enter") replayTimeline($("#runId").value.trim()); });
 $("#cmdName").addEventListener("keydown", (e) => { if (e.key === "Enter") postCommand(); });
 $("#tmClear").addEventListener("click", () => { const f = $("#tmFeed"); f.innerHTML = ""; f.dataset.ready = ""; refreshTelemetry(true); });
 $("#compRun").addEventListener("click", compRun);
 $("#compStop").addEventListener("click", compStop);
+$("#emergencyBtn").addEventListener("click", toggleEmergency);
+$("#grantCreate").addEventListener("click", createGrant);
+$("#powerAdd").addEventListener("click", addPower);
+$("#powerPropose").addEventListener("click", proposePower);
+$("#capRegistryRefresh").addEventListener("click", refreshCapabilityRegistry);
+$("#capSetup").addEventListener("click", setupCapability);
+$("#capActivationRequest").addEventListener("click", requestCapabilityActivation);
 $("#docRun").addEventListener("click", docRun);
+$("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
+$("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
+$("#preflightRun").addEventListener("click", runPreflight);
+$("#preflightApprovals").addEventListener("click", createPreflightApprovals);
+$("#runDownloadsScan").addEventListener("click", runDownloadsScan);
+$("#startDownloadsScanMission").addEventListener("click", startDownloadsScanMission);
+$("#refreshScanReports").addEventListener("click", listScanReports);
+document.querySelectorAll("button[data-safety-example]").forEach((b) => b.addEventListener("click", () => applySafetyExample(b.dataset.safetyExample)));
 
 async function boot(){
   await refreshOverview();
   await refreshJobs();
+  try { await refreshMissions(); } catch(e){}
   refreshTelemetry(true);
   openTmStream();
 }
 boot();
-setInterval(() => { refreshOverview(); refreshJobs(); try { refreshTelemetry(false); } catch(e){} }, 8000);
+setInterval(() => { refreshOverview(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
 </script>
 </body>
 </html>
