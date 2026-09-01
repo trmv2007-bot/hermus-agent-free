@@ -1,8 +1,14 @@
 """Free Web Search - DuckDuckGo, no API key - Optimized with caching"""
+import warnings
 from core.cache import web_search_cache
 
+warnings.filterwarnings("ignore", message=".*duckduckgo_search.*renamed to.*ddgs.*", category=RuntimeWarning)
+
 try:
-    from duckduckgo_search import DDGS
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        from duckduckgo_search import DDGS
     DDG_AVAILABLE = True
 except ImportError:
     DDG_AVAILABLE = False
