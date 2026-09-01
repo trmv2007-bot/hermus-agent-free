@@ -442,7 +442,8 @@ async def command_endpoint(request: Request):
         for key in ("platform", "user_id", "text", "model", "mode", "api_key",
                     "base_url", "provider", "key_name", "profile", "run_id",
                     "autonomous", "async", "async_mode", "talking", "speak",
-                    "stream", "voice", "speech_rate", "timeout", "prefer"):
+                    "stream", "voice", "speech_rate", "timeout", "prefer",
+                    "preflight", "allow_preflight_planning"):
             val = form.get(key)
             if val is not None and val != "":
                 payload[key] = val
@@ -527,6 +528,8 @@ async def command_endpoint(request: Request):
                 "prefer": prefer,
                 "max_repairs": payload.get("max_repairs"),
                 "budget_steps": payload.get("budget_steps"),
+                "preflight": payload.get("preflight"),
+                "allow_preflight_planning": payload.get("allow_preflight_planning"),
             },
             session_key=f"{platform}:{user_id}",
             timeout=payload.get("timeout"),
@@ -582,6 +585,11 @@ async def command_endpoint(request: Request):
                 should_cancel=lambda: _run_bus.is_cancelled(run_id),
                 steer_source=lambda: _run_bus.pending_steers(run_id),
                 max_repairs=int(payload.get("max_repairs") or 2),
+                preflight=payload.get("preflight"),
+                allow_preflight_planning=bool(
+                    str(payload.get("allow_preflight_planning", "false")).lower()
+                    in {"1", "true", "yes"}
+                ),
             )
             if isinstance(out, dict):
                 out.setdefault("steps", out.get("steps", 0))

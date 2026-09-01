@@ -112,6 +112,9 @@ def _runtime_execute(
         requirements=payload.get("requirements"),
         domain=payload.get("domain"),
         subgoals=payload.get("subgoals"),
+        preflight=payload.get("preflight"),
+        allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower()
+                                      in {"1", "true", "yes"}),
     )
     if not isinstance(result, dict):
         result = {"response": str(result or "")}
@@ -256,6 +259,9 @@ def make_mission_start_handler(agent_getter: Callable[..., Any]):
             subgoals=payload.get("subgoals"),
             budget_steps=int(payload.get("budget_steps", 20)),
             on_event=ctx.emit,
+            preflight=str(payload.get("preflight", "true")).lower() not in {"0", "false", "no"},
+            allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower()
+                                          in {"1", "true", "yes"}),
         )
         out = report.to_dict()
         out["job_id"] = ctx.id

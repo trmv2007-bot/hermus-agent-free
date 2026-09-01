@@ -208,6 +208,21 @@ def _model_id(agent: Any) -> str:
         return ""
 
 
+def _agent_has_no_backend(agent: Any) -> bool:
+    """Best-effort check that a bound agent cannot actually call a real model.
+
+    A ``mock`` provider (and standalone fake/test agents) will always return
+    the offline fallback stub, so a mission cannot perform real work no matter
+    what approvals are granted. Reporting ``No model backend`` honestly is more
+    useful than surfacing an approval prompt for a run that cannot execute.
+    """
+    try:
+        provider = str(getattr(getattr(agent, "llm", None), "provider", "") or "").lower()
+        return provider in ("", "mock", "fake", "offline")
+    except Exception:
+        return True
+
+
 def _chat_fallback_allowed() -> bool:
     """Is the (discouraged) mission→chat downgrade explicitly enabled?
 
@@ -515,6 +530,8 @@ def execute(
     requirements: Optional[list[str]] = None,
     domain: Optional[str] = None,
     subgoals: Optional[list[str]] = None,
+    preflight: Optional[bool] = None,
+    allow_preflight_planning: bool = False,
 ) -> dict[str, Any]:
     """Run one request through the universal runtime.
 
@@ -601,6 +618,16 @@ def execute(
     # ---- pre-flight: does the selected model support what a mission needs? ----
     _emit_model_capability_warning(resolved_agent, prefer, _emit)
 
+    # The red-line/approval pre-flight is part of the autonomy control plane.
+    # ``None`` means "use the engine default". A bound agent with no usable
+    # model backend cannot execute regardless of approvals, so asking for
+    # approval first would hide the real blocker ("No model backend").
+    do_preflight = bool(preflight) if preflight is not None else True
+    if do_preflight and _agent_has_no_backend(resolved_agent):
+        _emit("preflight_state", {"status": "SKIPPED_NO_MODEL_BACKEND",
+                                  "reason": "no usable model backend; mission will report honest blocker"})
+        do_preflight = False
+
     try:
         engine = MissionEngine(storage_dir=mission_engine.storage_dir)
         report = engine.start_mission(
@@ -614,6 +641,8 @@ def execute(
             on_event=on_event,
             should_cancel=should_cancel,
             steer_source=steer_source,
+            preflight=do_preflight,
+            allow_preflight_planning=allow_preflight_planning,
         )
     except Exception as exc:
         # ------------------------------------------------------------------

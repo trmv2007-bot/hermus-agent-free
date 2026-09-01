@@ -116,9 +116,12 @@ def test_computer_controls_map_to_real_backend():
     assert "active" in st
     # the control room's run button targets the real POST /computer/run
     assert c.post("/computer/run", json={"objective": "test"}).status_code in (200, 400, 404, 503)
-    # emergency stop is a real, guarded action
+    # emergency stop is a real, guarded action; always release it afterwards so
+    # the global brake does not bleed into every later test/run.
     assert c.post("/computer/control/emergency-stop", json={}).status_code in (200, 400, 503)
     assert "/computer/control/emergency-stop" in _client().get("/control").text
+    # release the brake so the global state does not leak into later tests/runs
+    assert c.post("/computer/control/emergency-release", json={}).status_code in (200, 400, 503)
 
 
 def test_remote_controls_map_to_real_backend():
