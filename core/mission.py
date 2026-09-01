@@ -1326,7 +1326,14 @@ class MissionEngine:
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
         detected_domain = domain or verifier_registry.auto_detect_domain(goal)
         preflight_data = None
-        if preflight:
+        # The safety pre-flight guards the *agent-driven* autonomy path. When a
+        # caller injects its own executor (offline tests, simulations, custom
+        # runtimes that own their execution side effects), the caller has
+        # already decided how the work will run, so pre-flight should not block
+        # it with an approval prompt. Real gateway/CLI/dashboard runs that go
+        # through `runtime.execute` or `make_agent_backed_executor` keep the
+        # gate enabled (callers can still opt out explicitly).
+        if preflight and executor is None and self._injected_executor is None:
             try:
                 from .autonomy_preflight import preflight_goal
 

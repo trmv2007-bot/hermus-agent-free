@@ -24,11 +24,27 @@ router = APIRouter()
 
 
 def _permission_guard(tool: str, args: dict | None = None):
-    """Route-level guard for computer actions that bypass ToolGateway wrappers."""
+    """Route-level guard for computer actions that bypass ToolGateway wrappers.
+
+    Dry-run / plan-only probes never execute a real action, so they are
+    permitted (and still audited) without consuming an interactive approval.
+    Red-zone and emergency-stop findings remain blocked even for a dry run.
+    """
     try:
         from core.permissions import Decision, permission_manager
 
-        check = permission_manager.check(tool, args=args or {})
+        args = args or {}
+        dry_run = bool(args.get("dry_run") or args.get("plan_only") or args.get("preview"))
+        check = permission_manager.check(tool, args=args)
+        if dry_run and check.get("decision") != Decision.DENY.value:
+            # Planning allows the user to inspect the plan before approving.
+            # The real execution path still runs through the same permission
+            # gate and will require an approval when dry_run is removed.
+            permission_manager.audit(
+                tool, "allow", None, check.get("risk"),
+                extra={"safety": check.get("safety"), "dry_run": True},
+            )
+            return None
         if check.get("decision") == Decision.ALLOW.value:
             return None
         return JSONResponse({

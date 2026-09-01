@@ -396,6 +396,11 @@ def test_command_async_mission_autonomous(client):
     r = client.post("/command", json={
         "text": "mission: build a tiny tool and verify it", "user_id": "rt2",
         "platform": "dashboard", "autonomous": True, "async": True,
+        # the autonomy control-plane pre-flight will (correctly) ask for an
+        # approval before execution; this test is specifically checking the
+        # honest no-model-backend blocker, so it deliberately opts out of
+        # the approval pre-flight for this offline/mock run.
+        "preflight": False,
     })
     assert r.status_code == 200, r.text
     body = r.json()

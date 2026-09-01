@@ -123,7 +123,15 @@ def assess_tool_action(tool_name: str, args: dict[str, Any] | None = None) -> Ac
 
     # Red Line 3: private data/secret handling. Broad local scans are yellow;
     # exfiltration/logging/committing obvious secrets is red.
-    if re.search(r"\b(home directory|~/|/home/|downloads folder|documents folder|browser profile|\.ssh|\.env|id_rsa|credentials?)\b", text):
+    # ``~`` is deliberately not wrapped in a word-boundary alternation: a raw
+    # ``~/Documents`` path has a non-word boundary before the tilde in
+    # ``path=~/documents``, so ``\b~`` silently fails to match and the action
+    # is incorrectly classified green.
+    if re.search(
+        r"(?:home directory|~|/home/|/users/|/documents/|/downloads/|/desktop/|"
+        r"documents?|downloads?|desktops?|browser profile|\.ssh|\.env|id_rsa|credentials?)",
+        text,
+    ):
         mark("yellow", 3, "touches broad/private local data and needs approved scope/purpose")
     if re.search(r"\b(upload|post|send|publish|commit|log|paste)\b.{0,50}\b(secret|credential|token|api key|\.env|id_rsa|private key|cookie)\b", text):
         mark("red", 3, "would expose or persist secrets/private data outside approved purpose")
