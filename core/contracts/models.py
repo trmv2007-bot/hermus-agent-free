@@ -22,7 +22,13 @@ class Capability(str, Enum):
 
 
 class FailureClass(str, Enum):
-    """Separate failure classes with different recovery policies."""
+    """Separate failure classes with different recovery policies.
+
+    These map to the canonical structured error codes the ModelGateway exposes so
+    a mission/agent can decide on recovery without parsing free-form text:
+    ``provider_unavailable``, ``rate_limited``, ``authentication_failed``,
+    ``model_unavailable``, ``timeout``, ``capability_mismatch``.
+    """
 
     RATE_LIMIT = "rate_limit"            # 429
     AUTH = "auth"                        # 401/403
@@ -32,6 +38,9 @@ class FailureClass(str, Enum):
     CONTEXT_OVERFLOW = "context_overflow"
     POLICY_DENIED = "policy_denied"
     NETWORK = "network"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"   # provider down/refused
+    MODEL_UNAVAILABLE = "model_unavailable"          # model not deployed/known
+    CAPABILITY_MISMATCH = "capability_mismatch"      # model can't satisfy a requirement
     UNKNOWN = "unknown"
 
 

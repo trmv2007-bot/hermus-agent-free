@@ -771,7 +771,7 @@ class HermusDoctor:
     def _doctor_llm(self, model: Optional[str] = None):
         """Build the LLM the doctor speaks through (its own engine role)."""
         from .accelerators import model_ref_for
-        from .llm import FreeLLM
+        from .models import get_model_gateway
 
         ref = model or getattr(config, "doctor_model", "") or model_ref_for("doctor")
         if not ref:
@@ -779,15 +779,15 @@ class HermusDoctor:
         ref = self._prefer_downloaded_doctor(ref)
         if str(ref or "").split("/", 1)[0].lower() == "nollama":
             if self._ensure_local_engine(ref):
-                return FreeLLM(model=ref), ref
+                return get_model_gateway().llm(model=ref), ref
             # The download exists but NoLlama isn't installed/running (or was
             # explicitly disabled). Never silently drop to ollama/llama3.1:8b;
             # use any configured API provider instead, so the doctor keeps
             # working with "anything" configured.
             fb = self._configured_doctor_fallback()
             if fb:
-                return FreeLLM(model=fb[0]), fb[0]
-        return FreeLLM(model=ref), ref
+                return get_model_gateway().llm(model=fb[0]), fb[0]
+        return get_model_gateway().llm(model=ref), ref
 
     def triage(
         self,

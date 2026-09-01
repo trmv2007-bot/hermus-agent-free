@@ -765,9 +765,9 @@ class SkillForge:
         if self._llm:
             return self._llm(messages)
         try:
-            from .llm import free_llm
+            from .models import get_model_gateway
 
-            resp = free_llm.chat(messages)
+            resp = get_model_gateway().chat(messages)
             return getattr(resp, "content", "") or ""
         except Exception:
             return ""
@@ -875,7 +875,10 @@ class SkillForge:
             if query and "query" not in args:
                 args["query"] = query
             try:
-                out = tool_registry.execute(name, args)
+                # §5 canonical path: skills execute tools through the ToolGateway.
+                from .tools import get_tool_gateway, gateway_result_dict
+                res = get_tool_gateway().execute(name, args, actor="skill_forge")
+                out = gateway_result_dict(res)
             except Exception as e:
                 out = {{"error": str(e)}}
             failed = isinstance(out, dict) and (
@@ -1118,9 +1121,9 @@ class SkillForge:
         similar = self.find_similar(cand.description)
         if similar and similar.get("name"):
             try:
-                from .memory2 import memory2
+                from .memory import memory
 
-                memory2.remember(
+                memory.remember(
                     "procedural", cand.description,
                     importance=6.0, success=True, session=session_id,
                     metadata={"skill": similar["name"], "deduped": True},

@@ -544,6 +544,44 @@ class FreeLLM:
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(content), model="mock/mock")
         return LLMResponse(content, usage=usage)
 
+    def generate_image(self, prompt: str, image_base64: str) -> LLMResponse:
+        """Single-image vision completion through the provider adapter.
+
+        The provider owns the HTTP call; the caller never issues a request to a
+        model backend. Only the free-local Ollama path is wired for image input
+        (native ``/api/generate``, stream off) — matching the legacy vision tool.
+        A 404 (model not pulled) raises a ``ValueError`` that the gateway maps to
+        ``model_unavailable`` rather than silently returning text.
+        """
+        if self.provider != "ollama":
+            raise ValueError(f"vision is not supported for provider '{self.provider}'")
+        base = (self.base_url_override or config.ollama_base_url).rstrip("/")
+        if base.endswith("/v1"):
+            base = base[: -len("/v1")]
+        url = f"{base}/api/generate"
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "images": [image_base64],
+            "stream": False,
+        }
+        if self.temperature is not None:
+            payload["options"] = {"temperature": self.temperature}
+        try:
+            resp = requests.post(url, json=payload, timeout=120)
+        except requests.exceptions.ConnectionError:
+            raise requests.exceptions.ConnectionError(
+                f"Ollama not running at {base}. Start: ollama serve && ollama pull {self.model_name}"
+            )
+        if resp.status_code == 404:
+            raise ValueError(
+                f"Model {self.model_name} not found. Pull with: ollama pull {self.model_name} (free)"
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data.get("response", "")
+        return LLMResponse(content)
+
     def chat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Route to provider. Any unknown provider → OpenAI-compatible HTTP."""
         self.last_tools_disabled_reason = None
@@ -673,6 +711,21 @@ def _emit_chunks(text: str, on_delta: Optional[callable], size: int = 24) -> Non
         return
     for i in range(0, len(text), size):
         on_delta(text[i : i + size])
+
+
+def list_ollama_models(base_url: Optional[str] = None) -> list[str]:
+    """Return the model names visible at the local Ollama node (discovery, not generation).
+
+    Kept in the model subsystem so no call outside it issues a request to a model
+    backend — the gateway exposes this via :meth:`~ModelGateway.vision_models`.
+    """
+    base = (base_url or config.ollama_base_url).rstrip("/")
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]
+    resp = requests.get(f"{base}/api/tags", timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
 
 
 free_llm = FreeLLM()

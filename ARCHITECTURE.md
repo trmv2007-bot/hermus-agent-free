@@ -60,6 +60,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **World state** | `core.state.WorldStateFacade` | `core.computer.world_state` | one writable path |
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
 | **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
+| **Delegation** | `subagents.subagent` (facade) `→` `subagent.delegate` Job on `gateway.queue.JobQueue` | job log + results | the queue owns lifecycle; `core.delegation` is only the worker implementation |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Red-line policy / approvals** | `RED_LINES.md` + `core.safety_policy` + `core.approval` | `policies/red_lines.json` + capability ledger + scoped approval grants | deterministic green/yellow/red classification plus scoped grants for yellow actions |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |
@@ -100,6 +101,38 @@ Speech/media integration follows the same one-owner rule:
   idempotency/attempt fields are the shared contract and the queue adds only runtime
   operational fields.
 
+### 3.1 Delegation execution path (canonical)
+
+Delegation is **entered only through the canonical JobQueue**; there is no second
+delegation lifecycle.
+
+```
+Agent / Mission (tool: subagent_spawn, delegate_tasks)
+   └─ subagents.subagent.delegate / spawn_subagent
+        └─ submit_and_wait("subagent.delegate", {goal, tasks, …}, run_id, mission_id)
+             └─ gateway.queue.JobQueue ── owns lifecycle
+                  ├─ queued → running → succeeded / failed / cancelled
+                  ├─ retry (backoff), timeout, cancel, persistence, restart recovery
+                  └─ handler: gateway.handlers.make_delegate_handler
+                       └─ core.delegation.Delegation.fanout / decompose_and_run   (worker impl)
+                            └─ run_subagent_task → HermusAgent
+                                 ├─ ModelGateway      (model selection/completion/fallback)
+                                 ├─ ToolGateway       (tool execution, permission gate)
+                                 ├─ MemoryFacade      (recall/persist)
+                                 └─ EventBus          (job.lifecycle + delegation.activity events)
+```
+* Correlation: the Job carries `mission_id`/`run_id`; the handler passes them into the
+  delegation tree, a per-node `DelegationNode` carries `mission_id`/`run_id`/`job_id`/
+  `parent_task_id`, and the worker forwards them onto `HermusAgent` and every event.
+  When an agent delegates from inside a queued turn, `current_job_context()` inherits the
+  parent run/mission/task IDs automatically.
+* The sub-agent workers are the transport adapter of the delegation handler (subprocess
+  JSON-RPC or the in-process fallback) and are the **only** place that spawns workers;
+  they are driven from within a queued `subagent.delegate` Job, never from a tool/route.
+* The agent tools never invoke `core.delegation` directly and never call
+  `tool_registry.execute` / `memory2` / a provider directly; all of it runs through the
+  canonical boundaries.
+
 ---
 
 ## 4. Legacy components — relocated to compat / read-only / deleted
@@ -112,11 +145,12 @@ The final tree must not contain two competing implementations.
 |---|---|---|
 | Autonomy | ✅ **DONE** — `core/autonomous.py` **deleted** | `MissionEngine` is the only autonomy engine; disabling the runtime is a **BLOCKED** state, never a silent downgrade. The marker verifier/diagnoser was rehomed to `core/verifiers.py` (feature depth preserved). |
 | Events | ✅ **single canonical event authority** | The canonical `core.events.EventBus` (durable, replayable) is the single authoritative source. `dashboard_events` + `computer/events` mirror every event onto it (computer bridge added Phase 1); the dead `core/events/legacy.py` bridge was removed (zero production consumers). The dict APIs remain only as in-memory projections for realtime/SSE consumers. |
-| Memory | ✅ **DONE** — `MemoryFacade` is the single writable memory path | The facade owns the typed Memory2 store plus the v1 session/curated/user-model/token backend; no competing process-level v1 singleton. |
+| Memory | ✅ **DONE** — `MemoryFacade` is the single writable memory path | The facade owns the typed Memory2 store plus the v1 session/curated/user-model/token backend; no competing process-level v1 singleton. **All app-level `memory2` imports are migrated to the facade** (agent/delegation/integrations/skill_forge/profiles/harness); a gate forbids app-level `memory2` imports outside `core.memory`. The `recall_context` proxy was fixed (was passing a nonexistent `budget=` and silently returning `""`); `KINDS` is exported. |
 | World state | ✅ **DONE** — `world_state_v2.py` **deleted** | `core/computer/world_state.WorldState` (v1) is canonical; `core.state.WorldStateFacade` is the single writable path. The dead V2 duplicate (exported only from `__init__`, used by no functional code) was removed. |
-| Models | ✅ **verified single stack — no duplicate** | The provider layer (`providers` → `multi_key` → `provider_resolver` → `model_capabilities`) is one mutually-dependent stack with `ModelGateway` (`core/models/gateway.py`) as its single public facade. Each capability (`select_usable_bundle`, `list_available_providers`, `discover_runtime_bundles`, `negotiate`, `select_compatible_model`, `diagnose`) has exactly **one** owner. `router2` (runtime task-type model swap) and `model_fleet` (multi-model distribution) are distinct higher-level features, not duplicates. No competing production implementation exists to delete. |
+| Models | ✅ **verified single stack — no duplicate** | The provider layer (`providers` → `multi_key` → `provider_resolver` → `model_capabilities`) is one mutually-dependent stack with `ModelGateway` (`core/models/gateway.py`) as its single public facade. Each capability (`select_usable_bundle`, `list_available_providers`, `discover_runtime_bundles`, `negotiate`, `select_compatible_model`, `diagnose`) has exactly **one** owner. `router2` (runtime task-type model swap) and `model_fleet` (multi-model distribution) are distinct higher-level features, not duplicates. No competing production implementation exists to delete. **The live runtime now builds its model client through `ModelGateway.llm()`** (construction + router swap); `ModelGateway` exposes the public selection/completion boundary (`complete/chat/stream/select_model/negotiate_capabilities/fallback/health_check/provider_status/model_status`) with structured `ModelGatewayError` + `FailureClass` codes. A behavioral gate runs a real turn and asserts the gateway is used. |
 | Tools | ✅ **single invocable boundary — agent routed through it** | `core.tools.ToolGateway` is the only legal invocation path; the agent runtime (`core/agent._execute_tool`) now delegates to it (policy gate + typed `ToolResult` + canonical event emission), with `ToolRegistry` as the shared implementation. Gates enforce no agent bypass. |
-| Verification / capability | ✅ **integration + gates** | Canonical owners (MissionEngine/ModelGateway/ToolGateway/JobQueue/MemoryFacade/EventBus) drive realistic offline flow tests (`tests/test_capability_flows.py`, Tasks 1-8) and 21 architecture gates. |
+| Verification / capability | ✅ **integration + behavioral gates** | Canonical owners (MissionEngine/ModelGateway/ToolGateway/JobQueue/MemoryFacade/EventBus) drive realistic offline flow tests (`tests/test_capability_flows.py`, Tasks 1-8) and 31 architecture gates (`test_architecture_gates.py`) + 3 behavioral proofs (`test_behavioral_boundary_proof.py`, which run a real agent turn and assert ModelGateway / ToolGateway / MemoryFacade were actually used) + the delegation-connectivity proof (`tests/test_delegation_connectivity.py`). Full suite: **684 passed, 2 skipped, 16 warnings (0 failures)**. |
+| Security | ✅ **CORS secure-by-default** | Replaced `allow_origins=['*'] + allow_credentials=True` with a restricted default allow-list, credentials OFF unless explicitly opted in, wildcard forcing credentials OFF. No test depended on the old behavior. |
 | Setup | 🟡 `setup.sh`/`activate.sh` thin wrappers → `./hermus bootstrap` | one bootstrap. |
 
 ### Deletion milestones (follow-ups)
@@ -132,7 +166,10 @@ The final tree must not contain two competing implementations.
 2. ~~**Events**~~ ✅ **single canonical event authority** — the canonical `core.events.EventBus` is the durable/replayable source; `dashboard_events` + `computer/events` mirror every event onto it (computer bridge added). The dead `core/events/legacy.py` bridge (`publish_legacy`/`LegacyEventBridge`) was removed — it had zero production consumers. `run_events.RunBus` kept as the genuine per-run live-stream/steer/cancel owner that also mirrors onto the canonical bus.
 3. ~~**Memory**~~ ✅ **single public writer** — `MemoryFacade` (`core.memory.get_memory`) is the only public writable path; `core.compat.legacy_memory` is a private backend owned by the facade (intentionally retained, not a duplicate) and no production code imports it outside `core.memory` (enforced by gate).
 4. ~~**Models**~~ ✅ **static boundary gate** — `tests/test_architecture_gates.py::test_one_model_boundary_no_direct_provider_sdk` rejects any direct provider SDK import outside the canonical model subsystem; `ModelGateway` is the public selection facade and `routes_canonical` uses it. (Enforced by gate.)
-5. **Setup** — one idempotent `bootstrap`/`start`/`doctor`; confirm shell wrappers contain no business logic and never mask required dep failures.
+5. ~~**Setup**~~ ✅ **done** — one idempotent `bootstrap`/`start`/`doctor`. `bootstrap.py` distinguishes required vs optional deps and fails truthfully on missing required modules; `setup.sh` handles OS packages then delegates to the bootstrap; `activate.sh`/launchers are thin (no business logic, no `|| true` masking of required deps). Setup-contract gates added.
+6. ~~**Android control subsystem (Spec §16–19) backend**~~ ✅ **built** — `core.android` is the single Android boundary: `AndroidTool` (facade) reached via `ToolGateway` → `android_*` tools and `/android/*` API. Real `AdbAndroidTransport` (screencap/uiautomator/tap/text/keyevent/am start) + signed companion-bridge transport; explicit consent (denied by default) + configurable allowed-ops allowlist; HMAC-SHA256 secure pairing/sign/verify; append-only audit log + EventBus mirror; honest `android_control_unavailable` reporting. ⚠️ **Device/emulator E2E remains UNTESTED** — it requires a live device + the Android Agent Companion app and is never marked WORKING on mocks.
+7. ~~**Android Agent Companion (on-device half) + end-to-end control**~~ ✅ **reference built + agentic loop proven** — `android_companion/` (native Kotlin/Gradle: signed bridge server on loopback `127.0.0.1:8080`, accessibility `DeviceController`, `MediaProjection` `ScreenCapture`, consent `PairingActivity`) uses only documented permission-gated APIs (no security bypass). The backend Android path was fixed in the integration pass: ADB transport now reads binary screenshots safely (§8), retrieves the real UI tree by dumping then cat-ing the XML and parsing it (§9), resolves the launcher activity for app launch (§10), the singleton provisions a real transport via `build_default_transport()` (§7), and the bridge transport enforces loopback/HTTPS in code (§13). `core/android/simulate.py` implements the real `AndroidTransport` interface on a deterministic "device" so the full observe → reason → act → verify → continue loop is exercised through the real `ToolGateway`; `core/android/observe.py` (semantic observation — reason over labels/buttons/fields, not raw coords); `core/android/verify.py` (before/action/after). `tests/test_android_agentic_loop.py` proves the loop; `tests/test_android_subsystem.py` (20) covers the fixed ADB/UI/launch/factory/bridge paths. ⚠️ **Physical device/emulator + live-model E2E remain NOT VERIFIED** (no SDK/device/keys here); exact steps in `FINAL_REPORT.md` §52.
+7. ~~**Restart/resume (Spec §13)**~~ ✅ **done** — `MissionEngine.load_mission()`; restart tests (kill worker → fresh engine loads → resumes → completes; duplicate-execution prevented; cancel state survives). **Host-level computer E2E remains UNTESTED** (guarded test skips without pyautogui + a real display); computer *capability* is reported honestly (`computer_control_unavailable` when real control is unavailable). Provider-E2E on a real API key remains UNTESTED (no keys in this environment).
 
 ---
 

@@ -261,12 +261,12 @@ class Memory:
         context = "\n".join([f"[{r['timestamp']}] {r['role']}: {r['content'][:500]}" for r in results])
         # Use free LLM to summarize
         try:
-            from ..llm import free_llm
+            from ..models import get_model_gateway
             messages = [
                 {"role": "system", "content": "You are a memory summarizer. Summarize prior sessions relevant to query."},
                 {"role": "user", "content": f"Query: {query}\n\nPrior sessions:\n{context}\n\nSummarize what is relevant for cross-session recall."}
             ]
-            resp = free_llm.chat(messages)
+            resp = get_model_gateway().chat(messages)
             return resp.content
         except Exception:
             # Fallback without LLM

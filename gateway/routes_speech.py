@@ -20,6 +20,11 @@ except ImportError:  # executed as a plain module (python gateway/gateway.py)
 
 router = APIRouter()
 
+# The dashboard/events WebSocket self-authenticates (1028-close token check); it
+# lives on its own router so the control-plane HTTP router can be gated by the
+# optional gateway token without running a Request dependency on a WebSocket.
+ws_router = APIRouter()
+
 
 @router.get("/dashboard/status")
 async def dashboard_status():
@@ -277,7 +282,7 @@ async def speech_avatar_job_status(code: str):
     return JSONResponse(result, status_code=503)
 
 
-@router.websocket("/dashboard/events")
+@ws_router.websocket("/dashboard/events")
 async def dashboard_events_ws(websocket: WebSocket):
     """Live chat/speech lifecycle stream used by fullscreen Talking Mode."""
     from core.dashboard_events import dashboard_event_bus

@@ -13,7 +13,7 @@ legacy ``Memory`` class is still exported for tests that exercise the session/
 curated backend directly and is the implementation the facade owns.
 """
 
-from .store import MemoryFacade, get_memory
+from .store import MemoryFacade, get_memory, KINDS
 from .migration import (MigrationReader, migrate_legacy, detect_legacy,
                         verify_migration)
 
@@ -28,6 +28,7 @@ from ..compat.legacy_memory import Memory  # noqa: F401  (backend class)
 __all__ = [
     "MemoryFacade",
     "get_memory",
+    "KINDS",     # canonical typed-memory kinds
     "MigrationReader",
     "migrate_legacy",
     "detect_legacy",

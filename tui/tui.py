@@ -468,7 +468,7 @@ Free stack: No API keys needed for ollama/ + DuckDuckGo search + SQLite FTS5
                 # For free version, simple non-streaming but could stream via llm.chat_stream()
                 try:
                     # Try streaming via LLM
-                    from core.llm import free_llm
+                    from core.models import get_model_gateway
                     # Build messages similar to agent
                     messages = [
                         {"role": "system", "content": self.agent._build_system_prompt()},
@@ -476,7 +476,7 @@ Free stack: No API keys needed for ollama/ + DuckDuckGo search + SQLite FTS5
                     ]
                     # Stream
                     full_response = ""
-                    for chunk in free_llm.chat_stream(messages, tools=self.agent.tools):
+                    for chunk in get_model_gateway().stream(messages, tools=self.agent.tools):
                         print(chunk, end="", flush=True)
                         full_response += chunk
 

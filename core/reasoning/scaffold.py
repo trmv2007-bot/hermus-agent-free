@@ -125,9 +125,9 @@ class PlanBuilder:
     def build_plan(self, goal: str, session_id: str = "", difficulty: int = 3) -> Plan:
         plan = Plan(goal=goal, session_id=session_id, difficulty=difficulty)
         try:
-            from ..llm import FreeLLM
+            from ..models import get_model_gateway
 
-            llm = FreeLLM(self.model)
+            llm = get_model_gateway().llm(model=self.model)
             resp = llm.chat(
                 [
                     {"role": "system", "content": _PLAN_PROMPT},

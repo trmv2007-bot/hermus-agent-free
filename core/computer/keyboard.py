@@ -72,15 +72,24 @@ class PyAutoGUIKeyboard(KeyboardBackend):
 
 
 class DryRunKeyboard(KeyboardBackend):
-    """Headless/test keyboard: records keystrokes without injecting them."""
+    """Headless/test keyboard: records keystrokes without injecting them.
+
+    ``fallback_reason`` is set when this backend was chosen as a *fallback* because
+    real control (pyautogui) was unavailable. Callers can then surface that truth as
+    ``computer_control_unavailable`` instead of silently pretending real control.
+    When omitted (explicit dry-run mode / offline tests) the reason is empty.
+    """
 
     name = "dry_run"
 
-    def __init__(self) -> None:
+    def __init__(self, *, fallback_reason: Optional[str] = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.fallback_reason = fallback_reason
 
     def available(self) -> dict[str, Any]:
-        return {"available": True, "error": None, "note": "dry-run backend; no real key injection"}
+        return {"available": True, "error": None,
+                "note": "dry-run backend; no real key injection",
+                "fallback_reason": self.fallback_reason}
 
     def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
@@ -101,4 +110,4 @@ def default_keyboard() -> KeyboardBackend:
     real = PyAutoGUIKeyboard()
     if real.available()["available"]:
         return real
-    return DryRunKeyboard()
+    return DryRunKeyboard(fallback_reason=real.available().get("error") or "pyautogui unavailable")

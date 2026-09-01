@@ -137,7 +137,7 @@ def test_marker_verifier_and_failure_classification():
 def _new_agents_dir(tmp_path):
     from core.workspace import workspace
     ag = tmp_path / "agents"
-    workspace.dirs["agents"] = ag
+    workspace.base_dir = tmp_path
     ag.mkdir(parents=True, exist_ok=True)
     return ag
 
@@ -146,33 +146,39 @@ def test_agent_manager_lifecycle(tmp_path):
     """AgentManager is a registry + delegation facade; the canonical Job queue owns execution."""
     import time
     from core.agent_manager import AgentManager
-    _new_agents_dir(tmp_path)
+    from core.workspace import workspace
 
-    am = AgentManager()
-    assert am.create("tester", role="generic")["success"]
-    assert not am.create("tester", role="generic")["success"]  # duplicate
+    # Isolate the workspace root so real agent dirs under ~/.hermus are never
+    # created (and restored on exit, so the singleton never leaks across tests).
+    prior_base = workspace.base_dir
+    try:
+        _new_agents_dir(tmp_path)
+        am = AgentManager()
+        assert am.create("tester", role="generic")["success"]
+        assert not am.create("tester", role="generic")["success"]  # duplicate
 
-    # start/stop are registry lifecycle flags — no child subprocess, no pid, no heartbeat file.
-    st = am.start("tester")
-    assert st["success"] and st["queue"] == "canonical"
-    status = am.status("tester")
-    assert status["success"] and status["status"] == "registered"
-    assert status["alive"] is True
-    am.stop("tester")
-    # The removed protocol left no bespoke state.json / jobs / results lifecycle files.
-    ag = tmp_path / "agents" / "tester"
-    assert not (ag / "state.json").exists()
-    assert not (ag / "state.json").exists()
+        # start/stop are registry lifecycle flags — no subprocess, pid, heartbeat file.
+        st = am.start("tester")
+        assert st["success"] and st["queue"] == "canonical"
+        status = am.status("tester")
+        assert status["success"] and status["status"] == "registered"
+        assert status["alive"] is True
+        am.stop("tester")
+        # The removed protocol left no bespoke state.json / jobs / results files.
+        ag = tmp_path / "agents" / "tester"
+        assert not (ag / "state.json").exists()
 
-    # Job submission is a canonical Job; the registry does NOT write jobs/*.json.
-    job = am.submit_job("tester", {"task": "hello"})
-    assert job.get("success") is True
-    assert (ag / "jobs").exists() is False
+        # Job submission is a canonical Job; the registry does NOT write jobs/*.json.
+        job = am.submit_job("tester", {"task": "hello"})
+        assert job.get("success") is True
+        assert (ag / "jobs").exists() is False
 
-    # The watchdog reports honestly and delegates recovery to the canonical queue.
-    tick = am.watchdog_tick(restart=False)
-    assert tick["recovery_owner"] == "canonical-job-queue"
-    assert isinstance(tick["stale"], list)
+        # The watchdog reports honestly and delegates recovery to the queue.
+        tick = am.watchdog_tick(restart=False)
+        assert tick["recovery_owner"] == "canonical-job-queue"
+        assert isinstance(tick["stale"], list)
+    finally:
+        workspace.base_dir = prior_base
 
 
 def test_no_production_path_creates_agent_json_jobs():

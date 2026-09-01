@@ -25,13 +25,19 @@ from datetime import datetime
 from typing import Any, Optional
 from collections.abc import Callable
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.config import config
 from core.run_events import RunBus, run_bus, sse_format
 
 router = APIRouter()
+
+# The bidirectional WebSocket is mounted on its own router so the control-plane
+# HTTP/SSE router above can be gated by the optional gateway token WITHOUT the
+# dependency running ahead of the WS handler's own 1008-close auth (a failing
+# router dependency on a WebSocket closes it with the wrong code).
+ws_router = APIRouter()
 
 _agent_getter: Optional[Callable[..., Any]] = None
 
@@ -251,7 +257,7 @@ async def queue_status():
 
 
 # ---------------------------------------------------------------- bi-directional WS
-@router.websocket("/ws/agent")
+@ws_router.websocket("/ws/agent")
 async def ws_agent(websocket: WebSocket):
     """Bidirectional agent channel.
 
@@ -288,7 +294,7 @@ async def ws_agent(websocket: WebSocket):
         "kinds": sorted(job_queue.handlers),
         "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled},
         "sandbox": _safe(lambda: __import__("core.sandbox", fromlist=["sandbox"]).sandbox.status()["backend"]),
-        "memory_index": _safe(lambda: __import__("core.memory2", fromlist=["memory2"]).memory2.store.index_stats()),
+        "memory_index": _safe(lambda: _memory_index_stats()),
         "ts": _ts(),
     })
 
@@ -369,10 +375,15 @@ async def ws_agent(websocket: WebSocket):
                 name = str(msg.get("name") or msg.get("tool") or "")
                 args = msg.get("args") or msg.get("arguments") or {}
                 try:
-                    from core.tool_registry import tool_registry
+                    # §5 canonical path: gateway tool calls go through ToolGateway.
+                    from core.tools import get_tool_gateway, gateway_result_dict
 
-                    result = await asyncio.to_thread(tool_registry.execute, name,
-                                                     args if isinstance(args, dict) else {})
+                    def _run():
+                        r = get_tool_gateway().execute(name,
+                                                       args if isinstance(args, dict) else {},
+                                                       actor="realtime")
+                        return gateway_result_dict(r)
+                    result = await asyncio.to_thread(_run)
                     await send({"type": "tool_result", "tool": name, "result": result})
                 except Exception as e:
                     await send({"type": "error", "error": str(e)[:300], "tool": name})
@@ -380,10 +391,10 @@ async def ws_agent(websocket: WebSocket):
 
             if action == "memory":
                 try:
-                    from core.memory2 import memory2
+                    from core.memory import memory
 
                     out = await asyncio.to_thread(
-                        memory2.hybrid_recall,
+                        memory.hybrid_recall,
                         str(msg.get("query") or ""),
                         limit=int(msg.get("limit") or 6),
                     )
@@ -412,7 +423,7 @@ async def ws_agent(websocket: WebSocket):
 def _hello(job_queue) -> dict[str, Any]:
     """Capabilities frame sent right after a WS handshake."""
     from core.sandbox import sandbox as jail
-    from core.memory2 import memory2
+    from core.memory import memory
 
     return {
         "type": "hello",
@@ -422,9 +433,17 @@ def _hello(job_queue) -> dict[str, Any]:
         "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled,
                   "backend": job_queue.backend},
         "sandbox": _safe(lambda: jail.status()["backend"]),
-        "memory_index": _safe(lambda: memory2.store.index_stats()),
+        "memory_index": _safe(lambda: memory.index_stats()),
         "ts": _ts(),
     }
+
+
+def _memory_index_stats() -> dict[str, Any]:
+    try:
+        from core.memory import memory
+        return memory.index_stats()
+    except Exception:
+        return {}
 
 
 def _safe(fn: Callable[[], Any]) -> Any:
@@ -439,7 +458,7 @@ def _safe(fn: Callable[[], Any]) -> Any:
 async def memory_hybrid(payload: dict[str, Any] = None):
     """Hybrid recall over typed memory (BM25 + vectors + RRF + decay)."""
     payload = payload or {}
-    from core.memory2 import memory2
+    from core.memory import memory
 
     query = str(payload.get("query") or "")
     if not query.strip():
@@ -448,11 +467,11 @@ async def memory_hybrid(payload: dict[str, Any] = None):
     project = payload.get("project") or None
     kinds = payload.get("kinds") or None
     if payload.get("explain"):
-        return await asyncio.to_thread(memory2.explain, query, limit, project=project, kinds=kinds)
-    hits = await asyncio.to_thread(memory2.hybrid_recall, query, project=project, kinds=kinds, limit=limit)
+        return await asyncio.to_thread(memory.explain, query, limit, project=project, kinds=kinds)
+    hits = await asyncio.to_thread(memory.hybrid_recall, query, project=project, kinds=kinds, limit=limit)
     return {
         "query": query, "mode": "hybrid", "count": len(hits),
-        "index": memory2.store.index_stats(),
+        "index": memory.index_stats(),
         "results": [
             {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
              "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
@@ -465,11 +484,11 @@ async def memory_hybrid(payload: dict[str, Any] = None):
 
 @router.post("/memory/remember")
 async def memory_remember(payload: dict[str, Any] = None):
-    from core.memory2 import memory2
+    from core.memory import memory
 
     payload = payload or {}
     res = await asyncio.to_thread(
-        memory2.remember, str(payload.get("kind") or "semantic"), str(payload.get("content") or ""),
+        memory.remember, str(payload.get("kind") or "semantic"), str(payload.get("content") or ""),
         project=payload.get("project"), importance=float(payload.get("importance", 5.0)),
         success=payload.get("success"), ttl_hours=payload.get("ttl_hours"),
         pinned=bool(payload.get("pinned")), metadata=payload.get("metadata") or None,
@@ -482,34 +501,34 @@ async def memory_sweep(payload: dict[str, Any] = None):
     payload = payload or {}
     if not payload.get("confirm"):
         return JSONResponse({"error": "sweep archives/purges memory; send confirm=true"}, status_code=400)
-    from core.memory2 import memory2
+    from core.memory import memory
 
     return await asyncio.to_thread(
-        memory2.sweep, project=payload.get("project") or None,
+        memory.sweep, project=payload.get("project") or None,
         dry_run=bool(payload.get("dry_run", False)),
     )
 
 
 @router.get("/memory/stats")
 async def memory_stats():
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return await asyncio.to_thread(memory2.stats)
+    return await asyncio.to_thread(memory.stats)
 
 
 @router.post("/memory/reindex")
 async def memory_reindex(payload: dict[str, Any] = None):
     """Rebuild the FTS + vector indexes (after switching embedding model)."""
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return await asyncio.to_thread(memory2.reindex)
+    return await asyncio.to_thread(memory.reindex)
 
 
 @router.get("/memory/access-log")
 async def memory_access_log(memory_id: int, limit: int = 20):
-    from core.memory2 import memory2
+    from core.memory import memory
 
-    return {"memory_id": memory_id, "access": memory2.store.access_log(memory_id, limit=limit)}
+    return {"memory_id": memory_id, "access": memory.access_log(memory_id, limit=limit)}
 
 
 # ---- skill forge ---------------------------------------------------------------
@@ -614,10 +633,13 @@ async def sandbox_recent(limit: int = 20):
 # ---- delegation ---------------------------------------------------------------
 @router.post("/delegate")
 async def delegate(payload: dict[str, Any] = None):
-    """Fan out work to parallel sub-agents (processes + JSON-RPC) and aggregate."""
-    payload = payload or {}
-    from core.delegation import delegation
+    """Fan out work to parallel sub-agents (processes + JSON-RPC) and aggregate.
 
+    The delegation always runs as a canonical ``subagent.delegate`` Job on the
+    JobQueue (async: return the job id; sync: block for its structured result) so
+    the lifecycle is owned by the queue.
+    """
+    payload = payload or {}
     tasks = payload.get("tasks")
     goal = str(payload.get("goal") or payload.get("text") or "")
     if payload.get("async"):
@@ -626,21 +648,27 @@ async def delegate(payload: dict[str, Any] = None):
         job = job_queue.submit("subagent.delegate", payload, session_key=f"delegate:{goal[:40]}")
         return {"job_id": job.id, "run_id": job.run_id, "status": job.status,
                 "events_url": f"/jobs/{job.id}/events"}
-    if tasks:
-        return await asyncio.to_thread(
-            delegation.fanout, [str(t) for t in tasks], goal=goal,
-            aggregate=str(payload.get("aggregate") or "synthesize"),
-            max_children=int(payload.get("max_children") or delegation.max_workers),
-            timeout=payload.get("timeout"),
-        )
-    if not goal:
+    if not (tasks or goal):
         return JSONResponse({"error": "goal or tasks required"}, status_code=400)
-    return await asyncio.to_thread(
-        delegation.decompose_and_run, goal,
-        max_children=int(payload.get("max_children") or 4),
-        aggregate=str(payload.get("aggregate") or "synthesize"),
-        timeout=payload.get("timeout"),
+    # Canonical path: even the synchronous form of the /delegate endpoint runs the
+    # delegation as a ``subagent.delegate`` Job on the JobQueue (lifecycle owned by
+    # the queue), then blocks for its structured result — never calling the
+    # delegation module directly.
+    from subagents.subagent import DELEGATE_JOB, submit_and_wait
+
+    # Run the blocking submit+wait off the event loop so a live gateway (whose
+    # queue owns a running loop) can drive the job without deadlocking.
+    st = await asyncio.to_thread(
+        submit_and_wait, DELEGATE_JOB, payload,
+        session_key=f"delegate:{str(goal)[:40]}",
+        timeout=float(payload.get("timeout") or 300.0),
     )
+    if st.get("status") == "failed":
+        return {"ok": False, "error": st.get("error") or "delegate job failed",
+                "job_id": st.get("job_id")}
+    res = st.get("result") or {"ok": False, "error": "no result"}
+    res["job_id"] = st.get("job_id") or res.get("job_id")
+    return res
 
 
 @router.get("/delegation/status")
@@ -961,9 +989,20 @@ async def shutdown() -> None:
 
 
 def install(app, *, agent_getter: Optional[Callable[..., Any]] = None) -> dict[str, str]:
-    """Mount the realtime router on the app and wire queue ⇄ app lifecycle."""
+    """Mount the realtime router on the app and wire queue ⇄ app lifecycle.
+
+    The control-plane HTTP/SSE router is gated by the optional gateway token
+    (``_check_gateway_auth``: no-op when HERMUS_GATEWAY_TOKEN is unset, else every
+    job/command/delegate/memory/skill/sandbox/mission/swe/rollback endpoint
+    requires it). The single WebSocket is mounted separately on ``ws_router`` so
+    it keeps its own 1008-close token check rather than a router dependency that
+    would close it with the wrong code.
+    """
+    from .context import _check_gateway_auth
+
     global _agent_getter
     if agent_getter is not None:
         _agent_getter = agent_getter
-    app.include_router(router)
+    app.include_router(router, dependencies=[Depends(_check_gateway_auth)])
+    app.include_router(ws_router)
     return {"mounted": True}

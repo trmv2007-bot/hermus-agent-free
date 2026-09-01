@@ -116,15 +116,21 @@ def _has(binary: str) -> bool:
 
 
 class DryRunWindowBackend(WindowBackend):
-    """Headless/test backend: records window actions without performing them."""
+    """Headless/test backend: records window actions without performing them.
+
+    ``fallback_reason`` is set when this backend was chosen as a *fallback* because
+    real window control (pygetwindow) was unavailable.
+    """
 
     name = "dry_run"
 
-    def __init__(self) -> None:
+    def __init__(self, *, fallback_reason: Optional[str] = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.fallback_reason = fallback_reason
 
     def available(self) -> dict[str, Any]:
-        return {"available": True, "error": None, "note": "dry-run backend; no real window control"}
+        return {"available": True, "error": None, "note": "dry-run backend; no real window control",
+                "fallback_reason": self.fallback_reason}
 
     def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
@@ -148,4 +154,4 @@ def default_window_manager() -> WindowBackend:
     real = PyGetWindowBackend()
     if real.available()["available"]:
         return real
-    return DryRunWindowBackend()
+    return DryRunWindowBackend(fallback_reason=real.available().get("error") or "pygetwindow unavailable")

@@ -12,6 +12,7 @@ from typing import Optional
 
 from ..config import config
 from ..llm import FreeLLM
+from ..models import get_model_gateway
 
 # Priority order used to pick members when the budget allows fewer than the roster
 _ROLE_PRIORITY = ["chair", "researcher", "critic", "synthesizer", "judge"]
@@ -40,7 +41,7 @@ class CounselMember:
 
     def llm(self) -> FreeLLM:
         temp = self.temperature if self.temperature is not None else ROLE_TEMPERATURES.get(self.role, 0.3)
-        return FreeLLM(self.model, api_key=self.api_key or None, base_url=self.base_url or None, temperature=temp)
+        return get_model_gateway().llm(model=self.model, api_key=self.api_key or None, base_url=self.base_url or None, temperature=temp)
 
 
 def _discover_workers() -> list[dict]:

@@ -288,16 +288,14 @@ class ToolRegistry:
         ) -> dict:
             """Plan → fan out parallel sub-agents → aggregate structured results."""
             try:
-                from core.delegation import delegation
+                # Canonical path: delegation runs as a ``subagent.delegate`` Job on the
+                # JobQueue (execution lifecycle owned by the queue), never by calling the
+                # delegation module directly from a tool.
+                from subagents.subagent import delegate
 
-                if tasks:
-                    return delegation.fanout(
-                        [str(t) for t in tasks], goal=goal, max_children=int(max_children),
-                        aggregate=str(aggregate or "synthesize"),
-                    )
-                return delegation.decompose_and_run(
-                    goal, max_children=int(max_children), aggregate=str(aggregate or "synthesize")
-                )
+                return delegate(str(goal), tasks=list(tasks) if tasks else None,
+                                max_children=int(max_children),
+                                aggregate=str(aggregate or "synthesize"))
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
@@ -321,16 +319,16 @@ class ToolRegistry:
         ) -> dict:
             """Hybrid (BM25 + vectors, RRF-fused) recall over typed memory 2.0."""
             try:
-                from core.memory2 import memory2
+                from core.memory import memory
 
                 if explain:
-                    return memory2.explain(query, limit=int(limit),
-                                           project=project or None, kinds=kinds or None)
-                hits = memory2.hybrid_recall(query, limit=int(limit),
-                                             project=project or None, kinds=kinds or None)
+                    return memory.explain(query, limit=int(limit),
+                                          project=project or None, kinds=kinds or None)
+                hits = memory.hybrid_recall(query, limit=int(limit),
+                                            project=project or None, kinds=kinds or None)
                 return {
                     "query": query, "mode": "hybrid", "count": len(hits),
-                    "index": memory2.store.index_stats(),
+                    "index": memory.index_stats(),
                     "results": [
                         {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
                          "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
@@ -345,9 +343,9 @@ class ToolRegistry:
         def memory_sweep(dry_run: bool = True, project: str = "") -> dict:
             """Run the decay lifecycle pass (archive stale, purge dead, consolidate dupes)."""
             try:
-                from core.memory2 import memory2
+                from core.memory import memory
 
-                return memory2.sweep(project=project or None, dry_run=bool(dry_run))
+                return memory.sweep(project=project or None, dry_run=bool(dry_run))
             except Exception as e:
                 return {"error": str(e)}
 
@@ -643,6 +641,20 @@ class ToolRegistry:
             register_architecture_tools(self)
         except Exception as e:
             self._errors.append(f"integrations: {e}")
+        # Android control tools (consent-gated, audited; single Android boundary)
+        try:
+            from .android.tools import register_android_tools
+
+            register_android_tools(self)
+        except Exception as e:
+            self._errors.append(f"android: {e}")
+        # Computer control tools (honest computer_control_unavailable reporting)
+        try:
+            from .computer.tools import register_computer_tools
+
+            register_computer_tools(self)
+        except Exception as e:
+            self._errors.append(f"computer: {e}")
         # Custom APIs as tools
         try:
             from core.custom_api import custom_api_manager

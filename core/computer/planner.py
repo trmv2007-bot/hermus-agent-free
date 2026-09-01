@@ -7,7 +7,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from ..llm import FreeLLM, free_llm
+from ..llm import FreeLLM
+from ..models import get_model_gateway
 from .skills import ComputerSkill, ComputerSkillStore
 from .world_state import WorldState
 
@@ -172,7 +173,7 @@ class ComputerPlanner:
         skills: Optional[ComputerSkillStore] = None,
         world_state: Optional[WorldState] = None,
     ):
-        self.llm = llm or free_llm
+        self.llm = llm or get_model_gateway().llm()
         self.skills = skills or ComputerSkillStore()
         self.world_state = world_state
         self.last_graph: Optional[TaskGraph] = None

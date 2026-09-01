@@ -10,6 +10,6 @@ Execution order (spec §9):
   emit outcome event -> run domain verifier -> feed typed outcome to retry/replan.
 """
 
-from .gateway import ToolGateway, get_tool_gateway, tool_response
+from .gateway import ToolGateway, get_tool_gateway, tool_response, gateway_result_dict
 
-__all__ = ["ToolGateway", "get_tool_gateway", "tool_response"]
+__all__ = ["ToolGateway", "get_tool_gateway", "tool_response", "gateway_result_dict"]

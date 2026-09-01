@@ -37,6 +37,7 @@ Gates enforcing these claims live in `tests/test_architecture_gates.py`.
 | Speech | `core.speech` | — |
 | Doctor/diagnostics | `core.doctor` | — |
 | Situational awareness model | `core.world_model.WorldModel` (facts/events for connectors) | distinct from persisted `WorldStateFacade` |
+| Android boundary | `core.android.tool.AndroidTool` (`get_android_tool`) | reaches via `tool_registry` → `ToolGateway` → `android_*` tools; consent + allowlist + audit |
 
 ---
 
@@ -52,7 +53,7 @@ Gates enforcing these claims live in `tests/test_architecture_gates.py`.
 ### Memory
 - `core/memory/__init__.py`, `core/memory/store.py` — canonical `MemoryFacade` (single public writer).
 - `core/memory/migration.py` — legacy-data migration reader (`MigrationReader`, `migrate_legacy`).
-- `core/memory2.py` — typed memory (semantic/working/procedural/hybrid) backend.
+- `core/memory2.py` — typed memory (semantic/working/procedural/hybrid) backend. **Internal to `core.memory`** — app-level `memory2` imports are forbidden by gate (`test_no_app_level_memory2_direct_access` now matches absolute *and* resolved-relative imports by final module segment; all app-level callers route through the facade: `tool_registry`, `gateway/handlers`, `gateway/realtime`, `gateway/routes_subsystems`).
 - `core/compat/legacy_memory.py` — session history / curated memory / user model / token usage **backend**. Retained as a private backend owned by the facade — it owns a real SQLite schema (sessions FTS5, curated_memory, skill_usage, trajectories, token_usage) and a user-model JSON file. This is a **distinct capability** from memory2, not a duplicate, so it is intentionally retained behind the single public facade. It is no longer a second public `Memory` singleton.
 
 ### Model
@@ -63,6 +64,17 @@ Gates enforcing these claims live in `tests/test_architecture_gates.py`.
 ### World state
 - `core/state/world.py` — `WorldStateFacade` (public writable path).
 - `core/computer/world_state.py` — `WorldState` backend owned by the facade.
+
+### Android
+- `core/android/tool.py` — `AndroidTool` facade (single Android boundary); `get_android_tool()`.
+- `core/android/transport.py` — `AndroidTransport` ABC, `AdbAndroidTransport` (real device), `BridgeAndroidTransport` (companion), `detect_capability`, `AndroidUnavailable`.
+- `core/android/permissions.py` — `AndroidPermissionManager` (consent denied-by-default + allowed-ops allowlist), `PermissionDenied`.
+- `core/android/secure.py` — HMAC-SHA256 pairing secret, sign/verify.
+- `core/android/audit.py` — append-only audit record + EventBus mirror.
+- `core/android/observe.py` / `verify.py` — semantic observation builder + before/action/after verifier.
+- `core/android/simulate.py` — deterministic simulated device (real `AndroidTransport` interface) for off-line E2E.
+- `core/android/agent.py` — deterministic goal-driven controller (observe → act → verify loop via real `ToolGateway`).
+- `android_companion/` — on-device native companion (signed bridge, accessibility `DeviceController`, MediaProjection `ScreenCapture`, consent `PairingActivity`). **NOT built/run here** (no SDK/device) — reference implementation.
 
 ### Jobs / agents
 - `gateway/queue.py` — `JobQueue`/`Job` (single job execution owner).
