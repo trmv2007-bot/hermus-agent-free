@@ -54,6 +54,8 @@ REQUIRED_PIP = [
 ]
 OPTIONAL = [
     ("playwright", "browser"),
+    ("pyautogui", "computer.mouse"),
+    ("pygetwindow", "computer.window"),
     ("PIL", "vision"),
     ("omnivoice", "speech.omnivoice"),
     ("soundfile", "speech.soundfile"),

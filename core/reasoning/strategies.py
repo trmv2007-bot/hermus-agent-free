@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from ..config import config
 from ..llm import FreeLLM
+from ..models import get_model_gateway
 
 
 def _chat(llm: FreeLLM, system: str, user: str) -> str:
@@ -51,7 +52,7 @@ def reflexion_in_loop(
     model: Optional[str] = None,
 ) -> tuple[str, dict[str, Any]]:
     """Critique the draft, then revise it. 2 extra calls max."""
-    llm = FreeLLM(model or config.model)
+    llm = get_model_gateway().llm(model=model or config.model)
     ev = _evidence_text(evidence)
     try:
         critique = _chat(
@@ -94,7 +95,7 @@ def self_consistency(
 
     def draft_one(seed: int) -> str:
         try:
-            llm = FreeLLM(model or config.model)  # fresh per thread (rotates keys)
+            llm = get_model_gateway().llm(model=model or config.model)  # fresh per thread (rotates keys)
             return _chat(
                 llm,
                 (
@@ -120,7 +121,7 @@ def self_consistency(
 
     try:
         merged = _chat(
-            FreeLLM(model or config.model),
+            get_model_gateway().llm(model=model or config.model),
             (
                 "You are a consensus synthesizer. Below are k independent drafts for the same "
                 "task. Produce ONE final answer that keeps the facts and phrasing they AGREE "
@@ -150,7 +151,7 @@ def verify_with_tools(
     Max cost: 1 claims call + up to 3 searches + 1 revise call. Any failure in a
     verification step keeps the draft and continues (never blocks the answer).
     """
-    llm = FreeLLM(model or config.model)
+    llm = get_model_gateway().llm(model=model or config.model)
     ev = _evidence_text(evidence)
     claims: list[str] = []
     try:
@@ -173,10 +174,13 @@ def verify_with_tools(
     verified = []
     for claim in claims:
         try:
-            from ..tool_registry import tool_registry
-
-            res = tool_registry.execute("web_search", {"query": claim, "max_results": 3})
-            text = json.dumps(res, ensure_ascii=False, default=str)[:400]
+            # §5 canonical path: route the search through the ToolGateway.
+            from ..tools import get_tool_gateway, gateway_result_dict
+            gw = get_tool_gateway()
+            res = gw.execute("web_search", {"query": claim, "max_results": 3},
+                             actor="reasoning")
+            out = gateway_result_dict(res)
+            text = json.dumps(out, ensure_ascii=False, default=str)[:400]
             verified.append(f"Claim: {claim}\nSearch: {text}")
         except Exception as e:
             verified.append(f"Claim: {claim}\nSearch failed: {e}")

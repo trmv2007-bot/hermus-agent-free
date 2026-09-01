@@ -57,6 +57,22 @@ def test_redact_recursive_and_off():
     assert redact({"key": "keep"}, enabled=False) == {"key": "keep"}
 
 
+def test_registry_result_with_empty_error_classifies_as_ok():
+    """§5 regression: tools that use ``\"error\": \"\"`` to mean success (e.g. sandbox_run)
+    must be classified as ok by the gateway, not as a TOOL_ERROR."""
+    from core.tools.gateway import _classify_registry_result, gateway_result_dict, get_tool_gateway, ToolGateway
+    # sandbox_run-style output: success=True, error="" (no-error sentinel).
+    raw = {"success": True, "stdout": "over_socket\n", "stderr": "", "returncode": 0,
+           "error": "", "backend": "local"}
+    ok, output, meta = _classify_registry_result(raw)
+    assert ok is True, f"empty error string must not be treated as a tool failure: {meta}"
+    assert output is raw
+    assert meta.get("ok") is True
+    # A genuinely failed dict (truthy error) still classifies as failure.
+    ok2, _, meta2 = _classify_registry_result({"error": "boom", "returncode": 1})
+    assert ok2 is False and meta2.get("error_code") == "TOOL_ERROR"
+
+
 def test_tool_result_shape():
     from core.contracts import ToolResult, ToolStatus
     r = ToolResult.error("TIMEOUT", "slow", retryable=True)

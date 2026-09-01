@@ -1266,6 +1266,20 @@ class MissionEngine:
         except Exception:
             return None
 
+    def load_mission(self, mission_id: str) -> MissionReport:
+        """Load a persisted mission from a (potentially fresh) engine/process.
+
+        This is the recovery entry point for restart/resume: a new engine (after a
+        worker was killed) reads the durable report and hands it back so the caller
+        can inspect it, then ``resume_mission`` continues it. Raises ``ValueError``
+        when the mission does not exist (callers should surface that as
+        ``mission_not_found``, not silently return a fabricated report).
+        """
+        report = self.get_mission(mission_id)
+        if report is None:
+            raise ValueError(f"Mission {mission_id} not found in {self.storage_dir}")
+        return report
+
     def list_missions(self) -> list[MissionReport]:
         missions: list[MissionReport] = []
         if not self.storage_dir.exists():

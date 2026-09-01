@@ -20,20 +20,19 @@ Then start the live gateway:
 ```
 *(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
 
-Open **`http://localhost:8000/dashboard`** in your browser!
+Open **`http://localhost:8000/control`** in your browser!
 
 ---
 
-## 🎛️ The 4 Control Decks
+## 🎛️ The Control Room (single production UI)
 
-1. **Daily Control Center & Setup Wizard (`http://localhost:8000/dashboard`):**
-   * Multi-tab control room for chat, multi-model fleet, key vault, semantic RAG memory, tools registry, and channel webhooks.
-2. **Jarvis Holographic Spatial HUD (`http://localhost:8000/jarvis`):**
-   * 3D Living holographic gyroscopic orb, infinite pan/zoom spatial canvas, reactive audio synthesizer, and multi-window workspace.
-3. **Computer Agent Flight Deck (`http://localhost:8000/computer/dashboard`):**
-   * Autonomous browser execution deck with live viewport, real-time action telemetry, and DAG execution tracker.
-4. **Pocket Remote Control (`http://localhost:8000/remote`):**
-   * Mobile deck designed for smartphones with Dynamic Island status, instant tactile approvals, voice input, and encrypted Tailscale pairing.
+The canonical control room is at **`http://localhost:8000/control`** (root `/` redirects
+here). It is a single self-contained surface streamed from backend state + event
+replay — it is a *projection*, not a separate store. It covers chat, the multi-model
+fleet, key vault, semantic RAG memory, tools registry, channel webhooks, computer/agent
+autonomy and remote-pocket control, reconstructed from durable backend state. The
+older `/dashboard`, `/jarvis`, `/computer/dashboard` and `/remote` surfaces and their
+assets were removed and folded into `/control`.
 
 ---
 

@@ -125,54 +125,70 @@ def test_agent_autonomous_loop():
 # --------------------------------------------------------------------------
 # Gateway endpoints
 # --------------------------------------------------------------------------
-def test_gateway_endpoints():
+def test_gateway_endpoints(tmp_path):
     from fastapi.testclient import TestClient
 
     from gateway.gateway import app
+    from core.workspace import workspace
+    from core.profiles import profile_manager
 
-    client = TestClient(app)
+    # Redirect the global workspace to a temp root so /workspace/* and /agents/*
+    # never write to the real ~/.hermus (and the singletons are restored after),
+    # so this test is hermetic and repeatable across runs.
+    prior_base = workspace.base_dir
+    prior_profiles_dir = profile_manager.profiles_dir
+    try:
+        workspace.base_dir = tmp_path
+        # The profile manager is a module singleton that captured its dir at
+        # construction, so redirect it explicitly for this test.
+        profile_manager.profiles_dir = tmp_path / "profiles"
 
-    # workspace
-    r = client.post("/workspace/create", json={"name": "gwtest", "description": "d"})
-    assert r.status_code == 200 and r.json().get("success")
+        client = TestClient(app)
 
-    # memory2
-    r = client.post("/memory2/remember", json={"kind": "semantic", "content": "gw memory"})
-    assert r.status_code == 200 and r.json().get("success")
-    r = client.post("/memory2/recall", json={"query": "gw memory"})
-    assert r.status_code == 200 and len(r.json().get("results", [])) >= 1
+        # workspace
+        r = client.post("/workspace/create", json={"name": "gwtest", "description": "d"})
+        assert r.status_code == 200 and r.json().get("success")
 
-    # permissions
-    r = client.post("/permissions/check", json={"tool": "shell_execute"})
-    assert r.status_code == 200 and r.json()["decision"] in ("allow", "ask")
-    r = client.get("/permissions/log")
-    assert r.status_code == 200 and isinstance(r.json().get("log"), list)
+        # memory2
+        r = client.post("/memory2/remember", json={"kind": "semantic", "content": "gw memory"})
+        assert r.status_code == 200 and r.json().get("success")
+        r = client.post("/memory2/recall", json={"query": "gw memory"})
+        assert r.status_code == 200 and len(r.json().get("results", [])) >= 1
 
-    # research (offline: empty search → graceful)
-    r = client.post("/research", json={"query": "test"})
-    assert r.status_code == 200 and "answer" in r.json()
+        # permissions
+        r = client.post("/permissions/check", json={"tool": "shell_execute"})
+        assert r.status_code == 200 and r.json()["decision"] in ("allow", "ask")
+        r = client.get("/permissions/log")
+        assert r.status_code == 200 and isinstance(r.json().get("log"), list)
 
-    # router
-    r = client.post("/router/select", json={"text": "write code"})
-    assert r.status_code == 200 and r.json().get("task_type")
+        # research (offline: empty search → graceful)
+        r = client.post("/research", json={"query": "test"})
+        assert r.status_code == 200 and "answer" in r.json()
 
-    # watchdog
-    r = client.post("/watchdog/handle", json={"error": "JSONDecodeError: line 3"})
-    assert r.status_code == 200 and r.json().get("known") is True
+        # router
+        r = client.post("/router/select", json={"text": "write code"})
+        assert r.status_code == 200 and r.json().get("task_type")
 
-    # agents
-    r = client.post("/agents/create", json={"name": "gwagent", "role": "generic"})
-    assert r.status_code == 200 and r.json().get("success")
-    r = client.get("/agents")
-    assert r.status_code == 200 and any(a.get("name") == "gwagent" for a in r.json().get("agents", []))
+        # watchdog
+        r = client.post("/watchdog/handle", json={"error": "JSONDecodeError: line 3"})
+        assert r.status_code == 200 and r.json().get("known") is True
 
-    # profiles
-    r = client.post("/profiles/create", json={"name": "gwprofile"})
-    assert r.status_code == 200 and r.json().get("success")
+        # agents
+        r = client.post("/agents/create", json={"name": "gwagent", "role": "generic"})
+        assert r.status_code == 200 and r.json().get("success")
+        r = client.get("/agents")
+        assert r.status_code == 200 and any(a.get("name") == "gwagent" for a in r.json().get("agents", []))
 
-    # screen status
-    r = client.get("/screen/status")
-    assert r.status_code == 200 and "running" in r.json()
+        # profiles
+        r = client.post("/profiles/create", json={"name": "gwprofile"})
+        assert r.status_code == 200 and r.json().get("success")
+
+        # screen status
+        r = client.get("/screen/status")
+        assert r.status_code == 200 and "running" in r.json()
+    finally:
+        workspace.base_dir = prior_base
+        profile_manager.profiles_dir = prior_profiles_dir
 
 
 # --------------------------------------------------------------------------

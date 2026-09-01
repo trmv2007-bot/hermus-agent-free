@@ -22,6 +22,10 @@ from gateway.context import _token_matches
 
 router = APIRouter()
 
+# /computer/events WebSocket self-authenticates; keep it off the gated HTTP router
+# so a Request dependency is never run on a WebSocket.
+ws_router = APIRouter()
+
 
 def _permission_guard(tool: str, args: dict | None = None):
     """Route-level guard for computer actions that bypass ToolGateway wrappers.
@@ -1024,7 +1028,7 @@ async def remote_control_action(payload: dict = None):
 
 
 
-@router.websocket("/computer/events")
+@ws_router.websocket("/computer/events")
 async def computer_events_ws(websocket: WebSocket):
     """Live event stream: task_started, state_changed, action_*, verification,
     repair_*, task_completed, emergency_stop, world_changed, ..."""

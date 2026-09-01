@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hermus Companion</string>
+    <string name="accessibility_desc">Allows Hermus to observe the accessible UI and perform
+        user-consented actions (tap / type / gestures). Only used when you explicitly enable
+        it and pair with your own Hermus backend.</string>
+</resources>

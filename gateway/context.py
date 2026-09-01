@@ -11,7 +11,7 @@ import os
 from typing import Optional
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+
 
 from core.agent import HermusAgent
 from core.config import config
@@ -52,14 +52,28 @@ def _token_matches(provided: Optional[str], expected: str) -> bool:
     return hmac.compare_digest(str(provided or ""), str(expected))
 
 
-def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> Optional[JSONResponse]:
-    """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token."""
+def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> None:
+    """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token.
+
+    Used as a FastAPI dependency on the control-plane HTTP routers. When no token is
+    configured the gateway stays open (local default); when ``HERMUS_GATEWAY_TOKEN``
+    or ``config.gateway_api_token`` is set, every gated HTTP route requires it. A
+    missing or wrong token raises ``HTTPException`` so the request is rejected before
+    any handler runs. (Note: a dependency that merely *returns* a ``Response`` does
+    not short-circuit in FastAPI — it must raise.)
+
+    Must only be applied to routers whose routes are all HTTP. WebSocket routes must
+    live on a separate, ungated router (or self-authenticate) because a WS route
+    cannot inject ``request: Request``.
+    """
+    from fastapi import HTTPException
+
     expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
     if not expected:
         return None  # open (local default)
     provided = x_hermus_token or request.headers.get("X-Hermus-Token") or request.query_params.get("token")
     if not _token_matches(provided, expected):
-        return JSONResponse({"error": "Unauthorized - set X-Hermus-Token header"}, status_code=401)
+        raise HTTPException(status_code=401, detail="Unauthorized - set X-Hermus-Token header")
     return None
 
 

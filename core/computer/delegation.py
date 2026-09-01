@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..agent_manager import AgentManager, agent_manager
-from ..llm import FreeLLM, free_llm
+from ..llm import FreeLLM
+from ..models import get_model_gateway
 from .planner import TaskGraph
 
 
@@ -81,7 +82,7 @@ class MultiAgentDelegator:
         root: str = "data/delegations",
     ):
         self.manager = manager or agent_manager
-        self.llm = llm or free_llm
+        self.llm = llm or get_model_gateway().llm()
         root_path = Path(root).expanduser()
         if not root_path.is_absolute() and root == "data/delegations":
             root_path = Path(__file__).resolve().parents[2] / root_path

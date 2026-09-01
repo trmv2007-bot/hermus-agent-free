@@ -85,15 +85,22 @@ class PyAutoGUIMouse(MouseBackend):
 
 
 class DryRunMouse(MouseBackend):
-    """Headless/test mouse: records calls without touching the pointer."""
+    """Headless/test mouse: records calls without touching the pointer.
+
+    ``fallback_reason`` is set when this backend was chosen as a *fallback* because
+    real control (pyautogui) was unavailable. Callers can surface that truth as
+    ``computer_control_unavailable`` instead of silently pretending real control.
+    """
 
     name = "dry_run"
 
-    def __init__(self) -> None:
+    def __init__(self, *, fallback_reason: Optional[str] = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.fallback_reason = fallback_reason
 
     def available(self) -> dict[str, Any]:
-        return {"available": True, "error": None, "note": "dry-run backend; no real pointer control"}
+        return {"available": True, "error": None, "note": "dry-run backend; no real pointer control",
+                "fallback_reason": self.fallback_reason}
 
     def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
@@ -114,8 +121,8 @@ class DryRunMouse(MouseBackend):
 
 
 def default_mouse() -> MouseBackend:
-    """Return a real backend when available, otherwise a safe dry-run one."""
+    """Return a real backend when available, otherwise a safe dry-run fallback."""
     real = PyAutoGUIMouse()
     if real.available()["available"]:
         return real
-    return DryRunMouse()
+    return DryRunMouse(fallback_reason=real.available().get("error") or "pyautogui unavailable")

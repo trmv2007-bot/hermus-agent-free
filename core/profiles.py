@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from .memory2 import Memory2
+from .memory import MemoryFacade
 from .workspace import workspace
 import builtins
 
@@ -41,8 +41,10 @@ class ProfileManager:
     def _profile_dir(self, name: str) -> Path:
         return self.profiles_dir / _safe_name(name)
 
-    def _memory(self, name: str) -> Memory2:
-        return Memory2(db_path=str(self._profile_dir(name) / "memory2.db"))
+    def _memory(self, name: str) -> MemoryFacade:
+        # Canonical facade owns the typed backend; the per-profile DB path is the
+        # only available knob (every profile keeps an independent store).
+        return MemoryFacade(db_path=str(self._profile_dir(name) / "memory2.db"))
 
     def create(self, name: str, persona: Optional[str] = None,
                model: Optional[str] = None) -> dict[str, Any]:

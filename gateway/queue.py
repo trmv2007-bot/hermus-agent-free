@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import threading
 import time
 import uuid
 from collections import deque
@@ -57,6 +58,80 @@ STATUS_INTERRUPTED = "interrupted"
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+# Per-thread job context: while a handler (and the agent it runs) is executing on
+# the queue, the current job's correlation IDs are exposed so that work the agent
+# spawns (e.g. a delegated sub-agent) inherits the parent run/mission/task ids.
+_ctxt_tls = threading.local()
+
+
+def set_current_job_context(job: "Job") -> None:
+    _ctxt_tls.job_id = job.id
+    _ctxt_tls.run_id = job.run_id
+    _ctxt_tls.mission_id = getattr(job, "mission_id", None) or ""
+    _ctxt_tls.task_id = (job.payload or {}).get("parent_task_id") or str(job.id)
+
+
+def clear_current_job_context() -> None:
+    for k in ("job_id", "run_id", "mission_id", "task_id"):
+        if hasattr(_ctxt_tls, k):
+            delattr(_ctxt_tls, k)
+
+
+def current_job_context() -> dict[str, str]:
+    """Correlation IDs of the job currently executing on this thread (if any)."""
+    return {
+        "job_id": getattr(_ctxt_tls, "job_id", ""),
+        "run_id": getattr(_ctxt_tls, "run_id", ""),
+        "mission_id": getattr(_ctxt_tls, "mission_id", ""),
+        "task_id": getattr(_ctxt_tls, "task_id", ""),
+    }
+
+
+def _lifecycle_event_type(status: str) -> str:
+    """Map a queue status to the canonical job lifecycle event name."""
+    return {
+        STATUS_QUEUED: "job.queued",
+        STATUS_RUNNING: "job.started",
+        STATUS_DONE: "job.completed",
+        STATUS_FAILED: "job.failed",
+        STATUS_CANCELLED: "job.cancelled",
+    }.get(status, f"job.{status}")
+
+
+def _emit_lifecycle_event(job: "Job", event_type: str, *, status: str = "",
+                          error: str = "", extra: Optional[dict[str, Any]] = None) -> None:
+    """Mirror a queue lifecycle transition onto the canonical EventBus.
+
+    The JobQueue already publishes to its per-run ``RunBus`` (drives SSE/WebSocket
+    consumers). This ALSO publishes a ``job.lifecycle`` envelope to the canonical
+    :class:`core.events.bus.EventBus` with the job/run/mission correlation IDs so
+    the single authoritative, replayable event source sees every job transition
+    (created/queued/started/progress/completed/failed/cancelled/timeout/retry) —
+    required for control-room state and post-hoc audit. Never raises.
+    """
+    try:
+        from core.events import get_bus
+        from core.contracts import EventEnvelope
+
+        payload = job.payload or {}
+        mission_id = getattr(job, "mission_id", None) or payload.get("mission_id") or None
+        env = EventEnvelope(
+            run_id=job.run_id,
+            mission_id=str(mission_id) if mission_id else None,
+            source="jobqueue",
+            type="job.lifecycle",
+            command=event_type,
+            target=str(job.id),
+            args_redacted={**(extra or {}), "kind": job.kind, "attempt": job.attempt,
+                           "session_key": job.session_key},
+            status=status or job.status,
+            error_code=str(error)[:400] if error else None,
+        )
+        get_bus().publish(env)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -331,6 +406,10 @@ class JobQueue:
             max_attempts=max(1, int(max_attempts if max_attempts is not None else 1)),
             idempotency_key=dedupe_key,
         )
+        # Carry the parent mission/task correlation ID so lifecycle events are traceable.
+        if payload.get("mission_id"):
+            job.mission_id = str(payload.get("mission_id"))
+        _emit_lifecycle_event(job, "job.created", status=STATUS_QUEUED)
         if dedupe_key and dedupe_key in self._recent_keys:
             existing_id = self._recent_keys[dedupe_key]
             existing = self.jobs.get(existing_id)
@@ -347,6 +426,7 @@ class JobQueue:
                       "session_key": session_key, "run_id": job.run_id, "data": _trim(payload)})
         self.bus.publish(job.run_id, "job_queued", {"job_id": job.id, "kind": kind,
                                                      "session_key": session_key})
+        _emit_lifecycle_event(job, "job.queued", status=STATUS_QUEUED)
         self._kick(job)
         return job
 
@@ -401,6 +481,8 @@ class JobQueue:
         self.bus.publish(job.run_id, "job_started", {"job_id": job.id, "kind": job.kind,
                                                       "attempt": job.attempts,
                                                       "max_attempts": job.max_attempts})
+        _emit_lifecycle_event(job, "job.started", status=STATUS_RUNNING,
+                              extra={"attempt": job.attempts})
         self._record({"job_id": job.id, "event": "started", "attempt": job.attempts})
         try:
             if handler is None:
@@ -422,6 +504,8 @@ class JobQueue:
                         # (and the agent loop polls the run bus) and unwinds itself.
                         ctx.emit("cancel_requested", {"reason": f"job timeout after {job.timeout}s"})
                         self.bus.cancel(job.run_id)
+                        _emit_lifecycle_event(job, "job.timeout", status=STATUS_RUNNING,
+                                              error=f"timed out after {job.timeout}s")
                         try:
                             result = await asyncio.wait_for(fut, timeout=self.cancel_grace)
                         except asyncio.CancelledError:
@@ -447,6 +531,9 @@ class JobQueue:
                 delay = min(30.0, self.retry_backoff ** job.attempts)
                 self.bus.publish(job.run_id, "job_retry", {"job_id": job.id, "error": str(e)[:400],
                                                             "attempt": job.attempts, "in": delay})
+                _emit_lifecycle_event(job, "job.retry", status=STATUS_QUEUED,
+                                      error=f"{type(e).__name__}: {e}",
+                                      extra={"attempt": job.attempts, "in": delay})
                 self._record({"job_id": job.id, "event": "retry", "error": str(e)[:400]})
                 job.status = STATUS_QUEUED
                 if self._loop is not None:
@@ -485,6 +572,9 @@ class JobQueue:
              "duration_ms": job.brief()["duration_ms"],
              "result_preview": _trim(job.result or {})},
         )
+        _emit_lifecycle_event(job, _lifecycle_event_type(status), status=status,
+                              error=job.error if status == STATUS_FAILED else "",
+                              extra={"duration_ms": job.brief()["duration_ms"]})
         try:
             self.bus.finish(job.run_id, "finished" if status == STATUS_DONE else status,
                             result=job.result, error=job.error if status == STATUS_FAILED else "")
@@ -510,6 +600,8 @@ class JobQueue:
             return {"cancelled": True, "job_id": job_id, "stage": "queued"}
         self.bus.cancel(job.run_id)
         self.bus.publish(job.run_id, "cancel_requested", {"job_id": job_id})
+        _emit_lifecycle_event(job, "job.cancel_requested", status=STATUS_RUNNING,
+                              error="cancel requested (cooperative)")
         return {"cancelled": True, "job_id": job_id, "stage": "cooperative",
                 "note": "agent will stop at its next step boundary"}
 
@@ -830,23 +922,32 @@ def _row_time(row: dict[str, Any]) -> float:
 
 
 def _call_with_context(handler: JobHandler, ctx: JobContext) -> Any:
-    """Run a sync handler in a worker thread; supports ``emit=`` kwarg handlers."""
+    """Run a sync handler in a worker thread; supports ``emit=`` kwarg handlers.
+
+    While the handler runs, the job's correlation IDs are exposed on this thread so
+    any work the handler (or the agent it runs) spawns inherits the parent run /
+    mission / task ids — the delegation path reads them via :func:`current_job_context`.
+    """
     try:
         sig = inspect.signature(handler)
         params = sig.parameters
     except (TypeError, ValueError):
         params = {}
-    if "emit" in params and "ctx" not in params:
-        return handler(ctx.payload, emit=ctx.emit)
-    if "ctx" in params:
+    set_current_job_context(ctx.job)
+    try:
+        if "emit" in params and "ctx" not in params:
+            return handler(ctx.payload, emit=ctx.emit)
+        if "ctx" in params:
+            return handler(ctx)
+        if params and next(iter(params.values())).kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY
+        ):
+            first = next(iter(params.values()))
+            if first.name in ("payload", "job"):
+                return handler(ctx.payload)
         return handler(ctx)
-    if params and next(iter(params.values())).kind in (
-        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY
-    ):
-        first = next(iter(params.values()))
-        if first.name in ("payload", "job"):
-            return handler(ctx.payload)
-    return handler(ctx)
+    finally:
+        clear_current_job_context()
 
 
 def _trim(data: Any, limit: int = 1500) -> Any:

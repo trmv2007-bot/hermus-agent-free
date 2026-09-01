@@ -77,8 +77,24 @@ def _rel(p: Path) -> str:
         return str(p)
 
 
+def _resolve_relative(p: Path, module: str) -> str:
+    """Resolve a relative ``ImportFrom.module`` (e.g. ``..memory2``) to an absolute
+    dotted module using the importing file's package, or return the raw value if the
+    file is not inside the repo package root."""
+    if not module.startswith("."):
+        return module
+    rel = os.path.relpath(p, ROOT)
+    parts = rel.split(os.sep)[:-1]  # directory components of the importing file
+    # Package of the importing module: replace slashes with dots.
+    pkg = ".".join(x for x in parts if x != "" and x != "..")
+    up = len(module) - len(module.lstrip("."))
+    base = pkg.split(".")[:-up] if pkg else []
+    tail = module.lstrip(".")
+    return ".".join(base + ([tail] if tail else [])) if (base or tail) else module
+
+
 def _imports(p: Path) -> list[str]:
-    """Return dotted module names imported by a file (static)."""
+    """Return dotted module names imported by a file (static, relative-resolved)."""
     mods: list[str] = []
     try:
         tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
@@ -90,9 +106,9 @@ def _imports(p: Path) -> list[str]:
                 mods.append(a.name)
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                mods.append(node.module)
+                mods.append(_resolve_relative(p, node.module))
             for a in node.names:
-                mods.append(f"{node.module or '.'}.{a.name}")
+                mods.append(f"{_resolve_relative(p, node.module or '.')}.{a.name}")
     return mods
 
 
@@ -154,6 +170,28 @@ def test_one_memory_writer_no_public_legacy_import():
     assert not offenders, f"production imports the legacy memory impl outside core.memory: {offenders}"
 
 
+def test_no_app_level_memory2_direct_access():
+    """core.memory is the ONLY writable memory boundary; app-level code must not
+    reach into the typed backend (memory2) directly. The typed store (memory2) is
+    internal to core.memory and may only be imported there. (Config flag strings
+    like ``memory2_enabled`` are allowed; the *import* is what is forbidden.)"""
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel.startswith("core/memory/") or rel == "core/compat/legacy_memory.py":
+            continue
+        for mod in _imports(p):
+            # Matches ``memory2``, ``core.memory2``, and relative ``.memory2``/
+            # ``..memory2`` (after resolution) — i.e. the typed backend by final segment.
+            last = mod.split(".")[-1]
+            if last == "memory2" and not rel.startswith("core/memory/"):
+                offenders.append((rel, mod))
+    assert not offenders, (
+        "app-level code directly imports the typed memory backend (memory2); "
+        f"route through core.memory: {offenders}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # One world-state owner
 # ---------------------------------------------------------------------------
@@ -179,6 +217,37 @@ def test_one_model_boundary_no_direct_provider_sdk():
             if mod in _PROVIDER_SDK or mod.split(".")[0] in _PROVIDER_SDK:
                 offenders.append((rel, mod))
     assert not offenders, f"direct provider SDK import outside model subsystem: {offenders}"
+
+
+def test_one_model_boundary_no_direct_free_llm_construction():
+    """Every production model invocation is obtained via ModelGateway.
+
+    Application code must not construct a ``FreeLLM`` (the provider-call
+    implementation) directly nor use the module-level ``free_llm`` singleton —
+    both bypass the canonical ModelGateway (selection/capability/fallback/health).
+    It must also not issue a request to a model backend endpoint directly
+    (``/api/generate``, ``/api/chat``, ``/chat/completions``) — that is the same
+    bypass via a different door. Only the model subsystem owner modules may.
+    """
+    model_endpoints = ("/api/generate", "/api/chat", "/chat/completions")
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if any(rel.startswith(m.rstrip("/*")) or rel == m for m in _MODEL_SUBSYSTEM):
+            continue
+        src = p.read_text(encoding="utf-8")
+        # Direct construction: FreeLLM(...)  and  free_llm.<method>(
+        for pat in ("FreeLLM(", "free_llm."):
+            if pat in src:
+                offenders.append((rel, pat))
+        for ep in model_endpoints:
+            if ep in src:
+                offenders.append((rel, f"direct model endpoint {ep}"))
+    assert not offenders, (
+        "application code constructs FreeLLM / uses the free_llm singleton / "
+        "calls a model endpoint directly; "
+        f"route through get_model_gateway(): {offenders}"
+    )
 
 
 def test_model_gateway_is_the_selection_facade():
@@ -273,6 +342,92 @@ def test_one_tool_gateway_no_duplicate_invoke_path():
     # invoke toolregistry.execute directly anymore.
     assert "tool_registry.execute(" not in agent, \
         "core.agent must not bypass the ToolGateway by calling tool_registry.execute"
+
+
+def _tool_registry_aliases(p: Path) -> set[str]:
+    """Return the local names bound to the tool-registry module in ``p`` (AST).
+
+    Handles ``from .tool_registry import tool_registry``, ``from ..tool_registry import
+    tool_registry as tr``, ``import tool_registry``, ``from core.tool_registry import ...
+    ``; returns the set of *call-site names* that actually reference the registry.
+    """
+    try:
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+    except SyntaxError:
+        return set()
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            # Normalize to see if the source module is a tool_registry module.
+            resolved = _resolve_relative(p, module)
+            if not (resolved.endswith(".tool_registry") or resolved == "tool_registry"
+                    or resolved == "core.tool_registry"):
+                continue
+            for alias in node.names:
+                local = alias.asname or alias.name
+                aliases.add(local)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.endswith(".tool_registry"):
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+#: modules that legitimately own/drive the registry directly (gateway is the public path;
+#: the registry implementation itself is exempt).
+_REGISTRY_OWNERS = {"core/tool_registry.py", "core/tools/gateway.py", "core/tools/__init__.py"}
+
+
+def test_no_tool_gateway_bypass_in_production():
+    """§31: no production module may invoke tools by calling ``tool_registry.execute(...)``
+    directly, bypassing the ToolGateway. AST-based (catches aliases), not string matching."""
+    offenders: list[str] = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in _REGISTRY_OWNERS:
+            continue
+        aliases = _tool_registry_aliases(p)
+        if not aliases:
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            attr = getattr(func, "attr", None)
+            value = getattr(func, "value", None)
+            if attr != "execute":
+                continue
+            name = getattr(value, "id", None)
+            if name in aliases:
+                offenders.append(f"{rel}:{getattr(node, 'lineno', '?')} {name}.execute(...)")
+    assert not offenders, (
+        "production bypassing the ToolGateway via tool_registry.execute (route via "
+        f"get_tool_gateway().execute()): {offenders}"
+    )
+
+
+def test_android_tool_default_transport_is_factory_provisioned():
+    """§31: the production Android singleton must not be left as AndroidTool(transport=None)
+    when a transport can be built — it must provision via the canonical transport factory."""
+    src = (ROOT / "core/android/tool.py").read_text(encoding="utf-8")
+    assert "build_default_transport" in src, \
+        "get_android_tool() must provision its transport via build_default_transport()"
+    assert "get_android_transport()" in src or "build_default_transport()" in src
+    # The factory (in the transport module) supplies the configured ADB/bridge transport.
+    transport_src = (ROOT / "core/android/transport.py").read_text(encoding="utf-8")
+    assert "def build_default_transport" in transport_src
+
+
+def test_android_no_duplicate_tool_impl():
+    """§31: exactly one AndroidTool facade class and one transport-factory function."""
+    tool_src = (ROOT / "core/android/tool.py").read_text(encoding="utf-8")
+    assert tool_src.count("class AndroidTool") == 1, "must be a single AndroidTool class"
+    assert "def get_android_tool" in tool_src
 
 
 # ---------------------------------------------------------------------------
@@ -408,3 +563,110 @@ def test_doctor_reports_explicit_states_not_fake_ok():
     src = (ROOT / "core/doctor.py").read_text(encoding="utf-8")
     for token in ("worst_severity", "ok", "attention", "critical", "findings"):
         assert token in src
+
+
+# ---------------------------------------------------------------------------
+# One canonical setup / bootstrap: thin wrappers, honest required-dep detection
+# ---------------------------------------------------------------------------
+def test_setup_thin_wrappers_delegate_to_bootstrap():
+    """setup.sh / activate.sh / launchers must be thin — no duplicated business
+    logic and no '|| true' masking of the canonical bootstrap."""
+    setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+    # setup.sh handles OS packages then delegates to the one-command bootstrap.
+    assert "bootstrap" in setup.lower()
+    assert "exec python bootstrap.py" in setup or '"./bin/hermus" bootstrap' in setup
+    activate = (ROOT / "activate.sh").read_text(encoding="utf-8")
+    assert "NO business logic" in activate or "no business logic" in activate.lower()
+
+
+def test_bootstrap_probes_required_deps_honestly():
+    """bootstrap.py must distinguish required vs optional capabilities and report
+    missing required deps (so a fresh install never silently degrades)."""
+    src = (ROOT / "bootstrap.py").read_text(encoding="utf-8")
+    assert "REQUIRED_IMPORTS" in src and "REQUIRED_PIP" in src
+    assert "OPTIONAL" in src
+    assert "def doctor()" in src and "def run()" in src
+    # It must classify optional deps as 'unavailable' with a reason, not fake ok.
+    assert "unavailable" in src
+    assert "required" in src.lower()
+    # No '|| true' style masking of the required install.
+    assert "no ``|| true`` masking on required dependencies" in src
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# One delegation entry point — must go through the canonical JobQueue
+# ---------------------------------------------------------------------------
+# The ONLY production code allowed to call the delegation engine directly is
+# (a) the delegation module itself and (b) the canonical ``subagent.delegate``
+# Job handler in gateway/handlers.py. Every other caller must submit a Job.
+_DELEGATION_ENGINE_OWNERS = {"core/delegation.py", "gateway/handlers.py"}
+_DELEGATION_DIRECT_CALLS = (
+    "delegation.fanout(",
+    "delegation.decompose_and_run(",
+    "delegation.delegate(",
+)
+
+
+def test_delegation_entered_only_through_canonical_queue():
+    """Delegation is a JobQueue owner: no tool/route/mission may invoke the
+    delegation engine directly, bypassing the queue lifecycle."""
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in _DELEGATION_ENGINE_OWNERS:
+            continue
+        src = p.read_text(encoding="utf-8")
+        for pat in _DELEGATION_DIRECT_CALLS:
+            if pat in src:
+                offenders.append((rel, pat))
+    assert not offenders, (
+        "delegation must be entered through the canonical JobQueue "
+        f"(submit a subagent.delegate job); direct engine calls bypass its "
+        f"lifecycle: {offenders}"
+    )
+
+
+def test_subagents_facade_submits_through_queue_not_direct_engine():
+    """subagents.subagent is a queue facade: it must submit jobs via
+    submit_and_wait, not call the delegation engine directly."""
+    src = (ROOT / "subagents/subagent.py").read_text(encoding="utf-8")
+    assert "submit_and_wait(" in src and "DELEGATE_JOB" in src, \
+        "the subagent facade must enqueue delegation on the canonical JobQueue"
+    # No direct engine fan-out/decompose calls in the facade.
+    for pat in ("_engine().fanout(", "_engine().decompose_and_run(", "engine.fanout(",
+                "engine.decompose_and_run("):
+        assert pat not in src, f"subagent facade bypasses the queue via {pat}"
+
+
+# ---------------------------------------------------------------------------
+# Subagent worker canonical boundaries
+# ---------------------------------------------------------------------------
+def test_subagent_worker_runs_through_canonical_boundaries():
+    """The sub-agent execution path must use the canonical boundaries: HermusAgent
+    (ModelGateway/ToolGateway/MemoryFacade) and the canonical EventBus — never a
+    second provider, tool or event path."""
+    dlg = (ROOT / "core/delegation.py").read_text(encoding="utf-8")
+    # The single worker engine builds the real agent (which routes model/tools/memory).
+    assert ("HermusAgent(" in dlg) or ("from .agent import HermusAgent" in dlg), \
+        "the sub-agent worker must run through HermusAgent"
+    # Worker must not construct a provider client directly.
+    assert "FreeLLM(" not in dlg, "delegation worker must not build a provider client directly"
+    # Synthesis/planning LLM calls route through the canonical ModelGateway.
+    assert "get_model_gateway().chat(" in dlg or "get_model_gateway()" in dlg, \
+        "delegation synthesis/planning must use the canonical ModelGateway"
+    # Delegation lifecycle events mirror onto the canonical EventBus.
+    assert "get_bus().publish(" in dlg, "delegation must emit events via the canonical EventBus"
+
+
+# ---------------------------------------------------------------------------
+# JobQueue lifecycle mirrors onto the canonical EventBus
+# ---------------------------------------------------------------------------
+def test_jobqueue_lifecycle_mirrors_onto_canonical_event_bus():
+    """The JobQueue is the canonical job lifecycle owner AND mirrors every job
+    transition onto the EventEnvelope EventBus (no second event authority)."""
+    q = (ROOT / "gateway/queue.py").read_text(encoding="utf-8")
+    assert "get_bus().publish(" in q, "JobQueue must mirror lifecycle onto the canonical EventBus"
+    assert "_lifecycle_event_type" in q, "JobQueue must map terminal statuses to lifecycle names"

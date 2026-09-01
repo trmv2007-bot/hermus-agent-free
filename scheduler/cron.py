@@ -56,12 +56,12 @@ class CronManager:
 
         # Fallback: try LLM to parse to cron (free via Ollama)
         try:
-            from core.llm import free_llm
+            from core.models import get_model_gateway
             messages = [
                 {"role": "system", "content": "Convert natural language schedule to cron expression. Only return cron, no explanation. Example: 'daily at 9am' -> '0 9 * * *'"},
                 {"role": "user", "content": text}
             ]
-            resp = free_llm.chat(messages)
+            resp = get_model_gateway().chat(messages)
             # Extract cron-like pattern
             cron_match = re.search(r'(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)', resp.content)
             if cron_match:

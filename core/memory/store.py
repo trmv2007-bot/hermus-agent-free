@@ -79,11 +79,41 @@ class MemoryFacade:
         except Exception:
             return self.recall(query, project=project, kinds=kinds, limit=limit)
 
-    def recall_context(self, query: str, *, budget: int = 2000, **kw) -> str:
+    def recall_context(self, query: str, *, budget: int = 2000, **kw) -> Any:
+        """Ranked memories + eviction report from the typed backend.
+
+        Proxies the real ``memory2.recall_context(query, limit, max_tokens, hybrid,
+        per_kind_cap, project, ...)`` signature so callers get the exact dict-shaped
+        result (``text``/``kept``/``evicted``); ``budget`` maps to the store's token
+        budget. Never raises: on error it returns an explicit empty report rather
+        than pretending recall succeeded.
+        """
+        kw = dict(kw)
+        # `budget` is the facade's public knob; the store calls it `max_tokens`.
+        if "max_tokens" not in kw:
+            kw["max_tokens"] = budget
         try:
-            return self._store.recall_context(query, budget=budget, **kw)
-        except AttributeError:
-            return ""
+            return self._store.recall_context(query, **kw)
+        except TypeError:
+            # Store doesn't accept these kwargs — retry with the core ones only.
+            try:
+                subset = {k: kw[k] for k in ("limit", "hybrid", "per_kind_cap",
+                                             "project", "max_tokens") if k in kw}
+                return self._store.recall_context(query, **subset)
+            except Exception:
+                return {"text": "", "kept": [], "evicted": [], "tokens": 0,
+                        "budget_tokens": budget, "mode": "empty", "ids": [], "index": {}}
+        except Exception:
+            # Fall back to a text-only block when the typed backend is unavailable.
+            try:
+                text = self._store.recall_prompt_block(query, **{k: kw[k] for k in
+                                                                 ("limit", "project")
+                                                                 if k in kw})
+                return {"text": text or "", "kept": [], "evicted": [], "tokens": 0,
+                        "budget_tokens": budget, "mode": "fallback", "ids": [], "index": {}}
+            except Exception:
+                return {"text": "", "kept": [], "evicted": [], "tokens": 0,
+                        "budget_tokens": budget, "mode": "empty", "ids": [], "index": {}}
 
     def recall_prompt_block(self, *args, **kw) -> str:
         try:
@@ -118,6 +148,29 @@ class MemoryFacade:
             return self._store.stats()
         except AttributeError:
             return {}
+
+    def sweep(self, *, project: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
+        """Run the typed backend's decay lifecycle pass (archive/purge/consolidate)."""
+        if self._store is not None and hasattr(self._store, "sweep"):
+            return self._store.sweep(project=project, dry_run=bool(dry_run))
+        return {"ok": True, "note": "sweep unavailable"}
+
+    def reindex(self) -> dict[str, Any]:
+        if self._store is not None and hasattr(self._store, "reindex"):
+            return self._store.reindex()
+        return {"ok": False, "note": "reindex unavailable"}
+
+    def index_stats(self) -> dict[str, Any]:
+        st = getattr(self._store, "store", None)
+        if st is not None and hasattr(st, "index_stats"):
+            return st.index_stats()
+        return {}
+
+    def access_log(self, memory_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        st = getattr(self._store, "store", None)
+        if st is not None and hasattr(st, "access_log"):
+            return st.access_log(memory_id, limit=limit)
+        return []
 
     # -- session / curated / user-model / token (legacy v1 backend) --------------
     @property

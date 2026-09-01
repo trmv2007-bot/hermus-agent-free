@@ -32,6 +32,11 @@ except ImportError:  # executed as a plain module (python gateway/gateway.py)
 
 router = APIRouter()
 
+# The inbound webhook lives on `router` and stays ungated (an external service
+# cannot attach an auth header). The channel *control* actions live on
+# `control_router`, which the gateway gates with the optional gateway token.
+control_router = APIRouter()
+
 
 @router.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
@@ -41,7 +46,20 @@ async def telegram_webhook(request: Request):
     and one long tool loop should not pin an HTTP worker. So: parse the update,
     enqueue a `channel.reply` job, return 202 with the job handle. Set
     HERMUS_WEBHOOK_SYNC=1 to restore the old inline behaviour.
+
+    When the optional HERMUS_TELEGRAM_WEBHOOK_SECRET is configured (register the
+    webhook with setWebhook's secret_token), the request must carry the matching
+    X-Telegram-Bot-Api-Secret-Token header; otherwise the route stays open for
+    setups that register a webhook without a secret.
     """
+    from gateway.context import _token_matches
+
+    expected = config.telegram_webhook_secret or os.getenv("HERMUS_TELEGRAM_WEBHOOK_SECRET")
+    if expected:
+        provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if not _token_matches(provided, expected):
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+
     try:
         data = await request.json()
     except Exception as e:
@@ -81,7 +99,7 @@ async def telegram_webhook(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@router.get("/channels/status")
+@control_router.get("/channels/status")
 async def channels_status():
     """Telegram/Discord channel runtime status"""
     return {
@@ -92,7 +110,7 @@ async def channels_status():
     }
 
 
-@router.post("/channels/start")
+@control_router.post("/channels/start")
 async def channels_start(payload: dict = None):
     """Manually start Telegram polling + Discord bot"""
     payload = payload or {}
@@ -101,7 +119,7 @@ async def channels_start(payload: dict = None):
     return {"started": started, "status": get_channel_status()}
 
 
-@router.post("/telegram/send")
+@control_router.post("/telegram/send")
 async def telegram_send(payload: dict):
     """Send a Telegram message directly (ops / cron delivery)"""
     chat_id = payload.get("chat_id")
