@@ -69,6 +69,7 @@ def test_capabilities_snapshot_is_backend_derived():
     c = _client()
     caps = c.get("/api/v1/system/capabilities").json()
     assert "providers" in caps and "tools" in caps and "tool_count" in caps
+    assert "speech" in caps and "transcription" in caps and "avatar" in caps
     assert isinstance(caps["providers"], list)
     assert isinstance(caps["tool_count"], int)
 

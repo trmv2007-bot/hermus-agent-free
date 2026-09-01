@@ -309,6 +309,65 @@ def test_runtime_uses_canonical_model_gateway():
 
 
 # ---------------------------------------------------------------------------
+# Integrated media capabilities keep one owner each
+# ---------------------------------------------------------------------------
+def test_omnivoice_backend_single_owner():
+    """Only the canonical speech subsystem may load or manage OmniVoice."""
+    src = (ROOT / "core/speech.py").read_text(encoding="utf-8")
+    assert "create_clone_prompt" in src and "OmniVoice" in src
+    allowed = {"core/speech.py", "core/config.py", "tools/speech_tools.py", "gateway/routes_speech.py"}
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in allowed:
+            continue
+        text = p.read_text(encoding="utf-8")
+        if "OmniVoice.from_pretrained" in text or "VoiceClonePrompt" in text:
+            offenders.append(rel)
+    assert not offenders, f"OmniVoice runtime logic escaped the speech owner: {offenders}"
+
+
+def test_heygem_connector_single_owner():
+    """Only the avatar connector may know the local HeyGem-style HTTP paths."""
+    src = (ROOT / "core/avatar.py").read_text(encoding="utf-8")
+    for token in ("preprocess_and_tran", "/v1/invoke", "/submit", "/query"):
+        assert token in src
+    allowed = {"core/avatar.py", "core/config.py", "tools/heygem.py", "gateway/routes_speech.py"}
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in allowed:
+            continue
+        text = p.read_text(encoding="utf-8")
+        if any(token in text for token in ("preprocess_and_tran", "/v1/invoke", "/easy/submit", "/easy/query")):
+            offenders.append(rel)
+    assert not offenders, f"avatar service HTTP details leaked outside the connector: {offenders}"
+
+
+def test_handy_compatibility_single_owner():
+    """Only tools.voice may own Handy-style local STT model discovery rules."""
+    src = (ROOT / "tools/voice.py").read_text(encoding="utf-8")
+    assert "discover_local_stt_models" in src and "com.pais.handy" in src
+    allowed = {"tools/voice.py", "core/config.py", "core/permissions.py", "gateway/routes_speech.py", "gateway/routes_canonical.py"}
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if rel in allowed:
+            continue
+        text = p.read_text(encoding="utf-8")
+        if "com.pais.handy" in text or "voice_discover_local_models" in text:
+            offenders.append(rel)
+    assert not offenders, f"Handy-style model discovery leaked outside tools.voice: {offenders}"
+
+
+def test_tool_registry_discovers_media_connectors():
+    """Integrated media capabilities must enter the app through ToolRegistry/ToolGateway."""
+    src = (ROOT / "core/tool_registry.py").read_text(encoding="utf-8")
+    for mod in ("tools.speech_tools", "tools.heygem", "tools.voice"):
+        assert mod in src, f"ToolRegistry must discover {mod}"
+
+
+# ---------------------------------------------------------------------------
 # Security: no committed credentials in production code
 # ---------------------------------------------------------------------------
 def test_no_committed_secrets_in_production():

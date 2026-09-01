@@ -33,6 +33,7 @@ def test_dashboard_status_and_event_websocket():
     assert body["gateway"] == "online"
     assert body["local"] is True
     assert "speech" in body and "tasks" in body
+    assert "transcription" in body and "avatar" in body
 
     with client.websocket_connect("/dashboard/events") as websocket:
         first = websocket.receive_json()

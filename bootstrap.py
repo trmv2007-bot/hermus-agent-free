@@ -55,6 +55,8 @@ REQUIRED_PIP = [
 OPTIONAL = [
     ("playwright", "browser"),
     ("PIL", "vision"),
+    ("omnivoice", "speech.omnivoice"),
+    ("soundfile", "speech.soundfile"),
     ("groq", "provider.groq"),
     ("huggingface_hub", "provider.hf"),
     ("faster_whisper", "voice"),

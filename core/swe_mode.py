@@ -10,6 +10,7 @@ import difflib
 import json
 import shutil
 import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -277,7 +278,7 @@ class SoftwareEngineerMode:
             # Run Python or toolchain tests
             if toolchain.language == "python":
                 test_res = subprocess.run(
-                    ["pytest", "-v"],
+                    [sys.executable, "-m", "pytest", "-v"],
                     cwd=str(root),
                     capture_output=True,
                     text=True,

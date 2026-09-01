@@ -132,6 +132,7 @@ class HermusDoctor:
             "diagnostics": self._diagnostics(),
             "watchdog": self._watchdog_history(),
             "engines": self._engine_state(),
+            "media": self._media_state(),
             "resources": self._resources(),
         }
         return signals
@@ -171,6 +172,21 @@ class HermusDoctor:
             return engine_state(probe=True)
         except Exception as exc:  # noqa: BLE001
             return {"status": "unknown", "error": f"{type(exc).__name__}: {exc}"}
+
+    @staticmethod
+    def _media_state() -> dict[str, Any]:
+        try:
+            from .avatar import get_avatar_service
+            from .speech import speech_engine
+            from tools.voice import voice_available_models
+
+            return {
+                "speech": speech_engine.status(),
+                "avatar": get_avatar_service().status(probe=True),
+                "transcription": voice_available_models(),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
     @staticmethod
     def _resources() -> dict[str, Any]:
@@ -290,6 +306,7 @@ class HermusDoctor:
         findings.extend(self._analyze_issues(signals.get("issues") or []))
         findings.extend(self._analyze_diagnostics(signals.get("diagnostics") or {}))
         findings.extend(self._analyze_engines(signals.get("engines") or {}))
+        findings.extend(self._analyze_media(signals.get("media") or {}))
         findings.extend(self._analyze_stuck(signals.get("stuck") or {}))
         findings.extend(self._analyze_resources(signals.get("resources") or {}))
         findings.extend(self._analyze_watchdog(signals.get("watchdog") or []))
@@ -449,6 +466,78 @@ class HermusDoctor:
                     "heavy generative reasoning runs on the GPU.",
                     [],
                     component="local_engine",
+                )
+            )
+        return out
+
+    @staticmethod
+    def _analyze_media(media: dict[str, Any]) -> list[Finding]:
+        out: list[Finding] = []
+        if media.get("error"):
+            out.append(
+                _finding(
+                    SEVERITY_LOW,
+                    "media_status",
+                    "Optional media capability probe failed",
+                    str(media.get("error"))[:200],
+                    ["Import core.speech, core.avatar, and tools.voice locally to reproduce the failing probe"],
+                    component="media",
+                )
+            )
+            return out
+
+        speech = media.get("speech") or {}
+        if speech and not speech.get("available"):
+            out.append(
+                _finding(
+                    SEVERITY_LOW,
+                    "speech_optional",
+                    "Local speech synthesis is unavailable",
+                    str((speech.get("detail") or {}).get("setup") or speech.get("detail") or "speech backend unavailable")[:220],
+                    [
+                        "Install piper or espeak-ng for basic offline TTS",
+                        "For advanced cloning/design, install optional OmniVoice dependencies (omnivoice, torch, soundfile)",
+                    ],
+                    component="speech",
+                )
+            )
+
+        avatar = media.get("avatar") or {}
+        if avatar.get("configured") and avatar.get("available") is False:
+            services = avatar.get("services") or {}
+            blocked = [
+                f"{name}: {(row or {}).get('detail') or 'unreachable'}"
+                for name, row in services.items()
+                if (row or {}).get("reachable") is not True
+            ]
+            out.append(
+                _finding(
+                    SEVERITY_LOW,
+                    "avatar_optional",
+                    "Talking-avatar connector is configured but not reachable",
+                    "; ".join(blocked)[:220] or "local HeyGem-style services did not answer",
+                    [
+                        "Start the local HeyGem-compatible services on ports 18180 and 8383/easy, or disable the connector URLs",
+                        "Use /speech/avatar/status?probe=true to verify both localhost services respond",
+                    ],
+                    component="avatar",
+                )
+            )
+
+        transcription = media.get("transcription") or {}
+        local_engine = transcription.get("local_engine") or {}
+        if not local_engine.get("ready") and int(transcription.get("discovered_count") or 0) == 0:
+            out.append(
+                _finding(
+                    SEVERITY_LOW,
+                    "transcription_optional",
+                    "No local STT accelerator or discovered model assets",
+                    "voice commands will fall back to slower/default transcription paths until a model asset is installed",
+                    [
+                        "Place Whisper GGML/GGUF or Parakeet assets in a configured handy-model-dir and re-check /speech/transcription/models",
+                        "Or download a Whisper/OpenVINO model through the Local AI Engine panel",
+                    ],
+                    component="transcription",
                 )
             )
         return out
@@ -813,6 +902,7 @@ class HermusDoctor:
                 "watchdog_failures": len(
                     [h for h in (signals.get("watchdog") or []) if h.get("ok") is False]
                 ),
+                "media": signals.get("media") or {},
                 "resources": signals.get("resources") or {},
             },
         }
@@ -873,6 +963,7 @@ class HermusDoctor:
         findings = self.analyze(signals)
         llm, ref = self._doctor_llm()
         engine = signals.get("engines") or {}
+        media = signals.get("media") or {}
         return {
             "enabled": bool(getattr(config, "doctor_enabled", True)),
             "auto": bool(getattr(config, "doctor_auto", False)),
@@ -881,6 +972,7 @@ class HermusDoctor:
             "model_available": bool(ref) and (engine.get("status") in ("ready", "not_applicable")),
             "engine_status": engine.get("status"),
             "engine_mode": (engine.get("plan") or {}).get("mode"),
+            "media": media,
             "worst_severity": findings[0].severity if findings else SEVERITY_INFO,
             "counts": _count_severities(findings),
             "finding_count": len(findings),

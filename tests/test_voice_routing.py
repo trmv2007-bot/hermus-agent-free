@@ -258,3 +258,4 @@ def test_transcription_status_route_reports_the_active_backend(monkeypatch):
     assert body["backend"] == "faster-whisper"
     assert body["local_engine"]["ready"] is False
     assert "Whisper model" in body["note"]
+    assert "discovered_count" in body and "search_dirs" in body

@@ -26,6 +26,8 @@ DISCOVER_MODULES = [
     "tools.browser",
     "tools.vision",
     "tools.voice",
+    "tools.speech_tools",
+    "tools.heygem",
     "tools.internet_eyes",
     "tools.agent_reach_doctor",
     "tools.facebook",

@@ -54,12 +54,30 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Tools** | `core.tools.ToolGateway` | ToolRegistry + evidence | only legal invocation path |
 | **Models** | `core.models.ModelGateway` | provider/credential state | only provider/select path |
 | **Memory** | `core.memory.MemoryFacade` | `core.memory2` MemoryStore | one writable path |
+| **Speech / TTS** | `core.speech.SpeechEngine` | `data/speech` (audio + OmniVoice prompts) | canonical local speech synthesis owner |
+| **Voice / STT** | `tools.voice` via `ToolGateway` + `/speech/*` routes | optional session history via `MemoryFacade` | one transcription + cleanup path |
+| **Avatar / talking video** | `core.avatar.AvatarService` | `data/avatar` (voices/audio/jobs) | optional local HeyGem-compatible connector |
 | **World state** | `core.state.WorldStateFacade` | `core.computer.world_state` | one writable path |
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
 | **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |
 | **Gateway** | `gateway/gateway.py` | — | transport only |
+
+Speech/media integration follows the same one-owner rule:
+
+- `core.speech.py` remains the only TTS owner. Existing `piper` / `espeak` /
+  `pyttsx3` paths stay intact, and OmniVoice is only an optional advanced backend
+  behind that same facade.
+- `core.avatar.py` is the only talking-avatar owner. It does not vendor or
+  reproduce HeyGem's Electron/app stack; it only targets the documented local
+  HTTP contract as an optional connector.
+- `tools.voice.py` remains the only STT owner. Handy-inspired model discovery,
+  transcript cleanup, and optional memory logging were folded into that same
+  path instead of creating a second dictation subsystem.
+- Capability/status reporting for these features must flow through the existing
+  canonical surfaces (`ToolGateway`, `/api/v1/system/capabilities`, `/speech/*`,
+  `bootstrap`, `core.doctor`) rather than a dashboard-only truth source.
 
 ---
 

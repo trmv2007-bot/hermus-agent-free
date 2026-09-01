@@ -3,6 +3,7 @@ import ast
 import json
 import re
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -272,7 +273,7 @@ def test_{name}_entrypoint():
 
             try:
                 res = subprocess.run(
-                    ["pytest", "-v", str(test_file)],
+                    [sys.executable, "-m", "pytest", "-v", str(test_file)],
                     cwd=str(self.skills_dir.parent),
                     capture_output=True,
                     text=True,
