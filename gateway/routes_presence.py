@@ -86,20 +86,32 @@ async def presence_goal_add(payload: dict[str, Any] | None = None):
 
 
 @router.post("/goals/{goal_id}/complete")
-async def presence_goal_complete(goal_id: str, payload: dict[str, Any] | None = None):
+async def presence_goal_complete(
+    goal_id: str,
+    payload: dict[str, Any] | None = None,
+    user_id: str | None = None,
+):
     from core.presence import get_presence
 
-    result = get_presence().complete_goal(goal_id, note=str((payload or {}).get("note") or ""))
+    payload = payload or {}
+    owner = str(payload.get("user_id") or user_id or "default")
+    result = get_presence().complete_goal(
+        goal_id,
+        note=str(payload.get("note") or ""),
+        user_id=owner,
+    )
     if not result.get("success"):
         return JSONResponse(result, status_code=404)
     return result
 
 
 @router.post("/goals/{goal_id}/touch")
-async def presence_goal_touch(goal_id: str):
+async def presence_goal_touch(goal_id: str, payload: dict[str, Any] | None = None, user_id: str | None = None):
     from core.presence import get_presence
 
-    result = get_presence().touch_goal(goal_id)
+    payload = payload or {}
+    owner = str(payload.get("user_id") or user_id or "default")
+    result = get_presence().touch_goal(goal_id, user_id=owner)
     if not result.get("success"):
         return JSONResponse(result, status_code=404)
     return result
@@ -134,7 +146,11 @@ async def presence_check_in(payload: dict[str, Any] | None = None):
         if due:
             selected = next((g for g in goals if g.get("id") == due[0].get("id")), None)
     if selected is None and not str(payload.get("text") or "").strip():
-        return {"queued": False, "reason": "no active goal is due for a check-in", "check_ins_due": manager.check_ins_due()}
+        return {
+            "queued": False,
+            "reason": "no active goal is due for a check-in",
+            "check_ins_due": manager.check_ins_due(user_id=user_id),
+        }
 
     title = str((selected or {}).get("title") or "your ongoing work")
     text = str(payload.get("text") or (
@@ -150,26 +166,32 @@ async def presence_check_in(payload: dict[str, Any] | None = None):
 
     platform = str(payload.get("platform") or "dashboard")
     run_id = str(payload.get("run_id") or f"run_presence_{uuid.uuid4().hex[:8]}")
-    job = job_queue.submit(
-        "runtime.turn",
-        {
-            "text": text,
-            "platform": platform,
-            "user_id": user_id,
-            "model": payload.get("model"),
-            # Chat mode has no system tools; read_only also strips custom APIs
-            # for this one cached-agent turn, even when wording is custom.
-            "mode": "chat",
-            "prefer": "chat",
-            "read_only": True,
-            "stream": bool(payload.get("stream", True)),
-        },
-        session_key=f"{platform}:{user_id}",
-        timeout=payload.get("timeout"),
-        run_id=run_id,
-    )
+    try:
+        job = job_queue.submit(
+            "runtime.turn",
+            {
+                "text": text,
+                "platform": platform,
+                "user_id": user_id,
+                "model": payload.get("model"),
+                # Chat mode has no system tools; read_only also strips custom APIs
+                # for this one cached-agent turn, even when wording is custom.
+                "mode": "chat",
+                "prefer": "chat",
+                "read_only": True,
+                "stream": bool(payload.get("stream", True)),
+            },
+            session_key=f"{platform}:{user_id}",
+            timeout=payload.get("timeout"),
+            run_id=run_id,
+        )
+    except Exception as exc:
+        return JSONResponse({
+            "queued": False,
+            "error": f"check-in could not be queued: {type(exc).__name__}: {exc}"[:400],
+        }, status_code=503)
     if selected:
-        manager.mark_checkin(str(selected.get("id")))
+        manager.mark_checkin(str(selected.get("id")), user_id=user_id)
         manager.record_moment(
             "checkin_requested",
             f"Requested a status check on {title}",

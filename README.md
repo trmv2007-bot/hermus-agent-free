@@ -73,6 +73,11 @@ POST /presence/check-in
 POST /presence/heartbeat
 ```
 
+`/api/status` remains a lightweight public transport probe and exposes only
+operational presence fields; identity, goals, moments and turn results stay on
+the authenticated `/presence` surface. When `HERMUS_GATEWAY_TOKEN` is set, the
+presence endpoints use the same gateway token as the rest of the control plane.
+
 The Control Room's **Presence** tab lets you edit the identity, add ongoing
 goals, see recent continuity moments and request a check-in. Voice-first requests
 and optional local TTS/talking-avatar rendering share the same operational

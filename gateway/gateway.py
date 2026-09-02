@@ -125,7 +125,7 @@ def _queue_due_presence_checkin(snapshot: dict) -> Optional[dict]:
             session_key="presence:default",
             run_id=run_id,
         )
-        get_presence().mark_checkin(goal_id)
+        get_presence().mark_checkin(goal_id, user_id="default")
         get_presence().record_moment(
             "proactive_checkin",
             f"Queued a safe status check on {title}",
@@ -484,7 +484,10 @@ async def api_status():
     try:
         from core.presence import get_presence
 
-        presence_snapshot = get_presence().snapshot()
+        # /api/status is intentionally a public transport probe. Do not expose
+        # identity, goal titles, user messages or turn results through it; the
+        # authenticated /presence endpoints carry the full continuity snapshot.
+        presence_snapshot = get_presence().public_status()
     except Exception as exc:
         presence_snapshot = {"error": f"presence unavailable: {type(exc).__name__}: {exc}"}
     return {

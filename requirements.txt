@@ -57,6 +57,9 @@ fastapi>=0.104.0
 python-multipart>=0.0.9  # multipart form parsing (dashboard file attachments)
 psutil>=5.9.0  # live JARVIS process/system telemetry
 uvicorn[standard]>=0.24.0
+# Keep WebSocket support explicit: the Control Room and live computer telemetry
+# otherwise silently fall back to polling when only bare uvicorn is installed.
+websockets>=12.0
 python-telegram-bot>=20.0
 discord.py>=2.3.0
 # Slack webhook via requests (free)

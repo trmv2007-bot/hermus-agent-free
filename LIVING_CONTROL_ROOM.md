@@ -14,7 +14,9 @@ it and their routes/assets removed.
 # open http://localhost:8000/control
 ```
 
-If `HERMUS_GATEWAY_TOKEN` is configured, open the dashboard with `?token=...`.
+If `HERMUS_GATEWAY_TOKEN` is configured, open the room as
+`/control?token=...`. The browser forwards it as an auth header for HTTP and as
+a query credential only where browser SSE/WebSocket APIs cannot set headers.
 The browser may also use a token saved under `hermus_gateway_token` in local
 storage. Keys and provider credentials remain server-side.
 

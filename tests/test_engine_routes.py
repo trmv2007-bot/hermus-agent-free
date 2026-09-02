@@ -100,6 +100,9 @@ def test_api_status_carries_the_engine_summary(client):
     assert set(engine["roles"]) >= {"reasoning", "background", "doctor", "vision"}
     assert "local_engine_routing_npu_gpu" in body["features"]
     assert "hermus_doctor_self_repair" in body["features"]
+    # Public status is a transport probe, not an unauthenticated continuity dump.
+    assert set(body["presence"]) == {"state", "changed_at", "last_seen", "last_heartbeat", "heartbeat_count"}
+    assert "identity" not in body["presence"] and "goals" not in body["presence"]
 
 
 def test_nollama_install_route_reports_failure_cleanly(client, monkeypatch):

@@ -443,6 +443,34 @@
 <script src="/static/control-client.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
+// When gateway auth is enabled, open /control?token=... once (or store it as
+// hermus_gateway_token). Browser fetch cannot read the server-side environment,
+// so attach that token to every API request without putting it into ordinary
+// fetch URLs. SSE/WS helpers add it separately because those browser APIs do
+// not support custom headers.
+const tokenFromUrl = new URLSearchParams(location.search).get("token") || "";
+let gatewayToken = tokenFromUrl;
+if (!gatewayToken) {
+  try { gatewayToken = localStorage.getItem("hermus_gateway_token") || ""; } catch(e) {};
+}
+if (gatewayToken) {
+  window.__HERMUS_GATEWAY_TOKEN = gatewayToken;
+  // Do not leave a query credential in the address bar/history after capturing it.
+  if (tokenFromUrl) {
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch(e) {}
+  }
+}
+if (gatewayToken && window.fetch) {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const opts = Object.assign({}, init || {});
+    const headers = new Headers(input && input.headers ? input.headers : undefined);
+    new Headers(opts.headers || {}).forEach((value, key) => headers.set(key, value));
+    headers.set("X-Hermus-Token", gatewayToken);
+    opts.headers = headers;
+    return nativeFetch(input, opts);
+  };
+}
 const conn = $("#conn");
 const rtt = $("#rtt");
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -770,7 +798,8 @@ async function refreshTelemetry(force){
 }
 function openTmStream(){
   try {
-    tmWs = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/dashboard/events");
+    const wsToken = gatewayToken ? "?token=" + encodeURIComponent(gatewayToken) : "";
+    tmWs = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/dashboard/events" + wsToken);
     tmWs.onmessage = (ev) => {
       try { const msg = JSON.parse(ev.data); if (msg && msg.kind === "snapshot") msg.events.forEach(tmAppend); else if (msg && msg.id) tmAppend(msg); } catch(e){}
     };

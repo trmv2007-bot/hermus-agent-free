@@ -11,6 +11,7 @@ These tests drive the canonical backend directly through the same endpoints
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 def _client():
@@ -51,6 +52,12 @@ def test_control_room_serves_from_real_backend_seeds():
     # approve/reject are built dynamically from a real /remote/{action} command
     assert '"/remote/" + act' in text or "'/remote/' + act" in text \
         or '"/remote/"' in text, "remote approve/reject must hit the real backend"
+    # Authenticated deployments must be usable from the browser too: HTTP uses
+    # the header and browser-only SSE/WS transports receive the query token.
+    assert "X-Hermus-Token" in text
+    assert "__HERMUS_GATEWAY_TOKEN" in text
+    client_js = Path("gateway/static/control-client.js").read_text()
+    assert "?token=" in client_js
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,25 @@ from core.config import config
 from core.presence import PresenceManager
 
 
+def test_corrupt_shape_is_ignored_without_breaking_boot(tmp_path):
+    path = tmp_path / "presence.json"
+    path.write_text(json.dumps({
+        "goals": ["not-a-goal", {"title": "token=old-secret", "priority": "bad", "checkin_count": "bad"}],
+        "moments": [None, {"summary": "api_key=old-secret"}],
+        "presence": {"heartbeat_count": "bad"},
+    }))
+    manager = PresenceManager(path)
+    snapshot = manager.snapshot()
+    assert len(snapshot["goals"]) == 1
+    assert "old-secret" not in str(snapshot["goals"])
+    assert snapshot["goals"][0]["priority"] == 3
+    assert snapshot["goals"][0]["checkin_count"] == 0
+    assert isinstance(manager.check_ins_due(), list)
+    assert len(snapshot["moments"]) == 1
+    assert "old-secret" not in str(snapshot["moments"])
+    assert snapshot["presence"]["heartbeat_count"] == 0
+
+
 def test_presence_has_identity_and_survives_restart(tmp_path):
     path = tmp_path / "presence.json"
     first = PresenceManager(path)
@@ -68,6 +87,26 @@ def test_goals_surface_due_checkins_and_can_complete(tmp_path, monkeypatch):
     assert manager.list_goals(status="active") == []
 
 
+def test_explicit_goal_deadlines_are_honored(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "presence_checkin_after_minutes", 30)
+    manager = PresenceManager(tmp_path / "presence.json")
+    now = datetime.now(timezone.utc)
+    past = (now - timedelta(hours=1)).isoformat()
+    future = (now + timedelta(hours=1)).isoformat()
+    past_goal = manager.add_goal("Overdue deadline", due_at=past)["goal"]
+    future_goal = manager.add_goal("Future deadline", due_at=future)["goal"]
+    old = (now - timedelta(hours=2)).isoformat()
+    with manager._lock:
+        for goal in manager._data["goals"]:
+            goal["last_touched_at"] = old
+        manager._save_locked()
+    due_ids = {item["id"] for item in manager.check_ins_due()}
+    assert past_goal["id"] in due_ids
+    assert future_goal["id"] not in due_ids
+    manager.mark_checkin(past_goal["id"])
+    assert past_goal["id"] not in {item["id"] for item in manager.check_ins_due()}
+
+
 def test_heartbeat_is_persisted_and_never_executes_work(tmp_path):
     manager = PresenceManager(tmp_path / "presence.json")
     before = manager.snapshot()["presence"]["heartbeat_count"]
@@ -84,6 +123,15 @@ def test_scoped_continuity_does_not_cross_users(tmp_path):
     manager.add_goal("Bob's private goal", user_id="bob")
     manager.record_moment("note", "Alice's private continuity", user_id="alice")
     manager.record_moment("note", "Bob's private continuity", user_id="bob")
+    manager.begin_turn("Alice's private request", session_id="alice-session", user_id="alice")
+    alice_live = manager.snapshot(user_id="alice")
+    bob_live = manager.snapshot(user_id="bob")
+    assert alice_live["presence"]["active_goal"] == "Alice's private request"
+    assert bob_live["presence"]["active_goal"] is None
+    assert "Alice's private request" not in str(bob_live["presence"])
+    manager.finish_turn(
+        goal="Alice's private request", response="private answer", session_id="alice-session", user_id="alice"
+    )
 
     alice = manager.snapshot(user_id="alice")
     bob_prompt = manager.prompt_block(user_id="bob")
@@ -91,6 +139,10 @@ def test_scoped_continuity_does_not_cross_users(tmp_path):
     assert all(g["title"] != "Bob's private goal" for g in alice["goals"])
     assert "Bob's private continuity" in bob_prompt
     assert "Alice's private continuity" not in bob_prompt
+    assert manager.complete_goal(
+        next(g["id"] for g in manager.list_goals() if g["user_id"] == "bob"),
+        user_id="alice",
+    )["success"] is False
 
 
 def test_nested_moment_metadata_is_redacted_before_persistence(tmp_path):
@@ -104,6 +156,22 @@ def test_nested_moment_metadata_is_redacted_before_persistence(tmp_path):
     metadata = stored["moments"][-1]["metadata"]
     assert metadata["nested"]["password"] == "[redacted]"
     assert metadata["nested"]["items"][0] == "[redacted-token]"
+
+
+def test_public_status_excludes_private_continuity_content(tmp_path):
+    manager = PresenceManager(tmp_path / "presence.json")
+    manager.update_identity(name="Private Hermus")
+    manager.add_goal("Do not expose this title", user_id="alice")
+    manager.begin_turn("private request", session_id="s", user_id="alice")
+    manager.finish_turn(
+        goal="private request",
+        response="private result",
+        session_id="s",
+        user_id="alice",
+    )
+    public = manager.public_status()
+    assert set(public) == {"state", "changed_at", "last_seen", "last_heartbeat", "heartbeat_count"}
+    assert "private" not in str(public).lower()
 
 
 def test_read_only_runtime_temporarily_removes_all_registered_tools():

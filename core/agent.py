@@ -1090,26 +1090,27 @@ Rules:
                         detail=f"working · {event_type.replace('_', ' ')}",
                         session_id=self.session_id,
                         run_id=run_id,
+                        user_id=user_id,
                         goal=goal,
                     )
                 elif event_type in {"step_observed", "tool_result", "llm_delta"}:
                     # Keep the status alive without emitting a disk write for
                     # every streamed token.
-                    presence.touch(detail="thinking")
+                    presence.touch(detail="thinking", user_id=user_id)
                 elif event_type == "verification":
                     presence.activity(
                         "verifying", detail="checking the result",
-                        session_id=self.session_id, run_id=run_id, goal=goal,
+                        session_id=self.session_id, run_id=run_id, user_id=user_id, goal=goal,
                     )
                 elif event_type == "skill_harvest_started":
                     presence.activity(
                         "learning", detail="turn complete · distilling a reusable skill",
-                        session_id=self.session_id, run_id=run_id, goal=goal,
+                        session_id=self.session_id, run_id=run_id, user_id=user_id, goal=goal,
                     )
                 elif event_type == "approval_required":
                     presence.activity(
                         "waiting_approval", detail="waiting for your approval",
-                        session_id=self.session_id, run_id=run_id, goal=goal,
+                        session_id=self.session_id, run_id=run_id, user_id=user_id, goal=goal,
                     )
             except Exception:
                 pass

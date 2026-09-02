@@ -36,7 +36,10 @@ const STREAM_EVENT_TYPES = [
 ];
 
 function streamUrl(path) {
-  return '/stream/' + encodeURIComponent(String(path == null ? '' : path));
+  const token = (typeof window !== 'undefined' && window.location)
+    ? (window.__HERMUS_GATEWAY_TOKEN || new URLSearchParams(window.location.search).get('token')) : '';
+  const suffix = token ? '?token=' + encodeURIComponent(token) : '';
+  return '/stream/' + encodeURIComponent(String(path == null ? '' : path)) + suffix;
 }
 
 /**

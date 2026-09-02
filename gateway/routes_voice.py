@@ -124,7 +124,10 @@ def _llm_ack(transcript: str) -> str:
     try:
         from gateway.context import _agent_factory
 
-        agent = _agent_factory()
+        # The shared factory is per-platform/user; using it without those
+        # arguments silently forced every LLM acknowledgement into the fallback
+        # canned phrase.
+        agent = _agent_factory("voice", "default", mode="chat")
         llm = getattr(agent, "llm", None)
         if llm is None:
             return ""

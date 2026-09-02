@@ -133,3 +133,40 @@ def test_talking_command_returns_backend_audio(monkeypatch):
 def test_invalid_speech_audio_id_is_404():
     response = TestClient(app).get("/speech/audio/not-safe")
     assert response.status_code == 404
+
+
+def test_http_presence_goal_mutations_are_owner_scoped(monkeypatch, tmp_path):
+    from core.presence import PresenceManager
+
+    manager = PresenceManager(tmp_path / "presence.json")
+    monkeypatch.setattr("core.presence.get_presence", lambda: manager)
+    client = TestClient(app)
+    alice = client.post("/presence/goals", json={"title": "Alice goal", "user_id": "alice"}).json()
+    goal_id = alice["goal"]["id"]
+    assert client.post(f"/presence/goals/{goal_id}/complete", json={}).status_code == 404
+    assert client.post(f"/presence/goals/{goal_id}/touch", json={}).status_code == 404
+    assert client.post(f"/presence/goals/{goal_id}/complete", params={"user_id": "alice"}, json={}).status_code == 200
+
+
+def test_voice_llm_ack_uses_the_shared_factory(monkeypatch):
+    """The optional personalised acknowledgment must use the factory signature."""
+    from gateway.routes_voice import _llm_ack
+
+    calls = {}
+
+    class FakeLLM:
+        def chat(self, messages, tools=None):
+            calls["tools"] = tools
+            return SimpleNamespace(content="Starting now.")
+
+    fake_agent = SimpleNamespace(llm=FakeLLM())
+
+    def factory(platform, user_id, **kwargs):
+        calls["factory"] = (platform, user_id, kwargs)
+        return fake_agent
+
+    monkeypatch.setattr("gateway.context._agent_factory", factory)
+    assert _llm_ack("check the service") == "Starting now."
+    assert calls["factory"][:2] == ("voice", "default")
+    assert calls["factory"][2]["mode"] == "chat"
+    assert calls["tools"] is None
