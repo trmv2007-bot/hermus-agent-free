@@ -104,12 +104,71 @@ def test_governor_strategy_and_budget():
     config.think_strategy = "auto"
     # council already deliberated -> no strategy
     assert governor.strategy_for("Research and compare three free vector databases.", mode="agent", council_used=True) == "none"
-    # step budget: easy stays cheap, hard gets room, capped by config
-    assert governor.step_budget("hi") <= 2
-    assert 1 <= governor.step_budget("hi") <= config.max_tool_steps
-    assert governor.step_budget("x" * 400) <= config.max_tool_steps
-    assert governor.step_budget("anything", mode="chat") <= 2
+    # step budget: easy stays cheap, hard gets room, capped by config.
+    # Pin every governor input this asserts on — a developer's local .env may
+    # raise HERMUS_MAX_TOOL_STEPS / _CHAT_MAX_STEPS / _STEP_BUDGET_FULL, and this
+    # test is about the default share-scaling behaviour, not ambient config.
+    old = (config.max_tool_steps, config.step_budget_full, config.chat_max_steps)
+    config.max_tool_steps = 32
+    config.step_budget_full = False
+    config.chat_max_steps = 2
+    try:
+        assert governor.step_budget("hi") <= 2
+        assert 1 <= governor.step_budget("hi") <= config.max_tool_steps
+        assert governor.step_budget("x" * 400) <= config.max_tool_steps
+        assert governor.step_budget("anything", mode="chat") <= 2
+    finally:
+        (config.max_tool_steps, config.step_budget_full, config.chat_max_steps) = old
     print("✅ Governor: strategy mapping, overrides, step budgets all work")
+
+
+def test_governor_budget_caps_are_liftable_without_code_edits():
+    """The two caps that used to be hard-coded are now env-driven.
+
+    ``step_budget`` previously returned ``min(2, max_tool_steps)`` for chat and a
+    difficulty-scaled share otherwise, with no way to lift either. Both are now
+    configurable, and neither can collapse to 0 (which would make the agent's
+    ``while steps < budget_steps`` loop never execute and silently disable tool
+    use instead of raising a limit).
+    """
+    from core.reasoning.governor import governor
+
+    old = (config.max_tool_steps, config.step_budget_full, config.chat_max_steps)
+    config.max_tool_steps = 200
+    try:
+        # Defaults: chat capped at 2, easy tasks get a small share of the budget.
+        config.step_budget_full = False
+        config.chat_max_steps = 2
+        assert governor.step_budget("anything", mode="chat") == 2
+        assert governor.step_budget("hi") < 200
+
+        # HERMUS_CHAT_MAX_STEPS lifts the chat ceiling, still clamped to budget.
+        config.chat_max_steps = 50
+        assert governor.step_budget("anything", mode="chat") == 50
+        assert governor.step_budget("anything", mode="multi-chat") == 50
+        config.chat_max_steps = 9999
+        assert governor.step_budget("anything", mode="chat") == 200
+
+        # HERMUS_STEP_BUDGET_FULL grants the whole budget at every difficulty.
+        config.step_budget_full = True
+        assert governor.step_budget("hi") == 200
+        assert governor.step_budget("x" * 400) == 200
+
+        # A zero/negative chat cap must not disable tool use entirely.
+        config.step_budget_full = False
+        for bad in (0, -5):
+            config.chat_max_steps = bad
+            assert governor.step_budget("anything", mode="chat") >= 1
+    finally:
+        (config.max_tool_steps, config.step_budget_full, config.chat_max_steps) = old
+
+
+def test_governor_budget_knobs_default_to_previous_behaviour():
+    """Without the new env vars set, nothing about the budget changes."""
+    from core.config import Config
+
+    assert Config.model_fields["chat_max_steps"].default == 2
+    assert Config.model_fields["step_budget_full"].default is False
 
 
 def test_strategy_reflexion():

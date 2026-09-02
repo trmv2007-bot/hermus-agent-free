@@ -9,16 +9,49 @@ current-environment/target truth; it is distinct from memory (learned over time)
 and evidence (proof something happened).
 
 ``WorldStateFacade`` wraps one ``WorldState`` instance and exposes the full
-method + property surface so no caller constructs a second state object.
+method + property surface, and ``create_world_state`` /
+``world_state_from_dict`` / ``load_world_state`` are the only construction paths
+— production modules (``ComputerAgent``, ``TaskStore``) call them instead of
+instantiating ``WorldState`` directly, so no caller builds a second state object
+behind this module's back. ``test_one_worldstate_owner`` enforces that.
 """
 
 from __future__ import annotations
 
+import json
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 FACADE_V2 = "v1"  # canonical == the live V1 WorldState
+
+
+def _backend() -> Any:
+    """Import the canonical WorldState class lazily (avoids an import cycle)."""
+    from ..computer.world_state import WorldState  # type: ignore
+
+    return WorldState
+
+
+def create_world_state(**kwargs: Any) -> Any:
+    """The single construction path for a world-state object.
+
+    Production code calls this instead of ``WorldState(...)`` directly so that
+    ``core.state`` really is the one place world state gets created, which is what
+    the architecture gate asserts.
+    """
+    return _backend()(**kwargs)
+
+
+def world_state_from_dict(data: Optional[dict[str, Any]]) -> Any:
+    """Rebuild a world state from a checkpoint snapshot."""
+    return _backend().from_dict(data)
+
+
+def load_world_state(path: str, *, strict: bool = False) -> Any:
+    """Load a persisted snapshot. ``strict=True`` raises on a missing/corrupt file."""
+    return _backend().load(path, strict=strict)
 
 
 class WorldStateFacade:
@@ -27,11 +60,10 @@ class WorldStateFacade:
     def __init__(self, state: Any = None, *, canonical: str = FACADE_V2,
                  state_path: Optional[str] = None):
         if state is None:
-            from ..computer.world_state import WorldState  # type: ignore
             if state_path and Path(state_path).exists():
-                state = WorldState.load(state_path)
+                state = load_world_state(state_path)
             else:
-                state = WorldState()
+                state = create_world_state()
         self._state = state
         self._canonical = canonical
 
@@ -71,6 +103,10 @@ class WorldStateFacade:
 
     def from_dict(self, data: dict[str, Any]) -> "WorldStateFacade":
         self._state = type(self._state).from_dict(data)
+        return self
+
+    def load(self, path: str, *, strict: bool = False) -> "WorldStateFacade":
+        self._state = type(self._state).load(path, strict=strict)
         return self
 
     def save(self, path: str) -> str:
@@ -133,34 +169,77 @@ def get_world_state() -> WorldStateFacade:
 
 def detect_legacy(path: str) -> bool:
     """True if a world-state file exists (V1 format is canonical now)."""
-    p = Path(path)
-    return p.exists()
+    return Path(path).expanduser().is_file()
 
 
 def migrate_world_state(legacy_path: str, *, dry_run: bool = False,
                         marker_path: Optional[str] = None,
-                        out_path: Optional[str] = None) -> dict[str, Any]:
+                        out_path: Optional[str] = None,
+                        allow_corrupt: bool = False) -> dict[str, Any]:
     """Validate/load a world-state file into the canonical V1 schema.
 
     V1 ``WorldState`` is canonical, so this is a load + integrity check rather
     than a schema downcast. It writes a canonical snapshot and marks complete.
-    """
-    from ..computer.world_state import WorldState  # type: ignore
 
-    p = Path(legacy_path)
-    if not p.exists():
+    An unreadable file is reported as a failure and left **untouched**. The
+    previous version called the forgiving ``WorldState.load`` (which returns an
+    empty state on any parse error) and then wrote that empty snapshot over the
+    input by default — so running a migration against a corrupt file silently
+    destroyed the only copy of the data and still reported ``success: True``.
+    Pass ``allow_corrupt=True`` to opt into replacing it; the original bytes are
+    backed up to ``<name>.corrupt.<timestamp>.bak`` first.
+    """
+    p = Path(legacy_path).expanduser()
+    if not p.is_file():
         return {"success": False, "error": f"world-state {p} not found"}
+
+    corrupt_reason: Optional[str] = None
     try:
-        state = WorldState.load(str(p))
+        state = load_world_state(str(p), strict=True)
     except Exception as exc:
-        state = WorldState()
-        if not dry_run:
-            # A malformed file still produces a canonical snapshot on next save.
-            pass
+        if not allow_corrupt:
+            return {
+                "success": False,
+                "corrupt": True,
+                "error": f"world-state {p} is unreadable: {exc}",
+                "hint": ("re-run with allow_corrupt=True to write a canonical "
+                         "snapshot (the original is backed up, not overwritten)"),
+            }
+        corrupt_reason = str(exc)
+        state = create_world_state()
+
     if dry_run:
-        return {"success": True, "dry_run": True,
+        return {"success": True, "dry_run": True, "corrupt": corrupt_reason is not None,
                 "keys": list(state.to_dict().keys()),
                 "revision": state.revision}
-    out = Path(out_path) if out_path else p
+
+    out = Path(out_path).expanduser() if out_path else p
+    backup: Optional[str] = None
+    if corrupt_reason is not None and out.resolve() == p.resolve():
+        stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
+        backup_path = p.with_name(f"{p.name}.corrupt.{stamp}.bak")
+        backup_path.write_bytes(p.read_bytes())
+        backup = str(backup_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
     state.save(str(out))
-    return {"success": True, "written": str(out), "revision": state.revision}
+
+    result: dict[str, Any] = {
+        "success": True,
+        "written": str(out),
+        "revision": state.revision,
+        "corrupt": corrupt_reason is not None,
+    }
+    if backup:
+        result["backup"] = backup
+    if marker_path:
+        marker = Path(marker_path).expanduser()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({
+            "migrated_at": datetime.now().astimezone().isoformat(),
+            "source": str(p),
+            "written": str(out),
+            "revision": state.revision,
+            "corrupt": corrupt_reason is not None,
+        }, indent=2), encoding="utf-8")
+        result["marker"] = str(marker)
+    return result

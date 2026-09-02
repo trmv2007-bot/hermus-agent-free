@@ -457,6 +457,47 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
     return channel_reply
 
 
+def make_voice_reply_handler(agent_getter: Callable[..., Any]):
+    """Voice-first job: do the work, then synthesize the answer for speech.
+
+    This is the background half of ``POST /voice/command``. The caller has
+    already heard a short acknowledgment and returned, so latency here is not
+    perceived as silence — it is just work happening. When it finishes we render
+    the answer to a local WAV clip and emit ``voice_answer`` so the client can
+    speak it without a second round trip.
+    """
+    from core.config import config as _cfg
+
+    def voice_reply(ctx) -> dict[str, Any]:
+        payload = dict(ctx.payload)
+        runtime_result = _runtime_execute(
+            _PseudoCtx(ctx.id, ctx.run_id, payload, ctx.emit),
+            prefer=str(payload.get("prefer") or "auto"),
+            agent_getter=agent_getter,
+        )
+        answer = str(runtime_result.get("response") or runtime_result.get("error") or "")
+        speech: dict[str, Any] = {"spoken": False, "audio_url": None}
+        if answer and getattr(_cfg, "voice_speak_answer", True):
+            # Speech-only truncation: the full answer stays in the job result and
+            # transcript, only the spoken clip is shortened.
+            limit = int(getattr(_cfg, "voice_answer_max_chars", 900) or 900)
+            try:
+                from gateway.routes_voice import synthesize_speech
+
+                speech = synthesize_speech(answer[:limit])
+            except Exception as exc:
+                speech = {"spoken": False, "audio_url": None,
+                          "error": f"{type(exc).__name__}: {exc}"[:200]}
+        try:
+            ctx.emit("voice_answer", {"text": answer[:4000], **speech})
+        except Exception:
+            pass
+        return {"answer": answer[:4000], "speech": speech, "chat": runtime_result,
+                "spoken": bool(speech.get("spoken"))}
+
+    return voice_reply
+
+
 class _PseudoCtx:
     """Adapter so handlers can be composed (channel_reply wraps the runtime)."""
 
@@ -494,6 +535,7 @@ def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: boo
         "subagent.delegate": (make_delegate_handler(), "hierarchical sub-agent fan-out + aggregation"),
         "memory.sweep": (make_memory_sweep_handler(), "decay/archive/purge pass over typed memory"),
         "channel.reply": (make_channel_reply_handler(agent_getter), "runtime turn + deliver answer back to the channel"),
+        "voice.reply": (make_voice_reply_handler(agent_getter), "voice-first turn: work in background, then synthesize the spoken answer"),
     }
     for kind, (fn, _desc) in kinds.items():
         queue.register(kind, fn, overwrite=overwrite)

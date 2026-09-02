@@ -15,6 +15,7 @@ from .skill_manager import skill_manager
 from .task_tracker import task_tracker
 from .modes import AgentMode, get_mode_config
 from .tool_registry import tool_registry
+from .tool_select import EXPAND_TOOL_NAME, select_tools, selection_report
 from .run_events import record_issue
 from .run_hooks import CancelledRun, CancelToken, make_emitter
 
@@ -44,6 +45,11 @@ class HermusAgent:
         self.trajectory: list[dict] = []
         self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
         self.max_steps = max_steps or getattr(config, "max_tool_steps", 8)
+        # Per-turn tool selection state. Reset at the start of every chat() so a
+        # selection never leaks between turns, and so an `expand_tools` call only
+        # widens the turn it happened in.
+        self._turn_selected_tools: Optional[list[dict]] = None
+        self._turn_tool_expanded = False
 
         if mode is None:
             try:
@@ -117,7 +123,38 @@ class HermusAgent:
         """Force reload registry (e.g. after MCP connect)."""
         tool_registry.load(force=True)
         self.tools = self._get_tools()
+        # A stale selection would hide the tools that just arrived.
+        self._turn_selected_tools = None
         return {"tools": len(self.tools)}
+
+    def _tools_for_turn(self, user_message: str, emit=None) -> Optional[list[dict]]:
+        """Tool schemas for this turn: a relevant subset, or the full catalog.
+
+        Shipping all ~179 schemas costs ~18.3K prompt tokens on *every* step of
+        the loop. We send only the plausibly-relevant ones, and always include
+        ``expand_tools`` so a wrong guess costs one round trip instead of a
+        silently missing capability. Once expanded, the turn keeps the full
+        catalog — widening is sticky within a turn but never leaks to the next.
+        """
+        if not self.tools:
+            return None
+        if self._turn_tool_expanded:
+            return self.tools
+        if self._turn_selected_tools is None:
+            try:
+                selected = select_tools(self.tools, user_message)
+            except Exception as exc:
+                # Selection is an optimization, never a reason to fail a turn.
+                record_issue("tools", "select_tools", exc, retryable=False,
+                             fallback="full tool catalog sent this turn")
+                selected = list(self.tools)
+            self._turn_selected_tools = selected
+            if emit is not None:
+                try:
+                    emit("tools_selected", selection_report(self.tools, selected))
+                except Exception:
+                    pass
+        return self._turn_selected_tools
 
     def _custom_api_signature(self) -> str:
         """Compact signature of the current custom APIs (name/url/token) so we
@@ -209,7 +246,17 @@ class HermusAgent:
         nudges = memory.periodic_nudges()
         nudges_text = "\n".join(nudges) if nudges else "No nudges."
 
-        tool_count = len(self.tools)
+        # Report what the model will actually be OFFERED, not the catalog size.
+        # With per-turn selection these differ (e.g. 21 offered vs 179
+        # registered); telling the model it has 179 tools when 21 are in the
+        # request invites it to call ones it cannot see.
+        offered_tools = self._tools_for_turn(user_message)
+        tool_count = len(offered_tools) if offered_tools else len(self.tools)
+        tool_note = (
+            "" if tool_count >= len(self.tools) else
+            f" of {len(self.tools)} registered — a subset chosen for this request"
+            " (call `expand_tools` if you need one that is not listed)"
+        )
 
         # Lessons loop (Phase 3): past corrections/failures injected into the prompt
         lessons_block = ""
@@ -270,7 +317,7 @@ You have:
 - Typed long-term memory (episodic/semantic/procedural/project) via memory2_recall / memory2_remember
 - Auto-created skills (skill_list / skill_use with task context)
 - MCP tools when configured (mcp_list_servers / mcp_connect_all)
-- {tool_count} tools registered (browser, vision, voice, internet eyes, pentest, backends, research, screen, etc.)
+- {tool_count} tools{tool_note} available (browser, vision, voice, internet eyes, pentest, backends, research, screen, etc.)
 
 Curated Memory:
 {curated_text}
@@ -331,6 +378,10 @@ Rules:
         """
         emit = make_emitter(on_event)
         cancel = CancelToken(should_cancel)
+        # Tool selection is per-turn: never carry a subset (or a widening) from a
+        # previous turn into this one.
+        self._turn_selected_tools = None
+        self._turn_tool_expanded = False
 
         def _drain_steers() -> list[str]:
             if steer_source is None:
@@ -588,7 +639,7 @@ Rules:
 
             emit("step_started", {"step": steps, "of": budget_steps})
             # Only pass tools while we still have budget for another tool round
-            use_tools = self.tools if self.tools else None
+            use_tools = self._tools_for_turn(user_message, emit)
             if stream:
                 response = self.llm.stream_chat(
                     messages, tools=use_tools, on_delta=_delta_sink(emit, steps)
@@ -656,7 +707,24 @@ Rules:
                 _t0 = time.time()
                 emit("tool_call", {"step": steps, "tool": tool_name,
                                    "args": _safe_trunc_args(tool_args)})
-                result = self._execute_tool(tool_name, tool_args)
+                if tool_name == EXPAND_TOOL_NAME:
+                    # The model needs something the subset did not include. Give
+                    # it the whole catalog for the rest of the turn rather than
+                    # letting it silently work around a missing capability.
+                    self._turn_tool_expanded = True
+                    self._turn_selected_tools = None
+                    result = {
+                        "success": True, "expanded": True,
+                        "tools_available": len(self.tools or []),
+                        "reason": str(tool_args.get("reason") or ""),
+                        "output": ("Full tool catalog is now available. "
+                                   "Call the tool you needed."),
+                    }
+                    emit("tools_expanded", {"step": steps,
+                                            "reason": result["reason"],
+                                            "tools_available": result["tools_available"]})
+                else:
+                    result = self._execute_tool(tool_name, tool_args)
                 emit(
                     "tool_result",
                     {

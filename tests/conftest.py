@@ -1,6 +1,12 @@
 """Shared test fixtures / isolation.
 
-Two independent isolation concerns are handled here:
+Three independent isolation concerns are handled here:
+
+0. ``core/config.py`` calls ``load_dotenv`` at import time, so a developer's
+   personal ``.env`` (raised step budgets, doctor caps, verify thresholds, ...)
+   would otherwise change the values the suite asserts. ``HERMUS_NO_DOTENV=1``
+   is exported at the very top of this module, before any ``core`` import, so
+   tests see declared defaults instead of whoever's local config.
 
 1. ``core.computer.task_control.task_control`` is a process-wide singleton
    holding global interrupt (emergency-stop) and task-registration state.
@@ -26,9 +32,15 @@ from __future__ import annotations
 
 import os
 
-import pytest
+# Must happen before ANY core import: core/config.py calls load_dotenv() at
+# import time, so a developer's personal .env would otherwise change the values
+# the suite asserts (step budgets, doctor caps, verify thresholds, ...). This
+# makes the suite deterministic regardless of local config.
+os.environ["HERMUS_NO_DOTENV"] = "1"
 
-from core.computer.task_control import get_task_control
+import pytest  # noqa: E402
+
+from core.computer.task_control import get_task_control  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

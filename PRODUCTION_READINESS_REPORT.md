@@ -43,7 +43,7 @@ Upstream tip verified unchanged: `005504398c3188566e5acbc391239e2aefc215cf`
 - **Single `ModelGateway`** (`core/models/gateway.py`) — one class, one `get_model_gateway()`.
 - **Single `Config`** (`core/config.py`) — one class, one singleton `config`.
 - **Single durable `EventBus`** (`core.events.get_bus()`); `RunBus` is the live SSE/`/runs` stream. Both persist/mirror run activity; this is a deliberate live-stream vs durable-log split, not a duplicate owner.
-- **WorldState unified**: `core/state/world.py` facade over one `WorldState` impl (`WorldStateV2` gone).
+- **WorldState unified**: `core/state/world.py` is the single public boundary over one `WorldState` impl (`WorldStateV2` gone) — `create_world_state`/`world_state_from_dict`/`load_world_state` are the only construction paths (used by `ComputerAgent` and `TaskStore`), with `WorldStateFacade`/`get_world_state` as the wrapper + accessor. Enforced by `test_one_worldstate_owner`.
 - **No duplicate (method, normalized-path) HTTP routes** across all gateway routers (prefix-aware scan).
 - **All 138 production modules import cleanly** (no missing-import landmines in un-executed paths).
 - **Direct model HTTP/SDK calls are confined to the model subsystem** (`core/llm.py`, `core/openai_compat.py`, `core/providers.py`, `core/free_keys.py`, `core/multi_key.py`, `core/model_fleet.py`, `core/provider_router.py`, `core/router2.py`, `core/model_capabilities.py`, `core/custom_api.py`, `core/computer/llm/`). The only outlier is `tools/vision.py`.

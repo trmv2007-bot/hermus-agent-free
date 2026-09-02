@@ -196,10 +196,55 @@ def test_no_app_level_memory2_direct_access():
 # One world-state owner
 # ---------------------------------------------------------------------------
 def test_one_worldstate_owner():
-    """WorldStateFacade (core.state) is the public world-state path."""
+    """core.state is the one world-state boundary: it defines the facade AND is the
+    only production path that constructs a world state.
+
+    The previous version of this gate only counted files defining
+    ``class WorldStateFacade``, so it passed while the facade had no production
+    caller at all (the agent built ``WorldState()`` itself) and the docs claiming
+    "one writable path" were false. It now also fails if any production module
+    outside the owner constructs or rehydrates a world state directly.
+    """
     defs = [p for p in _prod_files() if "class WorldStateFacade" in p.read_text(encoding="utf-8")]
     assert [str(_rel(x)) for x in defs] == ["core/state/world.py"], \
         "world state must be owned by exactly one facade (core.state.WorldStateFacade)"
+
+    owner = {"core/state/world.py", "core/computer/world_state.py"}
+    banned = ("WorldState(", "WorldState.from_dict(", "WorldState.load(")
+    offenders = []
+    for p in _prod_files():
+        if _rel(p) in owner:
+            continue
+        text = p.read_text(encoding="utf-8")
+        for token in banned:
+            if token in text:
+                offenders.append(f"{_rel(p)}: {token}")
+    assert not offenders, (
+        "world state must be constructed through core.state "
+        "(create_world_state/world_state_from_dict/load_world_state), not by "
+        f"instantiating WorldState directly: {offenders}"
+    )
+
+
+def test_worldstate_facade_is_reachable_from_production():
+    """The advertised public path must actually be importable from the live stack.
+
+    Guards the inverse regression of the gate above: a facade that nothing can
+    reach is documentation, not a boundary.
+    """
+    from core.state import (  # noqa: F401
+        WorldStateFacade,
+        create_world_state,
+        get_world_state,
+        load_world_state,
+        world_state_from_dict,
+    )
+    import core.computer.computer_agent as agent_module
+
+    source = Path(agent_module.__file__).read_text(encoding="utf-8")
+    assert "create_world_state" in source, \
+        "ComputerAgent must build its world state through core.state"
+    assert get_world_state().canonical == "v1"
 
 
 # ---------------------------------------------------------------------------

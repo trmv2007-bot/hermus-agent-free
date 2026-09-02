@@ -94,6 +94,7 @@
 </header>
 <nav>
   <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="voice">Voice</button>
   <button data-tab="jobs">Jobs</button>
   <button data-tab="missions">Missions</button>
   <button data-tab="telemetry">Telemetry</button>
@@ -136,6 +137,46 @@
           <button id="cmdBtn">POST /api/v1/commands</button>
         </div>
         <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ VOICE ============ -->
+  <div class="tab" id="tab-voice">
+    <div class="grid">
+      <section class="full">
+        <h2>Voice-first mode <span id="voiceState" class="tag">idle</span></h2>
+        <div class="bar">
+          <button id="voiceMic" class="ghost">Hold to talk</button>
+          <button id="voiceStop" class="danger" disabled>Stop</button>
+          <input id="voiceText" placeholder="…or type it and hear the reply" />
+          <button id="voiceSend" class="ghost">Say it</button>
+        </div>
+        <div class="bar" id="handsfreeBar">
+          <button id="hfArm" class="ghost">Hands-free: off</button>
+          <span id="hfMic" class="tag" title="Microphone state">mic off</span>
+          <span id="hfWake" class="tag">wake word: —</span>
+          <progress id="hfLevel" value="0" max="1" style="width:160px"></progress>
+        </div>
+        <div class="hint">
+          Hands-free keeps the microphone open and listens continuously: it detects
+          speech by energy (no button press), transcribes it, and only acts when the
+          utterance starts with the wake word. Talking over the assistant interrupts
+          it. <strong>Arming this holds the mic open for as long as it stays on</strong>
+          — every detected utterance is sent to speech-to-text before the wake word is
+          checked. Requires <code>HERMUS_VOICE_HANDSFREE=1</code>.
+        </div>
+        <div class="cells" id="voiceCaps"></div>
+        <div class="hint">
+          Speaks first, works second: <code>POST /voice/command</code> transcribes,
+          returns a short spoken acknowledgment, and queues the real work as a
+          <code>voice.reply</code> job. The acknowledgment is a canned phrase by
+          default — no model call — so it lands in well under a second instead of
+          waiting out a full tool-carrying agent turn.
+        </div>
+        <div class="feed" id="voiceLog" style="height:260px">
+          <div class="note">Nothing said yet. Mic audio is transcribed locally (faster-whisper); speech is synthesized locally (Piper/espeak).</div>
+        </div>
       </section>
     </div>
   </div>
@@ -331,6 +372,7 @@
   event log) + typed commands only. The UI never owns truth and never simulates success.
 </footer>
 
+<script src="/static/control-client.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const conn = $("#conn");
@@ -928,6 +970,207 @@ $("#runDownloadsScan").addEventListener("click", runDownloadsScan);
 $("#startDownloadsScanMission").addEventListener("click", startDownloadsScanMission);
 $("#refreshScanReports").addEventListener("click", listScanReports);
 document.querySelectorAll("button[data-safety-example]").forEach((b) => b.addEventListener("click", () => applySafetyExample(b.dataset.safetyExample)));
+
+// ---------- voice-first (Jarvis) mode ----------
+function vlog(kind, text){
+  const feed = $("#voiceLog"); if (!feed) return;
+  const note = feed.querySelector(".note"); if (note) note.remove();
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<span class="tag">${esc(kind)}</span> ${esc(text)}`;
+  feed.prepend(row);
+  while (feed.children.length > 60) feed.lastChild.remove();
+}
+function vstate(label, cls){ const el = $("#voiceState"); if (el) { el.textContent = label; el.className = "tag " + (cls || ""); } }
+
+async function refreshVoiceStatus(){
+  try {
+    const { j } = await getJSON("/voice/status");
+    const caps = $("#voiceCaps");
+    if (caps) caps.innerHTML =
+      kpi(j.enabled ? "on" : "off", "voice mode") +
+      kpi(j.ack_mode, "ack source") +
+      kpi((j.tts && (j.tts.backend || j.tts.selected)) || "none", "tts backend") +
+      kpi((j.stt && (j.stt.model || (j.stt.models && j.stt.models[0]))) || "none", "stt model") +
+      kpi(j.queue_ready ? "ready" : "not started", "job queue");
+    if (!j.enabled) vlog("voice", "disabled — set HERMUS_VOICE_ENABLED=1");
+    _hfCfg = j.handsfree || null;
+    const hf = _hfCfg || {};
+    const wake = $("#hfWake");
+    if (wake) {
+      wake.textContent = hf.enabled
+        ? (hf.wake_required ? "wake word: " + (hf.wake_word || "(none)") : "wake word: not required")
+        : "hands-free: needs HERMUS_VOICE_HANDSFREE=1";
+    }
+    const arm = $("#hfArm");
+    if (arm) arm.disabled = !hf.enabled;
+    if (!hf.enabled) hfMic("disabled");
+  } catch(e){ vlog("voice", "status failed: " + e.message); }
+}
+
+let _hfCfg = null;
+let _hf = null;
+let _hfStream = null;
+let _hfRunId = null;
+
+function hfMic(label, cls){ const el = $("#hfMic"); if (el) { el.textContent = label; el.className = "tag " + (cls || ""); } }
+function hfLevel(v){ const el = $("#hfLevel"); if (el) el.value = Math.min(1, (v || 0) * 8); }
+
+async function armHandsFree(){
+  if (_hf) { disarmHandsFree(); return; }
+  const HC = window.HermusClient;
+  if (!HC) { vlog("voice", "client script not loaded"); return; }
+  if (!_hfCfg || !_hfCfg.enabled) {
+    vlog("voice", "hands-free is off server-side — set HERMUS_VOICE_HANDSFREE=1");
+    return;
+  }
+  const cfg = _hfCfg;
+  let mic = null;
+  const loop = HC.createVoiceLoop({
+    onEvent: (type, data) => {
+      const d = data || {};
+      if (type === "level") { hfLevel(d.level); return; }
+      if (type === "state") {
+        vstate(d.state, d.state === "listening" ? "ok" : "warn");
+        if (d.state === "listening") hfMic("listening", "ok");
+        else if (d.state === "capturing") hfMic("recording", "warn");
+        else if (d.state === "thinking") hfMic("transcribing", "warn");
+        else if (d.state === "speaking") hfMic("answering", "warn");
+        return;
+      }
+      if (type === "speech_start") vlog("mic", "speech detected");
+      else if (type === "transcript") vlog("heard", d.text || "(nothing)");
+      else if (type === "discarded") {
+        vlog("ignored", d.reason === "wake_word"
+          ? "not addressed to me: " + (d.text || "") : d.reason);
+      }
+      else if (type === "command") vlog("you", d.text);
+      else if (type === "answer") vlog("hermus", d.answer || (d.ok ? "(done)" : "(failed)"));
+      else if (type === "barge_in") vlog("barge-in", "you interrupted me");
+      else if (type === "superseded") vlog("barge-in", "dropped a stale answer");
+      else if (type === "error") vlog("error", (d.stage || "") + ": " + d.message);
+    },
+    capture: () => HC.startRecording({ stream: _hfStream }),
+    transcribe: (blob) => HC.transcribeBlob(blob, { model: cfg.stt_model }),
+    run: async (text) => {
+      const res = await HC.sendCommand({ text });
+      _hfRunId = (res && res.raw && (res.raw.run_id || res.raw.runId)) || null;
+      return res;
+    },
+    speak: (text) => HC.speakText(text),
+    stopSpeaking: () => HC.stopSpeaking(),
+    // Best effort: the run id only exists once /command has started.
+    cancel: () => {
+      if (_hfRunId) { try { fetch("/run/cancel/" + encodeURIComponent(_hfRunId), { method: "POST" }); } catch(e){} }
+    },
+  }, {
+    wakeWord: cfg.wake_word, wakeAliases: cfg.wake_aliases || [],
+    wakeRequired: cfg.wake_required,
+    silenceMs: cfg.silence_ms, speechMs: cfg.speech_ms,
+    minUtteranceMs: cfg.min_utterance_ms, maxUtteranceMs: cfg.max_utterance_ms,
+    bargeIn: cfg.barge_in,
+  });
+
+  try { mic = await HC.attachMic(loop); }
+  catch(e){ vlog("mic", "microphone unavailable: " + e.message); hfMic("denied", "err"); return; }
+  _hfStream = mic.stream;
+  _hf = { loop, mic };
+  loop.start();
+  const btn = $("#hfArm");
+  if (btn) btn.textContent = "Hands-free: ON — click to stop";
+  hfMic("listening", "ok");
+  vlog("hands-free", cfg.wake_required
+    ? "armed — start with “" + cfg.wake_word + "”"
+    : "armed — no wake word, everything you say is acted on");
+}
+
+function disarmHandsFree(){
+  if (!_hf) return;
+  try { _hf.loop.stop(); } catch(e){}
+  try { _hf.mic.stop(); } catch(e){}
+  _hf = null; _hfStream = null; _hfRunId = null;
+  const btn = $("#hfArm");
+  if (btn) btn.textContent = "Hands-free: off";
+  hfMic("mic off");
+  hfLevel(0);
+  vstate("idle");
+  vlog("hands-free", "disarmed — microphone closed");
+}
+
+let _rec = null;
+async function startTalk(){
+  if (!window.HermusClient) { vlog("voice", "client script not loaded"); return; }
+  const HC = window.HermusClient;
+  HC.stopSpeaking();
+  try {
+    _rec = HC.startRecording();
+  } catch(e){ vlog("voice", "mic unavailable: " + e.message); return; }
+  vstate("listening", "warn");
+  $("#voiceMic").disabled = true; $("#voiceStop").disabled = false;
+  vlog("mic", "listening…");
+}
+async function endTalk(){
+  if (!_rec) return;
+  const rec = _rec; _rec = null;
+  rec.stop();
+  $("#voiceMic").disabled = false; $("#voiceStop").disabled = true;
+  vstate("transcribing");
+  let blob;
+  try { blob = await rec.promise; }
+  catch(e){ vstate("idle"); vlog("mic", "recording failed: " + e.message); return; }
+  await runVoice(() => window.HermusClient.postVoiceBlob(blob, voiceHandlers()));
+}
+
+function voiceHandlers(){
+  const HC = window.HermusClient;
+  return {
+    onTranscript: (t) => { vlog("you", t || "(nothing heard)"); },
+    onAck: (ack) => {
+      vlog("hermus", (ack && ack.text) || "(no acknowledgment)");
+      if (ack && !ack.spoken) vlog("tts", "no local clip — using browser voice (" + (ack.error || "unavailable") + ")");
+      vstate("working");
+    },
+    onEvent: (type, data) => {
+      if (type === "tool_call") vlog("tool", (data && data.name) || type);
+      else if (type === "step_started") vlog("step", (data && (data.state || data.name)) || type);
+    },
+    onAnswer: (data) => {
+      const text = (data && (data.text || data.answer)) || "";
+      vlog("answer", text ? text.slice(0, 400) : "(empty)");
+      vstate("speaking");
+      setTimeout(() => vstate("idle"), 1200);
+    },
+    onError: (err) => { vlog("error", String((err && err.message) || err)); vstate("idle", "err"); },
+  };
+}
+
+async function runVoice(fn){
+  try { await fn(); }
+  catch(e){ vlog("error", String((e && e.message) || e)); vstate("idle", "err"); }
+}
+
+function initVoice(){
+  const mic = $("#voiceMic"), stop = $("#voiceStop"), send = $("#voiceSend"), box = $("#voiceText");
+  if (!mic) return;
+  mic.addEventListener("mousedown", startTalk);
+  mic.addEventListener("touchstart", (e) => { e.preventDefault(); startTalk(); }, { passive: false });
+  ["mouseup", "mouseleave"].forEach((ev) => mic.addEventListener(ev, () => { if (_rec) endTalk(); }));
+  mic.addEventListener("touchend", (e) => { e.preventDefault(); if (_rec) endTalk(); }, { passive: false });
+  stop.addEventListener("click", () => { if (_rec) endTalk(); });
+  const typed = async () => {
+    const text = (box.value || "").trim(); if (!text) return;
+    box.value = "";
+    vlog("you", text);
+    vstate("transcribing");
+    await runVoice(() => window.HermusClient.sayText(text, voiceHandlers()));
+  };
+  send.addEventListener("click", typed);
+  box.addEventListener("keydown", (e) => { if (e.key === "Enter") typed(); });
+  const arm = $("#hfArm");
+  if (arm) arm.addEventListener("click", armHandsFree);
+  refreshVoiceStatus();
+}
+initVoice();
 
 async function boot(){
   await refreshOverview();
