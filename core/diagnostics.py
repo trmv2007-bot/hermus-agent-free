@@ -119,6 +119,8 @@ def run_diagnostics() -> dict[str, Any]:
         checks.append(_check("computer_agent", False, f"import error: {exc}",
                              "Run: pip install -r requirements.txt"))
 
+    checks.extend(_web_acquisition_checks())
+
     required_ok = all(c["ok"] for c in checks if c["level"] == "required")
     recommended_ok = all(c["ok"] for c in checks if c["level"] == "recommended")
     return {
@@ -140,6 +142,20 @@ def _now() -> str:
     from datetime import datetime
 
     return datetime.now().astimezone().isoformat()
+
+
+def _web_acquisition_checks() -> list[dict[str, Any]]:
+    """Honest web-subsystem capability checks (spec §21).
+
+    Never reports a capability as working merely because an import succeeds:
+    each status comes from core.web.capabilities, which distinguishes
+    available / unavailable / not_installed / not_verified. All checks are
+    "recommended" level — a missing Scrapling degrades capabilities but never
+    fails the install report.
+    """
+    from .web_status import web_status_checks
+
+    return web_status_checks()
 
 
 def print_diagnostics(report: dict[str, Any]) -> None:

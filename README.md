@@ -298,6 +298,35 @@ Depending on configuration, capabilities include:
 
 Tool results are tracked as part of the task trajectory so later verification and learning can use what actually happened.
 
+## 🕷️ Web Acquisition (Scrapling-powered)
+
+All page acquisition runs through one canonical subsystem — `core.web.WebGateway`
+— backed by [Scrapling](https://github.com/D4Vinci/Scrapling) (optional, BSD-3):
+
+- **autonomous strategy routing**: fast browser-fingerprint HTTP first, real
+  Chromium only when the page needs JavaScript, stealth only when you enable it
+  and cheaper methods genuinely failed — every attempt is recorded on the result;
+- **tools**: `web_fetch`, `web_extract` (CSS/XPath, adaptive — selectors survive
+  site redesigns), `web_extract_links`, `web_extract_metadata`,
+  `web_search_and_extract`, `web_crawl` (background job on the canonical
+  JobQueue, cancellable, with progress events), `web_session`
+  (domain-pinned cookie jars, never shown to the model), `web_capabilities`;
+- **security-first**: SSRF protection (private/loopback/link-local DNS,
+  redirect re-validation, scheme/port guards), domain allow/block lists,
+  response-size + crawl-ceiling limits, secrets (cookies/headers) never cross
+  the boundary;
+- **untrusted-by-construction**: page content is sanitized, bounded, and
+  explicitly labeled as data — never instructions;
+- **honest capability reporting**: `hermus doctor` distinguishes
+  available / unavailable / not_installed / not_verified, and Android/Termux
+  defaults to the lightweight HTTP path (no untested browser claims).
+
+Install: `pip install "scrapling[fetchers]" && scrapling install` (browser
+binaries optional). Without it, web tools degrade to typed "not installed"
+results — the lightweight core is unaffected.
+See [`docs/WEB_ACQUISITION.md`](docs/WEB_ACQUISITION.md) for the architecture,
+capability matrix and security model.
+
 ## 🔐 Command Sandbox
 
 Local command execution can pass through a policy layer with controls such as:
@@ -684,6 +713,7 @@ The goal is to measure success rate, steps and tool failures instead of treating
 | [`SIMPLE_GUIDE.md`](SIMPLE_GUIDE.md) | Beginner-oriented guide |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Third-party notices |
 | [`docs/LOCAL_ENGINE.md`](docs/LOCAL_ENGINE.md) | Local engine: NPU/GPU routing, NoLlama, on-demand model downloads, the Hermus doctor |
+| [`docs/WEB_ACQUISITION.md`](docs/WEB_ACQUISITION.md) | Web acquisition: Scrapling-powered gateway, strategy router, security model, crawling |
 
 ---
 

@@ -20,6 +20,7 @@ from urllib.parse import quote
 # Also supports TOOL_DEFINITION (single) which gets wrapped.
 DISCOVER_MODULES = [
     "tools.web_search",
+    "tools.web_acquisition",
     "tools.public_apis",
     "tools.file_tools",
     "tools.shell",
@@ -55,6 +56,11 @@ TOOL_FALLBACK_CHAINS: dict[str, list[dict]] = {
             "tool": "browser_navigate",
             "args": lambda a: {"url": "https://html.duckduckgo.com/html/?q=" + quote((a.get("query") or "")[:200])},
         },
+    ],
+    "web_fetch": [
+        {"retry": True},
+        # Escalate a plain fetch to the router's JS-rendering path once.
+        {"tool": "web_fetch", "args": lambda a: {**a, "strategy": "dynamic"}},
     ],
     "web_read": [
         {"retry": True},

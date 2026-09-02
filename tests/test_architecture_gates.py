@@ -715,3 +715,60 @@ def test_jobqueue_lifecycle_mirrors_onto_canonical_event_bus():
     q = (ROOT / "gateway/queue.py").read_text(encoding="utf-8")
     assert "get_bus().publish(" in q, "JobQueue must mirror lifecycle onto the canonical EventBus"
     assert "_lifecycle_event_type" in q, "JobQueue must map terminal statuses to lifecycle names"
+
+
+# ---------------------------------------------------------------------------
+# One web acquisition boundary (Scrapling integration)
+# ---------------------------------------------------------------------------
+# core.web (WebGateway -> StrategyRouter -> ScraplingBackend) is the single
+# canonical web-acquisition owner. Scrapling is an optional dependency and may
+# only be imported inside core/web/*; tools and routes get web capabilities
+# exclusively through ToolGateway -> tools.web_acquisition -> WebGateway.
+_WEB_OWNERS = ("core/web/",)
+
+
+def test_one_web_acquisition_boundary_no_scrapling_outside_core_web():
+    """``scrapling`` is importable only inside core/web — nowhere else in
+    production code (spec §3: no integration boundary bypass)."""
+    offenders = []
+    for p in _prod_files():
+        rel = _rel(p)
+        if any(rel.startswith(owner) for owner in _WEB_OWNERS):
+            continue
+        for mod in _imports(p):
+            if mod == "scrapling" or mod.startswith("scrapling."):
+                offenders.append((rel, mod))
+                continue
+            # Also catch the sneaky form: ``import scrapling.fetchers`` done via
+            # importlib strings is out of static reach, but plain imports aren't.
+            last = mod.split(".")[-1]
+            if last == "scrapling" and not rel.startswith("tools/"):
+                offenders.append((rel, mod))
+    assert not offenders, (
+        "scrapling imports outside core/web bypass the canonical WebGateway: "
+        f"{offenders}"
+    )
+
+
+def test_web_tools_route_through_web_gateway_not_scrapling():
+    """The LLM-facing web tools module must call the WebGateway (which owns
+    security + routing + normalization), never scrapling or raw HTTP clients."""
+    src = (ROOT / "tools/web_acquisition.py").read_text(encoding="utf-8")
+    assert "get_web_gateway" in src, "web tools must go through core.web.get_web_gateway"
+    for banned in ("import scrapling", "from scrapling", "requests.get", "httpx.", "aiohttp."):
+        assert banned not in src, f"web tools must not bypass the gateway via {banned}"
+
+
+def test_web_gateway_owns_security_routing_and_events():
+    """core.web.WebGateway must keep the canonical invariants in one place:
+    WebSecurityPolicy checks before fetch, StrategyRouter for escalation,
+    canonical EventBus telemetry, canonical cache reuse, and WebResult-only
+    outputs (raw Scrapling responses never cross the boundary)."""
+    gw = (ROOT / "core/web/gateway.py").read_text(encoding="utf-8")
+    assert "WebSecurityPolicy" in gw, "gateway must own the security policy"
+    assert "StrategyRouter" in gw, "gateway must own strategy routing/escalation"
+    assert "get_bus" in gw or "EventEnvelope" in gw, \
+        "gateway must emit telemetry onto the canonical EventBus"
+    assert "LRUCache" in gw, "gateway must reuse the canonical bounded cache"
+    raw = (ROOT / "core/web/scrapling_backend.py").read_text(encoding="utf-8")
+    assert "RawFetch" in raw, "backend must keep scrapling responses internal"
