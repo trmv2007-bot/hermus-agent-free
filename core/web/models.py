@@ -50,6 +50,7 @@ class CrawlStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    TIMEOUT = "timeout"        # wall-clock deadline reached before completion
 
 
 @dataclass

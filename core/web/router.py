@@ -12,8 +12,10 @@ Decision policy (spec §5/§6), cheapest-sufficient-first:
 ``AUTO`` builds a plan, executes it in order, records every attempt (strategy,
 status, latency, failure class, escalation reason) on the resulting WebResult,
 and never retries the exact same failing strategy with the same arguments.
-Forced strategies run alone unless ``allow_fallback`` is set. Security refusals
-are never escalated around — they abort the whole plan.
+``allow_fallback=False`` strictly disables escalation for EVERY requested
+strategy — including ``auto``, which then runs only its first (cheapest
+permitted) strategy and stops there. Security refusals are never escalated
+around — they abort the whole plan.
 """
 from __future__ import annotations
 
@@ -199,6 +201,10 @@ class StrategyRouter:
         started = time.monotonic()
         attempts: list[StrategyAttempt] = []
         plan = self.plan(strategy, require_js=require_js)
+        if not allow_fallback:
+            # Strict no-escalation contract: whatever the requested strategy —
+            # AUTO included — run only the first (cheapest permitted) strategy.
+            plan = plan[:1]
         if not plan:
             return error_result(
                 url, strategy=strategy,
@@ -208,7 +214,6 @@ class StrategyRouter:
                 failure_class=FailureClass.DEPENDENCY_MISSING.value,
             )
 
-        forced = requested_strategy(strategy) is not None
         insufficient = False
         for index, strat in enumerate(plan):
             try:
@@ -266,11 +271,11 @@ class StrategyRouter:
                 ))
                 last_reason = "transport failure"
 
-            # Decide whether to escalate to the next strategy at all.
+            # Decide whether to escalate to the next strategy at all. The plan
+            # was already truncated to one entry when allow_fallback is False,
+            # so reaching here with more entries means escalation is permitted.
             next_index = index + 1
             if next_index >= len(plan):
-                break
-            if forced and not allow_fallback:
                 break
         else:
             pass  # plan exhausted

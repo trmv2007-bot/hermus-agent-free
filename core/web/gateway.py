@@ -323,11 +323,15 @@ class WebGateway:
         )
         if not plan.start_urls:
             return {"ok": False, "error": "no valid start URLs", "error_code": "WEB_CRAWL_EMPTY"}
+        # The caller-requested wall clock is honored but can never exceed the
+        # configured ceiling (web_crawl_wall_clock) — previously the parameter
+        # was silently ignored.
+        wall_ceiling = float(getattr(self._config, "web_crawl_wall_clock", 600))
+        wall_clock = min(float(wall_clock_seconds or wall_ceiling), wall_ceiling)
         worker = CrawlWorker(plan, router=self._router, policy=self._policy,
                              emit=self._crawl_emit(emit, mission_id, run_id),
                              should_cancel=should_cancel,
-                             wall_clock_seconds=float(
-                                 getattr(self._config, "web_crawl_wall_clock", 600)))
+                             wall_clock_seconds=wall_clock)
         return worker.run()
 
     def crawl_async(self, urls: list[str], *, session_key: str = "web-crawl",
@@ -371,6 +375,7 @@ class WebGateway:
             allow_fallback=bool(payload.get("allow_fallback", True)),
             max_dynamic_pages=int(payload.get("max_dynamic_pages", 0) or 0),
             per_domain_delay_ms=payload.get("per_domain_delay_ms"),
+            wall_clock_seconds=float(payload.get("wall_clock_seconds", 600.0) or 600.0),
             emit=getattr(ctx, "emit", None),
             should_cancel=getattr(ctx, "should_cancel", None),
             mission_id=payload.get("mission_id"),

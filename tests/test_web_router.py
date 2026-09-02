@@ -287,3 +287,116 @@ class TestEscalation:
         result = router.fetch("https://x.example/", strategy="dynamic", allow_fallback=False)
         assert result.ok is True
         assert calls == ["dynamic"]
+
+
+# ----------------------------------------------------------- no-fallback contract
+class TestNoFallbackContract:
+    """``allow_fallback=False`` strictly disables escalation — AUTO included.
+
+    Mocked at the backend seam (proves router logic only, not browsers).
+    """
+
+    def _dual_strategy_router(self, monkeypatch):
+        """Router whose plan genuinely contains static AND dynamic, so any
+        escalation with allow_fallback=False would be visible."""
+        cfg = StubConfig()
+        cfg.web_termux_restrict = False
+        monkeypatch.setattr(capabilities, "probe", lambda force=False: {
+            "static": {"status": capabilities.NOT_VERIFIED, "detail": ""},
+            "dynamic": {"status": capabilities.AVAILABLE, "detail": ""},
+        })
+        router = StrategyRouter(cfg, WebSecurityPolicy())
+        assert [s.value for s in router.plan("auto")] == ["static", "dynamic"]
+        return router
+
+    def test_auto_no_fallback_never_escalates_past_js_shell(self, monkeypatch):
+        router = self._dual_strategy_router(monkeypatch)
+        calls: list[str] = []
+        behaviors = {
+            "static": lambda url: make_raw(
+                url, html="<html><body><div id='root'></div></body></html>", text=""),
+            "dynamic": lambda url: make_raw(
+                url, html="<html><body>rendered content long enough here</body></html>"),
+        }
+
+        def fake_run(strat, url, **kw):
+            calls.append(strat.value)
+            return behaviors[strat.value](url)
+
+        monkeypatch.setattr(router, "_run_strategy", fake_run)
+        result = router.fetch("https://spa.example/", strategy="auto",
+                              allow_fallback=False)
+        assert calls == ["static"], "auto + allow_fallback=False must not escalate"
+        assert result.ok is False
+        assert [a.strategy for a in result.attempts] == ["static"]
+        assert any("insufficient" in w for w in result.warnings), \
+            "must say honestly that content was fetched but insufficient"
+
+    def test_auto_no_fallback_never_escalates_past_transport_failure(self, monkeypatch):
+        router = self._dual_strategy_router(monkeypatch)
+        calls: list[str] = []
+
+        def fake_run(strat, url, **kw):
+            calls.append(strat.value)
+            if strat.value == "static":
+                raise WebAcquisitionError("connection refused",
+                                          failure_class=FailureClass.CONNECTION,
+                                          error_code="WEB_CONNECTION_ERROR")
+            return make_raw(url, html="<html><body>would have worked</body></html>")
+
+        monkeypatch.setattr(router, "_run_strategy", fake_run)
+        result = router.fetch("https://down.example/", strategy="auto",
+                              allow_fallback=False)
+        assert calls == ["static"], "transport failure must not trigger escalation"
+        assert result.ok is False
+        assert result.failure_class == FailureClass.CONNECTION.value
+
+    def test_auto_with_fallback_still_escalates(self, monkeypatch):
+        """Contrast case: default allow_fallback=True keeps AUTO escalation."""
+        router = self._dual_strategy_router(monkeypatch)
+        calls: list[str] = []
+        behaviors = {
+            "static": lambda url: make_raw(
+                url, html="<html><body><div id='root'></div></body></html>", text=""),
+            "dynamic": lambda url: make_raw(
+                url, html="<html><body>rendered content long enough here</body></html>"),
+        }
+
+        def fake_run(strat, url, **kw):
+            calls.append(strat.value)
+            return behaviors[strat.value](url)
+
+        monkeypatch.setattr(router, "_run_strategy", fake_run)
+        result = router.fetch("https://spa.example/", strategy="auto",
+                              allow_fallback=True)
+        assert calls == ["static", "dynamic"]
+        assert result.ok is True and result.strategy == "dynamic"
+
+    def test_explicit_static_no_fallback_stays_static(self, monkeypatch):
+        router = self._dual_strategy_router(monkeypatch)
+        calls: list[str] = []
+
+        def fake_run(strat, url, **kw):
+            calls.append(strat.value)
+            return make_raw(url, html="<html><body><div id='root'></div></body></html>",
+                            text="")
+
+        monkeypatch.setattr(router, "_run_strategy", fake_run)
+        result = router.fetch("https://spa.example/", strategy="static",
+                              allow_fallback=False)
+        assert calls == ["static"]
+        assert result.ok is False
+
+    def test_explicit_dynamic_no_fallback_runs_alone(self, monkeypatch):
+        router = self._dual_strategy_router(monkeypatch)
+        calls: list[str] = []
+
+        def fake_run(strat, url, **kw):
+            calls.append(strat.value)
+            return make_raw(url, html="<html><body>dynamic page content here</body></html>")
+
+        monkeypatch.setattr(router, "_run_strategy", fake_run)
+        result = router.fetch("https://x.example/", strategy="dynamic",
+                              allow_fallback=False)
+        assert calls == ["dynamic"]
+        assert result.ok is True and result.strategy == "dynamic"

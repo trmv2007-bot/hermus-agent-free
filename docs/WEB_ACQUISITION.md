@@ -96,7 +96,17 @@ acquisition instead of forcing static:
 * `strategy="dynamic"` — request a real browser per page where permitted;
 * `max_dynamic_pages` (crawl-level, default 0 = unlimited within `max_pages`)
   caps how many pages may escalate to a browser strategy, so a JS-heavy site
-  cannot spin up unbounded Chromium instances;
+  cannot spin up unbounded Chromium instances. The budget is **atomic**: a
+  slot is reserved under a lock *before* a browser-capable fetch starts, so
+  concurrent crawl workers can never exceed the cap (an `auto` page that ends
+  up static returns its unused slot);
+* `allow_fallback=False` strictly disables strategy escalation everywhere —
+  including `strategy="auto"`, which then runs only its first (cheapest
+  permitted) strategy;
+* the crawl wall clock is a hard scheduling deadline: no new page fetch starts
+  after it, politeness waits are bounded by it, in-flight fetches are waited
+  on only briefly past it (then abandoned as daemon threads — never killed),
+  and the summary reports `status="timeout"` / `timed_out=true` honestly;
 * the configured per-domain politeness delay
   (`HERMUS_WEB_CRAWL_DELAY_MS` → `web_crawl_per_domain_delay_ms`) is threaded
   Config → WebGateway → `plan_crawl` → `CrawlPlan` → `CrawlWorker` and is
@@ -268,8 +278,12 @@ raises findings for security misconfigurations (e.g.
   stays static; SPA shell escalates; static-with-scripts stays static; dynamic
   content escalates).
 * `tests/test_web_crawl_strategy.py` — crawl uses the intelligent router for
-  `auto`, stays static for `static`, honors `max_dynamic_pages`, and actually
-  propagates/honors the configured per-domain delay.
+  `auto`, stays static for `static`, honors `max_dynamic_pages` (including
+  atomically under real thread concurrency), and actually propagates/honors
+  the configured per-domain delay.
+* `tests/test_web_crawl_timeout.py` — hard wall-clock deadline: no new work
+  after the deadline, bounded politeness waits, bounded joins with honest
+  abandonment reporting, and accurate `timeout` status.
 * `tests/test_web_live.py` — **REAL LIVE** internet fetch (pypi.org; skipped
   without egress) and **REAL LOCAL** full-stack fetch/extract/crawl.
 * Mocked tests prove routing/wiring logic only — they are never cited as proof
