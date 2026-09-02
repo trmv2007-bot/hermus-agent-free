@@ -8,15 +8,31 @@ from pathlib import Path
 # GEMINI_API_KEY, NVIDIA_API_KEY, ...) is invisible to the provider resolver,
 # model fleet and fallback logic even though it is "configured". ``override``
 # stays False so real exported environment variables still win.
-try:
-    from dotenv import load_dotenv
+#
+# HERMUS_NO_DOTENV=1 skips the load. The test suite sets it: a developer's
+# personal .env (raised step budgets, doctor caps, verify thresholds, ...) would
+# otherwise change what the tests assert, making the suite depend on whoever's
+# machine it runs on.
+if os.getenv("HERMUS_NO_DOTENV", "") not in ("1", "true", "True"):
+    try:
+        from dotenv import load_dotenv
 
-    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
-except Exception:  # python-dotenv is optional until setup.sh installs it
-    pass
+        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+    except Exception:  # python-dotenv is optional until setup.sh installs it
+        pass
 
 from pydantic import BaseModel
 from typing import Optional
+
+
+def csv_list(value: str) -> list:
+    """Parse a comma-separated env value into a clean list of strings.
+
+    Blank entries are dropped: a trailing comma or an unset variable must not
+    produce a wake-word alias of "" (which would match everything).
+    """
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
 
 class Config(BaseModel):
     # LLM Provider - free options
@@ -94,6 +110,17 @@ class Config(BaseModel):
     # 32 keeps simple chat cheap (the governor scales the per-task budget
     # down for easy tasks) while giving real work room to finish.
     max_tool_steps: int = int(os.getenv("HERMUS_MAX_TOOL_STEPS", "32"))
+
+    # Chat/multi-chat turns are held to a much tighter tool budget than agent
+    # turns, because a chat message is usually a question rather than a job.
+    # Raise this (or set it equal to max_tool_steps) to let chat turns run long
+    # tool chains too.
+    chat_max_steps: int = int(os.getenv("HERMUS_CHAT_MAX_STEPS", "2"))
+    # The reasoning governor normally hands a task only a *share* of
+    # max_tool_steps, scaled by classified difficulty (6.25% .. 100%), so easy
+    # tasks stay cheap. Set to 1 to grant the full max_tool_steps budget to every
+    # task regardless of difficulty.
+    step_budget_full: bool = os.getenv("HERMUS_STEP_BUDGET_FULL", "0") not in ("0", "false", "False")
 
     # ---- Universal mission runtime -----------------------------------------
     # Route every execution surface (agent.autonomous(), /command?autonomous,
@@ -221,6 +248,67 @@ class Config(BaseModel):
     redis_url: Optional[str] = os.getenv("REDIS_URL")
     gateway_stream_enabled: bool = os.getenv("HERMUS_STREAM_ENABLED", "1") not in ("0", "false", "False")
     gateway_stream_tokens: bool = os.getenv("HERMUS_STREAM_TOKENS", "1") not in ("0", "false", "False")
+
+    # ---- Per-turn tool selection -------------------------------------------
+    # Every agent call otherwise ships all ~179 tool schemas: measured at ~18.3K
+    # of a ~19.9K prompt (93%), re-sent on every step of the ReAct loop. Sending
+    # only the plausibly-relevant tools cuts that dramatically, which lowers both
+    # cost and time-to-first-token. The model can always call `expand_tools` to
+    # get the full catalog back if the subset is missing something.
+    tool_subset_enabled: bool = os.getenv("HERMUS_TOOL_SUBSET", "1") not in ("0", "false", "False")
+    # 0 disables subsetting. Values at or above the catalog size are a no-op.
+    tool_subset_limit: int = int(os.getenv("HERMUS_TOOL_SUBSET_LIMIT", "40"))
+
+    # ---- Hands-free voice loop ---------------------------------------------
+    # OFF by default and deliberately so: an always-hot microphone is a standing
+    # privacy commitment, not a convenience setting. Turning this on means the
+    # browser keeps the mic open for as long as the Voice tab is armed, and audio
+    # is sent to the speech-to-text backend on every detected utterance.
+    voice_handsfree: bool = os.getenv("HERMUS_VOICE_HANDSFREE", "0") not in ("0", "false", "False")
+    # Word that must start an utterance before it is acted on. With the wake word
+    # required, ambient speech is transcribed and then discarded without ever
+    # reaching the model.
+    voice_wake_word: str = os.getenv("HERMUS_VOICE_WAKE_WORD", "jarvis")
+    # Comma-separated mistranscriptions of the wake word that speech-to-text
+    # actually produces on this install. The matcher tolerates ~2 edits; anything
+    # further out has to be declared here rather than by loosening the budget,
+    # which would let ordinary words un-gate the microphone.
+    voice_wake_aliases: list[str] = csv_list(os.getenv("HERMUS_VOICE_WAKE_ALIASES", ""))
+    voice_wake_required: bool = os.getenv("HERMUS_VOICE_WAKE_REQUIRED", "1") not in ("0", "false", "False")
+    # Trailing silence that ends an utterance.
+    voice_silence_ms: int = int(os.getenv("HERMUS_VOICE_SILENCE_MS", "900"))
+    # Leading voice needed before we believe someone is talking (kills key clicks).
+    voice_speech_ms: int = int(os.getenv("HERMUS_VOICE_SPEECH_MS", "140"))
+    # Hard cap so a noisy room cannot record forever.
+    voice_max_utterance_ms: int = int(os.getenv("HERMUS_VOICE_MAX_UTTERANCE_MS", "20000"))
+    # Shorter than this is a cough, not a command.
+    voice_min_utterance_ms: int = int(os.getenv("HERMUS_VOICE_MIN_UTTERANCE_MS", "350"))
+    # Interrupt the assistant's own speech when the user starts talking.
+    voice_barge_in: bool = os.getenv("HERMUS_VOICE_BARGE_IN", "1") not in ("0", "false", "False")
+
+    # ---- Voice-first (Jarvis) mode -----------------------------------------
+    # A normal agent turn sends the whole tool catalog (~20K prompt tokens) and
+    # takes seconds to tens of seconds. A voice conversation cannot sit in
+    # silence that long, so /voice/command speaks a short acknowledgment first
+    # and queues the real work behind it. See gateway/routes_voice.py.
+    voice_enabled: bool = os.getenv("HERMUS_VOICE_ENABLED", "1") not in ("0", "false", "False")
+    # How the immediate acknowledgment is produced:
+    #   canned -> local phrase pool, no model call at all (fastest: local TTS only)
+    #   llm    -> tools-free model call (personalised, but pays model latency)
+    #   off    -> no acknowledgment; just transcribe and queue
+    voice_ack_mode: str = (os.getenv("HERMUS_VOICE_ACK_MODE", "canned") or "canned").strip().lower()
+    # Pipe-separated acknowledgment pool used by the canned mode.
+    voice_ack_phrases: str = os.getenv(
+        "HERMUS_VOICE_ACK_PHRASES",
+        "On it.|Give me a second.|Working on that now.|Sure, one moment.|Right away.",
+    )
+    # Synthesize the final answer for speech when the job finishes.
+    voice_speak_answer: bool = os.getenv("HERMUS_VOICE_SPEAK_ANSWER", "1") not in ("0", "false", "False")
+    # Speech-only truncation. Long answers stay complete in the transcript and
+    # job result; only the spoken clip is shortened so replies stay listenable.
+    voice_answer_max_chars: int = int(os.getenv("HERMUS_VOICE_ANSWER_MAX_CHARS", "900"))
+    # Whisper model for inbound microphone audio.
+    voice_stt_model: str = os.getenv("HERMUS_VOICE_STT_MODEL", "base")
 
     # ---- Tool sandboxing ---------------------------------------------------
     # auto | docker | podman | gvisor | local | off

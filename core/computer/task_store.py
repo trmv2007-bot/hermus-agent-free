@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .world_state import WorldState
+from ..state import create_world_state
 import builtins
 
 
@@ -136,7 +137,7 @@ class TaskStore:
             graph=dict(graph or {}),
             current_state=names[0] if names else None,
             pending_states=names,
-            world_state=(world_state or WorldState(task=task, task_state="PLANNING")).to_dict(),
+            world_state=(world_state or create_world_state(task=task, task_state="PLANNING")).to_dict(),
             attempts=1,
         )
         self.directory(task_id).mkdir(parents=True, exist_ok=True)

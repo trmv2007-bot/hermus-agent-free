@@ -25,6 +25,7 @@ from .video_analyzer import VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
 from .world_state import WorldState
+from ..state import create_world_state, world_state_from_dict
 
 
 def _slug(value: str) -> str:
@@ -71,7 +72,7 @@ class ComputerAgent:
         self.recorder = recorder or ScreenRecorder(source=ImageGrabSource())
         self.policy = policy or recording_policy
         self.skills = skills or ComputerSkillStore()
-        self.world_state = world_state or WorldState()
+        self.world_state = world_state or create_world_state()
         self.planner_engine = ComputerPlanner(skills=self.skills, world_state=self.world_state)
         self.planner = planner
         self.analyzer = analyzer
@@ -141,7 +142,7 @@ class ComputerAgent:
                 "error": "task has no pending state to resume",
                 "checkpoint": checkpoint.to_dict(),
             }
-        self.world_state = WorldState.from_dict(checkpoint.world_state)
+        self.world_state = world_state_from_dict(checkpoint.world_state)
         self.planner_engine.world_state = self.world_state
         return self.run(
             checkpoint.task,

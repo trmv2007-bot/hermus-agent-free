@@ -294,6 +294,7 @@ from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E4
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_android import router as _android_router  # noqa: E402
@@ -314,6 +315,7 @@ app.include_router(_computer_ws_router)
 app.include_router(_speech_router, dependencies=_gate_control)
 app.include_router(_speech_ws_router)
 app.include_router(_jarvis_router, dependencies=_gate_control)
+app.include_router(_voice_router, dependencies=_gate_control)
 app.include_router(_engine_router, dependencies=_gate_control)
 app.include_router(_canonical_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
@@ -431,6 +433,25 @@ async def control_room():
         return HTMLResponse("Control room not found", status_code=404)
     return HTMLResponse(
         html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/static/control-client.js")
+async def control_client_js():
+    """Serve the browser client (SSE + voice-first flow).
+
+    Served from a route rather than a StaticFiles mount: the control room is the
+    only UI surface and it is same-origin, so a single explicit file keeps the
+    gateway from exposing the whole directory.
+    """
+    js_path = Path(__file__).parent / "static" / "control-client.js"
+    if not js_path.exists():
+        return Response("control-client.js not found", status_code=404,
+                        media_type="text/plain")
+    return Response(
+        js_path.read_text(encoding="utf-8"),
+        media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
 

@@ -201,3 +201,34 @@ if __name__ == "__main__":
     doc["version"] = 1
     ConstitutionManager().save(doc, log=False)
     print("\n🎉 All counsel system tests passed (offline, mock model)")
+
+
+def test_council_executor_gets_a_tool_subset_not_the_full_catalog(monkeypatch):
+    """The executor loop used to send all 179 schemas (~18.3K tokens) on every
+    step *and* every tool round. Regression guard for per-step selection."""
+    from core.counsel.council import CouncilSession
+    from core.llm import FreeLLM
+    from core.tool_registry import tool_registry
+
+    tool_registry.load()
+    full = len(tool_registry.get_definitions(allowed={"all"}))
+    seen: list[int] = []
+
+    class _R:
+        content = "DONE the step is complete"
+        tool_calls: list = []
+
+    def fake_chat(self, messages, tools=None, **_kw):
+        seen.append(len(tools or []))
+        return _R()
+
+    monkeypatch.setattr(FreeLLM, "chat", fake_chat)
+
+    cs = CouncilSession("List two python libraries for web scraping.", model="mock/mock",
+                        difficulty=3, max_members=2, max_rounds=1, execute=True)
+    cs.run()
+
+    executor_calls = [n for n in seen if n > 0]
+    assert executor_calls, "the executor never called the model with tools"
+    assert min(executor_calls) < full, \
+        f"executor was handed the full catalog: {executor_calls} vs {full} registered"

@@ -553,7 +553,14 @@ def test_step_budgets_scale_with_config():
     assert default_steps >= 24, "default tool budget must not starve real work"
 
     old = config.max_tool_steps
+    old_full = config.step_budget_full
+    old_chat = config.chat_max_steps
+    # Pin the governor's other inputs too: a developer's local .env can raise
+    # HERMUS_CHAT_MAX_STEPS / HERMUS_STEP_BUDGET_FULL, and this test is about the
+    # default difficulty-share behaviour, not the ambient environment.
     config.max_tool_steps = 32
+    config.step_budget_full = False
+    config.chat_max_steps = 2
     try:
         hard = ("Build a full-stack web application with authentication, a database, "
                 "a test suite, and deployment scripts. Keep going until it works, "
@@ -565,6 +572,8 @@ def test_step_budgets_scale_with_config():
         assert governor.step_budget("anything", mode="chat") <= 2
     finally:
         config.max_tool_steps = old
+        config.step_budget_full = old_full
+        config.chat_max_steps = old_chat
 
 
 # ------------------------------------------------------------------ SWE agent

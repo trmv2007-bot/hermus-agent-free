@@ -62,7 +62,10 @@ Gates enforcing these claims live in `tests/test_architecture_gates.py`.
 - `core/providers.py`, `core/multi_key.py`, `core/openai_compat.py`, `core/custom_api.py`, `core/provider_resolver.py`, `core/model_fleet.py`, `core/router2.py`, `core/model_capabilities.py`, `core/free_keys.py`, `core/nollama.py` — model/provider implementation layers under the facade.
 
 ### World state
-- `core/state/world.py` — `WorldStateFacade` (public writable path).
+- `core/state/world.py` — public boundary: `create_world_state` /
+  `world_state_from_dict` / `load_world_state` (the only construction paths),
+  `WorldStateFacade` + `get_world_state` (wrapper + process-wide accessor), and
+  `migrate_world_state` / `detect_legacy` (non-destructive load + integrity check).
 - `core/computer/world_state.py` — `WorldState` backend owned by the facade.
 
 ### Android

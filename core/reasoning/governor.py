@@ -132,14 +132,28 @@ class Governor:
     # Absolute caps (2/4/6/8/12) starved hard tasks when max_tool_steps was
     # raised: a difficulty-5 goal could never use more than 12 tool rounds no
     # matter what HERMUS_MAX_TOOL_STEPS said. Shares scale with the budget.
+    # Set HERMUS_STEP_BUDGET_FULL=1 to skip the share table entirely and grant
+    # every task the whole budget.
     _STEP_SHARES = {1: 0.0625, 2: 0.125, 3: 0.25, 4: 0.5, 5: 1.0}
     _MIN_STEPS = {1: 2, 2: 2, 3: 4, 4: 6, 5: 8}
 
     def step_budget(self, text: str, mode: str = "agent") -> int:
-        """Per-task max tool steps: easy tasks stay cheap, hard tasks get room."""
-        if mode and str(mode).lower() in ("chat", "multi-chat"):
-            return min(2, config.max_tool_steps)
+        """Per-task max tool steps: easy tasks stay cheap, hard tasks get room.
+
+        Two escape hatches lift the caps without editing this file:
+        ``HERMUS_CHAT_MAX_STEPS`` raises the chat/multi-chat ceiling (default 2),
+        and ``HERMUS_STEP_BUDGET_FULL=1`` grants the full ``max_tool_steps``
+        budget regardless of classified difficulty. Both still clamp to the
+        configured budget, and neither can return 0 — a zero budget would make
+        the ``while steps < budget_steps`` loop in the agent never run at all,
+        silently disabling tool use instead of lifting a limit.
+        """
         budget = max(1, int(getattr(config, "max_tool_steps", 8)))
+        if mode and str(mode).lower() in ("chat", "multi-chat"):
+            chat_cap = int(getattr(config, "chat_max_steps", 2))
+            return max(1, min(chat_cap, budget))
+        if getattr(config, "step_budget_full", False):
+            return budget
         diff = self.classify_difficulty(text)
         share = self._STEP_SHARES.get(diff, 1.0)
         cap = max(self._MIN_STEPS.get(diff, 1), int(round(budget * share)))

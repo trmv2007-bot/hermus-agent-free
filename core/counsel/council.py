@@ -29,6 +29,7 @@ from ..llm import FreeLLM
 from ..memory import memory
 from ..reasoning.governor import governor
 from ..reasoning.scaffold import Plan, PlanStep
+from ..tool_select import EXPAND_TOOL_NAME, select_tools
 from .constitution import constitution
 from .members import CounselMember, build_roster, describe_roster
 
@@ -403,7 +404,7 @@ class CouncilSession:
         from ..tool_registry import tool_registry
 
         tool_registry.load()
-        tools = tool_registry.get_definitions(allowed={"all"})
+        all_tools = tool_registry.get_definitions(allowed={"all"})
         failures = 0
         replans = 0
         reconvene_threshold = int(self.rules.get("reconvene_on_failures", 2))
@@ -412,6 +413,10 @@ class CouncilSession:
 
         for idx, step in enumerate(self.plan.steps):
             step.status = "active"
+            # Per-step tool selection. The full catalog is ~18.3K tokens and this
+            # call happens once per step *per tool round*, so sending everything
+            # multiplies fast. `expand_tools` recovers a wrong guess mid-step.
+            tools = select_tools(all_tools, f"{step.goal} {step.action}")
             messages = [
                 {"role": "system", "content": (
                     f"You are the Hermus council executor ({executor.persona[:120]}).\n"
@@ -441,6 +446,16 @@ class CouncilSession:
                             targs = {}
                     try:
                         print(f"[⚙️ {tname}({json.dumps(targs)[:120]})]")
+                        if tname == EXPAND_TOOL_NAME:
+                            # The subset missed something this step needs. Widen
+                            # for the remaining rounds of this step.
+                            tools = list(all_tools)
+                            observations.append(
+                                f"tool {tname} -> full tool catalog now available")
+                            messages.append({"role": "user", "content":
+                                             "Full tool catalog is now available. "
+                                             "Call the tool you needed."})
+                            continue
                         # §5 canonical path: execute through the ToolGateway so policy,
                         # audit and tracing stay centralized.
                         from ..tools import get_tool_gateway, gateway_result_dict

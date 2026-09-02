@@ -160,8 +160,18 @@ class VisualStateMachine:
                     self.world_state.current_state = str(event["next_state"])
                 elif phase == "terminal":
                     self.world_state.finish_task(bool(event.get("success")))
-            except Exception:
-                pass
+            except Exception as exc:
+                # Never let a bookkeeping failure abort execution, but do not
+                # swallow it silently either: a world state that quietly stops
+                # tracking is indistinguishable from one that agrees with the
+                # screen, and that is exactly the failure this model exists to
+                # prevent. Surface it on the telemetry channel instead.
+                self._telemetry(
+                    "world_state_update_failed",
+                    phase=event.get("phase"),
+                    state=event.get("state"),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         if self.on_event is not None:
             self.on_event(event)
 
