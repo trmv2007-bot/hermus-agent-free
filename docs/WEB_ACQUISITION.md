@@ -106,7 +106,10 @@ acquisition instead of forcing static:
 * the crawl wall clock is a hard scheduling deadline: no new page fetch starts
   after it, politeness waits are bounded by it, in-flight fetches are waited
   on only briefly past it (then abandoned as daemon threads — never killed),
-  and the summary reports `status="timeout"` / `timed_out=true` honestly;
+  and the summary reports `status="timeout"` / `timed_out=true` honestly. That
+  join grace is a single budget shared by the whole in-flight batch (one
+  absolute join deadline, each thread joined only for the time left), so N
+  simultaneously stuck fetches cannot multiply the effective timeout;
 * the configured per-domain politeness delay
   (`HERMUS_WEB_CRAWL_DELAY_MS` → `web_crawl_per_domain_delay_ms`) is threaded
   Config → WebGateway → `plan_crawl` → `CrawlPlan` → `CrawlWorker` and is
