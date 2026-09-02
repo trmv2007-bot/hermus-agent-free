@@ -378,7 +378,7 @@ async def ws_agent(websocket: WebSocket):
                     # §5 canonical path: gateway tool calls go through ToolGateway.
                     from core.tools import get_tool_gateway, gateway_result_dict
 
-                    def _run():
+                    def _run(name=name, args=args):
                         r = get_tool_gateway().execute(name,
                                                        args if isinstance(args, dict) else {},
                                                        actor="realtime")

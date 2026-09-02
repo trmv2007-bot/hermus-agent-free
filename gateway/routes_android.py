@@ -50,7 +50,7 @@ async def grant(req: _PermissionRequest) -> dict[str, Any]:
         get_permission_manager().grant(req.op_class)
         return {"ok": True, "granted": req.op_class}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/permissions/revoke")
@@ -67,7 +67,7 @@ async def set_ops(req: _OpsRequest) -> dict[str, Any]:
         get_permission_manager().set_allowed_ops(req.ops)
         return {"ok": True, "allowed_ops": get_permission_manager().allowed_ops()}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{op}")

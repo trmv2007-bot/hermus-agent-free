@@ -280,7 +280,8 @@ def _emergency_state() -> dict[str, Any]:
 
 def _suggest_approval_prompts(actions: list[PreflightAction], findings: list[PreflightFinding]) -> list[dict[str, Any]]:
     prompts: list[dict[str, Any]] = []
-    for action, finding in zip(actions, findings):
+    # findings is built one-per-action in preflight_goal(); strict zip enforces that invariant.
+    for action, finding in zip(actions, findings, strict=True):
         if not finding.missing_approval:
             continue
         safety_lines = list(finding.red_lines)

@@ -46,7 +46,7 @@ async def system_health():
         return {"ok": required_ok, "python": report.get("python"),
                 "venv": report.get("venv"), "capabilities": report["capabilities"]}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"health probe failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"health probe failed: {exc}") from exc
 
 
 @router.get("/system/capabilities")
@@ -72,7 +72,7 @@ async def system_capabilities(payload: bool = False):
             "avatar": get_avatar_service().status(probe=bool(payload)),
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"capability probe failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"capability probe failed: {exc}") from exc
 
 
 @router.post("/commands")
