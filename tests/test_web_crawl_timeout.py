@@ -155,6 +155,114 @@ class TestWallClockDeadline:
         assert summary["pages_processed"] == 2
 
 
+class TestJoinBudgetIsGlobal:
+    """The join grace is spent ONCE per batch, not once per stuck thread.
+
+    Regression guard: joining each thread with its own ``deadline + grace``
+    budget multiplied the effective timeout by the number of in-flight
+    fetches (N stuck threads → N × grace of overshoot). The batch must share
+    a single absolute join deadline.
+    """
+
+    @staticmethod
+    def _stuck_threads(count: int, release: threading.Event) -> list[threading.Thread]:
+        """Start ``count`` daemon threads that stay alive until released."""
+        threads = []
+        for _ in range(count):
+            t = threading.Thread(target=release.wait, args=(30.0,), daemon=True)
+            t.start()
+            threads.append(t)
+        return threads
+
+    def test_many_stuck_threads_share_one_join_budget(self, monkeypatch):
+        monkeypatch.setattr(crawl_mod, "_JOIN_GRACE_SECONDS", 0.3)
+        plan = plan_crawl(["http://x.example/a"], requested_pages=1,
+                          requested_depth=0, requested_concurrency=1,
+                          per_domain_delay_ms=0, max_pages_ceiling=5)
+        worker = CrawlWorker(plan, router=SlowRouter(0.0), policy=_policy(),
+                             wall_clock_seconds=0.0)
+        worker._deadline = time.monotonic()  # deadline already reached
+
+        release = threading.Event()
+        stuck = self._stuck_threads(6, release)
+        try:
+            started = time.monotonic()
+            abandoned = worker._join_bounded(stuck)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+
+        assert abandoned == 6, "stuck threads must be reported as abandoned"
+        # Global bound is grace (0.3s) + scheduling slack — emphatically NOT
+        # 6 × 0.3s, which is what the per-thread budget produced.
+        assert elapsed < 1.0, f"join budget multiplied per thread ({elapsed:.2f}s)"
+        assert all(t.is_alive() for t in stuck), "threads must never be killed"
+
+    def test_join_waits_are_not_cumulative_as_threads_grow(self, monkeypatch):
+        """Doubling the number of stuck threads must not double the wait."""
+        monkeypatch.setattr(crawl_mod, "_JOIN_GRACE_SECONDS", 0.4)
+        plan = plan_crawl(["http://x.example/a"], requested_pages=1,
+                          requested_depth=0, requested_concurrency=1,
+                          per_domain_delay_ms=0, max_pages_ceiling=5)
+        worker = CrawlWorker(plan, router=SlowRouter(0.0), policy=_policy(),
+                             wall_clock_seconds=0.0)
+
+        timings = []
+        for count in (2, 8):
+            worker._deadline = time.monotonic()
+            release = threading.Event()
+            stuck = self._stuck_threads(count, release)
+            try:
+                started = time.monotonic()
+                assert worker._join_bounded(stuck) == count
+                timings.append(time.monotonic() - started)
+            finally:
+                release.set()
+
+        two, eight = timings
+        assert eight < 1.0, f"8 stuck threads overshot the global bound ({eight:.2f}s)"
+        assert eight < two + 0.4, \
+            f"wait scaled with thread count ({two:.2f}s → {eight:.2f}s)"
+
+    def test_early_finishers_still_join_normally(self, monkeypatch):
+        """A shared budget must not cut short threads that finish in time."""
+        monkeypatch.setattr(crawl_mod, "_JOIN_GRACE_SECONDS", 2.0)
+        plan = plan_crawl(["http://x.example/a"], requested_pages=1,
+                          requested_depth=0, requested_concurrency=1,
+                          per_domain_delay_ms=0, max_pages_ceiling=5)
+        worker = CrawlWorker(plan, router=SlowRouter(0.0), policy=_policy(),
+                             wall_clock_seconds=5.0)
+        threads = [threading.Thread(target=time.sleep, args=(0.05,), daemon=True)
+                   for _ in range(4)]
+        for t in threads:
+            t.start()
+        assert worker._join_bounded(threads) == 0
+        assert not any(t.is_alive() for t in threads)
+
+    def test_concurrent_stuck_fetches_stay_within_global_bound(self, monkeypatch):
+        """End-to-end: a full batch of hung fetches is abandoned once, and the
+        whole crawl stays inside deadline + one grace period."""
+        monkeypatch.setattr(crawl_mod, "_JOIN_GRACE_SECONDS", 0.4)
+        urls = [f"http://h{i}.example/a" for i in range(4)]
+        plan = plan_crawl(urls, requested_pages=4, requested_depth=0,
+                          requested_concurrency=4, per_domain_delay_ms=0,
+                          max_pages_ceiling=10, max_concurrency_ceiling=8)
+        router = SlowRouter(10.0)  # every fetch hangs far past deadline + grace
+        worker = CrawlWorker(plan, router=router, policy=_policy(),
+                             wall_clock_seconds=0.3)
+
+        started = time.monotonic()
+        summary = worker.run()
+        elapsed = time.monotonic() - started
+
+        # deadline (0.3) + one shared grace (0.4) + slack — not 4 × grace.
+        assert elapsed < 1.5, f"total wait exceeded the global bound ({elapsed:.2f}s)"
+        assert summary["timed_out"] is True
+        assert summary["status"] == "timeout"
+        assert summary["pages_processed"] == 0
+        assert any("abandoned" in (f.get("error") or "") for f in summary["failures"])
+
+
 class TestGatewayWallClock:
     def test_gateway_honors_requested_wall_clock_bounded_by_ceiling(self, monkeypatch):
         """The wall_clock_seconds argument reaches the worker (previously it

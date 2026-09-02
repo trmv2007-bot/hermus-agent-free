@@ -14,8 +14,9 @@ Guarantees:
 * the wall-clock deadline is hard at scheduling boundaries: no new page fetch
   starts after the deadline, politeness/rate-limit waits are bounded by it, and
   in-flight fetches are waited on only up to the deadline (plus a short join
-  grace) — threads are never killed unsafely, stragglers are abandoned as
-  daemon threads and reported honestly
+  grace that is shared by the whole in-flight batch — N stuck fetches cannot
+  multiply the timeout) — threads are never killed unsafely, stragglers are
+  abandoned as daemon threads and reported honestly
 * the browser-page budget (``max_dynamic_pages``) is enforced atomically: a
   slot is RESERVED under the lock before a dynamic/stealth-capable fetch
   starts, so concurrent workers can never exceed the cap (0 = unlimited)
@@ -48,7 +49,12 @@ _ALLOWED_STRATEGIES = ("auto", "static", "dynamic", "stealth")
 _BROWSER_CAPABLE = ("auto", "dynamic", "stealth")
 # Extra seconds granted to in-flight fetches after the wall-clock deadline
 # before they are abandoned (threads are daemons; they are never killed).
+# This grace is spent ONCE per batch, shared by every in-flight thread — it is
+# not a per-thread budget (see CrawlWorker._join_bounded).
 _JOIN_GRACE_SECONDS = 5.0
+# Floor for the shared join budget, so a batch that is already past its
+# deadline still gives an almost-finished fetch a brief moment to land.
+_JOIN_MIN_SECONDS = 0.1
 
 
 @dataclass
@@ -309,13 +315,29 @@ class CrawlWorker:
     def _join_bounded(self, threads: list[threading.Thread]) -> int:
         """Wait for in-flight fetches, but never past deadline + grace.
 
+        The budget is GLOBAL to the batch, not per thread: one absolute join
+        deadline is computed once (remaining wall clock + a single grace
+        period) and every thread is joined only for whatever time is left of
+        it. With N stuck threads the total wait therefore stays inside that
+        one bound instead of multiplying it by N.
+
         Returns how many threads were still running when the wait ended
         (abandoned — they are daemon threads and are never killed; their late
         writes into the batch dict are simply not read again).
         """
+        if not threads:
+            return 0
+        # One absolute deadline for the whole group. Read the grace at call
+        # time so it stays configurable/patchable, and keep the historical
+        # minimum slice so an almost-finished fetch is still given a moment.
+        budget = max(self._remaining() + float(_JOIN_GRACE_SECONDS), _JOIN_MIN_SECONDS)
+        join_deadline = time.monotonic() + budget
         for thread in threads:
-            budget = self._remaining() + _JOIN_GRACE_SECONDS
-            thread.join(timeout=max(0.1, budget))
+            remaining = join_deadline - time.monotonic()
+            if remaining <= 0:
+                # Total budget spent — the rest are abandoned (never killed).
+                break
+            thread.join(timeout=remaining)
         return sum(1 for t in threads if t.is_alive())
 
     # -------------------------------------------------------------- internals
