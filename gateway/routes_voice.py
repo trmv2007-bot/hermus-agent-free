@@ -214,6 +214,8 @@ async def voice_status():
         stt = voice_available_models() or {}
     except Exception as exc:
         stt = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+    from core.presence import get_presence
+
     return {
         "enabled": bool(config.voice_enabled),
         "ack_mode": str(config.voice_ack_mode or "canned"),
@@ -234,6 +236,7 @@ async def voice_status():
         },
         "queue_ready": bool(getattr(_job_queue, "enabled", False)
                             and getattr(_job_queue, "_started", False)),
+        "presence": get_presence().current(),
         "tts": tts,
         "stt": stt,
     }
@@ -244,8 +247,21 @@ async def voice_ack(payload: dict | None = None):
     """Speak a single acknowledgment phrase. Used by the UI and by tests."""
     if not config.voice_enabled:
         return JSONResponse({"success": False, "error": "voice mode disabled"}, status_code=503)
-    text = str((payload or {}).get("text") or "").strip() or pick_ack()
+    payload = payload or {}
+    text = str(payload.get("text") or "").strip() or pick_ack()
     clip = await _synthesize_async(text)
+    try:
+        from core.presence import get_presence
+
+        get_presence().record_moment(
+            "voice_ack", "Spoke a voice acknowledgement",
+            session_id=str(payload.get("session_id") or ""),
+            user_id=str(payload.get("user_id") or "default"),
+            metadata={"spoken": bool(clip.get("spoken")), "mode": "manual"},
+            emit=False,
+        )
+    except Exception:
+        pass
     return {"success": bool(clip.get("spoken")), **clip}
 
 
@@ -255,6 +271,7 @@ async def voice_command(
     model: str = "",
     language: str | None = None,
     session_id: str = "",
+    user_id: str = "default",
 ):
     """Speak first, work second.
 
@@ -286,10 +303,21 @@ async def voice_command(
 
     # Acknowledgment first: this is the latency the user actually perceives.
     ack = await _make_ack(text)
+    try:
+        from core.presence import get_presence
+
+        get_presence().record_moment(
+            "voice_request", "Received a voice request",
+            session_id=session_id, user_id=user_id or "default",
+            metadata={"ack_spoken": bool(ack.get("spoken")), "input": "microphone"},
+            emit=False,
+        )
+    except Exception:
+        pass
 
     queued = _enqueue(
         {"text": text, "platform": "voice", "session_id": session_id,
-         "prefer": "auto", "voice": True},
+         "user_id": user_id or "default", "prefer": "auto", "voice": True},
         session_key=f"voice:{session_id or 'default'}",
         dedupe_key=f"voice:{session_id}:{int(started * 1000)}",
     )
@@ -320,10 +348,23 @@ async def voice_say(payload: dict | None = None):
     if not text:
         return JSONResponse({"success": False, "error": "text required"}, status_code=400)
     session_id = str(payload.get("session_id") or "")
+    user_id = str(payload.get("user_id") or "default")
 
     ack = await _make_ack(text)
+    try:
+        from core.presence import get_presence
+
+        get_presence().record_moment(
+            "voice_request", "Received a typed voice-mode request",
+            session_id=session_id, user_id=user_id,
+            metadata={"ack_spoken": bool(ack.get("spoken")), "input": "typed"},
+            emit=False,
+        )
+    except Exception:
+        pass
     queued = _enqueue(
         {"text": text, "platform": "voice", "session_id": session_id,
+         "user_id": user_id,
          "prefer": str(payload.get("prefer") or "auto"), "voice": True},
         session_key=f"voice:{session_id or 'default'}",
         dedupe_key=f"voice:{session_id}:{int(started * 1000)}",

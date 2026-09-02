@@ -115,6 +115,7 @@ def _runtime_execute(
         preflight=payload.get("preflight"),
         allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower()
                                       in {"1", "true", "yes"}),
+        read_only=bool(payload.get("read_only", False)),
     )
     if not isinstance(result, dict):
         result = {"response": str(result or "")}

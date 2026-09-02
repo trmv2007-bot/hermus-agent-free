@@ -20,7 +20,17 @@ storage. Keys and provider credentials remain server-side.
 
 ## Control Room
 
-The opening view prioritizes running and monitoring tasks:
+The opening view prioritizes running and monitoring tasks. The **Presence** tab
+also gives Hermus durable continuity rather than only a task spinner:
+
+- editable local identity (name, role, tone, values and greeting);
+- current operational state (idle, thinking, working, verifying, learning or waiting for approval);
+- ongoing user-approved goals and explicit check-in suggestions;
+- short recent continuity moments from real turns and goal changes;
+- a safe heartbeat that never calls a model or runs tools by itself;
+- voice-first requests and optional local speech/talking-avatar rendering that
+  leave redacted continuity moments while keeping execution on the canonical
+  queue.
 
 - a large directive composer with Agent, Agent Crew, Computer, and Talking modes;
 - current mission state, progress phases, live events, and recent missions;
@@ -114,6 +124,10 @@ transcription.
 | `/speech/audio/{audio_id}` | GET | Serve one traversal-safe generated clip |
 | `/speech/transcribe` | POST | Transcribe microphone audio locally |
 | `/control` | GET | Single production control room (root `/` → `/control`) |
+| `/presence` | GET | Identity, current state, goals, heartbeat and continuity moments |
+| `/presence/identity` | PUT | Update the local Hermus identity |
+| `/presence/goals` | GET/POST | List or add ongoing goals |
+| `/presence/check-in` | POST | Queue an explicit, read-only continuity check-in |
 | `/api/v1/system/health` | GET | Live system health probe |
 | `/api/v1/system/capabilities` | GET | Providers + tools + circuit status |
 | `/android/*` | — | Android control API (consent-gated, audited) |

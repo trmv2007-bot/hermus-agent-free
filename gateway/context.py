@@ -40,6 +40,11 @@ def get_agent_for_user(
             api_key=api_key,
             base_url=base_url,
         )
+    # The presence layer is user-aware for local continuity notes. Keep the
+    # identity global to this self-hosted instance, but associate active turns
+    # with the session owner so the dashboard can explain who is being served.
+    AGENTS[key].user_id = str(user_id or "anonymous")
+    AGENTS[key].platform = str(platform or "api")
     return AGENTS[key]
 
 

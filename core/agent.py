@@ -309,6 +309,21 @@ class HermusAgent:
             except Exception:
                 persona_block = ""
 
+        # Presence/continuity: stable identity + current operational state +
+        # short recent moments. This is deliberately grounded local state, not
+        # a claim that the model is conscious.
+        presence_block = ""
+        try:
+            from .presence import get_presence
+
+            presence_block = "\n" + get_presence().prompt_block(
+                session_id=self.session_id,
+                user_id=str(getattr(self, "user_id", "") or "default"),
+            ) + "\n"
+        except Exception as exc:
+            record_issue("presence", "prompt_block", exc, retryable=False,
+                         fallback="turn continues without presence context")
+
         return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
 
 You have:
@@ -332,6 +347,7 @@ Periodic Nudges:
 {nudges_text}
 {lessons_block}
 {memory2_block}
+{presence_block}
 {persona_block}
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
@@ -356,7 +372,7 @@ Rules:
             text = text[:limit] + "...(truncated)"
         return f"Tool {name} returned:\n{text}"
 
-    def chat(
+    def _chat_impl(
         self,
         user_message: str,
         *,
@@ -1028,6 +1044,113 @@ Rules:
             "status": "waiting_for_approval" if pending_approval else "done",
             "events": None,
         }
+
+    def chat(
+        self,
+        user_message: str,
+        *,
+        on_event=None,
+        stream: bool = False,
+        should_cancel=None,
+        steer_source=None,
+    ) -> dict[str, Any]:
+        """Run a turn while updating Hermus' durable identity/presence layer.
+
+        The existing ReAct loop remains the execution owner. This thin wrapper
+        only adds continuity: a user sees Hermus move through operational states,
+        and the next turn receives a short, grounded continuity block.
+        """
+        from .presence import get_presence
+
+        presence = get_presence()
+        job_context: dict[str, str] = {}
+        try:
+            from gateway.queue import current_job_context
+
+            job_context = current_job_context() or {}
+        except Exception:
+            # CLI/direct agent calls do not run inside the gateway queue.
+            job_context = {}
+        run_id = job_context.get("run_id", "")
+        user_id = str(getattr(self, "user_id", "") or "default")
+        goal = str(user_message or "").strip()
+        presence.begin_turn(
+            goal,
+            session_id=self.session_id,
+            run_id=run_id,
+            user_id=user_id,
+        )
+
+        def presence_event(event_type: str, data: Optional[dict] = None) -> None:
+            data = data or {}
+            try:
+                if event_type in {"step_started", "tool_call", "tools_expanded"}:
+                    presence.activity(
+                        "working",
+                        detail=f"working · {event_type.replace('_', ' ')}",
+                        session_id=self.session_id,
+                        run_id=run_id,
+                        goal=goal,
+                    )
+                elif event_type in {"step_observed", "tool_result", "llm_delta"}:
+                    # Keep the status alive without emitting a disk write for
+                    # every streamed token.
+                    presence.touch(detail="thinking")
+                elif event_type == "verification":
+                    presence.activity(
+                        "verifying", detail="checking the result",
+                        session_id=self.session_id, run_id=run_id, goal=goal,
+                    )
+                elif event_type == "skill_harvest_started":
+                    presence.activity(
+                        "learning", detail="turn complete · distilling a reusable skill",
+                        session_id=self.session_id, run_id=run_id, goal=goal,
+                    )
+                elif event_type == "approval_required":
+                    presence.activity(
+                        "waiting_approval", detail="waiting for your approval",
+                        session_id=self.session_id, run_id=run_id, goal=goal,
+                    )
+            except Exception:
+                pass
+            if on_event is not None:
+                on_event(event_type, data)
+
+        result: Optional[dict[str, Any]] = None
+        try:
+            result = self._chat_impl(
+                user_message,
+                on_event=presence_event,
+                stream=stream,
+                should_cancel=should_cancel,
+                steer_source=steer_source,
+            )
+            waiting = bool(result.get("waiting_for_approval")) or result.get("status") == "waiting_for_approval"
+            failed = bool(result.get("error")) or result.get("mission_failed") is True or result.get("status") in {"failed", "blocked"}
+            failure = result.get("failure") if isinstance(result.get("failure"), dict) else {}
+            failure_reason = str(result.get("error") or failure.get("reason") or "")
+            presence.finish_turn(
+                goal=goal,
+                response=str(result.get("response") or result.get("final_answer") or ""),
+                session_id=self.session_id,
+                run_id=run_id,
+                user_id=user_id,
+                success=not failed,
+                waiting_for_approval=waiting,
+                error=failure_reason if failed else "",
+            )
+            return result
+        except Exception as exc:
+            presence.finish_turn(
+                goal=goal,
+                response="",
+                session_id=self.session_id,
+                run_id=run_id,
+                user_id=user_id,
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
 
     def _persist_memory2(self, user_message: str, final_content: str,
                          tool_results: list[dict]) -> None:

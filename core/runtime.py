@@ -316,6 +316,65 @@ def _chat_with_compat(agent: Any, text: str, *, on_event=None, stream: bool = Fa
         return agent.chat(text)
 
 
+def _read_only_chat(
+    agent: Any,
+    text: str,
+    *,
+    on_event=None,
+    stream: bool = False,
+    should_cancel=None,
+    steer_source=None,
+) -> dict[str, Any]:
+    """Run one chat turn with registered tools temporarily removed.
+
+    Chat Mode normally permits user-defined custom APIs for compatibility. A
+    presence check-in is stricter: snapshot the cached agent's tool state,
+    clear it for this turn, then restore it so ordinary chat is unaffected.
+    """
+    missing = object()
+    original_tools = getattr(agent, "tools", missing)
+    original_selected = getattr(agent, "_turn_selected_tools", missing)
+    original_expanded = getattr(agent, "_turn_tool_expanded", missing)
+    original_api_sig = getattr(agent, "_custom_api_sig", missing)
+    try:
+        if original_tools is not missing:
+            agent.tools = []
+        if original_selected is not missing:
+            agent._turn_selected_tools = None
+        if original_expanded is not missing:
+            agent._turn_tool_expanded = False
+        # Hermus refreshes custom API tools at the start of a turn when its
+        # signature changes. Match the current signature temporarily so that
+        # refresh cannot repopulate the read-only turn's tool list.
+        if hasattr(agent, "_custom_api_signature"):
+            try:
+                agent._custom_api_sig = agent._custom_api_signature()
+            except Exception:
+                pass
+        return _chat_with_compat(
+            agent,
+            text,
+            on_event=on_event,
+            stream=stream,
+            should_cancel=should_cancel,
+            steer_source=steer_source,
+        )
+    finally:
+        if original_tools is not missing:
+            agent.tools = original_tools
+        if original_selected is not missing:
+            agent._turn_selected_tools = original_selected
+        if original_expanded is not missing:
+            agent._turn_tool_expanded = original_expanded
+        if original_api_sig is not missing:
+            agent._custom_api_sig = original_api_sig
+        elif hasattr(agent, "_custom_api_sig"):
+            try:
+                del agent._custom_api_sig
+            except AttributeError:
+                pass
+
+
 def mission_failure_result(
     goal: str,
     *,
@@ -532,6 +591,7 @@ def execute(
     subgoals: Optional[list[str]] = None,
     preflight: Optional[bool] = None,
     allow_preflight_planning: bool = False,
+    read_only: bool = False,
 ) -> dict[str, Any]:
     """Run one request through the universal runtime.
 
@@ -539,7 +599,9 @@ def execute(
     single ReAct turn, ``"mission"`` forces the full mission lifecycle.
     Returns a dict whose canonical answer is ``response``; chat results carry
     the chat fields (steps/tool_results/...), mission results carry the mission
-    report plus the legacy autonomous fields.
+    report plus the legacy autonomous fields. ``read_only=True`` disables all
+    registered tools for the turn and blocks mission promotion, for bounded
+    continuity/status checks that must not change the world.
     """
     text = str(text or "").strip()
     prefer = (prefer or "auto").lower()
@@ -552,6 +614,25 @@ def execute(
         kind = "mission"
     elif prefer == "auto":
         kind = classify_request(text)
+
+    if read_only and kind == "mission":
+        blocked = mission_failure_result(
+            text,
+            stage="blocked",
+            reason="This bounded continuity turn is read-only; executable mission work is not allowed.",
+            error_type="read_only_runtime",
+            recoverable=False,
+        )
+        blocked["run_kind"] = "mission_blocked"
+        blocked["state"] = "blocked"
+        if isinstance(blocked.get("failure"), dict):
+            blocked["failure"]["state"] = "blocked"
+        if on_event is not None:
+            try:
+                on_event("mission_finished", {"state": "blocked", "failure": blocked["failure"]})
+            except Exception:
+                pass
+        return blocked
 
     # Feature flag off: the mission runtime is the *only* autonomy engine, so
     # disabling it is a BLOCKED state — it must never silently downgrade an
@@ -583,7 +664,8 @@ def execute(
     )
 
     if kind == "chat" or resolved_agent is None:
-        result = _chat_with_compat(
+        chat_runner = _read_only_chat if read_only else _chat_with_compat
+        result = chat_runner(
             resolved_agent, text, on_event=on_event, stream=stream,
             should_cancel=should_cancel, steer_source=steer_source,
         )

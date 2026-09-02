@@ -71,6 +71,28 @@
   .z-yellow { color:var(--warn); border-color:var(--warn); }
   .z-red { color:var(--err); border-color:var(--err); }
   .quick { display:flex; gap:8px; flex-wrap:wrap; }
+  .presence-hero { display:flex; align-items:center; gap:18px; min-height:150px; }
+  .presence-orb { width:112px; height:112px; border-radius:50%; display:grid; place-items:center;
+    font-size:46px; color:var(--acc); border:1px solid var(--acc);
+    background:radial-gradient(circle at 35% 30%, #234f72 0%, #102238 34%, #0e1420 72%);
+    box-shadow:0 0 24px rgba(88,166,255,.25), inset 0 0 22px rgba(88,166,255,.12);
+    animation:presence-pulse 3.2s ease-in-out infinite; }
+  .presence-orb.working { border-color:var(--ok); color:var(--ok); box-shadow:0 0 28px rgba(63,185,80,.3), inset 0 0 22px rgba(63,185,80,.12); }
+  .presence-orb.waiting_approval,.presence-orb.verifying { border-color:var(--warn); color:var(--warn); }
+  .presence-orb.error { border-color:var(--err); color:var(--err); }
+  .presence-copy { min-width:0; }
+  .presence-name { font-size:24px; font-weight:700; letter-spacing:.04em; }
+  .presence-detail { color:var(--muted); margin-top:4px; max-width:780px; }
+  .presence-meta { color:var(--muted); font-size:12px; margin-top:12px; }
+  .presence-state { display:inline-block; padding:3px 10px; border:1px solid var(--acc); border-radius:999px; color:var(--acc); font-size:12px; margin-left:8px; }
+  .goal-list { display:flex; flex-direction:column; gap:7px; }
+  .goal-card { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 10px;
+    background:var(--panel2); border:1px solid var(--line); border-radius:7px; }
+  .goal-card .goal-title { flex:1; min-width:0; }
+  .goal-card .goal-title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .goal-card .goal-age { color:var(--muted); font-size:11px; }
+  @keyframes presence-pulse { 0%,100% { transform:scale(1); opacity:.9; } 50% { transform:scale(1.035); opacity:1; } }
+  @media (prefers-reduced-motion: reduce) { .presence-orb { animation:none; } }
   footer { padding:12px 22px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
   .col { display:flex; flex-direction:column; gap:18px; }
   .full { grid-column:1 / -1; }
@@ -84,6 +106,7 @@
   <div class="health">
     <span id="conn" class="pill">connecting…</span>
     <span id="rtt" class="pill">—</span>
+    <span id="presencePill" class="pill">presence: —</span>
     <span id="jobcount" class="pill">—</span>
     <span id="pendingCount" class="pill">approvals: —</span>
     <span id="blockedMissionCount" class="pill">blocked missions: —</span>
@@ -94,6 +117,7 @@
 </header>
 <nav>
   <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="presence">Presence</button>
   <button data-tab="voice">Voice</button>
   <button data-tab="jobs">Jobs</button>
   <button data-tab="missions">Missions</button>
@@ -137,6 +161,50 @@
           <button id="cmdBtn">POST /api/v1/commands</button>
         </div>
         <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ PRESENCE ============ -->
+  <div class="tab" id="tab-presence">
+    <div class="grid">
+      <section class="full">
+        <h2>Hermus presence <span id="presenceState" class="presence-state">connecting…</span></h2>
+        <div class="presence-hero">
+          <div id="presenceOrb" class="presence-orb">☤</div>
+          <div class="presence-copy">
+            <div id="presenceName" class="presence-name">Hermus</div>
+            <div id="presenceRole" class="presence-detail">Loading identity and continuity…</div>
+            <div id="presenceDetail" class="presence-meta">—</div>
+            <div id="presenceMeta" class="presence-meta">heartbeat — · active goals — · last seen —</div>
+          </div>
+        </div>
+        <div class="hint">This is grounded operational presence, not a claim of consciousness. The heartbeat never runs tools or model calls by itself.</div>
+      </section>
+      <section>
+        <h2>Identity</h2>
+        <div class="bar"><input id="identityName" placeholder="name e.g. Hermus" /></div>
+        <div class="bar"><input id="identityRole" placeholder="role" /></div>
+        <div class="bar"><input id="identityTone" placeholder="tone" /></div>
+        <div class="bar"><input id="identityValues" placeholder="values, comma-separated" /></div>
+        <div class="bar"><input id="identityGreeting" placeholder="greeting" /></div>
+        <button id="identitySave" class="ghost">Save identity</button>
+        <div class="feed" id="identityOut" style="height:100px"><div class="note">Identity is stored locally and included as grounded context in future turns.</div></div>
+      </section>
+      <section>
+        <h2>Ongoing goals</h2>
+        <div class="bar"><input id="presenceGoal" placeholder="e.g. Keep the API reliable" /><button id="presenceGoalAdd">Add</button></div>
+        <div class="goal-list" id="presenceGoals"><div class="hint">No ongoing goals.</div></div>
+        <div class="hint" style="margin-top:10px">Goals create visible continuity. Due check-ins are suggestions only until you request one.</div>
+      </section>
+      <section class="full">
+        <h2>Recent continuity moments</h2>
+        <div class="feed" id="presenceMoments" style="height:260px"><div class="note">No moments yet. Start a turn or add an ongoing goal.</div></div>
+      </section>
+      <section class="full">
+        <h2>Heartbeat</h2>
+        <div class="bar"><button id="presenceHeartbeat" class="ghost">Send heartbeat now</button><button id="presenceCheckIn" class="ghost">Check in on next due goal</button></div>
+        <div class="feed" id="presenceOut" style="height:140px"><div class="note">A heartbeat keeps the presence state fresh and surfaces overdue goals; it does not execute work.</div></div>
       </section>
     </div>
   </div>
@@ -422,6 +490,97 @@ function refreshTab(name){
   else if (name === "remote") refreshRemote();
   else if (name === "safety") refreshSafety();
   else if (name === "doctor") refreshDoctor();
+  else if (name === "presence") refreshPresence();
+}
+
+// ---------- PRESENCE / CONTINUITY ----------
+function presenceTime(value){
+  if (!value) return "—";
+  try { return new Date(value).toLocaleString(); } catch(e){ return String(value); }
+}
+function renderPresence(data){
+  const identity = data.identity || {};
+  const p = data.presence || {};
+  const goals = data.goals || [];
+  const moments = data.moments || [];
+  const due = data.check_ins_due || [];
+  const state = String(p.state || "idle");
+  const stateEl = $("#presenceState");
+  if (stateEl) { stateEl.textContent = state.replace("_", " "); stateEl.className = "presence-state"; }
+  const pill = $("#presencePill");
+  if (pill) { pill.textContent = "presence: " + state.replace("_", " "); pill.className = "pill " + (state === "error" ? "err" : (state === "idle" ? "ok" : "warn")); }
+  const orb = $("#presenceOrb");
+  if (orb) orb.className = "presence-orb " + state;
+  if ($("#presenceName")) $("#presenceName").textContent = identity.name || "Hermus";
+  if ($("#presenceRole")) $("#presenceRole").textContent = identity.role || "AI partner";
+  if ($("#presenceDetail")) $("#presenceDetail").textContent = (p.detail || "ready") + (p.last_error ? " · " + p.last_error : "");
+  if ($("#presenceMeta")) $("#presenceMeta").textContent =
+    "heartbeat " + String(data.heartbeat?.count ?? p.heartbeat_count ?? 0) +
+    " · active goals " + String(data.active_goal_count ?? goals.filter((g)=>g.status === "active").length) +
+    " · last seen " + presenceTime(p.last_seen);
+  if ($("#identityName")) $("#identityName").value = identity.name || "";
+  if ($("#identityRole")) $("#identityRole").value = identity.role || "";
+  if ($("#identityTone")) $("#identityTone").value = identity.tone || "";
+  if ($("#identityValues")) $("#identityValues").value = (identity.values || []).join(", ");
+  if ($("#identityGreeting")) $("#identityGreeting").value = identity.greeting || "";
+
+  const goalsEl = $("#presenceGoals");
+  if (goalsEl) {
+    const active = goals.filter((g)=>g.status === "active");
+    goalsEl.innerHTML = active.map((g) => `<div class="goal-card">
+      <div class="goal-title"><strong>${esc(g.title)}</strong><span class="goal-age">priority ${esc(g.priority)}${due.some((d)=>d.id===g.id) ? " · check-in due" : ""}</span></div>
+      <button class="ghost" data-complete-goal="${esc(g.id)}">done</button>
+    </div>`).join("") || '<div class="hint">No ongoing goals.</div>';
+    goalsEl.querySelectorAll("button[data-complete-goal]").forEach((b)=>b.addEventListener("click", ()=>completePresenceGoal(b.dataset.completeGoal)));
+  }
+  const momentsEl = $("#presenceMoments");
+  if (momentsEl) {
+    momentsEl.innerHTML = moments.slice().reverse().map((m)=>`<div><span class="t">${esc(presenceTime(m.at))}</span> <span class="e">${esc(m.kind)}</span> ${esc(m.summary)}</div>`).join("") || '<div class="note">No moments yet.</div>';
+  }
+  const out = $("#presenceOut");
+  if (out && due.length) out.innerHTML = '<div class="note">' + due.length + ' check-in(s) due: ' + due.map((g)=>esc(g.title)).join(" · ") + '</div>';
+  else if (out && !out.dataset.message) out.innerHTML = '<div class="note">No check-ins due. Heartbeat is healthy.</div>';
+}
+async function refreshPresence(){
+  try {
+    const { j } = await getJSON("/presence");
+    renderPresence(j);
+  } catch(e){
+    const out = $("#presenceOut"); if (out) out.innerHTML = '<div class="note">presence unavailable: ' + esc(e.message) + '</div>';
+  }
+}
+function savePresenceIdentity(){
+  const out = $("#identityOut");
+  const payload = {
+    name: $("#identityName").value.trim(), role: $("#identityRole").value.trim(),
+    tone: $("#identityTone").value.trim(), values: splitCsv($("#identityValues").value),
+    greeting: $("#identityGreeting").value.trim(),
+  };
+  fetch("/presence/identity", { method:"PUT", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>identity saved: <span class="e">' + esc(d.success) + '</span></div>'; refreshPresence(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">identity save failed: ' + esc(e.message) + '</div>'; });
+}
+function addPresenceGoal(){
+  const title = $("#presenceGoal").value.trim();
+  if (!title) return;
+  fetch("/presence/goals", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ title }) })
+    .then((r)=>r.json()).then((d)=>{ $("#presenceGoal").value = ""; $("#presenceOut").dataset.message = "1"; $("#presenceOut").innerHTML = '<div>goal added: <code>' + esc(d.goal?.id || d.error) + '</code></div>'; refreshPresence(); })
+    .catch((e)=>{ $("#presenceOut").innerHTML = '<div class="note">goal failed: ' + esc(e.message) + '</div>'; });
+}
+function completePresenceGoal(id){
+  fetch("/presence/goals/" + encodeURIComponent(id) + "/complete", { method:"POST", headers:{ "Content-Type":"application/json" }, body:"{}" })
+    .then((r)=>r.json()).then(()=>refreshPresence()).catch((e)=>{ $("#presenceOut").innerHTML = '<div class="note">complete failed: ' + esc(e.message) + '</div>'; });
+}
+function sendPresenceHeartbeat(){
+  fetch("/presence/heartbeat", { method:"POST" }).then((r)=>r.json()).then((d)=>{ renderPresence(d); $("#presenceOut").dataset.message = "1"; $("#presenceOut").innerHTML = '<div>heartbeat recorded at <span class="e">' + esc(presenceTime(d.presence?.last_heartbeat)) + '</span></div>'; }).catch((e)=>{ $("#presenceOut").innerHTML = '<div class="note">heartbeat failed: ' + esc(e.message) + '</div>'; });
+}
+function requestPresenceCheckIn(){
+  const out = $("#presenceOut"); out.innerHTML = '<div class="note">queueing a read-only continuity check-in…</div>';
+  fetch("/presence/check-in", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ platform:"dashboard", user_id:"default" }) })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = d.queued
+      ? '<div>check-in queued: <code>' + esc(d.job_id) + '</code> · follow the live job stream</div>'
+      : '<div class="note">' + esc(d.reason || d.error || "check-in not queued") + '</div>'; refreshPresence(); })
+    .catch((e)=>{ out.innerHTML = '<div class="note">check-in failed: ' + esc(e.message) + '</div>'; });
 }
 
 // ---------- OVERVIEW ----------
@@ -946,6 +1105,11 @@ function docRun(){
 // ---------- wiring ----------
 $("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
 $("#cmdBtn").addEventListener("click", postCommand);
+$("#identitySave").addEventListener("click", savePresenceIdentity);
+$("#presenceGoalAdd").addEventListener("click", addPresenceGoal);
+$("#presenceGoal").addEventListener("keydown", (e) => { if (e.key === "Enter") addPresenceGoal(); });
+$("#presenceHeartbeat").addEventListener("click", sendPresenceHeartbeat);
+$("#presenceCheckIn").addEventListener("click", requestPresenceCheckIn);
 $("#missionPreflight").addEventListener("click", missionPreflight);
 $("#missionStart").addEventListener("click", () => startMission(false));
 $("#missionPlanBlocked").addEventListener("click", () => startMission(true));
@@ -1174,13 +1338,14 @@ initVoice();
 
 async function boot(){
   await refreshOverview();
+  await refreshPresence();
   await refreshJobs();
   try { await refreshMissions(); } catch(e){}
   refreshTelemetry(true);
   openTmStream();
 }
 boot();
-setInterval(() => { refreshOverview(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
+setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
 </script>
 </body>
 </html>

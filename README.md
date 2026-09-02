@@ -43,6 +43,41 @@ It is **self-hosted and open source**. Local models such as Ollama can be used w
 - ⏰ **Automations** — scheduled tasks and natural-language cron workflows.
 - 📦 **Artifact tracking** — hashes, metadata and exportable deliverables.
 - 🔌 **Provider flexibility** — local Ollama plus configurable compatible hosted/free-tier providers.
+- 🌱 **Presence & continuity** — durable identity, operational state, ongoing goals, heartbeat and explicit safe check-ins.
+
+---
+
+## 🌱 Presence & Continuity
+
+Hermus now has a small, grounded "presence" layer so it can feel continuous
+without pretending to be conscious. It remembers its editable identity, shows
+whether it is idle/thinking/working/verifying/learning/waiting for approval,
+tracks user-approved ongoing goals, records short local continuity moments and
+runs a lightweight heartbeat in the gateway.
+
+The heartbeat is safe by default: it updates status and surfaces overdue
+check-ins, but never calls a model, runs tools or grants permissions by itself.
+An explicit check-in uses the normal `runtime.turn` queue path and remains
+subject to the existing safety controls. Owners who want a more proactive
+presence can opt in with `HERMUS_PRESENCE_PROACTIVE_CHECKINS=1`; this only queues
+one read-only status check for a due goal and still cannot perform actions.
+
+Useful endpoints:
+
+```text
+GET  /presence
+PUT  /presence/identity
+GET  /presence/goals
+POST /presence/goals
+POST /presence/check-in
+POST /presence/heartbeat
+```
+
+The Control Room's **Presence** tab lets you edit the identity, add ongoing
+goals, see recent continuity moments and request a check-in. Voice-first requests
+and optional local TTS/talking-avatar rendering share the same operational
+presence and add redacted voice/embodiment moments without creating a second
+execution path.
 
 ---
 
@@ -635,6 +670,9 @@ hermus jobs list
 | `hermus mem2 context` | Inspect packed memory context |
 | `hermus sandbox status` | Inspect command-execution sandbox |
 | `hermus cron list` | List scheduled jobs |
+| `hermus presence status` | Show identity, live state, goals and continuity moments |
+| `hermus presence identity --tone "warm and concise"` | Update Hermus' identity |
+| `hermus presence goal add "Keep the API healthy"` | Add an ongoing goal |
 | `hermus gateway start` | Start the unified gateway |
 
 The exact command surface can evolve; use `hermus --help` for the version currently installed.

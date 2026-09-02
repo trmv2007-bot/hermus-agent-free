@@ -30,6 +30,7 @@ ws_router = APIRouter()
 async def dashboard_status():
     """Small, fast status aggregate used by the futuristic command deck."""
     from core.avatar import get_avatar_service
+    from core.presence import get_presence
     from core.speech import speech_engine
     from tools.voice import voice_available_models
 
@@ -43,6 +44,7 @@ async def dashboard_status():
         "speech": speech_engine.status(),
         "transcription": voice_available_models(),
         "avatar": get_avatar_service().status(),
+        "presence": get_presence().current(),
         "local": True,
     }
 
@@ -121,6 +123,18 @@ async def speech_synthesize(payload: dict):
         return JSONResponse(result, status_code=503)
     result.pop("path", None)
     result["audio_url"] = f"/speech/audio/{result['audio_id']}"
+    try:
+        from core.presence import get_presence
+
+        get_presence().record_moment(
+            "speech_generated", "Generated a local spoken response",
+            session_id=str(payload.get("session_id") or ""),
+            user_id=str(payload.get("user_id") or "default"),
+            metadata={"backend": result.get("backend"), "audio_id": result.get("audio_id")},
+            emit=False,
+        )
+    except Exception:
+        pass
     dashboard_event_bus.publish("speech_ready", {
         "audio_url": result["audio_url"],
         "audio_id": result["audio_id"],
@@ -235,6 +249,17 @@ async def speech_avatar_prepare_voice(payload: dict):
     )
     if result.get("success"):
         profile = result.get("voice_profile") or {}
+        try:
+            from core.presence import get_presence
+
+            get_presence().record_moment(
+                "avatar_voice_prepared", "Prepared an optional talking-avatar voice profile",
+                user_id=str(payload.get("user_id") or "default"),
+                metadata={"voice_profile_id": profile.get("voice_profile_id"), "lang": profile.get("lang")},
+                emit=False,
+            )
+        except Exception:
+            pass
         dashboard_event_bus.publish("avatar_voice_prepared", {
             "voice_profile_id": profile.get("voice_profile_id"),
             "lang": profile.get("lang"),
@@ -262,6 +287,17 @@ async def speech_avatar_render(payload: dict):
         code=str(payload.get("code") or ""),
     )
     if result.get("success"):
+        try:
+            from core.presence import get_presence
+
+            get_presence().record_moment(
+                "avatar_render_submitted", "Submitted an optional talking-avatar render",
+                user_id=str(payload.get("user_id") or "default"),
+                metadata={"code": result.get("code"), "backend": result.get("backend")},
+                emit=False,
+            )
+        except Exception:
+            pass
         dashboard_event_bus.publish("avatar_render_submitted", {
             "code": result.get("code"),
             "backend": result.get("backend"),

@@ -75,6 +75,98 @@ from gateway.context import (  # noqa: F401
 )
 from gateway.context import _agent_factory  # noqa: F401
 
+def _queue_due_presence_checkin(snapshot: dict) -> Optional[dict]:
+    """Optionally turn one due goal into a normal, read-only chat job.
+
+    This path is opt-in via ``HERMUS_PRESENCE_PROACTIVE_CHECKINS=1``. It uses
+    the canonical queue rather than calling the model from the heartbeat thread,
+    and marks the goal before returning so repeated heartbeats cannot duplicate
+    the same check-in. The prompt explicitly forbids taking action without the
+    user's approval.
+    """
+    if not getattr(config, "presence_proactive_checkins", False):
+        return None
+    due = snapshot.get("check_ins_due") or []
+    if not due:
+        return None
+    try:
+        from core.presence import get_presence
+        from gateway.queue import job_queue
+
+        if not job_queue.enabled or not job_queue._started:
+            return None
+        # The background heartbeat has no authenticated owner. Keep opt-in
+        # automation confined to the default/local continuity scope; other
+        # users can request an explicit check-in with their own user_id.
+        scoped = get_presence().snapshot(user_id="default")
+        due = scoped.get("check_ins_due") or []
+        if not due:
+            return None
+        target = due[0]
+        goal_id = str(target.get("id") or "")
+        goals = get_presence().list_goals(status="active", user_id="default")
+        goal = next((g for g in goals if g.get("id") == goal_id), None)
+        if goal is None:
+            return None
+        title = str(goal.get("title") or "the ongoing goal")
+        text = (
+            f"Proactive check-in on the ongoing goal: {title}. Give the owner a concise "
+            "status update using only real evidence from memory and completed work. "
+            "Do not execute tools, send messages or change anything; ask the owner "
+            "before taking any action."
+        )
+        run_id = f"run_presence_{os.urandom(4).hex()}"
+        job = job_queue.submit(
+            "runtime.turn",
+            {"text": text, "platform": "presence", "user_id": "default",
+             # Chat mode exposes no system tools; read_only also strips custom
+             # APIs, so proactive presence stays read-only on the queue.
+             "mode": "chat", "prefer": "chat", "read_only": True, "stream": True},
+            session_key="presence:default",
+            run_id=run_id,
+        )
+        get_presence().mark_checkin(goal_id)
+        get_presence().record_moment(
+            "proactive_checkin",
+            f"Queued a safe status check on {title}",
+            run_id=job.run_id,
+            metadata={"goal_id": goal_id},
+            emit=False,
+        )
+        return {"job_id": job.id, "run_id": job.run_id, "goal_id": goal_id}
+    except Exception as exc:
+        print(f"[Presence] proactive check-in skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
+async def _presence_heartbeat_loop():
+    """Keep Hermus visibly present and optionally follow up on ongoing goals.
+
+    A heartbeat records the current operational state and surfaces overdue
+    user-approved goals. By default it does not call a model or perform actions;
+    with ``HERMUS_PRESENCE_PROACTIVE_CHECKINS=1`` it may queue one explicit,
+    read-only status check through the normal ``runtime.turn`` path.
+    """
+    from core.presence import get_presence
+
+    interval = max(5, int(getattr(config, "presence_heartbeat_seconds", 30) or 30))
+    while True:
+        try:
+            snapshot = await asyncio.to_thread(get_presence().heartbeat)
+            due = snapshot.get("check_ins_due") or []
+            if due:
+                print(f"[Presence] heartbeat={snapshot.get('presence', {}).get('heartbeat_count')} "
+                      f"state={snapshot.get('presence', {}).get('state')} check_ins_due={len(due)}")
+                queued = await asyncio.to_thread(_queue_due_presence_checkin, snapshot)
+                if queued:
+                    print(f"[Presence] proactive check-in queued: {queued.get('job_id')}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[Presence] heartbeat error: {type(exc).__name__}: {exc}")
+        await asyncio.sleep(interval)
+
+
 async def _background_agent_watchdog():
     """Periodically revive stale/dead persistent background agents."""
     from core.agent_manager import agent_manager
@@ -178,6 +270,13 @@ async def lifespan(app: FastAPI):
         queue_info = await _realtime.startup(app, agent_getter=get_agent_for_user)
     except Exception as e:
         print(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
+    presence_task = None
+    if getattr(config, "presence_enabled", True):
+        try:
+            presence_task = asyncio.create_task(_presence_heartbeat_loop())
+        except Exception as e:
+            print(f"[Gateway] presence heartbeat failed to start: {e}")
+
     maintenance_task = None
     if getattr(config, "memory_sweep_minutes", 60) > 0:
         try:
@@ -199,6 +298,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if presence_task and not presence_task.done():
+            presence_task.cancel()
         if maintenance_task and not maintenance_task.done():
             maintenance_task.cancel()
         if watchdog_task and not watchdog_task.done():
@@ -298,6 +399,7 @@ from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_android import router as _android_router  # noqa: E402
+from gateway.routes_presence import router as _presence_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -319,6 +421,7 @@ app.include_router(_voice_router, dependencies=_gate_control)
 app.include_router(_engine_router, dependencies=_gate_control)
 app.include_router(_canonical_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
+app.include_router(_presence_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -378,11 +481,18 @@ async def api_status():
         }
     except Exception as e:  # noqa: BLE001 - status must still answer
         local_engine = {"error": str(e)}
+    try:
+        from core.presence import get_presence
+
+        presence_snapshot = get_presence().snapshot()
+    except Exception as exc:
+        presence_snapshot = {"error": f"presence unavailable: {type(exc).__name__}: {exc}"}
     return {
         "message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI - Optimized",
         "platforms": ["telegram", "discord", "cli"],
         "agents": len(AGENTS),
         "channels": get_channel_status(),
+        "presence": presence_snapshot,
         "optimized": True,
         "cache_stats": get_cache_stats(),
         "local_engine": local_engine,
@@ -410,6 +520,8 @@ async def api_status():
             "self_healing_watchdog",
             "workspace_projects",
             "profiles_personas",
+            "durable_identity_presence_heartbeat",
+            "ongoing_goals_safe_checkins",
             "local_engine_routing_npu_gpu",
             "nollama_openvino_engine",
             "hermus_doctor_self_repair",

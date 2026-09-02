@@ -195,6 +195,22 @@ class Config(BaseModel):
     # Active persona / profile name (independent memory + system prompt).
     profile: str = os.getenv("HERMUS_PROFILE", "")
 
+    # ---- Presence / continuity layer ---------------------------------------
+    # Gives Hermus a durable identity, visible operational state, ongoing goals
+    # and a lightweight heartbeat. The heartbeat is observability only: it never
+    # calls a model or performs an action without an explicit request.
+    presence_enabled: bool = os.getenv("HERMUS_PRESENCE_ENABLED", "1") not in ("0", "false", "False")
+    presence_state_path: str = os.getenv("HERMUS_PRESENCE_STATE", "data/presence.json")
+    presence_heartbeat_seconds: int = int(os.getenv("HERMUS_PRESENCE_HEARTBEAT_SECONDS", "30"))
+    # Emit one heartbeat event every N beats (state changes always emit).
+    presence_event_every: int = int(os.getenv("HERMUS_PRESENCE_EVENT_EVERY", "5"))
+    # An ongoing goal becomes eligible for a visible check-in suggestion after
+    # this many minutes without a user/agent touch. By default this is only a
+    # visible suggestion; set HERMUS_PRESENCE_PROACTIVE_CHECKINS=1 to queue one
+    # read-only status check through the normal runtime path.
+    presence_checkin_after_minutes: int = int(os.getenv("HERMUS_PRESENCE_CHECKIN_AFTER_MINUTES", "240"))
+    presence_proactive_checkins: bool = os.getenv("HERMUS_PRESENCE_PROACTIVE_CHECKINS", "0") not in ("0", "false", "False")
+
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"
     embedding_model: str = os.getenv("HERMUS_EMBED_MODEL", "nomic-embed-text")
