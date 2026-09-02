@@ -41,9 +41,10 @@ class WebSession:
     created_at: float = field(default_factory=time.monotonic)
     last_used_at: float = field(default_factory=time.monotonic)
     ttl_seconds: float = 1800.0
-    sync_session: Optional[Any] = None      # scrapling FetcherSession (sync use)
-    dynamic_session: Optional[Any] = None   # scrapling DynamicSession (lazy)
-    stealth_session: Optional[Any] = None   # scrapling StealthySession (lazy)
+    sync_session: Optional[Any] = None      # live scrapling client (_SyncSessionLogic)
+    _sync_factory: Optional[Any] = None     # FetcherSession context manager (owns the client)
+    dynamic_session: Optional[Any] = None   # scrapling DynamicSession (lazy; optional)
+    stealth_session: Optional[Any] = None   # scrapling StealthySession (lazy; optional)
     requests: int = 0
 
     def expired(self) -> bool:
@@ -55,24 +56,35 @@ class WebSession:
             return False
         return any(host_matches_pattern(host, p) for p in self.allowed_domains)
 
+    def ensure_sync_session(self) -> Any:
+        """Lazily open (once) and return the live Scrapling sync client.
+
+        Scrapling's ``FetcherSession`` is a factory context manager: entering it
+        yields the client that actually has ``.get()``. We keep that client for
+        the session's lifetime so cookies persist across fetches, and close it
+        in :meth:`close`.
+        """
+        if self.sync_session is not None:
+            return self.sync_session
+        from scrapling.fetchers import FetcherSession  # lazy: optional dependency
+
+        factory = FetcherSession()
+        client = factory.__enter__()  # noqa: PLC2801 - explicit lifecycle, closed in close()
+        self._sync_factory = factory
+        self.sync_session = client
+        return client
+
     def close(self) -> None:
-        for attr in ("sync_session", "dynamic_session", "stealth_session"):
-            session = getattr(self, attr, None)
-            if session is None:
-                continue
-            try:
-                close = getattr(session, "close", None)
-                if callable(close):
-                    close()
-            except Exception:
-                pass
-            try:
-                exit_ = getattr(session, "__exit__", None)
-                if callable(exit_):
-                    exit_(None, None, None)
-            except Exception:
-                pass
-            setattr(self, attr, None)
+        factory, self._sync_factory = self._sync_factory, None
+        self.sync_session = None
+        self.dynamic_session = None
+        self.stealth_session = None
+        if factory is None:
+            return
+        try:
+            factory.__exit__(None, None, None)  # noqa: PLC2801 - paired with __enter__ above
+        except Exception:
+            pass
 
 
 class WebSessionManager:
@@ -117,8 +129,14 @@ class WebSessionManager:
             session = WebSession(name=name, allowed_domains=tuple(clean_domains),
                                  ttl_seconds=self._ttl)
             if strategy in ("static", "any"):
-                # Created lazily by the backend on first use; kept here for reuse.
-                session.sync_session = self._open_sync_session()
+                try:
+                    session.ensure_sync_session()
+                except ImportError as exc:
+                    raise WebSessionError(
+                        "cannot open scrapling session — install 'scrapling[fetchers]'"
+                    ) from exc
+                except Exception as exc:
+                    raise WebSessionError(f"cannot open scrapling session: {exc}") from exc
             self._sessions[name] = session
             return self.describe(name)
 
@@ -160,15 +178,6 @@ class WebSessionManager:
             return self._describe(session)
 
     # -------------------------------------------------------------- internals
-    def _open_sync_session(self) -> Any:
-        """Open a Scrapling FetcherSession via the backend module boundary."""
-        try:
-            from scrapling.fetchers import FetcherSession  # lazy: optional dependency
-
-            return FetcherSession()
-        except Exception as exc:  # pragma: no cover - capability-gated upstream
-            raise WebSessionError(f"cannot open scrapling session: {exc}") from exc
-
     def _destroy(self, name: str) -> None:
         session = self._sessions.pop(name, None)
         if session is not None:

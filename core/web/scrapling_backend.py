@@ -32,6 +32,32 @@ from .models import (
 from .security import WebSecurityPolicy
 
 # curl_cffi network error families → failure classification.
+def _scrapling_session(session: Any, strategy: FetchStrategy) -> Any:
+    """Unwrap a :class:`core.web.sessions.WebSession` into the live Scrapling
+    client for ``strategy`` (duck-typed — the backend never imports the
+    sessions module, keeping one direction of coupling).
+
+    * static: lazily opens (once) and returns the persistent client so cookies
+      survive across fetches; raises ``StrategyUnavailableError`` if Scrapling
+      is missing (same contract as the one-off fetchers).
+    * dynamic/stealth: the wrapper holds no live browser session, so returns
+      ``None`` → the caller uses a one-off fetcher (honest degradation).
+    * a raw Scrapling session (no ``ensure_sync_session`` attr) passes through.
+    """
+    if session is None:
+        return None
+    ensure = getattr(session, "ensure_sync_session", None)
+    if callable(ensure):
+        if strategy != FetchStrategy.STATIC:
+            return None  # browser strategies use one-off fetchers from the wrapper
+        try:
+            return ensure()
+        except ImportError as exc:
+            raise StrategyUnavailableError(
+                f"session backend unavailable: {exc}", strategy=strategy.value) from exc
+    return session  # already a raw Scrapling session object
+
+
 def _classify_network_error(exc: Exception) -> FailureClass:
     text = f"{type(exc).__name__} {exc}".lower()
     if "timed out" in text or "timeout" in text:
@@ -125,8 +151,9 @@ class ScraplingBackend:
             }
             if headers:
                 kwargs["headers"] = dict(headers)
-            if session is not None:
-                response = session.get(url, **kwargs)
+            live_session = _scrapling_session(session, FetchStrategy.STATIC)
+            if live_session is not None:
+                response = live_session.get(url, **kwargs)
             else:
                 from scrapling.fetchers import Fetcher  # lazy: optional dependency
 
@@ -166,8 +193,9 @@ class ScraplingBackend:
                 kwargs["capture_xhr"] = capture_xhr
             if extra_headers:
                 kwargs["extra_headers"] = dict(extra_headers)
-            if session is not None:
-                response = session.fetch(url, **kwargs)
+            live_session = _scrapling_session(session, FetchStrategy.DYNAMIC)
+            if live_session is not None:
+                response = live_session.fetch(url, **kwargs)
             else:
                 from scrapling.fetchers import DynamicFetcher  # lazy: optional dependency
 
@@ -205,8 +233,9 @@ class ScraplingBackend:
                 "retries": 1,
                 "solve_cloudflare": bool(solve_cloudflare),
             }
-            if session is not None:
-                response = session.fetch(url, **kwargs)
+            live_session = _scrapling_session(session, FetchStrategy.STEALTH)
+            if live_session is not None:
+                response = live_session.fetch(url, **kwargs)
             else:
                 from scrapling.fetchers import StealthyFetcher  # lazy: optional dependency
 
