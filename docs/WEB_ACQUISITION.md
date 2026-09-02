@@ -81,8 +81,26 @@ Enforced structurally by `tests/test_architecture_gates.py`:
 | --- | --- | --- |
 | 1 | `static` | Default. Page content is in the initial HTML. |
 | 2 | `dynamic` | Static output is a JS shell / empty / challenge, or the caller requires JS. Needs browser binaries. |
-| 3 | `stealth` | Only when enabled in config **and** lower levels genuinely failed. Never attempted blindly. |
-| 4 | crawl | Many URLs / recursive traversal → background job on the canonical JobQueue. |
+| 3 | `stealth` | Only when enabled in config **and** lower levels genuinely failed. Never attempted blindly. Policy-controlled — **not** model-selectable (the `web_fetch`/`web_crawl` tool schemas expose only `auto`/`static`/`dynamic`). |
+| 4 | crawl | Many URLs / recursive traversal → background job on the canonical JobQueue. Uses the SAME router per page (see §3a). |
+
+### 3a. Crawl strategy escalation
+
+A crawl runs each page through the **same** strategy router as single-page
+acquisition instead of forcing static:
+
+* `strategy="auto"` (default, from `HERMUS_WEB_STRATEGY`) — static first,
+  escalate a discovered JS-heavy page to `dynamic`/`stealth` **where policy and
+  capabilities permit**. Lightweight pages stay lightweight;
+* `strategy="static"` — every page stays on fast HTTP (no browser);
+* `strategy="dynamic"` — request a real browser per page where permitted;
+* `max_dynamic_pages` (crawl-level, default 0 = unlimited within `max_pages`)
+  caps how many pages may escalate to a browser strategy, so a JS-heavy site
+  cannot spin up unbounded Chromium instances;
+* the configured per-domain politeness delay
+  (`HERMUS_WEB_CRAWL_DELAY_MS` → `web_crawl_per_domain_delay_ms`) is threaded
+  Config → WebGateway → `plan_crawl` → `CrawlPlan` → `CrawlWorker` and is
+  actually honored between same-host hits (bounded global concurrency preserved).
 
 Escalation rules:
 
@@ -91,9 +109,16 @@ Escalation rules:
 * a failing strategy is **never** blindly retried (transport-level retries are
   Scrapling's own bounded per-request retries);
 * security refusals abort the whole plan (never escalated around);
-* content-sufficiency heuristics: meaningful text threshold, JS-shell markers
-  (`<div id="root"></div>`, "enable JavaScript"), challenge markers
-  (Cloudflare/CAPTCHA), HTTP status;
+* an oversized response (`SIZE_LIMIT`) also aborts the plan — a heavier strategy
+  never shrinks a body, so escalation would be pointless;
+* content-sufficiency heuristic — **large HTML ≠ JavaScript-required.** A page is
+  only treated as a JS shell when there is *little meaningful extracted text*
+  AND a corroborating signal: an explicit empty mount node
+  (`<div id="root"></div>`), a "enable JavaScript" `<noscript>`, a hydration
+  marker (`__NEXT_DATA__`, `window.__NUXT__`, `data-reactroot`, …), or
+  script-dominated HTML (scripts > 60 % of bytes with no semantic body). A large
+  text-rich article — even 100 KB with analytics scripts — stays **static**;
+* challenge markers (Cloudflare/CAPTCHA) classify the failure as `bot_challenge`;
 * on Android/Termux, browser strategies are restricted by default
   (`HERMUS_WEB_TERMUX_RESTRICT=1`) — untested capability is never claimed.
 
@@ -110,7 +135,8 @@ Escalation rules:
 | Dynamic (JS) fetching | `web_fetch` escalation / `strategy=dynamic` | `scrapling install` (Chromium) | ⚠️ capability detection tested; **browser fetch itself not verified in CI** (no browser binaries) |
 | Stealth fetching | `strategy=stealth` | `HERMUS_WEB_STEALTH=1` + `scrapling install` | ⚠️ same — **unverified against live anti-bot sites** |
 | XHR/API capture | `web_fetch` dynamic + `capture_xhr` | dynamic stack | ⚠️ bundling logic unit-tested with fakes; **not verified live** |
-| Sessions (cookies) | `web_session` tool | static stack | ✅ isolation/pinning/TTL tests; cookie values never exposed |
+| Sessions (cookies) — **static** | `web_session` tool | static stack | ✅ **persistent**: a live `FetcherSession` client + cookie jar is reused across fetches (`static_session_persistence=available`); isolation/pinning/TTL tested; cookie values never exposed |
+| Sessions (cookies) — **dynamic/stealth** | `web_session` tool | browser stack | ⚠️ **not persistent**: browser strategies use one-off fetchers per call, so cross-fetch browser contexts are **not** reused (`dynamic_session_persistence=unavailable`). No fake persistence is claimed. |
 | Background crawling | `web_crawl` tool → JobQueue | any install | ✅ real loopback crawl + real JobQueue job test |
 | Search + acquire | `web_search_and_extract` | ddgs + static | ✅ pipeline tests (search faked, fetch real) |
 | Android/Termux | HTTP-only by default | — | ✅ detection tested; **no Android browser claim** |
@@ -132,10 +158,25 @@ Legend: ✅ verified by tests in this repo · ⚠️ implemented, honestly repor
    `HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1` — tests/intranets only);
 5. classic SSRF pivot ports refused (ssh, redis, postgres, …);
 6. domain block list (wildcards) + optional allow list; block wins;
-7. redirect safety: Scrapling `follow_redirects="safe"` **and** post-fetch
-   re-validation of the final URL;
-8. response-size caps per response and per crawl, crawl page/depth/concurrency/
-   wall-clock ceilings, per-domain rate limiting, bounded concurrency;
+7. redirect safety (belt **and** suspenders): Scrapling's
+   `follow_redirects="safe"` refuses redirects to internal IPs at the transport
+   layer, **and** Hermus independently re-validates the final URL *and every
+   redirect hop* through the **same** security battery as the requested URL
+   (`WebSecurityPolicy.check_final_url` → `check`). This catches what the
+   transport check does not: a redirect to a **blocked domain**, a **disallowed
+   scheme**, embedded **credentials**, or an SSRF **pivot port**. A refused
+   redirect returns a typed `WEB_SECURITY_BLOCKED` result — never a leaked
+   exception. Tested: public→loopback (v4/v6), public→private, public→link-local
+   metadata, public→blocked-domain, public→disallowed-scheme, and multi-hop;
+8. response-size cap: **honest limitation** — Scrapling's HTTP fetcher
+   (curl_cffi) buffers the full body before Hermus sees it, so there is no true
+   streamed *pre-download* abort. The cap (`web_max_response_bytes`) is therefore
+   enforced at the **earliest safe point** — immediately in the backend after
+   acquisition, *before* the body is retained, parsed, normalized, cached or
+   sent to memory (raising `ResponseTooLargeError`/`SIZE_LIMIT`). It is honestly
+   a *reject-after-acquisition* cutoff, **not** *download-prevented*. Crawls also
+   enforce an aggregate byte cap plus page/depth/concurrency/wall-clock ceilings,
+   per-domain rate limiting and bounded concurrency;
 9. secrets never cross the boundary: cookies, request headers, proxy settings
    are dropped in the normalizer; telemetry redacts URLs (no query strings).
 
@@ -167,7 +208,9 @@ Highlights: `HERMUS_WEB_ENABLED`, `HERMUS_WEB_STRATEGY`,
 `HERMUS_WEB_BROWSER_TIMEOUT`, `HERMUS_WEB_MAX_RESPONSE_BYTES`,
 `HERMUS_WEB_MAX_CONTENT_CHARS`, `HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES`,
 `HERMUS_WEB_ALLOWED_DOMAINS`, `HERMUS_WEB_BLOCKED_DOMAINS`,
-`HERMUS_WEB_CRAWL_*`, `HERMUS_WEB_SESSION_*`, `HERMUS_WEB_CACHE*`.
+`HERMUS_WEB_CRAWL_*` (including `HERMUS_WEB_CRAWL_DELAY_MS`, the per-domain
+politeness delay now propagated all the way to the crawl worker),
+`HERMUS_WEB_SESSION_*`, `HERMUS_WEB_CACHE*`.
 
 ## 8. Installation
 
@@ -194,9 +237,11 @@ Scrapling (Hermus targets 3.10+ anyway). Scrapling is pinned
 **available / unavailable / not_installed / not_verified** — "importable" is
 never conflated with "working": browser binaries are checked on disk, and a
 strategy only reads *available* after one real fetch succeeded in-process
-(`capabilities.mark_verified`). The doctor also raises findings for security
-misconfigurations (e.g. `HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1` is a HIGH
-finding).
+(`capabilities.mark_verified`). The capability probe additionally reports
+`static_session_persistence` (available with the static stack) and
+`dynamic_session_persistence` (always `unavailable` — see §4). The doctor also
+raises findings for security misconfigurations (e.g.
+`HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1` is a HIGH finding).
 
 ## 10. Android / Termux
 
@@ -213,8 +258,18 @@ finding).
 * `tests/test_web_crawl.py` — bounded crawl, cancellation, limits (real loopback + **real JobQueue job**).
 * `tests/test_web_sessions.py` — session isolation, TTL, secrecy.
 * `tests/test_web_injection.py` — injection fixtures through the real path.
-* `tests/test_web_capability.py` — the four honest states, Termux, verification.
+* `tests/test_web_capability.py` — the four honest states, Termux, verification,
+  static/dynamic session-persistence reporting.
 * `tests/test_web_tools.py` — registry/permission/tool wiring.
+* `tests/test_web_redirect_security.py` — post-redirect final-URL re-validation
+  (loopback v4/v6, private, link-local, blocked domain, disallowed scheme,
+  multi-hop) and response-size enforcement (backend cutoff + router abort).
+* `tests/test_web_heuristic.py` — JS-shell heuristic cases A–D (large static
+  stays static; SPA shell escalates; static-with-scripts stays static; dynamic
+  content escalates).
+* `tests/test_web_crawl_strategy.py` — crawl uses the intelligent router for
+  `auto`, stays static for `static`, honors `max_dynamic_pages`, and actually
+  propagates/honors the configured per-domain delay.
 * `tests/test_web_live.py` — **REAL LIVE** internet fetch (pypi.org; skipped
   without egress) and **REAL LOCAL** full-stack fetch/extract/crawl.
 * Mocked tests prove routing/wiring logic only — they are never cited as proof

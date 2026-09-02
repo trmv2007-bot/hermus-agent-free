@@ -278,13 +278,25 @@ class WebGateway:
               concurrency: int = 2, same_site_only: bool = True,
               extra_domains: Optional[list[str]] = None,
               want_markdown: bool = False,
+              strategy: str = "",
+              allow_fallback: bool = True,
+              max_dynamic_pages: int = 0,
+              per_domain_delay_ms: Optional[int] = None,
               emit: Optional[Any] = None,
               should_cancel: Optional[Any] = None,
               wall_clock_seconds: float = 600.0,
               mission_id: Optional[str] = None,
               run_id: Optional[str] = None) -> dict[str, Any]:
         """Run a bounded crawl **inline** (small crawls / tests). For real workloads
-        prefer :meth:`crawl_async`, which submits to the canonical JobQueue."""
+        prefer :meth:`crawl_async`, which submits to the canonical JobQueue.
+
+        ``strategy`` selects the per-crawl acquisition policy (spec §6): "auto"
+        (default, from ``web_default_strategy``) runs the intelligent router with
+        escalation; "static" stays lightweight; "dynamic"/"stealth" request that
+        class where policy permits. The configured per-domain politeness delay
+        (``web_crawl_per_domain_delay_ms``) is propagated to the worker unless
+        overridden here.
+        """
         if not self.enabled:
             return {"ok": False, "error": "web subsystem disabled", "error_code": "WEB_DISABLED"}
         for url in urls or []:
@@ -293,6 +305,11 @@ class WebGateway:
             except Exception as exc:
                 return {"ok": False, "error": str(exc), "error_code": "WEB_SECURITY_BLOCKED",
                         "url": redact_url(url)}
+        # Config-driven defaults (bug #7: the configured delay must actually reach
+        # the worker — previously CrawlPlan silently kept its hard-coded default).
+        delay = (int(per_domain_delay_ms) if per_domain_delay_ms is not None
+                 else int(getattr(self._config, "web_crawl_per_domain_delay_ms", 500)))
+        crawl_strategy = strategy or getattr(self._config, "web_default_strategy", "auto")
         plan = plan_crawl(
             urls, requested_pages=max_pages, requested_depth=max_depth,
             requested_concurrency=concurrency,
@@ -301,6 +318,8 @@ class WebGateway:
             max_concurrency_ceiling=int(getattr(self._config, "web_crawl_concurrency", 8)),
             same_site_only=same_site_only, extra_domains=extra_domains,
             want_markdown=want_markdown,
+            strategy=crawl_strategy, allow_fallback=allow_fallback,
+            per_domain_delay_ms=delay, max_dynamic_pages=max_dynamic_pages,
         )
         if not plan.start_urls:
             return {"ok": False, "error": "no valid start URLs", "error_code": "WEB_CRAWL_EMPTY"}
@@ -348,8 +367,13 @@ class WebGateway:
             same_site_only=bool(payload.get("same_site_only", True)),
             extra_domains=payload.get("extra_domains"),
             want_markdown=bool(payload.get("want_markdown", False)),
+            strategy=str(payload.get("strategy", "") or ""),
+            allow_fallback=bool(payload.get("allow_fallback", True)),
+            max_dynamic_pages=int(payload.get("max_dynamic_pages", 0) or 0),
+            per_domain_delay_ms=payload.get("per_domain_delay_ms"),
             emit=getattr(ctx, "emit", None),
             should_cancel=getattr(ctx, "should_cancel", None),
+            mission_id=payload.get("mission_id"),
         )
         result["job_id"] = getattr(getattr(ctx, "job", None), "id", "")
         return result

@@ -71,6 +71,32 @@ class TestProbeStates:
         assert capabilities.strategy_ready("stealth") is False
 
 
+class TestSessionPersistenceReporting:
+    """Audit finding #8: session persistence must be reported honestly per
+    fetcher — static is persistent (live client + cookie jar reused), dynamic
+    is NOT (one-off browser fetchers), and we must never claim otherwise."""
+
+    def test_static_persistence_available_when_static_ready(self, monkeypatch):
+        monkeypatch.setattr(capabilities, "_importable", lambda name: True)
+        monkeypatch.setattr(capabilities, "scrapling_version", lambda: "0.4.15")
+        caps = capabilities.probe(force=True)
+        assert caps["static_session_persistence"]["status"] in (
+            capabilities.AVAILABLE, capabilities.NOT_VERIFIED)
+
+    def test_dynamic_persistence_always_unavailable_not_faked(self, monkeypatch):
+        monkeypatch.setattr(capabilities, "_importable", lambda name: True)
+        monkeypatch.setattr(capabilities, "scrapling_version", lambda: "0.4.15")
+        caps = capabilities.probe(force=True)
+        assert caps["dynamic_session_persistence"]["status"] == capabilities.UNAVAILABLE
+        assert "not implemented" in caps["dynamic_session_persistence"]["detail"].lower()
+
+    def test_static_persistence_degrades_when_static_missing(self, monkeypatch):
+        monkeypatch.setattr(capabilities, "_importable", lambda name: False)
+        monkeypatch.setattr(capabilities, "scrapling_version", lambda: None)
+        caps = capabilities.probe(force=True)
+        assert caps["static_session_persistence"]["status"] != capabilities.AVAILABLE
+
+
 class TestVerification:
     def test_mark_verified_flips_status_to_available(self, monkeypatch):
         monkeypatch.setattr(capabilities, "_importable", lambda name: True)

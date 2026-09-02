@@ -34,6 +34,9 @@ EmitFn = Callable[[str, dict[str, Any]], None]
 CancelFn = Callable[[], bool]
 
 
+_ALLOWED_STRATEGIES = ("auto", "static", "dynamic", "stealth")
+
+
 @dataclass
 class CrawlPlan:
     """Validated crawl parameters (clamped to configured ceilings)."""
@@ -46,6 +49,14 @@ class CrawlPlan:
     same_site_only: bool = True
     extra_domains: tuple[str, ...] = ()
     want_markdown: bool = False
+    # Per-crawl strategy policy (spec §6): "auto" uses the intelligent router
+    # (static → escalate to dynamic/stealth where permitted); "static" stays
+    # lightweight; "dynamic"/"stealth" request that class where policy allows.
+    strategy: str = "auto"
+    allow_fallback: bool = True
+    # Cap how many pages in a crawl may escalate to a (costly) browser strategy,
+    # so a JS-heavy site cannot silently spin up unbounded Chromium instances.
+    max_dynamic_pages: int = 0  # 0 → unlimited (still bounded by max_pages)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +67,9 @@ class CrawlPlan:
             "per_domain_delay_ms": self.per_domain_delay_ms,
             "same_site_only": self.same_site_only,
             "extra_domains": list(self.extra_domains),
+            "strategy": self.strategy,
+            "allow_fallback": self.allow_fallback,
+            "max_dynamic_pages": self.max_dynamic_pages,
         }
 
 
@@ -71,6 +85,10 @@ def plan_crawl(
     same_site_only: bool = True,
     extra_domains: Optional[list[str]] = None,
     want_markdown: bool = False,
+    strategy: str = "auto",
+    allow_fallback: bool = True,
+    per_domain_delay_ms: int = 500,
+    max_dynamic_pages: int = 0,
 ) -> CrawlPlan:
     """Clamp a crawl request to Hermus's configured ceilings (spec §11)."""
     clean_urls: list[str] = []
@@ -81,6 +99,9 @@ def plan_crawl(
         if bare and bare not in seen:
             seen.add(bare)
             clean_urls.append(bare)
+    strat = (strategy or "auto").lower().strip()
+    if strat not in _ALLOWED_STRATEGIES:
+        strat = "auto"
     return CrawlPlan(
         start_urls=clean_urls[:50],
         max_pages=max(1, min(int(requested_pages or 1), int(max_pages_ceiling))),
@@ -89,6 +110,10 @@ def plan_crawl(
         same_site_only=same_site_only,
         extra_domains=tuple(d.lower().strip(".") for d in (extra_domains or []) if d),
         want_markdown=want_markdown,
+        strategy=strat,
+        allow_fallback=bool(allow_fallback),
+        per_domain_delay_ms=max(0, int(per_domain_delay_ms or 0)),
+        max_dynamic_pages=max(0, int(max_dynamic_pages or 0)),
     )
 
 
@@ -108,6 +133,7 @@ class CrawlWorker:
         self._domain_locks: dict[str, float] = {}
         self._lock = threading.Lock()
         self.cancelled = False
+        self._dynamic_used = 0  # count of pages that escalated to a browser strategy
         self.progress = CrawlProgress(max_pages=plan.max_pages, status=CrawlStatus.QUEUED.value)
 
     # ------------------------------------------------------------------ run
@@ -215,10 +241,28 @@ class CrawlWorker:
         if depth > self.plan.max_depth:
             out[url] = {"depth": depth, "result": "depth limit"}
             return
+        # Per-crawl strategy policy (spec §6): the crawl uses the SAME intelligent
+        # router as single-page acquisition instead of forcing static. "auto"
+        # starts static and escalates to dynamic/stealth only where the router's
+        # policy + capabilities permit, so a JS-heavy page discovered mid-crawl
+        # can actually render instead of failing — while lightweight pages stay
+        # lightweight. A browser-strategy budget (max_dynamic_pages) prevents a
+        # crawl from spinning up unbounded browser instances.
+        strategy = self.plan.strategy or "auto"
+        allow_fallback = self.plan.allow_fallback
+        if strategy in ("auto", "dynamic", "stealth") and self.plan.max_dynamic_pages:
+            with self._lock:
+                if self._dynamic_used >= self.plan.max_dynamic_pages:
+                    # Browser budget exhausted — keep this page on the cheap path.
+                    strategy = "static"
+                    allow_fallback = False
         try:
-            result = self._router.fetch(url, strategy="static",
+            result = self._router.fetch(url, strategy=strategy,
                                         want_markdown=self.plan.want_markdown,
-                                        allow_fallback=False)
+                                        allow_fallback=allow_fallback)
+            if getattr(result, "strategy", "static") in ("dynamic", "stealth"):
+                with self._lock:
+                    self._dynamic_used += 1
             out[url] = {"depth": depth, "result": result}
         except Exception as exc:
             out[url] = {"depth": depth, "result": f"{type(exc).__name__}: {exc}"}
