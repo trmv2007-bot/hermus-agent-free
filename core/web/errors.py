@@ -36,6 +36,19 @@ class SecurityBlockedError(WebAcquisitionError):
                          error_code=error_code, retryable=False)
 
 
+class ResponseTooLargeError(WebAcquisitionError):
+    """A response exceeded the configured size cap — never retry it.
+
+    Distinct from a security refusal: the target was allowed, but the body is
+    larger than ``web_max_response_bytes``. Carries ``SIZE_LIMIT`` so the router
+    aborts the plan (a bigger fetch never helps) instead of escalating.
+    """
+
+    def __init__(self, message: str, *, error_code: str = "WEB_RESPONSE_TOO_LARGE"):
+        super().__init__(message, failure_class=FailureClass.SIZE_LIMIT,
+                         error_code=error_code, retryable=False)
+
+
 class StrategyUnavailableError(WebAcquisitionError):
     """The requested strategy cannot run here (dependency missing / disabled)."""
 
@@ -56,6 +69,7 @@ class AllStrategiesFailedError(WebAcquisitionError):
 __all__ = [
     "WebAcquisitionError",
     "SecurityBlockedError",
+    "ResponseTooLargeError",
     "StrategyUnavailableError",
     "AllStrategiesFailedError",
 ]

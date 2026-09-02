@@ -155,12 +155,16 @@ def web_search_and_extract(query: str, max_results: int = 5, fetch_top: int = 2,
 
 
 def web_crawl(urls: str, max_pages: int = 10, max_depth: int = 2, concurrency: int = 2,
-              background: bool = True) -> dict[str, Any]:
+              strategy: str = "auto", background: bool = True) -> dict[str, Any]:
     """Crawl a small set of pages (bounded; stays on the starting sites).
 
-    background=true (default) queues the crawl on Hermus's job queue and returns
-    a job id immediately — check progress with the jobs tools. Large crawls are
-    capped by configuration and never run inside the chat turn.
+    strategy controls acquisition per page: "auto" (default) picks the cheapest
+    working method and escalates a JS-heavy page to a real browser only where
+    permitted; "static" keeps every page on fast HTTP; "dynamic" requests a real
+    browser where permitted. background=true (default) queues the crawl on
+    Hermus's job queue and returns a job id immediately — check progress with the
+    jobs tools. Large crawls are capped by configuration and never run inside the
+    chat turn.
     """
     if isinstance(urls, str):
         url_list = [u.strip() for u in urls.replace(",", " ").split() if u.strip()]
@@ -175,23 +179,26 @@ def web_crawl(urls: str, max_pages: int = 10, max_depth: int = 2, concurrency: i
     max_pages = max(1, min(int(max_pages or 10), 100))
     max_depth = max(0, min(int(max_depth or 2), 4))
     concurrency = max(1, min(int(concurrency or 2), 8))
+    strategy = (strategy or "auto").lower().strip()
+    if strategy not in ("auto", "static", "dynamic"):
+        strategy = "auto"  # stealth stays policy-controlled, never model-selectable
 
     gw = _gateway()
     if background:
         queued = gw.crawl_async(url_list, max_pages=max_pages, max_depth=max_depth,
-                                concurrency=concurrency)
+                                concurrency=concurrency, strategy=strategy)
         if queued.get("ok"):
             return queued
         # Queue not started (e.g. CLI use): fall back to a tiny inline crawl.
         if queued.get("error_code") == "WEB_QUEUE_UNAVAILABLE" and max_pages <= 5:
             inline = gw.crawl(url_list, max_pages=max_pages, max_depth=max_depth,
-                              concurrency=concurrency)
+                              concurrency=concurrency, strategy=strategy)
             inline["background"] = False
             inline["untrusted"] = True
             return inline
         return queued
     result = gw.crawl(url_list, max_pages=max_pages, max_depth=max_depth,
-                      concurrency=concurrency)
+                      concurrency=concurrency, strategy=strategy)
     result["untrusted"] = True
     return result
 
@@ -343,6 +350,10 @@ TOOL_DEFINITIONS = [
                     "max_pages": {"type": "integer", "default": 10},
                     "max_depth": {"type": "integer", "default": 2},
                     "concurrency": {"type": "integer", "default": 2},
+                    "strategy": {"type": "string", "enum": ["auto", "static", "dynamic"],
+                                 "default": "auto",
+                                 "description": "Per-page method: auto escalates JS-heavy pages "
+                                                "to a browser where permitted; static stays HTTP-only"},
                     "background": {"type": "boolean", "default": True},
                 },
                 "required": ["urls"],

@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from . import capabilities
 from .errors import (
+    ResponseTooLargeError,
     SecurityBlockedError,
     StrategyUnavailableError,
 )
@@ -36,10 +37,20 @@ from .normalizer import build_web_result, error_result
 from .scrapling_backend import RawFetch, backend
 from .security import WebSecurityPolicy
 
-# Markers that a static response is a JS shell / anti-bot challenge.
+# Explicit SPA-shell markers: an empty mount node a framework hydrates into, or
+# a noscript telling the user to enable JavaScript. These are direct evidence of
+# client-side rendering — independent of page size.
 _JS_SHELL_MARKERS = (
-    re.compile(r"<div[^>]+id=[\"'](?:root|app|__next|q-app)[\"'][^>]*>\s*</div>", re.I),
+    re.compile(r"<div[^>]+id=[\"'](?:root|app|__next|q-app|__nuxt|svelte)[\"'][^>]*>\s*</div>", re.I),
+    re.compile(r"<div[^>]+id=[\"']root[\"'][^>]*>\s*</div>", re.I),
     re.compile(r"<noscript>[^<]*enable\s+javascript", re.I),
+    re.compile(r"you\s+need\s+to\s+enable\s+javascript\s+to\s+run\s+this\s+app", re.I),
+)
+# Hydration/framework markers that, combined with little text, indicate an SPA
+# shell whose content arrives via JS.
+_HYDRATION_MARKERS = (
+    re.compile(r"__NEXT_DATA__|window\.__NUXT__|__remixContext|window\.__INITIAL_STATE__", re.I),
+    re.compile(r"data-reactroot|data-react-helmet|ng-version=|data-server-rendered", re.I),
 )
 _CHALLENGE_MARKERS = (
     re.compile(r"just a moment", re.I),
@@ -47,8 +58,15 @@ _CHALLENGE_MARKERS = (
     re.compile(r"captcha|are you a robot|verify you are human", re.I),
     re.compile(r"attention required", re.I),
 )
+# Meaningful *extracted text* thresholds — the real signal of usable content.
 _MIN_MEANINGFUL_TEXT = 120
-_BIG_HTML_WITHOUT_TEXT = 4000
+# A page with almost no text that is mostly <script> is a JS shell regardless of
+# byte size. We compare visible text against script bytes rather than total HTML.
+_SPA_TEXT_CEILING = 200          # below this, a shell is plausible
+_SCRIPT_DOMINANCE_RATIO = 0.60   # scripts are >60% of the HTML → content is JS-side
+
+_SCRIPT_BLOCK = re.compile(r"<script\b[^>]*>.*?</script>", re.I | re.S)
+_BODY_TEXT_TAGS = re.compile(r"<(?:p|article|section|h1|h2|h3|li|td|main)\b", re.I)
 
 
 def _page_html(response: Any) -> str:
@@ -65,12 +83,47 @@ def _page_text(response: Any) -> str:
         return ""
 
 
+def _script_dominance(html: str) -> float:
+    """Fraction of the HTML that is inside <script> blocks (0..1).
+
+    A high ratio with little visible text is the honest signal of a JS shell —
+    large HTML that is mostly *prose* (a long article) has a low ratio and stays
+    static.
+    """
+    if not html:
+        return 0.0
+    script_bytes = sum(len(m.group(0)) for m in _SCRIPT_BLOCK.finditer(html))
+    return script_bytes / max(1, len(html))
+
+
 def _looks_like_js_shell(response: Any) -> bool:
+    """Decide whether a static response is a client-rendered shell.
+
+    Rule (spec §5): *large HTML ≠ JavaScript-required*. A 100 KB static article
+    full of text stays static; a tiny SPA shell with almost no meaningful text
+    is a dynamic candidate. Signals, in order of confidence:
+
+    1. explicit SPA mount/noscript markers → shell;
+    2. very little extracted text AND (hydration markers OR script-dominated
+       HTML OR no semantic body tags) → shell;
+    3. otherwise → NOT a shell (even if the HTML is big).
+    """
     html = _page_html(response)
     if any(p.search(html) for p in _JS_SHELL_MARKERS):
         return True
-    # A big HTML with ~no text is a strong signal the content is JS-rendered.
-    return len(html) > _BIG_HTML_WITHOUT_TEXT
+    text = _page_text(response)
+    if len(text) >= _SPA_TEXT_CEILING:
+        # Meaningful text present — real content, not a shell, whatever the size.
+        return False
+    # Little-to-no text: corroborate with a second signal before escalating.
+    if any(p.search(html) for p in _HYDRATION_MARKERS):
+        return True
+    if _script_dominance(html) >= _SCRIPT_DOMINANCE_RATIO:
+        return True
+    # Tiny text and no semantic body elements at all → nothing useful arrived.
+    if not text and not _BODY_TEXT_TAGS.search(html):
+        return True
+    return False
 
 
 def _looks_challenged(response: Any) -> bool:
@@ -178,6 +231,19 @@ class StrategyRouter:
                 attempts.append(StrategyAttempt(
                     strategy=strat.value, outcome="error",
                     error_class=exc.failure_class.value, error=str(exc), reason="blocked",
+                ))
+                return error_result(
+                    url, strategy=strategy, error=str(exc),
+                    error_code=exc.error_code,
+                    failure_class=exc.failure_class.value, attempts=attempts,
+                )
+            except ResponseTooLargeError as exc:
+                # Size cap is terminal: a heavier strategy never shrinks a body,
+                # so abort the whole plan instead of escalating.
+                attempts.append(StrategyAttempt(
+                    strategy=strat.value, outcome="error",
+                    error_class=exc.failure_class.value, error=str(exc),
+                    reason="response exceeds size limit",
                 ))
                 return error_result(
                     url, strategy=strategy, error=str(exc),

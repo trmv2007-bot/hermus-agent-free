@@ -170,6 +170,27 @@ def probe(*, force: bool = False) -> dict[str, Any]:
                   "detail": "pip install 'scrapling[ai]' for markdown extraction (text still works)"}
         )
 
+        # Session persistence — reported honestly per fetcher (spec §12).
+        # Static: Scrapling's FetcherSession keeps a live curl_cffi client whose
+        #   cookie jar survives across fetches → Hermus reuses it (persistent).
+        # Dynamic/stealth: Hermus does NOT hold a live browser context across
+        #   calls (each browser fetch uses a one-off fetcher — see
+        #   scrapling_backend._scrapling_session), so cross-fetch persistence is
+        #   NOT claimed; the underlying Scrapling DynamicSession/StealthySession
+        #   exist but are not wired for reuse here. Do not fake persistence.
+        static_persist = caps["static"]["status"] in (AVAILABLE, NOT_VERIFIED)
+        caps["static_session_persistence"] = {
+            "status": AVAILABLE if static_persist else caps["static"]["status"],
+            "detail": ("FetcherSession keeps a live client + cookie jar across fetches"
+                       if static_persist else "static fetcher unavailable"),
+        }
+        caps["dynamic_session_persistence"] = {
+            "status": UNAVAILABLE,
+            "detail": ("browser sessions use one-off fetchers per call — persistent "
+                       "cross-fetch browser contexts are not implemented (no fake "
+                       "persistence claimed)"),
+        }
+
         caps["verified"] = dict(_verified)
         _cache = caps
         _cache_at = time.time()

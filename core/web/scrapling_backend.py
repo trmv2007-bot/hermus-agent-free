@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from . import capabilities
 from .errors import (
+    SecurityBlockedError,
     StrategyUnavailableError,
     WebAcquisitionError,
 )
@@ -144,8 +145,8 @@ class ScraplingBackend:
                 "timeout": timeout,
                 "stealthy_headers": stealthy_headers,
                 # Belt: Scrapling itself refuses redirect chains that leave for
-                # private/internal addresses. Suspenders: gateway re-validates
-                # the final URL afterwards.
+                # private/internal addresses. Suspenders: _to_raw re-validates
+                # every redirect hop AND the final URL afterwards.
                 "follow_redirects": "safe",
                 "max_redirects": max(1, policy.max_redirects),
             }
@@ -158,11 +159,18 @@ class ScraplingBackend:
                 from scrapling.fetchers import Fetcher  # lazy: optional dependency
 
                 response = Fetcher.get(url, **kwargs)
-        except StrategyUnavailableError:
+        except (StrategyUnavailableError, SecurityBlockedError):
             raise
+        except (ImportError, ModuleNotFoundError) as exc:
+            # A transitive optional-dep failure (e.g. scrapling's static engine
+            # importing playwright/patchright/browserforge) must degrade to a
+            # typed 'strategy unavailable', not be misreported as a network error.
+            raise StrategyUnavailableError(
+                f"static acquisition dependency missing: {exc}",
+                strategy=FetchStrategy.STATIC.value) from exc
         except Exception as exc:  # curl_cffi network failures
             raise _raise_for_network_error(exc) from exc
-        return self._to_raw(url, response, started)
+        return self._to_raw(url, response, started, policy=policy)
 
     # ---------------------------------------------------------------- dynamic
     def fetch_dynamic(
@@ -200,11 +208,15 @@ class ScraplingBackend:
                 from scrapling.fetchers import DynamicFetcher  # lazy: optional dependency
 
                 response = DynamicFetcher.fetch(url, **kwargs)
-        except StrategyUnavailableError:
+        except (StrategyUnavailableError, SecurityBlockedError):
             raise
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise StrategyUnavailableError(
+                f"dynamic acquisition dependency missing: {exc}",
+                strategy=FetchStrategy.DYNAMIC.value) from exc
         except Exception as exc:
             raise _raise_for_network_error(exc) from exc
-        raw = self._to_raw(url, response, started)
+        raw = self._to_raw(url, response, started, policy=policy)
         raw.captured_xhr = _bundle_captured_xhr(getattr(response, "captured_xhr", None) or [])
         return raw
 
@@ -240,11 +252,15 @@ class ScraplingBackend:
                 from scrapling.fetchers import StealthyFetcher  # lazy: optional dependency
 
                 response = StealthyFetcher.fetch(url, **kwargs)
-        except StrategyUnavailableError:
+        except (StrategyUnavailableError, SecurityBlockedError):
             raise
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise StrategyUnavailableError(
+                f"stealth acquisition dependency missing: {exc}",
+                strategy=FetchStrategy.STEALTH.value) from exc
         except Exception as exc:
             raise _raise_for_network_error(exc) from exc
-        return self._to_raw(url, response, started)
+        return self._to_raw(url, response, started, policy=policy)
 
     # ---------------------------------------------------------------- parsing
     def parse_html(self, html: str, url: str = "") -> Any:
@@ -262,7 +278,8 @@ class ScraplingBackend:
         return Selector(content=html, url=url or "about:blank")
 
     # ---------------------------------------------------------------- helpers
-    def _to_raw(self, url: str, response: Any, started: float) -> RawFetch:
+    def _to_raw(self, url: str, response: Any, started: float, *,
+                policy: Optional[WebSecurityPolicy] = None) -> RawFetch:
         headers = getattr(response, "headers", None) or {}
         content_type = ""
         try:
@@ -270,20 +287,46 @@ class ScraplingBackend:
         except Exception:
             pass
         body = getattr(response, "body", b"") or b""
+        size_bytes = len(body)
+        final_url = getattr(response, "url", "") or url
         history = tuple(
             getattr(h, "url", "") or "" for h in (getattr(response, "history", None) or [])
         )
+        if policy is not None:
+            # (1) Final-URL SSRF re-validation — the suspenders to Scrapling's
+            # follow_redirects="safe" belt. A page can redirect a public host to
+            # a private/loopback/blocked/disallowed target; refuse the *result*.
+            self._revalidate_final_url(url, final_url, history, policy)
+            # (2) Size cutoff — as early as the backend permits (curl_cffi has
+            # already buffered the body; we reject before Hermus retains/parses
+            # it, so an oversized page never enters normalization/caching/memory).
+            policy.check_response(size_bytes, content_type=content_type)
         return RawFetch(
             url=url,
-            final_url=getattr(response, "url", "") or url,
+            final_url=final_url,
             status=int(getattr(response, "status", 0) or 0),
             reason=str(getattr(response, "reason", "") or ""),
             content_type=content_type,
-            size_bytes=len(body),
+            size_bytes=size_bytes,
             duration_ms=int((time.monotonic() - started) * 1000),
             history=history,
             response=response,
         )
+
+    @staticmethod
+    def _revalidate_final_url(requested: str, final_url: str,
+                              history: tuple[str, ...],
+                              policy: WebSecurityPolicy) -> None:
+        """Re-run the full security battery on the final URL and every hop.
+
+        Any redirect hop that lands on a forbidden target aborts the fetch with
+        a typed :class:`SecurityBlockedError` — never a leaked exception, and
+        never a silently-accepted internal address.
+        """
+        for hop in (*history, final_url):
+            if not hop:
+                continue
+            policy.check_final_url(hop, requested_url=requested, purpose="redirect")
 
 
 def _bundle_captured_xhr(xhrs: list[Any]) -> list[dict[str, Any]]:

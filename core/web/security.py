@@ -144,39 +144,58 @@ class WebSecurityPolicy:
         self._check_host_addresses(host, purpose)
         return raw
 
-    def check_final_url(self, url: str, *, purpose: str = "redirect") -> None:
-        """Re-validate a URL a server redirected us to (post-redirect SSRF guard)."""
-        parsed = urlparse(url or "")
-        host = (parsed.hostname or "").lower()
-        if not host:
-            raise SecurityBlockedError(f"{purpose}: redirect target has no hostname")
-        if parsed.scheme.lower() not in self.allowed_schemes:
-            raise SecurityBlockedError(f"{purpose}: redirect to non-http(s) scheme refused")
-        for pattern in self.blocked_domains:
-            if host_matches_pattern(host, pattern):
-                raise SecurityBlockedError(f"{purpose}: redirect to blocked domain '{host}' refused")
-        if not self.allow_private_addresses:
-            if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".local"):
-                raise SecurityBlockedError(f"{purpose}: redirect to internal host refused")
+    def check_final_url(self, url: str, *, requested_url: str = "",
+                        purpose: str = "redirect") -> str:
+        """Re-validate the URL a server actually redirected us to (post-redirect
+        SSRF guard). This is the *suspenders* to Scrapling's ``follow_redirects``
+        belt: a page can redirect ``https://public.example`` →
+        ``http://127.0.0.1:8080`` (or to a blocked domain, a disallowed scheme,
+        or a private/link-local/loopback IPv4/IPv6 address), and we must refuse
+        the *result* even though the original target was allowed.
+
+        It runs the SAME battery of checks as :meth:`check` (scheme allow-list,
+        embedded credentials, internal-host suffixes, SSRF pivot ports, domain
+        block/allow lists, and DNS→IP private/reserved rejection) so there is a
+        single source of security truth — no partial re-implementation that can
+        drift. Returns the normalized final URL.
+        """
+        final = (url or "").strip()
+        if not final:
+            raise SecurityBlockedError(f"{purpose}: redirect target is empty")
+        # Fast path: identical to the already-validated request → nothing new.
+        if requested_url and final == requested_url.strip():
+            return final
+        # DNS-unresolvable is a real block here (unlike the pre-flight gate):
+        # the response was fetched, so the final host resolved for Scrapling —
+        # if we cannot resolve it, we cannot prove it is safe, so refuse.
+        parsed = urlparse(final)
+        host = (parsed.hostname or "").lower().strip(".")
+        if host and not self.allow_private_addresses:
             try:
-                infos = socket.getaddrinfo(host, None)
+                socket.getaddrinfo(host, None)
             except socket.gaierror as exc:
                 raise SecurityBlockedError(
-                    f"{purpose}: redirect target could not be resolved") from exc
-            for info in infos:
-                ip = ipaddress.ip_address(info[4][0])
-                if self._is_forbidden_ip(ip):
-                    raise SecurityBlockedError(
-                        f"{purpose}: redirect resolves to a private/reserved address, refused"
-                    )
+                    f"{purpose}: redirect target '{host}' could not be resolved for "
+                    "re-validation") from exc
+        return self.check(final, purpose=purpose)
 
-    def check_response(self, content_type: str, size_bytes: int) -> None:
-        """Response-level guards: size cap and non-web content types."""
-        if size_bytes > self.max_response_bytes:
-            raise SecurityBlockedError(
+    def check_response(self, size_bytes: int, *, content_type: str = "") -> None:
+        """Response-size guard, enforced by the caller as early as the backend
+        allows (see :mod:`core.web.scrapling_backend`).
+
+        Honest limitation: Scrapling's HTTP fetcher (curl_cffi) downloads the
+        full body before Hermus sees it, so this is a *post-acquisition* cutoff,
+        not a streamed pre-download abort — the body is bounded by curl but the
+        cap is applied the moment control returns. Raises
+        :class:`ResponseTooLargeError` (``SIZE_LIMIT``) so the router aborts the
+        plan rather than escalating (a heavier strategy never shrinks a body).
+        """
+        if self.max_response_bytes and size_bytes > self.max_response_bytes:
+            from .errors import ResponseTooLargeError
+
+            raise ResponseTooLargeError(
                 f"response of {size_bytes} bytes exceeds the configured limit "
-                f"({self.max_response_bytes} bytes)",
-                error_code="WEB_RESPONSE_TOO_LARGE",
+                f"({self.max_response_bytes} bytes)"
             )
 
     # --------------------------------------------------------------- internals
