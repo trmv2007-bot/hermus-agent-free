@@ -21,7 +21,7 @@ if os.getenv("HERMUS_NO_DOTENV", "") not in ("1", "true", "True"):
     except Exception:  # python-dotenv is optional until setup.sh installs it
         pass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 
@@ -332,6 +332,59 @@ class Config(BaseModel):
     delegation_timeout: float = float(os.getenv("HERMUS_DELEGATION_TIMEOUT", "120"))
     delegation_rpc: bool = os.getenv("HERMUS_DELEGATION_RPC", "1") not in ("0", "false", "False")
 
+
+    # ---- Web acquisition (Scrapling-backed, canonical core.web gateway) -----
+    # All production web actions flow through core.web.WebGateway -> strategy
+    # router -> Scrapling. Scrapling is an OPTIONAL dependency: with it absent
+    # the subsystem degrades to typed "not installed" results, never crashes.
+    web_enabled: bool = os.getenv("HERMUS_WEB_ENABLED", "1") not in ("0", "false", "False")
+    # auto | static | dynamic | stealth — what the router prefers when the
+    # agent does not name a strategy. AUTO = cheapest sufficient (static first).
+    web_default_strategy: str = os.getenv("HERMUS_WEB_STRATEGY", "auto")
+    # JS-rendered fetching (Playwright Chromium). Needs `scrapling install`.
+    web_dynamic_enabled: bool = os.getenv("HERMUS_WEB_DYNAMIC", "1") not in ("0", "false", "False")
+    # Stealth/anti-bot fetching is OFF by default: it is only used when a
+    # normal acquisition genuinely fails AND an operator turned it on.
+    web_stealth_enabled: bool = os.getenv("HERMUS_WEB_STEALTH", "0") not in ("0", "false", "False")
+    # Whether stealth may solve Cloudflare-style interstitials (needs
+    # HERMUS_WEB_STEALTH=1 too; still requires an explicit per-call opt-in).
+    web_stealth_solve_cloudflare: bool = os.getenv("HERMUS_WEB_STEALTH_CF", "0") not in ("0", "false", "False")
+    # On Android/Termux, keep browser strategies off until explicitly enabled
+    # AND verified (Hermus never claims untested browser support).
+    web_termux_restrict: bool = os.getenv("HERMUS_WEB_TERMUX_RESTRICT", "1") not in ("0", "false", "False")
+
+    # Timeouts / sizes (resource control — spec §11)
+    web_request_timeout: float = float(os.getenv("HERMUS_WEB_TIMEOUT", "20"))
+    web_browser_timeout: float = float(os.getenv("HERMUS_WEB_BROWSER_TIMEOUT", "45"))
+    web_max_response_bytes: int = int(os.getenv("HERMUS_WEB_MAX_RESPONSE_BYTES", str(5 * 1024 * 1024)))
+    web_max_redirects: int = int(os.getenv("HERMUS_WEB_MAX_REDIRECTS", "10"))
+    # Budget of page text kept per result / handed toward the model.
+    web_max_content_chars: int = int(os.getenv("HERMUS_WEB_MAX_CONTENT_CHARS", "20000"))
+
+    # SSRF posture. Private/loopback/link-local targets are ALWAYS blocked
+    # unless this is explicitly set — for tests or self-hosted intranets.
+    web_allow_private_addresses: bool = os.getenv("HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES", "0") not in ("0", "false", "False")
+    # Optional domain policy (comma-separated; `*.example.com` wildcards ok).
+    # Empty allow list = all (non-blocked) public domains permitted.
+    web_allowed_domains: list = Field(default_factory=lambda: csv_list(os.getenv("HERMUS_WEB_ALLOWED_DOMAINS", "")))
+    web_blocked_domains: list = Field(default_factory=lambda: csv_list(os.getenv("HERMUS_WEB_BLOCKED_DOMAINS", "")))
+
+    # Crawl ceilings (background crawls go through the canonical JobQueue).
+    web_crawl_max_pages: int = int(os.getenv("HERMUS_WEB_CRAWL_MAX_PAGES", "100"))
+    web_crawl_max_depth: int = int(os.getenv("HERMUS_WEB_CRAWL_MAX_DEPTH", "4"))
+    web_crawl_concurrency: int = int(os.getenv("HERMUS_WEB_CRAWL_CONCURRENCY", "8"))
+    web_crawl_wall_clock: float = float(os.getenv("HERMUS_WEB_CRAWL_WALL_CLOCK", "600"))
+    web_crawl_per_domain_delay_ms: int = int(os.getenv("HERMUS_WEB_CRAWL_DELAY_MS", "500"))
+
+    # Sessions: in-memory cookie jars pinned to explicit domains, never
+    # serialized and never shown to the model.
+    web_max_sessions: int = int(os.getenv("HERMUS_WEB_MAX_SESSIONS", "8"))
+    web_session_ttl: float = float(os.getenv("HERMUS_WEB_SESSION_TTL", "1800"))
+
+    # Page cache (canonical core.cache LRUCache). Only unauthenticated GETs.
+    web_cache_enabled: bool = os.getenv("HERMUS_WEB_CACHE", "1") not in ("0", "false", "False")
+    web_cache_size: int = int(os.getenv("HERMUS_WEB_CACHE_SIZE", "128"))
+    web_cache_ttl: int = int(os.getenv("HERMUS_WEB_CACHE_TTL", "600"))
 
     # MCP servers config
     mcp_servers_path: str = "data/mcp_servers.json"

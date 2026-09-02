@@ -55,6 +55,17 @@ DEFAULT_POLICY: dict[str, tuple] = {
     "memory2": (Risk.READ, Decision.ALLOW, [Capability.READ]),
     "web_search": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
     "web_read": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    # Scrapling-backed web acquisition tools (core.web.WebGateway). Single-page
+    # acquisition/extraction is read-only and ALLOW; heavier or stateful actions
+    # (crawls, cookie sessions) require a human-aligned ASK.
+    "web_fetch": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "web_extract": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "web_extract_links": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "web_extract_metadata": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "web_search_and_extract": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
+    "web_crawl": (Risk.NETWORK, Decision.ASK, [Capability.NETWORK]),
+    "web_session": (Risk.NETWORK, Decision.ASK, [Capability.NETWORK]),
+    "web_capabilities": (Risk.READ, Decision.ALLOW, [Capability.READ]),
     "browser_navigate": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
     "browser_screenshot": (Risk.NETWORK, Decision.ALLOW, [Capability.NETWORK]),
     "vision_analyze": (Risk.READ, Decision.ALLOW, [Capability.READ]),

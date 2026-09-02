@@ -61,6 +61,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
 | **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
 | **Delegation** | `subagents.subagent` (facade) `→` `subagent.delegate` Job on `gateway.queue.JobQueue` | job log + results | the queue owns lifecycle; `core.delegation` is only the worker implementation |
+| **Web acquisition** | `core.web.WebGateway` (see `docs/WEB_ACQUISITION.md`) | bounded page cache (`core.cache` LRU) + in-memory session jars | `ToolGateway → tools.web_acquisition → WebGateway → StrategyRouter → Scrapling backend` (the only scrapling importer; optional dependency, degrades honestly) |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Red-line policy / approvals** | `RED_LINES.md` + `core.safety_policy` + `core.approval` | `policies/red_lines.json` + capability ledger + scoped approval grants | deterministic green/yellow/red classification plus scoped grants for yellow actions |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |

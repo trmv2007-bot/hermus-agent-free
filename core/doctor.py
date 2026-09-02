@@ -310,8 +310,49 @@ class HermusDoctor:
         findings.extend(self._analyze_stuck(signals.get("stuck") or {}))
         findings.extend(self._analyze_resources(signals.get("resources") or {}))
         findings.extend(self._analyze_watchdog(signals.get("watchdog") or []))
+        findings.extend(self._analyze_web_security())
 
         findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.category))
+        return findings
+
+    # -- web acquisition security posture ------------------------------------
+    @staticmethod
+    def _analyze_web_security() -> list[Finding]:
+        """Deterministic findings about the web subsystem's security config.
+
+        The web subsystem (core.web, Scrapling-backed) makes outbound requests,
+        so a misconfigured guard is a real risk the doctor must name even when
+        nothing has broken yet.
+        """
+        findings: list[Finding] = []
+        try:
+            from .config import config as _config
+        except Exception:  # noqa: BLE001
+            return findings
+        if getattr(_config, "web_allow_private_addresses", False):
+            findings.append(_finding(
+                SEVERITY_HIGH, "web-security",
+                "SSRF protection disabled: private/internal addresses are fetchable",
+                "HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1 lets web fetching reach loopback, "
+                "link-local (169.254.169.254) and RFC1918 addresses.",
+                [
+                    "Remove HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES from .env (or set it to 0)",
+                    "Use HERMUS_WEB_BLOCKED_DOMAINS / HERMUS_WEB_ALLOWED_DOMAINS to scope targets instead",
+                ],
+                component="core.web",
+            ))
+        if getattr(_config, "web_stealth_enabled", False) and \
+                getattr(_config, "web_stealth_solve_cloudflare", False):
+            findings.append(_finding(
+                SEVERITY_LOW, "web-security",
+                "Stealth fetching with challenge-solving is enabled",
+                "HERMUS_WEB_STEALTH=1 and HERMUS_WEB_STEALTH_CF=1 permit anti-bot bypass "
+                "acquisition. It only triggers after cheaper strategies fail, but the "
+                "operator should confirm this is intended for this deployment.",
+                ["Set HERMUS_WEB_STEALTH_CF=0 to allow stealth fetching without automatic "
+                 "interstitial solving"],
+                component="core.web",
+            ))
         return findings
 
     # -- grouped runtime issues --------------------------------------------

@@ -245,6 +245,24 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# STEP 6b: Web Acquisition Engine (OPTIONAL — Scrapling, canonical core.web backend)
+# -----------------------------------------------------------------------------
+# Fast HTTP fetching + adaptive extraction work without browsers; dynamic /
+# stealth fetching additionally needs the Chromium binaries (step 6 shared them
+# via Playwright). Failure here is non-fatal: Hermus degrades honestly and
+# `hermus doctor` reports exactly what is missing (run: scrapling install).
+step_start "6b" "Web Acquisition Engine (Scrapling — optional)"
+if pip install "scrapling[fetchers]>=0.3.10,<0.5" --quiet; then
+  if scrapling install; then
+    step_ok "Scrapling web acquisition engine ready (HTTP fetchers + browser deps)"
+  else
+    sub_step "⚠️  scrapling install (browser deps) failed — fast HTTP web fetching still works; dynamic/stealth degrades to a reported-unavailable capability. Re-run later: scrapling install"
+  fi
+else
+  sub_step "⚠️  Scrapling not installed (optional) — web tools degrade to a reported not_installed capability. Install with: pip install 'scrapling[fetchers]'"
+fi
+
+# -----------------------------------------------------------------------------
 # STEP 7: Local Storage, Databases & Memory Initialization
 # -----------------------------------------------------------------------------
 step_start "7" "Local Vector Storage, Memory & Session Directories"

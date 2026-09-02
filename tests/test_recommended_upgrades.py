@@ -107,19 +107,34 @@ def test_skill_manager_test_generation_and_health(tmp_path):
 
 
 def test_web_read_caching(tmp_path, monkeypatch):
+    """web_read caches successful gateway reads and reports cache hits.
+
+    web_read is now a compatibility path over the canonical WebGateway, so the
+    mock sits at the gateway seam (core.web.fetch_text), not raw requests.get.
+    """
     import tools.internet_eyes as ie
 
     monkeypatch.setattr(ie, "Path", lambda p: tmp_path / p)
-    # Mock requests.get
-    class MockResp:
-        status_code = 200
-        text = "# Cached Page Content\nThis is mock content"
-    monkeypatch.setattr(ie.requests, "get", lambda *args, **kwargs: MockResp())
+
+    class FakeGateway:
+        calls = 0
+
+        def fetch_text(self, url, max_chars=15000):
+            FakeGateway.calls += 1
+            return {"ok": True, "url": url, "title": "Cached", "strategy": "static",
+                    "content": "# Cached Page Content\nThis is mock content",
+                    "content_length": 41, "truncated": False, "warnings": []}
+
+    import core.web
+
+    monkeypatch.setattr(core.web, "get_web_gateway", lambda: FakeGateway())
 
     res1 = ie.web_read("http://example-cached-test.com", use_jina=False, use_cache=True)
     assert res1["success"] is True
+    assert FakeGateway.calls == 1
 
-    # Call again, should return cached
+    # Call again, should return cached (gateway not consulted twice)
     res2 = ie.web_read("http://example-cached-test.com", use_jina=False, use_cache=True)
     assert res2["success"] is True
     assert res2.get("cached") is True
+    assert FakeGateway.calls == 1

@@ -536,7 +536,24 @@ def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: boo
         "memory.sweep": (make_memory_sweep_handler(), "decay/archive/purge pass over typed memory"),
         "channel.reply": (make_channel_reply_handler(agent_getter), "runtime turn + deliver answer back to the channel"),
         "voice.reply": (make_voice_reply_handler(agent_getter), "voice-first turn: work in background, then synthesize the spoken answer"),
+        "web.crawl": (make_web_crawl_handler(), "bounded background web crawl through the canonical WebGateway (Scrapling-backed)"),
     }
     for kind, (fn, _desc) in kinds.items():
         queue.register(kind, fn, overwrite=overwrite)
     return {k: v[1] for k, v in kinds.items()}
+
+
+def make_web_crawl_handler() -> Callable[[Any], dict[str, Any]]:
+    """Background bounded crawl: Agent → WebGateway → JobQueue → CrawlWorker.
+
+    The handler delegates entirely to ``WebGateway.crawl_job_handler`` so the
+    queue owns lifecycle while security, limits and normalization stay in the
+    canonical web subsystem. Progress events flow through ctx.emit (run bus)
+    and are mirrored onto the canonical EventBus by the gateway.
+    """
+    def handler(ctx) -> dict[str, Any]:
+        from core.web import get_web_gateway
+
+        return get_web_gateway().crawl_job_handler(ctx)
+    handler.__doc__ = "web.crawl: bounded background crawl via core.web.WebGateway"
+    return handler

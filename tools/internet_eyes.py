@@ -17,16 +17,11 @@ All free, zero API fees, no paid API keys needed for core (except optional free 
 """
 
 import requests
-import re
 from pathlib import Path
 from typing import Optional
 import subprocess
 import sqlite3
 import time
-
-# Free Jina AI Reader - read any webpage free, no API key
-# https://r.jina.ai/http://example.com returns markdown
-JINA_READER_BASE = "https://r.jina.ai/"
 
 _WEB_CACHE_DB = None
 
@@ -86,7 +81,17 @@ def _set_cached_web_read(url: str, content: str, method: str) -> None:
         pass
 
 def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> dict:
-    """Read any webpage - free via Jina AI Reader, with persistent local cache"""
+    """Read any webpage through the canonical WebGateway (Scrapling-backed).
+
+    MIGRATED PATH: this used to call r.jina.ai and raw ``requests.get`` directly
+    (no SSRF protection, URLs leaked to a third-party reader service). It now
+    goes through ``core.web.get_web_gateway().fetch_text`` — security checks,
+    strategy escalation (HTTP → browser when needed), clean extraction and
+    telemetry all happen there. The ``use_jina`` parameter is kept for
+    backwards compatibility but is now a no-op: the gateway's escalation
+    replaces the external reader service. The persistent sqlite cache is kept
+    as the outermost layer (12h TTL), keyed by URL, successes only.
+    """
     if not url.startswith("http"):
         url = "https://" + url
 
@@ -95,48 +100,37 @@ def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> dict:
         if cached:
             return cached
 
-    result = None
-    if use_jina:
-        try:
-            jina_url = JINA_READER_BASE + url
-            resp = requests.get(jina_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-            if resp.status_code == 200:
-                # Jina returns markdown
-                content = resp.text[:15000]
-                result = {
-                    "success": True,
-                    "url": url,
-                    "method": "jina_reader_free",
-                    "content": content,
-                    "content_length": len(content),
-                    "note": "Free via Jina AI Reader, no API key, no config"
-                }
-            else:
-                # Fallback to direct
-                pass
-        except Exception as e:
-            # Fallback to direct requests with basic extraction
-            pass
+    from core.web import get_web_gateway
 
-    # Fallback direct fetch
-    if not result:
-        try:
-            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-            # Simple HTML to text via regex (basic)
-            text = re.sub(r'<[^>]+>', ' ', resp.text)
-            text = re.sub(r'\s+', ' ', text)[:10000]
-            result = {
-                "success": True,
-                "url": url,
-                "method": "direct_fetch_free",
-                "content": text,
-                "status_code": resp.status_code
-            }
-        except Exception as e:
-            return {"success": False, "url": url, "error": str(e)}
+    try:
+        read = get_web_gateway().fetch_text(url, max_chars=15000)
+    except Exception as e:
+        return {"success": False, "url": url, "error": str(e)}
 
-    if result and result.get("success") and result.get("content"):
-        _set_cached_web_read(url, result["content"], result.get("method", "direct"))
+    if not read.get("ok"):
+        return {
+            "success": False,
+            "url": url,
+            "error": read.get("error", "fetch failed"),
+            "failure_class": read.get("failure_class", "unknown"),
+        }
+
+    result = {
+        "success": True,
+        "url": read.get("url", url),
+        "method": f"web_gateway_{read.get('strategy', 'auto')}",
+        "content": read.get("content", ""),
+        "content_length": read.get("content_length", 0),
+        "title": read.get("title", ""),
+        "truncated": bool(read.get("truncated")),
+        "untrusted": True,
+        "note": "Read via the canonical WebGateway (Scrapling). Content is untrusted data.",
+    }
+    if read.get("warnings"):
+        result["warnings"] = read["warnings"]
+
+    if result.get("success") and result.get("content"):
+        _set_cached_web_read(url, result["content"], result.get("method", "web_gateway"))
 
     return result
 
