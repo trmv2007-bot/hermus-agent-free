@@ -1,434 +1,296 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Hermus Agent Free — SYSTEM INSTALLER (WSL / Linux)
-# Installs OS packages (APTs, Node, Bun, Playwright system deps).
 #
-# NOTE (Rebuild §6, §18): the canonical ONE-COMMAND bootstrap is `./hermus bootstrap`,
-# which creates the venv, installs the pinned Python dependencies, initializes the
-# data layout, migrates legacy state and runs health probes. This script handles the
-# OS-level packages only and then delegates to that canonical bootstrap at the end.
-# It does NOT duplicate launchers or Python dependency logic.
-# =============================================================================
+# Hermus Agent Free — safe, idempotent installer/orchestrator.
+#
+# The shell layer owns only host/OS detection and host packages.  The canonical
+# Python bootstrap owns .venv, dependency files, runtime paths and Doctor/live
+# verification.  It is intentionally a thin wrapper so setup, the CLI and the
+# gateway health endpoint cannot drift into three different installations.
+#
+# Supported hosts: Linux, macOS and Android/Termux.  Windows is not silently
+# guessed or partially installed by this POSIX script.
+#
+# Usage:
+#   ./setup.sh                    install/repair and run live verification
+#   ./setup.sh --repair           repair a broken venv/dependency installation
+#   ./setup.sh --verify-only      do not install; run the live Doctor report
+#   ./setup.sh --skip-system      do not call the host package manager
+#   ./setup.sh --skip-browser     do not download Chromium (verification fails
+#                                  if the configured browser is required)
+#   ./setup.sh --skip-optional    leave optional integrations untouched
+#
 
-# Auto-re-exec in bash if invoked via sh/dash
 if [ -z "${BASH_VERSION:-}" ]; then
   exec bash "$0" "$@"
 fi
 
-set -e
+set -Eeuo pipefail
 
-# Color & Format helpers
-if [ -t 1 ]; then
-  C_CYAN='\033[0;36m'
-  C_GREEN='\033[0;32m'
-  C_YELLOW='\033[1;33m'
-  C_BLUE='\033[0;34m'
-  C_MAGENTA='\033[0;35m'
-  C_RED='\033[0;31m'
-  C_BOLD='\033[1m'
-  C_DIM='\033[2m'
-  C_MUTED='\033[2m'
-  C_RESET='\033[0m'
-else
-  C_CYAN=''
-  C_GREEN=''
-  C_YELLOW=''
-  C_BLUE=''
-  C_MAGENTA=''
-  C_RED=''
-  C_BOLD=''
-  C_DIM=''
-  C_MUTED=''
-  C_RESET=''
-fi
-
-step_start() {
-  local num="$1"
-  local title="$2"
-  echo -e "\n${C_CYAN}${C_BOLD}[$num/9]${C_RESET} ${C_BOLD}$title${C_RESET}"
-}
-
-sub_step() {
-  echo -e "      ${C_BLUE}➜${C_RESET} $*"
-}
-
-step_ok() {
-  echo -e "      ${C_GREEN}✓ $1${C_RESET}"
-}
-
-step_warn() {
-  echo -e "      ${C_YELLOW}⚠ $1${C_RESET}"
-}
-
-echo -e "${C_CYAN}${C_BOLD}"
-echo "  ╔═════════════════════════════════════════════════════════════════╗"
-echo "  ║         ☤ HERMUS AGENT FREE — MASTER DEVELOPER INSTALLER        ║"
-echo "  ║        Complete Stack: Linux/WSL, Node, Bun, Python & AI       ║"
-echo "  ╚═════════════════════════════════════════════════════════════════╝"
-echo -e "${C_RESET}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# -----------------------------------------------------------------------------
-# STEP 1: System Packages & Linux/WSL Tooling
-# -----------------------------------------------------------------------------
-step_start "1" "System Packages & Build Essentials (APT / Linux / WSL)"
-
-if command -v apt-get >/dev/null 2>&1; then
-  SUDO_CMD=""
-  if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-    SUDO_CMD="sudo"
-  fi
-  
-  sub_step "Updating package lists..."
-  $SUDO_CMD apt-get update -y -qq 2>/dev/null || true
-  
-  sub_step "Installing git, curl, wget, jq, ffmpeg, build-essential..."
-  $SUDO_CMD DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    git curl wget jq ca-certificates build-essential ffmpeg \
-    python3 python3-venv python3-pip python3-dev python3-virtualenv virtualenv 2>/dev/null || true
-  
-  step_ok "System developer tooling ready (git, curl, jq, ffmpeg)"
+if [ -t 1 ]; then
+  C_CYAN=$'\033[0;36m'
+  C_GREEN=$'\033[0;32m'
+  C_YELLOW=$'\033[1;33m'
+  C_RED=$'\033[0;31m'
+  C_BOLD=$'\033[1m'
+  C_RESET=$'\033[0m'
 else
-  step_ok "Non-Debian/WSL environment detected — using existing system packages"
+  C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_BOLD=""; C_RESET=""
 fi
 
-# -----------------------------------------------------------------------------
-# STEP 2: Node.js & npm (JavaScript / TypeScript Ecosystem)
-# -----------------------------------------------------------------------------
-step_start "2" "Node.js & npm (Frontend, MCP Bridges & Web Tools)"
+usage() {
+  sed -n '1,34p' "$0"
+}
 
-if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-  step_ok "Node.js $(node -v) & npm $(npm -v) already installed"
-else
-  sub_step "Installing Node.js 20 LTS & npm..."
-  if command -v apt-get >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO_CMD bash - >/dev/null 2>&1 || true
-    $SUDO_CMD apt-get install -y -qq nodejs >/dev/null 2>&1 || true
-  fi
-  if command -v node >/dev/null 2>&1; then
-    step_ok "Node.js $(node -v) installed successfully"
-  else
-    step_warn "Node.js optional installation skipped (install manually if using MCP JS tools)"
-  fi
-fi
+VERIFY_ONLY=0
+REPAIR=0
+SKIP_SYSTEM=0
+SKIP_BROWSER=0
+SKIP_OPTIONAL=0
 
-# -----------------------------------------------------------------------------
-# STEP 3: Bun Runtime (Fast TypeScript / JavaScript Execution)
-# -----------------------------------------------------------------------------
-step_start "3" "Bun Runtime (Ultra-fast JS/TS package executor)"
-
-if command -v bun >/dev/null 2>&1; then
-  step_ok "Bun $(bun --version) already installed"
-elif [ -f "$HOME/.bun/bin/bun" ]; then
-  export PATH="$HOME/.bun/bin:$PATH"
-  step_ok "Bun $($HOME/.bun/bin/bun --version) detected in ~/.bun/bin"
-else
-  sub_step "Installing Bun via official installer (bun.sh)..."
-  curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 || true
-  if [ -f "$HOME/.bun/bin/bun" ]; then
-    export PATH="$HOME/.bun/bin:$PATH"
-    step_ok "Bun $($HOME/.bun/bin/bun --version) installed successfully"
-  else
-    step_warn "Bun install skipped (optional for ultra-fast TS execution)"
-  fi
-fi
-
-# -----------------------------------------------------------------------------
-# STEP 4: Python 3.10+ & Virtual Environment (.venv)
-# -----------------------------------------------------------------------------
-step_start "4" "Python 3.10+ Environment & Resilient (.venv) Setup"
-
-PYTHON_CANDIDATES=()
-for cmd in python3.13 python3.12 python3.11 python3.10 python3 python; do
-  if command -v "$cmd" >/dev/null 2>&1; then
-    if "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-      PYTHON_CANDIDATES+=("$cmd")
-    fi
-  fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --verify-only) VERIFY_ONLY=1 ;;
+    --repair) REPAIR=1 ;;
+    --skip-system) SKIP_SYSTEM=1 ;;
+    --skip-browser) SKIP_BROWSER=1 ;;
+    --skip-optional) SKIP_OPTIONAL=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown setup option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
 done
 
-if [ ${#PYTHON_CANDIDATES[@]} -eq 0 ]; then
-  echo -e "${C_RED}[ERROR] Python 3.10+ is required but not found.${C_RESET}"
-  echo "Install with: sudo apt install python3 python3-venv python3-pip"
-  exit 1
+say() { printf '%b\n' "$*"; }
+info() { say "${C_CYAN}➜${C_RESET} $*"; }
+ok() { say "${C_GREEN}✓${C_RESET} $*"; }
+warn() { say "${C_YELLOW}⚠${C_RESET} $*"; }
+fatal() { say "${C_RED}${C_BOLD}✗ SETUP HOST CHECK FAILED:${C_RESET} $*" >&2; exit 1; }
+
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# Run a privileged host command. A missing privilege path is a real error for
+# required packages; callers use it only inside an explicit if/then branch.
+privileged() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command_exists sudo; then
+    sudo "$@"
+  else
+    say "No root privileges and sudo is unavailable; cannot run: $*" >&2
+    return 1
+  fi
+}
+
+OS_NAME="$(uname -s 2>/dev/null || printf 'unknown')"
+TERMUX=0
+case "${TERMUX_VERSION:-}" in
+  "") ;;
+  *) TERMUX=1 ;;
+esac
+case "${PREFIX:-}" in
+  *com.termux*) TERMUX=1 ;;
+esac
+case "${PATH:-}" in
+  *com.termux*) TERMUX=1 ;;
+esac
+
+if [ "$TERMUX" -eq 1 ]; then
+  PLATFORM_FAMILY="android-termux"
+else
+  case "$OS_NAME" in
+    Linux) PLATFORM_FAMILY="linux" ;;
+    Darwin) PLATFORM_FAMILY="macos" ;;
+    *) fatal "unsupported host '$OS_NAME'. Use Linux, macOS or Android/Termux." ;;
+  esac
 fi
 
-PRIMARY_PY="${PYTHON_CANDIDATES[0]}"
-sub_step "Selected Python runtime: $($PRIMARY_PY --version)"
-
-# Clean up broken .venv if needed
-if [ -d ".venv" ] && [ ! -f ".venv/bin/activate" ]; then
-  sub_step "Cleaning incomplete previous virtualenv..."
-  rm -rf .venv
+say "${C_CYAN}${C_BOLD}HERMUS SETUP — ${PLATFORM_FAMILY}${C_RESET}"
+say "Repository: $SCRIPT_DIR"
+if [ "$VERIFY_ONLY" -eq 1 ]; then
+  info "Verification-only mode: no package manager, venv, env file or optional install changes will be made."
+elif [ "$REPAIR" -eq 1 ]; then
+  info "Repair mode: existing user data/configuration is preserved; broken runtime pieces may be repaired."
 fi
 
-if [ ! -f ".venv/bin/activate" ]; then
-  sub_step "Creating isolated virtual environment (.venv)..."
-  for py in "${PYTHON_CANDIDATES[@]}"; do
-    "$py" -m venv .venv 2>/dev/null || true
-    if [ -f ".venv/bin/activate" ]; then
-      PRIMARY_PY="$py"
-      break
+if [ ! -r "$SCRIPT_DIR/bootstrap.py" ] || [ ! -r "$SCRIPT_DIR/requirements.txt" ]; then
+  fatal "bootstrap.py and requirements.txt must exist in the repository root."
+fi
+
+PYTHON_CMD=""
+select_python() {
+  local candidate
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
+    if command_exists "$candidate" && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+      PYTHON_CMD="$candidate"
+      return 0
     fi
   done
-  
-  if [ ! -f ".venv/bin/activate" ] && command -v virtualenv >/dev/null 2>&1; then
-    virtualenv -p "$PRIMARY_PY" .venv 2>/dev/null || true
-  fi
-fi
-
-if [ ! -f ".venv/bin/activate" ]; then
-  echo -e "${C_RED}[ERROR] Could not initialize virtual environment.${C_RESET}"
-  echo "Run: sudo apt install python3-venv python3-pip virtualenv"
-  exit 1
-fi
-
-# shellcheck disable=SC1091
-source .venv/bin/activate
-step_ok "Virtual environment active: $(python --version)"
-
-sub_step "Upgrading pip, setuptools, wheel..."
-python -m pip install -U pip setuptools wheel --quiet 2>/dev/null || true
-
-# -----------------------------------------------------------------------------
-# STEP 5: Python Core & Web Gateway Stack (Live Progress)
-# -----------------------------------------------------------------------------
-step_start "5" "Hermus AI Core & FastAPI Web Gateway Stack"
-
-sub_step "Installing FastAPI, Uvicorn, multipart uploads, telemetry, Starlette, HTTPX..."
-pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0" "starlette>=0.46.0" \
-  "httpx>=0.24.0" "python-multipart>=0.0.9" "psutil>=5.9.0" --quiet
-step_ok "FastAPI, SSE/WebSockets, JARVIS attachments and live telemetry dependencies ready"
-
-sub_step "Installing Pydantic, Python-Dotenv, Requests..."
-pip install "pydantic>=2.0.0" "python-dotenv>=1.0.0" "requests>=2.31.0" --quiet
-step_ok "Data validation and configuration loader ready"
-
-sub_step "Installing Groq, HuggingFace, Tiktoken, Search Engine..."
-pip install "groq>=0.4.0" "huggingface_hub>=0.23.0" "tiktoken>=0.5.0" "duckduckgo-search>=5.0.0" "ddgs" --quiet
-step_ok "LLM connectors (Groq, Mistral, HuggingFace) & Search tools ready"
-
-sub_step "Installing TUI & CLI Studio (Rich, Prompt-Toolkit, APScheduler)..."
-pip install "APScheduler>=3.10.0" "prompt_toolkit>=3.0.41" "rich>=13.0.0" "pytest>=8.0.0" "anyio>=4.0.0" --quiet
-step_ok "Terminal UI and autonomous scheduling subsystem ready"
-
-sub_step "Installing Media & Vision (Pillow, FFmpeg bindings)..."
-if pip install "Pillow>=10.0.0" "imageio-ffmpeg>=0.5.1" --quiet 2>/dev/null; then
-  step_ok "Vision, screenshot and image analysis tools ready"
-else
-  # Optional component: report the real outcome instead of a false "ready".
-  sub_step "⚠️  Vision/FFmpeg packages failed to install (optional; screenshots/vision degraded)"
-fi
-
-# Optional voice / bot packages
-sub_step "Installing Voice & Bot Integrations (faster-whisper, telegram, discord)..."
-if pip install "faster-whisper>=0.9.0" "python-telegram-bot>=20.0" "discord.py>=2.3.0" "paramiko>=3.0.0" --quiet 2>/dev/null; then
-  step_ok "Voice transcription & messaging integrations ready"
-else
-  sub_step "⚠️  Voice/bot packages failed to install (optional; voice & Telegram/Discord degraded)"
-fi
-
-# -----------------------------------------------------------------------------
-# STEP 6: Computer Agent & Browser Automation Runtime
-# -----------------------------------------------------------------------------
-step_start "6" "Computer Agent Browser Automation Runtime (Playwright)"
-
-sub_step "Installing Playwright library..."
-pip install "playwright>=1.40.0" --quiet
-sub_step "Setting up Chromium browser binaries (~150MB engine download)..."
-if python -m playwright install chromium; then
-  step_ok "Playwright Chromium browser automation engine ready"
-else
-  sub_step "⚠️  Chromium download failed (computer-agent live browser view degraded; the library is installed and you can re-run: python -m playwright install chromium)"
-fi
-
-# -----------------------------------------------------------------------------
-# STEP 6b: Web Acquisition Engine (OPTIONAL — Scrapling, canonical core.web backend)
-# -----------------------------------------------------------------------------
-# Fast HTTP fetching + adaptive extraction work without browsers; dynamic /
-# stealth fetching additionally needs the Chromium binaries (step 6 shared them
-# via Playwright). Failure here is non-fatal: Hermus degrades honestly and
-# `hermus doctor` reports exactly what is missing (run: scrapling install).
-step_start "6b" "Web Acquisition Engine (Scrapling — optional)"
-if pip install "scrapling[fetchers]>=0.3.10,<0.5" --quiet; then
-  if scrapling install; then
-    step_ok "Scrapling web acquisition engine ready (HTTP fetchers + browser deps)"
-  else
-    sub_step "⚠️  scrapling install (browser deps) failed — fast HTTP web fetching still works; dynamic/stealth degrades to a reported-unavailable capability. Re-run later: scrapling install"
-  fi
-else
-  sub_step "⚠️  Scrapling not installed (optional) — web tools degrade to a reported not_installed capability. Install with: pip install 'scrapling[fetchers]'"
-fi
-
-# -----------------------------------------------------------------------------
-# STEP 7: Local Storage, Databases & Memory Initialization
-# -----------------------------------------------------------------------------
-step_start "7" "Local Vector Storage, Memory & Session Directories"
-
-mkdir -p data data/sessions data/tmp data/skins data/counsel data/plans data/recordings missions artifacts checkpoints bin
-step_ok "Initialized local SQLite databases and vector storage in data/"
-
-# -----------------------------------------------------------------------------
-# STEP 8: Executable Launchers & Environment Paths
-# -----------------------------------------------------------------------------
-step_start "8" "Generating Executable Launchers & Environment Setup"
-
-cat > bin/hermus << 'EOF'
-#!/usr/bin/env bash
-set -e
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$ROOT/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$ROOT/.venv/bin/activate"
-fi
-export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-exec python "$ROOT/hermus.py" "$@"
-EOF
-chmod +x bin/hermus
-
-cat > bin/hermus-gateway << 'EOF'
-#!/usr/bin/env bash
-set -e
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$ROOT/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$ROOT/.venv/bin/activate"
-fi
-export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-PORT="${1:-8000}"
-echo -e "\033[0;36m☤ Hermus Live Gateway\033[0m"
-echo -e "  • Control Center:   \033[1;36mhttp://localhost:${PORT}/control\033[0m"
-echo -e "  • Jarvis Spatial:   \033[1;35mhttp://localhost:${PORT}/control#telemetry\033[0m"
-echo -e "  • Computer Agent:   \033[1mhttp://localhost:${PORT}/control#computer\033[0m"
-echo -e "  • Pocket Remote:    \033[1mhttp://localhost:${PORT}/remote\033[0m"
-echo ""
-exec python "$ROOT/hermus.py" gateway start --port "$PORT"
-EOF
-chmod +x bin/hermus-gateway
-
-cat > activate.sh << 'EOF'
-#!/usr/bin/env bash
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-(return 0 2>/dev/null) && IS_SOURCED=1 || IS_SOURCED=0
-
-if [ "$IS_SOURCED" -eq 1 ]; then
-  if [ -f "$ROOT/.venv/bin/activate" ]; then
-    # shellcheck disable=SC1091
-    source "$ROOT/.venv/bin/activate"
-  fi
-  export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-  export PATH="$ROOT/bin:$ROOT:$PATH"
-  if [ -d "$HOME/.bun/bin" ]; then
-    export PATH="$HOME/.bun/bin:$PATH"
-  fi
-  echo -e "\033[0;32m✓\033[0m \033[1;36mHermus environment activated!\033[0m"
-  echo -e "  Commands now available: \033[1mhermus-gateway\033[0m, \033[1mhermus\033[0m"
-else
-  echo -e "\033[1;33m⚠️  Notice:\033[0m 'activate.sh' must be \033[1mSOURCE-loaded\033[0m to persist in your current terminal:"
-  echo -e "  👉 \033[1;32msource activate.sh\033[0m   (or: \033[1;32m. activate.sh\033[0m)"
-  echo ""
-  echo -e "\033[1mAlternatively, launch directly without activating:\033[0m"
-  echo -e "  • Start Dashboard: \033[1;36m./bin/hermus-gateway\033[0m  (or \033[1;36m./hermus-gateway\033[0m)"
-  echo -e "  • Terminal CLI:    \033[1;36m./hermus\033[0m"
-  echo ""
-fi
-EOF
-chmod +x activate.sh
-
-cat > hermus << 'EOF'
-#!/usr/bin/env bash
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-exec "$ROOT/bin/hermus" "$@"
-EOF
-chmod +x hermus
-
-cat > hermus-gateway << 'EOF'
-#!/usr/bin/env bash
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-exec "$ROOT/bin/hermus-gateway" "$@"
-EOF
-chmod +x hermus-gateway
-
-step_ok "Generated executables: ./hermus, ./hermus-gateway, ./bin/hermus-gateway, source activate.sh"
-
-# -----------------------------------------------------------------------------
-# STEP 9: Verify the core actually imports (do NOT declare success if broken).
-# -----------------------------------------------------------------------------
-step_start "9" "Verifying Hermus and the JARVIS control plane"
-sub_step "Checking gateway/runtime imports, multipart uploads, telemetry, routes and dashboard assets..."
-if python - <<'PY' 2>/dev/null
-import sys
-from pathlib import Path
-sys.path.insert(0, ".")
-import multipart  # required by JARVIS FormData attachments
-import psutil     # live process telemetry
-from gateway.gateway import app
-from gateway import routes_jarvis
-from core import agent, mission
-
-routes = list(app.routes)
-for included in app.routes:
-    original = getattr(included, "original_router", None)
-    if original is not None:
-        routes.extend(original.routes)
-paths = {route.path for route in routes if getattr(route, "path", None)}
-required_routes = {
-    "/control", "/command", "/api/jarvis/status", "/navigator/fetch",
-    "/run/steer", "/run/cancel/{run_id}", "/stream/run/{run_id}",
-    "/api/v1/system/health", "/jobs", "/queue/status",
+  return 1
 }
-missing_routes = required_routes - paths
-required_assets = [
-    Path("gateway/control.html"),
-]
-missing_assets = [str(path) for path in required_assets if not path.is_file()]
-if missing_routes or missing_assets:
-    raise SystemExit(f"missing routes={sorted(missing_routes)} assets={missing_assets}")
-PY
-then
-  step_ok "Hermus runtime and JARVIS command, SSE, control, telemetry and attachment surfaces are installed"
+
+# The system checks are skipped only when explicitly requested. Even then the
+# canonical bootstrap must still report a missing host/runtime component.
+if [ "$VERIFY_ONLY" -eq 0 ] && [ "$SKIP_SYSTEM" -eq 0 ]; then
+  info "Checking host developer tools and installing only missing required packages"
+  if ! select_python; then
+    PYTHON_CMD=""
+  fi
+
+  case "$PLATFORM_FAMILY" in
+    android-termux)
+      if [ -z "$PYTHON_CMD" ] || ! command_exists git || ! command_exists curl; then
+        if ! command_exists pkg; then
+          fatal "Python 3.10+ or Git is missing and Termux pkg is unavailable. Install them, then re-run setup.sh."
+        fi
+        info "Termux: installing required Python/Git/Curl packages with pkg"
+        if ! pkg update -y; then
+          fatal "Termux package index update failed; fix pkg/network access and re-run setup.sh."
+        fi
+        if ! pkg install -y python git curl; then
+          fatal "Termux could not install required python/git/curl packages."
+        fi
+      fi
+      ;;
+    linux)
+      if [ -z "$PYTHON_CMD" ] || ! command_exists git || ! command_exists curl; then
+        if ! command_exists apt-get && ! command_exists dnf && ! command_exists yum && ! command_exists pacman && ! command_exists apk; then
+          fatal "Python 3.10+ or Git is missing and no supported Linux package manager was found."
+        fi
+        if command_exists apt-get; then
+          info "Linux: installing required Python/Git/venv/build tooling with apt"
+          if ! privileged apt-get update; then
+            fatal "apt-get update failed while required host packages are missing."
+          fi
+          if ! privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              python3 python3-pip python3-venv python3-dev git curl ca-certificates build-essential; then
+            fatal "apt-get could not install required Python/Git/venv packages."
+          fi
+        elif command_exists dnf; then
+          if ! privileged dnf install -y python3 python3-pip python3-devel git curl ca-certificates gcc gcc-c++; then
+            fatal "dnf could not install required Python/Git/venv packages."
+          fi
+        elif command_exists yum; then
+          if ! privileged yum install -y python3 python3-pip python3-devel git curl ca-certificates gcc gcc-c++; then
+            fatal "yum could not install required Python/Git/venv packages."
+          fi
+        elif command_exists pacman; then
+          if ! privileged pacman -Sy --noconfirm python python-pip git curl ca-certificates base-devel; then
+            fatal "pacman could not install required Python/Git/venv packages."
+          fi
+        else
+          if ! privileged apk add python3 py3-pip python3-dev git curl ca-certificates build-base; then
+            fatal "apk could not install required Python/Git/venv packages."
+          fi
+        fi
+      fi
+      ;;
+    macos)
+      if [ -z "$PYTHON_CMD" ] || ! command_exists git || ! command_exists curl; then
+        if ! command_exists brew; then
+          fatal "Python 3.10+ or Git is missing and Homebrew is unavailable. Install Homebrew or the required tools, then re-run setup.sh."
+        fi
+        info "macOS: installing missing Python/Git tooling with Homebrew"
+        if ! brew install python@3.12 git curl; then
+          fatal "Homebrew could not install required Python/Git packages."
+        fi
+        brew_python_prefix=""
+        if brew_python_prefix="$(brew --prefix python@3.12 2>/dev/null)"; then
+          export PATH="$brew_python_prefix/bin:$PATH"
+        fi
+      fi
+      ;;
+  esac
+
+  select_python || fatal "Python 3.10+ is required but no supported interpreter was found."
+  ok "Host Python selected: $PYTHON_CMD ($($PYTHON_CMD --version 2>&1))"
+
+  if ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
+    if ! "$PYTHON_CMD" -m ensurepip --upgrade; then
+      fatal "Python pip is unavailable and ensurepip could not repair it."
+    fi
+  fi
+  if ! "$PYTHON_CMD" -m venv --help >/dev/null 2>&1; then
+    fatal "Python venv support is unavailable; install python3-venv (Linux) or a full Python distribution (macOS/Termux)."
+  fi
+  command_exists git || fatal "Git is required by the current updater/project workflow."
+  command_exists curl || fatal "curl is required for secure runtime/package downloads."
+  if ! git -C "$SCRIPT_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    warn "This directory is not a Git worktree; Git is installed but updater metadata cannot be verified."
+  else
+    ok "Git worktree detected"
+  fi
+
+  # Node/npm are used by the checked-in JavaScript client tests, but there is no
+  # Node application/package manifest in this repository. Try the native package
+  # manager when straightforward; failure remains an explicit optional report,
+  # never a hidden required failure.
+  if ! command_exists node || ! command_exists npm; then
+    case "$PLATFORM_FAMILY" in
+      android-termux)
+        if command_exists pkg; then
+          if ! pkg install -y nodejs-lts; then warn "Optional Node.js/npm install failed on Termux."; fi
+        else
+          warn "Node.js/npm unavailable on Termux (optional: no Node package manifest is present)."
+        fi
+        ;;
+      linux)
+        if command_exists apt-get; then
+          if ! privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm; then
+            warn "Optional Node.js/npm install failed; Python Hermus remains installable."
+          fi
+        else
+          warn "Node.js/npm unavailable (optional: no Node package manifest is present)."
+        fi
+        ;;
+      macos)
+        if command_exists brew; then
+          if ! brew install node; then warn "Optional Node.js/npm install failed; Python Hermus remains installable."; fi
+        else
+          warn "Node.js/npm unavailable (optional: no Node package manifest is present)."
+        fi
+        ;;
+    esac
+  fi
+  if command_exists bun; then
+    ok "Optional Bun runtime detected: $(bun --version 2>/dev/null || printf 'version unavailable')"
+  else
+    warn "Optional Bun runtime unavailable (no Bun package manifest is present; Node/npm remain the supported JS check)."
+  fi
 else
-  echo ""
-  echo -e "${C_RED}${C_BOLD}  ✗ VERIFICATION FAILED: Hermus core did not import cleanly.${C_RESET}"
-  echo -e "${C_MUTED}    Re-run setup with: bash setup.sh   (or activate the venv and run: pip install -r requirements.txt)${C_RESET}"
-  echo ""
-  exit 1
+  if [ "$VERIFY_ONLY" -eq 1 ]; then
+    info "Host package installation skipped by --verify-only"
+  else
+    info "Host package installation skipped by --skip-system"
+  fi
 fi
 
-echo ""
-echo -e "${C_GREEN}${C_BOLD}═════════════════════════════════════════════════════════════════════════${C_RESET}"
-echo -e "${C_CYAN}${C_BOLD}  🎉 ALL-IN-ONE DEVELOPER STACK INSTALLED SUCCESSFULLY!${C_RESET}"
-echo -e "${C_GREEN}${C_BOLD}═════════════════════════════════════════════════════════════════════════${C_RESET}"
-echo ""
-echo -e "  ${C_BOLD}1. Start the Server & Dashboards (pick one):${C_RESET}"
-echo -e "     ${C_GREEN}source activate.sh && hermus-gateway${C_RESET}"
-echo -e "     ${C_MUTED}or directly:${C_RESET} ${C_CYAN}./bin/hermus-gateway${C_RESET}  ${C_MUTED}(or ${C_CYAN}./hermus-gateway${C_MUTED})${C_RESET}"
-echo ""
-echo -e "  ${C_BOLD}2. Open in your Browser:${C_RESET}"
-echo -e "     • Setup Wizard & Chat:  ${C_CYAN}http://localhost:8000/control${C_RESET}"
-echo -e "     • Jarvis Spatial HUD:   ${C_CYAN}http://localhost:8000/control#telemetry${C_RESET}"
-echo -e "     • Computer Agent Deck:  ${C_CYAN}http://localhost:8000/control#computer${C_RESET}"
-echo -e "     • Mobile Pocket Remote: ${C_CYAN}http://localhost:8000/remote${C_RESET}"
-echo ""
-echo -e "  ${C_BOLD}3. Use in Terminal (CLI):${C_RESET}"
-echo -e "     ${C_CYAN}./hermus${C_RESET}"
-echo ""
-echo -e "  ${C_BOLD}4. Optional local AI engine (no weights were downloaded here):${C_RESET}"
-echo -e "     ${C_MUTED}Dashboard → Local AI Engine, or:${C_RESET} ${C_CYAN}./hermus engine status${C_RESET}"
-echo -e "     ${C_MUTED}NPU/GPU routing, on-demand model downloads and the Hermus doctor:${C_RESET}"
-echo -e "     ${C_MUTED}docs/LOCAL_ENGINE.md${C_RESET}"
-echo ""
-
-# -----------------------------------------------------------------------------
-# STEP 9: Delegate to the canonical one-command bootstrap (Rebuild §6, §18)
-# -----------------------------------------------------------------------------
-step_start "9" "Running canonical bootstrap (./hermus bootstrap)"
-if [ -x "./bin/hermus" ]; then
-  bash "./bin/hermus" bootstrap
-else
-  echo -e "${C_YELLOW}⚠ launcher not generated yet; running bootstrap directly${C_RESET}"
-  ( exec python bootstrap.py )
+# Playwright can install distro libraries with its own supported resolver. Do
+# this only on ordinary Linux; Termux's package layout is different and the
+# Doctor will classify an unavailable browser as platform-optional.
+if [ "$VERIFY_ONLY" -eq 0 ] && [ "$SKIP_SYSTEM" -eq 0 ] && [ "$PLATFORM_FAMILY" = "linux" ]; then
+  export HERMUS_PLAYWRIGHT_WITH_DEPS=1
 fi
+
+# Keep the repository root on the bootstrap process path. The final delegation
+# uses the existing launcher, which selects the same .venv interpreter.
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+BOOTSTRAP_ARGS=()
+if [ "$VERIFY_ONLY" -eq 1 ]; then BOOTSTRAP_ARGS+=(--verify-only); fi
+if [ "$REPAIR" -eq 1 ]; then BOOTSTRAP_ARGS+=(--repair); fi
+if [ "$SKIP_BROWSER" -eq 1 ]; then BOOTSTRAP_ARGS+=(--skip-browser); fi
+if [ "$SKIP_OPTIONAL" -eq 1 ]; then BOOTSTRAP_ARGS+=(--skip-optional); fi
+
+if [ ! -x "$SCRIPT_DIR/bin/hermus" ]; then
+  if ! chmod u+x "$SCRIPT_DIR/bin/hermus"; then
+    fatal "bin/hermus exists but cannot be made executable; fix its permissions and re-run setup.sh."
+  fi
+fi
+
+say "${C_CYAN}➜${C_RESET} Delegating to canonical bootstrap/Doctor (same interpreter used by Hermus launchers)"
+# Keep this as the one canonical entry point. bootstrap.py re-execs into .venv
+# when setup was started with a system Python.
+exec "./bin/hermus" bootstrap "${BOOTSTRAP_ARGS[@]}"

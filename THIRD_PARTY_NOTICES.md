@@ -92,11 +92,11 @@ Notes:
 
 ---
 
-## Scrapling (optional web acquisition backend)
+## Scrapling (required base web acquisition backend)
 
 Hermus's canonical web acquisition subsystem (`core/web`) uses
-[`D4Vinci/Scrapling`](https://github.com/D4Vinci/Scrapling) as an **optional
-pip dependency** — the fetch/parse engine behind `core.web.WebGateway`. No
+[`D4Vinci/Scrapling`](https://github.com/D4Vinci/Scrapling) as a required base
+pip dependency — the fetch/parse engine behind `core.web.WebGateway`. No
 Scrapling source code is vendored, copied, or modified; the integration calls
 its public API only (`scrapling.fetchers`, `scrapling.parser`, sessions).
 
@@ -115,7 +115,8 @@ Relevant Hermus files:
 - `core/web_status.py`, `core/diagnostics.py`, `core/doctor.py`
 
 Notes:
-- Scrapling is OPTIONAL: without it every web tool degrades to a typed,
-  honest "not installed" result; nothing else in Hermus changes.
+- Scrapling is required for the enabled web subsystem: setup reports a missing
+  package as a required failure rather than claiming web readiness. Android/
+  Termux may still use the lightweight HTTP path without a browser binary.
 - Scrapling's own MCP server is not the integration path; the canonical path
   is Agent → ToolGateway → WebGateway → Scrapling (see docs/WEB_ACQUISITION.md).

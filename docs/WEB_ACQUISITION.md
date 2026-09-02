@@ -9,7 +9,8 @@ architecture, capabilities, configuration, security model and limitations.
 
 ## 1. What Scrapling adds
 
-Scrapling (BSD-3-Clause, optional dependency) provides:
+Scrapling (BSD-3-Clause, a required base web dependency installed from
+`requirements.txt`) provides:
 
 | Capability | What Hermus uses it for |
 | --- | --- |
@@ -145,8 +146,8 @@ Escalation rules:
 | Targeted CSS/XPath extraction | `web_extract` tool | same | ✅ real extraction tests |
 | Adaptive extraction | `web_extract` with `adaptive=true` | same | ✅ unit tests (mocked DOM relocation); **live site drift not verified** |
 | Markdown output | `Response.markdown()` | `pip install "scrapling[ai]"` | ✅ degrade-honest tests; live markdown needs the extra |
-| Dynamic (JS) fetching | `web_fetch` escalation / `strategy=dynamic` | `scrapling install` (Chromium) | ⚠️ capability detection tested; **browser fetch itself not verified in CI** (no browser binaries) |
-| Stealth fetching | `strategy=stealth` | `HERMUS_WEB_STEALTH=1` + `scrapling install` | ⚠️ same — **unverified against live anti-bot sites** |
+| Dynamic (JS) fetching | `web_fetch` escalation / `strategy=dynamic` | `scrapling install` (Chromium) | ✅ `setup.sh` launches Chromium and verifies a local page; live anti-bot sites remain unverified |
+| Stealth fetching | `strategy=stealth` | `HERMUS_WEB_STEALTH=1` + `scrapling install` | ⚠️ capability/install checked; **not verified against live anti-bot sites** |
 | XHR/API capture | `web_fetch` dynamic + `capture_xhr` | dynamic stack | ⚠️ bundling logic unit-tested with fakes; **not verified live** |
 | Sessions (cookies) — **static** | `web_session` tool | static stack | ✅ **persistent**: a live `FetcherSession` client + cookie jar is reused across fetches (`static_session_persistence=available`); isolation/pinning/TTL tested; cookie values never exposed |
 | Sessions (cookies) — **dynamic/stealth** | `web_session` tool | browser stack | ⚠️ **not persistent**: browser strategies use one-off fetchers per call, so cross-fetch browser contexts are **not** reused (`dynamic_session_persistence=unavailable`). No fake persistence is claimed. |
@@ -228,16 +229,24 @@ politeness delay now propagated all the way to the crawl worker),
 ## 8. Installation
 
 ```bash
-# Lightweight core (no Scrapling): everything imports; web tools return
-# typed "not installed" results. Nothing breaks.
-pip install -r requirements.txt           # scrapling is an optional group
+# Canonical Hermus installation (Linux, macOS or Android/Termux):
+./setup.sh
 
-# Web acquisition:
-pip install "scrapling[fetchers]"         # HTTP fetchers + parser extras
-scrapling install                          # optional: Chromium for dynamic/stealth
+# Repeat the real checks without changing packages or user data:
+./setup.sh --verify-only
+
+# Manual web-only repair inside the selected project environment:
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m scrapling install
 ```
 
-`setup.sh` performs both steps non-fatally (step 6b). Python ≥ 3.10 required by
+`requirements.txt` is the canonical required manifest and includes Scrapling
+fetchers plus Playwright. `setup.sh` delegates to the same bootstrap used by
+`hermus bootstrap`, installs the browser runtime where the platform supports
+it, and requires a real local Scrapling fetch and browser navigation before it
+prints `HERMUS SETUP: READY`. Missing optional desktop/voice/provider features
+are reported separately rather than hidden. Python ≥ 3.10 required by
 Scrapling (Hermus targets 3.10+ anyway). Scrapling is pinned
 `>=0.3.10,<0.5` (verified against 0.4.15, BSD-3-Clause — see
 `THIRD_PARTY_NOTICES.md`).

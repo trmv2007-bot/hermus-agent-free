@@ -1,108 +1,45 @@
-# Hermus Agent Free - 100% Free Stack, No Paid APIs - Now with Browser, Vision, Voice, Backends, Trajectory
+# Hermus Agent Free — canonical required runtime dependencies
+#
+# setup.sh/bootstrap.py install this file with the interpreter in .venv. Keep
+# package names here (rather than duplicating them in shell/Python lists). The
+# optional integrations live in requirements-optional.txt and are installed
+# independently so one unavailable platform integration cannot hide a core
+# installation failure.
 
-# Core
+# Core configuration, HTTP, token accounting
 pydantic>=2.0.0
 python-dotenv>=1.0.0
-
-# LLM Free Providers
-# Ollama - local free LLMs, no API key, runs on laptop/$5 VPS
 requests>=2.31.0
-# Groq free tier (optional, free key) - fast cloud
-groq>=0.4.0
-# HuggingFace free inference (optional, free token)
-huggingface_hub>=0.23.0
-
-# Memory + Token Counting - SQLite FTS5 built-in + tiktoken free
-# sqlite3 is builtin Python
 tiktoken>=0.5.0
 
-# Tools - Free, no API keys
+# Search and web/browser runtime used by the enabled web subsystem
 ddgs>=9.0.0
-# File tools builtin
-# Shell builtin subprocess
-
-# Browser Automation Playwright Free - No API key
 playwright>=1.40.0
+scrapling[fetchers]>=0.3.10,<0.5
 
-# Vision LLaVA via Ollama Free - No API key, local vision
-# Uses Ollama LLaVA via requests, no extra pip dep, but for image handling:
+# Vision, document/media support used by current tools
 Pillow>=10.0.0
-# Ollama already required, llava model pulled via ollama pull llava:7b (free)
-# Conventional MP4/WebM screen recording (bundled free FFmpeg binary fallback)
 imageio-ffmpeg>=0.5.1
+feedparser>=6.0.0
+pypdf>=4.0.0
+PyYAML>=6.0.0
 
-# Voice Memo Transcription faster-whisper Free - Local Whisper, no API key
+# Voice input runtime. Model weights are downloaded only when the user selects
+# a model; setup never downloads weights or records audio.
 faster-whisper>=0.9.0
 
-# Optional advanced speech/avatar integrations
-# OmniVoice is intentionally not a hard dependency. Install separately if you
-# want advanced multilingual TTS / voice cloning / voice design support:
-#   pip install omnivoice torch soundfile
-# HeyGem-style avatar support uses the optional local HTTP connector in
-# core/avatar.py and targets an already-running localhost stack.
-
-# Backends - Seven terminal backends free
-# local always available
-# docker - requires docker binary free
-# ssh - requires ssh binary free, paramiko optional free
-paramiko>=3.0.0
-# singularity - HPC free
-# modal - serverless persistence free tier
-modal>=0.60.0
-# daytona - serverless free tier
-# vercel - vercel sandbox free tier
-
-# Gateway - Free Bot APIs
+# Gateway, queue, telemetry and multipart uploads
 fastapi>=0.104.0
-python-multipart>=0.0.9  # multipart form parsing (dashboard file attachments)
-psutil>=5.9.0  # live JARVIS process/system telemetry
+python-multipart>=0.0.9
+psutil>=5.9.0
 uvicorn[standard]>=0.24.0
-# Keep WebSocket support explicit: the Control Room and live computer telemetry
-# otherwise silently fall back to polling when only bare uvicorn is installed.
 websockets>=12.0
-python-telegram-bot>=20.0
-discord.py>=2.3.0
-# Slack webhook via requests (free)
-# WhatsApp/Signal via free bridges (optional)
 
-# Scheduler - Free
+# Scheduler and terminal UI
 APScheduler>=3.10.0
-# Natural language cron parsing - free via LLM, no paid parser
-
-# TUI - Free
 prompt_toolkit>=3.0.41
 rich>=13.0.0
 
-# Subagents + Multi-Key + Multi-AI - Free (multiprocessing builtin)
-# No extra deps
-
-# Trajectory Batch Generation + Compression - Free
-# No extra dep, uses core modules
-
-# Custom API - Free
-# Uses requests already required
-
-# Dev
+# Verification/development dependencies used by the repository test suite
 pytest>=8.0.0
 httpx>=0.24.0
-
-
-# Computer control (OPTIONAL — real desktop automation; degrades to a reported
-# dry-run/unavailable capability when absent). Install for host computer control:
-#   pip install pyautogui pygetwindow
-# Hermus detects these and reports `computer_control_unavailable` (with reason) when
-# they (or a display) are not present, rather than silently pretending real control.
-pyautogui>=0.9.54; platform_system=="Linux" or platform_system=="Darwin" or platform_system=="Windows"
-pygetwindow>=0.0.9; platform_system=="Windows"
-
-
-# Web acquisition engine (OPTIONAL — canonical backend of core/web; BSD-3-Clause).
-# Install for the Scrapling-backed web gateway (fast HTTP fetch, adaptive
-# extraction, dynamic/stealth fetching, crawling):
-#   pip install "scrapling[fetchers]"
-#   scrapling install          # browser deps for dynamic/stealth (optional)
-# Base scrapling is parser-only; [fetchers] adds curl_cffi + the fetch engines.
-# Without it, all core.web tools degrade to typed `not_installed` results and
-# `hermus doctor` reports exactly what is missing. Verified against 0.4.15;
-# the `<0.5` ceiling guards against unbounded upstream API changes.
-scrapling[fetchers]>=0.3.10,<0.5

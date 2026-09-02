@@ -70,17 +70,19 @@ def _importable(name: str) -> bool:
 
 
 def _playwright_chromium_path() -> Optional[Path]:
-    """Locate the Playwright chromium binary WITHOUT launching the driver.
+    """Locate the Playwright Chromium binary without launching a browser.
 
     Playwright installs browsers under a browsers root (``$PLAYWRIGHT_BROWSERS_PATH``
     or the per-OS default cache dir) as ``chromium-<build>/<bin-dir>/chrome``.
-    Scanning keeps the probe cheap, side-effect-free and safe to call from the
-    doctor — launching a browser to prove it exists would defeat the point.
+    ``PLAYWRIGHT_BROWSERS_PATH=0`` uses a package-local ``.local-browsers``
+    directory, so that location is included too.  Discovery is intentionally
+    separate from the live launch check: an executable on disk is not claimed
+    operational until the deep Doctor actually starts and closes it.
     """
     roots: list[Path] = []
     env_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-    if env_root:
-        roots.append(Path(env_root))
+    if env_root and env_root != "0":
+        roots.append(Path(env_root).expanduser())
     home = Path.home()
     if platform.system() == "Linux":
         roots.append(home / ".cache" / "ms-playwright")
@@ -88,6 +90,14 @@ def _playwright_chromium_path() -> Optional[Path]:
         roots.append(home / "Library" / "Caches" / "ms-playwright")
     elif platform.system() == "Windows":
         roots.append(home / "AppData" / "Local" / "ms-playwright")
+
+    # A hermetic Playwright install (PLAYWRIGHT_BROWSERS_PATH=0) stores its
+    # browser beside the package rather than in the user cache.
+    try:
+        package_root = Path(importlib.util.find_spec("playwright").submodule_search_locations[0])
+        roots.append(package_root / "driver" / "package" / ".local-browsers")
+    except (AttributeError, IndexError, TypeError, ValueError):
+        pass
 
     exe_names = ("chrome",) if platform.system() != "Windows" else ("chrome.exe",)
     subdirs = ("chrome-linux64", "chrome-linux", "chrome-win64", "chrome-win",
@@ -100,9 +110,14 @@ def _playwright_chromium_path() -> Optional[Path]:
             for sub in subdirs:
                 for name in exe_names:
                     candidate = build / sub / name
-                    if candidate.exists():
+                    if candidate.is_file():
                         return candidate
     return None
+
+
+def chromium_executable_path() -> Optional[Path]:
+    """Public, side-effect-free Chromium executable discovery for Doctor/setup."""
+    return _playwright_chromium_path()
 
 
 def _browser_status() -> tuple[str, str]:

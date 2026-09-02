@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-set -e
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$ROOT/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$ROOT/.venv/bin/activate"
-fi
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 PORT="${1:-8000}"
 echo -e "\033[0;36m☤ Hermus Live Gateway\033[0m"
@@ -12,4 +8,15 @@ echo -e "  • Control Center:   \033[1;36mhttp://localhost:${PORT}/control\033[
 echo -e "  • Health:           \033[1mhttp://localhost:${PORT}/api/v1/system/health\033[0m"
 echo -e "  • Doctor:           \033[1;35m./hermus doctor\033[0m"
 echo ""
-exec python "$ROOT/hermus.py" gateway start --port "$PORT"
+
+# Match bin/hermus: never run the gateway with a different interpreter from the
+# one that owns installed packages.
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" "$ROOT/hermus.py" gateway start --port "$PORT"
+elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  exec "$ROOT/.venv/Scripts/python.exe" "$ROOT/hermus.py" gateway start --port "$PORT"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 "$ROOT/hermus.py" gateway start --port "$PORT"
+else
+  exec python "$ROOT/hermus.py" gateway start --port "$PORT"
+fi

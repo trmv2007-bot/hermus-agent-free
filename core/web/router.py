@@ -280,7 +280,15 @@ class StrategyRouter:
         else:
             pass  # plan exhausted
 
-        last = attempts[-1] if attempts else StrategyAttempt(
+        # Do not let a later unavailable fallback erase a meaningful transport
+        # failure from the strategy that actually ran. For example, a static
+        # connection error followed by an absent dynamic dependency should stay
+        # a connection error in the final result, not become dependency_missing.
+        meaningful = [
+            attempt for attempt in attempts
+            if attempt.error_class not in (FailureClass.NONE.value, FailureClass.DEPENDENCY_MISSING.value)
+        ]
+        last = (meaningful[-1] if meaningful else attempts[-1]) if attempts else StrategyAttempt(
             strategy=strategy, outcome="error", error_class=FailureClass.UNKNOWN.value)
         if last.error:
             message = last.error

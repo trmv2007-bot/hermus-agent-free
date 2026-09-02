@@ -341,7 +341,7 @@ Tool results are tracked as part of the task trajectory so later verification an
 ## 🕷️ Web Acquisition (Scrapling-powered)
 
 All page acquisition runs through one canonical subsystem — `core.web.WebGateway`
-— backed by [Scrapling](https://github.com/D4Vinci/Scrapling) (optional, BSD-3):
+— backed by [Scrapling](https://github.com/D4Vinci/Scrapling) (required web runtime, BSD-3):
 
 - **autonomous strategy routing**: fast browser-fingerprint HTTP first, real
   Chromium only when the page needs JavaScript, stealth only when you enable it
@@ -361,9 +361,12 @@ All page acquisition runs through one canonical subsystem — `core.web.WebGatew
   available / unavailable / not_installed / not_verified, and Android/Termux
   defaults to the lightweight HTTP path (no untested browser claims).
 
-Install: `pip install "scrapling[fetchers]" && scrapling install` (browser
-binaries optional). Without it, web tools degrade to typed "not installed"
-results — the lightweight core is unaffected.
+Install: `./setup.sh` (or repair manually with
+`.venv/bin/python -m pip install -r requirements.txt` and
+`.venv/bin/python -m playwright install chromium`). Chromium is optional on
+Android/Termux and desktop control remains host/display-dependent; setup reports
+those states explicitly. A missing required Scrapling/Python runtime is a real
+setup failure, not a fake success.
 See [`docs/WEB_ACQUISITION.md`](docs/WEB_ACQUISITION.md) for the architecture,
 capability matrix and security model.
 
@@ -582,10 +585,16 @@ Hermus is a Python project.
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+./setup.sh                         # Linux, macOS or Android/Termux
+# ./setup.sh --verify-only         # repeatable live Doctor check, no changes
 ```
+
+`setup.sh` delegates dependency installation, Chromium/Scrapling setup and the
+live Doctor checks to the canonical Python bootstrap. It preserves an existing
+`.env`, data and databases; use `--repair` for a broken runtime and
+`--skip-optional` when optional provider/channel packages are not wanted. A
+manual install remains possible with `python -m venv .venv` followed by
+`.venv/bin/python -m pip install -r requirements.txt`.
 
 Then inspect the available commands:
 
@@ -608,11 +617,11 @@ git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
 ./hermus bootstrap
 ```
-*(`./hermus bootstrap` is the canonical one-command setup: it creates/updates the
-venv, installs the pinned dependencies, initializes the data layout, migrates
-legacy state and prints a capability summary — idempotent and exit-0 only when
-required capabilities are ready. Need OS-level system packages first? Run
-`bash setup.sh`, which delegates the Python/deps/layout/health work to this same
+*(`./hermus bootstrap` is the canonical Python setup: it creates/updates the
+venv, installs the canonical dependency files, initializes the data layout and
+runs the live Doctor — idempotent and exit-0 only when required capabilities are
+ready. For host-package detection/repair on Linux, macOS or Android/Termux,
+run `./setup.sh`; it delegates the same Python/deps/layout/health work to this
 bootstrap.)*
 
 ### 2. Launch Gateway & Dashboards

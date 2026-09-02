@@ -1,6 +1,6 @@
 # ☤ Hermus Agent Free — Quickstart & Installation Guide
 
-Get up and running with Hermus on **Linux, macOS, or Windows (WSL2)** in 3 simple steps.
+Get up and running with Hermus on **Linux, macOS, or Android/Termux** in 3 simple steps. Windows users can use WSL2 and run the Linux path.
 
 ---
 
@@ -14,11 +14,12 @@ cd hermus-agent-free
 
 ### Step 2: Bootstrap with One Command
 ```bash
-./hermus bootstrap
+./setup.sh
 ```
-*(No need to `source` multiple files. If you need OS-level system packages first —
-Node, Bun, Playwright Chromium, ffmpeg, graphics libs — run `bash setup.sh`, which
-now delegates all Python/dependency/layout/health work to this canonical bootstrap.)*
+*(No need to `source` multiple files. `setup.sh` detects Linux, macOS and
+Android/Termux, installs missing host tools where supported, then delegates all
+Python/dependency/layout/Chromium/Scrapling/live-Doctor work to this canonical
+bootstrap.)*
 
 **What the canonical bootstrap does (idempotent — safe to run again):**
 1. Detects OS / Python / permissions.
@@ -27,9 +28,12 @@ now delegates all Python/dependency/layout/health work to this canonical bootstr
 4. Initializes the canonical data/home layout (`data`, `workspace`, `artifacts`, `skills`, `migrations`, `logs`).
 5. Migrates legacy memory/state if present.
 6. Runs health probes and prints one capability summary.
-7. Exits `0` only when **required** capabilities are ready.
-   Optional deps (Playwright, vision, voice, channels, backends) degrade into an
-   explicit `unavailable` state with the exact reason — never a fake success.
+7. Performs real local Scrapling and headless-Chromium checks, gateway route/
+   JobQueue startup checks, security checks and backend initialization.
+8. Exits `0` only when **required** capabilities are ready. Optional desktop
+   control, TTS/model weights, provider credentials and platform-specific
+   channels degrade into an explicit state with the exact reason — never a fake
+   success.
 
 Recommended commands:
 ```bash

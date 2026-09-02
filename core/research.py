@@ -56,7 +56,12 @@ class Source:
 def _default_search(query: str, limit: int = 10) -> list[dict[str, str]]:
     try:
         from tools.web_search import search  # noqa: F401
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            # Compatibility with older environments; ddgs is the canonical
+            # required package in requirements.txt.
+            from duckduckgo_search import DDGS
 
         with DDGS() as ddgs:
             results = []

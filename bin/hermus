@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-set -e
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$ROOT/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$ROOT/.venv/bin/activate"
-fi
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-exec python "$ROOT/hermus.py" "$@"
+
+# Always invoke the interpreter selected by setup/bootstrap. Falling back to
+# ambient Python is only for the first bootstrap invocation before .venv exists;
+# bootstrap then re-execs itself inside the new environment.
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" "$ROOT/hermus.py" "$@"
+elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  exec "$ROOT/.venv/Scripts/python.exe" "$ROOT/hermus.py" "$@"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 "$ROOT/hermus.py" "$@"
+else
+  exec python "$ROOT/hermus.py" "$@"
+fi
