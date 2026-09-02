@@ -572,7 +572,7 @@ class FreeLLM:
         except requests.exceptions.ConnectionError:
             raise requests.exceptions.ConnectionError(
                 f"Ollama not running at {base}. Start: ollama serve && ollama pull {self.model_name}"
-            )
+            ) from None
         if resp.status_code == 404:
             raise ValueError(
                 f"Model {self.model_name} not found. Pull with: ollama pull {self.model_name} (free)"

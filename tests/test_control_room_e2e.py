@@ -61,7 +61,7 @@ def test_health_snapshot_is_backend_derived():
     c = _client()
     h = c.get("/api/v1/system/health").json()
     assert "ok" in h and "python" in h and "venv" in h and "capabilities" in h
-    for k, v in h["capabilities"].items():
+    for v in h["capabilities"].values():
         assert v["status"] in ("ready", "capable", "unavailable", "missing", "present")
 
 

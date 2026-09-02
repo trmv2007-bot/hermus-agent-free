@@ -452,7 +452,7 @@ def test_bootstrap_doctor_reports(monkeypatch):
     assert "system.python" in report["capabilities"]
     # No fabrication: missing optional deps report "unavailable".
     caps = report["capabilities"]
-    for k, v in caps.items():
+    for v in caps.values():
         assert v["status"] in ("ready", "capable", "unavailable", "missing", "present")
 
 
