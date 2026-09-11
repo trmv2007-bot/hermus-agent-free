@@ -10,32 +10,81 @@ Difficulty scale:
   4 = complex / research           -> convene the Council (standard)
   5 = very hard / open-ended       -> full Council (judge, more rounds, reconvene)
 """
+
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from ..config import config
 
 # Keywords that push a task up the difficulty scale
 _STRONG_HARD = (
-    "research", "analy", "compar", "plan", "build", "create", "develop",
-    "debug", "fix", "security", "pentest", "audit", "design", "implement",
-    "architect", "review", "investigat", "strateg", "optimiz", "migrat",
-    "refactor", "architect", "forecast", "report", "essay", "framework",
-    "verif", "evaluat", "recommend", "deployment",
+    "research",
+    "analy",
+    "compar",
+    "plan",
+    "build",
+    "create",
+    "develop",
+    "debug",
+    "fix",
+    "security",
+    "pentest",
+    "audit",
+    "design",
+    "implement",
+    "architect",
+    "review",
+    "investigat",
+    "strateg",
+    "optimiz",
+    "migrat",
+    "refactor",
+    "architect",
+    "forecast",
+    "report",
+    "essay",
+    "framework",
+    "verif",
+    "evaluat",
+    "recommend",
+    "deployment",
 )
 _MEDIUM_HARD = (
-    "explain", "summar", "list", "write", "draft", "generate",
-    "decide", "choose", "improve", "test", "detail", "example", "how to", "steps",
+    "explain",
+    "summar",
+    "list",
+    "write",
+    "draft",
+    "generate",
+    "decide",
+    "choose",
+    "improve",
+    "test",
+    "detail",
+    "example",
+    "how to",
+    "steps",
 )
-_EXPLICIT_HARD = ("complex", "hard", "thorough", "deep", "careful", "difficult", "extensive", "comprehensive", "critical", "in detail", "complete")
+_EXPLICIT_HARD = (
+    "complex",
+    "hard",
+    "thorough",
+    "deep",
+    "careful",
+    "difficult",
+    "extensive",
+    "comprehensive",
+    "critical",
+    "in detail",
+    "complete",
+)
 
 # Budget table: difficulty -> (max_members, max_rounds, plan_first, council)
 _BUDGET_TABLE: dict[int, tuple[int, int, bool, bool]] = {
     1: (0, 0, False, False),
     2: (0, 0, False, False),
-    3: (3, 2, True, False),    # mini deliberation can still help
+    3: (3, 2, True, False),  # mini deliberation can still help
     4: (5, 3, True, True),
     5: (6, 4, True, True),
 }
@@ -106,7 +155,7 @@ class Governor:
             return False
         return True
 
-    def council_config(self, text: str, mode: str = "agent") -> Optional[dict]:
+    def council_config(self, text: str, mode: str = "agent") -> dict | None:
         """Return convene parameters for the Council, or None if not worth it."""
         if not self.should_use_council(text, mode):
             return None

@@ -1,9 +1,15 @@
 """Response Time Tester - Test how much time API key takes to get response from AI model - free"""
 
-import time
 import json
+import time
 from datetime import datetime
+
+from core.log import get_logger
+
 from .config import config
+
+logger = get_logger(__name__)
+
 
 class ResponseTimeTester:
     """Test response time for API keys - free"""
@@ -42,8 +48,8 @@ class ResponseTimeTester:
         health = {}
 
         try:
-            from .providers import get_provider
             from .openai_compat import health_ping
+            from .providers import get_provider
 
             preset = get_provider(provider)
             model_name = model or preset.get("default_model") or "gpt-3.5-turbo"
@@ -103,10 +109,11 @@ class ResponseTimeTester:
         # Also update multi-key manager with response time
         try:
             from .multi_key import multi_key_manager
+
             # Store response time in key metadata
             data = multi_key_manager._load()
             for k in data.get(provider, []):
-                key_val = k if isinstance(k, str) else k.get("key","")
+                key_val = k if isinstance(k, str) else k.get("key", "")
                 if key_val == api_key:
                     if isinstance(k, dict):
                         # Update dict with response time history
@@ -121,14 +128,15 @@ class ResponseTimeTester:
                         k["last_response_time"] = elapsed
             multi_key_manager._save(data)
         except Exception as e:
-            print(f"Failed to update multi-key with response time: {e}")
+            logger.error(f"Failed to update multi-key with response time: {e}")
 
         return result
 
     def test_custom_api_key(self, api_name: str, api_key: str = None, test_args: dict = None, timeout: int = 30) -> dict:
         """Test response time for custom API key from different website"""
-        from .custom_api import custom_api_manager
         import time as time_module
+
+        from .custom_api import custom_api_manager
 
         # Find API by name
         apis = custom_api_manager.list_apis()
@@ -140,7 +148,7 @@ class ResponseTimeTester:
         target_api = None
         if api_key:
             for api in matching:
-                token = api.get("auth",{}).get("token") or api.get("auth",{}).get("value") or ""
+                token = api.get("auth", {}).get("token") or api.get("auth", {}).get("value") or ""
                 if token == api_key or api_key in token or token in api_key:
                     target_api = api
                     break
@@ -158,19 +166,23 @@ class ResponseTimeTester:
 
             test_result = {
                 "api_name": api_name,
-                "api_id": target_api.get("id",""),
-                "api_key_preview": f"{api_key[:6]}...{api_key[-4:]}" if api_key and len(api_key)>10 else f"{(target_api.get('auth',{}).get('token','') or '')[:6]}...{ (target_api.get('auth',{}).get('token','') or '')[-4:]}" if (target_api.get('auth',{}).get('token','') or '') else "no-token",
-                "url": target_api.get("url",""),
-                "method": target_api.get("method","GET"),
+                "api_id": target_api.get("id", ""),
+                "api_key_preview": f"{api_key[:6]}...{api_key[-4:]}"
+                if api_key and len(api_key) > 10
+                else f"{(target_api.get('auth', {}).get('token', '') or '')[:6]}...{(target_api.get('auth', {}).get('token', '') or '')[-4:]}"
+                if (target_api.get("auth", {}).get("token", "") or "")
+                else "no-token",
+                "url": target_api.get("url", ""),
+                "method": target_api.get("method", "GET"),
                 "test_args": test_args,
                 "response_time_seconds": round(elapsed, 3),
                 "response_time_ms": int(elapsed * 1000),
                 "success": success,
                 "status_code": result.get("status_code"),
                 "error": result.get("error"),
-                "response_preview": str(result.get("data",""))[:300] if success else "",
+                "response_preview": str(result.get("data", ""))[:300] if success else "",
                 "timestamp": datetime.now().isoformat(),
-                "test_id": f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{api_name}"
+                "test_id": f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{api_name}",
             }
 
             # Save
@@ -190,22 +202,23 @@ class ResponseTimeTester:
                 "response_time_seconds": round(elapsed, 3),
                 "success": False,
                 "error": str(e),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
     def test_all_keys_for_provider(self, provider: str, prompt: str = "Hello", model: str = None) -> list[dict]:
         """Test all keys for provider and rank by response time - free, to find fastest key"""
         from .multi_key import multi_key_manager
+
         data = multi_key_manager.list_keys()
         keys = data.get(provider, [])
 
         results = []
         for key_entry in keys:
-            key_val = key_entry if isinstance(key_entry, str) else key_entry.get("key","")
-            key_name = key_entry.get("name","") if isinstance(key_entry, dict) else ""
+            key_val = key_entry if isinstance(key_entry, str) else key_entry.get("key", "")
+            key_name = key_entry.get("name", "") if isinstance(key_entry, dict) else ""
             if not key_val:
                 continue
-            print(f"[ResponseTime] Testing {provider} key {key_name or key_val[:10]}...")
+            logger.info(f"[ResponseTime] Testing {provider} key {key_name or key_val[:10]}...")
             result = self.test_llm_key(provider, key_val, model=model, prompt=prompt)
             results.append(result)
 
@@ -217,12 +230,13 @@ class ResponseTimeTester:
     def test_all_keys_for_custom_api(self, api_name: str, test_args: dict = None) -> list[dict]:
         """Test all keys for same custom API name from different websites and rank by response time"""
         from .custom_api import custom_api_manager
+
         apis = custom_api_manager.list_apis()
         matching = [a for a in apis if a["name"] == api_name]
 
         results = []
         for api in matching:
-            token = api.get("auth",{}).get("token") or api.get("auth",{}).get("value") or "no-token"
+            token = api.get("auth", {}).get("token") or api.get("auth", {}).get("value") or "no-token"
             result = self.test_custom_api_key(api_name, api_key=token, test_args=test_args)
             results.append(result)
 
@@ -253,8 +267,9 @@ class ResponseTimeTester:
             "avg_response_time_seconds": round(avg, 3),
             "fastest": fastest,
             "slowest": slowest,
-            "recent": history[-5:][::-1]
+            "recent": history[-5:][::-1],
         }
+
 
 # Global tester free
 response_tester = ResponseTimeTester()
@@ -270,13 +285,19 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "provider": {"type": "string", "enum": ["groq", "hf", "openai", "custom"], "description": "Provider"},
-                    "api_key": {"type": "string", "description": "API key to test (or will test all keys for provider if not provided)"},
-                    "model": {"type": "string", "description": "Model name e.g., openai/gpt-oss-20b, mistralai/Mistral-7B-Instruct-v0.3"},
-                    "prompt": {"type": "string", "description": "Test prompt", "default": "Hello, what is Python async?"}
+                    "api_key": {
+                        "type": "string",
+                        "description": "API key to test (or will test all keys for provider if not provided)",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name e.g., openai/gpt-oss-20b, mistralai/Mistral-7B-Instruct-v0.3",
+                    },
+                    "prompt": {"type": "string", "description": "Test prompt", "default": "Hello, what is Python async?"},
                 },
-                "required": ["provider"]
-            }
-        }
+                "required": ["provider"],
+            },
+        },
     },
     {
         "type": "function",
@@ -287,25 +308,36 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "api_name": {"type": "string", "description": "Custom API name e.g., weather_api"},
-                    "api_key": {"type": "string", "description": "Specific API key to test (optional, if not provided tests all keys for same API name)"},
-                    "test_args": {"type": "object", "description": "Test args as JSON e.g., {\"id\": \"1\"} or {\"q\": \"London\"}"}
+                    "api_key": {
+                        "type": "string",
+                        "description": "Specific API key to test (optional, if not provided tests all keys for same API name)",
+                    },
+                    "test_args": {"type": "object", "description": 'Test args as JSON e.g., {"id": "1"} or {"q": "London"}'},
                 },
-                "required": ["api_name"]
-            }
-        }
+                "required": ["api_name"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "get_response_time_stats",
             "description": "Get response time stats - average, fastest, slowest API key, history",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    }
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 TOOL_MAP = {
-    "test_api_key_response_time": lambda provider, api_key=None, model=None, prompt="Hello, what is Python async?": response_tester.test_llm_key(provider, api_key, model, prompt) if api_key else {"results": response_tester.test_all_keys_for_provider(provider, prompt, model)},
-    "test_custom_api_response_time": lambda api_name, api_key=None, test_args=None: response_tester.test_custom_api_key(api_name, api_key, test_args) if api_key else {"results": response_tester.test_all_keys_for_custom_api(api_name, test_args)},
+    "test_api_key_response_time": lambda provider, api_key=None, model=None, prompt="Hello, what is Python async?": (
+        response_tester.test_llm_key(provider, api_key, model, prompt)
+        if api_key
+        else {"results": response_tester.test_all_keys_for_provider(provider, prompt, model)}
+    ),
+    "test_custom_api_response_time": lambda api_name, api_key=None, test_args=None: (
+        response_tester.test_custom_api_key(api_name, api_key, test_args)
+        if api_key
+        else {"results": response_tester.test_all_keys_for_custom_api(api_name, test_args)}
+    ),
     "get_response_time_stats": lambda: response_tester.get_stats(),
 }

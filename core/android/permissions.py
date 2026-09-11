@@ -6,25 +6,29 @@ allowed-ops allowlist. Consent is persisted so a restart does not silently
 re-authorize or lose the user's choice; a missing/unset consent is treated as
 denied (``android_control_unavailable``), never granted-by-default.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+
+from ..errors import HermusError
 
 #: Op classes that require consent. A broader "meta" grant can cover all of them.
 OP_CLASSES = ("screen_capture", "ui_control", "launch_app", "device_info", "notification")
-_ALLOWED_OPS = {"connect", "get_screen", "get_ui_tree", "tap", "type", "back",
-                "launch_app", "observe", "current_app"}
+_ALLOWED_OPS = {"connect", "get_screen", "get_ui_tree", "tap", "type", "back", "launch_app", "observe", "current_app"}
 
 
-class PermissionDenied(RuntimeError):
+class PermissionDenied(HermusError, RuntimeError):  # noqa: N818 - public exception name, kept for API stability
     """Raised when an op is not consented to / not allowlisted."""
 
+    code = "android_permission_denied"
+    status = 403
+
     def __init__(self, reason: str, *, op: str = "", category: str = "permission"):
-        super().__init__(reason)
+        super().__init__(reason, details={"op": op, "category": category})
         self.reason = reason
         self.op = op
         self.category = category
@@ -33,7 +37,7 @@ class PermissionDenied(RuntimeError):
 class AndroidPermissionManager:
     """Single writer for Android consent + allowed-ops; persisted to disk."""
 
-    def __init__(self, path: Optional[str] = None):
+    def __init__(self, path: str | None = None):
         default_dir = os.environ.get("HERMUS_DATA_DIR", tempfile.gettempdir())
         self.path = path or str(Path(default_dir) / "hermus_android_permissions.json")
         self._lock = __import__("threading").RLock()
@@ -113,7 +117,7 @@ class AndroidPermissionManager:
 
     # -- op -> class --------------------------------------------------------
     @staticmethod
-    def op_class(op: str) -> Optional[str]:
+    def op_class(op: str) -> str | None:
         if op in ("get_screen", "observe"):
             return "screen_capture"
         if op == "current_app":
@@ -133,21 +137,21 @@ class AndroidPermissionManager:
         cls = self.op_class(op)
         if cls is None or not self.is_allowed(op):
             raise PermissionDenied(
-                f"op '{op}' is not in the allowed-ops allowlist "
-                f"({sorted(self._allowed_ops)})",
+                f"op '{op}' is not in the allowed-ops allowlist ({sorted(self._allowed_ops)})",
                 op=op,
             )
         if not self.is_consented(cls):
             raise PermissionDenied(
                 f"user has not granted '{cls}' consent; call android_permission_grant "
-                f"(\"{cls}\") explicitly — no silent or covert access",
-                op=op, category="consent",
+                f'("{cls}") explicitly — no silent or covert access',
+                op=op,
+                category="consent",
             )
         return cls
 
 
 #: process-wide canonical instance (single consent authority)
-_permission_manager: Optional[AndroidPermissionManager] = None
+_permission_manager: AndroidPermissionManager | None = None
 
 
 def get_permission_manager() -> AndroidPermissionManager:

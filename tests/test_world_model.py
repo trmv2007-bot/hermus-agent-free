@@ -4,8 +4,12 @@ from core.world_model import WorldModel
 def test_world_model_tracks_provenance_and_redacts_credentials(tmp_path):
     model = WorldModel(tmp_path / "world.jsonl")
     fact = model.observe(
-        "user", "context", {"project": "Hermus", "api_token": "do-not-store"},
-        source="profile", permission_scope="profile.read", confidence=0.9,
+        "user",
+        "context",
+        {"project": "Hermus", "api_token": "do-not-store"},
+        source="profile",
+        permission_scope="profile.read",
+        confidence=0.9,
     )
     assert fact.value["project"] == "Hermus"
     assert fact.value["api_token"] == "[REDACTED]"

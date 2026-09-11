@@ -1,17 +1,17 @@
 """Goal-driven desktop planner that produces an executable visual state graph."""
+
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from ..llm import FreeLLM
 from ..models import get_model_gateway
 from .skills import ComputerSkill, ComputerSkillStore
 from .world_state import WorldState
-
 
 SUPPORTED_ACTIONS = {
     "click_target",
@@ -47,8 +47,8 @@ class PlanNode:
     expected: str
     precondition: str = ""
     goal: str = ""
-    on_success: Optional[str] = None
-    on_failure: Optional[str] = None
+    on_success: str | None = None
+    on_failure: str | None = None
     fallbacks: list[dict[str, Any]] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
     agent: str = "computer-operator"
@@ -63,7 +63,7 @@ class TaskGraph:
     task: str
     goal: TaskGoal
     nodes: list[PlanNode]
-    start: Optional[str] = None
+    start: str | None = None
     success_terminal: str = "SUCCESS"
     failure_terminal: str = "FAILURE"
     source: str = "planner"
@@ -103,7 +103,7 @@ class TaskGraph:
         transitions = {node.name: node.on_success for node in self.nodes if node.on_success in set(names)}
         for origin in names:
             seen: set[str] = set()
-            cursor: Optional[str] = origin
+            cursor: str | None = origin
             while cursor in transitions:
                 if cursor in seen:
                     errors.append(f"success-transition cycle detected from '{origin}'")
@@ -129,25 +129,27 @@ class TaskGraph:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TaskGraph":
+    def from_dict(cls, data: dict[str, Any]) -> TaskGraph:
         goal_data = data.get("goal") if isinstance(data.get("goal"), dict) else {}
         nodes = []
         for raw in data.get("nodes", data.get("plan", [])) or []:
             if not isinstance(raw, dict) or not isinstance(raw.get("action"), dict):
                 continue
-            nodes.append(PlanNode(
-                name=str(raw.get("name") or f"STATE_{len(nodes)}"),
-                action=dict(raw["action"]),
-                expected=str(raw.get("expected") or ""),
-                precondition=str(raw.get("precondition") or ""),
-                goal=str(raw.get("goal") or ""),
-                on_success=raw.get("on_success"),
-                on_failure=raw.get("on_failure"),
-                fallbacks=list(raw.get("fallbacks") or []),
-                depends_on=list(raw.get("depends_on") or []),
-                agent=str(raw.get("agent") or "computer-operator"),
-                metadata=dict(raw.get("metadata") or {}),
-            ))
+            nodes.append(
+                PlanNode(
+                    name=str(raw.get("name") or f"STATE_{len(nodes)}"),
+                    action=dict(raw["action"]),
+                    expected=str(raw.get("expected") or ""),
+                    precondition=str(raw.get("precondition") or ""),
+                    goal=str(raw.get("goal") or ""),
+                    on_success=raw.get("on_success"),
+                    on_failure=raw.get("on_failure"),
+                    fallbacks=list(raw.get("fallbacks") or []),
+                    depends_on=list(raw.get("depends_on") or []),
+                    agent=str(raw.get("agent") or "computer-operator"),
+                    metadata=dict(raw.get("metadata") or {}),
+                )
+            )
         return cls(
             task=str(data.get("task") or ""),
             goal=TaskGoal(
@@ -169,20 +171,20 @@ class ComputerPlanner:
 
     def __init__(
         self,
-        llm: Optional[FreeLLM] = None,
-        skills: Optional[ComputerSkillStore] = None,
-        world_state: Optional[WorldState] = None,
+        llm: FreeLLM | None = None,
+        skills: ComputerSkillStore | None = None,
+        world_state: WorldState | None = None,
     ):
         self.llm = llm or get_model_gateway().llm()
         self.skills = skills or ComputerSkillStore()
         self.world_state = world_state
-        self.last_graph: Optional[TaskGraph] = None
+        self.last_graph: TaskGraph | None = None
 
     def plan(self, task: str) -> list[dict[str, Any]]:
         """Compatibility API returning planner step dictionaries."""
         return self.plan_graph(task).to_plan()
 
-    def plan_graph(self, task: str, world_state: Optional[WorldState] = None) -> TaskGraph:
+    def plan_graph(self, task: str, world_state: WorldState | None = None) -> TaskGraph:
         world = world_state or self.world_state
         skill = self.skills.recall(task)
         if skill is not None and skill.procedure:
@@ -201,7 +203,7 @@ class ComputerPlanner:
         return graph
 
     @staticmethod
-    def _normalize_skill_action(step: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _normalize_skill_action(step: dict[str, Any]) -> dict[str, Any] | None:
         action = step.get("action")
         if isinstance(action, str):
             action = {"kind": action, **(step.get("args") or {})}
@@ -216,24 +218,25 @@ class ComputerPlanner:
                 continue
             name = str(step.get("name") or f"SKILL_STATE_{index}")
             next_name = (
-                str(procedure[index + 1].get("name") or f"SKILL_STATE_{index + 1}")
-                if index + 1 < len(procedure) else "SUCCESS"
+                str(procedure[index + 1].get("name") or f"SKILL_STATE_{index + 1}") if index + 1 < len(procedure) else "SUCCESS"
             )
-            nodes.append(PlanNode(
-                name=name,
-                goal=str(step.get("goal") or f"Replay learned step for {task}"),
-                precondition=str(step.get("precondition") or ""),
-                action=action,
-                expected=str(step.get("expected") or "The learned action has its intended visible effect"),
-                on_success=str(step.get("on_success") or next_name),
-                on_failure=step.get("on_failure"),
-                metadata={
-                    "recalled_from": skill.name,
-                    "skill_success_rate": skill.success_rate,
-                    "known_failures": list(skill.typical_failures),
-                    "known_repairs": list(skill.repairs),
-                },
-            ))
+            nodes.append(
+                PlanNode(
+                    name=name,
+                    goal=str(step.get("goal") or f"Replay learned step for {task}"),
+                    precondition=str(step.get("precondition") or ""),
+                    action=action,
+                    expected=str(step.get("expected") or "The learned action has its intended visible effect"),
+                    on_success=str(step.get("on_success") or next_name),
+                    on_failure=step.get("on_failure"),
+                    metadata={
+                        "recalled_from": skill.name,
+                        "skill_success_rate": skill.success_rate,
+                        "known_failures": list(skill.typical_failures),
+                        "known_repairs": list(skill.repairs),
+                    },
+                )
+            )
         return TaskGraph(
             task=task,
             goal=TaskGoal(task, f"The learned procedure '{skill.name}' completes successfully"),
@@ -259,7 +262,7 @@ class ComputerPlanner:
         return None
 
     @staticmethod
-    def _sanitize_action(raw: Any) -> Optional[dict[str, Any]]:
+    def _sanitize_action(raw: Any) -> dict[str, Any] | None:
         if not isinstance(raw, dict):
             return None
         kind = str(raw.get("kind") or raw.get("action") or "").strip()
@@ -299,7 +302,7 @@ class ComputerPlanner:
             return None
         return action
 
-    def _decompose(self, task: str, world: Optional[WorldState]) -> TaskGraph:
+    def _decompose(self, task: str, world: WorldState | None) -> TaskGraph:
         world_json = json.dumps(world.to_dict(include_history=False), default=str) if world else "{}"
         prompt = f"""You are the Hermus desktop Task Planner. Turn the request into an executable visual state graph.
 
@@ -350,18 +353,20 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
             action = self._sanitize_action(raw.get("action"))
             if action is None:
                 continue
-            nodes.append(PlanNode(
-                name=re.sub(r"[^A-Za-z0-9_-]+", "_", str(raw.get("name") or f"STATE_{index}")).strip("_") or f"STATE_{index}",
-                goal=str(raw.get("goal") or ""),
-                precondition=str(raw.get("precondition") or ""),
-                action=action,
-                expected=str(raw.get("expected") or ""),
-                on_success=str(raw["on_success"]) if raw.get("on_success") else None,
-                on_failure=str(raw["on_failure"]) if raw.get("on_failure") else None,
-                fallbacks=[item for item in raw.get("fallbacks", []) if isinstance(item, dict)],
-                depends_on=[str(item) for item in raw.get("depends_on", [])],
-                agent=str(raw.get("agent") or "computer-operator"),
-            ))
+            nodes.append(
+                PlanNode(
+                    name=re.sub(r"[^A-Za-z0-9_-]+", "_", str(raw.get("name") or f"STATE_{index}")).strip("_") or f"STATE_{index}",
+                    goal=str(raw.get("goal") or ""),
+                    precondition=str(raw.get("precondition") or ""),
+                    action=action,
+                    expected=str(raw.get("expected") or ""),
+                    on_success=str(raw["on_success"]) if raw.get("on_success") else None,
+                    on_failure=str(raw["on_failure"]) if raw.get("on_failure") else None,
+                    fallbacks=[item for item in raw.get("fallbacks", []) if isinstance(item, dict)],
+                    depends_on=[str(item) for item in raw.get("depends_on", [])],
+                    agent=str(raw.get("agent") or "computer-operator"),
+                )
+            )
         for index, node in enumerate(nodes):
             if not node.on_success:
                 node.on_success = nodes[index + 1].name if index + 1 < len(nodes) else "SUCCESS"
@@ -381,7 +386,7 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
     def _step_name(prefix: str, index: int) -> str:
         return f"{prefix}_{index + 1}"
 
-    def _fallback_graph(self, task: str, world: Optional[WorldState]) -> TaskGraph:
+    def _fallback_graph(self, task: str, world: WorldState | None) -> TaskGraph:
         """Safe deterministic decomposition; never clicks the entire request."""
         text = str(task or "").strip()
         lowered = text.lower()
@@ -391,23 +396,29 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
             name = self._step_name(prefix, len(nodes))
             if nodes:
                 nodes[-1].on_success = name
-            nodes.append(PlanNode(
-                name=name,
-                goal=goal,
-                precondition=precondition,
-                action=action,
-                expected=expected,
-                on_success="SUCCESS",
-                on_failure=None,
-            ))
+            nodes.append(
+                PlanNode(
+                    name=name,
+                    goal=goal,
+                    precondition=precondition,
+                    action=action,
+                    expected=expected,
+                    on_success="SUCCESS",
+                    on_failure=None,
+                )
+            )
 
         # Open/launch application.
         app_match = re.search(r"\b(?:open|launch|start)\s+([A-Za-z0-9 ._+-]+?)(?=\s+(?:and|then|to|,)|$)", text, re.I)
         if app_match:
             app = app_match.group(1).strip().strip(".")
             if app and app.lower() not in {"this", "that", "the file", "file", "program", "the program"}:
-                add("OPEN_APP", {"kind": "open_application", "name": app},
-                    f"The {app} application window is visible", f"Open {app}")
+                add(
+                    "OPEN_APP",
+                    {"kind": "open_application", "name": app},
+                    f"The {app} application window is visible",
+                    f"Open {app}",
+                )
 
         # Browser navigation is intentionally decomposed into focus/type/enter.
         url_match = re.search(r"\b((?:https?://|www\.)[^\s,]+|[a-z0-9-]+\.(?:com|org|net|io|dev|app)(?:/[^\s,]*)?)", text, re.I)
@@ -415,57 +426,95 @@ Supported actions: click_target, type_text, press_key, hotkey, scroll, open_appl
             raw_url = (url_match.group(1) if url_match else re.search(r"\bgo to\s+([^\s,]+)", text, re.I).group(1)).rstrip(".")
             url = raw_url if re.match(r"^[a-z]+://", raw_url, re.I) else f"https://{raw_url}"
             host = urlparse(url).netloc or raw_url
-            add("FOCUS_ADDRESS", {"kind": "hotkey", "keys": ["ctrl", "l"]},
-                "The browser address bar is focused", "Focus the address bar")
-            add("TYPE_URL", {"kind": "type_text", "text": url},
-                f"The address bar contains {url}", f"Enter {url}")
-            add("NAVIGATE", {"kind": "press_key", "key": "enter"},
-                f"The {host} page is visibly loaded", f"Navigate to {host}")
+            add(
+                "FOCUS_ADDRESS",
+                {"kind": "hotkey", "keys": ["ctrl", "l"]},
+                "The browser address bar is focused",
+                "Focus the address bar",
+            )
+            add("TYPE_URL", {"kind": "type_text", "text": url}, f"The address bar contains {url}", f"Enter {url}")
+            add("NAVIGATE", {"kind": "press_key", "key": "enter"}, f"The {host} page is visibly loaded", f"Navigate to {host}")
 
         # Explicit click intent only; do not convert arbitrary prose to targets.
         for match in re.finditer(r"\bclick\s+(?:the\s+)?[\"']?([^,.;]+?)[\"']?(?=\s+(?:and|then)\b|[,.;]|$)", text, re.I):
             target = match.group(1).strip().strip("\"'")
             if target:
-                add("CLICK_TARGET", {"kind": "click_target", "target": target},
-                    f"Clicking {target} produces the intended visible result", f"Click {target}")
+                add(
+                    "CLICK_TARGET",
+                    {"kind": "click_target", "target": target},
+                    f"Clicking {target} produces the intended visible result",
+                    f"Click {target}",
+                )
 
         type_match = re.search(r"\btype\s+[\"']([^\"']+)[\"']", text, re.I)
         if type_match:
             value = type_match.group(1)
-            add("TYPE_TEXT", {"kind": "type_text", "text": value},
-                f"The text {value} is visible in the focused field", "Enter the requested text")
+            add(
+                "TYPE_TEXT",
+                {"kind": "type_text", "text": value},
+                f"The text {value} is visible in the focused field",
+                "Enter the requested text",
+            )
 
         press_match = re.search(r"\bpress\s+(?:the\s+)?([A-Za-z0-9_+-]+)(?:\s+key)?", text, re.I)
         if press_match:
             key = press_match.group(1)
-            add("PRESS_KEY", {"kind": "press_key", "key": key},
-                f"Pressing {key} produces the intended visible result", f"Press {key}")
+            add(
+                "PRESS_KEY",
+                {"kind": "press_key", "key": key},
+                f"Pressing {key} produces the intended visible result",
+                f"Press {key}",
+            )
 
         if re.search(r"\bdownload\b", lowered):
-            add("DOWNLOAD", {"kind": "click_target", "target": "Download button or link"},
-                "The browser shows the download completed", "Download the requested file")
+            add(
+                "DOWNLOAD",
+                {"kind": "click_target", "target": "Download button or link"},
+                "The browser shows the download completed",
+                "Download the requested file",
+            )
         if re.search(r"\b(?:unzip|extract)\b", lowered):
-            add("OPEN_DOWNLOADS", {"kind": "open_application", "name": "File Manager"},
-                "The file manager shows the downloaded archive", "Open the downloaded file location",
-                "The browser shows the download completed")
-            add("EXTRACT", {"kind": "click_target", "target": "Extract or Extract All"},
-                "The extracted folder is visible", "Extract the downloaded archive",
-                "The downloaded archive is visible")
+            add(
+                "OPEN_DOWNLOADS",
+                {"kind": "open_application", "name": "File Manager"},
+                "The file manager shows the downloaded archive",
+                "Open the downloaded file location",
+                "The browser shows the download completed",
+            )
+            add(
+                "EXTRACT",
+                {"kind": "click_target", "target": "Extract or Extract All"},
+                "The extracted folder is visible",
+                "Extract the downloaded archive",
+                "The downloaded archive is visible",
+            )
         if re.search(r"\b(?:open|launch|start)\s+(?:the\s+)?program\b", lowered):
-            add("LAUNCH_PROGRAM", {"kind": "click_target", "target": "The extracted program or executable"},
-                "The program window is visible", "Launch the extracted program",
-                "The extracted folder is visible")
+            add(
+                "LAUNCH_PROGRAM",
+                {"kind": "click_target", "target": "The extracted program or executable"},
+                "The program window is visible",
+                "Launch the extracted program",
+                "The extracted folder is visible",
+            )
         if re.search(r"\b(?:make sure|verify|test).*(?:works|working|success)", lowered):
-            add("VERIFY_RESULT", {"kind": "wait_until", "condition": "The program is open and visibly responsive"},
-                "The program is open and visibly responsive without an error dialog", "Verify the program works")
+            add(
+                "VERIFY_RESULT",
+                {"kind": "wait_until", "condition": "The program is open and visibly responsive"},
+                "The program is open and visibly responsive without an error dialog",
+                "Verify the program works",
+            )
 
         warnings: list[str] = []
         if not nodes:
             # Safe fail-closed fallback: observe a concrete condition rather
             # than blindly clicking the entire natural-language request.
             warnings.append("No executable intent could be extracted without an LLM; using an observation-only state")
-            add("OBSERVE_GOAL", {"kind": "wait_until", "condition": f"The screen visibly confirms: {text}"},
-                f"The screen visibly confirms: {text}", "Determine whether the requested state is already complete")
+            add(
+                "OBSERVE_GOAL",
+                {"kind": "wait_until", "condition": f"The screen visibly confirms: {text}"},
+                f"The screen visibly confirms: {text}",
+                "Determine whether the requested state is already complete",
+            )
 
         return TaskGraph(
             task=text,

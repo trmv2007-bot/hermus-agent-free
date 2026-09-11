@@ -6,11 +6,12 @@ Model Fleet — distribute tasks across multiple AI models + API keys.
 - Race: first successful healthy model wins
 - Auto-pick: choose models from discovered healthy keys
 """
+
 from __future__ import annotations
 
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime
 
 from .multi_key import multi_key_manager
@@ -310,8 +311,7 @@ class ModelFleet:
         results = []
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paired))) as ex:
             futs = {
-                ex.submit(_run_worker, w, task, f"Specialist subtask for goal: {goal[:200]}"): (task, w)
-                for task, w in paired
+                ex.submit(_run_worker, w, task, f"Specialist subtask for goal: {goal[:200]}"): (task, w) for task, w in paired
             }
             for fut in as_completed(futs):
                 task, w = futs[fut]
@@ -390,10 +390,14 @@ class ModelFleet:
             else:
                 strategy = "fanout"
         if strategy == "map":
-            return self.map_goal(goal, **{k: kwargs[k] for k in ("subtasks", "models", "providers", "max_workers") if k in kwargs})
+            return self.map_goal(
+                goal, **{k: kwargs[k] for k in ("subtasks", "models", "providers", "max_workers") if k in kwargs}
+            )
         if strategy == "race":
             return self.race(goal, **{k: kwargs[k] for k in ("models", "providers", "max_workers") if k in kwargs})
-        return self.fanout(goal, **{k: kwargs[k] for k in ("models", "providers", "system", "max_workers", "judge") if k in kwargs})
+        return self.fanout(
+            goal, **{k: kwargs[k] for k in ("models", "providers", "system", "max_workers", "judge") if k in kwargs}
+        )
 
     def _judge(self, prompt: str, results: list[dict]) -> str:
         ok = [r for r in results if r.get("success") and r.get("response")]
@@ -416,9 +420,7 @@ class ModelFleet:
             judge_worker["base_url"] = b.get("base_url")
             judge_worker["model"] = b.get("default_model") or judge_worker["model"]
 
-        catalog = "\n\n".join(
-            f"### {r.get('model')} ({r.get('latency_ms')}ms)\n{r.get('response','')[:1500]}" for r in ok[:6]
-        )
+        catalog = "\n\n".join(f"### {r.get('model')} ({r.get('latency_ms')}ms)\n{r.get('response', '')[:1500]}" for r in ok[:6])
         judge_prompt = (
             f"Original question:\n{prompt}\n\n"
             f"Multiple AI models answered:\n{catalog}\n\n"
@@ -432,8 +434,7 @@ class ModelFleet:
         if not ok:
             return "No successful subtask results."
         body = "\n\n".join(
-            f"### Subtask: {r.get('subtask','')}\nModel: {r.get('model')}\n{r.get('response','')[:2000]}"
-            for r in ok
+            f"### Subtask: {r.get('subtask', '')}\nModel: {r.get('model')}\n{r.get('response', '')[:2000]}" for r in ok
         )
         merge_prompt = (
             f"Parent goal: {goal}\n\nSpecialist results:\n{body}\n\n"

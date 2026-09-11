@@ -1,10 +1,11 @@
 """Before/action/after visual verification for GUI work."""
+
 from __future__ import annotations
 
 import threading
 import uuid
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 from .frame_sampler import _image_diff
 from .recorder import decode_frame
@@ -13,9 +14,9 @@ from .recorder import decode_frame
 class ScreenVerifier:
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
+        vision_model: Callable[[Any, str], dict[str, Any]] | None = None,
         change_threshold: float = 0.02,
-        transition_model: Optional[Callable[[Any, Any, str], dict[str, Any]]] = None,
+        transition_model: Callable[[Any, Any, str], dict[str, Any]] | None = None,
     ):
         # vision_model(after, expected) -> matched/detail/confidence
         # transition_model(before, after, expected) compares both boundaries.
@@ -33,7 +34,7 @@ class ScreenVerifier:
         after: Any,
         expected_state: str = "",
         action: str = "",
-        evidence: Optional[dict[str, Any]] = None,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Confirm the screen reached ``expected_state`` after an action."""
         change = self.screen_changed(before, after)
@@ -47,9 +48,7 @@ class ScreenVerifier:
         if expected_state and (self.transition_model or self.vision_model):
             try:
                 if self.transition_model:
-                    response = self.transition_model(
-                        decode_frame(before), decode_frame(after), expected_state
-                    )
+                    response = self.transition_model(decode_frame(before), decode_frame(after), expected_state)
                 else:
                     response = self.vision_model(decode_frame(after), expected_state)
                 if isinstance(response, str):
@@ -77,8 +76,8 @@ class ScreenVerifier:
         before: Any,
         after: Any,
         expected_state: str,
-        recording: Optional[str] = None,
-        offset: Optional[float] = None,
+        recording: str | None = None,
+        offset: float | None = None,
     ) -> dict[str, Any]:
         """Return an agent-memory-ready ACTION/VISUAL RESULT evidence record."""
         evidence: dict[str, Any] = {}
@@ -103,7 +102,7 @@ class ScreenVerifier:
         frames: list[dict[str, Any]],
         expected_state: str = "",
         action: str = "",
-        recording: Optional[str] = None,
+        recording: str | None = None,
     ) -> dict[str, Any]:
         if not frames:
             return {"ok": False, "detail": "no frames", "confidence": 0.0}
@@ -164,7 +163,7 @@ class ActionVerificationManager:
             },
         }
 
-    def after(self, action_id: str, verifier: Optional[ScreenVerifier] = None) -> dict[str, Any]:
+    def after(self, action_id: str, verifier: ScreenVerifier | None = None) -> dict[str, Any]:
         with self._lock:
             item = self._pending.pop(action_id, None)
         if item is None:
@@ -188,7 +187,4 @@ class ActionVerificationManager:
 
     def pending(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [
-                {key: value for key, value in item.items() if key != "before"}
-                for item in self._pending.values()
-            ]
+            return [{key: value for key, value in item.items() if key != "before"} for item in self._pending.values()]

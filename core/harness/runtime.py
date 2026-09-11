@@ -1,4 +1,5 @@
 """Facade used by HermusAgent each turn."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -24,8 +25,7 @@ class HarnessRuntime:
 
         for ev in files.pending(session_id):
             notices.append(
-                f"FILE CHANGED UNDER YOU: {ev.get('path')} "
-                f"(writer={ev.get('writer') or 'unknown'}). Re-read before editing."
+                f"FILE CHANGED UNDER YOU: {ev.get('path')} (writer={ev.get('writer') or 'unknown'}). Re-read before editing."
             )
         files.ack(session_id)
 

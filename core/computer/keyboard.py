@@ -4,10 +4,11 @@ Mirrors :mod:`core.computer.mouse`: real key injection is optional
 (``pyautogui``) and headless-safe, with a :class:`DryRunKeyboard` that emits
 identical structured action records for offline testing and auditing.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 
 def _now() -> str:
@@ -39,7 +40,7 @@ class PyAutoGUIKeyboard(KeyboardBackend):
 
     def __init__(self) -> None:
         self._gui = None
-        self._error: Optional[str] = None
+        self._error: str | None = None
         try:
             import pyautogui  # type: ignore
 
@@ -82,14 +83,17 @@ class DryRunKeyboard(KeyboardBackend):
 
     name = "dry_run"
 
-    def __init__(self, *, fallback_reason: Optional[str] = None) -> None:
+    def __init__(self, *, fallback_reason: str | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.fallback_reason = fallback_reason
 
     def available(self) -> dict[str, Any]:
-        return {"available": True, "error": None,
-                "note": "dry-run backend; no real key injection",
-                "fallback_reason": self.fallback_reason}
+        return {
+            "available": True,
+            "error": None,
+            "note": "dry-run backend; no real key injection",
+            "fallback_reason": self.fallback_reason,
+        }
 
     def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}

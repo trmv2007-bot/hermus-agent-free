@@ -20,6 +20,7 @@ reproduction before fixing:
 Offline + dependency-light: no models or network required. A temporary
 HERMUS_HOME is set BEFORE importing modules that bind a global workspace.
 """
+
 import os
 import sys
 import tempfile
@@ -40,12 +41,11 @@ config.trajectory_path = str(Path(_TMP) / "trajectories.jsonl")
 config.user_model_path = str(Path(_TMP) / "user_model.json")
 config.embeddings_db_path = str(Path(_TMP) / "embeddings.db")
 
+import gateway.gateway as gw  # noqa: E402
+import gateway.realtime as rt  # noqa: E402
 from core.artifact_manager import ArtifactManager, _detect_extension  # noqa: E402
 from core.memory import Memory  # noqa: E402
 from core.mission import MissionEngine, MissionState  # noqa: E402
-
-import gateway.gateway as gw  # noqa: E402
-import gateway.realtime as rt  # noqa: E402
 
 
 # --------------------------------------------------------------------- security
@@ -86,16 +86,20 @@ def test_periodic_nudges_reads_content_column(tmp_path):
 
 def test_update_user_model_preserves_list_item_types(tmp_path):
     mem = Memory(db_path=str(tmp_path / "memory.db"))
-    mem.save_user_model({
-        "preferences": {"style": "concise"},
-        "projects": [{"name": "alpha", "lang": "py"}],
-        "workflows": ["deploy"],
-    })
+    mem.save_user_model(
+        {
+            "preferences": {"style": "concise"},
+            "projects": [{"name": "alpha", "lang": "py"}],
+            "workflows": ["deploy"],
+        }
+    )
 
-    mem.update_user_model({
-        "projects": [{"name": "beta", "lang": "rs"}, {"name": "alpha", "lang": "py"}],
-        "workflows": ["deploy", "test", "deploy"],
-    })
+    mem.update_user_model(
+        {
+            "projects": [{"name": "beta", "lang": "rs"}, {"name": "alpha", "lang": "py"}],
+            "workflows": ["deploy", "test", "deploy"],
+        }
+    )
 
     model = mem.load_user_model()
     # Dicts must stay dicts (previously stringified to JSON blobs)
@@ -223,8 +227,7 @@ def test_mission_lifecycle_progress_persisted(tmp_path):
 
     def blocking_executor(node, ctx):
         if node.id == "impl":
-            return {"success": False, "blocked": True,
-                    "blocker_reason": "need deploy credentials"}
+            return {"success": False, "blocked": True, "blocker_reason": "need deploy credentials"}
         return {"success": True, "output": f"done {node.id}"}
 
     engine._raw_executor = blocking_executor
@@ -247,7 +250,9 @@ def test_hf_call_binds_current_token_before_client_use():
     import core.llm as llm
 
     src = Path(llm.__file__).read_text(encoding="utf-8")
-    assert "current_token: Optional[str] = None" in src, (
+    # Accept both the legacy Optional[...] spelling and the modern X | None
+    # spelling (pyupgrade rewrites the former into the latter).
+    assert ("current_token: Optional[str] = None" in src) or ("current_token: str | None = None" in src), (
         "current_token must be initialized before the try block"
     )
 
@@ -339,9 +344,9 @@ def test_map_goal_executes_each_subtask_once():
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    from core.multi_key import MultiKeyManager
-    import core.multi_key as mk_mod
     import core.model_fleet as fleet_mod
+    import core.multi_key as mk_mod
+    from core.multi_key import MultiKeyManager
 
     lock = threading.Lock()
     seen: list = []
@@ -363,11 +368,14 @@ def test_map_goal_executes_each_subtask_once():
             self.rfile.read(length)
             with lock:
                 seen.append(self.path)
-            self._reply({
-                "id": "x", "model": "m",
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            })
+            self._reply(
+                {
+                    "id": "x",
+                    "model": "m",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            )
 
         def do_GET(self):
             self._reply({"data": [{"id": "m", "owned_by": "x"}]})
@@ -392,9 +400,7 @@ def test_map_goal_executes_each_subtask_once():
         )
         assert res["success"], "map_goal must succeed against the counting server"
         chat_calls = [p for p in seen if "chat/completions" in p]
-        assert len(chat_calls) == 3, (
-            f"each subtask must execute exactly once, got {len(chat_calls)} chat calls"
-        )
+        assert len(chat_calls) == 3, f"each subtask must execute exactly once, got {len(chat_calls)} chat calls"
     finally:
         mk_mod.multi_key_manager = old
         fleet_mod.multi_key_manager = old
@@ -437,7 +443,6 @@ def test_memory_concurrent_thread_access(tmp_path):
 def test_gateway_router_split_surface():
     """The gateway monolith split into per-concern routers must preserve the
     HTTP surface and the legacy import/monkeypatch contract."""
-    import os as _os
 
     import gateway.gateway as gw
 
@@ -468,8 +473,7 @@ def test_gateway_router_split_surface():
         from fastapi.testclient import TestClient
 
         with TestClient(gw.app) as client:
-            r = client.post("/command", json={"text": "ping", "platform": "web",
-                                              "user_id": "split_check", "stream": False})
+            r = client.post("/command", json={"text": "ping", "platform": "web", "user_id": "split_check", "stream": False})
             assert r.status_code == 200
             assert r.json()["response"] == "patched"
             assert sentinel == ["ping"]
@@ -498,36 +502,77 @@ def test_gateway_router_split_surface():
         methods_by_path.setdefault(path, set()).update(methods)
 
     expected = {
-        ("/command", "POST"), ("/platforms", "GET"), ("/api/status", "GET"),
-        ("/control", "GET"), ("/webhook/telegram", "POST"),
-        ("/channels/status", "GET"), ("/telegram/send", "POST"),
-        ("/tools", "GET"), ("/mcp/servers", "GET"), ("/fleet/run", "POST"),
-        ("/keys/list", "GET"), ("/keys/add", "POST"), ("/custom-apis/add", "POST"),
-        ("/update/check", "GET"), ("/plugins", "GET"),
-        ("/agents", "GET"), ("/workspace", "GET"), ("/memory2/remember", "POST"),
-        ("/permissions/set", "POST"), ("/permissions/approve", "POST"),
-        ("/permissions/approvals", "GET"), ("/permissions/revoke", "POST"),
-        ("/permissions/pending", "GET"), ("/permissions/pending/resolve", "POST"),
-        ("/permissions/pending/retry", "POST"), ("/permissions/bundles", "GET"),
+        ("/command", "POST"),
+        ("/platforms", "GET"),
+        ("/api/status", "GET"),
+        ("/control", "GET"),
+        ("/webhook/telegram", "POST"),
+        ("/channels/status", "GET"),
+        ("/telegram/send", "POST"),
+        ("/tools", "GET"),
+        ("/mcp/servers", "GET"),
+        ("/fleet/run", "POST"),
+        ("/keys/list", "GET"),
+        ("/keys/add", "POST"),
+        ("/custom-apis/add", "POST"),
+        ("/update/check", "GET"),
+        ("/plugins", "GET"),
+        ("/agents", "GET"),
+        ("/workspace", "GET"),
+        ("/memory2/remember", "POST"),
+        ("/permissions/set", "POST"),
+        ("/permissions/approve", "POST"),
+        ("/permissions/approvals", "GET"),
+        ("/permissions/revoke", "POST"),
+        ("/permissions/pending", "GET"),
+        ("/permissions/pending/resolve", "POST"),
+        ("/permissions/pending/retry", "POST"),
+        ("/permissions/bundles", "GET"),
         ("/permissions/bundles/resolve", "POST"),
-        ("/red-lines/policy", "GET"), ("/safety/events", "GET"), ("/safety/report", "GET"), ("/safety/preflight", "POST"), ("/safety/preflight/approvals", "POST"), ("/capabilities/ledger", "GET"),
-        ("/capabilities/ledger/discover", "POST"), ("/capabilities/ledger/propose", "POST"),
-        ("/capabilities/registry", "GET"), ("/capabilities/registry/register", "POST"), ("/capabilities/registry/setup", "POST"),
-        ("/capabilities/registry/request-activation", "POST"), ("/capabilities/registry/activate", "POST"),
-        ("/emergency/status", "GET"), ("/emergency/stop", "POST"), ("/emergency/resume", "POST"),
-        ("/research", "POST"), ("/local-defense/scan", "POST"),
-        ("/local-defense/reports", "GET"), ("/local-defense/reports/{name}", "GET"),
-        ("/local-defense/missions", "POST"), ("/local-defense/missions/{mission_id}/run", "POST"),
+        ("/red-lines/policy", "GET"),
+        ("/safety/events", "GET"),
+        ("/safety/report", "GET"),
+        ("/safety/preflight", "POST"),
+        ("/safety/preflight/approvals", "POST"),
+        ("/capabilities/ledger", "GET"),
+        ("/capabilities/ledger/discover", "POST"),
+        ("/capabilities/ledger/propose", "POST"),
+        ("/capabilities/registry", "GET"),
+        ("/capabilities/registry/register", "POST"),
+        ("/capabilities/registry/setup", "POST"),
+        ("/capabilities/registry/request-activation", "POST"),
+        ("/capabilities/registry/activate", "POST"),
+        ("/emergency/status", "GET"),
+        ("/emergency/stop", "POST"),
+        ("/emergency/resume", "POST"),
+        ("/research", "POST"),
+        ("/local-defense/scan", "POST"),
+        ("/local-defense/reports", "GET"),
+        ("/local-defense/reports/{name}", "GET"),
+        ("/local-defense/missions", "POST"),
+        ("/local-defense/missions/{mission_id}/run", "POST"),
         ("/screen/status", "GET"),
-        ("/profiles", "GET"), ("/computer/status", "GET"), ("/computer/tasks", "GET"),
-        ("/computer/episodes", "GET"), ("/computer/run", "POST"),
-        ("/remote/status", "GET"), ("/remote/approve", "POST"),
-        ("/speech/status", "GET"), ("/speech/synthesize", "POST"),
-        ("/dashboard/status", "GET"), ("/dashboard/events", "WS"),
-        ("/computer/events", "WS"), ("/queue/status", "GET"), ("/jobs", "POST"),
+        ("/profiles", "GET"),
+        ("/computer/status", "GET"),
+        ("/computer/tasks", "GET"),
+        ("/computer/episodes", "GET"),
+        ("/computer/run", "POST"),
+        ("/remote/status", "GET"),
+        ("/remote/approve", "POST"),
+        ("/speech/status", "GET"),
+        ("/speech/synthesize", "POST"),
+        ("/dashboard/status", "GET"),
+        ("/dashboard/events", "WS"),
+        ("/computer/events", "WS"),
+        ("/queue/status", "GET"),
+        ("/jobs", "POST"),
         ("/missions/{mission_id}/preflight/approvals", "POST"),
     }
-    missing = [(p, m) for p, m in expected if p not in paths or (m != "WS" and {"GET", "POST", "DELETE"} & {m} and m not in methods_by_path.get(p, set()))]
+    missing = [
+        (p, m)
+        for p, m in expected
+        if p not in paths or (m != "WS" and {"GET", "POST", "DELETE"} & {m} and m not in methods_by_path.get(p, set()))
+    ]
     assert not missing, f"routes lost in the gateway split: {missing}"
     # Sanity: the surface is substantial, not just the composition root.
     assert len(paths) >= 120, f"expected the full gateway surface, got {len(paths)} routes"

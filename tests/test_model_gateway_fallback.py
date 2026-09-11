@@ -5,13 +5,12 @@ documented test seam) so the gateway's actual execute-and-fallback loop is exerc
 provider A fails -> classify -> retry -> select provider B -> response returned. They
 prove the retry/fallback *logic*; they are NOT a live-provider test (that is NOT VERIFIED).
 """
-from __future__ import annotations
 
-import time
+from __future__ import annotations
 
 import pytest
 
-from core.contracts import FailureClass, ModelGatewayResult, ModelRequirement
+from core.contracts import FailureClass, ModelRequirement
 from core.models.gateway import ModelGateway, ModelGatewayError
 
 
@@ -25,6 +24,7 @@ class _FakeResp:
 class _FakeLLM:
     """Deterministic fake completion client. ``mode`` controls behavior:
     - 'ok' returns a response; 'fail' raises; 'fail_then_ok' fails first N then ok."""
+
     def __init__(self, model, provider, mode="ok", fail_times=0, key="provider/model"):
         self.provider = provider
         self.model_name = model
@@ -47,10 +47,13 @@ class _FakeLLM:
 class _FakeResolver:
     def __init__(self, bundles):
         self.bundles = bundles
+
     def select_usable_bundle(self, require_tools=False, prefer=None):
         return self.bundles[0] if self.bundles else None
+
     def list_available_providers(self, probe=False):
         return [dict(b, provider=b.get("provider")) for b in self.bundles]
+
     def discover_runtime_bundles(self, include_local=True):
         return self.bundles
 
@@ -58,9 +61,9 @@ class _FakeResolver:
 class _FakeCaps:
     def __init__(self):
         self.store = {}
+
     def negotiate(self, model):
-        return {"capabilities": ["tools"], "tools": True, "vision": False,
-                "reasoning": False, "context_window": 8000}
+        return {"capabilities": ["tools"], "tools": True, "vision": False, "reasoning": False, "context_window": 8000}
 
 
 class _FakeRouter:
@@ -85,6 +88,7 @@ def test_chat_with_fallback_selects_provider_b_when_a_unavailable():
         {"provider": "good", "default_model": "good-model", "free": True},
     ]
     made = {}
+
     def llm_factory(model=None, provider=None, api_key=None, base_url=None, temperature=None):
         mode = "fail" if provider == "bad" else "ok"
         obj = _FakeLLM(model, provider, mode=mode, key=f"{provider}/{model}")
@@ -109,12 +113,12 @@ def test_chat_with_fallback_selects_provider_b_when_a_unavailable():
 def test_chat_with_fallback_retries_transient_then_succeeds():
     """§4.2: a retryable failure is retried within the SAME provider before falling back."""
     bundles = [{"provider": "p", "default_model": "m", "free": True}]
+
     def llm_factory(model=None, provider=None, **kw):
-        return _FakeLLM(model, provider, mode="fail_then_ok", fail_times=1,
-                        key=f"{provider}/{model}")
+        return _FakeLLM(model, provider, mode="fail_then_ok", fail_times=1, key=f"{provider}/{model}")
+
     gw = _gateway(bundles, llm_factory)
-    resp = gw.chat_with_fallback([{"role": "user", "content": "hi"}],
-                                 req=ModelRequirement(task="chat"), max_retries=3)
+    resp = gw.chat_with_fallback([{"role": "user", "content": "hi"}], req=ModelRequirement(task="chat"), max_retries=3)
     assert resp.content == "response from p/m"
 
 
@@ -124,12 +128,13 @@ def test_chat_with_fallback_all_attempts_raise_typed_error():
         {"provider": "a", "default_model": "a", "free": True},
         {"provider": "b", "default_model": "b", "free": True},
     ]
+
     def llm_factory(model=None, provider=None, **kw):
         return _FakeLLM(model, provider, mode="fail", key=f"{provider}/{model}")
+
     gw = _gateway(bundles, llm_factory)
     with pytest.raises(ModelGatewayError) as exc:
-        gw.chat_with_fallback([{"role": "user", "content": "hi"}],
-                              req=ModelRequirement(task="chat"))
+        gw.chat_with_fallback([{"role": "user", "content": "hi"}], req=ModelRequirement(task="chat"))
     # The error is structured: failure_class set and the message lists attempts.
     assert exc.value.failure_class in (FailureClass.RATE_LIMIT.value,)
     assert "attempt" in str(exc.value)
@@ -138,16 +143,21 @@ def test_chat_with_fallback_all_attempts_raise_typed_error():
 def test_stream_error_during_iteration_is_classified():
     """§4.3: a provider error raised WHILE iterating the stream is a typed gateway error,
     not a raw exception from the generator."""
+
     class _FailingStream:
         def stream_chat(self, messages, tools=None, on_delta=None):
             def gen():
                 yield "hello"
                 raise RuntimeError("connection reset during stream")
+
             return gen()
+
         provider = "bad"
         model_name = "m"
+
     def llm_factory(model=None, provider=None, **kw):
         return _FailingStream()
+
     gw = _gateway([], llm_factory)  # resolver irrelevant; stream takes explicit provider
     gen = gw.stream([{"role": "user", "content": "hi"}], model="m", provider="bad")
     got = []

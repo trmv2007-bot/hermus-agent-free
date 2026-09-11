@@ -21,21 +21,23 @@ Guarantees
     ``load mission → change budget → save mission``, so two workers cannot
     clobber each other's edits.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional, Union
+from typing import Any
 
 try:  # pragma: no cover - platform dependent
     import fcntl
 except Exception:  # pragma: no cover - Windows / exotic platforms
     fcntl = None  # type: ignore[assignment]
 
-PathLike = Union[str, Path]
+PathLike = str | Path
 
 
 def _fsync_dir(path: Path) -> None:
@@ -59,9 +61,7 @@ def atomic_write_bytes(path: PathLike, data: bytes) -> None:
     """Atomically replace ``path`` with ``data`` (tmp + fsync + rename)."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp"
-    )
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as handle:
@@ -122,7 +122,7 @@ def file_lock(path: PathLike, *, exclusive: bool = True) -> Iterator[None]:
             pass
 
 
-def read_json(path: PathLike, default: Optional[Any] = None) -> Any:
+def read_json(path: PathLike, default: Any | None = None) -> Any:
     """Read a JSON document, returning ``default`` when it is missing/invalid."""
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))

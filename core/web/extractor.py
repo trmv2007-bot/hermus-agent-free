@@ -9,6 +9,7 @@ match is rejected rather than silently returning unrelated content.
 Every result reports *how* the value was found (selector, method, adaptive
 flag, confidence) and the source URL, so callers can audit what they got.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -32,15 +33,15 @@ def extract_from_result(
     max_values: int = 50,
 ) -> ExtractionResult:
     """Run one extraction against an already-acquired :class:`WebResult`."""
-    out = ExtractionResult(ok=False, source_url=result.final_url or result.url,
-                           selector=selector, method=method, adaptive=bool(adaptive))
+    out = ExtractionResult(
+        ok=False, source_url=result.final_url or result.url, selector=selector, method=method, adaptive=bool(adaptive)
+    )
     if not result.ok:
         out.error = result.error or "source acquisition failed"
         return out
     html = result.html
     if not html:
-        out.error = ("no HTML retained for this result — re-fetch with include_html=true "
-                     "to run selectors")
+        out.error = "no HTML retained for this result — re-fetch with include_html=true to run selectors"
         return out
     try:
         page = backend.parse_html(html, out.source_url)
@@ -79,8 +80,7 @@ def extract_from_result(
         out.error = "adaptive extraction found no relocation candidate for this selector"
         return out
     if adaptive and matches is not None:
-        confidence = getattr(matches, "confidence", None) \
-            if not isinstance(matches, list) else None
+        confidence = getattr(matches, "confidence", None) if not isinstance(matches, list) else None
         if confidence is not None:
             out.confidence = float(confidence)
 
@@ -94,9 +94,9 @@ def extract_from_result(
 
 
 def extract_text(result: WebResult, *, max_chars: int = 20_000) -> ExtractionResult:
-    out = ExtractionResult(ok=bool(result.ok and result.text),
-                           source_url=result.final_url or result.url,
-                           method="text", selector="")
+    out = ExtractionResult(
+        ok=bool(result.ok and result.text), source_url=result.final_url or result.url, method="text", selector=""
+    )
     out.values = [sanitize_text(result.text, max_chars)] if result.text else []
     if not out.ok:
         out.error = result.error or "no text content available"
@@ -104,29 +104,25 @@ def extract_text(result: WebResult, *, max_chars: int = 20_000) -> ExtractionRes
 
 
 def extract_markdown(result: WebResult, *, max_chars: int = 20_000) -> ExtractionResult:
-    out = ExtractionResult(ok=bool(result.ok and result.markdown),
-                           source_url=result.final_url or result.url,
-                           method="markdown", selector="")
+    out = ExtractionResult(
+        ok=bool(result.ok and result.markdown), source_url=result.final_url or result.url, method="markdown", selector=""
+    )
     out.values = [sanitize_text(result.markdown, max_chars)] if result.markdown else []
     if not result.markdown and result.ok:
-        out.error = ("markdown not available for this result (requires 'scrapling[ai]' "
-                     "and a fresh fetch)")
+        out.error = "markdown not available for this result (requires 'scrapling[ai]' and a fresh fetch)"
     return out
 
 
 def extract_metadata(result: WebResult) -> ExtractionResult:
-    out = ExtractionResult(ok=bool(result.ok), source_url=result.final_url or result.url,
-                           method="metadata", selector="")
+    out = ExtractionResult(ok=bool(result.ok), source_url=result.final_url or result.url, method="metadata", selector="")
     out.values = [f"{k}: {v}" for k, v in sorted(result.metadata.items())]
     out.values.insert(0, f"title: {result.title}" if result.title else "title: (none)")
     return out
 
 
-def extract_links(result: WebResult, *, pattern: str = "",
-                  max_links: int = 200) -> ExtractionResult:
+def extract_links(result: WebResult, *, pattern: str = "", max_links: int = 200) -> ExtractionResult:
     """Absolute links; optional regex filter on URL or anchor text."""
-    out = ExtractionResult(ok=bool(result.ok), source_url=result.final_url or result.url,
-                           method="links", selector=pattern)
+    out = ExtractionResult(ok=bool(result.ok), source_url=result.final_url or result.url, method="links", selector=pattern)
     links = result.links or []
     if pattern:
         import re
@@ -136,8 +132,8 @@ def extract_links(result: WebResult, *, pattern: str = "",
         except re.error as exc:
             out.error = f"invalid link pattern: {exc}"
             return out
-        links = [l for l in links if rx.search(l.url) or rx.search(l.text or "")]
-    out.values = [f"{l.text} {l.url}".strip() for l in links[:max_links]]
+        links = [link for link in links if rx.search(link.url) or rx.search(link.text or "")]
+    out.values = [f"{link.text} {link.url}".strip() for link in links[:max_links]]
     out.warnings.append(f"{len(links)} links matched" if len(links) > max_links else "")
     out.warnings = [w for w in out.warnings if w]
     if not result.ok:

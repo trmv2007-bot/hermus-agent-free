@@ -14,31 +14,38 @@ Every operation:
    ``"ok": False``) instead of fabricating success, when a device/permission is
    missing.
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from .audit import record
 from .permissions import OP_CLASSES, PermissionDenied, get_permission_manager
 from .transport import AndroidTransport, AndroidUnavailable, detect_capability
 
-_OP_ALIASES = {"type": "type_text", "connect": "connect", "get_screen": "get_screen",
-               "get_ui_tree": "get_ui_tree", "tap": "tap", "back": "back",
-               "launch_app": "launch_app", "current_app": "current_app",
-               "observe": "_observe_transport"}
+_OP_ALIASES = {
+    "type": "type_text",
+    "connect": "connect",
+    "get_screen": "get_screen",
+    "get_ui_tree": "get_ui_tree",
+    "tap": "tap",
+    "back": "back",
+    "launch_app": "launch_app",
+    "current_app": "current_app",
+    "observe": "_observe_transport",
+}
 
 #: composite ops handled at the facade (not a single transport method)
 _COMPOSITE_OPS = {"observe"}
 
 
 class AndroidTool:
-    def __init__(self, *, transport: Optional[AndroidTransport] = None,
-                 permissions: Any = None):
+    def __init__(self, *, transport: AndroidTransport | None = None, permissions: Any = None):
         self._transport = transport
         self._permissions = permissions or get_permission_manager()
 
     @property
-    def transport(self) -> Optional[AndroidTransport]:
+    def transport(self) -> AndroidTransport | None:
         return self._transport
 
     def _authorize(self, op: str) -> str:
@@ -53,9 +60,13 @@ class AndroidTool:
         """
         if self._transport is None:
             cap = detect_capability()
-            return {"ok": False, "error": "android_control_unavailable",
-                    "reason": cap.get("reason") or "no Android transport configured"}
+            return {
+                "ok": False,
+                "error": "android_control_unavailable",
+                "reason": cap.get("reason") or "no Android transport configured",
+            }
         from .observe import build_observation
+
         try:
             tree = self._transport.get_ui_tree(**kw)
             screen = self._transport.get_screen(**kw)
@@ -63,23 +74,27 @@ class AndroidTool:
         except AndroidUnavailable as exc:
             return {"ok": False, "error": "android_control_unavailable", "reason": exc.reason}
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": "android_control_unavailable",
-                    "reason": f"{type(exc).__name__}: {exc}"[:300]}
+            return {"ok": False, "error": "android_control_unavailable", "reason": f"{type(exc).__name__}: {exc}"[:300]}
 
     def _dispatch(self, op: str, args: dict[str, Any]) -> dict[str, Any]:
         if self._transport is None:
             cap = detect_capability()
-            raise AndroidUnavailable(cap.get("reason") or "no Android transport configured",
-                                     category="device", op=op)
+            raise AndroidUnavailable(cap.get("reason") or "no Android transport configured", category="device", op=op)
         method = getattr(self._transport, _OP_ALIASES[op], None)
         if method is None:
-            raise AndroidUnavailable(f"transport does not implement '{op}'",
-                                     category="op", op=op)
+            raise AndroidUnavailable(f"transport does not implement '{op}'", category="op", op=op)
         return method(**args)
 
-    def run(self, op: str, args: dict[str, Any], *, trace_id: Optional[str] = None,
-            device: Optional[str] = None, mission_id: Optional[str] = None,
-            run_id: Optional[str] = None) -> dict[str, Any]:
+    def run(
+        self,
+        op: str,
+        args: dict[str, Any],
+        *,
+        trace_id: str | None = None,
+        device: str | None = None,
+        mission_id: str | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
         """Execute one authorized Android operation.
 
         Returns an honest result dict. On any authorization/availability failure it
@@ -87,16 +102,27 @@ class AndroidTool:
         "reason": ...}`` — it never fabricates a success.
         """
         if op not in _OP_ALIASES:
-            return {"ok": False, "error": "android_control_unavailable",
-                    "reason": f"unknown op '{op}' (choose {sorted(_OP_ALIASES)})"}
+            return {
+                "ok": False,
+                "error": "android_control_unavailable",
+                "reason": f"unknown op '{op}' (choose {sorted(_OP_ALIASES)})",
+            }
         # Authorize FIRST (no covert path): consent + allowlist.
         try:
             op_class = self._authorize(op)
         except PermissionDenied as exc:
             reason = exc.reason
-            record(op, args, ok=False, reason=reason, device=device,
-                   op_class=exc.category, trace_id=trace_id, mission_id=mission_id,
-                   run_id=run_id)
+            record(
+                op,
+                args,
+                ok=False,
+                reason=reason,
+                device=device,
+                op_class=exc.category,
+                trace_id=trace_id,
+                mission_id=mission_id,
+                run_id=run_id,
+            )
             return {"ok": False, "error": "android_control_unavailable", "reason": reason}
         try:
             if op in _COMPOSITE_OPS:
@@ -105,22 +131,58 @@ class AndroidTool:
                 result = self._dispatch(op, args)
         except AndroidUnavailable as exc:
             reason = exc.reason
-            record(op, args, ok=False, reason=reason, device=device, op_class=op_class,
-                   trace_id=trace_id, mission_id=mission_id, run_id=run_id)
+            record(
+                op,
+                args,
+                ok=False,
+                reason=reason,
+                device=device,
+                op_class=op_class,
+                trace_id=trace_id,
+                mission_id=mission_id,
+                run_id=run_id,
+            )
             return {"ok": False, "error": "android_control_unavailable", "reason": reason}
         except PermissionDenied as exc:
             reason = exc.reason
-            record(op, args, ok=False, reason=reason, device=device, op_class=op_class,
-                   trace_id=trace_id, mission_id=mission_id, run_id=run_id)
+            record(
+                op,
+                args,
+                ok=False,
+                reason=reason,
+                device=device,
+                op_class=op_class,
+                trace_id=trace_id,
+                mission_id=mission_id,
+                run_id=run_id,
+            )
             return {"ok": False, "error": "android_control_unavailable", "reason": reason}
         except Exception as exc:  # noqa: BLE001 - surface everything honestly
             reason = f"{type(exc).__name__}: {exc}"[:300]
-            record(op, args, ok=False, reason=reason, device=device, op_class=op_class,
-                   trace_id=trace_id, mission_id=mission_id, run_id=run_id)
+            record(
+                op,
+                args,
+                ok=False,
+                reason=reason,
+                device=device,
+                op_class=op_class,
+                trace_id=trace_id,
+                mission_id=mission_id,
+                run_id=run_id,
+            )
             return {"ok": False, "error": "android_control_unavailable", "reason": reason}
         ok = bool(result.get("ok", True))
-        record(op, args, ok=ok, result=result, device=device, op_class=op_class,
-               trace_id=trace_id, mission_id=mission_id, run_id=run_id)
+        record(
+            op,
+            args,
+            ok=ok,
+            result=result,
+            device=device,
+            op_class=op_class,
+            trace_id=trace_id,
+            mission_id=mission_id,
+            run_id=run_id,
+        )
         return result
 
     # -- canonical surface (the ops spec §17 requires) ------------------------
@@ -149,8 +211,7 @@ class AndroidTool:
         """Truthful capability report (never claims availability if unproven)."""
         cap = detect_capability(transport=self._transport)
         cap["consented_ops"] = self._permissions.allowed_ops()
-        cap["consent"] = {cls: self._permissions.is_consented(cls)
-                          for cls in OP_CLASSES}
+        cap["consent"] = {cls: self._permissions.is_consented(cls) for cls in OP_CLASSES}
         return cap
 
 
@@ -164,7 +225,7 @@ def set_transport_factory(factory):
     _transport_factory = factory
 
 
-def get_android_transport() -> Optional[AndroidTransport]:
+def get_android_transport() -> AndroidTransport | None:
     """Return the provisioned transport for the singleton, or None if unavailable.
 
     Uses the canonical :func:`core.android.transport.build_default_transport` so the
@@ -175,11 +236,12 @@ def get_android_transport() -> Optional[AndroidTransport]:
     if _transport_factory is not None:
         return _transport_factory()
     from .transport import build_default_transport
+
     return build_default_transport()
 
 
 #: process-wide canonical instance (single Android boundary)
-_android_tool: Optional[AndroidTool] = None
+_android_tool: AndroidTool | None = None
 
 
 def get_android_tool() -> AndroidTool:

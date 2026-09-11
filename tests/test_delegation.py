@@ -8,6 +8,7 @@ Cancellation, the depth budget and process hygiene must be real.
 Offline: children use the mock model. Run:
   python tests/test_delegation.py   (or pytest tests/test_delegation.py)
 """
+
 import json
 import os
 import subprocess
@@ -61,7 +62,7 @@ def test_rpc_frames_are_valid_jsonrpc_2():
     assert "result" not in err
 
     note = rpc_notification("step_started", {"i": 1})
-    assert note["method"] == "step_started" and "id" not in note      # notifications: no id
+    assert note["method"] == "step_started" and "id" not in note  # notifications: no id
     assert note["jsonrpc"] == "2.0"
 
     # long errors are truncated, never explode the frame
@@ -71,15 +72,25 @@ def test_rpc_frames_are_valid_jsonrpc_2():
 
 def test_result_contract_is_normalized_from_any_shape():
     # agent-shaped result
-    agent = normalize_result({"response": "text answer", "tool_results": [{"tool": "x"}],
-                              "steps": 3, "usage": {"total_tokens": 12}})
+    agent = normalize_result(
+        {"response": "text answer", "tool_results": [{"tool": "x"}], "steps": 3, "usage": {"total_tokens": 12}}
+    )
     assert agent["answer"] == "text answer"
     assert agent["status"] in ("done", "partial")
     assert agent["steps"] == 3 and agent["usage"]["total_tokens"] == 12
 
     # already-conforming input is preserved
-    full = {"answer": "done", "evidence": ["a"], "confidence": 0.8, "tool_calls": [1],
-            "status": "done", "artifacts": [], "usage": {"tokens": 5}, "steps": 2, "error": ""}
+    full = {
+        "answer": "done",
+        "evidence": ["a"],
+        "confidence": 0.8,
+        "tool_calls": [1],
+        "status": "done",
+        "artifacts": [],
+        "usage": {"tokens": 5},
+        "steps": 2,
+        "error": "",
+    }
     again = normalize_result(full)
     assert again["answer"] == "done" and again["confidence"] == 0.8
     assert again["evidence"] == ["a"] and again["status"] == "done"
@@ -94,9 +105,8 @@ def test_result_contract_is_normalized_from_any_shape():
 
     # every contract key is always present — the aggregator must never KeyError
     out = normalize_result(None)
-    assert {"answer", "evidence", "confidence", "tool_calls", "status", "error",
-            "artifacts", "usage", "steps"} <= set(out)
-    json.dumps(out)                                    # serializable across the wire
+    assert {"answer", "evidence", "confidence", "tool_calls", "status", "error", "artifacts", "usage", "steps"} <= set(out)
+    json.dumps(out)  # serializable across the wire
 
 
 # --------------------------------------------------------------------------
@@ -104,14 +114,39 @@ def test_result_contract_is_normalized_from_any_shape():
 # --------------------------------------------------------------------------
 def _results():
     return [
-        {"answer": "Postgres is better for joins", "confidence": 0.9, "status": "done",
-         "evidence": ["pg.md"], "tool_calls": [{"tool": "file_read"}], "artifacts": ["/tmp/a1"]},
-        {"answer": "Postgres is better for joins", "confidence": 0.8, "status": "done",
-         "evidence": ["pg2.md"], "tool_calls": [], "artifacts": []},
-        {"answer": "MySQL wins on ops cost", "confidence": 0.4, "status": "done",
-         "evidence": [], "tool_calls": [], "artifacts": ["/tmp/a3"]},
-        {"answer": "", "confidence": 0.0, "status": "failed", "error": "child died",
-         "evidence": [], "tool_calls": [], "artifacts": []},
+        {
+            "answer": "Postgres is better for joins",
+            "confidence": 0.9,
+            "status": "done",
+            "evidence": ["pg.md"],
+            "tool_calls": [{"tool": "file_read"}],
+            "artifacts": ["/tmp/a1"],
+        },
+        {
+            "answer": "Postgres is better for joins",
+            "confidence": 0.8,
+            "status": "done",
+            "evidence": ["pg2.md"],
+            "tool_calls": [],
+            "artifacts": [],
+        },
+        {
+            "answer": "MySQL wins on ops cost",
+            "confidence": 0.4,
+            "status": "done",
+            "evidence": [],
+            "tool_calls": [],
+            "artifacts": ["/tmp/a3"],
+        },
+        {
+            "answer": "",
+            "confidence": 0.0,
+            "status": "failed",
+            "error": "child died",
+            "evidence": [],
+            "tool_calls": [],
+            "artifacts": [],
+        },
     ]
 
 
@@ -121,13 +156,13 @@ def test_aggregate_strategies():
     concat = aggregate_results(res, strategy="concat")
     assert concat["used"] == 3 and concat["skipped"] == 1
     assert "### Child 1" in concat["answer"] and "Postgres" in concat["answer"]
-    assert concat["disagreement"] > 0                      # one child disagreed
+    assert concat["disagreement"] > 0  # one child disagreed
     assert concat["errors"] == ["child died"]
     assert concat["artifacts"] == ["/tmp/a1", "/tmp/a3"]
     assert concat["citations"] == ["pg.md", "pg2.md"]
 
     vote = aggregate_results(res, strategy="vote")
-    assert vote["used"] == 2                               # two children agreed
+    assert vote["used"] == 2  # two children agreed
     assert "Postgres is better for joins" in vote["answer"]
     assert vote["confidence"] > 0.5
 
@@ -150,15 +185,14 @@ def test_aggregate_of_all_failures_is_still_a_valid_record():
     assert out["used"] == 0 and out["answer"] == ""
     assert out["errors"] == ["boom"] and out["confidence"] == 0.0
     assert out["sections"] == [] and out["citations"] == []
-    assert aggregate_results([], strategy="vote")["used"] == 0      # empty tree, no crash
+    assert aggregate_results([], strategy="vote")["used"] == 0  # empty tree, no crash
 
 
 # --------------------------------------------------------------------------
 # Planning
 # --------------------------------------------------------------------------
 def test_plan_workstreams_falls_back_to_heuristic():
-    plan = plan_workstreams("Compare Postgres, MySQL and SQLite for our analytics workload",
-                            max_children=3)
+    plan = plan_workstreams("Compare Postgres, MySQL and SQLite for our analytics workload", max_children=3)
     assert plan["planner"] in ("llm", "heuristic")
     assert plan["tasks"] and len(plan["tasks"]) <= 3
     assert all(isinstance(t, str) and t.strip() for t in plan["tasks"])
@@ -172,7 +206,10 @@ def test_plan_workstreams_falls_back_to_heuristic():
 def test_worker_self_test_answers_ping():
     proc = subprocess.run(
         [sys.executable, "-m", "core.delegation", "--self-test", "--depth", "1"],
-        cwd=str(Path(__file__).parent.parent), capture_output=True, text=True, timeout=180,
+        cwd=str(Path(__file__).parent.parent),
+        capture_output=True,
+        text=True,
+        timeout=180,
         env={**os.environ, "HERMUS_HOME": _TMP, "HERMUS_MODEL": "mock/mock"},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -192,23 +229,32 @@ def test_unknown_method_and_bad_frame_are_answered_not_fatal():
         "print(json.dumps(w.dispatch({'id':2})));"
         "print(json.dumps(w.dispatch({'id':3,'method':'tool.call','params':{'name':'no_such_tool','args':{}}})));"
     )
-    proc = subprocess.run([sys.executable, "-c", script], cwd=str(Path(__file__).parent.parent),
-                          capture_output=True, text=True, timeout=180,
-                          env={**os.environ, "HERMUS_HOME": _TMP, "HERMUS_MODEL": "mock/mock"})
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(Path(__file__).parent.parent),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env={**os.environ, "HERMUS_HOME": _TMP, "HERMUS_MODEL": "mock/mock"},
+    )
     assert proc.returncode == 0, proc.stderr[-800:]
     lines = [json.loads(x) for x in proc.stdout.strip().splitlines()]
     assert lines[0]["error"]["code"] == ERR_METHOD_NOT_FOUND
-    assert lines[1]["error"]["code"] != 0                       # missing method
-    assert "result" in lines[2] or "error" in lines[2]          # unknown tool answered
+    assert lines[1]["error"]["code"] != 0  # missing method
+    assert "result" in lines[2] or "error" in lines[2]  # unknown tool answered
 
 
 def test_fanout_runs_children_in_parallel_processes():
     d = Delegation(timeout=120)
     events = []
     out = d.fanout(
-        ["List the top-level directories in this repo and describe each in one line",
-         "Count the python files under core/ and report the number"],
-        goal="quick repo survey", aggregate="concat", max_steps=2,
+        [
+            "List the top-level directories in this repo and describe each in one line",
+            "Count the python files under core/ and report the number",
+        ],
+        goal="quick repo survey",
+        aggregate="concat",
+        max_steps=2,
         on_event=lambda t, dd: events.append(t),
     )
     assert out["ok"] is True, out
@@ -252,8 +298,7 @@ def test_tree_is_inspectable_afterwards():
 
 def test_decomposition_path_plans_then_runs():
     d = Delegation(timeout=150)
-    out = d.decompose_and_run("Research and compare Postgres vs MySQL vs SQLite",
-                              max_children=3, aggregate="vote")
+    out = d.decompose_and_run("Research and compare Postgres vs MySQL vs SQLite", max_children=3, aggregate="vote")
     assert out["ok"] is True, out
     assert 1 <= out["children"] <= 3
     assert out["aggregate"]["strategy"] == "vote"
@@ -284,8 +329,9 @@ def test_empty_task_list_is_an_error_not_a_hang():
 def test_status_shape_and_unknown_cancel():
     d = Delegation(timeout=30)
     st = d.status()
-    assert {"enabled", "rpc", "depth", "max_depth", "max_workers", "timeout",
-            "can_delegate", "trees", "active_clients"} <= set(st)
+    assert {"enabled", "rpc", "depth", "max_depth", "max_workers", "timeout", "can_delegate", "trees", "active_clients"} <= set(
+        st
+    )
     assert st["max_depth"] >= 1
     assert d.cancel_tree("does_not_exist")["cancelled"] == 0
 
@@ -304,8 +350,7 @@ def test_cancellation_is_cooperative():
     """cancel_tree flips the run bus; children stop at their next step boundary."""
     d = Delegation(timeout=120)
     flag = {"v": False}
-    out = d.fanout(["Say beta"], goal="cancel check", max_steps=1,
-                   should_cancel=lambda: flag["v"])
+    out = d.fanout(["Say beta"], goal="cancel check", max_steps=1, should_cancel=lambda: flag["v"])
     # nothing was cancelled before the run, and the tree completes either way
     assert out["status"] in ("done", "partial", "failed")
     assert d.cancel_tree(out["tree_id"])["tree_id"] == out["tree_id"]
@@ -339,8 +384,7 @@ def test_generated_rpc_tool_lands_in_the_skill_tree():
     from core.skill_forge import skill_forge
     from subagents.subagent import write_python_tool_via_rpc
 
-    out = write_python_tool_via_rpc("rpc_log_digest",
-                                    ["shell_execute(grep)", "file_read(log)", "memory2_remember(summary)"])
+    out = write_python_tool_via_rpc("rpc_log_digest", ["shell_execute(grep)", "file_read(log)", "memory2_remember(summary)"])
     assert out.get("installed") is True, out
     name = out["tool_name"]
     assert name in skill_forge.index()["skills"]

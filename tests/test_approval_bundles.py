@@ -1,14 +1,24 @@
 from pathlib import Path
 
+from _cli_source import cli_source
+
 from core.approval import ApprovalStore
 from core.autonomy_preflight import create_preflight_approval_requests
 
 
 def test_approval_store_creates_and_resolves_bundle(tmp_path):
     store = ApprovalStore(tmp_path / "approval_grants.json")
-    r1 = store.create_request("shell_execute", {"command": "scan downloads folder ~/Downloads for malware"}, {"zone": "yellow", "red_lines": [3], "reasons": ["private data"]})["request"]
-    r2 = store.create_request("send_email", {"action": "send email"}, {"zone": "yellow", "red_lines": [9], "reasons": ["delegated communication"]})["request"]
-    bundle = store.create_bundle("Approval plan for mission msn_test", [r1["id"], r2["id"]], mission_id="msn_test", goal="scan and email")
+    r1 = store.create_request(
+        "shell_execute",
+        {"command": "scan downloads folder ~/Downloads for malware"},
+        {"zone": "yellow", "red_lines": [3], "reasons": ["private data"]},
+    )["request"]
+    r2 = store.create_request(
+        "send_email", {"action": "send email"}, {"zone": "yellow", "red_lines": [9], "reasons": ["delegated communication"]}
+    )["request"]
+    bundle = store.create_bundle(
+        "Approval plan for mission msn_test", [r1["id"], r2["id"]], mission_id="msn_test", goal="scan and email"
+    )
     assert bundle["success"] is True
     assert store.bundles()[0]["mission_id"] == "msn_test"
     resolved = store.resolve_bundle(bundle["bundle"]["id"], "approve", ttl_minutes=30, max_uses=1)
@@ -49,7 +59,7 @@ def test_gateway_exposes_bundle_routes_and_mission_bridge():
 
 
 def test_cli_and_dashboard_expose_bundle_flow():
-    cli = Path("hermus.py").read_text(encoding="utf-8")
+    cli = cli_source()
     dash = Path("gateway/control.html").read_text(encoding="utf-8")
     assert 'add_parser("bundles"' in cli
     assert 'add_parser("resolve-bundle"' in cli

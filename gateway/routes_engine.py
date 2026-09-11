@@ -15,10 +15,11 @@ Blocking work (installs, downloads, LLM triage) runs in a worker thread via
 ``asyncio.to_thread`` so the gateway keeps serving while a multi-GB model
 lands on disk.
 """
+
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -127,16 +128,14 @@ async def engine_model_download(payload: dict[str, Any] = None):
     try:
         from core.nollama import nollama_manager
 
-        result = await asyncio.to_thread(
-            nollama_manager.download_model, model_id, force=bool(payload.get("force"))
-        )
+        result = await asyncio.to_thread(nollama_manager.download_model, model_id, force=bool(payload.get("force")))
         return JSONResponse(result, status_code=200 if result.get("success") else 400)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
 
 
 @router.get("/engine/downloads")
-async def engine_downloads(job_id: Optional[str] = None):
+async def engine_downloads(job_id: str | None = None):
     """Download progress. Pass ``job_id`` for one job, omit it for all."""
     try:
         from core.nollama import nollama_manager

@@ -12,6 +12,7 @@ machines without a JS toolchain.
 Note the glob: `node --test tests/js/` treats the bare directory as a module path
 and dies with MODULE_NOT_FOUND on Node 22. The file pattern is required.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -31,7 +32,10 @@ def test_browser_client_js_tests_pass():
 
     result = subprocess.run(
         ["node", "--test", *(f"tests/js/{name}" for name in patterns)],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=180,
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
     output = (result.stdout or "") + (result.stderr or "")
     assert result.returncode == 0, f"JS client tests failed:\n{output[-4000:]}"

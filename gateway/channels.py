@@ -3,6 +3,7 @@ Real messaging channels - Telegram + Discord.
 - Telegram: Bot API sendMessage + optional long-polling OR webhook reply
 - Discord: discord.py bot listener (background thread/async)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -10,18 +11,21 @@ import os
 import threading
 import time
 import traceback
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 import requests
 
 from core.config import config
+from core.log import get_logger
+
+logger = get_logger(__name__)
 
 # Optional: shared agent factory injected by gateway
-_agent_factory: Optional[Callable] = None
-_telegram_poller_thread: Optional[threading.Thread] = None
+_agent_factory: Callable | None = None
+_telegram_poller_thread: threading.Thread | None = None
 _telegram_poller_stop = threading.Event()
-_discord_thread: Optional[threading.Thread] = None
+_discord_thread: threading.Thread | None = None
 _channel_status: dict[str, Any] = {
     "telegram": {"running": False, "mode": None, "last_error": None, "updates": 0},
     "discord": {"running": False, "last_error": None, "messages": 0},
@@ -39,7 +43,8 @@ def get_channel_status() -> dict:
 
 # --------------- Telegram ---------------
 
-def get_telegram_token() -> Optional[str]:
+
+def get_telegram_token() -> str | None:
     return os.getenv("TELEGRAM_BOT_TOKEN") or config.telegram_bot_token
 
 
@@ -209,11 +214,11 @@ def start_telegram_polling(agent_factory: Callable = None, offset_file: str = No
     factory = agent_factory or _agent_factory
     if not get_telegram_token():
         _channel_status["telegram"]["last_error"] = "TELEGRAM_BOT_TOKEN not set"
-        print("[Telegram] No TELEGRAM_BOT_TOKEN - polling not started")
+        logger.warning("[Telegram] No TELEGRAM_BOT_TOKEN - polling not started")
         return False
 
     if _telegram_poller_thread and _telegram_poller_thread.is_alive():
-        print("[Telegram] Poller already running")
+        logger.info("[Telegram] Poller already running")
         return True
 
     _telegram_poller_stop.clear()
@@ -231,7 +236,7 @@ def start_telegram_polling(agent_factory: Callable = None, offset_file: str = No
                 offset = 0
         # Drop webhook so polling works
         telegram_api("deleteWebhook", {"drop_pending_updates": False})
-        print("[Telegram] Long-polling started")
+        logger.info("[Telegram] Long-polling started")
         while not _telegram_poller_stop.is_set():
             try:
                 data = telegram_api(
@@ -253,7 +258,7 @@ def start_telegram_polling(agent_factory: Callable = None, offset_file: str = No
                 _channel_status["telegram"]["last_error"] = str(e)
                 time.sleep(3)
         _channel_status["telegram"]["running"] = False
-        print("[Telegram] Poller stopped")
+        logger.info("[Telegram] Poller stopped")
 
     _telegram_poller_thread = threading.Thread(target=loop, name="telegram-poller", daemon=True)
     _telegram_poller_thread.start()
@@ -266,7 +271,8 @@ def stop_telegram_polling():
 
 # --------------- Discord ---------------
 
-def get_discord_token() -> Optional[str]:
+
+def get_discord_token() -> str | None:
     return os.getenv("DISCORD_BOT_TOKEN") or config.discord_bot_token
 
 
@@ -277,11 +283,11 @@ def start_discord_bot(agent_factory: Callable = None):
     token = get_discord_token()
     if not token:
         _channel_status["discord"]["last_error"] = "DISCORD_BOT_TOKEN not set"
-        print("[Discord] No DISCORD_BOT_TOKEN - bot not started")
+        logger.warning("[Discord] No DISCORD_BOT_TOKEN - bot not started")
         return False
 
     if _discord_thread and _discord_thread.is_alive():
-        print("[Discord] Bot already running")
+        logger.info("[Discord] Bot already running")
         return True
 
     try:
@@ -289,7 +295,7 @@ def start_discord_bot(agent_factory: Callable = None):
         from discord.ext import commands
     except ImportError:
         _channel_status["discord"]["last_error"] = "discord.py not installed - pip install discord.py"
-        print("[Discord] discord.py missing")
+        logger.warning("[Discord] discord.py missing")
         return False
 
     def runner():
@@ -300,7 +306,7 @@ def start_discord_bot(agent_factory: Callable = None):
         @bot.event
         async def on_ready():
             _channel_status["discord"]["running"] = True
-            print(f"[Discord] Logged in as {bot.user}")
+            logger.info(f"[Discord] Logged in as {bot.user}")
 
         @bot.event
         async def on_message(message):
@@ -353,7 +359,7 @@ def start_discord_bot(agent_factory: Callable = None):
         except Exception as e:
             _channel_status["discord"]["last_error"] = str(e)
             _channel_status["discord"]["running"] = False
-            print(f"[Discord] Bot crashed: {e}")
+            logger.error(f"[Discord] Bot crashed: {e}")
 
     _discord_thread = threading.Thread(target=runner, name="discord-bot", daemon=True)
     _discord_thread.start()

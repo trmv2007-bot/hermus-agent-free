@@ -9,6 +9,6 @@ hand-rolling fallback logic across ``providers``, ``provider_resolver``,
 Model name keywords are only one score feature — never proof of capability.
 """
 
-from .gateway import ModelGateway, get_model_gateway, ModelGatewayError
+from .gateway import ModelGateway, ModelGatewayError, get_model_gateway
 
 __all__ = ["ModelGateway", "get_model_gateway", "ModelGatewayError"]

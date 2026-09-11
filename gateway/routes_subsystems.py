@@ -1,6 +1,7 @@
 """Architecture-upgrade endpoints: background agents, workspaces, memory2,
 permissions, research, model router, screen recording/watching, watchdog,
 and profiles."""
+
 from __future__ import annotations
 
 import asyncio
@@ -19,16 +20,20 @@ def _permission_guard(tool: str, args: dict | None = None):
         check = permission_manager.check(tool, args=args or {})
         if check.get("decision") == Decision.ALLOW.value:
             return None
-        return JSONResponse({
-            "success": False,
-            "error": f"Permission {check.get('decision')} for route action '{tool}'",
-            "permission": check,
-        }, status_code=403)
+        return JSONResponse(
+            {
+                "success": False,
+                "error": f"Permission {check.get('decision')} for route action '{tool}'",
+                "permission": check,
+            },
+            status_code=403,
+        )
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"success": False, "error": f"permission check failed closed: {exc}"}, status_code=403)
 
 
 # ---- Architecture-upgrade endpoints ------------------------------------------
+
 
 @router.get("/agents")
 async def background_agents_list():
@@ -64,16 +69,21 @@ async def background_agents_create(payload: dict):
     name = payload.get("name", "")
     if not name:
         return JSONResponse({"error": "name required"}, status_code=400)
-    return agent_manager.create(name, role=payload.get("role", "generic"),
-                                model=payload.get("model"), persona=payload.get("persona"))
+    return agent_manager.create(
+        name, role=payload.get("role", "generic"), model=payload.get("model"), persona=payload.get("persona")
+    )
 
 
 @router.get("/workspace")
 async def workspace_info():
     from core.workspace import workspace as ws
 
-    return {"base_dir": str(ws.base_dir), "projects": ws.list_projects(),
-            "current": ws.current_project(), "dirs": {k: str(v) for k, v in ws.dirs.items()}}
+    return {
+        "base_dir": str(ws.base_dir),
+        "projects": ws.list_projects(),
+        "current": ws.current_project(),
+        "dirs": {k: str(v) for k, v in ws.dirs.items()},
+    }
 
 
 @router.post("/workspace/create")
@@ -94,17 +104,27 @@ async def workspace_use(payload: dict):
 async def memory2_remember(payload: dict):
     from core.memory import memory
 
-    return memory.remember(payload.get("kind", "semantic"), payload.get("content", ""),
-                            importance=payload.get("importance", 5.0),
-                            success=payload.get("success"), project=payload.get("project"))
+    return memory.remember(
+        payload.get("kind", "semantic"),
+        payload.get("content", ""),
+        importance=payload.get("importance", 5.0),
+        success=payload.get("success"),
+        project=payload.get("project"),
+    )
 
 
 @router.post("/memory2/recall")
 async def memory2_recall(payload: dict):
     from core.memory import memory
 
-    return {"results": memory.recall(payload.get("query", ""), limit=int(payload.get("limit", 10)),
-                                      kinds=payload.get("kinds"), project=payload.get("project"))}
+    return {
+        "results": memory.recall(
+            payload.get("query", ""),
+            limit=int(payload.get("limit", 10)),
+            kinds=payload.get("kinds"),
+            project=payload.get("project"),
+        )
+    }
 
 
 @router.get("/permissions/log")
@@ -118,16 +138,14 @@ async def permissions_log(limit: int = 20):
 async def permissions_check(payload: dict):
     from core.permissions import permission_manager
 
-    return permission_manager.check(payload.get("tool", ""), agent=payload.get("agent"),
-                                    args=payload.get("args"))
+    return permission_manager.check(payload.get("tool", ""), agent=payload.get("agent"), args=payload.get("args"))
 
 
 @router.post("/permissions/set")
 async def permissions_set(payload: dict):
     from core.permissions import permission_manager
 
-    return permission_manager.set_policy(payload.get("tool", ""), payload.get("decision", "ask"),
-                                         agent=payload.get("agent"))
+    return permission_manager.set_policy(payload.get("tool", ""), payload.get("decision", "ask"), agent=payload.get("agent"))
 
 
 @router.get("/permissions/approvals")
@@ -189,12 +207,16 @@ async def permissions_bundles_resolve(payload: dict):
     if payload.get("resume") and result.get("success") and payload.get("decision") == "approve" and bundle.get("mission_id"):
         try:
             from core.mission import mission_engine
+
             report = mission_engine.get_mission(bundle["mission_id"])
             if report and str(report.domain) == "local_defense":
                 from core.local_defense_workflow import run_local_scan_mission
-                resumed = run_local_scan_mission(bundle["mission_id"])
+
+                resumed = await asyncio.to_thread(run_local_scan_mission, bundle["mission_id"])
             else:
-                resumed = mission_engine.resume_mission(bundle["mission_id"], extra_steps=payload.get("extra_steps") or 8)
+                resumed = await asyncio.to_thread(
+                    mission_engine.resume_mission, bundle["mission_id"], extra_steps=payload.get("extra_steps") or 8
+                )
             result["resume"] = resumed.to_dict()
         except Exception as exc:  # noqa: BLE001
             result["resume"] = {"success": False, "error": str(exc), "mission_id": bundle.get("mission_id")}
@@ -244,8 +266,8 @@ async def red_lines_policy():
 @router.get("/safety/events")
 async def safety_events(limit: int = 80):
     """Recent autonomy/safety audit events from the canonical EventBus."""
-    from core.safety_report import is_safety_event
     from core.events import get_bus
+    from core.safety_report import is_safety_event
 
     max_limit = max(1, min(200, int(limit)))
     events = [e.to_dict() for e in get_bus().recent(limit=max_limit * 4)]
@@ -309,21 +331,27 @@ async def capabilities_registry_register(payload: dict):
 async def capabilities_registry_setup(payload: dict):
     from core.capability_registry import get_capability_registry
 
-    return get_capability_registry().setup_plan(payload.get("name") or payload.get("power") or "", write_proposal=bool(payload.get("write_proposal", True)))
+    return get_capability_registry().setup_plan(
+        payload.get("name") or payload.get("power") or "", write_proposal=bool(payload.get("write_proposal", True))
+    )
 
 
 @router.post("/capabilities/registry/request-activation")
 async def capabilities_registry_request_activation(payload: dict):
     from core.capability_registry import get_capability_registry
 
-    return get_capability_registry().request_activation(payload.get("name") or payload.get("id") or "", reason=payload.get("reason", ""))
+    return get_capability_registry().request_activation(
+        payload.get("name") or payload.get("id") or "", reason=payload.get("reason", "")
+    )
 
 
 @router.post("/capabilities/registry/activate")
 async def capabilities_registry_activate(payload: dict):
     from core.capability_registry import get_capability_registry
 
-    return get_capability_registry().activate(payload.get("name") or payload.get("id") or "", approval_id=payload.get("approval_id", ""))
+    return get_capability_registry().activate(
+        payload.get("name") or payload.get("id") or "", approval_id=payload.get("approval_id", "")
+    )
 
 
 @router.get("/capabilities/ledger")
@@ -410,7 +438,8 @@ async def local_defense_scan(payload: dict):
     denied = _permission_guard("local_folder_defensive_scan", args)
     if denied is not None:
         return denied
-    return scan_folder(
+    return await asyncio.to_thread(
+        scan_folder,
         args["path"],
         max_files=int(args["max_files"] or 500),
         max_bytes=int(args["max_bytes"] or 4096),
@@ -456,7 +485,8 @@ async def local_defense_mission_run(mission_id: str):
     from core.local_defense_workflow import run_local_scan_mission
 
     try:
-        return run_local_scan_mission(mission_id).to_dict()
+        report = await asyncio.to_thread(run_local_scan_mission, mission_id)
+        return report.to_dict()
     except ValueError as exc:
         return JSONResponse({"success": False, "error": str(exc)}, status_code=404)
 
@@ -527,8 +557,7 @@ async def screen_analyze(payload: dict):
     from core.integrations import _screen_recorder
 
     frames = _screen_recorder().recent(float(payload.get("seconds", 10.0)))
-    analyzer = (VideoAnalyzer.with_ollama(payload.get("model", "llava:7b"))
-                if payload.get("use_vision", True) else VideoAnalyzer())
+    analyzer = VideoAnalyzer.with_ollama(payload.get("model", "llava:7b")) if payload.get("use_vision", True) else VideoAnalyzer()
     return await asyncio.to_thread(
         analyzer.analyze,
         frames,
@@ -564,9 +593,7 @@ async def screen_action_before(payload: dict):
     denied = _permission_guard("screen_action_before", payload or {})
     if denied is not None:
         return denied
-    return _screen_action_manager().before(
-        payload.get("action", ""), payload.get("expected_state", "")
-    )
+    return _screen_action_manager().before(payload.get("action", ""), payload.get("expected_state", ""))
 
 
 @router.post("/screen/action/after")
@@ -577,8 +604,7 @@ async def screen_action_after(payload: dict):
     denied = _permission_guard("screen_action_after", payload or {})
     if denied is not None:
         return denied
-    analyzer = (VideoAnalyzer.with_ollama(payload.get("model", "llava:7b"))
-                if payload.get("use_vision", False) else None)
+    analyzer = VideoAnalyzer.with_ollama(payload.get("model", "llava:7b")) if payload.get("use_vision", False) else None
     verifier = ScreenVerifier(
         vision_model=analyzer.evaluate_condition if analyzer else None,
         transition_model=analyzer.evaluate_transition if analyzer else None,
@@ -608,8 +634,7 @@ async def profiles_list():
 async def profiles_create(payload: dict):
     from core.profiles import profile_manager
 
-    return profile_manager.create(payload.get("name", ""), persona=payload.get("persona"),
-                                  model=payload.get("model"))
+    return profile_manager.create(payload.get("name", ""), persona=payload.get("persona"), model=payload.get("model"))
 
 
 # ===========================================================================

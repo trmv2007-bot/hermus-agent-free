@@ -6,6 +6,7 @@ Covers the contract that makes the mode feel instant:
   * the voice.reply handler synthesizes the answer and emits voice_answer,
   * a TTS or STT failure degrades instead of erroring the turn.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -44,8 +45,7 @@ def test_canned_ack_never_calls_the_model(monkeypatch):
         raise AssertionError("canned ack mode must not call the model")
 
     monkeypatch.setattr(routes_voice, "_llm_ack", boom)
-    monkeypatch.setattr(routes_voice, "synthesize_speech",
-                        lambda text: {"spoken": False, "text": text, "audio_url": None})
+    monkeypatch.setattr(routes_voice, "synthesize_speech", lambda text: {"spoken": False, "text": text, "audio_url": None})
     original = config.voice_ack_mode
     config.voice_ack_mode = "canned"
     try:
@@ -58,12 +58,12 @@ def test_canned_ack_never_calls_the_model(monkeypatch):
 
 def test_llm_ack_falls_back_to_a_phrase_when_the_model_is_down(monkeypatch):
     monkeypatch.setattr(routes_voice, "_llm_ack", lambda text: "")
-    monkeypatch.setattr(routes_voice, "synthesize_speech",
-                        lambda text: {"spoken": False, "text": text, "audio_url": None})
+    monkeypatch.setattr(routes_voice, "synthesize_speech", lambda text: {"spoken": False, "text": text, "audio_url": None})
     original = config.voice_ack_mode
     config.voice_ack_mode = "llm"
     try:
         import asyncio
+
         result = asyncio.run(routes_voice._make_ack("hello"))
     finally:
         config.voice_ack_mode = original
@@ -92,8 +92,13 @@ def test_synthesize_speech_returns_a_gateway_url(monkeypatch):
 
     class OkEngine:
         def synthesize(self, *a, **kw):
-            return {"success": True, "audio_id": "abc123", "backend": "piper",
-                    "estimated_duration": 1.4, "path": "/should/not/leak"}
+            return {
+                "success": True,
+                "audio_id": "abc123",
+                "backend": "piper",
+                "estimated_duration": 1.4,
+                "path": "/should/not/leak",
+            }
 
     monkeypatch.setattr(speech_mod, "speech_engine", OkEngine())
     result = routes_voice.synthesize_speech("hello")
@@ -126,9 +131,9 @@ def test_voice_reply_handler_synthesizes_and_emits(monkeypatch):
     from gateway.handlers import make_voice_reply_handler
 
     monkeypatch.setattr(
-        routes_voice, "synthesize_speech",
-        lambda text: {"spoken": True, "text": text, "audio_url": "/speech/audio/xyz",
-                      "backend": "piper"},
+        routes_voice,
+        "synthesize_speech",
+        lambda text: {"spoken": True, "text": text, "audio_url": "/speech/audio/xyz", "backend": "piper"},
     )
     monkeypatch.setattr(
         "gateway.handlers._runtime_execute",
@@ -189,9 +194,9 @@ def test_voice_answer_is_truncated_for_speech_only(monkeypatch):
 
     spoken = {}
     monkeypatch.setattr(
-        routes_voice, "synthesize_speech",
-        lambda text: spoken.update(text=text) or {"spoken": True, "text": text,
-                                                  "audio_url": "/speech/audio/t"},
+        routes_voice,
+        "synthesize_speech",
+        lambda text: spoken.update(text=text) or {"spoken": True, "text": text, "audio_url": "/speech/audio/t"},
     )
     monkeypatch.setattr(
         "gateway.handlers._runtime_execute",
@@ -200,6 +205,7 @@ def test_voice_answer_is_truncated_for_speech_only(monkeypatch):
     original = config.voice_answer_max_chars
     config.voice_answer_max_chars = 300
     try:
+
         class Ctx:
             id = "job-3"
             run_id = "run-3"
@@ -227,20 +233,21 @@ def voice_client(monkeypatch):
 
     class OkEngine:
         def synthesize(self, text, *a, **kw):
-            return {"success": True, "audio_id": f"id{abs(hash(text)) % 9999}",
-                    "backend": "piper", "estimated_duration": 1.1}
+            return {"success": True, "audio_id": f"id{abs(hash(text)) % 9999}", "backend": "piper", "estimated_duration": 1.1}
 
         def status(self):
             return {"backend": "piper", "selected": "piper"}
 
     monkeypatch.setattr(speech_mod, "speech_engine", OkEngine())
-    monkeypatch.setattr(voice_mod, "transcribe_audio",
-                        lambda path, model=None, language=None, **kw:
-                        {"success": True, "text": "what time is it in hyderabad"})
-    monkeypatch.setattr(voice_mod, "voice_available_models",
-                        lambda: {"available": True, "models": ["base"]})
+    monkeypatch.setattr(
+        voice_mod,
+        "transcribe_audio",
+        lambda path, model=None, language=None, **kw: {"success": True, "text": "what time is it in hyderabad"},
+    )
+    monkeypatch.setattr(voice_mod, "voice_available_models", lambda: {"available": True, "models": ["base"]})
 
     from fastapi.testclient import TestClient
+
     import gateway.gateway as gw
 
     with TestClient(gw.app) as client:
@@ -277,8 +284,7 @@ def test_voice_command_speaks_first_then_queues(voice_client, monkeypatch):
 
     monkeypatch.setattr(routes_voice, "_job_queue", FakeQueue())
 
-    r = voice_client.post("/voice/command", content=b"fake-webm-audio",
-                          headers={"Content-Type": "audio/webm"})
+    r = voice_client.post("/voice/command", content=b"fake-webm-audio", headers={"Content-Type": "audio/webm"})
 
     assert r.status_code == 202, r.text
     body = r.json()
@@ -299,25 +305,21 @@ def test_voice_command_speaks_first_then_queues(voice_client, monkeypatch):
 
 
 def test_voice_command_rejects_empty_audio(voice_client):
-    r = voice_client.post("/voice/command", content=b"",
-                          headers={"Content-Type": "audio/webm"})
+    r = voice_client.post("/voice/command", content=b"", headers={"Content-Type": "audio/webm"})
     assert r.status_code == 400
     assert "audio body required" in r.json()["error"]
 
 
 def test_voice_command_rejects_oversized_audio(voice_client):
-    r = voice_client.post("/voice/command", content=b"x" * (26 * 1024 * 1024),
-                          headers={"Content-Type": "audio/webm"})
+    r = voice_client.post("/voice/command", content=b"x" * (26 * 1024 * 1024), headers={"Content-Type": "audio/webm"})
     assert r.status_code == 413
 
 
 def test_voice_command_reports_a_transcription_failure(voice_client, monkeypatch):
     import tools.voice as voice_mod
 
-    monkeypatch.setattr(voice_mod, "transcribe_audio",
-                        lambda *a, **kw: {"success": False, "error": "no whisper model"})
-    r = voice_client.post("/voice/command", content=b"audio",
-                          headers={"Content-Type": "audio/webm"})
+    monkeypatch.setattr(voice_mod, "transcribe_audio", lambda *a, **kw: {"success": False, "error": "no whisper model"})
+    r = voice_client.post("/voice/command", content=b"audio", headers={"Content-Type": "audio/webm"})
     assert r.status_code == 503
     body = r.json()
     assert body["stage"] == "transcribe"
@@ -327,10 +329,8 @@ def test_voice_command_reports_a_transcription_failure(voice_client, monkeypatch
 def test_voice_command_handles_silence(voice_client, monkeypatch):
     import tools.voice as voice_mod
 
-    monkeypatch.setattr(voice_mod, "transcribe_audio",
-                        lambda *a, **kw: {"success": True, "text": "   "})
-    r = voice_client.post("/voice/command", content=b"audio",
-                          headers={"Content-Type": "audio/webm"})
+    monkeypatch.setattr(voice_mod, "transcribe_audio", lambda *a, **kw: {"success": True, "text": "   "})
+    r = voice_client.post("/voice/command", content=b"audio", headers={"Content-Type": "audio/webm"})
     assert r.status_code == 422
     assert "no speech detected" in r.json()["error"]
 
@@ -368,8 +368,7 @@ def test_voice_endpoints_refuse_when_disabled(voice_client, monkeypatch):
     monkeypatch.setattr(config, "voice_enabled", False)
     assert voice_client.get("/voice/status").json()["enabled"] is False
     assert voice_client.post("/voice/say", json={"text": "hi"}).status_code == 503
-    r = voice_client.post("/voice/command", content=b"audio",
-                          headers={"Content-Type": "audio/webm"})
+    r = voice_client.post("/voice/command", content=b"audio", headers={"Content-Type": "audio/webm"})
     assert r.status_code == 503
     assert "HERMUS_VOICE_ENABLED" in r.json()["error"]
 
@@ -393,9 +392,9 @@ def test_voice_command_runs_inline_when_there_is_no_queue(voice_client, monkeypa
 
     monkeypatch.setattr(routes_voice, "_job_queue", DeadQueue())
     monkeypatch.setattr(
-        routes_voice, "_run_inline",
-        lambda payload: {"answer": "inline answer", "inline": True,
-                         "speech": {"spoken": False, "audio_url": None}},
+        routes_voice,
+        "_run_inline",
+        lambda payload: {"answer": "inline answer", "inline": True, "speech": {"spoken": False, "audio_url": None}},
     )
     r = voice_client.post("/voice/say", json={"text": "hi"})
     assert r.status_code == 200, r.text
@@ -415,8 +414,15 @@ def test_client_script_is_served(voice_client):
     assert r.status_code == 200
     assert "javascript" in r.headers["content-type"]
     body = r.text
-    for symbol in ("openStream", "postVoiceBlob", "voiceCommand", "sendCommand",
-                   "startRecording", "voice_answer", "STREAM_EVENT_TYPES"):
+    for symbol in (
+        "openStream",
+        "postVoiceBlob",
+        "voiceCommand",
+        "sendCommand",
+        "startRecording",
+        "voice_answer",
+        "STREAM_EVENT_TYPES",
+    ):
         assert symbol in body, f"client is missing {symbol}"
 
 
@@ -437,8 +443,7 @@ def test_voice_routes_are_mounted(voice_client):
     found: list[str] = []
     collect(gw.app.routes, found)
     paths = set(found)
-    for expected in ("/voice/status", "/voice/command", "/voice/say", "/voice/ack",
-                     "/static/control-client.js"):
+    for expected in ("/voice/status", "/voice/command", "/voice/say", "/voice/ack", "/static/control-client.js"):
         assert expected in paths, f"{expected} not mounted"
 
 
@@ -468,8 +473,9 @@ def test_wake_aliases_parse_from_a_comma_separated_string():
 
 
 def test_wake_aliases_are_read_from_the_environment_at_import_time():
-    """Field defaults are evaluated when the class is defined, so this has to be
-    checked in a fresh interpreter rather than by constructing Config() here."""
+    """The ``config`` singleton reflects the import-time environment, so this is
+    checked in a fresh interpreter (a fresh ``Config()`` would also work now —
+    see tests/test_config.py — but this pins the real startup path)."""
     import os
     import subprocess
     import sys
@@ -477,9 +483,12 @@ def test_wake_aliases_are_read_from_the_environment_at_import_time():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = dict(os.environ, HERMUS_VOICE_WAKE_ALIASES=" jervis , ,jarviss ,")
     out = subprocess.run(
-        [sys.executable, "-c",
-         "from core.config import config; print(config.voice_wake_aliases)"],
-        cwd=root, env=env, capture_output=True, text=True, timeout=120,
+        [sys.executable, "-c", "from core.config import config; print(config.voice_wake_aliases)"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.strip().splitlines()[-1] == "['jervis', 'jarviss']"
@@ -490,8 +499,17 @@ def test_status_reports_the_handsfree_contract(voice_client):
     res = voice_client.get("/voice/status")
     assert res.status_code == 200
     hf = res.json()["handsfree"]
-    for key in ("enabled", "wake_word", "wake_required", "wake_aliases", "silence_ms",
-                "speech_ms", "min_utterance_ms", "max_utterance_ms", "barge_in"):
+    for key in (
+        "enabled",
+        "wake_word",
+        "wake_required",
+        "wake_aliases",
+        "silence_ms",
+        "speech_ms",
+        "min_utterance_ms",
+        "max_utterance_ms",
+        "barge_in",
+    ):
         assert key in hf, f"handsfree status is missing {key}"
     assert hf["silence_ms"] > hf["speech_ms"]
     assert hf["max_utterance_ms"] > hf["min_utterance_ms"]

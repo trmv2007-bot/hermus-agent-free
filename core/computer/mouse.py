@@ -6,10 +6,11 @@ same structured action records so the whole plan → act → verify loop remains
 testable and auditable offline.  Agents should never assume a backend is
 "real"; every action record carries a ``backend`` and ``dry_run`` flag.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 
 def _now() -> str:
@@ -30,7 +31,7 @@ class MouseBackend:
     def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> dict[str, Any]:
         raise NotImplementedError
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
+    def scroll(self, amount: float, x: float | None = None, y: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     def position(self) -> dict[str, Any]:
@@ -44,7 +45,7 @@ class PyAutoGUIMouse(MouseBackend):
 
     def __init__(self) -> None:
         self._gui = None
-        self._error: Optional[str] = None
+        self._error: str | None = None
         try:
             import pyautogui  # type: ignore
 
@@ -70,7 +71,7 @@ class PyAutoGUIMouse(MouseBackend):
         self._gui.click(float(x), float(y), button=button, clicks=int(clicks))
         return {"ok": True, "x": float(x), "y": float(y), "button": button, "clicks": int(clicks)}
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
+    def scroll(self, amount: float, x: float | None = None, y: float | None = None) -> dict[str, Any]:
         self._require()
         if x is not None and y is not None:
             self._gui.scroll(int(amount), float(x), float(y))
@@ -94,13 +95,17 @@ class DryRunMouse(MouseBackend):
 
     name = "dry_run"
 
-    def __init__(self, *, fallback_reason: Optional[str] = None) -> None:
+    def __init__(self, *, fallback_reason: str | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.fallback_reason = fallback_reason
 
     def available(self) -> dict[str, Any]:
-        return {"available": True, "error": None, "note": "dry-run backend; no real pointer control",
-                "fallback_reason": self.fallback_reason}
+        return {
+            "available": True,
+            "error": None,
+            "note": "dry-run backend; no real pointer control",
+            "fallback_reason": self.fallback_reason,
+        }
 
     def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}
@@ -113,7 +118,7 @@ class DryRunMouse(MouseBackend):
     def click(self, x: float, y: float, button: str = "left", clicks: int = 1) -> dict[str, Any]:
         return self._record("click", x=float(x), y=float(y), button=button, clicks=int(clicks))
 
-    def scroll(self, amount: float, x: Optional[float] = None, y: Optional[float] = None) -> dict[str, Any]:
+    def scroll(self, amount: float, x: float | None = None, y: float | None = None) -> dict[str, Any]:
         return self._record("scroll", amount=float(amount), x=x, y=y)
 
     def position(self) -> dict[str, Any]:

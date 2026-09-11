@@ -26,13 +26,15 @@ Guarantees:
 * progress events after every page (JobQueue ctx.emit + canonical EventBus)
 * per-page results are normalized WebResults (bounded), failures recorded
 """
+
 from __future__ import annotations
 
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 from urllib.parse import urldefrag, urlparse
 
 from .models import CrawlProgress, CrawlStatus, WebResult
@@ -103,7 +105,7 @@ def plan_crawl(
     max_depth_ceiling: int = 4,
     max_concurrency_ceiling: int = 8,
     same_site_only: bool = True,
-    extra_domains: Optional[list[str]] = None,
+    extra_domains: list[str] | None = None,
     want_markdown: bool = False,
     strategy: str = "auto",
     allow_fallback: bool = True,
@@ -141,9 +143,16 @@ class CrawlWorker:
     """Executes one validated crawl plan. Sync by design (runs on a JobQueue
     worker thread); concurrency comes from a bounded thread pool."""
 
-    def __init__(self, plan: CrawlPlan, *, router: Any, policy: WebSecurityPolicy,
-                 emit: Optional[EmitFn] = None, should_cancel: Optional[CancelFn] = None,
-                 wall_clock_seconds: float = 600.0):
+    def __init__(
+        self,
+        plan: CrawlPlan,
+        *,
+        router: Any,
+        policy: WebSecurityPolicy,
+        emit: EmitFn | None = None,
+        should_cancel: CancelFn | None = None,
+        wall_clock_seconds: float = 600.0,
+    ):
         self.plan = plan
         self._router = router
         self._policy = policy
@@ -210,18 +219,18 @@ class CrawlWorker:
                     break
                 with self._lock:
                     self.progress.current_url = url
-                thread = threading.Thread(
-                    target=self._fetch_one, args=(url, depth, batch_out), daemon=True)
+                thread = threading.Thread(target=self._fetch_one, args=(url, depth, batch_out), daemon=True)
                 threads.append(thread)
                 thread.start()
             abandoned = self._join_bounded(threads)
             if abandoned:
                 self.timed_out = True
-                failures.append({
-                    "error": f"wall-clock limit reached; {abandoned} in-flight "
-                             "fetch(es) abandoned (not killed)",
-                    "class": "timeout",
-                })
+                failures.append(
+                    {
+                        "error": f"wall-clock limit reached; {abandoned} in-flight fetch(es) abandoned (not killed)",
+                        "class": "timeout",
+                    }
+                )
 
             for url, item in list(batch_out.items()):
                 depth = item["depth"] if isinstance(item, dict) and "depth" in item else 0
@@ -245,14 +254,16 @@ class CrawlWorker:
                                 frontier.append((nxt, depth + 1))
                     else:
                         self.progress.pages_failed += 1
-                        failures.append({
-                            "url": url, "error": result.error[:200],
-                            "class": result.failure_class,
-                        })
+                        failures.append(
+                            {
+                                "url": url,
+                                "error": result.error[:200],
+                                "class": result.failure_class,
+                            }
+                        )
                 else:
                     self.progress.pages_failed += 1
-                    failures.append({"url": url, "error": str(result)[:200],
-                                     "class": "fetch_error"})
+                    failures.append({"url": url, "error": str(result)[:200], "class": "fetch_error"})
 
             # Enqueue discovered links with correct depth (from the page they came from).
             self._emit("crawl.progress", self._progress_dict(started))
@@ -368,9 +379,9 @@ class CrawlWorker:
                 strategy = "static"
                 allow_fallback = False
         try:
-            result = self._router.fetch(url, strategy=strategy,
-                                        want_markdown=self.plan.want_markdown,
-                                        allow_fallback=allow_fallback)
+            result = self._router.fetch(
+                url, strategy=strategy, want_markdown=self.plan.want_markdown, allow_fallback=allow_fallback
+            )
             used_browser = getattr(result, "strategy", "static") in ("dynamic", "stealth")
             if reserved and not used_browser:
                 # AUTO stayed on the cheap path — return the unused slot.
@@ -388,8 +399,7 @@ class CrawlWorker:
     def _reserve_dynamic_slot(self) -> bool:
         """Atomically claim one browser-strategy slot; False when exhausted."""
         with self._lock:
-            if self.plan.max_dynamic_pages and \
-                    self._dynamic_used >= self.plan.max_dynamic_pages:
+            if self.plan.max_dynamic_pages and self._dynamic_used >= self.plan.max_dynamic_pages:
                 return False
             self._dynamic_used += 1
             return True
@@ -407,8 +417,7 @@ class CrawlWorker:
             return False
         if self.plan.same_site_only:
             anchors = [u for u in self.plan.start_urls]
-            if not any(same_site(url, anchor) for anchor in anchors) \
-                    and not self._extra_domain(url):
+            if not any(same_site(url, anchor) for anchor in anchors) and not self._extra_domain(url):
                 return False
         return True
 

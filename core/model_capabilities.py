@@ -28,13 +28,14 @@ Sources, in order of trust:
 Probing is off by default in tests (``HERMUS_CAPABILITY_PROBE=0``) and always
 best-effort: an unreachable endpoint yields ``unknown``, never a crash.
 """
+
 from __future__ import annotations
 
 import os
 import re
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
 
@@ -74,10 +75,10 @@ class CapabilityReport:
     model: str
     provider: str = ""
     name: str = ""
-    reachable: Optional[bool] = None
-    present: Optional[bool] = None
+    reachable: bool | None = None
+    present: bool | None = None
     capabilities: dict[str, str] = field(default_factory=dict)
-    context_tokens: Optional[int] = None
+    context_tokens: int | None = None
     notes: list[str] = field(default_factory=list)
 
     # -- queries --------------------------------------------------------
@@ -87,20 +88,20 @@ class CapabilityReport:
     def has(self, capability: str) -> bool:
         return self.capabilities.get(capability) == YES
 
-    def missing(self, required: Optional[list[str]] = None) -> list[str]:
+    def missing(self, required: list[str] | None = None) -> list[str]:
         """Capabilities that are explicitly *not* available."""
         wanted = list(required or CAPABILITIES)
         return [c for c in wanted if self.capabilities.get(c) == NO]
 
-    def unknown(self, required: Optional[list[str]] = None) -> list[str]:
+    def unknown(self, required: list[str] | None = None) -> list[str]:
         wanted = list(required or CAPABILITIES)
         return [c for c in wanted if self.capabilities.get(c, UNKNOWN) == UNKNOWN]
 
-    def ok_for(self, required: Optional[list[str]] = None) -> bool:
+    def ok_for(self, required: list[str] | None = None) -> bool:
         """True when no *required* capability is known-missing."""
         return not self.missing(required)
 
-    def warnings(self, required: Optional[list[str]] = None) -> list[str]:
+    def warnings(self, required: list[str] | None = None) -> list[str]:
         out: list[str] = []
         for cap in self.missing(required):
             out.append(f"{self.model} does not support {cap} ({CAPABILITY_HELP.get(cap, '')})".strip())
@@ -127,58 +128,207 @@ class CapabilityReport:
 #: curated facts for model families we know about (regex → facts)
 _FAMILY_RULES: list[tuple[str, dict[str, Any]]] = [
     # local / open weights
-    (r"^llama3\.1:8b|^llama-3\.1-8b", {"tools": YES, "vision": NO, "long_context": YES,
-                                       "structured_outputs": UNKNOWN, "streaming": YES,
-                                       "computer_control": NO, "context": 131072}),
-    (r"^llama3\.2:.*(11b|90b)", {"tools": YES, "vision": YES, "long_context": YES,
-                                 "structured_outputs": UNKNOWN, "streaming": YES,
-                                 "computer_control": NO, "context": 131072}),
-    (r"^llama3\.1:70b|^llama-3\.1-70b", {"tools": YES, "vision": NO, "long_context": YES,
-                                         "structured_outputs": UNKNOWN, "streaming": YES,
-                                         "computer_control": NO, "context": 131072}),
-    (r"^llama3|^llama-3", {"tools": UNKNOWN, "vision": NO, "long_context": UNKNOWN,
-                           "structured_outputs": UNKNOWN, "streaming": YES,
-                           "computer_control": NO, "context": 8192}),
-    (r"^qwen2\.5", {"tools": YES, "vision": UNKNOWN, "long_context": YES,
-                    "structured_outputs": YES, "streaming": YES,
-                    "computer_control": NO, "context": 32768}),
-    (r"^mistral|^devstral|^codestral", {"tools": YES, "vision": NO, "long_context": YES,
-                                        "structured_outputs": YES, "streaming": YES,
-                                        "computer_control": NO, "context": 32768}),
-    (r"^deepseek", {"tools": YES, "vision": NO, "long_context": YES,
-                    "structured_outputs": UNKNOWN, "streaming": YES,
-                    "computer_control": NO, "context": 65536}),
-    (r"^gpt-4o", {"tools": YES, "vision": YES, "long_context": YES,
-                  "structured_outputs": YES, "streaming": YES,
-                  "computer_control": NO, "context": 128000}),
-    (r"^gpt-4\.1|^gpt-5", {"tools": YES, "vision": YES, "long_context": YES,
-                           "structured_outputs": YES, "streaming": YES,
-                           "computer_control": UNKNOWN, "context": 128000}),
-    (r"^gpt-oss", {"tools": YES, "vision": NO, "long_context": YES,
-                   "structured_outputs": YES, "streaming": YES,
-                   "computer_control": NO, "context": 131072}),
-    (r"^claude", {"tools": YES, "vision": YES, "long_context": YES,
-                  "structured_outputs": UNKNOWN, "streaming": YES,
-                  "computer_control": YES, "context": 200000}),
-    (r"^gemini", {"tools": YES, "vision": YES, "long_context": YES,
-                  "structured_outputs": YES, "streaming": YES,
-                  "computer_control": NO, "context": 128000}),
-    (r"^nemotron", {"tools": YES, "vision": UNKNOWN, "long_context": YES,
-                    "structured_outputs": UNKNOWN, "streaming": YES,
-                    "computer_control": NO, "context": 131072}),
-    (r"^phi", {"tools": UNKNOWN, "vision": NO, "long_context": UNKNOWN,
-               "structured_outputs": UNKNOWN, "streaming": YES,
-               "computer_control": NO, "context": 4096}),
-    (r"^mock", {"tools": NO, "vision": NO, "long_context": NO,
-                "structured_outputs": NO, "streaming": NO,
-                "computer_control": NO, "context": 0}),
+    (
+        r"^llama3\.1:8b|^llama-3\.1-8b",
+        {
+            "tools": YES,
+            "vision": NO,
+            "long_context": YES,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 131072,
+        },
+    ),
+    (
+        r"^llama3\.2:.*(11b|90b)",
+        {
+            "tools": YES,
+            "vision": YES,
+            "long_context": YES,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 131072,
+        },
+    ),
+    (
+        r"^llama3\.1:70b|^llama-3\.1-70b",
+        {
+            "tools": YES,
+            "vision": NO,
+            "long_context": YES,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 131072,
+        },
+    ),
+    (
+        r"^llama3|^llama-3",
+        {
+            "tools": UNKNOWN,
+            "vision": NO,
+            "long_context": UNKNOWN,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 8192,
+        },
+    ),
+    (
+        r"^qwen2\.5",
+        {
+            "tools": YES,
+            "vision": UNKNOWN,
+            "long_context": YES,
+            "structured_outputs": YES,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 32768,
+        },
+    ),
+    (
+        r"^mistral|^devstral|^codestral",
+        {
+            "tools": YES,
+            "vision": NO,
+            "long_context": YES,
+            "structured_outputs": YES,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 32768,
+        },
+    ),
+    (
+        r"^deepseek",
+        {
+            "tools": YES,
+            "vision": NO,
+            "long_context": YES,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 65536,
+        },
+    ),
+    (
+        r"^gpt-4o",
+        {
+            "tools": YES,
+            "vision": YES,
+            "long_context": YES,
+            "structured_outputs": YES,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 128000,
+        },
+    ),
+    (
+        r"^gpt-4\.1|^gpt-5",
+        {
+            "tools": YES,
+            "vision": YES,
+            "long_context": YES,
+            "structured_outputs": YES,
+            "streaming": YES,
+            "computer_control": UNKNOWN,
+            "context": 128000,
+        },
+    ),
+    (
+        r"^gpt-oss",
+        {
+            "tools": YES,
+            "vision": NO,
+            "long_context": YES,
+            "structured_outputs": YES,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 131072,
+        },
+    ),
+    (
+        r"^claude",
+        {
+            "tools": YES,
+            "vision": YES,
+            "long_context": YES,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": YES,
+            "context": 200000,
+        },
+    ),
+    (
+        r"^gemini",
+        {
+            "tools": YES,
+            "vision": YES,
+            "long_context": YES,
+            "structured_outputs": YES,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 128000,
+        },
+    ),
+    (
+        r"^nemotron",
+        {
+            "tools": YES,
+            "vision": UNKNOWN,
+            "long_context": YES,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 131072,
+        },
+    ),
+    (
+        r"^phi",
+        {
+            "tools": UNKNOWN,
+            "vision": NO,
+            "long_context": UNKNOWN,
+            "structured_outputs": UNKNOWN,
+            "streaming": YES,
+            "computer_control": NO,
+            "context": 4096,
+        },
+    ),
+    (
+        r"^mock",
+        {
+            "tools": NO,
+            "vision": NO,
+            "long_context": NO,
+            "structured_outputs": NO,
+            "streaming": NO,
+            "computer_control": NO,
+            "context": 0,
+        },
+    ),
 ]
 
 #: providers whose models we treat as tool-capable unless stated otherwise
 _TOOL_CAPABLE_PROVIDERS = {
-    "openai", "groq", "openrouter", "together", "fireworks", "deepseek",
-    "mistral", "codestral", "nvidia", "ollama", "lmstudio", "vllm", "azure",
-    "cohere", "cerebras", "sambanova", "xai",
+    "openai",
+    "groq",
+    "openrouter",
+    "together",
+    "fireworks",
+    "deepseek",
+    "mistral",
+    "codestral",
+    "nvidia",
+    "ollama",
+    "lmstudio",
+    "vllm",
+    "azure",
+    "cohere",
+    "cerebras",
+    "sambanova",
+    "xai",
 }
 
 #: providers known to reject tool calls (check preset ``supports_tools`` first)
@@ -211,7 +361,7 @@ def _provider_preset(provider: str) -> dict[str, Any]:
         return {}
 
 
-def _probe_http(url: str, timeout: float = 2.0) -> Optional[str]:
+def _probe_http(url: str, timeout: float = 2.0) -> str | None:
     """GET a URL; returns the body or ``None``. Never raises."""
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -221,13 +371,9 @@ def _probe_http(url: str, timeout: float = 2.0) -> Optional[str]:
         return None
 
 
-def probe_ollama(model_name: str, *, timeout: float = 2.0) -> tuple[Optional[bool], Optional[bool]]:
+def probe_ollama(model_name: str, *, timeout: float = 2.0) -> tuple[bool | None, bool | None]:
     """Return ``(reachable, model_present)`` for a local Ollama server."""
-    base = (
-        os.getenv("OLLAMA_HOST")
-        or str(getattr(config, "ollama_base_url", "") or "")
-        or "http://localhost:11434"
-    ).rstrip("/")
+    base = (os.getenv("OLLAMA_HOST") or str(getattr(config, "ollama_base_url", "") or "") or "http://localhost:11434").rstrip("/")
     body = _probe_http(f"{base}/api/tags", timeout=timeout)
     if body is None:
         return False, None
@@ -248,7 +394,7 @@ def probe_ollama(model_name: str, *, timeout: float = 2.0) -> tuple[Optional[boo
     return True, present
 
 
-def negotiate(model: str, *, probe: Optional[bool] = None) -> CapabilityReport:
+def negotiate(model: str, *, probe: bool | None = None) -> CapabilityReport:
     """Build the capability report for ``model`` (``provider/name``)."""
     model = str(model or "").strip() or str(getattr(config, "model", "") or "ollama/llama3.1:8b")
     provider, name = _split_model(model)
@@ -264,12 +410,21 @@ def negotiate(model: str, *, probe: Optional[bool] = None) -> CapabilityReport:
     elif provider in _TOOL_CAPABLE_PROVIDERS:
         caps["tools"] = YES
     caps["streaming"] = YES if preset.get("supports_tools", True) else UNKNOWN
-    caps["structured_outputs"] = YES if provider in (
-        "openai", "groq", "openrouter", "mistral", "fireworks", "together", "gemini",
-    ) else UNKNOWN
-    caps["computer_control"] = YES if provider in ("anthropic", "openai") else (
-        NO if provider == "ollama" else UNKNOWN
+    caps["structured_outputs"] = (
+        YES
+        if provider
+        in (
+            "openai",
+            "groq",
+            "openrouter",
+            "mistral",
+            "fireworks",
+            "together",
+            "gemini",
+        )
+        else UNKNOWN
     )
+    caps["computer_control"] = YES if provider in ("anthropic", "openai") else (NO if provider == "ollama" else UNKNOWN)
 
     # 2. model-family facts (more specific than the provider)
     low = name.lower()
@@ -333,12 +488,12 @@ AUTO_SELECT_CANDIDATES: tuple[str, ...] = (
 
 
 def select_compatible_model(
-    required: Optional[list[str]] = None,
+    required: list[str] | None = None,
     *,
-    candidates: Optional[list[str]] = None,
+    candidates: list[str] | None = None,
     prefer_current: bool = True,
-    probe: Optional[bool] = None,
-) -> tuple[Optional[str], dict[str, Any]]:
+    probe: bool | None = None,
+) -> tuple[str | None, dict[str, Any]]:
     """Pick the first candidate that satisfies ``required`` capabilities.
 
     Returns ``(model_or_None, {"reports": [...], "required": [...]})``. The
@@ -375,9 +530,9 @@ def select_compatible_model(
     pool.extend([c for c in (candidates or AUTO_SELECT_CANDIDATES) if c not in pool])
 
     reports: list[dict[str, Any]] = []
-    fallback: Optional[str] = None
-    best: Optional[str] = None
-    best_unknown: Optional[str] = None
+    fallback: str | None = None
+    best: str | None = None
+    best_unknown: str | None = None
     for idx, cand in enumerate(pool):
         if not cand:
             continue
@@ -408,11 +563,21 @@ def select_compatible_model(
             fallback = cand
 
     if best is not None:
-        return best[1], {"required": required, "reports": reports,
-                         "selected": best[1], "reason": "preferred capability-compatible model"}
-    return (best_unknown or fallback, {"required": required, "reports": reports,
-                                       "selected": best_unknown or fallback,
-                                       "reason": "no model with confirmed capabilities; using best unknown"})
+        return best[1], {
+            "required": required,
+            "reports": reports,
+            "selected": best[1],
+            "reason": "preferred capability-compatible model",
+        }
+    return (
+        best_unknown or fallback,
+        {
+            "required": required,
+            "reports": reports,
+            "selected": best_unknown or fallback,
+            "reason": "no model with confirmed capabilities; using best unknown",
+        },
+    )
 
 
 def mission_capability_gate(
@@ -420,7 +585,7 @@ def mission_capability_gate(
     *,
     needs_computer: bool = False,
     needs_vision: bool = False,
-    auto_select: Optional[bool] = None,
+    auto_select: bool | None = None,
 ) -> dict[str, Any]:
     """Pre-flight check used by the mission runtime and the gateway.
 

@@ -1,4 +1,5 @@
 """Approved-workspace filesystem connector."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,12 +30,14 @@ class FilesystemConnector(Connector):
                 if item.name.startswith(".") or item.name in {"__pycache__", "node_modules"}:
                     continue
                 files.append({"name": item.name, "kind": "directory" if item.is_dir() else "file"})
-            return [{
-                "subject": "filesystem",
-                "predicate": "workspace_entries",
-                "value": {"root": str(self.root), "entries": files},
-                "permission_scope": "filesystem.read",
-            }]
+            return [
+                {
+                    "subject": "filesystem",
+                    "predicate": "workspace_entries",
+                    "value": {"root": str(self.root), "entries": files},
+                    "permission_scope": "filesystem.read",
+                }
+            ]
         except OSError as exc:
             self.last_status = ConnectorStatus(self.name, "degraded", str(exc)[:200], capabilities=list(self.capabilities))
             return []

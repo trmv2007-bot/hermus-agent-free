@@ -3,6 +3,7 @@
 Minimal MCP echo server (stdio JSON-RPC) for testing Hermus MCP client.
 No external deps. Enable via: hermus mcp add --name echo --command python3 --arg tools/mcp_echo_server.py
 """
+
 import json
 import sys
 

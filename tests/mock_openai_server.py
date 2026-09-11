@@ -1,4 +1,5 @@
 """Tiny OpenAI-compatible mock server for testing custom base URLs."""
+
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,13 +21,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.endswith("/models") or "/models" in self.path:
-            self._send_json({
-                "object": "list",
-                "data": [
-                    {"id": "test-model", "object": "model"},
-                    {"id": "test-model-2", "object": "model"},
-                ],
-            })
+            self._send_json(
+                {
+                    "object": "list",
+                    "data": [
+                        {"id": "test-model", "object": "model"},
+                        {"id": "test-model-2", "object": "model"},
+                    ],
+                }
+            )
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -38,23 +41,29 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {"raw": raw.decode(errors="replace")}
         auth = self.headers.get("Authorization", "")
-        LOGS.append({
-            "path": self.path,
-            "auth": auth,
-            "model": body.get("model"),
-            "has_tools": "tools" in body,
-        })
-        self._send_json({
-            "id": "chatcmpl-test",
-            "object": "chat.completion",
-            "model": body.get("model", "test-model"),
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": f"MOCK REPLY from {body.get('model')} via {self.path}"},
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
-        })
+        LOGS.append(
+            {
+                "path": self.path,
+                "auth": auth,
+                "model": body.get("model"),
+                "has_tools": "tools" in body,
+            }
+        )
+        self._send_json(
+            {
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "model": body.get("model", "test-model"),
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"MOCK REPLY from {body.get('model')} via {self.path}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
+            }
+        )
 
 
 def serve(port=9999):
@@ -68,6 +77,7 @@ if __name__ == "__main__":
     srv = serve()
     print("mock server on 127.0.0.1:9999")
     import time
+
     try:
         while True:
             time.sleep(1)

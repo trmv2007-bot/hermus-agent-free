@@ -7,9 +7,9 @@ retry, and a mission can stop as ``BLOCKED`` (never a silent success).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class MissionState(str, Enum):
@@ -57,14 +57,15 @@ class MissionReportHeader:
     mission_id: str
     goal: str
     state: str
-    result: Optional[str] = None
+    result: str | None = None
     evidence_refs: list[str] = field(default_factory=list)
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
+    error_code: str | None = None
+    error_message: str | None = None
     resumable: bool = False
     changed_files: list[str] = field(default_factory=list)
 
 
 def _fields(cls):
     import dataclasses
+
     return dataclasses.fields(cls)

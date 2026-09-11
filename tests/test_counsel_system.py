@@ -3,6 +3,7 @@
 Uses ONLY the free mock model (mock/mock) so it runs offline with zero API keys.
 Run:  python tests/test_counsel_system.py
 """
+
 import sys
 from pathlib import Path
 
@@ -20,9 +21,12 @@ def test_governor_difficulty():
 
     assert governor.classify_difficulty("hi") == 1
     assert governor.classify_difficulty("what is python?") == 1
-    assert governor.classify_difficulty(
-        "Research, analyze and compare the top three free vector databases, then recommend one with a detailed plan and security review."
-    ) >= 4
+    assert (
+        governor.classify_difficulty(
+            "Research, analyze and compare the top three free vector databases, then recommend one with a detailed plan and security review."
+        )
+        >= 4
+    )
     assert 1 <= governor.classify_difficulty("x" * 500) <= 5
     # council config sanity
     cc = governor.council_config(
@@ -53,8 +57,6 @@ def test_plan_scaffold():
 
 
 def test_constitution_self_upgrade():
-    from core.counsel.constitution import ConstitutionManager
-
     # Idempotent test: wipe pending amendments + snapshots, force-reset to v1
     from core.counsel.constitution import DEFAULT_CONSTITUTION, ConstitutionManager
 
@@ -121,15 +123,24 @@ def test_council_session_runs():
     sess_path = config.resolve_path(f"data/counsel/sessions/{result['session_id']}.json")
     trans_path = config.resolve_path(f"data/counsel/transcripts/{result['session_id']}.jsonl")
     assert sess_path.exists() and trans_path.exists()
-    print(f"✅ Council session: {len(result['members'])} members, {result['transcript_turns']} turns, "
-          f"plan={len(result['plan']['steps'])} steps")
+    print(
+        f"✅ Council session: {len(result['members'])} members, {result['transcript_turns']} turns, "
+        f"plan={len(result['plan']['steps'])} steps"
+    )
 
 
 def test_council_execution_with_tools():
     from core.counsel.council import CouncilSession
 
     # Short goal so execution stays tiny; mock executor does no real tools
-    cs = CouncilSession("Plan and execute a quick two-step task: list two python libraries for web scraping.", model="mock/mock", difficulty=3, max_members=3, max_rounds=1, execute=True)
+    cs = CouncilSession(
+        "Plan and execute a quick two-step task: list two python libraries for web scraping.",
+        model="mock/mock",
+        difficulty=3,
+        max_members=3,
+        max_rounds=1,
+        execute=True,
+    )
     result = cs.run()
     assert result.get("final_answer")
     assert result.get("plan")
@@ -224,11 +235,11 @@ def test_council_executor_gets_a_tool_subset_not_the_full_catalog(monkeypatch):
 
     monkeypatch.setattr(FreeLLM, "chat", fake_chat)
 
-    cs = CouncilSession("List two python libraries for web scraping.", model="mock/mock",
-                        difficulty=3, max_members=2, max_rounds=1, execute=True)
+    cs = CouncilSession(
+        "List two python libraries for web scraping.", model="mock/mock", difficulty=3, max_members=2, max_rounds=1, execute=True
+    )
     cs.run()
 
     executor_calls = [n for n in seen if n > 0]
     assert executor_calls, "the executor never called the model with tools"
-    assert min(executor_calls) < full, \
-        f"executor was handed the full catalog: {executor_calls} vs {full} registered"
+    assert min(executor_calls) < full, f"executor was handed the full catalog: {executor_calls} vs {full} registered"

@@ -10,15 +10,18 @@ rest of Hermus rather than becoming special-cased globs.
 Discovery is lazy and every plugin is loaded in an isolated exception guard, so
 one broken plugin cannot take down the gateway.
 """
+
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
-import builtins
+from typing import Any
+
+from ..errors import HermusError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SEARCH_DIRS = ("core/plugins", "plugins")
@@ -28,14 +31,17 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-class PluginError(Exception):
-    pass
+class PluginError(HermusError):
+    """A plugin failed to load or execute."""
+
+    code = "plugin_error"
+    status = 500
 
 
 class PluginAPI:
     """Surface given to a plugin's ``register(api)`` call."""
 
-    def __init__(self, plugin_name: str, registry: "PluginRegistry"):
+    def __init__(self, plugin_name: str, registry: PluginRegistry):
         self._name = plugin_name
         self._registry = registry
 
@@ -48,15 +54,15 @@ class PluginAPI:
         name: str,
         fn: Callable[..., Any],
         description: str = "",
-        params: Optional[dict[str, Any]] = None,
-        required: Optional[list[str]] = None,
+        params: dict[str, Any] | None = None,
+        required: list[str] | None = None,
     ) -> None:
         self._registry.register_tool(self._name, name, fn, description, params or {}, required or [])
 
     def subscribe(self, event_type: str, handler: Callable[[dict[str, Any]], None]) -> None:
         self._registry.subscribe(self._name, event_type, handler)
 
-    def publish(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+    def publish(self, event_type: str, data: dict[str, Any] | None = None) -> None:
         self._registry.publish(self._name, event_type, data)
 
     def log(self, message: str) -> None:
@@ -64,7 +70,7 @@ class PluginAPI:
 
 
 class PluginRegistry:
-    def __init__(self, search_dirs: Optional[builtins.list[str]] = None):
+    def __init__(self, search_dirs: builtins.list[str] | None = None):
         self._lock = None  # lazy; replaced on first use
         self._search_dirs = list(search_dirs or DEFAULT_SEARCH_DIRS)
         self._plugins: dict[str, dict[str, Any]] = {}
@@ -149,12 +155,20 @@ class PluginRegistry:
         return module
 
     # -- registration ---------------------------------------------------
-    def register_tool(self, plugin: str, name: str, fn: Callable[..., Any],
-                      description: str = "", params: Optional[dict[str, Any]] = None,
-                      required: Optional[builtins.list[str]] = None) -> None:
+    def register_tool(
+        self,
+        plugin: str,
+        name: str,
+        fn: Callable[..., Any],
+        description: str = "",
+        params: dict[str, Any] | None = None,
+        required: builtins.list[str] | None = None,
+    ) -> None:
         with self._sync():
             self._tools[name] = {
-                "name": name, "plugin": plugin, "fn": fn,
+                "name": name,
+                "plugin": plugin,
+                "fn": fn,
                 "description": description,
                 "params": dict(params or {}),
                 "required": list(required or []),
@@ -165,7 +179,7 @@ class PluginRegistry:
         with self._sync():
             self._event_handlers.setdefault(event_type, []).append(handler)
 
-    def publish(self, plugin: str, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+    def publish(self, plugin: str, event_type: str, data: dict[str, Any] | None = None) -> None:
         try:
             from ..computer.events import publish as bus_publish
 
@@ -183,8 +197,7 @@ class PluginRegistry:
             self._tools.pop(key, None)
         for event_type in list(self._event_handlers.keys()):
             self._event_handlers[event_type] = [
-                h for h in self._event_handlers[event_type]
-                if getattr(h, "__plugin__", None) != plugin
+                h for h in self._event_handlers[event_type] if getattr(h, "__plugin__", None) != plugin
             ]
 
     def _tools_for_plugin(self, plugin: str) -> builtins.list[str]:
@@ -219,7 +232,7 @@ class PluginRegistry:
 
     def logs(self, limit: int = 50) -> builtins.list[dict[str, str]]:
         with self._sync():
-            return list(self._logs)[-max(1, int(limit)):]
+            return list(self._logs)[-max(1, int(limit)) :]
 
 
 plugin_registry = PluginRegistry()

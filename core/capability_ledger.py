@@ -4,14 +4,15 @@ Hermus may document powers it has, lacks, or discovers it could gain. This modul
 updates the human-readable ``CAPABILITY_LEDGER.md`` through a narrow API instead
 of letting arbitrary file writes modify the ledger.
 """
+
 from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DISCOVERED_HEADER = "## Discovered possible powers"
@@ -50,7 +51,7 @@ class CapabilityEntry:
         needed_approval_setup: str = "",
         status: str = "not_granted",
         source: str = "user",
-    ) -> "CapabilityEntry":
+    ) -> CapabilityEntry:
         return cls(
             power=_clean_cell(power),
             use=_clean_cell(use),
@@ -65,10 +66,7 @@ class CapabilityEntry:
         return asdict(self)
 
     def table_row(self) -> str:
-        return (
-            f"| {self.power} | {self.use} | {self.risk} | "
-            f"{self.needed_approval_setup} | {self.status} |"
-        )
+        return f"| {self.power} | {self.use} | {self.risk} | {self.needed_approval_setup} | {self.status} |"
 
 
 @dataclass(frozen=True)
@@ -96,7 +94,7 @@ class CapabilityProposal:
 
 Generated: {self.created_at}
 Category: {self.category}
-Related red lines: {', '.join(str(x) for x in self.red_lines) or 'none'}
+Related red lines: {", ".join(str(x) for x in self.red_lines) or "none"}
 
 ## Summary
 
@@ -135,7 +133,7 @@ approval, audit logging, and revocation controls.
 
 
 class CapabilityLedger:
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(self, path: Path | None = None):
         self.path = Path(path) if path is not None else _default_ledger_path()
 
     def read(self) -> str:
@@ -150,10 +148,15 @@ class CapabilityLedger:
                 continue
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if len(cells) >= 5:
-                entries.append({
-                    "power": cells[0], "use": cells[1], "risk": cells[2],
-                    "needed_approval_setup": cells[3], "status": cells[4],
-                })
+                entries.append(
+                    {
+                        "power": cells[0],
+                        "use": cells[1],
+                        "risk": cells[2],
+                        "needed_approval_setup": cells[3],
+                        "status": cells[4],
+                    }
+                )
         return entries
 
     def add_discovered(self, entry: CapabilityEntry) -> dict[str, Any]:
@@ -189,7 +192,7 @@ class CapabilityLedger:
         entry = capability_entry_from_blocked_action(tool, args or {}, safety or {}, reason=reason, source=source)
         return self.add_discovered(entry)
 
-    def propose(self, power: str, *, write: bool = False, output_dir: Optional[Path] = None) -> dict[str, Any]:
+    def propose(self, power: str, *, write: bool = False, output_dir: Path | None = None) -> dict[str, Any]:
         """Generate a safe setup proposal for a missing/not-granted power."""
         proposal = capability_setup_proposal(power)
         markdown = proposal.to_markdown()
@@ -208,13 +211,16 @@ class CapabilityLedger:
 
     def _audit(self, action: str, data: dict[str, Any]) -> None:
         try:
-            from .workspace import workspace
             import json
+
+            from .workspace import workspace
 
             path = workspace.dirs["logs"] / "capability_ledger.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(), "action": action, **data}, sort_keys=True) + "\n")
+                stream.write(
+                    json.dumps({"ts": datetime.now(timezone.utc).isoformat(), "action": action, **data}, sort_keys=True) + "\n"
+                )
         except Exception:
             pass
 
@@ -223,20 +229,22 @@ class CapabilityLedger:
             from .contracts import Actor, CommandSource, CommandStatus, EventEnvelope, EventType
             from .events import get_bus
 
-            get_bus().publish(EventEnvelope(
-                actor=Actor.SYSTEM.value,
-                source=CommandSource.INTERNAL.value,
-                type=EventType.STATE_CHANGED.value,
-                command=command,
-                target=data.get("power"),
-                args_redacted=data,
-                status=CommandStatus.SUCCEEDED.value,
-            ))
+            get_bus().publish(
+                EventEnvelope(
+                    actor=Actor.SYSTEM.value,
+                    source=CommandSource.INTERNAL.value,
+                    type=EventType.STATE_CHANGED.value,
+                    command=command,
+                    target=data.get("power"),
+                    args_redacted=data,
+                    status=CommandStatus.SUCCEEDED.value,
+                )
+            )
         except Exception:
             pass
 
 
-def get_capability_ledger(path: Optional[Path] = None) -> CapabilityLedger:
+def get_capability_ledger(path: Path | None = None) -> CapabilityLedger:
     return CapabilityLedger(path) if path is not None else CapabilityLedger()
 
 
@@ -253,14 +261,26 @@ def capability_setup_proposal(power: str) -> CapabilityProposal:
         "Expose status/health in the Control Room without fabricating readiness",
         "Add tests for allowed, approval-required, denied, and emergency-stop behavior",
     ]
-    files = ["core/connectors/", "tools/", "core/permissions.py", "gateway/routes_subsystems.py", "gateway/control.html", "tests/"]
+    files = [
+        "core/connectors/",
+        "tools/",
+        "core/permissions.py",
+        "gateway/routes_subsystems.py",
+        "gateway/control.html",
+        "tests/",
+    ]
     tests = [
         "unit tests for connector/tool registration",
         "permission tests for green/yellow/red cases",
         "dashboard/API route tests",
         "emergency-stop regression test",
     ]
-    gates = ["no connector enabled by import", "all external effects require scoped grant", "audit/event entries emitted", "revocation path documented"]
+    gates = [
+        "no connector enabled by import",
+        "all external effects require scoped grant",
+        "audit/event entries emitted",
+        "revocation path documented",
+    ]
     risks = ["scope creep", "private data exposure", "unclear ownership of external resources"]
 
     if any(word in lowered for word in ("gmail", "email", "message", "telegram", "discord", "slack", "send", "reply")):
@@ -279,40 +299,124 @@ def capability_setup_proposal(power: str) -> CapabilityProposal:
             "Log recipient, channel, subject/summary, and result without storing secrets",
             "Add Control Room approval UX for drafts and sends",
         ]
-        files = ["core/connectors/", "tools/", "gateway/routes_subsystems.py", "gateway/control.html", "tests/test_*communication*.py"]
-        tests = ["draft is green/read-only", "send without grant creates pending approval", "abusive impersonation/social-engineering wording is denied", "emergency stop blocks sends"]
+        files = [
+            "core/connectors/",
+            "tools/",
+            "gateway/routes_subsystems.py",
+            "gateway/control.html",
+            "tests/test_*communication*.py",
+        ]
+        tests = [
+            "draft is green/read-only",
+            "send without grant creates pending approval",
+            "abusive impersonation/social-engineering wording is denied",
+            "emergency stop blocks sends",
+        ]
         risks = ["privacy leak", "reputation damage", "unwanted commitments", "abusive impersonation"]
     elif any(word in lowered for word in ("wallet", "stock", "trade", "trading", "crypto", "invest", "money", "spend")):
         category = "agent_wallet_finance"
         red_lines = [4, 6, 11]
-        approvals = ["Isolated agent-owned wallet/account only", "Visible ledger", "Minimum reserve", "Risk limits", "Owner-share policy", "Emergency freeze"]
-        plan = ["Create wallet/account abstraction", "Implement append-only transaction ledger", "Add reserve/risk-limit checks before actions", "Separate quote/plan from execute", "Expose freeze/resume controls in dashboard"]
-        files = ["core/wallet.py", "core/permissions.py", "gateway/routes_subsystems.py", "gateway/control.html", "tests/test_wallet*.py"]
-        tests = ["cannot use personal bank/card", "cannot exceed reserve/risk limits", "market manipulation patterns denied", "emergency stop freezes actions"]
+        approvals = [
+            "Isolated agent-owned wallet/account only",
+            "Visible ledger",
+            "Minimum reserve",
+            "Risk limits",
+            "Owner-share policy",
+            "Emergency freeze",
+        ]
+        plan = [
+            "Create wallet/account abstraction",
+            "Implement append-only transaction ledger",
+            "Add reserve/risk-limit checks before actions",
+            "Separate quote/plan from execute",
+            "Expose freeze/resume controls in dashboard",
+        ]
+        files = [
+            "core/wallet.py",
+            "core/permissions.py",
+            "gateway/routes_subsystems.py",
+            "gateway/control.html",
+            "tests/test_wallet*.py",
+        ]
+        tests = [
+            "cannot use personal bank/card",
+            "cannot exceed reserve/risk limits",
+            "market manipulation patterns denied",
+            "emergency stop freezes actions",
+        ]
         risks = ["financial loss", "compliance/tax issues", "market manipulation", "hidden transactions"]
     elif any(word in lowered for word in ("scan", "network", "pentest", "security", "scrape", "incident")):
         category = "authorized_security_reach"
         red_lines = [4, 8, 11]
-        approvals = ["Owned/administered/explicitly-authorized target scope", "Time-boxed scan window", "Allowed techniques", "No persistence/exfiltration"]
-        plan = ["Create target-scope declaration model", "Gate scanners/scrapers through scope checks", "Log target/range/tool/purpose", "Add report-only default mode", "Expose active scope in dashboard"]
+        approvals = [
+            "Owned/administered/explicitly-authorized target scope",
+            "Time-boxed scan window",
+            "Allowed techniques",
+            "No persistence/exfiltration",
+        ]
+        plan = [
+            "Create target-scope declaration model",
+            "Gate scanners/scrapers through scope checks",
+            "Log target/range/tool/purpose",
+            "Add report-only default mode",
+            "Expose active scope in dashboard",
+        ]
         files = ["pentest/", "core/permissions.py", "core/safety_policy.py", "gateway/control.html", "tests/test_*scope*.py"]
-        tests = ["out-of-scope target denied", "in-scope target requires/uses grant", "random internet scan is blocked", "reports contain evidence and scope"]
+        tests = [
+            "out-of-scope target denied",
+            "in-scope target requires/uses grant",
+            "random internet scan is blocked",
+            "reports contain evidence and scope",
+        ]
         risks = ["unauthorized scanning", "third-party impact", "false positives", "sensitive findings exposure"]
     elif any(word in lowered for word in ("home", "folder", "file", "directory", "downloads", "documents")):
         category = "private_data_scope"
         red_lines = [3, 5, 11]
         approvals = ["Exact folders/resources", "Purpose", "Read-only vs write/delete", "TTL/use limit", "Output destination"]
-        plan = ["Create scoped filesystem grant templates", "Default broad scans to read-only", "Add report generation without exfiltration", "Require checkpoint before destructive actions", "Show scan scope in Control Room"]
+        plan = [
+            "Create scoped filesystem grant templates",
+            "Default broad scans to read-only",
+            "Add report generation without exfiltration",
+            "Require checkpoint before destructive actions",
+            "Show scan scope in Control Room",
+        ]
         files = ["tools/file_tools.py", "core/permissions.py", "gateway/control.html", "tests/test_*filesystem*.py"]
-        tests = ["broad folder scan creates approval prompt", "scope-limited scan allowed", "delete requires recovery path", "outside-scope path denied"]
+        tests = [
+            "broad folder scan creates approval prompt",
+            "scope-limited scan allowed",
+            "delete requires recovery path",
+            "outside-scope path denied",
+        ]
         risks = ["private data exposure", "accidental deletion", "over-broad indexing"]
     elif any(word in lowered for word in ("tool", "connector", "api", "calendar", "github", "cloud", "home assistant")):
         category = "connector_or_tool"
         red_lines = [3, 8, 11]
-        approvals = ["Connector account/resource owner approval", "Credential storage plan", "Permission scopes", "Revocation path"]
-        plan = ["Add disabled connector registration", "Expose status without network calls on import", "Add named read/write actions", "Gate write/high-impact actions", "Document setup in capability ledger"]
-        files = ["core/connectors/", "tools/", "core/tool_registry.py", "gateway/routes_subsystems.py", "tests/test_connectors.py"]
-        tests = ["connector disabled by default", "status works without credentials", "write action requires grant", "revocation disables actions"]
+        approvals = [
+            "Connector account/resource owner approval",
+            "Credential storage plan",
+            "Permission scopes",
+            "Revocation path",
+        ]
+        plan = [
+            "Add disabled connector registration",
+            "Expose status without network calls on import",
+            "Add named read/write actions",
+            "Gate write/high-impact actions",
+            "Document setup in capability ledger",
+        ]
+        files = [
+            "core/connectors/",
+            "tools/",
+            "core/tool_registry.py",
+            "gateway/routes_subsystems.py",
+            "tests/test_connectors.py",
+        ]
+        tests = [
+            "connector disabled by default",
+            "status works without credentials",
+            "write action requires grant",
+            "revocation disables actions",
+        ]
         risks = ["credential misuse", "over-broad account scope", "unexpected external effects"]
 
     return CapabilityProposal(
@@ -424,7 +528,7 @@ def _section(text: str, header: str) -> str:
     start = text.find(header)
     if start < 0:
         return ""
-    rest = text[start + len(header):]
+    rest = text[start + len(header) :]
     next_header = rest.find("\n## ")
     return rest if next_header < 0 else rest[:next_header]
 

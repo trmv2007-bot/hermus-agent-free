@@ -7,9 +7,9 @@ Model name keywords are only one score feature, never proof of capability.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict, fields as _fields
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class Capability(str, Enum):
@@ -30,17 +30,17 @@ class FailureClass(str, Enum):
     ``model_unavailable``, ``timeout``, ``capability_mismatch``.
     """
 
-    RATE_LIMIT = "rate_limit"            # 429
-    AUTH = "auth"                        # 401/403
+    RATE_LIMIT = "rate_limit"  # 429
+    AUTH = "auth"  # 401/403
     TIMEOUT = "timeout"
     INVALID_MODEL = "invalid_model"
     TOOL_UNSUPPORTED = "tool_unsupported"
     CONTEXT_OVERFLOW = "context_overflow"
     POLICY_DENIED = "policy_denied"
     NETWORK = "network"
-    PROVIDER_UNAVAILABLE = "provider_unavailable"   # provider down/refused
-    MODEL_UNAVAILABLE = "model_unavailable"          # model not deployed/known
-    CAPABILITY_MISMATCH = "capability_mismatch"      # model can't satisfy a requirement
+    PROVIDER_UNAVAILABLE = "provider_unavailable"  # provider down/refused
+    MODEL_UNAVAILABLE = "model_unavailable"  # model not deployed/known
+    CAPABILITY_MISMATCH = "capability_mismatch"  # model can't satisfy a requirement
     UNKNOWN = "unknown"
 
 
@@ -74,8 +74,8 @@ class ModelSelection:
     reason: str = ""
     tool_capable: bool = False
     vision_capable: bool = False
-    base_url: Optional[str] = None
-    api_key_ref: Optional[str] = None
+    base_url: str | None = None
+    api_key_ref: str | None = None
     free: bool = False
 
 
@@ -86,19 +86,19 @@ class ModelGatewayResult:
     provider: str
     model: str
     ok: bool
-    failure_class: Optional[str] = None
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    prompt_tokens: Optional[int] = None
-    completion_tokens: Optional[int] = None
-    latency_ms: Optional[int] = None
-    rate_state: Optional[dict[str, Any]] = None
+    failure_class: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    latency_ms: int | None = None
+    rate_state: dict[str, Any] | None = None
     used_fallback: bool = False
-    fallback_reason: Optional[str] = None
-    content: Optional[str] = None
-    tool_calls: Optional[list[dict[str, Any]]] = None
+    fallback_reason: str | None = None
+    content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
     retryable: bool = False
-    trace_id: Optional[str] = None
+    trace_id: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

@@ -5,15 +5,16 @@ across runs: reliability, durations, visual states, known failures, and repairs
 that resolved those failures.  This lets the planner prefer proven skills and
 the repair system reuse evidence instead of replaying raw clicks.
 """
+
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Iterable
+from typing import Any
 
 
 def _now() -> str:
@@ -45,10 +46,14 @@ def _aggregate_repairs(values: Iterable[dict[str, Any]], limit: int = 50) -> lis
         action = value.get("action") or value.get("action_spec") or {}
         if isinstance(action, dict) and isinstance(action.get("action_spec"), dict):
             action = action["action_spec"]
-        signature = json.dumps({
-            "failure": value.get("failure") or value.get("diagnosis") or value.get("repair_for"),
-            "action": action,
-        }, sort_keys=True, default=str)
+        signature = json.dumps(
+            {
+                "failure": value.get("failure") or value.get("diagnosis") or value.get("repair_for"),
+                "action": action,
+            },
+            sort_keys=True,
+            default=str,
+        )
         success = bool(value.get("success", value.get("outcome") == "success"))
         runs = max(1, int(value.get("runs", 1) or 1))
         successes = int(value.get("successes", runs if success else 0) or 0)
@@ -86,7 +91,7 @@ class ComputerSkill:
     updated: str = field(default_factory=_now)
     uses: int = 0
 
-    def normalize(self) -> "ComputerSkill":
+    def normalize(self) -> ComputerSkill:
         self.runs = max(0, int(self.runs))
         self.successes = max(0, int(self.successes))
         self.failures = max(0, int(self.failures))
@@ -112,7 +117,7 @@ class ComputerSkill:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ComputerSkill":
+    def from_dict(cls, data: dict[str, Any]) -> ComputerSkill:
         runs = int(data.get("runs", data.get("uses", 0)) or 0)
         rate = float(data.get("success_rate", 0.0 if runs else 1.0))
         successes = int(data.get("successes", round(rate * runs)) or 0)
@@ -137,7 +142,7 @@ class ComputerSkill:
         )
         return skill.normalize()
 
-    def known_repair(self, failure: str) -> Optional[dict[str, Any]]:
+    def known_repair(self, failure: str) -> dict[str, Any] | None:
         words = set(re.findall(r"[a-z0-9]+", str(failure).lower()))
         ranked: list[tuple[int, float, dict[str, Any]]] = []
         for repair in self.repairs:
@@ -196,11 +201,11 @@ class ComputerSkillStore:
         self,
         task: str,
         procedure: list[dict[str, Any]],
-        evidence: Optional[dict[str, Any]] = None,
-        name: Optional[str] = None,
-        duration: Optional[float] = None,
-        repairs: Optional[list[dict[str, Any]]] = None,
-        visual_states: Optional[list[str]] = None,
+        evidence: dict[str, Any] | None = None,
+        name: str | None = None,
+        duration: float | None = None,
+        repairs: list[dict[str, Any]] | None = None,
+        visual_states: list[str] | None = None,
         record_success: bool = True,
     ) -> dict[str, Any]:
         """Create or refresh a skill and record the successful source run."""
@@ -230,26 +235,28 @@ class ComputerSkillStore:
         for path in sorted(self.root.glob("*.json")):
             try:
                 skill = ComputerSkill.from_dict(json.loads(path.read_text(encoding="utf-8")))
-                skills.append({
-                    "name": skill.name,
-                    "task": skill.task,
-                    "steps": len(skill.procedure),
-                    "created": skill.created,
-                    "updated": skill.updated,
-                    "uses": skill.uses,
-                    "runs": skill.runs,
-                    "successes": skill.successes,
-                    "failures": skill.failures,
-                    "success_rate": skill.success_rate,
-                    "average_duration": skill.average_duration,
-                    "known_failures": len(skill.typical_failures),
-                    "known_repairs": len(skill.repairs),
-                })
+                skills.append(
+                    {
+                        "name": skill.name,
+                        "task": skill.task,
+                        "steps": len(skill.procedure),
+                        "created": skill.created,
+                        "updated": skill.updated,
+                        "uses": skill.uses,
+                        "runs": skill.runs,
+                        "successes": skill.successes,
+                        "failures": skill.failures,
+                        "success_rate": skill.success_rate,
+                        "average_duration": skill.average_duration,
+                        "known_failures": len(skill.typical_failures),
+                        "known_repairs": len(skill.repairs),
+                    }
+                )
             except Exception:
                 continue
         return sorted(skills, key=lambda item: (item["success_rate"], item["runs"]), reverse=True)
 
-    def get_skill(self, name: str) -> Optional[ComputerSkill]:
+    def get_skill(self, name: str) -> ComputerSkill | None:
         path = self._path(name)
         if not path.exists():
             return None
@@ -260,10 +267,7 @@ class ComputerSkillStore:
 
     @classmethod
     def _words(cls, text: str) -> set:
-        return {
-            word for word in re.findall(r"[a-z0-9]+", str(text).lower())
-            if word not in cls.STOPWORDS and len(word) > 1
-        }
+        return {word for word in re.findall(r"[a-z0-9]+", str(text).lower()) if word not in cls.STOPWORDS and len(word) > 1}
 
     def rank(self, task: str, limit: int = 5) -> list[dict[str, Any]]:
         words = self._words(task)
@@ -284,7 +288,7 @@ class ComputerSkillStore:
             ranked.append({"skill": skill, "score": round(score, 4), "overlap": overlap})
         return sorted(ranked, key=lambda item: item["score"], reverse=True)[: max(1, int(limit))]
 
-    def recall(self, task: str, minimum_score: float = 0.12) -> Optional[ComputerSkill]:
+    def recall(self, task: str, minimum_score: float = 0.12) -> ComputerSkill | None:
         ranked = self.rank(task, limit=1)
         return ranked[0]["skill"] if ranked and ranked[0]["score"] >= minimum_score else None
 
@@ -292,11 +296,11 @@ class ComputerSkillStore:
         self,
         name: str,
         success: bool,
-        error: Optional[str] = None,
-        duration: Optional[float] = None,
-        repairs: Optional[list[dict[str, Any]]] = None,
-        visual_states: Optional[list[str]] = None,
-        evidence: Optional[dict[str, Any]] = None,
+        error: str | None = None,
+        duration: float | None = None,
+        repairs: list[dict[str, Any]] | None = None,
+        visual_states: list[str] | None = None,
+        evidence: dict[str, Any] | None = None,
     ) -> None:
         skill = self.get_skill(name)
         if skill is None:
@@ -325,11 +329,11 @@ class ComputerSkillStore:
     def record_use(self, name: str) -> None:
         self.record_run(name, success=True)
 
-    def known_repair(self, skill_name: str, failure: str) -> Optional[dict[str, Any]]:
+    def known_repair(self, skill_name: str, failure: str) -> dict[str, Any] | None:
         skill = self.get_skill(skill_name)
         return skill.known_repair(failure) if skill else None
 
-    def profile(self, name: str) -> Optional[dict[str, Any]]:
+    def profile(self, name: str) -> dict[str, Any] | None:
         """Human-readable reliability profile for one skill.
 
         Example::

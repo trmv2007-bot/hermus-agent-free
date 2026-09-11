@@ -8,25 +8,29 @@
 The harness forces single-agent mode (council disabled) so strategy effects are
 measured in isolation; it is fully offline-safe when run with mock/mock.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from collections.abc import Callable
+
+from core.log import get_logger
 
 from ..config import config
+
+logger = get_logger(__name__)
 
 
 class EvalHarness:
     def __init__(
         self,
-        tasks_path: Optional[str] = None,
-        history_path: Optional[str] = None,
-        model: Optional[str] = None,
+        tasks_path: str | None = None,
+        history_path: str | None = None,
+        model: str | None = None,
     ):
         self.tasks_path = Path(tasks_path or config.resolve_path("tests/eval/benchmark_tasks.json"))
         self.history_path = Path(history_path or config.resolve_path("data/eval_history.json"))
@@ -42,7 +46,7 @@ class EvalHarness:
         try:
             return json.loads(self.tasks_path.read_text())
         except Exception as e:
-            print(f"[Eval] could not load tasks: {e}")
+            logger.warning(f"[Eval] could not load tasks: {e}")
             return []
 
     def list_categories(self) -> list[str]:
@@ -87,9 +91,9 @@ class EvalHarness:
     def run(
         self,
         strategy: str = "auto",
-        tasks: Optional[list[dict]] = None,
-        limit: Optional[int] = None,
-        model: Optional[str] = None,
+        tasks: list[dict] | None = None,
+        limit: int | None = None,
+        model: str | None = None,
         tag: str = "",
     ) -> dict:
         """Run benchmark tasks under a strategy. Offline-safe with mock/mock."""
@@ -214,8 +218,12 @@ class EvalHarness:
             "last_success_rate": last.get("success_rate"),
             "last_runs": last.get("runs"),
             "recent": [
-                {"timestamp": r.get("timestamp"), "strategy": r.get("strategy"),
-                 "success_rate": r.get("success_rate"), "runs": r.get("runs")}
+                {
+                    "timestamp": r.get("timestamp"),
+                    "strategy": r.get("strategy"),
+                    "success_rate": r.get("success_rate"),
+                    "runs": r.get("runs"),
+                }
                 for r in h[-5:]
             ],
         }
@@ -226,9 +234,9 @@ class EvalHarness:
         self,
         strategy_a: str,
         strategy_b: str,
-        tasks: Optional[list[dict]] = None,
-        limit: Optional[int] = None,
-        model: Optional[str] = None,
+        tasks: list[dict] | None = None,
+        limit: int | None = None,
+        model: str | None = None,
     ) -> dict:
         """A/B: run both strategies on the same tasks, pick the winner."""
         all_tasks = (tasks if tasks is not None else self.load_tasks())[:limit]

@@ -12,13 +12,13 @@ field + Add button) so the agent's high-level goal ("open Tasks and add a task")
 turned into a real, verifiable end-to-end task. It also records every action for
 assertions.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .transport import AndroidTransport, AndroidUnavailable
 
@@ -36,7 +36,7 @@ class _Elem:
     clickable: bool = False
     enabled: bool = True
     focused: bool = False
-    id: Optional[str] = None
+    id: str | None = None
 
     @property
     def bounds(self) -> list[int]:
@@ -56,15 +56,13 @@ class _App:
         self.elements = [
             _Elem(self.title, "TextView", 0, 40, 320, 40, id="title"),
             _Elem("Task title", "TextView", 20, 110, 240, 30, id="label"),
-            _Elem(field_value, "EditText", 20, 150, 280, 48,
-                  focused=True, clickable=True, id="field"),
+            _Elem(field_value, "EditText", 20, 150, 280, 48, focused=True, clickable=True, id="field"),
             _Elem("Add", "Button", 20, 230, 120, 48, clickable=True, id="add"),
             _Elem("Clear", "Button", 160, 230, 120, 48, clickable=True, id="clear"),
         ]
         # Append existing tasks as list rows below the buttons.
         for i, t in enumerate(self.tasks):
-            self.elements.append(_Elem(t, "ListItem", 20, 300 + i * 44,
-                                      280, 40, clickable=False, id=f"task_{i}"))
+            self.elements.append(_Elem(t, "ListItem", 20, 300 + i * 44, 280, 40, clickable=False, id=f"task_{i}"))
 
 
 def _mk_app(package: str, title: str) -> _App:
@@ -77,7 +75,7 @@ class SimulatedAndroidDevice(AndroidTransport):
 
     name = "simulated"
 
-    def __init__(self, *, package: str = APP_TASKS, tasks: Optional[list[str]] = None):
+    def __init__(self, *, package: str = APP_TASKS, tasks: list[str] | None = None):
         self.serial = "SIM-0001"
         self._apps: dict[str, _App] = {
             APP_TASKS: _mk_app(APP_TASKS, "Tasks"),
@@ -95,8 +93,7 @@ class SimulatedAndroidDevice(AndroidTransport):
     def _foreground(self) -> _App:
         if self.package in self._apps:
             return self._apps[self.package]
-        raise AndroidUnavailable(f"app '{self.package}' is not installed on the simulated device",
-                                 category="device")
+        raise AndroidUnavailable(f"app '{self.package}' is not installed on the simulated device", category="device")
 
     def _bump(self):
         self._rev += 1
@@ -104,24 +101,25 @@ class SimulatedAndroidDevice(AndroidTransport):
 
     # -- AndroidTransport interface ----------------------------------------
     def connect(self) -> dict[str, Any]:
-        return {"ok": True, "device": self.serial, "model": "Simulated Emulator",
-                "transport": "simulated"}
+        return {"ok": True, "device": self.serial, "model": "Simulated Emulator", "transport": "simulated"}
 
     def device_id(self) -> str:
         return self.serial
 
     def get_surface(self) -> dict[str, Any]:
         app = self._foreground()
-        return {"ok": True, "package": app.package, "title": app.title,
-                "tasks": list(app.tasks), "rev": self._rev}
+        return {"ok": True, "package": app.package, "title": app.title, "tasks": list(app.tasks), "rev": self._rev}
 
     def get_screen(self, **kw) -> dict[str, Any]:
         app = self._foreground()
-        blob = json.dumps({"pkg": app.package, "title": app.title, "tasks": app.tasks,
-                           "rev": self._rev})
-        return {"ok": True, "format": "png", "bytes": len(blob),
-                "hash": hashlib.sha256(blob.encode()).hexdigest()[:16],
-                "data": blob}
+        blob = json.dumps({"pkg": app.package, "title": app.title, "tasks": app.tasks, "rev": self._rev})
+        return {
+            "ok": True,
+            "format": "png",
+            "bytes": len(blob),
+            "hash": hashlib.sha256(blob.encode()).hexdigest()[:16],
+            "data": blob,
+        }
 
     def get_ui_tree(self, **kw) -> dict[str, Any]:
         app = self._foreground()
@@ -129,20 +127,24 @@ class SimulatedAndroidDevice(AndroidTransport):
         for e in app.elements:
             if e.id and e.id == "field_value" and not self._field_value:
                 continue
-            nodes.append({
-                "text": e.text, "class": e.cls, "clickable": e.clickable,
-                "enabled": e.enabled, "focused": e.focused,
-                "bounds": e.bounds, "id": e.id,
-            })
-        return {"ok": True, "format": "semantic", "package": app.package,
-                "title": app.title, "nodes": nodes}
+            nodes.append(
+                {
+                    "text": e.text,
+                    "class": e.cls,
+                    "clickable": e.clickable,
+                    "enabled": e.enabled,
+                    "focused": e.focused,
+                    "bounds": e.bounds,
+                    "id": e.id,
+                }
+            )
+        return {"ok": True, "format": "semantic", "package": app.package, "title": app.title, "nodes": nodes}
 
     def current_app(self) -> dict[str, Any]:
-        return {"ok": True, "package": self._foreground().package,
-                "title": self._foreground().title}
+        return {"ok": True, "package": self._foreground().package, "title": self._foreground().title}
 
     # -- control ------------------------------------------------------------
-    def _element_at(self, x: int, y: int, *, clickable_only: bool = True) -> Optional[_Elem]:
+    def _element_at(self, x: int, y: int, *, clickable_only: bool = True) -> _Elem | None:
         for e in reversed(self._foreground().elements):
             b = e.bounds
             if b[2] - b[0] <= 0 or b[3] - b[1] <= 0:

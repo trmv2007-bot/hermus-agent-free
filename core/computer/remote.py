@@ -12,6 +12,7 @@ The module is stdlib-only and headless-safe, so it is unit-testable without a
 display.  The actual wiring (gateway endpoints, mobile dashboard) lives in the
 gateway; this file only defines the policy/queue semantics.
 """
+
 from __future__ import annotations
 
 import threading
@@ -19,7 +20,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from .permissions import RiskLevel, emergency_stop
 
@@ -46,9 +47,9 @@ class ApprovalPrompt:
     args: dict[str, Any] = field(default_factory=dict)
     state: str = PromptState.PENDING.value
     created: str = field(default_factory=_now)
-    resolved: Optional[str] = None
-    decided_by: Optional[str] = None
-    reason: Optional[str] = None
+    resolved: str | None = None
+    decided_by: str | None = None
+    reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -63,8 +64,7 @@ class RemoteApprovalGate:
     ``required_risk``.
     """
 
-    def __init__(self, required_risk: RiskLevel = RiskLevel.MEDIUM, max_age: float = 600.0,
-                 approve_grace: float = 10.0):
+    def __init__(self, required_risk: RiskLevel = RiskLevel.MEDIUM, max_age: float = 600.0, approve_grace: float = 10.0):
         self._lock = threading.Lock()
         self.enabled: bool = False
         self.required_risk: RiskLevel = required_risk
@@ -79,23 +79,23 @@ class RemoteApprovalGate:
         self._recent_approvals: dict[str, float] = {}  # action -> epoch seconds
 
     # -- policy ---------------------------------------------------------
-    def set_enabled(self, enabled: bool, required_risk: Optional[RiskLevel] = None) -> dict[str, Any]:
+    def set_enabled(self, enabled: bool, required_risk: RiskLevel | None = None) -> dict[str, Any]:
         with self._lock:
             self.enabled = bool(enabled)
             if required_risk is not None:
                 self.required_risk = required_risk
         return self.status()
 
-    def _risk_at_or_above(self, risk: Optional[str]) -> bool:
+    def _risk_at_or_above(self, risk: str | None) -> bool:
         order = {RiskLevel.LOW.value: 0, RiskLevel.MEDIUM.value: 1, RiskLevel.HIGH.value: 2}
         return order.get(str(risk or ""), 1) >= order[self.required_risk.value]
 
     def check(
         self,
         action: str,
-        args: Optional[dict[str, Any]] = None,
-        risk: Optional[str] = None,
-        description: Optional[str] = None,
+        args: dict[str, Any] | None = None,
+        risk: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         """Decide whether ``action`` may proceed or must await approval."""
         if not self.enabled or not self._risk_at_or_above(risk):
@@ -136,8 +136,13 @@ class RemoteApprovalGate:
                 import time as _time
 
                 self._recent_approvals[prompt.action] = _time.time()
-        return {"success": True, "prompt_id": prompt_id, "decision": "approved",
-                "action": prompt.action, "description": prompt.description}
+        return {
+            "success": True,
+            "prompt_id": prompt_id,
+            "decision": "approved",
+            "action": prompt.action,
+            "description": prompt.description,
+        }
 
     def reject(self, prompt_id: str, reason: str = "", by: str = "remote") -> dict[str, Any]:
         with self._lock:
@@ -151,15 +156,21 @@ class RemoteApprovalGate:
             prompt.decided_by = by
             prompt.reason = reason
             self._prompts.pop(prompt_id, None)
-        return {"success": True, "prompt_id": prompt_id, "decision": "rejected",
-                "action": prompt.action, "description": prompt.description, "reason": reason}
+        return {
+            "success": True,
+            "prompt_id": prompt_id,
+            "decision": "rejected",
+            "action": prompt.action,
+            "description": prompt.description,
+            "reason": reason,
+        }
 
     def _prune_expired_locked(self) -> None:
         now = datetime.now().astimezone().timestamp()
         expired = [
-            pid for pid, prompt in self._prompts.items()
-            if self.max_age > 0
-            and (datetime.fromisoformat(prompt.created).astimezone().timestamp() + self.max_age) < now
+            pid
+            for pid, prompt in self._prompts.items()
+            if self.max_age > 0 and (datetime.fromisoformat(prompt.created).astimezone().timestamp() + self.max_age) < now
         ]
         for pid in expired:
             prompt = self._prompts.pop(pid)
@@ -168,9 +179,7 @@ class RemoteApprovalGate:
             self._history.append(prompt)
         if self.approve_grace > 0:
             cutoff = now - self.approve_grace
-            self._recent_approvals = {
-                action: ts for action, ts in self._recent_approvals.items() if ts >= cutoff
-            }
+            self._recent_approvals = {action: ts for action, ts in self._recent_approvals.items() if ts >= cutoff}
 
     def _within_grace(self, action: str) -> bool:
         with self._lock:
@@ -192,7 +201,7 @@ class RemoteApprovalGate:
     def history(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._history)
-        return [p.to_dict() for p in items[-max(1, int(limit)):]]
+        return [p.to_dict() for p in items[-max(1, int(limit)) :]]
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -205,7 +214,7 @@ class RemoteApprovalGate:
             }
 
 
-def _describe(action: str, args: Optional[dict[str, Any]] = None) -> str:
+def _describe(action: str, args: dict[str, Any] | None = None) -> str:
     args = args or {}
     if action == "click":
         return f"Click at ({args.get('x')}, {args.get('y')})"
@@ -232,10 +241,10 @@ class RemoteControlHub:
 
     def __init__(
         self,
-        approval: Optional[RemoteApprovalGate] = None,
-        task_control: Optional[Any] = None,
-        event_bus: Optional[Any] = None,
-        emergency: Optional[Any] = None,
+        approval: RemoteApprovalGate | None = None,
+        task_control: Any | None = None,
+        event_bus: Any | None = None,
+        emergency: Any | None = None,
     ):
         self.approval = approval or remote_approval
         self.emergency = emergency or emergency_stop

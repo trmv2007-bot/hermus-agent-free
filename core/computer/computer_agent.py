@@ -1,20 +1,24 @@
 """Persistent autonomous desktop agent: plan → act → verify → repair → resume."""
+
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
+from core.log import get_logger
+
+from ..state import create_world_state, world_state_from_dict
 from .controller import ComputerActionController
 from .events import machine_event, publish
 from .permissions import RecordingPolicy, recording_policy
 from .planner import ComputerPlanner
+from .recorder import ImageGrabSource, ScreenRecorder
 from .repair import RepairEngine
 from .replanner import AdaptiveReplanner, ReplanContext
-from .recorder import ImageGrabSource, ScreenRecorder
 from .skills import ComputerSkillStore
 from .state_machine import VisualStateMachine, dispatch_action
 from .task_control import get_task_control
@@ -25,7 +29,8 @@ from .video_analyzer import VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
 from .world_state import WorldState
-from ..state import create_world_state, world_state_from_dict
+
+logger = get_logger(__name__)
 
 
 def _slug(value: str) -> str:
@@ -55,16 +60,16 @@ class ComputerAgent:
 
     def __init__(
         self,
-        controller: Optional[ComputerActionController] = None,
-        recorder: Optional[ScreenRecorder] = None,
-        planner: Optional[Callable[[str], list[dict[str, Any]]]] = None,
-        analyzer: Optional[VideoAnalyzer] = None,
-        verifier: Optional[ScreenVerifier] = None,
-        repair_engine: Optional[RepairEngine] = None,
-        policy: Optional[RecordingPolicy] = None,
-        skills: Optional[ComputerSkillStore] = None,
-        task_store: Optional[TaskStore] = None,
-        world_state: Optional[WorldState] = None,
+        controller: ComputerActionController | None = None,
+        recorder: ScreenRecorder | None = None,
+        planner: Callable[[str], list[dict[str, Any]]] | None = None,
+        analyzer: VideoAnalyzer | None = None,
+        verifier: ScreenVerifier | None = None,
+        repair_engine: RepairEngine | None = None,
+        policy: RecordingPolicy | None = None,
+        skills: ComputerSkillStore | None = None,
+        task_store: TaskStore | None = None,
+        world_state: WorldState | None = None,
         learn_skills: bool = True,
         max_retries: int = 2,
     ):
@@ -108,7 +113,7 @@ class ComputerAgent:
         return graph.to_plan(), graph.to_dict()
 
     @staticmethod
-    def _recalled_skill(plan: list[dict[str, Any]], graph: dict[str, Any]) -> Optional[str]:
+    def _recalled_skill(plan: list[dict[str, Any]], graph: dict[str, Any]) -> str | None:
         source = str(graph.get("source") or "")
         if source.startswith("skill:"):
             return source.split(":", 1)[1]
@@ -158,12 +163,12 @@ class ComputerAgent:
     def run(
         self,
         task: str,
-        task_id: Optional[str] = None,
+        task_id: str | None = None,
         dry_run: bool = False,
-        plan: Optional[list[dict[str, Any]]] = None,
-        graph: Optional[dict[str, Any]] = None,
+        plan: list[dict[str, Any]] | None = None,
+        graph: dict[str, Any] | None = None,
         resume: bool = False,
-        start_state: Optional[str] = None,
+        start_state: str | None = None,
     ) -> dict[str, Any]:
         if dry_run:
             from .keyboard import DryRunKeyboard
@@ -184,9 +189,7 @@ class ComputerAgent:
             if self.analyzer is not None and self.analyzer.vision_model is not None:
                 initial_frame = self.recorder.capture_now(store=False)
                 if initial_frame is not None:
-                    self.world_state.update(
-                        self.analyzer.observe_world(initial_frame), source="initial_vision"
-                    )
+                    self.world_state.update(self.analyzer.observe_world(initial_frame), source="initial_vision")
             plan, graph = self._make_plan(task)
         else:
             plan = list(plan)
@@ -208,34 +211,47 @@ class ComputerAgent:
         task_control = get_task_control()
         task_control.register_task(task_id, task, initial_state=state_names[0] if state_names else "")
         if task_control.is_emergency_stop_active():
-            return {"success": False, "task_id": task_id, "task": task,
-                    "error": f"emergency stop: {task_control._emergency_stop_reason}",
-                    "result": "EMERGENCY_STOP"}
+            return {
+                "success": False,
+                "task_id": task_id,
+                "task": task,
+                "error": f"emergency stop: {task_control._emergency_stop_reason}",
+                "result": "EMERGENCY_STOP",
+            }
 
-        publish("task_started", {
-            "task_id": task_id,
-            "task": task,
-            "resume": bool(resume),
-            "states": state_names,
-            "source": source,
-        })
-        publish("plan_created", {
-            "task_id": task_id,
-            "task": task,
-            "source": source,
-            "start": (graph or {}).get("start") or (state_names[0] if state_names else None),
-            "states": state_names,
-            "nodes": len(state_names),
-            "resume": bool(resume),
-        })
-        publish("checkpoint_saved", {
-            "task_id": task_id,
-            "task": task,
-            "state": checkpoint.current_state,
-            "status": checkpoint.status,
-            "path": str(self.task_store.state_path(task_id)),
-            "reason": "task_initialized" if not resume else "task_resumed",
-        })
+        publish(
+            "task_started",
+            {
+                "task_id": task_id,
+                "task": task,
+                "resume": bool(resume),
+                "states": state_names,
+                "source": source,
+            },
+        )
+        publish(
+            "plan_created",
+            {
+                "task_id": task_id,
+                "task": task,
+                "source": source,
+                "start": (graph or {}).get("start") or (state_names[0] if state_names else None),
+                "states": state_names,
+                "nodes": len(state_names),
+                "resume": bool(resume),
+            },
+        )
+        publish(
+            "checkpoint_saved",
+            {
+                "task_id": task_id,
+                "task": task,
+                "state": checkpoint.current_state,
+                "status": checkpoint.status,
+                "path": str(self.task_store.state_path(task_id)),
+                "reason": "task_initialized" if not resume else "task_resumed",
+            },
+        )
 
         generation = checkpoint.resume_count if resume else 0
         recording_name = "recording.mp4" if generation == 0 else f"recording-resume-{generation}.mp4"
@@ -251,39 +267,53 @@ class ComputerAgent:
         previous_verifications = _read_json(task_dir / "verification.json", []) if resume else []
         previous_repairs_payload = _read_json(task_dir / "repairs.json", {}) if resume else {}
         base_offset = max(
-            [float(item.get("offset", 0.0)) for item in previous_timeline.get("events", []) if isinstance(item, dict)]
-            or [0.0]
+            [float(item.get("offset", 0.0)) for item in previous_timeline.get("events", []) if isinstance(item, dict)] or [0.0]
         )
-        timeline = Timeline(task=task, recording=str(recording_path) if ffmpeg else None,
-                            started=previous_timeline.get("started") if resume else None)
+        timeline = Timeline(
+            task=task,
+            recording=str(recording_path) if ffmpeg else None,
+            started=previous_timeline.get("started") if resume else None,
+        )
         for event in previous_timeline.get("events", []):
             if isinstance(event, dict):
                 timeline.add(
-                    event.get("offset", 0.0), event.get("type", "event"), event.get("description", ""),
-                    event.get("confidence", 0.0), event.get("timestamp"), event.get("evidence", {}),
+                    event.get("offset", 0.0),
+                    event.get("type", "event"),
+                    event.get("description", ""),
+                    event.get("confidence", 0.0),
+                    event.get("timestamp"),
+                    event.get("evidence", {}),
                 )
-        timeline.add(base_offset, "task_resume" if resume else "task_start",
-                     f"{'Resume' if resume else 'Task'}: {task}", 1.0, _now(),
-                     {"generation": generation, "start_state": start_state})
+        timeline.add(
+            base_offset,
+            "task_resume" if resume else "task_start",
+            f"{'Resume' if resume else 'Task'}: {task}",
+            1.0,
+            _now(),
+            {"generation": generation, "start_state": start_state},
+        )
 
         if dry_run:
-            print("\n[SIMULATION MODE] Plan for:", task)
+            logger.info("%s %s", "\n[SIMULATION MODE] Plan for:", task)
             for index, step in enumerate(plan, 1):
                 action = step.get("action") or {}
                 target = action.get("target") or action.get("name") or action.get("text") or action.get("condition") or ""
-                print(f"  {index}. {step.get('name', 'STEP')}: {action.get('kind', 'act')} {target}")
+                logger.info(f"  {index}. {step.get('name', 'STEP')}: {action.get('kind', 'act')} {target}")
                 if step.get("expected"):
-                    print(f"     Expected: {step['expected']}")
-            print("[SIMULATION MODE] No real actions will be performed.\n")
+                    logger.info(f"     Expected: {step['expected']}")
+            logger.warning("[SIMULATION MODE] No real actions will be performed.\n")
 
         recalled_skill = self._recalled_skill(plan, graph or {})
         if recalled_skill:
-            publish("skill_recalled", {
-                "task_id": task_id,
-                "task": task,
-                "skill": recalled_skill,
-                "source": source,
-            })
+            publish(
+                "skill_recalled",
+                {
+                    "task_id": task_id,
+                    "task": task,
+                    "skill": recalled_skill,
+                    "source": source,
+                },
+            )
             skill = self.skills.get_skill(recalled_skill)
             if skill and hasattr(self.repair_engine, "set_known_repairs"):
                 self.repair_engine.set_known_repairs(skill.repairs)
@@ -293,28 +323,34 @@ class ComputerAgent:
         def checkpoint_event(event: dict[str, Any]) -> None:
             saved = self.task_store.checkpoint_event(checkpoint, event, self.world_state)
             machine_event(event, task_id=task_id, task=task, emit_lifecycle_starts=False)
-            publish("checkpoint_saved", {
-                "task_id": task_id,
-                "task": task,
-                "state": saved.current_state,
-                "status": saved.status,
-                "phase": event.get("phase"),
-                "path": str(self.task_store.state_path(task_id)),
-            })
-            try:
-                world = self.world_state.to_dict(include_history=False)
-                publish("world_changed", {
+            publish(
+                "checkpoint_saved",
+                {
                     "task_id": task_id,
                     "task": task,
-                    "world": {
-                        "application": world.get("active_application"),
-                        "window": world.get("active_window"),
-                        "task_state": world.get("task_state"),
-                        "confidence": world.get("confidence"),
-                        "visible_targets": list(world.get("visible_targets") or []),
-                        "dialogs": list(world.get("dialogs") or []),
+                    "state": saved.current_state,
+                    "status": saved.status,
+                    "phase": event.get("phase"),
+                    "path": str(self.task_store.state_path(task_id)),
+                },
+            )
+            try:
+                world = self.world_state.to_dict(include_history=False)
+                publish(
+                    "world_changed",
+                    {
+                        "task_id": task_id,
+                        "task": task,
+                        "world": {
+                            "application": world.get("active_application"),
+                            "window": world.get("active_window"),
+                            "task_state": world.get("task_state"),
+                            "confidence": world.get("confidence"),
+                            "visible_targets": list(world.get("visible_targets") or []),
+                            "dialogs": list(world.get("dialogs") or []),
+                        },
                     },
-                })
+                )
             except Exception:  # noqa: BLE001
                 pass
 
@@ -327,23 +363,33 @@ class ComputerAgent:
                 payload["action"] = f"{kind} {target}".strip()
             verification = payload.pop("verification", None)
             if isinstance(verification, dict):
-                payload.update({
-                    "ok": bool(verification.get("ok")),
-                    "matched": bool(verification.get("matched", verification.get("ok"))),
-                    "confidence": verification.get("confidence", 0.0),
-                    "detail": verification.get("detail") or verification.get("error") or "",
-                })
+                payload.update(
+                    {
+                        "ok": bool(verification.get("ok")),
+                        "matched": bool(verification.get("matched", verification.get("ok"))),
+                        "confidence": verification.get("confidence", 0.0),
+                        "detail": verification.get("detail") or verification.get("error") or "",
+                    }
+                )
             publish(event_type, payload)
 
         machine = VisualStateMachine(
             controller=self.controller,
             recorder=self.recorder,
-            wait_until=(lambda condition, timeout: {"matched": True, "success": True,
-                                                     "detail": "simulation condition"}) if dry_run else self.wait_until,
+            wait_until=(lambda condition, timeout: {"matched": True, "success": True, "detail": "simulation condition"})
+            if dry_run
+            else self.wait_until,
             execute=lambda spec: dispatch_action(self.controller, spec),
-            verify=(lambda before, after, expected: {"ok": True, "matched": True,
-                                                     "detail": "simulation verification",
-                                                     "confidence": 1.0}) if dry_run else self._verify,
+            verify=(
+                lambda before, after, expected: {
+                    "ok": True,
+                    "matched": True,
+                    "detail": "simulation verification",
+                    "confidence": 1.0,
+                }
+            )
+            if dry_run
+            else self._verify,
             repair=self.repair_engine.create_plan,
             max_retries=self.max_retries,
             world_state=self.world_state,
@@ -358,14 +404,8 @@ class ComputerAgent:
             if not report.get("success"):
                 failure = report.get("failure") or {}
                 failure_category = str(failure.get("category") or "")
-                is_user_cancel = (
-                    task_control.is_cancel_requested(task_id)
-                    or failure_category == "cancelled"
-                )
-                is_emergency = (
-                    task_control.is_emergency_stop_active()
-                    or failure_category == "emergency_stop"
-                )
+                is_user_cancel = task_control.is_cancel_requested(task_id) or failure_category == "cancelled"
+                is_emergency = task_control.is_emergency_stop_active() or failure_category == "emergency_stop"
                 if not is_user_cancel and not is_emergency:
                     replan_count = 0
                     max_replans = getattr(self.replanner, "max_replans", 3)
@@ -374,13 +414,16 @@ class ComputerAgent:
                         if not self.replanner.can_replan(replan_count, max_replans):
                             break
 
-                        publish("replan_started", {
-                            "task_id": task_id,
-                            "task": task,
-                            "attempt": replan_count,
-                            "reason": failure.get("reason", report.get("error", "unknown")),
-                            "failed_state": report.get("final_state") or failure.get("state", ""),
-                        })
+                        publish(
+                            "replan_started",
+                            {
+                                "task_id": task_id,
+                                "task": task,
+                                "attempt": replan_count,
+                                "reason": failure.get("reason", report.get("error", "unknown")),
+                                "failed_state": report.get("final_state") or failure.get("state", ""),
+                            },
+                        )
 
                         # Build context for replanning
                         future_plan = list(plan) if plan else []
@@ -412,17 +455,19 @@ class ComputerAgent:
                         new_graph, deltas = self.replanner.replan(replan_context)
 
                         if new_graph and deltas:
-                            publish("plan_updated", {
-                                "task_id": task_id,
-                                "task": task,
-                                "deltas": [d.to_dict() for d in deltas],
-                                "replan_attempt": replan_count,
-                            })
+                            publish(
+                                "plan_updated",
+                                {
+                                    "task_id": task_id,
+                                    "task": task,
+                                    "deltas": [d.to_dict() for d in deltas],
+                                    "replan_attempt": replan_count,
+                                },
+                            )
                             # Run again with the updated plan
                             new_plan = new_graph.to_plan()
                             new_states = VisualStateMachine.plan_to_states(new_plan)
-                            report = machine.run(new_states, timeout_per_state=60.0,
-                                                 start_state=None, task_id=task_id)
+                            report = machine.run(new_states, timeout_per_state=60.0, start_state=None, task_id=task_id)
                         else:
                             break
 
@@ -445,22 +490,28 @@ class ComputerAgent:
         # Collect structured evidence from the current generation's trace.
         actions: list[dict[str, Any]] = list(previous_actions) if isinstance(previous_actions, list) else []
         verifications: list[dict[str, Any]] = list(previous_verifications) if isinstance(previous_verifications, list) else []
-        diagnoses: list[dict[str, Any]] = list(previous_repairs_payload.get("diagnoses", [])) if isinstance(previous_repairs_payload, dict) else []
-        repairs: list[dict[str, Any]] = list(previous_repairs_payload.get("repairs", [])) if isinstance(previous_repairs_payload, dict) else []
+        diagnoses: list[dict[str, Any]] = (
+            list(previous_repairs_payload.get("diagnoses", [])) if isinstance(previous_repairs_payload, dict) else []
+        )
+        repairs: list[dict[str, Any]] = (
+            list(previous_repairs_payload.get("repairs", [])) if isinstance(previous_repairs_payload, dict) else []
+        )
         retries = 0
         for visited in report.get("states_visited", []):
             phase = visited.get("phase", "")
             action = visited.get("action")
             verification = visited.get("verification")
             if phase == "diagnose":
-                diagnoses.append({
-                    "state": visited.get("state"),
-                    "attempt": visited.get("attempt"),
-                    "failure_reason": visited.get("failure_reason"),
-                    "diagnosis": visited.get("diagnosis", {}),
-                    "repair_plan": visited.get("repair_plan", {}),
-                    "repair_error": visited.get("repair_error"),
-                })
+                diagnoses.append(
+                    {
+                        "state": visited.get("state"),
+                        "attempt": visited.get("attempt"),
+                        "failure_reason": visited.get("failure_reason"),
+                        "diagnosis": visited.get("diagnosis", {}),
+                        "repair_plan": visited.get("repair_plan", {}),
+                        "repair_error": visited.get("repair_error"),
+                    }
+                )
             if phase == "original_action" and int(visited.get("attempt", 1) or 1) > 1:
                 retries += 1
 
@@ -487,26 +538,39 @@ class ComputerAgent:
                 }
                 actions.append(action_record)
                 if phase == "repair":
-                    repairs.append({
-                        "state": visited.get("repair_state"),
-                        "repair_for": visited.get("repair_for"),
-                        "repair_plan_id": visited.get("repair_plan_id"),
-                        "failure": next((item.get("failure_reason") for item in reversed(diagnoses)
-                                         if item.get("state") == visited.get("state")), None),
-                        "action": action_record,
-                        "verification": verification,
-                        "success": visited.get("outcome") == "success",
-                        "outcome": visited.get("outcome"),
-                        "failure_reason": visited.get("failure_reason"),
-                    })
+                    repairs.append(
+                        {
+                            "state": visited.get("repair_state"),
+                            "repair_for": visited.get("repair_for"),
+                            "repair_plan_id": visited.get("repair_plan_id"),
+                            "failure": next(
+                                (
+                                    item.get("failure_reason")
+                                    for item in reversed(diagnoses)
+                                    if item.get("state") == visited.get("state")
+                                ),
+                                None,
+                            ),
+                            "action": action_record,
+                            "verification": verification,
+                            "success": visited.get("outcome") == "success",
+                            "outcome": visited.get("outcome"),
+                            "failure_reason": visited.get("failure_reason"),
+                        }
+                    )
                 timeline.add(
                     step_offset,
                     f"repair:{action.get('action', 'action')}" if phase == "repair" else action.get("action", "action"),
                     action.get("description") or str(action.get("action", "action")),
                     action.get("confidence", 0.0),
                     action.get("ts"),
-                    {"action": action.get("action"), "args": action.get("args", {}),
-                     "state": visited.get("state"), "phase": phase, "generation": generation},
+                    {
+                        "action": action.get("action"),
+                        "args": action.get("args", {}),
+                        "state": visited.get("state"),
+                        "phase": phase,
+                        "generation": generation,
+                    },
                 )
             if isinstance(verification, dict) and verification:
                 verification_record = {
@@ -524,8 +588,7 @@ class ComputerAgent:
                     verification.get("detail") or ("PASS" if verification.get("ok") else "FAIL"),
                     verification.get("confidence", 0.0),
                     step_ts,
-                    {"ok": bool(verification.get("ok")), "state": visited.get("state"),
-                     "phase": phase, "generation": generation},
+                    {"ok": bool(verification.get("ok")), "state": visited.get("state"), "phase": phase, "generation": generation},
                 )
 
         stopped = self.recorder.stop()
@@ -536,12 +599,16 @@ class ComputerAgent:
         success = bool(report.get("success"))
         duration = time.monotonic() - started_monotonic
         self.world_state.finish_task(success)
-        timeline.add(base_offset + duration, "task_end", "SUCCESS" if success else "FAILURE",
-                     1.0 if success else 0.0, _now(), {"generation": generation})
+        timeline.add(
+            base_offset + duration,
+            "task_end",
+            "SUCCESS" if success else "FAILURE",
+            1.0 if success else 0.0,
+            _now(),
+            {"generation": generation},
+        )
 
-        visual_states = [
-            str(item.get("expected")) for item in plan if isinstance(item, dict) and item.get("expected")
-        ]
+        visual_states = [str(item.get("expected")) for item in plan if isinstance(item, dict) and item.get("expected")]
         if recalled_skill:
             self.skills.record_run(
                 recalled_skill,
@@ -581,8 +648,9 @@ class ComputerAgent:
         repairs_path.write_text(json.dumps({"diagnoses": diagnoses, "repairs": repairs}, indent=2, default=str), encoding="utf-8")
         summary_path = task_dir / "summary.md"
         summary_path.write_text(
-            self._summary(task, success, duration, actions, verifications, retries, repairs,
-                          report.get("failure"), timeline, resume=resume),
+            self._summary(
+                task, success, duration, actions, verifications, retries, repairs, report.get("failure"), timeline, resume=resume
+            ),
             encoding="utf-8",
         )
         self.policy.secure(verification_path)
@@ -596,20 +664,21 @@ class ComputerAgent:
             for step in plan:
                 if not isinstance(step, dict) or not isinstance(step.get("action"), dict):
                     continue
-                procedure.append({
-                    "name": step.get("name"),
-                    "goal": step.get("goal", ""),
-                    "precondition": step.get("precondition", ""),
-                    "action": step["action"],
-                    "expected": step.get("expected", ""),
-                    "on_success": step.get("on_success"),
-                    "on_failure": step.get("on_failure"),
-                })
+                procedure.append(
+                    {
+                        "name": step.get("name"),
+                        "goal": step.get("goal", ""),
+                        "precondition": step.get("precondition", ""),
+                        "action": step["action"],
+                        "expected": step.get("expected", ""),
+                        "on_success": step.get("on_success"),
+                        "on_failure": step.get("on_failure"),
+                    }
+                )
             skill_result = self.skills.save_skill(
                 task,
                 procedure,
-                evidence={"recording": recording, "task_id": task_id,
-                          "runs": [{"task_id": task_id, "success": True}]},
+                evidence={"recording": recording, "task_id": task_id, "runs": [{"task_id": task_id, "success": True}]},
                 duration=duration,
                 repairs=repairs,
                 visual_states=visual_states,
@@ -643,27 +712,33 @@ class ComputerAgent:
         task_control.unregister_task(task_id)
 
         completed_checkpoint = self.task_store.complete(checkpoint, success, final_result, self.world_state, recording)
-        publish("checkpoint_saved", {
-            "task_id": task_id,
-            "task": task,
-            "state": completed_checkpoint.current_state,
-            "status": completed_checkpoint.status,
-            "path": str(self.task_store.state_path(task_id)),
-            "reason": "task_completed" if success else "task_failed",
-        })
-        publish("task_completed" if success else "task_failed", {
-            "task_id": task_id,
-            "task": task,
-            "success": success,
-            "result": "SUCCESS" if success else "FAILURE",
-            "duration": round(duration, 2),
-            "actions": len(actions),
-            "retries": retries,
-            "repairs": len(repairs),
-            "verifications": len(verifications),
-            "error": report.get("error"),
-            "recording": recording,
-        })
+        publish(
+            "checkpoint_saved",
+            {
+                "task_id": task_id,
+                "task": task,
+                "state": completed_checkpoint.current_state,
+                "status": completed_checkpoint.status,
+                "path": str(self.task_store.state_path(task_id)),
+                "reason": "task_completed" if success else "task_failed",
+            },
+        )
+        publish(
+            "task_completed" if success else "task_failed",
+            {
+                "task_id": task_id,
+                "task": task,
+                "success": success,
+                "result": "SUCCESS" if success else "FAILURE",
+                "duration": round(duration, 2),
+                "actions": len(actions),
+                "retries": retries,
+                "repairs": len(repairs),
+                "verifications": len(verifications),
+                "error": report.get("error"),
+                "recording": recording,
+            },
+        )
         final_result["checkpoint"] = self.task_store.load(task_id).to_dict()
         return final_result
 
@@ -684,7 +759,7 @@ class ComputerAgent:
         verifications: list[dict[str, Any]],
         retries: int,
         repairs: list[dict[str, Any]],
-        failure: Optional[dict[str, Any]],
+        failure: dict[str, Any] | None,
         timeline: Timeline,
         resume: bool = False,
     ) -> str:
@@ -701,10 +776,12 @@ class ComputerAgent:
             f"Result: {'SUCCESS' if success else 'FAILURE'}",
         ]
         if failure:
-            lines.extend([
-                f"Failure category: {failure.get('category', 'unknown')}",
-                f"Failure reason: {failure.get('reason', 'unknown')}",
-            ])
+            lines.extend(
+                [
+                    f"Failure category: {failure.get('category', 'unknown')}",
+                    f"Failure reason: {failure.get('reason', 'unknown')}",
+                ]
+            )
         lines.extend(["", "Timeline:"])
         for event in timeline.events:
             minutes, seconds = divmod(max(0, int(event.offset)), 60)

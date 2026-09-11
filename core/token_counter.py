@@ -1,12 +1,15 @@
 """Token Counter - Free - Counts tokens for usage tracking, no paywall"""
+
 import re
 
 # Try tiktoken for accurate counting (optional, free)
 try:
     import tiktoken
+
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
+
 
 class TokenCounter:
     """Free token counter - uses tiktoken if available, else approximates"""
@@ -42,7 +45,7 @@ class TokenCounter:
         # Or more accurate: count words * 1.3
 
         # Detect if code (lots of symbols)
-        code_symbols = len(re.findall(r'[{}()\[\]=:;.,]', text))
+        code_symbols = len(re.findall(r"[{}()\[\]=:;.,]", text))
         if code_symbols > len(text) * 0.1:  # code-like
             # Code has more tokens
             return int(len(text) / 3.5)
@@ -105,11 +108,13 @@ class TokenCounter:
             "completion_cost": completion_cost,
             "total_cost": total_cost,
             "model": model,
-            "is_free": total_cost == 0.0
+            "is_free": total_cost == 0.0,
         }
+
 
 # Global counter free
 token_counter = TokenCounter()
+
 
 def count_tokens(text: str, model: str = None) -> int:
     counter = TokenCounter(model or "gpt-3.5-turbo")

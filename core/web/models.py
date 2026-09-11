@@ -6,36 +6,37 @@ Scrapling responses (and their cookie jars / request headers) never leave
 :class:`WebResult` here so downstream consumers (agent, ModelGateway,
 MemoryFacade) get a predictable, secrets-free, size-bounded shape.
 """
+
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class FetchStrategy(str, Enum):
     """How a page was (or should be) acquired. Escalation order: cheapest first."""
 
-    AUTO = "auto"          # let the router decide (never a final strategy)
-    STATIC = "static"      # Scrapling Fetcher — fast HTTP with browser TLS fingerprint
-    DYNAMIC = "dynamic"    # Scrapling DynamicFetcher — Playwright-driven Chromium
-    STEALTH = "stealth"    # Scrapling StealthyFetcher — hardened anti-bot browser
+    AUTO = "auto"  # let the router decide (never a final strategy)
+    STATIC = "static"  # Scrapling Fetcher — fast HTTP with browser TLS fingerprint
+    DYNAMIC = "dynamic"  # Scrapling DynamicFetcher — Playwright-driven Chromium
+    STEALTH = "stealth"  # Scrapling StealthyFetcher — hardened anti-bot browser
 
 
 class FailureClass(str, Enum):
     """Machine-readable classification of an acquisition failure (spec §6)."""
 
     NONE = "none"
-    SECURITY_BLOCKED = "security_blocked"     # SSRF / policy / scheme / private IP
+    SECURITY_BLOCKED = "security_blocked"  # SSRF / policy / scheme / private IP
     DNS = "dns_failure"
     CONNECTION = "connection_error"
     TIMEOUT = "timeout"
     TLS = "tls_error"
-    HTTP_STATUS = "http_status"               # server answered with an error status
-    CHALLENGE = "bot_challenge"               # anti-bot interstitial detected
-    EMPTY_CONTENT = "empty_content"           # page fetched but no meaningful text
-    JS_REQUIRED = "js_required"               # content only rendered client-side
+    HTTP_STATUS = "http_status"  # server answered with an error status
+    CHALLENGE = "bot_challenge"  # anti-bot interstitial detected
+    EMPTY_CONTENT = "empty_content"  # page fetched but no meaningful text
+    JS_REQUIRED = "js_required"  # content only rendered client-side
     DEPENDENCY_MISSING = "dependency_missing"  # scrapling / browser not installed
     CANCELLED = "cancelled"
     SIZE_LIMIT = "size_limit"
@@ -50,7 +51,7 @@ class CrawlStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    TIMEOUT = "timeout"        # wall-clock deadline reached before completion
+    TIMEOUT = "timeout"  # wall-clock deadline reached before completion
 
 
 @dataclass
@@ -58,12 +59,12 @@ class StrategyAttempt:
     """One acquisition attempt (strategy, outcome, timing) for observability."""
 
     strategy: str
-    outcome: str                      # "success" | "insufficient" | "error" | "skipped"
-    status_code: Optional[int] = None
-    duration_ms: Optional[int] = None
+    outcome: str  # "success" | "insufficient" | "error" | "skipped"
+    status_code: int | None = None
+    duration_ms: int | None = None
     error_class: str = FailureClass.NONE.value
     error: str = ""
-    reason: str = ""                  # why we escalated away from this strategy
+    reason: str = ""  # why we escalated away from this strategy
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,10 +96,10 @@ class ExtractionResult:
     ok: bool
     source_url: str = ""
     selector: str = ""
-    method: str = ""                  # "css" | "xpath" | "text" | "markdown" | "links" | "metadata"
+    method: str = ""  # "css" | "xpath" | "text" | "markdown" | "links" | "metadata"
     values: list[str] = field(default_factory=list)
     adaptive: bool = False
-    confidence: Optional[float] = None  # adaptive similarity confidence when known
+    confidence: float | None = None  # adaptive similarity confidence when known
     error: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -137,10 +138,7 @@ class CrawlProgress:
             "current_url": self.current_url,
             "elapsed_ms": self.elapsed_ms,
             "max_pages": self.max_pages,
-            "estimated_progress": (
-                round(min(1.0, self.pages_processed / max(1, self.max_pages)), 3)
-                if self.max_pages else None
-            ),
+            "estimated_progress": (round(min(1.0, self.pages_processed / max(1, self.max_pages)), 3) if self.max_pages else None),
             "status": self.status,
         }
 
@@ -164,18 +162,18 @@ class WebResult:
     url: str = ""
     final_url: str = ""
     title: str = ""
-    status_code: Optional[int] = None
+    status_code: int | None = None
     content_type: str = ""
     strategy: str = FetchStrategy.AUTO.value
     fetched_at: str = ""
-    duration_ms: Optional[int] = None
+    duration_ms: int | None = None
     text: str = ""
     markdown: str = ""
-    html: Optional[str] = None
+    html: str | None = None
     links: list[LinkInfo] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
-    data: Optional[Any] = None                  # structured capture (e.g. captured XHR JSON)
-    source: str = "scrapling"                   # which backend produced this
+    data: Any | None = None  # structured capture (e.g. captured XHR JSON)
+    source: str = "scrapling"  # which backend produced this
     attempts: list[StrategyAttempt] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     error: str = ""
@@ -184,13 +182,12 @@ class WebResult:
     size_bytes: int = 0
     sha256: str = ""
     truncated: bool = False
-    untrusted: bool = True                      # always: page content is untrusted data
+    untrusted: bool = True  # always: page content is untrusted data
     cached: bool = False
     session_name: str = ""
 
     # ---------------------------------------------------------------- output
-    def to_dict(self, *, include_html: bool = False, include_markdown: bool = False,
-                max_links: int = 50) -> dict[str, Any]:
+    def to_dict(self, *, include_html: bool = False, include_markdown: bool = False, max_links: int = 50) -> dict[str, Any]:
         """Plain-dict view for tool output / model consumption (size-bounded)."""
         out: dict[str, Any] = {
             "ok": self.ok,
@@ -213,7 +210,7 @@ class WebResult:
             "truncated": self.truncated,
             "untrusted": self.untrusted,
             "cached": self.cached,
-            "links": [l.to_dict() for l in self.links[:max_links]],
+            "links": [link.to_dict() for link in self.links[:max_links]],
             "links_total": len(self.links),
         }
         if self.error:

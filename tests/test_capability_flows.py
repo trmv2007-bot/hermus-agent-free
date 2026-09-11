@@ -8,15 +8,13 @@ they exercise the real contract shapes and canonical event/tool/job boundaries.
 
 Each Task from the spec is one test (or a small set).
 """
+
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 from pathlib import Path
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -24,21 +22,21 @@ import pytest
 # ---------------------------------------------------------------------------
 def test_task1_model_gateway_selects_and_records_typed_outcome():
     from core.contracts import ModelRequirement
-    from core.models import ModelGateway, get_model_gateway
+    from core.models import get_model_gateway
 
     gw = get_model_gateway()
     # Selection over the canonical boundary returns a ranked list (may be empty
     # offline when no provider is configured — but must never raise).
-    req = ModelRequirement(task="summarize the build", tools=False, vision=False,
-                           context_window=8000)
+    req = ModelRequirement(task="summarize the build", tools=False, vision=False, context_window=8000)
     cands = gw.select(req)
     assert isinstance(cands, list)
     assert all(hasattr(c, "provider") and hasattr(c, "model") for c in cands)
 
     # A completion is recorded as a typed outcome through the observation hook.
-    calls = []
     result = gw.complete(
-        provider="mock", model="mock-1", trace_id="tr-test-1",
+        provider="mock",
+        model="mock-1",
+        trace_id="tr-test-1",
         _complete=lambda provider, model, trace_id=None: ("hello world", None, {}),
     )
     assert result.ok is True
@@ -52,10 +50,13 @@ def test_task1_model_gateway_selects_and_records_typed_outcome():
 
 def test_task1_model_gateway_never_reports_success_on_failure():
     from core.models import ModelGateway
+
     gw = ModelGateway()
+
     # The hook raises -> the gateway must classify a typed failure, not fabricate OK.
     def boom(provider, model, trace_id=None):
         raise RuntimeError("connection refused")
+
     result = gw.complete(provider="mock", model="mock-1", _complete=boom)
     assert result.ok is False
     assert result.failure_class is not None
@@ -76,8 +77,8 @@ def test_task2_tool_gateway_executes_and_emits_canonical_event():
     reg.register("demo.add", lambda a, b: {"sum": int(a) + int(b)})
 
     from core.events.bus import configure_bus, get_bus
-    bus = configure_bus(os.path.join(os.environ.get("HERMUS_EVENTS_DIR", "/tmp"), "t2_events.jsonl"),
-                        reset=True)
+
+    bus = configure_bus(os.path.join(os.environ.get("HERMUS_EVENTS_DIR", "/tmp"), "t2_events.jsonl"), reset=True)
     gw = ToolGateway(reg, bus=bus)
     res = gw.execute("demo.add", {"a": 2, "b": 3}, trace_id="tr-t2")
     assert res.ok is True
@@ -89,6 +90,7 @@ def test_task2_tool_gateway_executes_and_emits_canonical_event():
 def test_task2_tool_failure_is_typed_not_reported_as_success():
     from core.tool_registry import ToolRegistry
     from core.tools import ToolGateway
+
     reg = ToolRegistry()
     reg.load()
     reg.register("demo.boom", lambda: (_ for _ in ()).throw(ValueError("disk full")))
@@ -131,7 +133,7 @@ def test_task3_job_retry_recovers_from_failure():
     """Failure recovery at the canonical job layer: a handler fails once then
     succeeds, the queue retries within max_attempts, and the result is produced.
     This is the alternate-strategy/retry half of autonomous recovery."""
-    from gateway.queue import JobQueue, STATUS_DONE, STATUS_FAILED
+    from gateway.queue import STATUS_DONE, STATUS_FAILED, JobQueue
 
     async def drive():
         q = JobQueue()
@@ -177,7 +179,7 @@ def test_task3_exhausted_retries_reports_failed_not_completed():
 # Task 4 — Delegation → canonical JobQueue → execution → result
 # ---------------------------------------------------------------------------
 def test_task4_canonical_jobqueue_executes_and_returns_result():
-    from gateway.queue import JobQueue, STATUS_DONE, STATUS_FAILED
+    from gateway.queue import STATUS_DONE, STATUS_FAILED, JobQueue
 
     async def drive():
         q = JobQueue()
@@ -234,8 +236,9 @@ def test_task4_agent_manager_delegates_to_canonical_queue(tmp_path):
 # Task 5 — Long-running backend mission survives UI disconnect
 # ---------------------------------------------------------------------------
 def test_task5_mission_persists_and_reconstructs_after_engine_recreated():
-    from core.mission import MissionEngine, MissionState
     import tempfile
+
+    from core.mission import MissionEngine
 
     with tempfile.TemporaryDirectory() as td:
         store = Path(td) / "missions"
@@ -251,7 +254,7 @@ def test_task5_mission_persists_and_reconstructs_after_engine_recreated():
 
         # A second engine (a fresh process / reconnect) reads the persisted mission.
         eng2 = MissionEngine(storage_dir=store)
-        loaded = eng2.load_mission(r1.mission_id) if hasattr(eng2, "load_mission") else None
+        _loaded = eng2.load_mission(r1.mission_id) if hasattr(eng2, "load_mission") else None
         # Either reachable via load, or the report round-trips through to_dict.
         assert r1.to_dict()["mission_id"] == r1.mission_id
         assert persisted.read_text(encoding="utf-8")  # durable JSON written
@@ -260,14 +263,15 @@ def test_task5_mission_persists_and_reconstructs_after_engine_recreated():
 def test_task5_event_bus_replays_after_bus_recreated():
     """The canonical EventBus is durable: a fresh bus re-reads the log (reconnect)."""
     import tempfile
+
     from core.events import EventBus
 
     with tempfile.TemporaryDirectory() as td:
         log = Path(td) / "events.jsonl"
         b1 = EventBus(log_path=log)
         from core.contracts import EventEnvelope
-        b1.publish(EventEnvelope(command="mission.start", type="command.requested",
-                                 status="running", source="test"))
+
+        b1.publish(EventEnvelope(command="mission.start", type="command.requested", status="running", source="test"))
         b1.close()
         # A reconnect (new bus) replays the durable log.
         b2 = EventBus(log_path=log)
@@ -279,8 +283,8 @@ def test_task5_event_bus_replays_after_bus_recreated():
 # Task 6 — Computer control: plan → action → observe → verify
 # ---------------------------------------------------------------------------
 def test_task6_computer_events_bridge_to_canonical_bus(tmp_path):
-    from core.events.bus import configure_bus, get_bus
     from core.computer.events import computer_event_bus
+    from core.events.bus import configure_bus, get_bus
 
     log = tmp_path / "t6_events.jsonl"
     bus = configure_bus(str(log), reset=True)
@@ -299,8 +303,10 @@ def test_task6_computer_verifier_records_before_after():
 
     class DummyRecorder:
         running = True
+
         def capture_now(self, store=True):
             return {"path": "/tmp/sample.png", "ts": time.time()}
+
         def mark(self, action, kind=None, metadata=None):
             return True
 
@@ -315,6 +321,7 @@ def test_task6_computer_verifier_records_before_after():
 # ---------------------------------------------------------------------------
 def test_task7_memory_roundtrip_typed_and_session():
     import tempfile
+
     from core.memory import MemoryFacade
 
     with tempfile.TemporaryDirectory() as td:
@@ -337,8 +344,9 @@ def test_task7_memory_roundtrip_typed_and_session():
 # Task 8 — Model fallback: primary unavailable → typed failure → continue
 # ---------------------------------------------------------------------------
 def test_task8_model_fallback_records_rate_limit_as_retryable():
-    from core.models import ModelGateway
     from core.contracts import FailureClass
+    from core.models import ModelGateway
+
     gw = ModelGateway()
 
     def rate_limited(provider, model, trace_id=None):

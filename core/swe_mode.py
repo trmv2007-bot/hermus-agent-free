@@ -3,6 +3,7 @@
 Provides a complete repository-level development lifecycle:
 Inspect → Understand → Plan → Edit (small patches) → Build → Test → Debug/Repair → Review Diff → Package & Report.
 """
+
 from __future__ import annotations
 
 import ast
@@ -11,11 +12,11 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 from .artifact_manager import artifact_manager
 from .critic import critic_manager
@@ -38,10 +39,10 @@ class SWEPhase(str, Enum):
 @dataclass
 class ToolchainInfo:
     language: str  # python | javascript | typescript | rust | go | java | kotlin | c_cpp | unknown
-    framework: Optional[str] = None  # fastapi, react, nextjs, django, android, etc.
-    build_tool: Optional[str] = None  # npm, cargo, gradle, pip, go
-    test_runner: Optional[str] = None  # pytest, jest, cargo test, go test
-    linter: Optional[str] = None  # ruff, eslint, flake8
+    framework: str | None = None  # fastapi, react, nextjs, django, android, etc.
+    build_tool: str | None = None  # npm, cargo, gradle, pip, go
+    test_runner: str | None = None  # pytest, jest, cargo test, go test
+    linter: str | None = None  # ruff, eslint, flake8
     entrypoints: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -154,7 +155,7 @@ class SWEResult:
     artifacts: list[str] = field(default_factory=list)
     change_report: str = ""
     repairs_made: int = 0
-    checkpoint_id: Optional[str] = None
+    checkpoint_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -163,7 +164,7 @@ class SWEResult:
 class SoftwareEngineerMode:
     """End-to-end repository-level software development lifecycle runner."""
 
-    def __init__(self, workspace_root: Optional[Path] = None):
+    def __init__(self, workspace_root: Path | None = None):
         self.workspace_root = workspace_root or workspace.root
 
     def _apply_patch(self, file_path: Path, new_content: str) -> bool:
@@ -180,8 +181,8 @@ class SoftwareEngineerMode:
     def execute(
         self,
         task: str,
-        workspace_dir: Optional[Path] = None,
-        coder_fn: Optional[Callable[[str, dict[str, Any]], dict[str, str]]] = None,
+        workspace_dir: Path | None = None,
+        coder_fn: Callable[[str, dict[str, Any]], dict[str, str]] | None = None,
         max_repairs: int = 3,
         agent: Any = None,
         on_event: Any = None,
@@ -201,7 +202,7 @@ class SoftwareEngineerMode:
         files_modified: list[str] = []
         repairs = 0
 
-        def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+        def _emit(event_type: str, data: dict[str, Any] | None = None) -> None:
             if on_event is not None:
                 try:
                     on_event(event_type, data or {})
@@ -221,17 +222,17 @@ class SoftwareEngineerMode:
             )
             error_log = str(ctx.get("error_log") or "").strip()
             if error_log:
-                prompt += (
-                    f"\n## Failing test output (fix these)\n```\n{error_log[:4000]}\n```\n"
-                )
+                prompt += f"\n## Failing test output (fix these)\n```\n{error_log[:4000]}\n```\n"
             prompt += (
                 "\nImplement/repair the code now using your tools (write files, run "
                 "commands). Report what you changed and the commands you ran. Do not "
                 "merely describe the changes — make them."
             )
             _chat_compat(
-                agent, prompt,
-                on_event=on_event, should_cancel=should_cancel,
+                agent,
+                prompt,
+                on_event=on_event,
+                should_cancel=should_cancel,
                 steer_source=steer_source,
             )
             # ground truth: files actually changed since the checkpoint
@@ -284,7 +285,7 @@ class SoftwareEngineerMode:
                     text=True,
                     timeout=30,
                 )
-                test_success = (test_res.returncode == 0)
+                test_success = test_res.returncode == 0
                 test_details = {
                     "returncode": test_res.returncode,
                     "stdout": test_res.stdout[-2000:],
@@ -298,7 +299,7 @@ class SoftwareEngineerMode:
                     text=True,
                     timeout=45,
                 )
-                test_success = (test_res.returncode == 0)
+                test_success = test_res.returncode == 0
                 test_details = {
                     "returncode": test_res.returncode,
                     "stdout": test_res.stdout[-2000:],
@@ -340,7 +341,6 @@ class SoftwareEngineerMode:
 
         # Phase 5: REVIEW DIFF
         phases.append(SWEPhase.REVIEW_DIFF.value)
-        diff_info = rollback_manager.diff(cp.id)
 
         # Generate unified diff string
         diff_text_list = []
@@ -355,7 +355,9 @@ class SoftwareEngineerMode:
         full_diff = "\n\n".join(diff_text_list)
 
         # Phase 6: VERIFICATION & CRITIC PANEL
-        files_content = {f: (root / f).read_text(encoding="utf-8", errors="ignore") for f in files_modified if (root / f).exists()}
+        files_content = {
+            f: (root / f).read_text(encoding="utf-8", errors="ignore") for f in files_modified if (root / f).exists()
+        }
         critic_res = critic_manager.run_full_review(
             task=task,
             files_content=files_content,
@@ -375,15 +377,15 @@ class SoftwareEngineerMode:
         artifact_paths = [a.path for a in artifacts]
 
         change_report = f"""# SWE Change Report: {task}
-- **Language/Framework**: {toolchain.language} / {toolchain.framework or 'generic'}
-- **Files Modified**: {len(files_modified)} ({', '.join(files_modified) if files_modified else 'none'})
-- **Test Status**: {'PASSED' if test_success else 'FAILED'} (Repairs attempted: {repairs})
-- **Domain Verification**: {'VERIFIED' if v_result.verified else 'UNVERIFIED'} (Score: {v_result.score})
-- **Critic Score**: {critic_res['overall_score']}/100 (Verdict: {critic_res['verdict'].upper()})
+- **Language/Framework**: {toolchain.language} / {toolchain.framework or "generic"}
+- **Files Modified**: {len(files_modified)} ({", ".join(files_modified) if files_modified else "none"})
+- **Test Status**: {"PASSED" if test_success else "FAILED"} (Repairs attempted: {repairs})
+- **Domain Verification**: {"VERIFIED" if v_result.verified else "UNVERIFIED"} (Score: {v_result.score})
+- **Critic Score**: {critic_res["overall_score"]}/100 (Verdict: {critic_res["verdict"].upper()})
 - **Artifacts Generated**: {len(artifact_paths)}
 
 ## Review Summary
-{critic_res['summary']}
+{critic_res["summary"]}
 """
 
         final_success = bool(test_success and v_result.verified and critic_res["approved"])

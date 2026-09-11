@@ -1,4 +1,5 @@
 """Tools for the jcode-inspired harness: sessions, swarm, bus, file-shift."""
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,6 +1,7 @@
 """WebGateway tests: security gates, normalization, caching, and a REAL
 end-to-end fetch against a local HTTP server (loopback permitted explicitly by
 the test-only policy — production policy blocks it by default)."""
+
 from __future__ import annotations
 
 import json
@@ -13,8 +14,8 @@ from core.web.gateway import WebGateway
 from core.web.security import (
     SecurityBlockedError,
     WebSecurityPolicy,
-    redact_url,
     host_matches_pattern,
+    redact_url,
 )
 
 
@@ -31,7 +32,7 @@ class StubConfig:
     web_browser_timeout = 5.0
     web_max_response_bytes = 1_000_000
     web_max_redirects = 5
-    web_allow_private_addresses = True          # test-only: local HTTP server
+    web_allow_private_addresses = True  # test-only: local HTTP server
     web_allowed_domains: list = []
     web_blocked_domains: list = []
     web_crawl_max_pages = 20
@@ -50,17 +51,26 @@ class LocalSite:
 
     def __init__(self):
         self.pages = {
-            "/": ("text/html", "<html><head><title>Home</title></head><body>"
-                               "<h1>Hello Hermus</h1><p>Lots of meaningful body text "
-                               "so the router deems this page sufficient for the test.</p>"
-                               "<a href='/page2'>next</a><a href='http://evil.exampleOutside/x'>out</a>"
-                               "</body></html>"),
-            "/page2": ("text/html", "<html><head><title>Page Two</title></head><body>"
-                                    "<p>Second page with enough real text to pass the "
-                                    "sufficiency heuristic used by the strategy router.</p></body></html>"),
-            "/js-shell": ("text/html", "<html><head><title>App</title></head><body>"
-                                       "<div id='root'></div><noscript>Enable JavaScript</noscript>"
-                                       "</body></html>"),
+            "/": (
+                "text/html",
+                "<html><head><title>Home</title></head><body>"
+                "<h1>Hello Hermus</h1><p>Lots of meaningful body text "
+                "so the router deems this page sufficient for the test.</p>"
+                "<a href='/page2'>next</a><a href='http://evil.exampleOutside/x'>out</a>"
+                "</body></html>",
+            ),
+            "/page2": (
+                "text/html",
+                "<html><head><title>Page Two</title></head><body>"
+                "<p>Second page with enough real text to pass the "
+                "sufficiency heuristic used by the strategy router.</p></body></html>",
+            ),
+            "/js-shell": (
+                "text/html",
+                "<html><head><title>App</title></head><body>"
+                "<div id='root'></div><noscript>Enable JavaScript</noscript>"
+                "</body></html>",
+            ),
             "/data.json": ("application/json", json.dumps({"price": 42, "ok": True})),
             "/big": ("application/octet-stream", "x" * 300),
         }
@@ -73,8 +83,9 @@ class LocalSite:
             def do_GET(self):
                 site.hit_log.append(self.path)
                 ctype, body = site.pages.get(self.path) or (
-                    "text/html", "<html><head><title>404</title></head><body>not found "
-                                 "page with filler text</body></html>")
+                    "text/html",
+                    "<html><head><title>404</title></head><body>not found page with filler text</body></html>",
+                )
                 status = 200 if self.path in site.pages else 404
                 payload = body.encode()
                 self.send_response(status)
@@ -121,8 +132,7 @@ class TestSecurityGate:
 
     def test_unsafe_schemes_rejected(self):
         policy = WebSecurityPolicy(allow_private_addresses=True)
-        for url in ("file:///etc/passwd", "ftp://example.com/x", "data:text/html,hi",
-                    "gopher://example.com"):
+        for url in ("file:///etc/passwd", "ftp://example.com/x", "data:text/html,hi", "gopher://example.com"):
             with pytest.raises(SecurityBlockedError):
                 policy.check(url)
 
@@ -201,7 +211,7 @@ class TestGatewayFetchRealLocal:
         assert not hasattr(result, "cookies")
         assert not hasattr(result, "request_headers")
         # links are absolutized; external link kept, anchor filtered
-        urls = [l.url for l in result.links]
+        urls = [link.url for link in result.links]
         assert f"{base}/page2" in urls
 
     def test_cache_hit_within_ttl(self, gateway, site):

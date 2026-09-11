@@ -22,6 +22,7 @@ The default OpenAI port is **8010**, not NoLlama's 8000, because the Hermus
 gateway already serves 8000.  The Ollama shim is started with
 ``--ollama-port 0`` so it never fights a real Ollama on 11434.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,7 +36,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
 
@@ -189,7 +190,7 @@ class DownloadJob:
     path: str = ""
     error: str = ""
     started: float = field(default_factory=time.time)
-    finished: Optional[float] = None
+    finished: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -234,17 +235,9 @@ def _dir_size(path: Path) -> int:
 class NollamaManager:
     """Install / serve / stop NoLlama and manage its model downloads."""
 
-    def __init__(self, home: Optional[str] = None, models_dir: Optional[str] = None) -> None:
-        self.home = Path(
-            home
-            or getattr(config, "nollama_dir", "")
-            or (Path.home() / ".hermus" / "nollama")
-        ).expanduser()
-        self.models_dir = Path(
-            models_dir
-            or getattr(config, "nollama_models_dir", "")
-            or (Path.home() / "models")
-        ).expanduser()
+    def __init__(self, home: str | None = None, models_dir: str | None = None) -> None:
+        self.home = Path(home or getattr(config, "nollama_dir", "") or (Path.home() / ".hermus" / "nollama")).expanduser()
+        self.models_dir = Path(models_dir or getattr(config, "nollama_models_dir", "") or (Path.home() / "models")).expanduser()
         self.port = int(getattr(config, "nollama_port", 8010) or 8010)
         # State lives beside the server it describes unless the user pinned a
         # path: two installs (or a test manager) must not read each other's pid.
@@ -257,7 +250,7 @@ class NollamaManager:
         self.log_path = config.resolve_path(pinned_log) if pinned_log else (self.home / "nollama.log")
         self._lock = threading.RLock()
         self._downloads: dict[str, DownloadJob] = {}
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
 
     # ------------------------------------------------------------------ paths
     @property
@@ -301,7 +294,7 @@ class NollamaManager:
             pass
         return data
 
-    def install(self, *, python_exe: Optional[str] = None, timeout: int = 900) -> dict[str, Any]:
+    def install(self, *, python_exe: str | None = None, timeout: int = 900) -> dict[str, Any]:
         """Fetch the NoLlama server and build its venv — **without** model weights.
 
         Returns a terminal result dict; every failure mode is reported with the
@@ -324,9 +317,7 @@ class NollamaManager:
                 target = self.home.parent / f"{self.home.name}.tmp"
                 if target.exists():
                     _rmtree(target)
-                code, out = _shell(
-                    [git, "clone", "--depth", "1", REPO_URL, str(target)], timeout=300
-                )
+                code, out = _shell([git, "clone", "--depth", "1", REPO_URL, str(target)], timeout=300)
                 if code != 0 or not (target / SERVER_FILE).exists():
                     return {
                         "success": False,
@@ -352,8 +343,7 @@ class NollamaManager:
                     return {
                         "success": False,
                         "stage": "venv",
-                        "error": (out or "python -m venv failed")[-800:]
-                        or f"venv created but {self.venv_python} is missing",
+                        "error": (out or "python -m venv failed")[-800:] or f"venv created but {self.venv_python} is missing",
                         "hint": "install python3-venv (Debian/Ubuntu) or python3-virtualenv",
                         "steps": steps,
                     }
@@ -365,9 +355,7 @@ class NollamaManager:
                 pkgs = ["openvino-genai", "fastapi", "uvicorn[standard]", "openai", "huggingface_hub"]
                 if requirements.exists():
                     pkgs = ["-r", str(requirements)]
-                code, out = _shell(
-                    [str(self.venv_python), "-m", "pip", "install", *pkgs], timeout=timeout
-                )
+                code, out = _shell([str(self.venv_python), "-m", "pip", "install", *pkgs], timeout=timeout)
                 if code != 0:
                     return {
                         "success": False,
@@ -408,7 +396,7 @@ class NollamaManager:
             out.append(entry)
         return out
 
-    def get_spec(self, model_id: str) -> Optional[ModelSpec]:
+    def get_spec(self, model_id: str) -> ModelSpec | None:
         return CATALOG_BY_ID.get(str(model_id or "").strip().lower())
 
     def installed_models(self) -> list[dict[str, Any]]:
@@ -435,7 +423,7 @@ class NollamaManager:
             )
         return found
 
-    def recommended_model(self, plan_dict: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
+    def recommended_model(self, plan_dict: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """The one model this machine is missing that unlocks the routed plan."""
         from .accelerators import ENGINE_NOLLAMA
 
@@ -463,7 +451,7 @@ class NollamaManager:
         with self._lock:
             return [job.to_dict() for job in self._downloads.values()]
 
-    def download_status(self, job_id: str) -> Optional[dict[str, Any]]:
+    def download_status(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._downloads.get(job_id)
             return job.to_dict() if job else None
@@ -486,8 +474,7 @@ class NollamaManager:
         with self._lock:
             for job in self._downloads.values():
                 if job.model_id == spec.id and job.state not in TERMINAL_STATES:
-                    return {"success": True, "started": False, "job": job.to_dict(),
-                            "detail": "download already in progress"}
+                    return {"success": True, "started": False, "job": job.to_dict(), "detail": "download already in progress"}
             if model_dir_ready(target) and not force:
                 job = DownloadJob(
                     id=f"{spec.id}-{int(time.time())}",
@@ -499,8 +486,7 @@ class NollamaManager:
                     finished=time.time(),
                 )
                 self._downloads[job.id] = job
-                return {"success": True, "started": False, "job": job.to_dict(),
-                        "detail": "already on disk"}
+                return {"success": True, "started": False, "job": job.to_dict(), "detail": "already on disk"}
             job = DownloadJob(
                 id=f"{spec.id}-{int(time.time())}",
                 model_id=spec.id,
@@ -510,9 +496,7 @@ class NollamaManager:
                 path=str(target),
             )
             self._downloads[job.id] = job
-        thread = threading.Thread(
-            target=self._download_worker, args=(job.id, spec), name=f"dl-{spec.id}", daemon=True
-        )
+        thread = threading.Thread(target=self._download_worker, args=(job.id, spec), name=f"dl-{spec.id}", daemon=True)
         thread.start()
         return {"success": True, "started": True, "job": job.to_dict()}
 
@@ -554,9 +538,7 @@ class NollamaManager:
                 kwargs["trust_remote_code"] = True
 
             stop = threading.Event()
-            watcher = threading.Thread(
-                target=self._watch_progress, args=(job, target, stop), daemon=True
-            )
+            watcher = threading.Thread(target=self._watch_progress, args=(job, target, stop), daemon=True)
             watcher.start()
             try:
                 snapshot_download(**kwargs)
@@ -573,10 +555,7 @@ class NollamaManager:
                 job.bytes_total = job.bytes_done or job.bytes_total
             else:
                 job.state = STATE_FAILED
-                job.error = (
-                    "download finished but openvino_model.bin/.xml are missing or truncated "
-                    "in " + str(target)
-                )
+                job.error = "download finished but openvino_model.bin/.xml are missing or truncated in " + str(target)
             job.finished = time.time()
         except Exception as exc:  # noqa: BLE001 - report, never crash the gateway
             job.state = STATE_FAILED
@@ -616,9 +595,11 @@ class NollamaManager:
     # and indexing passes.  NoLlama serves an OpenVINO Whisper model on the
     # OpenAI-standard audio path, so Hermus posts the microphone clip there and
     # keeps faster-whisper (CPU) as the fallback.
-    def whisper_model(self) -> Optional[dict[str, Any]]:
+    def whisper_model(self) -> dict[str, Any] | None:
         """Installed Whisper IR, if the user downloaded one from the dashboard."""
-        whisper_names = {spec.repo.split("/")[-1] for spec in MODEL_CATALOG if "background" in spec.roles and "whisper" in spec.repo.lower()}
+        whisper_names = {
+            spec.repo.split("/")[-1] for spec in MODEL_CATALOG if "background" in spec.roles and "whisper" in spec.repo.lower()
+        }
         for entry in self.installed_models():
             if entry.get("name") in whisper_names and entry.get("complete"):
                 spec = CATALOG_BY_ID.get(entry.get("model_id") or "")
@@ -629,7 +610,7 @@ class NollamaManager:
         self,
         audio_path: str,
         *,
-        language: Optional[str] = None,
+        language: str | None = None,
         timeout: float = 180.0,
     ) -> dict[str, Any]:
         """Transcribe one audio file on the local engine.
@@ -687,7 +668,7 @@ class NollamaManager:
             "duration": None,
         }
 
-    def best_installed_model(self, device: str = "", roles: Optional[tuple[str, ...]] = None) -> Optional[dict[str, Any]]:
+    def best_installed_model(self, device: str = "", roles: tuple[str, ...] | None = None) -> dict[str, Any] | None:
         """Pick an *already-downloaded* catalog model for a device/role.
 
         Used by ``start`` (so an engine actually serves the model a user
@@ -697,7 +678,7 @@ class NollamaManager:
         """
         device = (device or "AUTO").upper()
         wanted_roles = set(roles or ())
-        best: Optional[dict[str, Any]] = None
+        best: dict[str, Any] | None = None
         best_rank = 10_000
         for row in self.list_catalog():
             if not row.get("installed"):
@@ -736,11 +717,11 @@ class NollamaManager:
         self,
         *,
         device: str = "",
-        model_dir: Optional[str] = None,
-        gpu_model_dir: Optional[str] = None,
-        port: Optional[int] = None,
-        extra_args: Optional[list[str]] = None,
-        idle_timeout: Optional[int] = None,
+        model_dir: str | None = None,
+        gpu_model_dir: str | None = None,
+        port: int | None = None,
+        extra_args: list[str] | None = None,
+        idle_timeout: int | None = None,
     ) -> dict[str, Any]:
         """Launch the server pinned to a device (defaults to auto-detect).
 
@@ -905,7 +886,7 @@ def model_dir_ready(path: Path) -> bool:
 
 def _declared_weights_size(xml: Path) -> int:
     """Read the external-data size from the IR header without parsing all of it."""
-    with open(xml, "r", encoding="utf-8", errors="ignore") as handle:
+    with open(xml, encoding="utf-8", errors="ignore") as handle:
         head = handle.read(65536)
     marker = 'offset="0" size="'
     idx = head.find(marker)
@@ -930,9 +911,7 @@ def _which(name: str) -> str:
 def _shell(cmd: list[str], timeout: int = 120) -> tuple[int, str]:
     """Run a command, returning (code, combined output). Never raises."""
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, cwd=str(Path.cwd())
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(Path.cwd()))
     except subprocess.TimeoutExpired:
         return 124, f"timed out after {timeout}s: {' '.join(cmd)}"
     except Exception as exc:  # noqa: BLE001

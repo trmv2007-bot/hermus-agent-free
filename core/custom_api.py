@@ -2,11 +2,17 @@
 
 import json
 import re
-import requests
-from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from pathlib import Path
+
+import requests
+
+from core.log import get_logger
+
 from .config import config
+
+logger = get_logger(__name__)
+
 
 class CustomAPIManager:
     """Manage custom APIs - 100% free, user-defined APIs as tools"""
@@ -53,7 +59,7 @@ class CustomAPIManager:
                 return {"success": False, "error": f"Missing required field: {field}"}
 
         # Sanitize name
-        name = re.sub(r'[^a-zA-Z0-9_]', '_', api_def["name"]).lower()
+        name = re.sub(r"[^a-zA-Z0-9_]", "_", api_def["name"]).lower()
         api_def["name"] = name
         api_def["id"] = f"custom_{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(apis)}"
         api_def["created"] = datetime.now().isoformat()
@@ -61,14 +67,19 @@ class CustomAPIManager:
         # Default values
         api_def.setdefault("method", "GET")
         api_def.setdefault("headers", {})
-        api_def.setdefault("auth", {})  # {"type": "bearer", "token": "..."} or {"type": "apikey", "key": "X-API-Key", "value": "..."}
+        api_def.setdefault(
+            "auth", {}
+        )  # {"type": "bearer", "token": "..."} or {"type": "apikey", "key": "X-API-Key", "value": "..."}
         api_def.setdefault("parameters", {})  # JSON schema for params
         api_def.setdefault("enabled", True)
 
         # Check limit for same API name - allow up to 10 keys as requested
         existing_same_name = [a for a in apis if a["name"] == name]
         if len(existing_same_name) >= self.MAX_KEYS_PER_API_NAME:
-            return {"success": False, "error": f"Max {self.MAX_KEYS_PER_API_NAME} keys per custom API name reached for '{name}'. You have {len(existing_same_name)} keys from different websites already. Remove old with 'api remove {name}' or 'api remove <id>'."}
+            return {
+                "success": False,
+                "error": f"Max {self.MAX_KEYS_PER_API_NAME} keys per custom API name reached for '{name}'. You have {len(existing_same_name)} keys from different websites already. Remove old with 'api remove {name}' or 'api remove <id>'.",
+            }
 
         new_token = api_def.get("auth", {}).get("token") or api_def.get("auth", {}).get("value") or ""
 
@@ -93,21 +104,34 @@ class CustomAPIManager:
         # Also add to multi-key manager for custom provider for load balancing
         try:
             from .multi_key import multi_key_manager
+
             if new_token:
                 provider_key = f"custom_{name}"
                 # Add token to multi-key manager for this custom API
-                multi_key_manager.add_key(provider_key, new_token, name=f"{name}_{len([a for a in apis if a['name']==name])}")
+                multi_key_manager.add_key(provider_key, new_token, name=f"{name}_{len([a for a in apis if a['name'] == name])}")
         except Exception:
             pass
 
         if replaced:
-            return {"success": True, "api": api_def, "message": f"Custom API '{name}' updated (same token replaced). Now {len([a for a in apis if a['name']==name])} key(s) for this API."}
+            return {
+                "success": True,
+                "api": api_def,
+                "message": f"Custom API '{name}' updated (same token replaced). Now {len([a for a in apis if a['name'] == name])} key(s) for this API.",
+            }
         else:
             count = len([a for a in apis if a["name"] == name])
             if count > 1:
-                return {"success": True, "api": api_def, "message": f"Custom API '{name}' added with NEW key. Now {count} keys for same API - will use round-robin + fallback to complete quickly! Multi-key for custom APIs enabled."}
+                return {
+                    "success": True,
+                    "api": api_def,
+                    "message": f"Custom API '{name}' added with NEW key. Now {count} keys for same API - will use round-robin + fallback to complete quickly! Multi-key for custom APIs enabled.",
+                }
             else:
-                return {"success": True, "api": api_def, "message": f"Custom API '{name}' added. Now available as tool for agent."}
+                return {
+                    "success": True,
+                    "api": api_def,
+                    "message": f"Custom API '{name}' added. Now available as tool for agent.",
+                }
 
     def remove_api(self, name: str) -> dict:
         apis = self._load()
@@ -119,7 +143,7 @@ class CustomAPIManager:
         self._invalidate_tool_registry()
         return {"success": True, "message": f"Removed custom API '{name}'"}
 
-    def get_api(self, name: str) -> Optional[dict]:
+    def get_api(self, name: str) -> dict | None:
         apis = self._load()
         for api in apis:
             if api["name"] == name or api["id"] == name:
@@ -170,19 +194,19 @@ class CustomAPIManager:
 
             # Count how many keys exist for this API name for multi-key badge
             count_keys = len([a for a in apis if a["name"] == api["name"]])
-            multi_key_badge = f" | Multi-key: {count_keys} keys from different websites - round-robin + fallback + completes quickly!" if count_keys > 1 else ""
+            multi_key_badge = (
+                f" | Multi-key: {count_keys} keys from different websites - round-robin + fallback + completes quickly!"
+                if count_keys > 1
+                else ""
+            )
 
             tool_def = {
                 "type": "function",
                 "function": {
                     "name": api["name"],
-                    "description": f"[CUSTOM API] {api['description']} | URL: {api['url']} | Method: {api.get('method','GET')}{multi_key_badge} | Custom API defined by user, free",
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required
-                    }
-                }
+                    "description": f"[CUSTOM API] {api['description']} | URL: {api['url']} | Method: {api.get('method', 'GET')}{multi_key_badge} | Custom API defined by user, free",
+                    "parameters": {"type": "object", "properties": properties, "required": required},
+                },
             }
             tools.append(tool_def)
         return tools
@@ -197,13 +221,14 @@ class CustomAPIManager:
             # Multiple keys for same custom API - use multi-key manager round-robin
             try:
                 from .multi_key import multi_key_manager
+
                 provider_key = f"custom_{name}"
                 # Ensure all tokens are in multi-key manager
                 for api in matching:
                     token = api.get("auth", {}).get("token") or api.get("auth", {}).get("value") or ""
                     if token:
                         existing = multi_key_manager.list_keys().get(provider_key, [])
-                        existing_tokens = [k if isinstance(k, str) else k.get("key","") for k in existing]
+                        existing_tokens = [k if isinstance(k, str) else k.get("key", "") for k in existing]
                         if token not in existing_tokens:
                             multi_key_manager.add_key(provider_key, token, name=f"{name}_{len(existing)}")
 
@@ -220,12 +245,12 @@ class CustomAPIManager:
                             if result.get("success") and result.get("status_code", 200) < 400:
                                 multi_key_manager.mark_key_success(provider_key, chosen_token)
                             else:
-                                multi_key_manager.mark_key_failed(provider_key, chosen_token, result.get("error",""))
+                                multi_key_manager.mark_key_failed(provider_key, chosen_token, result.get("error", ""))
                             result["used_key"] = f"{chosen_token[:10]}... (multi-key {len(matching)} keys round-robin)"
                             result["total_keys_for_this_api"] = len(matching)
                             return result
             except Exception as e:
-                print(f"[Custom API Multi-Key] Failed to use multi-key, falling back to single: {e}")
+                logger.error(f"[Custom API Multi-Key] Failed to use multi-key, falling back to single: {e}")
 
         # Single key or fallback - original logic
         api = self.get_api(name)
@@ -254,10 +279,10 @@ class CustomAPIManager:
 
             request_kwargs = {"headers": headers, "timeout": 30}
             if auth.get("type") == "basic":
-                request_kwargs["auth"] = (auth.get("username",""), auth.get("password",""))
+                request_kwargs["auth"] = (auth.get("username", ""), auth.get("password", ""))
 
             if method == "GET":
-                params = {k: v for k, v in arguments.items() if "{"+k+"}" not in api["url"]}
+                params = {k: v for k, v in arguments.items() if "{" + k + "}" not in api["url"]}
                 request_kwargs["params"] = params
                 resp = requests.get(url, **request_kwargs)
             elif method == "POST":
@@ -279,26 +304,27 @@ class CustomAPIManager:
                 return {
                     "success": True,
                     "api": api["name"],
-                    "api_id": api.get("id",""),
+                    "api_id": api.get("id", ""),
                     "status_code": resp.status_code,
                     "url": url,
                     "data": data,
                     "data_str": data_str,
-                    "headers": dict(resp.headers)
+                    "headers": dict(resp.headers),
                 }
             except Exception:
                 text = resp.text[:5000]
                 return {
                     "success": True,
                     "api": api["name"],
-                    "api_id": api.get("id",""),
+                    "api_id": api.get("id", ""),
                     "status_code": resp.status_code,
                     "url": url,
                     "data": text,
-                    "data_str": text
+                    "data_str": text,
                 }
         except Exception as e:
-            return {"success": False, "api": api.get("name",""), "error": str(e), "url": api.get("url","")}
+            return {"success": False, "api": api.get("name", ""), "error": str(e), "url": api.get("url", "")}
+
 
 # Global manager free
 custom_api_manager = CustomAPIManager()

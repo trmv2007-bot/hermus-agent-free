@@ -4,6 +4,7 @@ The Markdown documents are the human constitution. This module is the small,
 stdlib-only loader used by tests and future enforcement code to read the same
 policy from ``policies/red_lines.json`` without adding a YAML dependency.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY_PATH = ROOT / "policies" / "red_lines.json"
@@ -29,7 +29,7 @@ class RedLineRule:
     red: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RedLineRule":
+    def from_dict(cls, data: dict[str, Any]) -> RedLineRule:
         return cls(
             id=int(data["id"]),
             key=str(data["key"]),
@@ -51,7 +51,7 @@ class SafetyPolicy:
     protected_paths: tuple[str, ...]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SafetyPolicy":
+    def from_dict(cls, data: dict[str, Any]) -> SafetyPolicy:
         return cls(
             version=str(data["version"]),
             name=str(data["name"]),
@@ -114,11 +114,16 @@ def assess_tool_action(tool_name: str, args: dict[str, Any] | None = None) -> Ac
             zone = next_zone
 
     # Red Line 1: shutdown/control evasion.
-    if re.search(r"\b(disable|bypass|ignore|kill|remove|turn off)\b.{0,40}\b(emergency[-_ ]?stop|shutdown|cancel|revocation|pause)\b", text):
+    if re.search(
+        r"\b(disable|bypass|ignore|kill|remove|turn off)\b.{0,40}\b(emergency[-_ ]?stop|shutdown|cancel|revocation|pause)\b", text
+    ):
         mark("red", 1, "attempts to disable or evade shutdown/revocation controls")
 
     # Red Line 2: audit/history concealment.
-    if re.search(r"\b(delete|wipe|remove|falsify|hide|corrupt|tamper)\b.{0,45}\b(audit|ledger|log|history|evidence|mission record|tool history)\b", text):
+    if re.search(
+        r"\b(delete|wipe|remove|falsify|hide|corrupt|tamper)\b.{0,45}\b(audit|ledger|log|history|evidence|mission record|tool history)\b",
+        text,
+    ):
         mark("red", 2, "attempts to hide, delete, or falsify audit/evidence history")
 
     # Red Line 3: private data/secret handling. Broad local scans are yellow;
@@ -133,20 +138,31 @@ def assess_tool_action(tool_name: str, args: dict[str, Any] | None = None) -> Ac
         text,
     ):
         mark("yellow", 3, "touches broad/private local data and needs approved scope/purpose")
-    if re.search(r"\b(upload|post|send|publish|commit|log|paste)\b.{0,50}\b(secret|credential|token|api key|\.env|id_rsa|private key|cookie)\b", text):
+    if re.search(
+        r"\b(upload|post|send|publish|commit|log|paste)\b.{0,50}\b(secret|credential|token|api key|\.env|id_rsa|private key|cookie)\b",
+        text,
+    ):
         mark("red", 3, "would expose or persist secrets/private data outside approved purpose")
 
     # Red Line 4: abuse/security. Authorized security tools can be yellow, but
     # credential theft/phishing/spam/malware deployment are red by shape.
-    if re.search(r"\b(port scan|network scan|vulnerability scan|exploit|pentest|scrape|malware analysis|reverse engineer)\b", text):
+    if re.search(
+        r"\b(port scan|network scan|vulnerability scan|exploit|pentest|scrape|malware analysis|reverse engineer)\b", text
+    ):
         mark("yellow", 4, "security/discovery action needs owned/administered/in-scope target")
-    if re.search(r"\b(phishing|credential theft|steal (?:token|cookie|password)|spam campaign|botnet|deploy malware|ransomware|keylogger|market manipulation|insider trading)\b", text):
+    if re.search(
+        r"\b(phishing|credential theft|steal (?:token|cookie|password)|spam campaign|botnet|deploy malware|ransomware|keylogger|market manipulation|insider trading)\b",
+        text,
+    ):
         mark("red", 4, "matches unlawful abuse or real-system malware/credential misuse")
 
     # Red Line 5: destructive/unrecoverable actions.
     if re.search(r"\b(rm\s+-rf\s+/(?:\s|$)|mkfs|dd\s+if=|wipe disk|format disk|delete backup|drop database|force push)\b", text):
         mark("red", 5, "destructive or potentially unrecoverable action")
-    elif re.search(r"\b(delete|overwrite|reset|destroy|wipe|remove)\b.{0,40}\b(database|backup|config|user file|repository|production)\b", text):
+    elif re.search(
+        r"\b(delete|overwrite|reset|destroy|wipe|remove)\b.{0,40}\b(database|backup|config|user file|repository|production)\b",
+        text,
+    ):
         mark("yellow", 5, "destructive action needs approval and recovery path")
 
     # Red Line 6: wallet/spending/trading.
@@ -160,11 +176,17 @@ def assess_tool_action(tool_name: str, args: dict[str, Any] | None = None) -> Ac
     paths = " ".join(str(v) for k, v in args.items() if k in {"path", "file", "filename", "target"})
     if _touches_protected_policy_path(paths):
         mark("yellow", 7, "touches protected red-line/safety control plane and requires review")
-    if re.search(r"\b(disable|bypass|weaken|skip|remove|turn off)\b.{0,50}\b(permission|approval|sandbox|red[-_ ]?line|safety|secret protection|audit|capability escalation)\b", text):
+    if re.search(
+        r"\b(disable|bypass|weaken|skip|remove|turn off)\b.{0,50}\b(permission|approval|sandbox|red[-_ ]?line|safety|secret protection|audit|capability escalation)\b",
+        text,
+    ):
         mark("red", 7, "attempts to weaken or bypass safety enforcement")
 
     # Red Line 8: broad/third-party reach.
-    if re.search(r"\b(random (?:network|ip|ips)|internet-wide|third-party system|private system|local network|subnet|account|device)\b", text):
+    if re.search(
+        r"\b(random (?:network|ip|ips)|internet-wide|third-party system|private system|local network|subnet|account|device)\b",
+        text,
+    ):
         mark("yellow", 8, "broad reach needs explicit authorized scope")
     if re.search(r"\b(use leaked credentials|persist on|backdoor|unauthorized access|scan random internet)\b", text):
         mark("red", 8, "reaches third-party systems without authorization or adds persistence")
@@ -176,17 +198,24 @@ def assess_tool_action(tool_name: str, args: dict[str, Any] | None = None) -> Ac
         mark("red", 9, "abusive impersonation or social engineering")
 
     # Red Line 10: fake evidence.
-    if re.search(r"\b(fake|fabricate|invent|pretend)\b.{0,40}\b(test result|evidence|citation|permission|success|observation)\b", text):
+    if re.search(
+        r"\b(fake|fabricate|invent|pretend)\b.{0,40}\b(test result|evidence|citation|permission|success|observation)\b", text
+    ):
         mark("red", 10, "requests fabricated certainty/evidence")
 
     # Red Line 11: silent power gain.
     if re.search(r"\b(activate|grant|enable|install|add)\b.{0,45}\b(connector|permission|capability|power|admin|scope)\b", text):
         mark("yellow", 11, "capability expansion must be visible, approved, and logged")
-    if re.search(r"\b(silently|secretly|without logging|without approval)\b.{0,45}\b(activate|grant|enable|escalate|permission|capability|power)\b", text):
+    if re.search(
+        r"\b(silently|secretly|without logging|without approval)\b.{0,45}\b(activate|grant|enable|escalate|permission|capability|power)\b",
+        text,
+    ):
         mark("red", 11, "silent capability gain or escalation")
 
     suggested = "deny" if zone == "red" else "ask" if zone == "yellow" else "allow"
-    return ActionSafetyAssessment(zone=zone, red_lines=tuple(sorted(red_lines)), reasons=tuple(reasons), suggested_decision=suggested)
+    return ActionSafetyAssessment(
+        zone=zone, red_lines=tuple(sorted(red_lines)), reasons=tuple(reasons), suggested_decision=suggested
+    )
 
 
 def _action_text(tool_name: str, args: dict[str, Any]) -> str:

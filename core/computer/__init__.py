@@ -19,9 +19,19 @@ important frames are promoted to local vision analysis. Real pointer/keyboard
 control uses ``pyautogui``/``pygetwindow`` when present and degrades to an
 auditable dry-run otherwise, so every path is testable offline.
 """
-from .controller import ComputerActionController, detect_computer_capability
+
+from .benchmark import (
+    COMPUTER_TASKS,
+    BenchmarkResult,
+    BenchmarkRunner,
+    TaskSpec,
+    get_task,
+    list_tasks,
+    run_benchmark,
+)
 from .computer_agent import ComputerAgent
 from .control_center import ControlCenter
+from .controller import ComputerActionController, detect_computer_capability
 from .delegation import DelegationPlan, MultiAgentDelegator, WorkUnit
 from .episodes import Episode, EpisodeStore, get_episode_store, record_episode
 from .event_detector import EventDetector, StreamingEventDetector
@@ -48,6 +58,23 @@ from .permissions import (
     recording_policy,
 )
 from .planner import ComputerPlanner, PlanNode, TaskGoal, TaskGraph
+from .recorder import (
+    CallableSource,
+    ImageGrabSource,
+    NullSource,
+    ScreenRecorder,
+    ScreenSource,
+    decode_frame,
+    encode_image,
+)
+from .remote import (
+    ApprovalPrompt,
+    PromptState,
+    RemoteApprovalGate,
+    RemoteControlHub,
+    remote_approval,
+    remote_control,
+)
 from .repair import FailureDiagnosis, FailureKind, RepairEngine, RepairPlan, RepairStep
 from .replanner import (
     AdaptiveReplanner,
@@ -57,14 +84,21 @@ from .replanner import (
     ReplanStrategy,
     create_replanner,
 )
-from .recorder import (
-    CallableSource,
-    ImageGrabSource,
-    NullSource,
-    ScreenRecorder,
-    ScreenSource,
-    decode_frame,
-    encode_image,
+from .resources import ResourceMonitor, get_resource_monitor, resource_monitor
+from .simulation import (
+    SimulatedElement,
+    SimulatedGrounder,
+    SimulatedKeyboard,
+    SimulatedMouse,
+    SimulatedScreen,
+    SimulatedWindow,
+    SimulatedWindowManager,
+    browser_scenario,
+    calculator_scenario,
+    download_error_scenario,
+    installer_scenario,
+    notepad_scenario,
+    popup_scenario,
 )
 from .skills import ComputerSkill, ComputerSkillStore
 from .state_machine import VisualState, VisualStateMachine, dispatch_action
@@ -84,46 +118,13 @@ from .verifier import ActionVerificationManager, ScreenVerifier
 from .video_analyzer import OllamaVisionModel, VideoAnalyzer
 from .video_writer import VideoWriter
 from .watcher import ScreenWatcher
-from .world_state import WorldObservation, WorldState
-from .simulation import (
-    SimulatedScreen,
-    SimulatedWindow,
-    SimulatedElement,
-    SimulatedMouse,
-    SimulatedKeyboard,
-    SimulatedWindowManager,
-    SimulatedGrounder,
-    calculator_scenario,
-    notepad_scenario,
-    browser_scenario,
-    popup_scenario,
-    installer_scenario,
-    download_error_scenario,
-)
-from .benchmark import (
-    BenchmarkResult,
-    BenchmarkRunner,
-    COMPUTER_TASKS,
-    TaskSpec,
-    get_task,
-    list_tasks,
-    run_benchmark,
-)
 from .window_manager import (
     DryRunWindowBackend,
     PyGetWindowBackend,
     WindowBackend,
     default_window_manager,
 )
-from .remote import (
-    ApprovalPrompt,
-    PromptState,
-    RemoteApprovalGate,
-    RemoteControlHub,
-    remote_approval,
-    remote_control,
-)
-from .resources import ResourceMonitor, get_resource_monitor, resource_monitor
+from .world_state import WorldObservation, WorldState
 
 __all__ = [
     # v1 — recording / understanding / verification
@@ -162,6 +163,7 @@ __all__ = [
     "DryRunWindowBackend",
     "default_window_manager",
     "ComputerActionController",
+    "detect_computer_capability",
     "TargetDetector",
     "extract_json_object",
     "ComputerPolicy",

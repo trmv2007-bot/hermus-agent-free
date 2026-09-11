@@ -14,16 +14,16 @@ Rules enforced here (non-negotiable):
 The scrapling session objects themselves are created by the backend module —
 this manager owns their lifecycle and isolation policy.
 """
+
 from __future__ import annotations
 
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
-from .errors import SecurityBlockedError
-from .errors import WebAcquisitionError
+from .errors import SecurityBlockedError, WebAcquisitionError
 from .security import WebSecurityPolicy, host_matches_pattern
 
 
@@ -41,10 +41,10 @@ class WebSession:
     created_at: float = field(default_factory=time.monotonic)
     last_used_at: float = field(default_factory=time.monotonic)
     ttl_seconds: float = 1800.0
-    sync_session: Optional[Any] = None      # live scrapling client (_SyncSessionLogic)
-    _sync_factory: Optional[Any] = None     # FetcherSession context manager (owns the client)
-    dynamic_session: Optional[Any] = None   # scrapling DynamicSession (lazy; optional)
-    stealth_session: Optional[Any] = None   # scrapling StealthySession (lazy; optional)
+    sync_session: Any | None = None  # live scrapling client (_SyncSessionLogic)
+    _sync_factory: Any | None = None  # FetcherSession context manager (owns the client)
+    dynamic_session: Any | None = None  # scrapling DynamicSession (lazy; optional)
+    stealth_session: Any | None = None  # scrapling StealthySession (lazy; optional)
     requests: int = 0
 
     def expired(self) -> bool:
@@ -90,8 +90,7 @@ class WebSession:
 class WebSessionManager:
     """Creates, isolates, expires and destroys acquisition sessions."""
 
-    def __init__(self, policy: WebSecurityPolicy, *, max_sessions: int = 8,
-                 ttl_seconds: float = 1800.0):
+    def __init__(self, policy: WebSecurityPolicy, *, max_sessions: int = 8, ttl_seconds: float = 1800.0):
         self._policy = policy
         self._max_sessions = max(1, int(max_sessions))
         self._ttl = float(ttl_seconds)
@@ -109,10 +108,8 @@ class WebSessionManager:
             domain = (domain or "").lower().strip(".")
             if not domain:
                 continue
-            if self._policy.blocked_domains and any(
-                    host_matches_pattern(domain, p) for p in self._policy.blocked_domains):
-                raise SecurityBlockedError(
-                    f"session '{name}': domain '{domain}' is blocked by Hermus policy")
+            if self._policy.blocked_domains and any(host_matches_pattern(domain, p) for p in self._policy.blocked_domains):
+                raise SecurityBlockedError(f"session '{name}': domain '{domain}' is blocked by Hermus policy")
             clean_domains.append(domain)
         if not clean_domains:
             raise WebSessionError("sessions must pin at least one allowed domain")
@@ -126,15 +123,12 @@ class WebSessionManager:
             if len(self._sessions) >= self._max_sessions:
                 oldest = min(self._sessions.values(), key=lambda s: s.last_used_at)
                 self._destroy(oldest.name)
-            session = WebSession(name=name, allowed_domains=tuple(clean_domains),
-                                 ttl_seconds=self._ttl)
+            session = WebSession(name=name, allowed_domains=tuple(clean_domains), ttl_seconds=self._ttl)
             if strategy in ("static", "any"):
                 try:
                     session.ensure_sync_session()
                 except ImportError as exc:
-                    raise WebSessionError(
-                        "cannot open scrapling session — install 'scrapling[fetchers]'"
-                    ) from exc
+                    raise WebSessionError("cannot open scrapling session — install 'scrapling[fetchers]'") from exc
                 except Exception as exc:
                     raise WebSessionError(f"cannot open scrapling session: {exc}") from exc
             self._sessions[name] = session

@@ -14,12 +14,13 @@ architecture — are deliberately scoped to what fits Hermus cleanly:
 * optionally write successful transcripts into the canonical MemoryFacade so
   voice input becomes part of the same searchable session history.
 """
+
 from __future__ import annotations
 
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from core.config import config
 
@@ -27,6 +28,7 @@ from core.config import config
 FASTER_WHISPER_AVAILABLE = False
 try:
     from faster_whisper import WhisperModel
+
     FASTER_WHISPER_AVAILABLE = True
 except ImportError:
     FASTER_WHISPER_AVAILABLE = False
@@ -44,8 +46,31 @@ _PARakeet_DIRS = {
         "engine": "parakeet",
         "name": "Parakeet V3",
         "languages": [
-            "en", "de", "fr", "es", "it", "pt", "nl", "pl", "sv", "da", "nb", "fi", "cs",
-            "sk", "bg", "hr", "ro", "et", "hu", "ru", "uk", "ja", "ko", "zh", "ar",
+            "en",
+            "de",
+            "fr",
+            "es",
+            "it",
+            "pt",
+            "nl",
+            "pl",
+            "sv",
+            "da",
+            "nb",
+            "fi",
+            "cs",
+            "sk",
+            "bg",
+            "hr",
+            "ro",
+            "et",
+            "hu",
+            "ru",
+            "uk",
+            "ja",
+            "ko",
+            "zh",
+            "ar",
         ],
     },
 }
@@ -75,17 +100,15 @@ def normalize_transcription_text(text: str) -> str:
     return value
 
 
-
-def strip_filler_words(text: str, language: Optional[str] = None) -> str:
+def strip_filler_words(text: str, language: str | None = None) -> str:
     """Remove a small conservative filler-word set when requested."""
-    lang = str((language or "en")).lower().split("-", 1)[0]
+    lang = str(language or "en").lower().split("-", 1)[0]
     fillers = _FILLERS.get(lang)
     if not fillers:
         return normalize_transcription_text(text)
     words = normalize_transcription_text(text).split()
     kept = [w for w in words if w.lower().strip(",.!?;:") not in fillers]
     return normalize_transcription_text(" ".join(kept))
-
 
 
 def _remember_transcript(text: str, *, session_id: str = "", project: str = "", backend: str = "") -> dict[str, Any]:
@@ -99,7 +122,6 @@ def _remember_transcript(text: str, *, session_id: str = "", project: str = "", 
         return {"remembered": True, "session_id": session_id, "project": project or None, "backend": backend}
     except Exception as exc:  # noqa: BLE001
         return {"remembered": False, "reason": str(exc), "backend": backend}
-
 
 
 def local_engine_transcribe(audio_path: str, language: str = None) -> dict:
@@ -120,14 +142,13 @@ def local_engine_transcribe(audio_path: str, language: str = None) -> dict:
         return {"success": False, "error": f"{type(e).__name__}: {e}"[:200]}
 
 
-
 def transcribe_audio(
     audio_path: str,
     model: str = "base",
     language: str = None,
     *,
-    normalize: Optional[bool] = None,
-    strip_fillers: Optional[bool] = None,
+    normalize: bool | None = None,
+    strip_fillers: bool | None = None,
     remember: bool = False,
     session_id: str = "",
     project: str = "",
@@ -158,8 +179,12 @@ def transcribe_audio(
 
     model_obj, err = _get_model(model)
     if err:
-        return {"success": False, "backend": "faster-whisper", "error": err,
-                **({"local_engine_error": engine_error} if engine_error else {})}
+        return {
+            "success": False,
+            "backend": "faster-whisper",
+            "error": err,
+            **({"local_engine_error": engine_error} if engine_error else {}),
+        }
 
     try:
         segments, info = model_obj.transcribe(str(p), language=language, beam_size=5)
@@ -167,11 +192,13 @@ def transcribe_audio(
         segments_list = []
         for segment in segments:
             text_parts.append(segment.text)
-            segments_list.append({
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text,
-            })
+            segments_list.append(
+                {
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text,
+                }
+            )
 
         full_text = " ".join(text_parts).strip()
         result = {
@@ -204,12 +231,11 @@ def transcribe_audio(
         }
 
 
-
 def _postprocess_result(
     result: dict[str, Any],
     *,
-    normalize: Optional[bool],
-    strip_fillers: Optional[bool],
+    normalize: bool | None,
+    strip_fillers: bool | None,
     remember: bool,
     session_id: str,
     project: str,
@@ -237,11 +263,9 @@ def _postprocess_result(
     return out
 
 
-
 def transcribe_voice_memo(audio_path: str, model: str = "base") -> dict:
     """Alias for transcribe_audio - for voice memo transcription feature"""
     return transcribe_audio(audio_path, model=model)
-
 
 
 def local_engine_status() -> dict:
@@ -263,7 +287,6 @@ def local_engine_status() -> dict:
         return {"engine": "nollama", "ready": False, "error": f"{type(e).__name__}: {e}"[:120]}
 
 
-
 def _default_handy_model_dirs() -> list[str]:
     dirs = []
     env_dirs = str(getattr(config, "handy_model_dirs", "") or os.getenv("HERMUS_HANDY_MODELS_DIRS", "")).strip()
@@ -274,19 +297,20 @@ def _default_handy_model_dirs() -> list[str]:
             if part:
                 dirs.append(part)
     home = Path.home()
-    dirs.extend([
-        str(home / ".config" / "com.pais.handy" / "models"),
-        str(home / "Library" / "Application Support" / "com.pais.handy" / "models"),
-        str(home / "models"),
-    ])
+    dirs.extend(
+        [
+            str(home / ".config" / "com.pais.handy" / "models"),
+            str(home / "Library" / "Application Support" / "com.pais.handy" / "models"),
+            str(home / "models"),
+        ]
+    )
     appdata = os.getenv("APPDATA")
     if appdata:
         dirs.append(str(Path(appdata) / "com.pais.handy" / "models"))
     return _dedupe(dirs)
 
 
-
-def discover_local_stt_models(search_dirs: Optional[list[str]] = None) -> dict[str, Any]:
+def discover_local_stt_models(search_dirs: list[str] | None = None) -> dict[str, Any]:
     """Discover Handy-compatible local STT models in conventional directories."""
     dirs = _dedupe(search_dirs or _default_handy_model_dirs())
     models: list[dict[str, Any]] = []
@@ -310,16 +334,18 @@ def discover_local_stt_models(search_dirs: Optional[list[str]] = None) -> dict[s
                     key = f"dir:{entry.resolve()}"
                     if key not in seen:
                         seen.add(key)
-                        models.append({
-                            "id": key,
-                            "name": preset["name"],
-                            "engine": preset["engine"],
-                            "format": "directory",
-                            "path": str(entry.resolve()),
-                            "languages": list(preset.get("languages") or []),
-                            "size_bytes": None,
-                            "source_dir": str(root),
-                        })
+                        models.append(
+                            {
+                                "id": key,
+                                "name": preset["name"],
+                                "engine": preset["engine"],
+                                "format": "directory",
+                                "path": str(entry.resolve()),
+                                "languages": list(preset.get("languages") or []),
+                                "size_bytes": None,
+                                "source_dir": str(root),
+                            }
+                        )
                 continue
             if entry.suffix.lower() not in (".bin", ".gguf"):
                 continue
@@ -329,19 +355,20 @@ def discover_local_stt_models(search_dirs: Optional[list[str]] = None) -> dict[s
             if key in seen:
                 continue
             seen.add(key)
-            models.append({
-                "id": key,
-                "name": _friendly_model_name(entry.stem),
-                "engine": _guess_engine(entry.name),
-                "format": entry.suffix.lower().lstrip("."),
-                "path": str(entry.resolve()),
-                "languages": _guess_languages(entry.name),
-                "size_bytes": _safe_size(entry),
-                "source_dir": str(root),
-            })
+            models.append(
+                {
+                    "id": key,
+                    "name": _friendly_model_name(entry.stem),
+                    "engine": _guess_engine(entry.name),
+                    "format": entry.suffix.lower().lstrip("."),
+                    "path": str(entry.resolve()),
+                    "languages": _guess_languages(entry.name),
+                    "size_bytes": _safe_size(entry),
+                    "source_dir": str(root),
+                }
+            )
     models.sort(key=lambda row: (row.get("engine") != "parakeet", row.get("name") or ""))
     return {"count": len(models), "search_dirs": dirs, "models": models}
-
 
 
 def voice_available_models() -> dict:
@@ -367,17 +394,14 @@ def voice_available_models() -> dict:
     }
 
 
-
 def voice_discover_local_models() -> dict:
     """Expose only the on-disk discovery view."""
     return discover_local_stt_models()
 
 
-
 def _friendly_model_name(stem: str) -> str:
     text = stem.replace("_", " ").replace("-", " ").strip()
     return " ".join(word.capitalize() for word in text.split()) or stem
-
 
 
 def _guess_engine(name: str) -> str:
@@ -390,7 +414,6 @@ def _guess_engine(name: str) -> str:
     return "gguf-transcribe"
 
 
-
 def _guess_languages(name: str) -> list[str]:
     low = name.lower()
     if "unified-en" in low or "english" in low:
@@ -400,13 +423,11 @@ def _guess_languages(name: str) -> list[str]:
     return []
 
 
-
-def _safe_size(path: Path) -> Optional[int]:
+def _safe_size(path: Path) -> int | None:
     try:
         return path.stat().st_size
     except OSError:
         return None
-
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -431,12 +452,19 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "audio_path": {"type": "string", "description": "Path to audio file"},
-                    "model": {"type": "string", "description": "Whisper model: tiny, base, small, medium, large-v2", "default": "base"},
+                    "model": {
+                        "type": "string",
+                        "description": "Whisper model: tiny, base, small, medium, large-v2",
+                        "default": "base",
+                    },
                     "language": {"type": "string", "description": "Language code e.g., en, es, fr, or None for auto-detect"},
                     "normalize": {"type": "boolean", "default": True},
                     "strip_fillers": {"type": "boolean", "default": False},
                     "remember": {"type": "boolean", "default": False},
-                    "session_id": {"type": "string", "description": "Store the transcript in session history under this session id"},
+                    "session_id": {
+                        "type": "string",
+                        "description": "Store the transcript in session history under this session id",
+                    },
                     "project": {"type": "string", "description": "Optional project scope for remembered transcripts"},
                 },
                 "required": ["audio_path"],

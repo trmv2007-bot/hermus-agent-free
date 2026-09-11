@@ -4,6 +4,7 @@ Replaces keyword heuristics with a table-driven router: task type + mode +
 worker availability -> single / council / fleet / subagents, and the fleet
 strategy (fanout | race | map | auto). Zero LLM calls, fully deterministic.
 """
+
 from __future__ import annotations
 
 import re
@@ -11,25 +12,57 @@ import re
 from ..config import config
 
 _RESEARCH_KW = (
-    "research", "find", "search", "investigat", "gather", "compare", "look up",
-    "what is", "who is", "where", "when", "sources", "information about",
+    "research",
+    "find",
+    "search",
+    "investigat",
+    "gather",
+    "compare",
+    "look up",
+    "what is",
+    "who is",
+    "where",
+    "when",
+    "sources",
+    "information about",
 )
 _CODE_KW = (
-    "write", "code", "python", "function", "script", "program", "implement",
-    "debug", "refactor", "fix this", "bug", "api", "class",
+    "write",
+    "code",
+    "python",
+    "function",
+    "script",
+    "program",
+    "implement",
+    "debug",
+    "refactor",
+    "fix this",
+    "bug",
+    "api",
+    "class",
 )
 _ANALYSIS_KW = (
-    "analy", "review", "evaluate", "recommend", "decide", "plan", "strategy",
-    "compare", "risk", "pros and cons", "roadmap", "architecture",
+    "analy",
+    "review",
+    "evaluate",
+    "recommend",
+    "decide",
+    "plan",
+    "strategy",
+    "compare",
+    "risk",
+    "pros and cons",
+    "roadmap",
+    "architecture",
 )
 _MULTI_PART = re.compile(r"^\s*(\d+[\.\):]|[-*])\s+", re.M)
 _AND_THEN = re.compile(r"\band then\b|\bthen\b|\band\b", re.I)
 
 _FLEET_BY_TYPE = {
-    "research": "fanout",    # same question -> many models -> consensus
-    "analysis": "map",       # split facets -> parallel -> merge
+    "research": "fanout",  # same question -> many models -> consensus
+    "analysis": "map",  # split facets -> parallel -> merge
     "code": "map",
-    "simple": "race",        # first healthy model wins (fast)
+    "simple": "race",  # first healthy model wins (fast)
 }
 
 

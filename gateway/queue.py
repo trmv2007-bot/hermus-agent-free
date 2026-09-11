@@ -27,6 +27,7 @@ chat-or-mission), ``agent.chat``, ``agent.autonomous``, ``mission.start``,
 ``memory.sweep`` … so new async work never needs a new endpoint. All
 work kinds execute through the universal mission runtime (``core.runtime``).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,15 +37,18 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 from core.config import config
 from core.contracts.jobs import Job as _ContractJob
+from core.log import get_logger
 from core.run_events import RunBus, run_bus
+
+logger = get_logger(__name__)
 
 JobHandler = Callable[["JobContext"], Any]
 
@@ -66,7 +70,7 @@ def _now() -> str:
 _ctxt_tls = threading.local()
 
 
-def set_current_job_context(job: "Job") -> None:
+def set_current_job_context(job: Job) -> None:
     _ctxt_tls.job_id = job.id
     _ctxt_tls.run_id = job.run_id
     _ctxt_tls.mission_id = getattr(job, "mission_id", None) or ""
@@ -100,8 +104,9 @@ def _lifecycle_event_type(status: str) -> str:
     }.get(status, f"job.{status}")
 
 
-def _emit_lifecycle_event(job: "Job", event_type: str, *, status: str = "",
-                          error: str = "", extra: Optional[dict[str, Any]] = None) -> None:
+def _emit_lifecycle_event(
+    job: Job, event_type: str, *, status: str = "", error: str = "", extra: dict[str, Any] | None = None
+) -> None:
     """Mirror a queue lifecycle transition onto the canonical EventBus.
 
     The JobQueue already publishes to its per-run ``RunBus`` (drives SSE/WebSocket
@@ -112,8 +117,8 @@ def _emit_lifecycle_event(job: "Job", event_type: str, *, status: str = "",
     required for control-room state and post-hoc audit. Never raises.
     """
     try:
-        from core.events import get_bus
         from core.contracts import EventEnvelope
+        from core.events import get_bus
 
         payload = job.payload or {}
         mission_id = getattr(job, "mission_id", None) or payload.get("mission_id") or None
@@ -124,8 +129,7 @@ def _emit_lifecycle_event(job: "Job", event_type: str, *, status: str = "",
             type="job.lifecycle",
             command=event_type,
             target=str(job.id),
-            args_redacted={**(extra or {}), "kind": job.kind, "attempt": job.attempt,
-                           "session_key": job.session_key},
+            args_redacted={**(extra or {}), "kind": job.kind, "attempt": job.attempt, "session_key": job.session_key},
             status=status or job.status,
             error_code=str(error)[:400] if error else None,
         )
@@ -153,9 +157,9 @@ class Job(_ContractJob):
     # wall-clock epoch used for timing; the contract's ``created_at`` stays the
     # canonical durable ISO timestamp.
     created_ts: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    finished_at: Optional[float] = None
-    result: Optional[dict[str, Any]] = None
+    started_at: float | None = None
+    finished_at: float | None = None
+    result: dict[str, Any] | None = None
     created: str = field(default_factory=_now)
 
     # -- legacy queue attribute aliases (map onto the canonical contract) -----
@@ -227,7 +231,7 @@ class Job(_ContractJob):
 class JobContext:
     """What a handler gets: the payload, an emitter, and cancellation."""
 
-    def __init__(self, job: Job, bus: RunBus, queue: "JobQueue"):
+    def __init__(self, job: Job, bus: RunBus, queue: JobQueue):
         self.job = job
         self._bus = bus
         self._queue = queue
@@ -258,19 +262,19 @@ class Lane:
         self.key = key
         self.pending: deque[Job] = deque()
         self.running = False
-        self.task: Optional[asyncio.Task] = None
+        self.task: asyncio.Task | None = None
 
 
 class JobQueue:
     def __init__(
         self,
         *,
-        workers: Optional[int] = None,
-        maxsize: Optional[int] = None,
-        default_timeout: Optional[float] = None,
-        bus: Optional[RunBus] = None,
-        persist: Optional[str] = None,
-        backend: Optional[str] = None,
+        workers: int | None = None,
+        maxsize: int | None = None,
+        default_timeout: float | None = None,
+        bus: RunBus | None = None,
+        persist: str | None = None,
+        backend: str | None = None,
     ):
         self.workers = int(workers if workers is not None else getattr(config, "gateway_queue_workers", 4))
         self.maxsize = int(maxsize if maxsize is not None else getattr(config, "gateway_queue_maxsize", 500))
@@ -284,19 +288,16 @@ class JobQueue:
         self.jobs: dict[str, Job] = {}
         self._order: deque[str] = deque(maxlen=self.maxsize)
         self._lanes: dict[str, Lane] = {}
-        self._recent_keys: dict[str, str] = {}      # dedupe key -> job id
-        self._sem: Optional[asyncio.Semaphore] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._recent_keys: dict[str, str] = {}  # dedupe key -> job id
+        self._sem: asyncio.Semaphore | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._started = False
         self._stopped = False
         self.retry_backoff = float(getattr(config, "gateway_queue_retry_backoff", 1.5) or 1.5)
         self.cancel_grace = float(getattr(config, "gateway_queue_cancel_grace", 15) or 15)
-        self.persist_path = Path(
-            persist or config.resolve_path(str(getattr(config, "gateway_jobs_log", "data/jobs/jobs.jsonl")))
-        )
+        self.persist_path = Path(persist or config.resolve_path(str(getattr(config, "gateway_jobs_log", "data/jobs/jobs.jsonl"))))
         self.results_dir = self.persist_path.parent / "results"
-        self.stats_counts = {"submitted": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "retried": 0,
-                             "rejected": 0}
+        self.stats_counts = {"submitted": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "retried": 0, "rejected": 0}
         self._redis = None
 
     # ------------------------------------------------------------------ wiring
@@ -305,7 +306,7 @@ class JobQueue:
             return
         self.handlers[kind] = handler
 
-    def handler(self, kind: str) -> Optional[JobHandler]:
+    def handler(self, kind: str) -> JobHandler | None:
         return self.handlers.get(kind)
 
     async def start(self) -> dict[str, Any]:
@@ -313,7 +314,7 @@ class JobQueue:
         if not self.enabled:
             info = self.status()
             info["note"] = "queue disabled by config — /command and webhooks run inline"
-            print("[Queue] disabled (gateway_queue_enabled=0) — inline execution")
+            logger.warning("[Queue] disabled (gateway_queue_enabled=0) — inline execution")
             return info
         self._loop = asyncio.get_running_loop()
         self._sem = asyncio.Semaphore(max(1, self.workers))
@@ -326,20 +327,19 @@ class JobQueue:
 
                 ok, detail = redis_available()
                 if not ok:
-                    print(f"[Queue] redis backend unavailable ({detail}) → in-process lanes")
+                    logger.info(f"[Queue] redis backend unavailable ({detail}) → in-process lanes")
                     self._redis = None
                 else:
                     self._redis = RedisStreamsConsumer(self)
                     info = await self._redis.start()
-                    print(f"[Queue] redis streams attached ({detail}) {info or ''}")
+                    logger.info(f"[Queue] redis streams attached ({detail}) {info or ''}")
             except Exception as e:
-                print(f"[Queue] redis backend failed ({e}) → in-process lanes")
+                logger.error(f"[Queue] redis backend failed ({e}) → in-process lanes")
                 self._redis = None
         info = self.status()
         info["recovered"] = recovered
-        print(
-            f"[Queue] workers={self.workers} timeout={self.default_timeout}s "
-            f"backend={self.backend} enabled={self.enabled}"
+        logger.warning(
+            f"[Queue] workers={self.workers} timeout={self.default_timeout}s backend={self.backend} enabled={self.enabled}"
         )
         return info
 
@@ -361,7 +361,7 @@ class JobQueue:
 
     # ------------------------------------------------------------------ intake
     def emit_for(self, job: Job) -> Callable[[str, dict[str, Any]], None]:
-        def emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+        def emit(event_type: str, data: dict[str, Any] | None = None) -> None:
             try:
                 payload = dict(data or {})
                 payload.setdefault("job_id", job.id)
@@ -375,22 +375,21 @@ class JobQueue:
     def submit(
         self,
         kind: str,
-        payload: Optional[dict[str, Any]] = None,
+        payload: dict[str, Any] | None = None,
         *,
         session_key: str = "",
         priority: int = 0,
-        timeout: Optional[float] = None,
-        max_attempts: Optional[int] = None,
+        timeout: float | None = None,
+        max_attempts: int | None = None,
         dedupe_key: str = "",
-        job_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        job_id: str | None = None,
+        run_id: str | None = None,
     ) -> Job:
         """Enqueue a job. Synchronous on purpose: FastAPI handlers, channel
         callbacks and the CLI all share one entry point, and nothing here blocks."""
         payload = dict(payload or {})
         if kind not in self.handlers:
-            raise KeyError(f"no handler registered for job kind '{kind}' "
-                           f"(known: {sorted(self.handlers)})")
+            raise KeyError(f"no handler registered for job kind '{kind}' (known: {sorted(self.handlers)})")
         if len(self.jobs) >= self.maxsize * 2:
             # keep memory bounded; oldest finished jobs are dropped first
             self._evict_old()
@@ -422,10 +421,17 @@ class JobQueue:
             self._recent_keys[dedupe_key] = job.id
         self.stats_counts["submitted"] += 1
         self.bus.start(job.run_id, label=f"{kind}:{job.id}")
-        self._record({"job_id": job.id, "event": "queued", "kind": kind,
-                      "session_key": session_key, "run_id": job.run_id, "data": _trim(payload)})
-        self.bus.publish(job.run_id, "job_queued", {"job_id": job.id, "kind": kind,
-                                                     "session_key": session_key})
+        self._record(
+            {
+                "job_id": job.id,
+                "event": "queued",
+                "kind": kind,
+                "session_key": session_key,
+                "run_id": job.run_id,
+                "data": _trim(payload),
+            }
+        )
+        self.bus.publish(job.run_id, "job_queued", {"job_id": job.id, "kind": kind, "session_key": session_key})
         _emit_lifecycle_event(job, "job.queued", status=STATUS_QUEUED)
         self._kick(job)
         return job
@@ -475,14 +481,15 @@ class JobQueue:
     async def _execute(self, job: Job) -> None:
         handler = self.handlers.get(job.kind)
         job.status = STATUS_RUNNING
-        job.attempts += 1                      # attempts == times executed (1-based)
+        job.attempts += 1  # attempts == times executed (1-based)
         job.started_at = time.time()
         ctx = JobContext(job, self.bus, self)
-        self.bus.publish(job.run_id, "job_started", {"job_id": job.id, "kind": job.kind,
-                                                      "attempt": job.attempts,
-                                                      "max_attempts": job.max_attempts})
-        _emit_lifecycle_event(job, "job.started", status=STATUS_RUNNING,
-                              extra={"attempt": job.attempts})
+        self.bus.publish(
+            job.run_id,
+            "job_started",
+            {"job_id": job.id, "kind": job.kind, "attempt": job.attempts, "max_attempts": job.max_attempts},
+        )
+        _emit_lifecycle_event(job, "job.started", status=STATUS_RUNNING, extra={"attempt": job.attempts})
         self._record({"job_id": job.id, "event": "started", "attempt": job.attempts})
         try:
             if handler is None:
@@ -492,8 +499,7 @@ class JobQueue:
             # the gateway stays responsive while a job is mid-tool-call.
             if inspect.iscoroutinefunction(handler):
                 pending = asyncio.ensure_future(_call_with_context(handler, ctx))
-                result = await (asyncio.wait_for(pending, timeout=job.timeout)
-                                if job.timeout else pending)
+                result = await (asyncio.wait_for(pending, timeout=job.timeout) if job.timeout else pending)
             else:
                 fut = self._loop.run_in_executor(None, _call_with_context, handler, ctx)
                 if job.timeout:
@@ -504,8 +510,7 @@ class JobQueue:
                         # (and the agent loop polls the run bus) and unwinds itself.
                         ctx.emit("cancel_requested", {"reason": f"job timeout after {job.timeout}s"})
                         self.bus.cancel(job.run_id)
-                        _emit_lifecycle_event(job, "job.timeout", status=STATUS_RUNNING,
-                                              error=f"timed out after {job.timeout}s")
+                        _emit_lifecycle_event(job, "job.timeout", status=STATUS_RUNNING, error=f"timed out after {job.timeout}s")
                         try:
                             result = await asyncio.wait_for(fut, timeout=self.cancel_grace)
                         except asyncio.CancelledError:
@@ -524,16 +529,20 @@ class JobQueue:
             self._finalize(job, STATUS_CANCELLED, error="cancelled")
             raise
         except Exception as e:
-            retriable = (job.attempts < max(1, job.max_attempts)
-                         and not isinstance(e, _NO_RETRY_ERRORS))
+            retriable = job.attempts < max(1, job.max_attempts) and not isinstance(e, _NO_RETRY_ERRORS)
             if retriable:
                 self.stats_counts["retried"] += 1
-                delay = min(30.0, self.retry_backoff ** job.attempts)
-                self.bus.publish(job.run_id, "job_retry", {"job_id": job.id, "error": str(e)[:400],
-                                                            "attempt": job.attempts, "in": delay})
-                _emit_lifecycle_event(job, "job.retry", status=STATUS_QUEUED,
-                                      error=f"{type(e).__name__}: {e}",
-                                      extra={"attempt": job.attempts, "in": delay})
+                delay = min(30.0, self.retry_backoff**job.attempts)
+                self.bus.publish(
+                    job.run_id, "job_retry", {"job_id": job.id, "error": str(e)[:400], "attempt": job.attempts, "in": delay}
+                )
+                _emit_lifecycle_event(
+                    job,
+                    "job.retry",
+                    status=STATUS_QUEUED,
+                    error=f"{type(e).__name__}: {e}",
+                    extra={"attempt": job.attempts, "in": delay},
+                )
                 self._record({"job_id": job.id, "event": "retry", "error": str(e)[:400]})
                 job.status = STATUS_QUEUED
                 if self._loop is not None:
@@ -549,8 +558,7 @@ class JobQueue:
             return
         self._kick(job)
 
-    def _finalize(self, job: Job, status: str, result: Optional[dict[str, Any]] = None,
-                  error: str = "") -> None:
+    def _finalize(self, job: Job, status: str, result: dict[str, Any] | None = None, error: str = "") -> None:
         job.status = status
         job.finished_at = time.time()
         if result is not None:
@@ -564,20 +572,40 @@ class JobQueue:
         elif status == STATUS_CANCELLED:
             self.stats_counts["cancelled"] += 1
         self._persist_result(job)
-        self._record({"job_id": job.id, "event": "finished", "status": status,
-                      "error": job.error[:500], "duration_ms": job.brief()["duration_ms"]})
-        self.bus.publish(
-            job.run_id, "job_finished",
-            {"job_id": job.id, "status": status, "error": job.error[:500],
-             "duration_ms": job.brief()["duration_ms"],
-             "result_preview": _trim(job.result or {})},
+        self._record(
+            {
+                "job_id": job.id,
+                "event": "finished",
+                "status": status,
+                "error": job.error[:500],
+                "duration_ms": job.brief()["duration_ms"],
+            }
         )
-        _emit_lifecycle_event(job, _lifecycle_event_type(status), status=status,
-                              error=job.error if status == STATUS_FAILED else "",
-                              extra={"duration_ms": job.brief()["duration_ms"]})
+        self.bus.publish(
+            job.run_id,
+            "job_finished",
+            {
+                "job_id": job.id,
+                "status": status,
+                "error": job.error[:500],
+                "duration_ms": job.brief()["duration_ms"],
+                "result_preview": _trim(job.result or {}),
+            },
+        )
+        _emit_lifecycle_event(
+            job,
+            _lifecycle_event_type(status),
+            status=status,
+            error=job.error if status == STATUS_FAILED else "",
+            extra={"duration_ms": job.brief()["duration_ms"]},
+        )
         try:
-            self.bus.finish(job.run_id, "finished" if status == STATUS_DONE else status,
-                            result=job.result, error=job.error if status == STATUS_FAILED else "")
+            self.bus.finish(
+                job.run_id,
+                "finished" if status == STATUS_DONE else status,
+                result=job.result,
+                error=job.error if status == STATUS_FAILED else "",
+            )
         except Exception:
             pass
 
@@ -587,10 +615,10 @@ class JobQueue:
         if not job:
             return {"cancelled": False, "error": f"unknown job '{job_id}'"}
         if job.status in (STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED):
-            return {"cancelled": False, "job_id": job_id, "status": job.status,
-                    "reason": "already terminal"}
-        if job.status == STATUS_QUEUED and job in (self._lanes.get(job.session_key).pending
-                                                   if self._lanes.get(job.session_key) else []):
+            return {"cancelled": False, "job_id": job_id, "status": job.status, "reason": "already terminal"}
+        if job.status == STATUS_QUEUED and job in (
+            self._lanes.get(job.session_key).pending if self._lanes.get(job.session_key) else []
+        ):
             lane = self._lanes[job.session_key]
             try:
                 lane.pending.remove(job)
@@ -600,12 +628,10 @@ class JobQueue:
             return {"cancelled": True, "job_id": job_id, "stage": "queued"}
         self.bus.cancel(job.run_id)
         self.bus.publish(job.run_id, "cancel_requested", {"job_id": job_id})
-        _emit_lifecycle_event(job, "job.cancel_requested", status=STATUS_RUNNING,
-                              error="cancel requested (cooperative)")
-        return {"cancelled": True, "job_id": job_id, "stage": "cooperative",
-                "note": "agent will stop at its next step boundary"}
+        _emit_lifecycle_event(job, "job.cancel_requested", status=STATUS_RUNNING, error="cancel requested (cooperative)")
+        return {"cancelled": True, "job_id": job_id, "stage": "cooperative", "note": "agent will stop at its next step boundary"}
 
-    def status(self, job_id: Optional[str] = None) -> dict[str, Any]:
+    def status(self, job_id: str | None = None) -> dict[str, Any]:
         if job_id:
             job = self.jobs.get(job_id)
             if not job:
@@ -618,8 +644,7 @@ class JobQueue:
                 # caller cannot use `"error" in payload` to detect an unknown
                 # job — that mistake made /jobs/{id} answer 404 for jobs that
                 # had already succeeded, breaking the dashboard's poll loop.
-                return {"error": f"unknown job '{job_id}'", "job_id": job_id,
-                        "found": False}
+                return {"error": f"unknown job '{job_id}'", "job_id": job_id, "found": False}
             out = job.brief()
             out["found"] = True
             out["result"] = _trim(job.result or {}, limit=6000) if job.status == STATUS_DONE else None
@@ -645,8 +670,7 @@ class JobQueue:
             "log": str(self.persist_path),
         }
 
-    def list_jobs(self, *, limit: int = 50, status: Optional[str] = None,
-                  session_key: Optional[str] = None) -> list[dict[str, Any]]:
+    def list_jobs(self, *, limit: int = 50, status: str | None = None, session_key: str | None = None) -> list[dict[str, Any]]:
         rows = [self.jobs[i].brief() for i in reversed(list(self._order)) if i in self.jobs]
         if status:
             rows = [r for r in rows if r["status"] == status]
@@ -660,12 +684,12 @@ class JobQueue:
             return []
         return self.bus.history(job.run_id, after=after, limit=limit)
 
-    def _lookup_logged_job(self, job_id: str) -> Optional[dict[str, Any]]:
+    def _lookup_logged_job(self, job_id: str) -> dict[str, Any] | None:
         """Answer for a job from a previous process (read from the durable log)."""
         try:
             if not self.persist_path.exists():
                 return None
-            found: Optional[dict[str, Any]] = None
+            found: dict[str, Any] | None = None
             for line in reversed(self.persist_path.read_text(errors="ignore").splitlines()[-4000:]):
                 try:
                     rec = json.loads(line)
@@ -699,7 +723,7 @@ class JobQueue:
         except Exception:
             return None
 
-    def result(self, job_id: str) -> Optional[dict[str, Any]]:
+    def result(self, job_id: str) -> dict[str, Any] | None:
         job = self.jobs.get(job_id)
         if job and job.result is not None:
             return job.result
@@ -730,8 +754,11 @@ class JobQueue:
         try:
             self.results_dir.mkdir(parents=True, exist_ok=True)
             (self.results_dir / f"{job.id}.json").write_text(
-                json.dumps({"job_id": job.id, "kind": job.kind, "status": job.status,
-                            "finished": _now(), "result": job.result}, default=str, indent=2)
+                json.dumps(
+                    {"job_id": job.id, "kind": job.kind, "status": job.status, "finished": _now(), "result": job.result},
+                    default=str,
+                    indent=2,
+                )
             )
         except Exception:
             pass
@@ -759,7 +786,7 @@ class JobQueue:
         if not path.exists():
             return latest, order, 0
         try:
-            lines = path.read_text(errors="ignore").splitlines()[-max(1, int(tail)):]
+            lines = path.read_text(errors="ignore").splitlines()[-max(1, int(tail)) :]
         except Exception:
             return latest, order, 0
         for line in lines:
@@ -796,11 +823,14 @@ class JobQueue:
         rows: dict[str, dict[str, Any]] = dict(latest)
         if include_live:
             for jid, job in self.jobs.items():
-                rows[jid] = {**rows.get(jid, {}), **job.brief(),
-                             "finished": job.finished_at or 0.0,
-                             "result_brief": _brief_result(job.result)}
+                rows[jid] = {
+                    **rows.get(jid, {}),
+                    **job.brief(),
+                    "finished": job.finished_at or 0.0,
+                    "result_brief": _brief_result(job.result),
+                }
         out = sorted(rows.values(), key=_row_time, reverse=True)
-        return out[:max(1, int(limit))]
+        return out[: max(1, int(limit))]
 
     def _load_durable_log(self, *, replay_limit: int = 50) -> dict[str, Any]:
         """Rehydrate recent jobs from the append-only log after a restart.
@@ -823,16 +853,19 @@ class JobQueue:
                 interrupted += 1
             if jid in self.jobs:
                 continue
-            job = Job(id=jid, type=str(rec.get("kind") or "unknown"),
-                      session_key=str(rec.get("session_key") or "default"),
-                      run_id=str(rec.get("run_id") or jid), status=status,
-                      error_message=str(rec.get("error") or "") or
-                            ("interrupted by gateway restart" if status == STATUS_INTERRUPTED else ""))
+            job = Job(
+                id=jid,
+                type=str(rec.get("kind") or "unknown"),
+                session_key=str(rec.get("session_key") or "default"),
+                run_id=str(rec.get("run_id") or jid),
+                status=status,
+                error_message=str(rec.get("error") or "")
+                or ("interrupted by gateway restart" if status == STATUS_INTERRUPTED else ""),
+            )
             self.jobs[job.id] = job
             self._order.append(job.id)
             recovered += 1
-        return {"seen": seen, "interrupted": interrupted, "recovered": recovered,
-                "jobs": len(latest)}
+        return {"seen": seen, "interrupted": interrupted, "recovered": recovered, "jobs": len(latest)}
 
     def _evict_old(self) -> None:
         keep_running = True
@@ -877,13 +910,13 @@ class JobQueue:
             out.append(row)
             if len(out) >= max(1, int(limit)):
                 break
-        return out[:max(1, int(limit))]
+        return out[: max(1, int(limit))]
 
     def recent_completed(self, limit: int = 10) -> list[dict[str, Any]]:
         return [row for row in self.recent_jobs(limit * 3) if row.get("status") == STATUS_DONE][:limit]
 
 
-class CancelledError_(Exception):
+class CancelledError_(Exception):  # noqa: N801, N818 - trailing underscore avoids clashing with asyncio.CancelledError; public marker name
     """Marker handlers can raise to stop a job without triggering a retry."""
 
 
@@ -892,9 +925,7 @@ try:  # the agent loop raises this when a run is cancelled mid-step
 except Exception:  # pragma: no cover
     _CancelledRun = None
 
-_NO_RETRY_ERRORS: tuple = tuple(
-    e for e in (asyncio.CancelledError, CancelledError_, _CancelledRun) if e is not None
-)
+_NO_RETRY_ERRORS: tuple = tuple(e for e in (asyncio.CancelledError, CancelledError_, _CancelledRun) if e is not None)
 
 
 def _row_time(row: dict[str, Any]) -> float:
@@ -940,7 +971,8 @@ def _call_with_context(handler: JobHandler, ctx: JobContext) -> Any:
         if "ctx" in params:
             return handler(ctx)
         if params and next(iter(params.values())).kind in (
-            inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
         ):
             first = next(iter(params.values()))
             if first.name in ("payload", "job"):
@@ -973,7 +1005,7 @@ def _trim(data: Any, limit: int = 1500) -> Any:
     return data
 
 
-def _brief_result(result: Optional[dict[str, Any]], limit: int = 160) -> str:
+def _brief_result(result: dict[str, Any] | None, limit: int = 160) -> str:
     """One-line summary of a job result for `hermus jobs list` / listings."""
     if not isinstance(result, dict):
         return str(result or "")[:limit]

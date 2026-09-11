@@ -1,14 +1,15 @@
 """Chronological visual-event timelines and task artifact bundles."""
+
 from __future__ import annotations
 
 import json
 import re
 import shutil
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Iterable
+from typing import Any
 
 
 @dataclass
@@ -17,7 +18,7 @@ class TimelineEvent:
     type: str
     description: str
     confidence: float = 0.0
-    timestamp: Optional[str] = None
+    timestamp: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -28,7 +29,7 @@ class TimelineEvent:
 
 
 class Timeline:
-    def __init__(self, task: str = "", recording: Optional[str] = None, started: Optional[str] = None):
+    def __init__(self, task: str = "", recording: str | None = None, started: str | None = None):
         self.task = task
         self.recording = recording
         self.started = started or datetime.now().astimezone().isoformat()
@@ -40,8 +41,8 @@ class Timeline:
         event_type: str,
         description: str,
         confidence: float = 0.0,
-        timestamp: Optional[str] = None,
-        evidence: Optional[dict[str, Any]] = None,
+        timestamp: str | None = None,
+        evidence: dict[str, Any] | None = None,
     ) -> TimelineEvent:
         event = TimelineEvent(
             offset=max(0.0, float(offset or 0.0)),
@@ -99,8 +100,15 @@ class TaskArtifacts:
     """Persist the debuggable recording/timeline/actions/result task layout."""
 
     FILES = (
-        "state.json", "plan.json", "timeline.json", "events.json", "actions.json",
-        "verification.json", "repairs.json", "result.json", "summary.md",
+        "state.json",
+        "plan.json",
+        "timeline.json",
+        "events.json",
+        "actions.json",
+        "verification.json",
+        "repairs.json",
+        "result.json",
+        "summary.md",
     )
 
     def __init__(self, task_id: str, root: str = "data/recordings"):
@@ -111,7 +119,7 @@ class TaskArtifacts:
         root_path = Path(root).expanduser()
         if not root_path.is_absolute() and root == "data/recordings":
             root_path = Path(__file__).resolve().parents[2] / root_path
-        self.directory = (root_path.resolve() / safe)
+        self.directory = root_path.resolve() / safe
         self.directory.mkdir(parents=True, exist_ok=True)
         try:
             self.directory.chmod(0o700)
@@ -120,11 +128,11 @@ class TaskArtifacts:
 
     def write(
         self,
-        timeline: Optional[Any] = None,
-        events: Optional[Iterable[dict[str, Any]]] = None,
-        actions: Optional[Iterable[dict[str, Any]]] = None,
-        result: Optional[dict[str, Any]] = None,
-        recording_path: Optional[str] = None,
+        timeline: Any | None = None,
+        events: Iterable[dict[str, Any]] | None = None,
+        actions: Iterable[dict[str, Any]] | None = None,
+        result: dict[str, Any] | None = None,
+        recording_path: str | None = None,
         copy_recording: bool = True,
     ) -> dict[str, Any]:
         if isinstance(timeline, Timeline):

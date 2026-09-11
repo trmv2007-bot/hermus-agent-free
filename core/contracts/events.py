@@ -15,10 +15,11 @@ Design rules:
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field, asdict, fields as _fields
+from dataclasses import asdict, dataclass, field
+from dataclasses import fields as _fields
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class EventType(str, Enum):
@@ -103,36 +104,39 @@ class EventEnvelope:
 
     event_id: str = field(default_factory=_new_id)
     trace_id: str = field(default_factory=_new_id)
-    run_id: Optional[str] = None
-    mission_id: Optional[str] = None
+    run_id: str | None = None
+    mission_id: str | None = None
     session_id: str = "default"
     actor: str = Actor.AGENT.value
     source: str = CommandSource.INTERNAL.value
     type: str = EventType.STATE_CHANGED.value
     command: str = ""
-    target: Optional[str] = None
+    target: str | None = None
     args_redacted: dict[str, Any] = field(default_factory=dict)
-    command_id: Optional[str] = None
-    idempotency_key: Optional[str] = None
+    command_id: str | None = None
+    idempotency_key: str | None = None
     timestamp: str = field(default_factory=_now_iso)
-    duration_ms: Optional[int] = None
+    duration_ms: int | None = None
     status: str = CommandStatus.PENDING.value
-    error_code: Optional[str] = None
+    error_code: str | None = None
     evidence_refs: list[str] = field(default_factory=list)
-    parent_event_id: Optional[str] = None
+    parent_event_id: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EventEnvelope":
+    def from_dict(cls, data: dict[str, Any]) -> EventEnvelope:
         known = {f.name for f in _fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def with_trace(self, trace_id: Optional[str] = None,
-                   mission_id: Optional[str] = None,
-                   run_id: Optional[str] = None,
-                   session_id: Optional[str] = None) -> "EventEnvelope":
+    def with_trace(
+        self,
+        trace_id: str | None = None,
+        mission_id: str | None = None,
+        run_id: str | None = None,
+        session_id: str | None = None,
+    ) -> EventEnvelope:
         if trace_id:
             self.trace_id = trace_id
         if mission_id:
@@ -153,20 +157,21 @@ class Command:
     """
 
     command: str
-    target: Optional[str] = None
+    target: str | None = None
     args: dict[str, Any] = field(default_factory=dict)
     actor: str = Actor.USER.value
     source: str = CommandSource.DASHBOARD.value
     session_id: str = "default"
     trace_id: str = field(default_factory=_new_id)
-    idempotency_key: Optional[str] = None
+    idempotency_key: str | None = None
     created_at: str = field(default_factory=_now_iso)
 
     def redacted_args(self) -> dict[str, Any]:
         return redact(self.args)
 
-    def to_envelope(self, type: str = EventType.COMMAND_REQUESTED.value,
-                    status: str = CommandStatus.PENDING.value) -> EventEnvelope:
+    def to_envelope(
+        self, type: str = EventType.COMMAND_REQUESTED.value, status: str = CommandStatus.PENDING.value
+    ) -> EventEnvelope:
         return EventEnvelope(
             trace_id=self.trace_id,
             session_id=self.session_id,

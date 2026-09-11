@@ -1,8 +1,9 @@
 """Connector discovery, lifecycle, health, and explicit action dispatch."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .base import Connector, ConnectorContext
 from .filesystem import FilesystemConnector
@@ -10,7 +11,7 @@ from .runtime import RuntimeConnector
 
 
 class ConnectorRegistry:
-    def __init__(self, context: Optional[ConnectorContext] = None):
+    def __init__(self, context: ConnectorContext | None = None):
         self.context = context or ConnectorContext()
         self._connectors: dict[str, Connector] = {}
 
@@ -23,7 +24,7 @@ class ConnectorRegistry:
             connector.enable()
         return connector
 
-    def get(self, name: str) -> Optional[Connector]:
+    def get(self, name: str) -> Connector | None:
         return self._connectors.get(name)
 
     def enable(self, name: str) -> dict[str, Any]:
@@ -34,7 +35,7 @@ class ConnectorRegistry:
         connector = self._required(name)
         return connector.disable().to_dict()
 
-    def refresh(self, name: Optional[str] = None) -> list[dict[str, Any]]:
+    def refresh(self, name: str | None = None) -> list[dict[str, Any]]:
         connectors = [self._required(name)] if name else list(self._connectors.values())
         return [connector.refresh() for connector in connectors if connector.enabled]
 
@@ -53,13 +54,15 @@ class ConnectorRegistry:
             raise ValueError(f"unknown action '{action}' for connector '{connector_name}'")
         return handler(**arguments)
 
-    def _required(self, name: Optional[str]) -> Connector:
+    def _required(self, name: str | None) -> Connector:
         if not name or name not in self._connectors:
             raise KeyError(f"unknown connector: {name!r}")
         return self._connectors[name]
 
 
-def register_builtin_connectors(registry: Optional[ConnectorRegistry] = None, *, workspace_root: Optional[Path] = None) -> ConnectorRegistry:
+def register_builtin_connectors(
+    registry: ConnectorRegistry | None = None, *, workspace_root: Path | None = None
+) -> ConnectorRegistry:
     """Register local, no-login connectors; nothing is enabled implicitly."""
     target = registry or connector_registry
     if target.get("runtime") is None:

@@ -16,7 +16,7 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -26,25 +26,30 @@ router = APIRouter(prefix="/api/v1", tags=["canonical"])
 
 class CommandRequest(BaseModel):
     """Typed backend command (Rebuild spec §8)."""
+
     command: str
-    target: Optional[str] = None
+    target: str | None = None
     args: dict[str, Any] = {}
     actor: str = "user"
     source: str = "dashboard"
     session_id: str = "default"
-    idempotency_key: Optional[str] = None
+    idempotency_key: str | None = None
 
 
 @router.get("/system/health")
 async def system_health():
     """Real health probes (never fabricated)."""
     import bootstrap
+
     try:
         report = bootstrap.doctor()
-        required_ok = all(v["present"] for k, v in report["capabilities"].items()
-                          if k.startswith("required."))
-        return {"ok": required_ok, "python": report.get("python"),
-                "venv": report.get("venv"), "capabilities": report["capabilities"]}
+        required_ok = all(v["present"] for k, v in report["capabilities"].items() if k.startswith("required."))
+        return {
+            "ok": required_ok,
+            "python": report.get("python"),
+            "venv": report.get("venv"),
+            "capabilities": report["capabilities"],
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"health probe failed: {exc}") from exc
 
@@ -57,6 +62,7 @@ async def system_capabilities(payload: bool = False):
     from core.speech import speech_engine
     from core.tools import get_tool_gateway
     from tools.voice import voice_available_models
+
     try:
         model_gw = get_model_gateway()
         providers = model_gw.providers(probe=bool(payload))
@@ -78,16 +84,21 @@ async def system_capabilities(payload: bool = False):
 @router.post("/commands")
 async def command(req: CommandRequest):
     """Record a backend command and emit canonical events (click accounting)."""
-    from core.contracts import Command, EventEnvelope, EventType, CommandStatus
+    from core.contracts import Command, CommandStatus, EventType
     from core.events import get_bus
-    cmd = Command(command=req.command, target=req.target, args=req.args,
-                  actor=req.actor, source=req.source, session_id=req.session_id,
-                  idempotency_key=req.idempotency_key)
-    env = cmd.to_envelope(type=EventType.COMMAND_REQUESTED.value,
-                          status=CommandStatus.PENDING.value)
+
+    cmd = Command(
+        command=req.command,
+        target=req.target,
+        args=req.args,
+        actor=req.actor,
+        source=req.source,
+        session_id=req.session_id,
+        idempotency_key=req.idempotency_key,
+    )
+    env = cmd.to_envelope(type=EventType.COMMAND_REQUESTED.value, status=CommandStatus.PENDING.value)
     published = get_bus().publish(env)
-    return {"ok": True, "event_id": published.event_id,
-            "trace_id": published.trace_id, "command_id": published.command_id}
+    return {"ok": True, "event_id": published.event_id, "trace_id": published.trace_id, "command_id": published.command_id}
 
 
 @router.get("/runs/{run_id}")
@@ -109,6 +120,7 @@ async def run_evidence(run_id: str):
 
 def _run_from_log(run_id: str) -> dict[str, Any]:
     from core.events import get_bus
+
     bus = get_bus()
     # Replay the durable log (or buffer) filtering by run_id.
     envs = bus.replay(since_cursor=0)

@@ -10,6 +10,7 @@ the behaviour that makes subsetting safe:
   * and a wrong guess is recoverable via ``expand_tools`` rather than silently
     removing a capability.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -25,9 +26,10 @@ from core.tool_select import (
 
 
 def _tool(name: str, description: str = "") -> dict:
-    return {"type": "function",
-            "function": {"name": name, "description": description,
-                         "parameters": {"type": "object", "properties": {}}}}
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": {"type": "object", "properties": {}}},
+    }
 
 
 def _names(tools: list[dict]) -> list[str]:
@@ -57,8 +59,7 @@ CATALOG = [
 
 
 def test_select_tools_actually_reduces_the_catalog():
-    chosen = select_tools(CATALOG, "open a web page in the browser and click a button",
-                          limit=6)
+    chosen = select_tools(CATALOG, "open a web page in the browser and click a button", limit=6)
     assert len(chosen) < len(CATALOG), "a browser request must not need the whole catalog"
     assert "browser_open" in _names(chosen)
     assert "browser_click" in _names(chosen)
@@ -96,8 +97,7 @@ def test_core_set_cannot_crowd_out_task_relevant_tools():
     core set, so a small limit silently dropped browser_click from a browser
     request — exactly the silent capability loss the expander exists to prevent.
     """
-    chosen = select_tools(CATALOG, "open a web page in the browser and click a button",
-                          limit=4)
+    chosen = select_tools(CATALOG, "open a web page in the browser and click a button", limit=4)
     names = _names(chosen)
     assert "browser_click" in names
     assert "browser_open" in names
@@ -249,6 +249,7 @@ def test_agent_sends_nothing_when_it_has_no_tools(agent, monkeypatch):
 
 def test_agent_survives_a_broken_selector(agent, monkeypatch):
     """Selection is an optimization; a bug in it must not fail the turn."""
+
     def boom(*_a, **_k):
         raise RuntimeError("selector exploded")
 
@@ -262,8 +263,7 @@ def test_agent_emits_a_selection_event(agent):
     seen = []
     agent._turn_selected_tools = None
     agent._turn_tool_expanded = False
-    agent._tools_for_turn("read a file from disk",
-                          emit=lambda kind, data: seen.append((kind, data)))
+    agent._tools_for_turn("read a file from disk", emit=lambda kind, data: seen.append((kind, data)))
     kinds = [k for k, _ in seen]
     assert "tools_selected" in kinds
     payload = seen[kinds.index("tools_selected")][1]
@@ -294,14 +294,12 @@ def test_chat_resets_tool_selection_between_turns(agent, monkeypatch):
 
     monkeypatch.setattr(agent.llm, "chat", fake_chat)
     monkeypatch.setattr(agent, "_build_system_prompt", lambda *a, **k: "sys")
-    monkeypatch.setattr(agent_mod, "select_tools",
-                        lambda tools, _text, **_k: list(tools[:3]))
+    monkeypatch.setattr(agent_mod, "select_tools", lambda tools, _text, **_k: list(tools[:3]))
 
-    agent._turn_tool_expanded = True          # pretend the last turn expanded
+    agent._turn_tool_expanded = True  # pretend the last turn expanded
     agent.chat("hello")
     agent.chat("hello again")
-    assert captured and all(n == 3 for n in captured), \
-        f"every turn must re-select, got {captured}"
+    assert captured and all(n == 3 for n in captured), f"every turn must re-select, got {captured}"
 
 
 def test_expand_tools_widens_the_next_model_call_without_executing_a_real_tool(agent, monkeypatch):
@@ -327,22 +325,19 @@ def test_expand_tools_widens_the_next_model_call_without_executing_a_real_tool(a
         calls.append(len(tools or []))
         state["n"] += 1
         if state["n"] == 1:
-            return _Resp("", [{"name": "expand_tools",
-                               "arguments": {"reason": "need database_query"}}])
+            return _Resp("", [{"name": "expand_tools", "arguments": {"reason": "need database_query"}}])
         return _Resp("done", [])
 
     monkeypatch.setattr(agent.llm, "chat", fake_chat)
     monkeypatch.setattr(agent, "_build_system_prompt", lambda *a, **k: "sys")
-    monkeypatch.setattr(agent, "_execute_tool",
-                        lambda name, args: executed.append(name) or {"success": True})
+    monkeypatch.setattr(agent, "_execute_tool", lambda name, args: executed.append(name) or {"success": True})
     monkeypatch.setattr(agent_mod, "select_tools", lambda tools, _t, **_k: list(tools[:3]))
 
     agent.chat("query the database", on_event=lambda kind, data: events.append(kind))
 
     assert len(calls) >= 2, f"expected a second model call, got {calls}"
     assert calls[0] == 3, "first call should carry the narrowed subset"
-    assert calls[1] == len(agent.tools), \
-        f"second call must carry the full catalog, got {calls[1]} of {len(agent.tools)}"
+    assert calls[1] == len(agent.tools), f"second call must carry the full catalog, got {calls[1]} of {len(agent.tools)}"
     assert "expand_tools" not in executed, "the expander is intercepted, never executed"
     assert "tools_expanded" in events
 
@@ -352,10 +347,8 @@ def test_system_prompt_reports_the_offered_count_not_the_catalog_size(agent):
     call ones it cannot see. The prompt must match what was actually sent."""
     prompt = agent._build_system_prompt("what time is it?")
     offered = len(agent._tools_for_turn("what time is it?"))
-    line = next((l for l in prompt.splitlines()
-                 if "tools" in l and "available" in l and "browser" in l), "")
+    line = next((ln for ln in prompt.splitlines() if "tools" in ln and "available" in ln and "browser" in ln), "")
     assert line, "the capability line describing available tools is missing"
     assert f"{offered} tools" in line, f"prompt says something else: {line}"
-    assert str(len(agent.tools)) in line and "of" in line, \
-        f"a subset should say how many are registered: {line}"
+    assert str(len(agent.tools)) in line and "of" in line, f"a subset should say how many are registered: {line}"
     assert "expand_tools" in line

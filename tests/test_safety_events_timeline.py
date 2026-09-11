@@ -25,5 +25,5 @@ def test_safety_core_header_is_live_projection_not_static_copy():
     assert "blockedMissionCount" in src
     assert "updateSafetyCore" in src
     assert "GET /permissions/pending" not in src  # JS uses relative fetch through getJSON below, not hardcoded copy text.
-    assert "setPill(\"#pendingCount\"" in src
-    assert "setPill(\"#blockedMissionCount\"" in src
+    assert 'setPill("#pendingCount"' in src
+    assert 'setPill("#blockedMissionCount"' in src

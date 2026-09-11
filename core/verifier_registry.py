@@ -4,6 +4,7 @@ Separates verification into Structural Verification (files, AST, configurations)
 and Behavioral Verification (test execution, server responses, process liveness, artifacts).
 A task is only verified when BOTH structural and behavioral proofs succeed.
 """
+
 from __future__ import annotations
 
 import ast
@@ -15,7 +16,7 @@ import sys
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .workspace import workspace
 
@@ -71,7 +72,9 @@ class PythonVerifier(BaseVerifier):
                 if p.suffix == ".py" and p.exists():
                     py_files.append(p)
         if not py_files and root_dir.exists():
-            py_files = [p for p in root_dir.rglob("*.py") if not any(x in p.parts for x in (".git", ".venv", "venv", "__pycache__"))][:15]
+            py_files = [
+                p for p in root_dir.rglob("*.py") if not any(x in p.parts for x in (".git", ".venv", "venv", "__pycache__"))
+            ][:15]
 
         for p in py_files:
             struct_total += 1
@@ -120,12 +123,21 @@ class PythonVerifier(BaseVerifier):
                 else:
                     errors.append(f"Pytest failed with exit code {res.returncode}")
                     suggestions.append("Inspect test failures and patch the failing assertions.")
-                    evidence.append({"type": "behavioral", "check": "test_suite", "status": "failed", "output": (res.stdout + res.stderr)[:1000]})
+                    evidence.append(
+                        {
+                            "type": "behavioral",
+                            "check": "test_suite",
+                            "status": "failed",
+                            "output": (res.stdout + res.stderr)[:1000],
+                        }
+                    )
             except Exception as e:
                 warnings.append(f"Could not execute test runner: {e}")
 
         behav_score = (behav_passed / max(1, behav_total)) if behav_total > 0 else 1.0
-        behavioral_verified = bool(behav_score >= 0.8 and not any("Runtime exceptions" in e or "Pytest failed" in e for e in errors))
+        behavioral_verified = bool(
+            behav_score >= 0.8 and not any("Runtime exceptions" in e or "Pytest failed" in e for e in errors)
+        )
 
         total_score = round((struct_score * 0.4) + (behav_score * 0.6), 2)
         verified = bool(structural_verified and behavioral_verified)
@@ -176,7 +188,7 @@ class AndroidVerifier(BaseVerifier):
             struct_passed += 1
             evidence.append({"type": "structural", "check": "gradle_build_scripts", "count": len(gradle_files)})
 
-        struct_score = (struct_passed / 2.0)
+        struct_score = struct_passed / 2.0
         structural_verified = bool(struct_score >= 0.5)
 
         behav_passed = 0
@@ -191,7 +203,14 @@ class AndroidVerifier(BaseVerifier):
                             if "AndroidManifest.xml" in names or any(n.endswith(".dex") for n in names) or "classes.dex" in names:
                                 valid_apks += 1
                                 artifacts.append(str(apk))
-                                evidence.append({"type": "behavioral", "check": "apk_container_valid", "file": apk.name, "size": apk.stat().st_size})
+                                evidence.append(
+                                    {
+                                        "type": "behavioral",
+                                        "check": "apk_container_valid",
+                                        "file": apk.name,
+                                        "size": apk.stat().st_size,
+                                    }
+                                )
                     except Exception:
                         pass
             if valid_apks > 0:
@@ -201,7 +220,7 @@ class AndroidVerifier(BaseVerifier):
                 errors.append("No valid .apk or .aab binary artifact generated in workspace")
                 suggestions.append("Run `./gradlew assembleDebug` to compile and package the APK.")
 
-        behav_score = 1.0 if behav_passed else (0.5 if not ("apk" in str(context.get("task", "")).lower()) else 0.0)
+        behav_score = 1.0 if behav_passed else (0.5 if "apk" not in str(context.get("task", "")).lower() else 0.0)
         behavioral_verified = bool(behav_score >= 0.5)
 
         total_score = round((struct_score * 0.4) + (behav_score * 0.6), 2)
@@ -250,6 +269,7 @@ class WebVerifier(BaseVerifier):
         if port:
             try:
                 import urllib.request
+
                 req = urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=2)
                 if req.status in (200, 301, 302):
                     evidence.append({"type": "behavioral", "check": "http_response", "port": port, "status": req.status})
@@ -297,7 +317,7 @@ class GitVerifier(BaseVerifier):
         try:
             res = subprocess.run(["git", "status", "--porcelain"], cwd=str(root_dir), capture_output=True, text=True, timeout=5)
             if res.returncode == 0:
-                uncommitted = [l for l in res.stdout.splitlines() if l.strip()]
+                uncommitted = [line for line in res.stdout.splitlines() if line.strip()]
                 evidence.append({"type": "behavioral", "check": "git_status", "uncommitted_files": len(uncommitted)})
                 if context.get("require_clean_tree") and uncommitted:
                     behav_ok = False
@@ -308,9 +328,14 @@ class GitVerifier(BaseVerifier):
 
         verified = bool(struct_ok and behav_ok and not errors)
         return VerificationResult(
-            verified=verified, score=1.0 if verified else 0.4, domain=self.domain,
-            structural_verified=struct_ok, behavioral_verified=behav_ok,
-            evidence=evidence, errors=errors, warnings=warnings
+            verified=verified,
+            score=1.0 if verified else 0.4,
+            domain=self.domain,
+            structural_verified=struct_ok,
+            behavioral_verified=behav_ok,
+            evidence=evidence,
+            errors=errors,
+            warnings=warnings,
         )
 
 
@@ -339,6 +364,7 @@ class LinuxVerifier(BaseVerifier):
         port = context.get("port")
         if port:
             import socket
+
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1.5)
             res = sock.connect_ex(("127.0.0.1", int(port)))
@@ -351,9 +377,14 @@ class LinuxVerifier(BaseVerifier):
 
         verified = bool(struct_ok and behav_ok and not errors)
         return VerificationResult(
-            verified=verified, score=1.0 if verified else 0.4, domain=self.domain,
-            structural_verified=struct_ok, behavioral_verified=behav_ok,
-            evidence=evidence, errors=errors, suggestions=suggestions
+            verified=verified,
+            score=1.0 if verified else 0.4,
+            domain=self.domain,
+            structural_verified=struct_ok,
+            behavioral_verified=behav_ok,
+            evidence=evidence,
+            errors=errors,
+            suggestions=suggestions,
         )
 
 
@@ -378,7 +409,14 @@ class ResearchVerifier(BaseVerifier):
 
         evidence.append({"type": "behavioral", "check": "substance", "word_count": word_count})
         if citations_present:
-            evidence.append({"type": "behavioral", "check": "citations_present", "count": len(urls) + len(citation_markers), "status": "passed"})
+            evidence.append(
+                {
+                    "type": "behavioral",
+                    "check": "citations_present",
+                    "count": len(urls) + len(citation_markers),
+                    "status": "passed",
+                }
+            )
 
         if not substance_ok:
             errors.append(f"Research output too brief ({word_count} words; expected >= 50)")
@@ -452,8 +490,12 @@ class GenericVerifier(BaseVerifier):
     domain = "generic"
 
     ERROR_MARKERS = (
-        "syntaxerror", "traceback (most recent call last):", "fatal error",
-        "command not found", "connection refused", "permission denied"
+        "syntaxerror",
+        "traceback (most recent call last):",
+        "fatal error",
+        "command not found",
+        "connection refused",
+        "permission denied",
     )
 
     def verify(self, context: dict[str, Any]) -> VerificationResult:
@@ -462,7 +504,9 @@ class GenericVerifier(BaseVerifier):
         problems = [m for m in self.ERROR_MARKERS if m in low]
         ok = bool(text) and not problems
 
-        evidence = [{"type": "behavioral", "check": "marker_scan", "status": "clean" if ok else "failed", "problems_found": problems}]
+        evidence = [
+            {"type": "behavioral", "check": "marker_scan", "status": "clean" if ok else "failed", "problems_found": problems}
+        ]
         errors = [f"Problem marker detected: '{p}'" for p in problems] if problems else []
 
         return VerificationResult(
@@ -498,16 +542,27 @@ class VerifierRegistry:
     def list_domains(self) -> list[str]:
         return sorted(list(self._verifiers.keys()))
 
-    def auto_detect_domain(self, task: str, files_modified: Optional[list[str]] = None, context: Optional[dict[str, Any]] = None) -> str:
+    def auto_detect_domain(
+        self, task: str, files_modified: list[str] | None = None, context: dict[str, Any] | None = None
+    ) -> str:
         low = task.lower()
         files = files_modified or (context.get("files") if context else []) or []
         file_exts = {Path(f).suffix.lower() for f in files if f}
 
-        if any(f in low for f in ("android", "apk", "aab", "gradle", "kotlin", "manifest.xml")) or ".apk" in file_exts or ".aab" in file_exts:
+        if (
+            any(f in low for f in ("android", "apk", "aab", "gradle", "kotlin", "manifest.xml"))
+            or ".apk" in file_exts
+            or ".aab" in file_exts
+        ):
             return "android"
-        if any(f in low for f in ("python", "pytest", "fastapi", "flask", "django", "pip", "def ", "class ")) or ".py" in file_exts:
+        if (
+            any(f in low for f in ("python", "pytest", "fastapi", "flask", "django", "pip", "def ", "class "))
+            or ".py" in file_exts
+        ):
             return "python"
-        if any(f in low for f in ("web", "website", "html", "react", "vue", "css", "frontend", "javascript", "node")) or file_exts & {".html", ".css", ".js", ".jsx", ".tsx", ".ts"}:
+        if any(
+            f in low for f in ("web", "website", "html", "react", "vue", "css", "frontend", "javascript", "node")
+        ) or file_exts & {".html", ".css", ".js", ".jsx", ".tsx", ".ts"}:
             return "web"
         if any(f in low for f in ("git", "commit", "branch", "repo", "merge", "push", "pull request")):
             return "git"
@@ -522,8 +577,8 @@ class VerifierRegistry:
 
     def verify(
         self,
-        domain_or_auto: Optional[str] = None,
-        context: Optional[dict[str, Any]] = None,
+        domain_or_auto: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> VerificationResult:
         ctx = context or {}
         task = ctx.get("task", "")
@@ -537,7 +592,7 @@ class VerifierRegistry:
     def verify_multi(
         self,
         domains: list[str],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> VerificationResult:
         ctx = context or {}
         results = [self.get(d).verify(ctx) for d in domains]

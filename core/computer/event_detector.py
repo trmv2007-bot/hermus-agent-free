@@ -1,7 +1,8 @@
 """Turn low-level frame changes into a small set of visual events."""
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from .frame_sampler import FrameSampler, _image_diff
 
@@ -24,7 +25,7 @@ class EventDetector:
         except (TypeError, ValueError):
             return fallback
 
-    def detect(self, frames: list[dict[str, Any]], max_events: Optional[int] = 12) -> list[dict[str, Any]]:
+    def detect(self, frames: list[dict[str, Any]], max_events: int | None = 12) -> list[dict[str, Any]]:
         changes = self.sampler.detect_changes(frames)
         groups: list[list[dict[str, Any]]] = []
         for change in changes:
@@ -45,22 +46,24 @@ class EventDetector:
             frame_index = int(strongest.get("frame_index", 0))
             before_index = max(0, int(group[0].get("before_index", frame_index - 1)))
             after_index = min(len(frames) - 1, int(group[-1].get("frame_index", frame_index)))
-            events.append({
-                "type": "screen_change",
-                "ts": strongest.get("ts"),
-                "offset": strongest.get("offset"),
-                "sequence": strongest.get("sequence"),
-                "change_score": strongest.get("change_score", 0.0),
-                "frame_index": frame_index,
-                "before_index": before_index,
-                "after_index": after_index,
-                "burst_frames": len(group),
-                # These references remain internal. VideoAnalyzer emits a
-                # JSON-safe evidence object instead of serializing image data.
-                "before_frame": frames[before_index],
-                "frame": frames[frame_index],
-                "after_frame": frames[after_index],
-            })
+            events.append(
+                {
+                    "type": "screen_change",
+                    "ts": strongest.get("ts"),
+                    "offset": strongest.get("offset"),
+                    "sequence": strongest.get("sequence"),
+                    "change_score": strongest.get("change_score", 0.0),
+                    "frame_index": frame_index,
+                    "before_index": before_index,
+                    "after_index": after_index,
+                    "burst_frames": len(group),
+                    # These references remain internal. VideoAnalyzer emits a
+                    # JSON-safe evidence object instead of serializing image data.
+                    "before_frame": frames[before_index],
+                    "frame": frames[frame_index],
+                    "after_frame": frames[after_index],
+                }
+            )
 
         if max_events is not None and len(events) > max(0, int(max_events)):
             # Preserve the highest-information changes, then put them back in
@@ -72,11 +75,7 @@ class EventDetector:
     @staticmethod
     def json_event(event: dict[str, Any]) -> dict[str, Any]:
         """Strip in-memory frame blobs from an event for persistence."""
-        return {
-            key: value
-            for key, value in event.items()
-            if key not in {"before_frame", "frame", "after_frame"}
-        }
+        return {key: value for key, value in event.items() if key not in {"before_frame", "frame", "after_frame"}}
 
 
 class StreamingEventDetector:
@@ -91,10 +90,10 @@ class StreamingEventDetector:
     def __init__(self, threshold: float = 0.02, debounce_seconds: float = 0.5):
         self.threshold = max(0.0, min(float(threshold), 1.0))
         self.debounce_seconds = max(0.0, float(debounce_seconds))
-        self._previous: Optional[dict[str, Any]] = None
+        self._previous: dict[str, Any] | None = None
         self._events: list[dict[str, Any]] = []
 
-    def observe(self, frame: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def observe(self, frame: dict[str, Any] | None) -> dict[str, Any] | None:
         if frame is None:
             return None
         if self._previous is None:

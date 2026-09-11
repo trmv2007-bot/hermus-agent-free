@@ -6,6 +6,7 @@ Covers:
 - default model (Ollama down) falls back to the configured custom key
 - custom API tools are available in chat/multi-chat modes
 """
+
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import pytest
 sys.path.append(str(Path(__file__).parent.parent))
 sys.path.append(str(Path(__file__).parent))
 
-from mock_openai_server import serve, LOGS  # noqa: E402
+from mock_openai_server import LOGS, serve  # noqa: E402
 
 
 @pytest.fixture()
@@ -51,8 +52,8 @@ def clean_custom_apis():
 
 
 def test_custom_key_used_in_chat_mode(mock_server, clean_keys):
-    from core.multi_key import multi_key_manager
     from core.agent import HermusAgent
+    from core.multi_key import multi_key_manager
 
     r = multi_key_manager.add_key(
         "custom",
@@ -94,9 +95,9 @@ def test_gateway_agent_cache_respects_model_change(mock_server, clean_keys):
 
 
 def test_default_chat_falls_back_to_custom_key(mock_server, clean_keys):
-    from core.multi_key import multi_key_manager
-    from core.cache import clear_all_caches
     from core.agent import HermusAgent
+    from core.cache import clear_all_caches
+    from core.multi_key import multi_key_manager
 
     # Avoid cached ollama responses from other tests
     clear_all_caches()
@@ -147,8 +148,8 @@ def test_full_endpoint_base_url(mock_server, clean_keys):
 
 
 def test_custom_api_tools_in_chat_modes(mock_server, clean_custom_apis):
-    from core.custom_api import custom_api_manager
     from core.agent import HermusAgent
+    from core.custom_api import custom_api_manager
 
     r = custom_api_manager.add_api(
         {
@@ -169,8 +170,8 @@ def test_custom_api_tools_in_chat_modes(mock_server, clean_custom_apis):
 
 def test_custom_api_added_later_is_picked_up(mock_server, clean_custom_apis):
     """A cached agent must see custom APIs added via Settings without restart."""
-    from core.custom_api import custom_api_manager
     from core.agent import HermusAgent
+    from core.custom_api import custom_api_manager
 
     agent = HermusAgent(model="mock/mock", mode="chat")
     assert agent.tools == []

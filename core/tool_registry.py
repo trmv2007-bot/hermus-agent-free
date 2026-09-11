@@ -5,15 +5,16 @@ Phase 4: registry-level tool failure fallbacks — if a tool errors, walk its
 fallback chain (retry / alternate tool) and attach a fallback_trail to the
 result so callers and the lessons loop can see what happened.
 """
+
 from __future__ import annotations
 
 import importlib
 import inspect
 import json
 import traceback
-from pathlib import Path
-from typing import Any, Optional
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 # Modules that expose TOOLS (list of OpenAI-style defs) and/or TOOL_MAP (name -> callable)
@@ -71,7 +72,7 @@ TOOL_FALLBACK_CHAINS: dict[str, list[dict]] = {
 }
 
 
-def _normalize_tool_def(item: Any) -> Optional[dict]:
+def _normalize_tool_def(item: Any) -> dict | None:
     """Normalize various tool definition shapes to OpenAI function-calling format."""
     if not isinstance(item, dict):
         return None
@@ -98,9 +99,7 @@ def _wrap_callable(fn: Callable) -> Callable:
         try:
             sig = inspect.signature(fn)
             # Filter kwargs to what the function accepts (unless **kwargs present)
-            accepts_var_kw = any(
-                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-            )
+            accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
             if not accepts_var_kw:
                 allowed = {
                     name
@@ -148,7 +147,7 @@ class ToolRegistry:
         self,
         name: str,
         executor: Callable,
-        definition: Optional[dict] = None,
+        definition: dict | None = None,
         source: str = "manual",
         overwrite: bool = True,
     ):
@@ -160,11 +159,7 @@ class ToolRegistry:
             norm = _normalize_tool_def(definition)
             if norm:
                 # Replace existing def with same name
-                self.definitions = [
-                    d
-                    for d in self.definitions
-                    if d.get("function", {}).get("name") != name
-                ]
+                self.definitions = [d for d in self.definitions if d.get("function", {}).get("name") != name]
                 self.definitions.append(norm)
 
     def register_builtin_memory_and_skills(self):
@@ -240,9 +235,7 @@ class ToolRegistry:
                     for p in params:
                         if p in context and context[p]:
                             call_kwargs[p] = context[p]
-                        elif p in ("query", "task", "text", "input", "prompt") and (
-                            task or query
-                        ):
+                        elif p in ("query", "task", "text", "input", "prompt") and (task or query):
                             call_kwargs[p] = task or query
                         elif p == "kwargs" or p.startswith("*"):
                             continue
@@ -262,9 +255,7 @@ class ToolRegistry:
                                 result = mod.run()
                     except TypeError:
                         result = mod.run()
-                skill_manager.log_skill_usage(
-                    name, success=True, feedback=f"Executed with task={str(task or query)[:80]}"
-                )
+                skill_manager.log_skill_usage(name, success=True, feedback=f"Executed with task={str(task or query)[:80]}")
                 return {
                     "skill": name,
                     "result": result if not isinstance(result, str) else result[:3000],
@@ -283,12 +274,11 @@ class ToolRegistry:
         def subagent_spawn(task: str, max_steps: int = 4, timeout: float = 0) -> dict:
             from subagents.subagent import spawn_subagent
 
-            return spawn_subagent(task, max_steps=int(max_steps or 4),
-                                  timeout=float(timeout) or None)
+            return spawn_subagent(task, max_steps=int(max_steps or 4), timeout=float(timeout) or None)
 
         def delegate_tasks(
             goal: str,
-            tasks: Optional[list[str]] = None,
+            tasks: list[str] | None = None,
             max_children: int = 4,
             aggregate: str = "synthesize",
         ) -> dict:
@@ -299,47 +289,63 @@ class ToolRegistry:
                 # delegation module directly from a tool.
                 from subagents.subagent import delegate
 
-                return delegate(str(goal), tasks=list(tasks) if tasks else None,
-                                max_children=int(max_children),
-                                aggregate=str(aggregate or "synthesize"))
+                return delegate(
+                    str(goal),
+                    tasks=list(tasks) if tasks else None,
+                    max_children=int(max_children),
+                    aggregate=str(aggregate or "synthesize"),
+                )
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        def sandbox_run(command: str, timeout: int = 30, network: bool = False,
-                        backend: str = "", allow_dangerous: bool = False) -> dict:
+        def sandbox_run(
+            command: str, timeout: int = 30, network: bool = False, backend: str = "", allow_dangerous: bool = False
+        ) -> dict:
             """Run a command in an ephemeral sandbox (containers when available, else rlimit jail)."""
             try:
                 from core.sandbox import sandbox
 
                 return sandbox.run(
-                    command, timeout=int(timeout or 30),
-                    network=bool(network), backend=(backend or None),
-                    allow_dangerous=bool(allow_dangerous), purpose="tool:sandbox_run",
+                    command,
+                    timeout=int(timeout or 30),
+                    network=bool(network),
+                    backend=(backend or None),
+                    allow_dangerous=bool(allow_dangerous),
+                    purpose="tool:sandbox_run",
                 )
             except Exception as e:
                 return {"error": str(e)}
 
         def memory_hybrid_search(
-            query: str, limit: int = 8, kinds: Optional[list[str]] = None,
-            project: str = "", explain: bool = False,
+            query: str,
+            limit: int = 8,
+            kinds: list[str] | None = None,
+            project: str = "",
+            explain: bool = False,
         ) -> dict:
             """Hybrid (BM25 + vectors, RRF-fused) recall over typed memory 2.0."""
             try:
                 from core.memory import memory
 
                 if explain:
-                    return memory.explain(query, limit=int(limit),
-                                          project=project or None, kinds=kinds or None)
-                hits = memory.hybrid_recall(query, limit=int(limit),
-                                            project=project or None, kinds=kinds or None)
+                    return memory.explain(query, limit=int(limit), project=project or None, kinds=kinds or None)
+                hits = memory.hybrid_recall(query, limit=int(limit), project=project or None, kinds=kinds or None)
                 return {
-                    "query": query, "mode": "hybrid", "count": len(hits),
+                    "query": query,
+                    "mode": "hybrid",
+                    "count": len(hits),
                     "index": memory.index_stats(),
                     "results": [
-                        {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
-                         "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
-                         "retrieval": h.get("retrieval"), "signals": h.get("signals"),
-                         "content": (h.get("content") or "")[:700]}
+                        {
+                            "id": h.get("id"),
+                            "kind": h.get("kind"),
+                            "score": h.get("score"),
+                            "rrf_score": h.get("rrf_score"),
+                            "decay": h.get("decay"),
+                            "retrieval": h.get("retrieval"),
+                            "signals": h.get("signals"),
+                            "content": (h.get("content") or "")[:700],
+                        }
                         for h in hits
                     ],
                 }
@@ -358,14 +364,16 @@ class ToolRegistry:
         def skill_harvest(session_recent: bool = True, dry_run: bool = False, goal: str = "") -> dict:
             """Distill the current session's trajectory into a validated SKILL.md skill."""
             try:
-                from .agent import HermusAgent  # noqa: F401  (only to confirm loop exists)
                 from core.skill_forge import skill_forge
+
+                from .agent import HermusAgent  # noqa: F401  (only to confirm loop exists)
 
                 traj = getattr(self, "_last_trajectory", None) or []
                 if not traj:
-                    return {"created": False,
-                            "error": "no trajectory in this registry context; "
-                                     "the agent loop auto-harvests after each turn"}
+                    return {
+                        "created": False,
+                        "error": "no trajectory in this registry context; the agent loop auto-harvests after each turn",
+                    }
                 return skill_forge.harvest(goal or "recent task", traj, dry_run=bool(dry_run))
             except Exception as e:
                 return {"created": False, "error": str(e)}
@@ -464,8 +472,11 @@ class ToolRegistry:
                 "subagent_spawn",
                 subagent_spawn,
                 "Spawn one isolated subagent (separate process, JSON-RPC worker) for a single task",
-                {"task": {"type": "string"}, "max_steps": {"type": "integer", "default": 4},
-                 "timeout": {"type": "number", "default": 0}},
+                {
+                    "task": {"type": "string"},
+                    "max_steps": {"type": "integer", "default": 4},
+                    "timeout": {"type": "number", "default": 0},
+                },
                 ["task"],
             ),
             (
@@ -474,8 +485,11 @@ class ToolRegistry:
                 "Hierarchical delegation: split work into parallel sub-agents (own processes, JSON-RPC) and aggregate their structured results",
                 {
                     "goal": {"type": "string", "description": "What the whole delegation is for"},
-                    "tasks": {"type": "array", "items": {"type": "string"},
-                              "description": "Explicit workstreams; omit to have them planned from `goal`"},
+                    "tasks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Explicit workstreams; omit to have them planned from `goal`",
+                    },
                     "max_children": {"type": "integer", "default": 4},
                     "aggregate": {"type": "string", "enum": ["synthesize", "concat", "vote", "best"]},
                 },
@@ -503,8 +517,11 @@ class ToolRegistry:
                     "limit": {"type": "integer", "default": 8},
                     "kinds": {"type": "array", "items": {"type": "string"}},
                     "project": {"type": "string"},
-                    "explain": {"type": "boolean", "default": False,
-                                "description": "Return rank/contribution diagnostics instead of hits"},
+                    "explain": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Return rank/contribution diagnostics instead of hits",
+                    },
                 },
                 ["query"],
             ),
@@ -633,7 +650,7 @@ class ToolRegistry:
                 source=module_path,
             )
 
-    def load(self, force: bool = False) -> "ToolRegistry":
+    def load(self, force: bool = False) -> ToolRegistry:
         if self._loaded and not force:
             return self
         self.clear()
@@ -702,7 +719,7 @@ class ToolRegistry:
         self._loaded = True
         return self
 
-    def get_definitions(self, allowed: Optional[set[str]] = None) -> list[dict]:
+    def get_definitions(self, allowed: set[str] | None = None) -> list[dict]:
         self.load()
         if allowed is None or "all" in allowed:
             return list(self.definitions)
@@ -721,7 +738,7 @@ class ToolRegistry:
                     break
         return out
 
-    def execute(self, name: str, args: Optional[dict] = None) -> dict:
+    def execute(self, name: str, args: dict | None = None) -> dict:
         self.load()
         args = args or {}
         if isinstance(args, str):
@@ -770,7 +787,7 @@ class ToolRegistry:
                 return trail
             return {"error": f"{name} failed: {e}"}
 
-    def _check_permission(self, name: str, args: dict) -> Optional[dict]:
+    def _check_permission(self, name: str, args: dict) -> dict | None:
         """Return a denial result dict to short-circuit execution, or None to allow."""
         try:
             from .config import config
@@ -786,7 +803,7 @@ class ToolRegistry:
                 return {
                     "error": f"Permission DENIED for tool '{name}'",
                     "permission": decision,
-                    "hint": "Enable with: hermus perms set %s allow" % name,
+                    "hint": f"Enable with: hermus perms set {name} allow",
                 }
             if d == Decision.ASK:
                 if getattr(config, "ask_policy", "allow") == "allow":
@@ -795,7 +812,7 @@ class ToolRegistry:
                 return {
                     "error": f"Permission requires confirmation (ASK) for tool '{name}'",
                     "permission": decision,
-                    "hint": "Enable with: hermus perms set %s allow  (or set HERMUS_ASK_POLICY=allow)" % name,
+                    "hint": f"Enable with: hermus perms set {name} allow  (or set HERMUS_ASK_POLICY=allow)",
                 }
         except Exception:
             pass
@@ -808,7 +825,7 @@ class ToolRegistry:
             return bool(err) or str(result.get("success", "")).lower() == "false"
         return False
 
-    def _walk_fallback(self, name: str, args: dict, original: Any) -> Optional[dict]:
+    def _walk_fallback(self, name: str, args: dict, original: Any) -> dict | None:
         """Walk the fallback chain for a failed tool. Returns result with trail or None."""
         chain = TOOL_FALLBACK_CHAINS.get(name)
         if not chain:
@@ -887,8 +904,7 @@ class ToolRegistry:
             {
                 "name": name,
                 "description": defs_by_name.get(name, {}).get("description", ""),
-                "parameters": defs_by_name.get(name, {}).get("parameters")
-                or {"type": "object", "properties": {}},
+                "parameters": defs_by_name.get(name, {}).get("parameters") or {"type": "object", "properties": {}},
                 "source": self.sources.get(name, ""),
             }
             for name in sorted(self.executors.keys())

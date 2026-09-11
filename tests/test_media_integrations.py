@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+import tools.voice as voice
 from core.avatar import AvatarService
 from core.config import config
 from core.speech import SpeechEngine
-import tools.voice as voice
 
 
 class _FakePrompt:
@@ -19,7 +19,7 @@ class _FakePrompt:
         Path(path).write_bytes(self.marker.encode("utf-8"))
 
     @classmethod
-    def load(cls, path: str) -> "_FakePrompt":
+    def load(cls, path: str) -> _FakePrompt:
         return cls(Path(path).read_bytes().decode("utf-8") or "prompt")
 
 
@@ -69,11 +69,13 @@ class _FakeAvatarSession:
     def post(self, url, json=None, timeout=None):
         self.posts.append((url, json, timeout))
         if url.endswith("/v1/preprocess_and_tran"):
-            return _FakeResponse(json_data={
-                "code": 0,
-                "asr_format_audio_url": "/srv/shared/ref.wav",
-                "reference_audio_text": "reference words",
-            })
+            return _FakeResponse(
+                json_data={
+                    "code": 0,
+                    "asr_format_audio_url": "/srv/shared/ref.wav",
+                    "reference_audio_text": "reference words",
+                }
+            )
         if url.endswith("/v1/invoke"):
             return _FakeResponse(content=b"RIFF" + b"0" * 48)
         if url.endswith("/submit"):
@@ -134,8 +136,8 @@ def test_transcribe_audio_can_remember_into_memory(tmp_path, monkeypatch):
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFF" + b"0" * 48)
 
-    from core.memory.store import MemoryFacade
     import core.memory.store as memory_store
+    from core.memory.store import MemoryFacade
 
     previous = memory_store._facade
     memory_store._facade = MemoryFacade(db_path=str(tmp_path / "memory2.db"))
@@ -213,7 +215,12 @@ def test_speech_routes_expose_transcription_models_and_avatar_status(monkeypatch
 
     monkeypatch.setattr(
         "tools.voice.voice_available_models",
-        lambda: {"available_models": ["base"], "discovered_models": [{"name": "GGML Small"}], "discovered_count": 1, "search_dirs": []},
+        lambda: {
+            "available_models": ["base"],
+            "discovered_models": [{"name": "GGML Small"}],
+            "discovered_count": 1,
+            "search_dirs": [],
+        },
     )
     monkeypatch.setattr(
         "core.avatar.get_avatar_service",

@@ -20,6 +20,7 @@ seams; a unit test may inject a fake runner to exercise command building, but th
 is NOT evidence of device capability — capability is reported by
 :func:`detect_capability` and E2E requires a live device/emulator.
 """
+
 from __future__ import annotations
 
 import base64
@@ -27,9 +28,10 @@ import json
 import shutil
 import subprocess
 import uuid
-from typing import Any, Optional
+from typing import Any
 from xml.etree import ElementTree as ET
 
+from ..errors import HermusError
 from .secure import sign, verify
 
 #: PNG magic signature — validated so a corrupted/empty screencap is never
@@ -37,11 +39,14 @@ from .secure import sign, verify
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-class AndroidUnavailable(RuntimeError):
+class AndroidUnavailable(HermusError, RuntimeError):  # noqa: N818 - public exception name, kept for API stability
     """Raised when Android control cannot be performed (no adb, no device, no permission)."""
 
-    def __init__(self, reason: str, *, category: str = "device", op: Optional[str] = None):
-        super().__init__(reason)
+    code = "android_unavailable"
+    status = 503
+
+    def __init__(self, reason: str, *, category: str = "device", op: str | None = None):
+        super().__init__(reason, details={"category": category, "op": op or ""})
         self.reason = reason
         self.category = category
         self.op = op
@@ -89,8 +94,7 @@ class AdbAndroidTransport(AndroidTransport):
     explicit so a missing binary is reported, not guessed.
     """
 
-    def __init__(self, *, adb: Optional[str] = None, serial: Optional[str] = None,
-                 timeout: float = 15.0, runner: Any = None):
+    def __init__(self, *, adb: str | None = None, serial: str | None = None, timeout: float = 15.0, runner: Any = None):
         self.adb = adb or shutil.which("adb") or "adb"
         self.serial = serial
         self.timeout = timeout
@@ -123,9 +127,9 @@ class AdbAndroidTransport(AndroidTransport):
         except FileNotFoundError as exc:
             raise AndroidUnavailable(f"adb not found: {exc}", category="tool") from exc
         except subprocess.TimeoutExpired as exc:
-            raise AndroidUnavailable(f"adb '{ ' '.join(args[:1]) }' timed out", category="timeout") from exc
+            raise AndroidUnavailable(f"adb '{' '.join(args[:1])}' timed out", category="timeout") from exc
         if getattr(proc, "returncode", 1) != 0:
-            err = (proc.stderr or proc.stdout or "")
+            err = proc.stderr or proc.stdout or ""
             if isinstance(err, bytes):
                 err = err.decode("utf-8", "replace")
             raise AndroidUnavailable(
@@ -159,7 +163,7 @@ class AdbAndroidTransport(AndroidTransport):
         except FileNotFoundError as exc:
             raise AndroidUnavailable(f"adb not found: {exc}", category="tool") from exc
         except subprocess.TimeoutExpired as exc:
-            raise AndroidUnavailable(f"adb '{ ' '.join(args[:1]) }' timed out", category="timeout") from exc
+            raise AndroidUnavailable(f"adb '{' '.join(args[:1])}' timed out", category="timeout") from exc
         if getattr(proc, "returncode", 1) != 0:
             err = proc.stderr or b""
             if isinstance(err, bytes):
@@ -179,8 +183,7 @@ class AdbAndroidTransport(AndroidTransport):
     # -- contract -----------------------------------------------------------
     def connect(self) -> dict[str, Any]:
         out = self._run(["shell", "getprop", "ro.product.model"])
-        return {"ok": True, "device": self.device_id(),
-                "model": out["output"] or "unknown", "transport": "adb"}
+        return {"ok": True, "device": self.device_id(), "model": out["output"] or "unknown", "transport": "adb"}
 
     def device_id(self) -> str:
         out = self._run(["get-serialno"])
@@ -190,8 +193,7 @@ class AdbAndroidTransport(AndroidTransport):
         out = self._run(["get-state"])
         state = out["output"] or "unknown"
         if state.strip() != "device":
-            raise AndroidUnavailable(f"device state '{state}' (expected 'device'); is it authorised?",
-                                     category="device")
+            raise AndroidUnavailable(f"device state '{state}' (expected 'device'); is it authorised?", category="device")
         return {"state": state}
 
     def get_screen(self, *, format: str = "png", **kw) -> dict[str, Any]:
@@ -199,15 +201,13 @@ class AdbAndroidTransport(AndroidTransport):
         # the PNG. Read bytes and validate the PNG signature before returning.
         raw = self._run_binary(["exec-out", "screencap", "-p"])
         if not raw:
-            raise AndroidUnavailable("adb screencap produced empty output",
-                                     category="device", op="get_screen")
+            raise AndroidUnavailable("adb screencap produced empty output", category="device", op="get_screen")
         if not raw.startswith(PNG_SIGNATURE):
             raise AndroidUnavailable(
-                "adb screencap did not produce a valid PNG (bad/incomplete payload)",
-                category="device", op="get_screen")
+                "adb screencap did not produce a valid PNG (bad/incomplete payload)", category="device", op="get_screen"
+            )
         b64 = base64.b64encode(raw).decode("ascii")
-        return {"ok": True, "format": "png", "mime": "image/png",
-                "bytes": len(raw), "b64": b64, "data": b64}
+        return {"ok": True, "format": "png", "mime": "image/png", "bytes": len(raw), "b64": b64, "data": b64}
 
     def get_ui_tree(self, **kw) -> dict[str, Any]:
         # `uiautomator dump` writes the XML to a file on-device; its STDOUT is only the
@@ -216,19 +216,21 @@ class AdbAndroidTransport(AndroidTransport):
         self._run(["shell", "uiautomator", "dump", "/sdcard/window_dump.xml"])
         xml_payload = self._run(["shell", "cat", "/sdcard/window_dump.xml"])["output"]
         if not xml_payload or "<hierarchy" not in xml_payload:
-            raise AndroidUnavailable("uiautomator dump produced no usable XML",
-                                     category="device", op="get_ui_tree")
+            raise AndroidUnavailable("uiautomator dump produced no usable XML", category="device", op="get_ui_tree")
         try:
             parsed = _parse_ui_xml(xml_payload)
         except ET.ParseError as exc:
-            raise AndroidUnavailable(f"uiautomator XML parse failed: {exc}",
-                                     category="device", op="get_ui_tree") from exc
+            raise AndroidUnavailable(f"uiautomator XML parse failed: {exc}", category="device", op="get_ui_tree") from exc
         if not parsed.get("nodes"):
-            raise AndroidUnavailable("uiautomator UI tree is empty",
-                                     category="device", op="get_ui_tree")
-        return {"ok": True, "format": "semantic", "package": parsed.get("package"),
-                "activity": parsed.get("activity"), "nodes": parsed["nodes"],
-                "raw_xml": xml_payload}
+            raise AndroidUnavailable("uiautomator UI tree is empty", category="device", op="get_ui_tree")
+        return {
+            "ok": True,
+            "format": "semantic",
+            "package": parsed.get("package"),
+            "activity": parsed.get("activity"),
+            "nodes": parsed["nodes"],
+            "raw_xml": xml_payload,
+        }
 
     def tap(self, x: int, y: int, **kw) -> dict[str, Any]:
         self._run(["shell", "input", "tap", str(int(x)), str(int(y))])
@@ -252,26 +254,23 @@ class AdbAndroidTransport(AndroidTransport):
         if component:
             if "/" not in component:
                 raise AndroidUnavailable(
-                    f"invalid component '{component}' (expected package/activity)",
-                    category="op", op="launch_app")
+                    f"invalid component '{component}' (expected package/activity)", category="op", op="launch_app"
+                )
             target = component
         elif package:
             resolved = self._resolve_launcher(package)
             target = resolved or package
         else:
-            raise AndroidUnavailable("launch_app requires a package or component",
-                                     category="op", op="launch_app")
+            raise AndroidUnavailable("launch_app requires a package or component", category="op", op="launch_app")
         self._run(["shell", "am", "start", "-n", target])
-        return {"ok": True, "package": package or component.split("/")[0],
-                "component": target}
+        return {"ok": True, "package": package or component.split("/")[0], "component": target}
 
-    def _resolve_launcher(self, package: str) -> Optional[str]:
+    def _resolve_launcher(self, package: str) -> str | None:
         """Resolve the launchable activity for ``package`` via `cmd package resolve-activity`
         (or `monkey -p`), returning a ``package/activity`` component. Falls back to the
         bare package so a launchable intent error is surfaced honestly by `am start`."""
         try:
-            out = self._run(
-                ["shell", "cmd", "package", "resolve-activity", "--brief", package])["output"]
+            out = self._run(["shell", "cmd", "package", "resolve-activity", "--brief", package])["output"]
             # Format: "<package>/<activity>" for the LAUNCHER intent. Resolve the last
             # non-empty line (resolve-activity can emit a header).
             comp = None
@@ -302,8 +301,7 @@ class BridgeAndroidTransport(AndroidTransport):
 
     _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
-    def __init__(self, *, base_url: str, secret: bytes, max_payload: int = 20 * 1024 * 1024,
-                 http: Any = None):
+    def __init__(self, *, base_url: str, secret: bytes, max_payload: int = 20 * 1024 * 1024, http: Any = None):
         self.base_url = base_url.rstrip("/")
         self.secret = secret
         self.max_payload = max_payload
@@ -319,26 +317,26 @@ class BridgeAndroidTransport(AndroidTransport):
         docstring — a remote plaintext bridge is rejected before any request is made.
         """
         from urllib.parse import urlparse
+
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
-            raise AndroidUnavailable(
-                f"bridge base_url scheme '{parsed.scheme}' not allowed (http/https)",
-                category="security")
+            raise AndroidUnavailable(f"bridge base_url scheme '{parsed.scheme}' not allowed (http/https)", category="security")
         if parsed.scheme == "https":
             return
         # Plaintext http is only acceptable on loopback.
         host = (parsed.hostname or "").lower()
         if host not in cls._LOOPBACK_HOSTS:
             raise AndroidUnavailable(
-                f"insecure plaintext bridge endpoint '{url}' refused; use https or a "
-                "loopback (127.0.0.1/localhost) address",
-                category="security")
+                f"insecure plaintext bridge endpoint '{url}' refused; use https or a loopback (127.0.0.1/localhost) address",
+                category="security",
+            )
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
     def _default_http(self, url: str, method: str, body: bytes, headers: dict) -> dict[str, Any]:
         import urllib.request
+
         req = urllib.request.Request(url, data=body, method=method)
         for k, v in headers.items():
             req.add_header(k, v)
@@ -354,41 +352,46 @@ class BridgeAndroidTransport(AndroidTransport):
         headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
         resp = self._http(self._url("/v1/exec"), "POST", body, headers)
         if resp.get("status", 0) not in (200, 201):
-            raise AndroidUnavailable(f"bridge returned HTTP {resp.get('status')}",
-                                     category="device")
+            raise AndroidUnavailable(f"bridge returned HTTP {resp.get('status')}", category="device")
         data = json.loads(resp["body"])
-        if not verify(self.secret, json.dumps(data.get("payload", {})).encode("utf-8"),
-                      data.get("mac", "")):
+        if not verify(self.secret, json.dumps(data.get("payload", {})).encode("utf-8"), data.get("mac", "")):
             raise AndroidUnavailable("bridge response MAC invalid", category="security")
         result = data.get("result") or {}
         if not result.get("ok"):
-            raise AndroidUnavailable(result.get("reason") or "companion rejected op",
-                                     category="permission", op=op)
+            raise AndroidUnavailable(result.get("reason") or "companion rejected op", category="permission", op=op)
         return result
 
     def connect(self) -> dict[str, Any]:
         return self._call("connect", {})
+
     def device_id(self) -> str:
         return str(self._call("device_id", {}).get("device", uuid.uuid4().hex))
+
     def get_screen(self, **kw) -> dict[str, Any]:
         return self._call("get_screen", kw)
+
     def get_ui_tree(self, **kw) -> dict[str, Any]:
         return self._call("get_ui_tree", kw)
+
     def tap(self, x: int, y: int, **kw) -> dict[str, Any]:
         return self._call("tap", {"x": int(x), "y": int(y), **kw})
+
     def type_text(self, text: str, **kw) -> dict[str, Any]:
         return self._call("type", {"text": text, **kw})
+
     def back(self, **kw) -> dict[str, Any]:
         return self._call("back", kw)
+
     def launch_app(self, package: str, **kw) -> dict[str, Any]:
         return self._call("launch_app", {"package": package, **kw})
 
 
-def _parse_bounds(val: Optional[str]) -> list[int]:
+def _parse_bounds(val: str | None) -> list[int]:
     """Parse an Android bounds string like ``[0,0][1080,2000]`` into ``[x1,y1,x2,y2]``."""
     if not val:
         return [0, 0, 0, 0]
     import re
+
     nums = re.findall(r"-?\d+", val)
     if len(nums) < 4:
         return [0, 0, 0, 0]
@@ -439,10 +442,11 @@ def _parse_ui_xml(xml_payload: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 def _env(name: str, default: str = "") -> str:
     import os
+
     return os.environ.get(name, default)
 
 
-def build_default_transport(*, serial: Optional[str] = None) -> Optional[AndroidTransport]:
+def build_default_transport(*, serial: str | None = None) -> AndroidTransport | None:
     """Provision the configured Android transport, or None when none can be constructed.
 
     Resolution order (all config-driven, no caller-chosen transports):
@@ -459,6 +463,7 @@ def build_default_transport(*, serial: Optional[str] = None) -> Optional[Android
         secret_b64 = _env("HERMUS_ANDROID_SECRET", "").strip()
         if base_url and secret_b64:
             from .secure import _unb64
+
             try:
                 secret = _unb64(secret_b64)
             except Exception:
@@ -475,8 +480,7 @@ def build_default_transport(*, serial: Optional[str] = None) -> Optional[Android
 # ---------------------------------------------------------------------------
 # Capability detection (honest reporting)
 # ---------------------------------------------------------------------------
-def detect_capability(*, serial: Optional[str] = None,
-                      transport: Optional[AndroidTransport] = None) -> dict[str, Any]:
+def detect_capability(*, serial: str | None = None, transport: AndroidTransport | None = None) -> dict[str, Any]:
     """Report truthfully whether Android control is available, with a reason.
 
     Returns ``{"available": bool, "transport": ..., "adb": ..., "device": ...,
@@ -487,34 +491,31 @@ def detect_capability(*, serial: Optional[str] = None,
     if transport is not None:
         try:
             info = transport.connect()
-            return {"available": True, "transport": type(transport).__name__,
-                    "device": info.get("device"), "reason": "ok"}
+            return {"available": True, "transport": type(transport).__name__, "device": info.get("device"), "reason": "ok"}
         except AndroidUnavailable as exc:
-            return {"available": False, "transport": type(transport).__name__,
-                    "device": None, "reason": exc.reason}
+            return {"available": False, "transport": type(transport).__name__, "device": None, "reason": exc.reason}
         except Exception as exc:  # noqa: BLE001 - capability reports, never raises
-            return {"available": False, "transport": type(transport).__name__,
-                    "device": None, "reason": f"unexpected: {exc}"}
+            return {"available": False, "transport": type(transport).__name__, "device": None, "reason": f"unexpected: {exc}"}
 
     adb = _env("HERMUS_ANDROID_ADB", "").strip() or shutil.which("adb")
-    bridge_configured = bool(_env("HERMUS_ANDROID_BRIDGE_URL", "").strip() and
-                             _env("HERMUS_ANDROID_SECRET", "").strip())
+    bridge_configured = bool(_env("HERMUS_ANDROID_BRIDGE_URL", "").strip() and _env("HERMUS_ANDROID_SECRET", "").strip())
     if not adb and not bridge_configured:
-        return {"available": False, "transport": "adb", "adb": None, "device": None,
-                "reason": "adb binary not found; install Android platform-tools or set "
-                          "HERMUS_ANDROID_ADB" if not bridge_configured else
-                          "bridge not fully configured"}
+        return {
+            "available": False,
+            "transport": "adb",
+            "adb": None,
+            "device": None,
+            "reason": "adb binary not found; install Android platform-tools or set HERMUS_ANDROID_ADB"
+            if not bridge_configured
+            else "bridge not fully configured",
+        }
     t = build_default_transport(serial=serial)
     if t is None:
-        return {"available": False, "transport": "none", "adb": adb, "device": None,
-                "reason": "no Android transport configured"}
+        return {"available": False, "transport": "none", "adb": adb, "device": None, "reason": "no Android transport configured"}
     try:
         info = t.connect()
-        return {"available": True, "transport": type(t).__name__,
-                "device": info.get("device"), "reason": "ok"}
+        return {"available": True, "transport": type(t).__name__, "device": info.get("device"), "reason": "ok"}
     except AndroidUnavailable as exc:
-        return {"available": False, "transport": type(t).__name__, "device": None,
-                "reason": exc.reason}
+        return {"available": False, "transport": type(t).__name__, "device": None, "reason": exc.reason}
     except Exception as exc:  # noqa: BLE001 - capability reports, never raises
-        return {"available": False, "transport": type(t).__name__, "device": None,
-                "reason": f"unexpected: {exc}"}
+        return {"available": False, "transport": type(t).__name__, "device": None, "reason": f"unexpected: {exc}"}

@@ -5,6 +5,7 @@ venv command and browser discovery are mocked deliberately, while the loopback
 fixture test is live. The full setup smoke is run separately in CI/operator
 verification because it needs a real .venv, Chromium and host libraries.
 """
+
 from __future__ import annotations
 
 import subprocess

@@ -1,5 +1,7 @@
 """Free Web Search - DuckDuckGo, no API key - Optimized with caching"""
+
 import warnings
+
 from core.cache import web_search_cache
 
 warnings.filterwarnings("ignore", message=".*duckduckgo_search.*renamed to.*ddgs.*", category=RuntimeWarning)
@@ -15,9 +17,11 @@ try:
 except ImportError:
     try:
         from duckduckgo_search import DDGS  # type: ignore
+
         DDG_AVAILABLE = True
     except ImportError:
         DDG_AVAILABLE = False
+
 
 def web_search(query: str, max_results: int = 5) -> list[dict]:
     """Free web search via DuckDuckGo - no API key - Optimized with caching"""
@@ -28,7 +32,13 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
         return cached
 
     if not DDG_AVAILABLE:
-        result = [{"title": f"Mock result for {query}", "href": "https://example.com", "body": f"This is mock search result for {query} - install duckduckgo-search for real free search: pip install duckduckgo-search"}]
+        result = [
+            {
+                "title": f"Mock result for {query}",
+                "href": "https://example.com",
+                "body": f"This is mock search result for {query} - install duckduckgo-search for real free search: pip install duckduckgo-search",
+            }
+        ]
         web_search_cache.set(cache_key, result)
         return result
 
@@ -37,17 +47,14 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
             results = list(ddgs.text(query, max_results=max_results))
             normalized = []
             for r in results:
-                normalized.append({
-                    "title": r.get("title",""),
-                    "href": r.get("href",""),
-                    "body": r.get("body","")
-                })
+                normalized.append({"title": r.get("title", ""), "href": r.get("href", ""), "body": r.get("body", "")})
             web_search_cache.set(cache_key, normalized)
             return normalized
     except Exception as e:
         result = [{"title": "Search error", "href": "", "body": f"Search failed: {e}. Mock fallback for {query}"}]
         web_search_cache.set(cache_key, result)
         return result
+
 
 # Tool definition for LLM
 TOOL_DEFINITION = {
@@ -59,16 +66,18 @@ TOOL_DEFINITION = {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query"},
-                "max_results": {"type": "integer", "description": "Max results", "default": 5}
+                "max_results": {"type": "integer", "description": "Max results", "default": 5},
             },
-            "required": ["query"]
-        }
-    }
+            "required": ["query"],
+        },
+    },
 }
+
 
 def execute(query: str, max_results: int = 5) -> dict:
     results = web_search(query, max_results)
     return {"results": results, "count": len(results)}
+
 
 TOOLS = [TOOL_DEFINITION]
 TOOL_MAP = {"web_search": execute}

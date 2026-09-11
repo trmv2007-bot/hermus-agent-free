@@ -14,11 +14,12 @@ Markdown extraction is best-effort: it requires Scrapling's optional ``ai``
 extra (markdownify). When absent, text is still produced and a warning notes
 the degradation — never a silent fake.
 """
+
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from .models import LinkInfo, StrategyAttempt, WebResult, content_hash
@@ -28,7 +29,7 @@ from .security import WebSecurityPolicy
 # Text budgets: what a WebResult keeps in memory / hands to the model.
 _TEXT_BUDGET = 20_000
 _MARKDOWN_BUDGET = 20_000
-_HTML_BUDGET = 200_000      # only when explicitly requested
+_HTML_BUDGET = 200_000  # only when explicitly requested
 _MAX_LINKS = 500
 _MAX_METADATA_FIELDS = 24
 
@@ -87,8 +88,7 @@ def _response_metadata(response: Any) -> dict[str, str]:
                 continue
         for level, tag in ((1, "h1"), (2, "h2")):
             try:
-                heads = [sanitize_text(t, 200) for t in
-                         response.css(f"{tag}::text").getall()[:8] or []]
+                heads = [sanitize_text(t, 200) for t in response.css(f"{tag}::text").getall()[:8] or []]
                 heads = [h for h in heads if h.strip()]
                 if heads:
                     meta[f"headings_h{level}"] = " | ".join(heads)
@@ -104,8 +104,7 @@ def _response_markdown(response: Any, warnings: list[str]) -> str:
         md = response.markdown(main_content_only=True)
         return sanitize_text(md or "", _MARKDOWN_BUDGET)
     except Exception as exc:
-        warnings.append(f"markdown extraction unavailable ({type(exc).__name__}) — "
-                        "install 'scrapling[ai]' for markdown output")
+        warnings.append(f"markdown extraction unavailable ({type(exc).__name__}) — install 'scrapling[ai]' for markdown output")
         return ""
 
 
@@ -156,9 +155,7 @@ def build_web_result(
 
     indicators = detect_injection(result.text)
     if indicators:
-        result.warnings.append(
-            "page content contains AI-directed instruction patterns — treated as data only"
-        )
+        result.warnings.append("page content contains AI-directed instruction patterns — treated as data only")
     if result.text and len(result.text.strip()) < 40:
         result.warnings.append("very little text extracted — page may require JavaScript")
     return result
@@ -171,8 +168,8 @@ def error_result(
     error: str,
     error_code: str,
     failure_class: str,
-    attempts: Optional[list[StrategyAttempt]] = None,
-    status_code: Optional[int] = None,
+    attempts: list[StrategyAttempt] | None = None,
+    status_code: int | None = None,
 ) -> WebResult:
     """A typed, non-throwing failure result for tool surfaces."""
     return WebResult(
@@ -193,7 +190,7 @@ def summarize_for_model(result: WebResult, *, max_chars: int) -> str:
     return result.summary(max_chars=max_chars)
 
 
-def structured_from_response(raw: Any) -> Optional[Any]:
+def structured_from_response(raw: Any) -> Any | None:
     """Best-effort structured read of a JSON-looking body (spec §14)."""
     response = raw.response
     if response is None:

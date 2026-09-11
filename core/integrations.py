@@ -8,6 +8,7 @@ live tool registry and agent loop.
 - `maybe_self_heal(result)` runs the watchdog on a failed agent result and
   attaches a `self_healing` block.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -25,6 +26,7 @@ def resolve_active_project() -> str:
 
 def register_architecture_tools(registry) -> None:
     """Register the upgrade tools. Safe to call multiple times (idempotent)."""
+
     # ---- Research pipeline -------------------------------------------------
     def research_deep(query: str, limit: int = 10) -> dict[str, Any]:
         from .research import research_pipeline
@@ -54,7 +56,7 @@ def register_architecture_tools(registry) -> None:
 
     # ---- Memory 2.0 --------------------------------------------------------
     def memory2_recall(query: str, limit: int = 10, kinds: str = "") -> dict[str, Any]:
-        from .memory import memory, KINDS
+        from .memory import KINDS, memory
 
         k = [x.strip() for x in (kinds or "").split(",") if x.strip()] or None
         if k:
@@ -76,7 +78,10 @@ def register_architecture_tools(registry) -> None:
                     "properties": {
                         "query": {"type": "string"},
                         "limit": {"type": "integer", "default": 10},
-                        "kinds": {"type": "string", "description": "comma-separated kinds: working,episodic,semantic,procedural,project"},
+                        "kinds": {
+                            "type": "string",
+                            "description": "comma-separated kinds: working,episodic,semantic,procedural,project",
+                        },
                     },
                     "required": ["query"],
                 },
@@ -85,13 +90,11 @@ def register_architecture_tools(registry) -> None:
         source="core.integrations",
     )
 
-    def memory2_remember(kind: str, content: str, importance: float = 5.0,
-                         success: str = "none") -> dict[str, Any]:
+    def memory2_remember(kind: str, content: str, importance: float = 5.0, success: str = "none") -> dict[str, Any]:
         from .memory import memory
 
         s = None if success == "none" else (success == "true")
-        r = memory.remember(kind, content, importance=importance, success=s,
-                            project=resolve_active_project())
+        r = memory.remember(kind, content, importance=importance, success=s, project=resolve_active_project())
         return r
 
     registry.register(
@@ -318,17 +321,101 @@ def register_architecture_tools(registry) -> None:
         return result
 
     definitions = [
-        ("screen_record_start", screen_record_start, "Start compressed rolling capture; optionally stream the full session to MP4/WebM.", {"max_seconds": {"type": "number", "default": 30.0}, "fps": {"type": "number", "default": 10.0}, "output_path": {"type": "string", "default": ""}}, []),
+        (
+            "screen_record_start",
+            screen_record_start,
+            "Start compressed rolling capture; optionally stream the full session to MP4/WebM.",
+            {
+                "max_seconds": {"type": "number", "default": 30.0},
+                "fps": {"type": "number", "default": 10.0},
+                "output_path": {"type": "string", "default": ""},
+            },
+            [],
+        ),
         ("screen_record_stop", screen_record_stop, "Stop capture and finalize any active video.", {}, []),
         ("screen_record_status", screen_record_status, "Recorder, compressed-RAM, and video-writer status.", {}, []),
-        ("screen_record_save", screen_record_save, "Save the rolling buffer as MP4/WebM, optionally as a task artifact bundle.", {"path": {"type": "string", "default": "recording.mp4"}, "seconds": {"type": "number", "default": 0.0}, "task_id": {"type": "string", "default": ""}}, []),
-        ("screen_get_recent", screen_get_recent, "Get recent frame timestamps and compressed buffer size.", {"seconds": {"type": "number", "default": 10.0}}, []),
-        ("screen_analyze", screen_analyze, "Detect important screen events and generate an agent-readable visual timeline.", {"task": {"type": "string", "default": ""}, "seconds": {"type": "number", "default": 10.0}, "max_events": {"type": "integer", "default": 12}, "use_vision": {"type": "boolean", "default": True}, "model": {"type": "string", "default": "llava:7b"}}, []),
-        ("screen_understand", screen_understand, "Summarize recent changes and compare the first/last screen.", {"description": {"type": "string"}, "seconds": {"type": "number", "default": 10.0}}, ["description"]),
-        ("screen_verify", screen_verify, "Before/after verification with optional semantic vision and procedural visual memory.", {"expected_state": {"type": "string"}, "seconds": {"type": "number", "default": 10.0}, "action": {"type": "string", "default": ""}, "use_vision": {"type": "boolean", "default": False}, "remember": {"type": "boolean", "default": False}}, ["expected_state"]),
-        ("screen_action_before", screen_action_before, "Capture the exact BEFORE frame for an upcoming GUI action.", {"action": {"type": "string"}, "expected_state": {"type": "string", "default": ""}}, ["action"]),
-        ("screen_action_after", screen_action_after, "Capture AFTER and verify it against a prior screen_action_before boundary.", {"action_id": {"type": "string"}, "use_vision": {"type": "boolean", "default": False}, "model": {"type": "string", "default": "llava:7b"}, "remember": {"type": "boolean", "default": False}}, ["action_id"]),
-        ("screen_watch", screen_watch, "Watch changed frames until a visual condition is true or timeout expires.", {"condition": {"type": "string"}, "timeout": {"type": "number", "default": 60.0}, "stable_matches": {"type": "integer", "default": 1}, "model": {"type": "string", "default": "llava:7b"}}, ["condition"]),
+        (
+            "screen_record_save",
+            screen_record_save,
+            "Save the rolling buffer as MP4/WebM, optionally as a task artifact bundle.",
+            {
+                "path": {"type": "string", "default": "recording.mp4"},
+                "seconds": {"type": "number", "default": 0.0},
+                "task_id": {"type": "string", "default": ""},
+            },
+            [],
+        ),
+        (
+            "screen_get_recent",
+            screen_get_recent,
+            "Get recent frame timestamps and compressed buffer size.",
+            {"seconds": {"type": "number", "default": 10.0}},
+            [],
+        ),
+        (
+            "screen_analyze",
+            screen_analyze,
+            "Detect important screen events and generate an agent-readable visual timeline.",
+            {
+                "task": {"type": "string", "default": ""},
+                "seconds": {"type": "number", "default": 10.0},
+                "max_events": {"type": "integer", "default": 12},
+                "use_vision": {"type": "boolean", "default": True},
+                "model": {"type": "string", "default": "llava:7b"},
+            },
+            [],
+        ),
+        (
+            "screen_understand",
+            screen_understand,
+            "Summarize recent changes and compare the first/last screen.",
+            {"description": {"type": "string"}, "seconds": {"type": "number", "default": 10.0}},
+            ["description"],
+        ),
+        (
+            "screen_verify",
+            screen_verify,
+            "Before/after verification with optional semantic vision and procedural visual memory.",
+            {
+                "expected_state": {"type": "string"},
+                "seconds": {"type": "number", "default": 10.0},
+                "action": {"type": "string", "default": ""},
+                "use_vision": {"type": "boolean", "default": False},
+                "remember": {"type": "boolean", "default": False},
+            },
+            ["expected_state"],
+        ),
+        (
+            "screen_action_before",
+            screen_action_before,
+            "Capture the exact BEFORE frame for an upcoming GUI action.",
+            {"action": {"type": "string"}, "expected_state": {"type": "string", "default": ""}},
+            ["action"],
+        ),
+        (
+            "screen_action_after",
+            screen_action_after,
+            "Capture AFTER and verify it against a prior screen_action_before boundary.",
+            {
+                "action_id": {"type": "string"},
+                "use_vision": {"type": "boolean", "default": False},
+                "model": {"type": "string", "default": "llava:7b"},
+                "remember": {"type": "boolean", "default": False},
+            },
+            ["action_id"],
+        ),
+        (
+            "screen_watch",
+            screen_watch,
+            "Watch changed frames until a visual condition is true or timeout expires.",
+            {
+                "condition": {"type": "string"},
+                "timeout": {"type": "number", "default": 60.0},
+                "stable_matches": {"type": "integer", "default": 1},
+                "model": {"type": "string", "default": "llava:7b"},
+            },
+            ["condition"],
+        ),
     ]
     for name, fn, desc, props, required in definitions:
         registry.register(
@@ -348,7 +435,7 @@ def register_architecture_tools(registry) -> None:
 
 def _screen_recorder():
     # module-level singleton, created lazily to avoid a display grab at import time
-    from .computer import ScreenRecorder, NullSource, ImageGrabSource
+    from .computer import ImageGrabSource, NullSource, ScreenRecorder
 
     if not hasattr(_screen_recorder, "rec"):
         try:

@@ -1,6 +1,6 @@
 """End-to-end tests for world state, graph planning, skills, resume and delegation."""
-from __future__ import annotations
 
+from __future__ import annotations
 
 from PIL import Image
 
@@ -39,21 +39,26 @@ def _controller():
 
 def test_world_state_structured_updates_history_and_persistence(tmp_path):
     world = WorldState(task="browse")
-    world.update({
-        "active_application": "Chrome",
-        "active_window": "YouTube",
-        "visible_targets": ["address bar", "search button"],
-        "dialogs": ["Update popup"],
-        "task_state": "BROWSER_READY",
-        "confidence": 0.94,
-        "detail": "Chrome shows YouTube with an update popup",
-    })
-    world.update({
-        "detail": "The popup is no longer visible; the search button is visible",
-        "clear_dialogs": True,
-        "visible_targets": ["search button", "video player"],
-        "confidence": 0.97,
-    }, source="verification")
+    world.update(
+        {
+            "active_application": "Chrome",
+            "active_window": "YouTube",
+            "visible_targets": ["address bar", "search button"],
+            "dialogs": ["Update popup"],
+            "task_state": "BROWSER_READY",
+            "confidence": 0.94,
+            "detail": "Chrome shows YouTube with an update popup",
+        }
+    )
+    world.update(
+        {
+            "detail": "The popup is no longer visible; the search button is visible",
+            "clear_dialogs": True,
+            "visible_targets": ["search button", "video player"],
+            "confidence": 0.97,
+        },
+        source="verification",
+    )
 
     assert world.active_application == "Chrome"
     assert world.active_window == "YouTube"
@@ -75,9 +80,7 @@ def test_planner_builds_complex_executable_graph_without_blind_click_fallback(tm
         skills=ComputerSkillStore(str(tmp_path / "skills")),
         world_state=WorldState(active_application="Chrome", task_state="BROWSER_READY"),
     )
-    graph = planner.plan_graph(
-        "Download this file, unzip it, open the program and make sure it works."
-    )
+    graph = planner.plan_graph("Download this file, unzip it, open the program and make sure it works.")
     kinds = [node.action["kind"] for node in graph.nodes]
     names = [node.name for node in graph.nodes]
 
@@ -96,15 +99,16 @@ def test_intelligent_skill_tracks_reliability_repairs_duration_and_visual_states
     store = ComputerSkillStore(str(tmp_path / "skills"))
     saved = store.save_skill(
         "Install X",
-        [{"name": "INSTALL", "action": {"kind": "click_target", "target": "Install"},
-          "expected": "Installed"}],
+        [{"name": "INSTALL", "action": {"kind": "click_target", "target": "Install"}, "expected": "Installed"}],
         duration=40.0,
-        repairs=[{"failure": "Permission dialog", "action": {"kind": "click_target", "target": "Allow"},
-                  "success": True}],
+        repairs=[{"failure": "Permission dialog", "action": {"kind": "click_target", "target": "Allow"}, "success": True}],
         visual_states=["Installer ready", "Installed"],
     )
     store.record_run(
-        saved["name"], success=False, error="Network timeout", duration=20.0,
+        saved["name"],
+        success=False,
+        error="Network timeout",
+        duration=20.0,
         visual_states=["Network error"],
     )
     store.record_run(saved["name"], success=True, duration=30.0)
@@ -121,13 +125,17 @@ def test_intelligent_skill_tracks_reliability_repairs_duration_and_visual_states
 
 def test_repair_engine_reuses_verified_skill_repair():
     engine = RepairEngine(use_llm=False)
-    engine.set_known_repairs([{
-        "failure": "permission dialog blocked install",
-        "state": "ALLOW_PERMISSION",
-        "action": {"kind": "click_target", "target": "Allow"},
-        "verification": {"expected_state": "Permission dialog is gone"},
-        "success": True,
-    }])
+    engine.set_known_repairs(
+        [
+            {
+                "failure": "permission dialog blocked install",
+                "state": "ALLOW_PERMISSION",
+                "action": {"kind": "click_target", "target": "Allow"},
+                "verification": {"expected_state": "Permission dialog is gone"},
+                "success": True,
+            }
+        ]
+    )
     plan = engine.create_plan(
         "A permission dialog blocked install",
         "Installer progress is visible",
@@ -145,13 +153,26 @@ def test_task_store_checkpoints_events_and_finds_resume_state(tmp_path):
     ]
     world = WorldState(task="demo")
     checkpoint = store.initialize("demo-id", "demo", plan, world_state=world)
-    store.checkpoint_event(checkpoint, {
-        "state": "ONE", "phase": "original_action", "outcome": "success",
-        "verification": {"ok": True},
-    }, world)
-    store.checkpoint_event(checkpoint, {
-        "state": "ONE", "phase": "transition", "outcome": "success_transition", "next_state": "TWO",
-    }, world)
+    store.checkpoint_event(
+        checkpoint,
+        {
+            "state": "ONE",
+            "phase": "original_action",
+            "outcome": "success",
+            "verification": {"ok": True},
+        },
+        world,
+    )
+    store.checkpoint_event(
+        checkpoint,
+        {
+            "state": "ONE",
+            "phase": "transition",
+            "outcome": "success_transition",
+            "next_state": "TWO",
+        },
+        world,
+    )
     store.mark_interrupted("demo-id", "crash")
 
     restored = store.load("demo-id")
@@ -216,8 +237,16 @@ def test_computer_agent_resume_skips_completed_states(tmp_path):
     checkpoint = store.load("resume-me")
     assert checkpoint.status == "success" and checkpoint.resume_count == 1
     task_dir = tmp_path / "tasks" / "resume-me"
-    for name in ("state.json", "plan.json", "timeline.json", "actions.json",
-                 "verification.json", "repairs.json", "result.json", "summary.md"):
+    for name in (
+        "state.json",
+        "plan.json",
+        "timeline.json",
+        "actions.json",
+        "verification.json",
+        "repairs.json",
+        "result.json",
+        "summary.md",
+    ):
         assert (task_dir / name).exists(), name
 
 
@@ -240,8 +269,7 @@ class _FakeAgentManager:
         return {"success": True, "name": name, "job_id": job_id, "queued": True}
 
     def wait_job(self, name, job_id, timeout=120):
-        return {"success": True, "status": "finished", "job_id": job_id,
-                "result": {"success": True, "result": f"done by {name}"}}
+        return {"success": True, "status": "finished", "job_id": job_id, "result": {"success": True, "result": f"done by {name}"}}
 
 
 def test_background_agent_jobs_persist_queryable_results(tmp_path):
@@ -249,8 +277,8 @@ def test_background_agent_jobs_persist_queryable_results(tmp_path):
     import asyncio
     import time
 
-    from gateway.queue import JobQueue
     from core.workspace import workspace
+    from gateway.queue import JobQueue
 
     # Isolate the workspace root so agent dirs never touch the real ~/.hermus,
     # and restore the singleton so it cannot leak into other tests in the run.
@@ -260,6 +288,7 @@ def test_background_agent_jobs_persist_queryable_results(tmp_path):
         (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
 
         from core.agent_manager import AgentManager
+
         q = JobQueue(workers=1, maxsize=100, default_timeout=15, persist=str(tmp_path / "jobs.log"))
         # Inject a deterministic handler so no live model is required.
         q.register("agent.general", lambda ctx: {"ok": True, "answer": ctx.payload["task"].upper()})
@@ -292,17 +321,18 @@ def test_background_agent_jobs_persist_queryable_results(tmp_path):
 def test_multi_agent_delegation_respects_dependencies_and_routes_roles(tmp_path):
     manager = _FakeAgentManager()
     delegator = MultiAgentDelegator(manager=manager, root=str(tmp_path / "delegations"))
-    plan = DelegationPlan(task="ship app", units=[
-        WorkUnit("research", "researcher", "Research the dependency"),
-        WorkUnit("code", "coder", "Implement the fix", depends_on=["research"]),
-        WorkUnit("desktop", "computer-operator", "Install and test", depends_on=["code"]),
-    ])
+    plan = DelegationPlan(
+        task="ship app",
+        units=[
+            WorkUnit("research", "researcher", "Research the dependency"),
+            WorkUnit("code", "coder", "Implement the fix", depends_on=["research"]),
+            WorkUnit("desktop", "computer-operator", "Install and test", depends_on=["code"]),
+        ],
+    )
     result = delegator.execute(plan, wait=True)
 
     assert result["success"] is True
     assert [job[2]["unit_id"] for job in manager.submitted] == ["research", "code", "desktop"]
-    assert [job[0] for job in manager.submitted] == [
-        "hermus-researcher", "hermus-coder", "hermus-computer-operator"
-    ]
+    assert [job[0] for job in manager.submitted] == ["hermus-researcher", "hermus-coder", "hermus-computer-operator"]
     assert manager.submitted[1][2]["dependencies"]["research"]
     assert (tmp_path / "delegations" / f"{plan.plan_id}.json").exists()

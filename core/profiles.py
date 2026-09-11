@@ -8,17 +8,18 @@ Memory 2.0 store, and optional per-profile model. Profiles live under
     hermus profile use code-reviewer
     hermus profile list
 """
+
 from __future__ import annotations
 
+import builtins
 import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .memory import MemoryFacade
 from .workspace import workspace
-import builtins
 
 PRESETS: dict[str, str] = {
     "assistant": "You are Hermus, a helpful, general-purpose AI assistant.",
@@ -34,7 +35,7 @@ def _safe_name(name: str) -> str:
 
 
 class ProfileManager:
-    def __init__(self, profiles_dir: Optional[Path] = None):
+    def __init__(self, profiles_dir: Path | None = None):
         self.profiles_dir = Path(profiles_dir) if profiles_dir else workspace.dirs["profiles"]
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
@@ -46,8 +47,7 @@ class ProfileManager:
         # only available knob (every profile keeps an independent store).
         return MemoryFacade(db_path=str(self._profile_dir(name) / "memory2.db"))
 
-    def create(self, name: str, persona: Optional[str] = None,
-               model: Optional[str] = None) -> dict[str, Any]:
+    def create(self, name: str, persona: str | None = None, model: str | None = None) -> dict[str, Any]:
         pdir = self._profile_dir(name)
         if (pdir / "profile.json").exists():
             return {"success": False, "error": f"profile '{name}' already exists"}
@@ -63,7 +63,7 @@ class ProfileManager:
         self._memory(name)
         return {"success": True, "name": name, "persona": data["persona"]}
 
-    def get(self, name: str) -> Optional[dict[str, Any]]:
+    def get(self, name: str) -> dict[str, Any] | None:
         path = self._profile_dir(name) / "profile.json"
         if not path.exists():
             return None

@@ -10,6 +10,7 @@ small, auditable grants such as:
 The permission manager uses these grants to turn matching ASK decisions into
 ALLOW decisions. Red-zone actions are never granted here.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -18,7 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -32,11 +33,11 @@ class ApprovalRequest:
     suggested_resources: list[str] = field(default_factory=list)
     suggested_purpose: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    resolved_at: Optional[str] = None
+    resolved_at: str | None = None
     resolution: str = ""
 
     @classmethod
-    def create(cls, tool: str, args: dict[str, Any], safety: dict[str, Any]) -> "ApprovalRequest":
+    def create(cls, tool: str, args: dict[str, Any], safety: dict[str, Any]) -> ApprovalRequest:
         return cls(
             id=f"approval_{uuid.uuid4().hex[:12]}",
             tool=tool,
@@ -48,7 +49,7 @@ class ApprovalRequest:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ApprovalRequest":
+    def from_dict(cls, data: dict[str, Any]) -> ApprovalRequest:
         return cls(
             id=str(data["id"]),
             tool=str(data.get("tool") or ""),
@@ -76,11 +77,11 @@ class ApprovalBundle:
     goal: str = ""
     status: str = "pending"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    resolved_at: Optional[str] = None
+    resolved_at: str | None = None
     resolution: str = ""
 
     @classmethod
-    def create(cls, title: str, request_ids: list[str], *, mission_id: str = "", goal: str = "") -> "ApprovalBundle":
+    def create(cls, title: str, request_ids: list[str], *, mission_id: str = "", goal: str = "") -> ApprovalBundle:
         return cls(
             id=f"bundle_{uuid.uuid4().hex[:12]}",
             title=title or "Approval bundle",
@@ -90,7 +91,7 @@ class ApprovalBundle:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ApprovalBundle":
+    def from_dict(cls, data: dict[str, Any]) -> ApprovalBundle:
         return cls(
             id=str(data["id"]),
             title=str(data.get("title") or data["id"]),
@@ -117,8 +118,8 @@ class ApprovalGrant:
     resources: list[str] = field(default_factory=list)
     purpose: str = ""
     decision: str = "allow"
-    expires_at: Optional[str] = None
-    max_uses: Optional[int] = None
+    expires_at: str | None = None
+    max_uses: int | None = None
     uses: int = 0
     active: bool = True
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -131,14 +132,14 @@ class ApprovalGrant:
         title: str,
         *,
         tool: str = "*",
-        red_lines: Optional[list[int]] = None,
-        resources: Optional[list[str]] = None,
+        red_lines: list[int] | None = None,
+        resources: list[str] | None = None,
         purpose: str = "",
-        ttl_minutes: Optional[int] = None,
-        max_uses: Optional[int] = None,
+        ttl_minutes: int | None = None,
+        max_uses: int | None = None,
         created_by: str = "user",
         notes: str = "",
-    ) -> "ApprovalGrant":
+    ) -> ApprovalGrant:
         expires_at = None
         if ttl_minutes is not None and int(ttl_minutes) > 0:
             expires_at = (datetime.now(timezone.utc) + timedelta(minutes=int(ttl_minutes))).isoformat()
@@ -156,7 +157,7 @@ class ApprovalGrant:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ApprovalGrant":
+    def from_dict(cls, data: dict[str, Any]) -> ApprovalGrant:
         return cls(
             id=str(data["id"]),
             title=str(data.get("title") or data["id"]),
@@ -178,7 +179,7 @@ class ApprovalGrant:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def expired(self, now: Optional[datetime] = None) -> bool:
+    def expired(self, now: datetime | None = None) -> bool:
         if not self.expires_at:
             return False
         try:
@@ -211,13 +212,15 @@ class ApprovalGrant:
         if self.purpose:
             purpose_text = _flatten_args(args).lower()
             required = self.purpose.lower()
-            if required not in purpose_text and not any(word and word in purpose_text for word in required.replace("_", " ").split()):
+            if required not in purpose_text and not any(
+                word and word in purpose_text for word in required.replace("_", " ").split()
+            ):
                 return False, "purpose mismatch"
         return True, "matched"
 
 
 class ApprovalStore:
-    def __init__(self, path: Path, requests_path: Optional[Path] = None, bundles_path: Optional[Path] = None):
+    def __init__(self, path: Path, requests_path: Path | None = None, bundles_path: Path | None = None):
         self.path = Path(path)
         self.requests_path = Path(requests_path) if requests_path is not None else self.path.with_name("approval_requests.json")
         self.bundles_path = Path(bundles_path) if bundles_path is not None else self.path.with_name("approval_bundles.json")
@@ -303,7 +306,7 @@ class ApprovalStore:
             out.append(data)
         return out
 
-    def get_request(self, request_id: str) -> Optional[ApprovalRequest]:
+    def get_request(self, request_id: str) -> ApprovalRequest | None:
         for req in self._read_requests():
             if req.id == request_id:
                 return req
@@ -316,7 +319,12 @@ class ApprovalStore:
         candidate = ApprovalRequest.create(tool_name, args, safety)
         requests = self._read_requests()
         for existing in requests:
-            if existing.status == "pending" and existing.tool == candidate.tool and existing.args_redacted == candidate.args_redacted and existing.safety == candidate.safety:
+            if (
+                existing.status == "pending"
+                and existing.tool == candidate.tool
+                and existing.args_redacted == candidate.args_redacted
+                and existing.safety == candidate.safety
+            ):
                 return {"success": True, "request": existing.to_dict(), "deduped": True}
         requests.append(candidate)
         self._write_requests(requests)
@@ -330,7 +338,11 @@ class ApprovalStore:
             return {"success": False, "error": "request_ids required"}
         existing = self._read_bundles()
         for bundle in existing:
-            if bundle.status == "pending" and set(bundle.request_ids) == set(request_ids) and bundle.mission_id == (mission_id or ""):
+            if (
+                bundle.status == "pending"
+                and set(bundle.request_ids) == set(request_ids)
+                and bundle.mission_id == (mission_id or "")
+            ):
                 return {"success": True, "bundle": bundle.to_dict(), "deduped": True}
         bundle = ApprovalBundle.create(title, request_ids, mission_id=mission_id, goal=goal)
         existing.append(bundle)
@@ -344,8 +356,8 @@ class ApprovalStore:
         bundle_id: str,
         decision: str,
         *,
-        ttl_minutes: Optional[int] = None,
-        max_uses: Optional[int] = None,
+        ttl_minutes: int | None = None,
+        max_uses: int | None = None,
         notes: str = "",
     ) -> dict[str, Any]:
         if decision not in {"approve", "deny"}:
@@ -366,13 +378,15 @@ class ApprovalStore:
             if req is None:
                 results.append({"id": req_id, "success": False, "error": "request missing"})
             elif req.status == "pending":
-                results.append(self.resolve_request(
-                    req_id,
-                    decision,
-                    ttl_minutes=ttl_minutes,
-                    max_uses=max_uses,
-                    notes=notes or f"Resolved via bundle {bundle_id}",
-                ))
+                results.append(
+                    self.resolve_request(
+                        req_id,
+                        decision,
+                        ttl_minutes=ttl_minutes,
+                        max_uses=max_uses,
+                        notes=notes or f"Resolved via bundle {bundle_id}",
+                    )
+                )
             else:
                 results.append({"id": req_id, "success": True, "request": req.to_dict(), "already": req.status})
         target.status = "approved" if decision == "approve" else "denied"
@@ -389,16 +403,16 @@ class ApprovalStore:
         request_id: str,
         decision: str,
         *,
-        resources: Optional[list[str]] = None,
+        resources: list[str] | None = None,
         purpose: str = "",
-        ttl_minutes: Optional[int] = None,
-        max_uses: Optional[int] = None,
+        ttl_minutes: int | None = None,
+        max_uses: int | None = None,
         notes: str = "",
     ) -> dict[str, Any]:
         if decision not in {"approve", "deny"}:
             return {"success": False, "error": "decision must be approve or deny", "id": request_id}
         requests = self._read_requests()
-        target: Optional[ApprovalRequest] = None
+        target: ApprovalRequest | None = None
         for req in requests:
             if req.id == request_id:
                 target = req
@@ -458,14 +472,16 @@ class ApprovalStore:
             self._publish("permission.grant.revoked", {"id": grant_id}, status="revoked")
         return {"success": changed, "id": grant_id}
 
-    def find_match(self, tool_name: str, args: dict[str, Any], safety: dict[str, Any]) -> Optional[ApprovalGrant]:
+    def find_match(self, tool_name: str, args: dict[str, Any], safety: dict[str, Any]) -> ApprovalGrant | None:
         for grant in self._read():
             ok, _ = grant.matches(tool_name, args, safety)
             if ok:
                 return grant
         return None
 
-    def allowed(self, tool_name: str, args: dict[str, Any], safety: dict[str, Any], *, consume: bool = False) -> Optional[dict[str, Any]]:
+    def allowed(
+        self, tool_name: str, args: dict[str, Any], safety: dict[str, Any], *, consume: bool = False
+    ) -> dict[str, Any] | None:
         grants = self._read()
         for grant in grants:
             ok, reason = grant.matches(tool_name, args, safety)
@@ -492,15 +508,17 @@ class ApprovalStore:
             from .contracts import Actor, CommandSource, EventEnvelope, EventType
             from .events import get_bus
 
-            get_bus().publish(EventEnvelope(
-                actor=Actor.SYSTEM.value,
-                source=CommandSource.INTERNAL.value,
-                type=EventType.PERMISSION_CHECKED.value,
-                command=command,
-                target=data.get("id") or data.get("tool"),
-                args_redacted=_redact_args(data),
-                status=status,
-            ))
+            get_bus().publish(
+                EventEnvelope(
+                    actor=Actor.SYSTEM.value,
+                    source=CommandSource.INTERNAL.value,
+                    type=EventType.PERMISSION_CHECKED.value,
+                    command=command,
+                    target=data.get("id") or data.get("tool"),
+                    args_redacted=_redact_args(data),
+                    status=status,
+                )
+            )
         except Exception:
             pass
 

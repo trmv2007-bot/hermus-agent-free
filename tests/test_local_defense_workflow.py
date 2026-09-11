@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from _cli_source import cli_source
+
 
 def test_local_defense_workflow_defines_gated_mission_lifecycle():
     src = Path("core/local_defense_workflow.py").read_text(encoding="utf-8")
@@ -22,7 +24,7 @@ def test_gateway_exposes_local_defense_mission_routes_and_bundle_resume_bridge()
 
 
 def test_cli_exposes_local_defense_scan_mission_commands():
-    src = Path("hermus.py").read_text(encoding="utf-8")
+    src = cli_source()
     assert 'safety_sub.add_parser("scan-mission"' in src
     assert 'safety_sub.add_parser("scan-mission-run"' in src
     assert "start_local_scan_mission" in src

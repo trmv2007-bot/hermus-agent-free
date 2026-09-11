@@ -5,6 +5,7 @@ tracks readiness for those powers and enforces a final activation gate: a
 capability may be documented, proposed, implemented or configured, but it is not
 usable until an approved activation request exists.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .contracts import CommandStatus, EventEnvelope, EventType
 
@@ -40,7 +41,9 @@ class CapabilityRecord:
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @classmethod
-    def create(cls, name: str, *, category: str = "generic", status: str = "missing", source: str = "manual", notes: str = "") -> "CapabilityRecord":
+    def create(
+        cls, name: str, *, category: str = "generic", status: str = "missing", source: str = "manual", notes: str = ""
+    ) -> CapabilityRecord:
         return cls(
             id=f"cap_{uuid.uuid4().hex[:12]}",
             name=_clean(name),
@@ -51,7 +54,7 @@ class CapabilityRecord:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CapabilityRecord":
+    def from_dict(cls, data: dict[str, Any]) -> CapabilityRecord:
         return cls(
             id=str(data["id"]),
             name=str(data.get("name") or data["id"]),
@@ -82,11 +85,13 @@ class CapabilityRegistry:
             records = [r for r in records if r.status not in ACTIVE_STATES]
         return [r.to_dict() for r in records]
 
-    def get(self, name_or_id: str) -> Optional[dict[str, Any]]:
+    def get(self, name_or_id: str) -> dict[str, Any] | None:
         rec = self._find(name_or_id)
         return rec.to_dict() if rec else None
 
-    def register(self, name: str, *, category: str = "generic", status: str = "missing", source: str = "manual", notes: str = "") -> dict[str, Any]:
+    def register(
+        self, name: str, *, category: str = "generic", status: str = "missing", source: str = "manual", notes: str = ""
+    ) -> dict[str, Any]:
         if not _clean(name):
             return {"success": False, "error": "capability name required"}
         records = self._read()
@@ -125,7 +130,11 @@ class CapabilityRegistry:
             self._replace(rec)
         except Exception as exc:  # noqa: BLE001
             proposal_result = {"success": False, "error": str(exc)}
-        payload = {"success": bool(proposal_result and proposal_result.get("success", True)), "record": rec.to_dict(), "proposal": proposal_result}
+        payload = {
+            "success": bool(proposal_result and proposal_result.get("success", True)),
+            "record": rec.to_dict(),
+            "proposal": proposal_result,
+        }
         self._publish("capability.setup.proposed", payload)
         return payload
 
@@ -135,15 +144,26 @@ class CapabilityRegistry:
         if rec is None:
             return {"success": False, "error": "capability not found", "capability": name_or_id}
         if rec.status in {"missing", "proposed", "planned"}:
-            return {"success": False, "error": f"capability is {rec.status}; implement/configure before activation", "record": rec.to_dict()}
+            return {
+                "success": False,
+                "error": f"capability is {rec.status}; implement/configure before activation",
+                "record": rec.to_dict(),
+            }
         try:
             from .permissions import permission_manager
 
             store = getattr(permission_manager, "approvals", None)
             if store is None:
                 return {"success": False, "error": "approval store unavailable", "record": rec.to_dict()}
-            safety = {"zone": "yellow", "red_lines": [11], "reasons": ["capability activation requires explicit approval"], "suggested_decision": "ask"}
-            result = store.create_request("capability_activate", {"capability": rec.name, "purpose": "activate capability", "reason": reason}, safety)
+            safety = {
+                "zone": "yellow",
+                "red_lines": [11],
+                "reasons": ["capability activation requires explicit approval"],
+                "suggested_decision": "ask",
+            }
+            result = store.create_request(
+                "capability_activate", {"capability": rec.name, "purpose": "activate capability", "reason": reason}, safety
+            )
             if result.get("success"):
                 req = result.get("request") or {}
                 rec.activation_request_id = req.get("id", "")
@@ -151,7 +171,12 @@ class CapabilityRegistry:
                 rec.updated_at = datetime.now(timezone.utc).isoformat()
                 self._replace(rec)
                 self._publish("capability.activation.requested", {"record": rec.to_dict(), "request": req})
-            return {"success": bool(result.get("success")), "record": rec.to_dict(), "request": result.get("request"), "deduped": result.get("deduped")}
+            return {
+                "success": bool(result.get("success")),
+                "record": rec.to_dict(),
+                "request": result.get("request"),
+                "deduped": result.get("deduped"),
+            }
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "error": str(exc), "record": rec.to_dict()}
 
@@ -222,7 +247,7 @@ class CapabilityRegistry:
         records.append(record)
         self._write(records)
 
-    def _find(self, name_or_id: str) -> Optional[CapabilityRecord]:
+    def _find(self, name_or_id: str) -> CapabilityRecord | None:
         key = _key(name_or_id)
         for rec in self._read():
             if rec.id == name_or_id or _key(rec.name) == key:
@@ -233,18 +258,20 @@ class CapabilityRegistry:
         try:
             from .events import get_bus
 
-            get_bus().publish(EventEnvelope(
-                type=EventType.STATE_CHANGED.value,
-                command=command,
-                target=data.get("id") or data.get("record", {}).get("id"),
-                args_redacted=data,
-                status=CommandStatus.SUCCEEDED.value,
-            ))
+            get_bus().publish(
+                EventEnvelope(
+                    type=EventType.STATE_CHANGED.value,
+                    command=command,
+                    target=data.get("id") or data.get("record", {}).get("id"),
+                    args_redacted=data,
+                    status=CommandStatus.SUCCEEDED.value,
+                )
+            )
         except Exception:
             pass
 
 
-def get_capability_registry(path: Optional[Path] = None) -> CapabilityRegistry:
+def get_capability_registry(path: Path | None = None) -> CapabilityRegistry:
     return CapabilityRegistry(path or DEFAULT_REGISTRY_PATH)
 
 

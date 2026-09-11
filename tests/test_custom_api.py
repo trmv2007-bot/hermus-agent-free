@@ -1,10 +1,14 @@
 """Test Custom API Feature - Free"""
+
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.parent))
+
 
 def test_custom_api():
     from core.custom_api import custom_api_manager
+
     # Clean
     custom_api_manager._save([])
 
@@ -14,11 +18,9 @@ def test_custom_api():
         "description": "Get a fake post by ID from jsonplaceholder free API for testing",
         "url": "https://jsonplaceholder.typicode.com/posts/{id}",
         "method": "GET",
-        "parameters": {
-            "id": {"type": "string", "description": "Post ID 1-100"}
-        },
+        "parameters": {"id": {"type": "string", "description": "Post ID 1-100"}},
         "headers": {},
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
     }
     result = custom_api_manager.add_api(api_def)
     assert result["success"]
@@ -45,6 +47,7 @@ def test_custom_api():
 
     # Test via agent
     from core.agent import HermusAgent
+
     agent = HermusAgent(model="mock/mock")
     # Check tools include custom
     tool_names = [t["function"]["name"] for t in agent.tools]
@@ -53,7 +56,8 @@ def test_custom_api():
 
     # Cleanup
     custom_api_manager.remove_api("jsonplaceholder_post")
-    print(f"✅ Custom API feature works - 100% free, no paywall!")
+    print("✅ Custom API feature works - 100% free, no paywall!")
+
 
 if __name__ == "__main__":
     test_custom_api()

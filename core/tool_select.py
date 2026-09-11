@@ -27,10 +27,11 @@ needs something it cannot see, it calls that, and the agent immediately re-offer
 the full catalog for the rest of the turn. Guessing wrong then costs one round
 trip instead of a silently degraded result.
 """
+
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 #: The tool the model calls when the offered subset is missing something.
 EXPAND_TOOL_NAME = "expand_tools"
@@ -47,8 +48,7 @@ EXPAND_TOOL_SCHEMA: dict[str, Any] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "reason": {"type": "string",
-                           "description": "One short line: which capability you need."},
+                "reason": {"type": "string", "description": "One short line: which capability you need."},
             },
             "required": ["reason"],
         },
@@ -58,12 +58,22 @@ EXPAND_TOOL_SCHEMA: dict[str, Any] = {
 #: Always offered, whatever the task looks like. These are the tools an agent
 #: needs to reason, read, write and report — dropping them would break ordinary
 #: turns, and they are cheap relative to the catalog.
-CORE_TOOLS: frozenset[str] = frozenset({
-    "file_read", "file_write", "file_edit", "file_search",
-    "shell_execute", "web_search", "web_read",
-    "memory_search", "memory_remember", "memory_recall",
-    "task_status", "delegate_tasks",
-})
+CORE_TOOLS: frozenset[str] = frozenset(
+    {
+        "file_read",
+        "file_write",
+        "file_edit",
+        "file_search",
+        "shell_execute",
+        "web_search",
+        "web_read",
+        "memory_search",
+        "memory_remember",
+        "memory_recall",
+        "task_status",
+        "delegate_tasks",
+    }
+)
 
 #: Extra weight for a match in the tool *name* rather than its description. A
 #: name match ("browser_click" vs "click the button") is much stronger evidence
@@ -74,18 +84,63 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 #: Words that appear in almost every tool description and therefore carry no
 #: discriminating signal. Without filtering these, everything matches everything.
-_STOPWORDS = frozenset({
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is",
-    "are", "be", "this", "that", "it", "its", "as", "by", "at", "from", "into",
-    "tool", "tools", "use", "using", "used", "returns", "return", "get", "gets",
-    "current", "status", "value", "values", "any", "all", "can", "will", "when",
-    "you", "your", "hermus", "result", "results", "data", "via", "or the",
-})
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "with",
+        "is",
+        "are",
+        "be",
+        "this",
+        "that",
+        "it",
+        "its",
+        "as",
+        "by",
+        "at",
+        "from",
+        "into",
+        "tool",
+        "tools",
+        "use",
+        "using",
+        "used",
+        "returns",
+        "return",
+        "get",
+        "gets",
+        "current",
+        "status",
+        "value",
+        "values",
+        "any",
+        "all",
+        "can",
+        "will",
+        "when",
+        "you",
+        "your",
+        "hermus",
+        "result",
+        "results",
+        "data",
+        "via",
+        "or the",
+    }
+)
 
 
 def _tokens(text: str) -> set[str]:
-    return {t for t in _WORD_RE.findall(str(text or "").lower())
-            if len(t) > 2 and t not in _STOPWORDS}
+    return {t for t in _WORD_RE.findall(str(text or "").lower()) if len(t) > 2 and t not in _STOPWORDS}
 
 
 def _name_tokens(name: str) -> set[str]:
@@ -116,8 +171,8 @@ def select_tools(
     tools: list[dict[str, Any]],
     text: str,
     *,
-    limit: Optional[int] = None,
-    core: Optional[frozenset[str]] = None,
+    limit: int | None = None,
+    core: frozenset[str] | None = None,
     include_expander: bool = True,
 ) -> list[dict[str, Any]]:
     """Return the tool schemas worth sending for this request.
@@ -182,7 +237,7 @@ def select_tools(
         take_scored = scored_list[: limit - len(take_core)]
         chosen = take_core + take_scored
         if len(chosen) < limit:
-            rest = core_list[core_cap:] + scored_list[len(take_scored):]
+            rest = core_list[core_cap:] + scored_list[len(take_scored) :]
             chosen += rest[: limit - len(chosen)]
 
     if include_expander and len(chosen) < len(tools):

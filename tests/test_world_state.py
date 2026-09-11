@@ -14,6 +14,7 @@ Each test here pins one defect that was found and fixed in
 * ``migrate_world_state`` silently replaced an unreadable file with an empty
   snapshot and still reported success — real data loss.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -244,14 +245,11 @@ def test_migrate_with_allow_corrupt_backs_up_before_replacing(tmp_path):
 
 def test_migrate_valid_file_still_writes_canonical_snapshot(tmp_path):
     source = tmp_path / "world.json"
-    source.write_text(json.dumps(
-        {"active_application": "chrome", "current_state": "IDLE", "revision": 7}
-    ), encoding="utf-8")
+    source.write_text(json.dumps({"active_application": "chrome", "current_state": "IDLE", "revision": 7}), encoding="utf-8")
 
     assert detect_legacy(str(source)) is True
     out = tmp_path / "out.json"
-    result = migrate_world_state(str(source), out_path=str(out),
-                                 marker_path=str(tmp_path / "marker.json"))
+    result = migrate_world_state(str(source), out_path=str(out), marker_path=str(tmp_path / "marker.json"))
 
     assert result["success"] is True
     assert result["corrupt"] is False

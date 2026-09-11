@@ -4,6 +4,7 @@ FFmpeg is resolved from ``HERMUS_FFMPEG``, the system PATH, or the free
 ``imageio-ffmpeg`` package.  The recorder feeds an MJPEG image pipe, avoiding
 raw full-screen frame copies and temporary per-frame files.
 """
+
 from __future__ import annotations
 
 import os
@@ -12,9 +13,9 @@ import shutil
 import subprocess
 import tempfile
 import threading
-from pathlib import Path
-from typing import Any, Optional
 from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
 
 from .recorder import encode_image
 
@@ -26,7 +27,7 @@ class VideoWriter:
         self,
         output_path: str,
         fps: float = 10.0,
-        ffmpeg_binary: Optional[str] = None,
+        ffmpeg_binary: str | None = None,
         queue_size: int = 30,
     ):
         self.output_path = Path(output_path).expanduser().resolve()
@@ -34,16 +35,16 @@ class VideoWriter:
         self.ffmpeg_binary = ffmpeg_binary or self.find_ffmpeg()
         self.queue_size = max(1, int(queue_size))
         self._queue: queue.Queue = queue.Queue(maxsize=self.queue_size)
-        self._process: Optional[subprocess.Popen] = None
-        self._stderr_file: Optional[Any] = None
-        self._thread: Optional[threading.Thread] = None
+        self._process: subprocess.Popen | None = None
+        self._stderr_file: Any | None = None
+        self._thread: threading.Thread | None = None
         self._running = False
-        self._error: Optional[str] = None
+        self._error: str | None = None
         self.frames_written = 0
         self.frames_dropped = 0
 
     @staticmethod
-    def find_ffmpeg() -> Optional[str]:
+    def find_ffmpeg() -> str | None:
         configured = os.environ.get("HERMUS_FFMPEG")
         if configured and Path(configured).expanduser().exists():
             return str(Path(configured).expanduser())
@@ -136,7 +137,7 @@ class VideoWriter:
         return {"success": True, "status": "writing", "path": str(self.output_path), "fps": self.fps}
 
     @staticmethod
-    def _frame_bytes(frame: Any) -> Optional[bytes]:
+    def _frame_bytes(frame: Any) -> bytes | None:
         if isinstance(frame, dict):
             data = frame.get("data")
             if data is not None:
@@ -232,7 +233,7 @@ class VideoWriter:
         output_path: str,
         frames: Iterable[Any],
         fps: float = 10.0,
-        ffmpeg_binary: Optional[str] = None,
+        ffmpeg_binary: str | None = None,
     ) -> dict[str, Any]:
         """Encode a finite iterable, blocking rather than dropping frames."""
         writer = cls(output_path, fps=fps, ffmpeg_binary=ffmpeg_binary, queue_size=1)

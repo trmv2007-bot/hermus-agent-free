@@ -19,41 +19,82 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Optional
+from typing import Any
 
-from ..contracts import (ModelRequirement, ModelSelection, ModelGatewayResult,
-                         FailureClass, Capability)
+from ..contracts import Capability, FailureClass, ModelGatewayResult, ModelRequirement, ModelSelection
+from ..errors import HermusError
+
+#: HTTP status per model failure class (for the gateway envelope).
+_STATUS_BY_FAILURE_CLASS = {
+    FailureClass.RATE_LIMIT.value: 429,
+    FailureClass.AUTH.value: 401,
+    FailureClass.TIMEOUT.value: 504,
+    FailureClass.INVALID_MODEL.value: 400,
+    FailureClass.TOOL_UNSUPPORTED.value: 400,
+    FailureClass.CONTEXT_OVERFLOW.value: 400,
+    FailureClass.POLICY_DENIED.value: 403,
+    FailureClass.NETWORK.value: 502,
+    FailureClass.PROVIDER_UNAVAILABLE.value: 502,
+    FailureClass.MODEL_UNAVAILABLE.value: 502,
+    FailureClass.CAPABILITY_MISMATCH.value: 400,
+    FailureClass.UNKNOWN.value: 502,
+}
 
 
-class ModelGatewayError(Exception):
+class ModelGatewayError(HermusError):
     """A typed model-gateway error carrying a canonical ``failure_class``.
 
     ``error_code`` is one of the structured codes the spec requires:
     ``provider_unavailable``, ``rate_limited``, ``authentication_failed``,
     ``model_unavailable``, ``timeout``, ``capability_mismatch``. Callers read
     ``failure_class``/``error_code`` to decide recovery instead of parsing text.
+
+    Re-based onto :class:`HermusError` so the gateway renders these with the
+    canonical envelope (``code`` mirrors the legacy ``error_code``).
     """
 
-    def __init__(self, message: str, *, failure_class: str = FailureClass.UNKNOWN.value,
-                 provider: str = "", model: str = "", retryable: Optional[bool] = None):
-        super().__init__(message)
+    code = "model_error"
+    status = 502
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_class: str = FailureClass.UNKNOWN.value,
+        provider: str = "",
+        model: str = "",
+        retryable: bool | None = None,
+    ):
+        resolved_retryable = (
+            retryable
+            if retryable is not None
+            else (
+                failure_class
+                in (
+                    FailureClass.RATE_LIMIT.value,
+                    FailureClass.TIMEOUT.value,
+                    FailureClass.NETWORK.value,
+                    FailureClass.PROVIDER_UNAVAILABLE.value,
+                )
+            )
+        )
+        super().__init__(
+            message,
+            code=failure_class,
+            status=_STATUS_BY_FAILURE_CLASS.get(failure_class, 502),
+            retryable=resolved_retryable,
+            details={"provider": provider, "model": model} if (provider or model) else None,
+        )
         self.failure_class = failure_class
         self.error_code = failure_class
         self.provider = provider
         self.model = model
-        self.retryable = retryable if retryable is not None else \
-            (failure_class in (FailureClass.RATE_LIMIT.value, FailureClass.TIMEOUT.value,
-                               FailureClass.NETWORK.value, FailureClass.PROVIDER_UNAVAILABLE.value))
-        self.retryable = retryable if retryable is not None else \
-            (failure_class in (FailureClass.RATE_LIMIT.value, FailureClass.TIMEOUT.value,
-                               FailureClass.NETWORK.value, FailureClass.PROVIDER_UNAVAILABLE.value))
 
 
 class ModelGateway:
     """One facade for provider discovery + model selection + completion."""
 
-    def __init__(self, *, resolver=None, capabilities=None, router=None, fleet=None,
-                 llm_builder=None):
+    def __init__(self, *, resolver=None, capabilities=None, router=None, fleet=None, llm_builder=None):
         self._resolver = resolver
         self._capabilities = capabilities
         self._router = router
@@ -71,18 +112,21 @@ class ModelGateway:
         if self._resolver is not None:
             return self._resolver
         from .. import provider_resolver  # type: ignore
+
         return provider_resolver
 
     def _capability_mod(self):
         if self._capabilities is not None:
             return self._capabilities
         from .. import model_capabilities  # type: ignore
+
         return model_capabilities
 
     def _router_mod(self):
         if self._router is not None:
             return self._router
         from .. import router2  # type: ignore
+
         return router2
 
     # --------------------------------------------------------------------------
@@ -123,22 +167,21 @@ class ModelGateway:
         if router_cand and not any(c.model == router_cand.model for c in candidates):
             candidates.append(router_cand)
         # Sort: capability-satisfied first, then reliability over cost.
-        candidates.sort(key=lambda c: (not c.tool_capable if require_tools else 0,
-                                       not c.vision_capable if req.vision else 0,
-                                       -c.score))
+        candidates.sort(
+            key=lambda c: (not c.tool_capable if require_tools else 0, not c.vision_capable if req.vision else 0, -c.score)
+        )
         return candidates
 
-    def choose(self, req: ModelRequirement) -> Optional[ModelSelection]:
+    def choose(self, req: ModelRequirement) -> ModelSelection | None:
         sel = self.select(req)
         return sel[0] if sel else None
 
     # -- Section-4 public API ---------------------------------------------------
-    def select_model(self, req: ModelRequirement) -> Optional[ModelSelection]:
+    def select_model(self, req: ModelRequirement) -> ModelSelection | None:
         """Alias of ``choose``: the one model-selection decision entry point."""
         return self.choose(req)
 
-    def negotiate_capabilities(self, model: str, provider: str = "",
-                               required: Optional[list[str]] = None) -> dict[str, Any]:
+    def negotiate_capabilities(self, model: str, provider: str = "", required: list[str] | None = None) -> dict[str, Any]:
         """Report (not guess) the capabilities a deployment supports.
 
         Returns a dict with ``capabilities``, ``tools``, ``vision``, ``reasoning``,
@@ -157,7 +200,7 @@ class ModelGateway:
             "context_window": cap.get("context_window", 0),
         }
         missing = []
-        for req in (required or []):
+        for req in required or []:
             if req == "tools" and not out["tools"]:
                 missing.append("tools")
             elif req == "vision" and not out["vision"]:
@@ -173,9 +216,14 @@ class ModelGateway:
     def capabilities_for(self, model: str, provider: str = "") -> dict[str, Any]:
         return self.negotiate_capabilities(model, provider)
 
-    def llm(self, model: Optional[str] = None, provider: Optional[str] = None,
-            api_key: Optional[str] = None, base_url: Optional[str] = None,
-            temperature: Optional[float] = None):
+    def llm(
+        self,
+        model: str | None = None,
+        provider: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        temperature: float | None = None,
+    ):
         """Build the concrete completion object for a model via the canonical path.
 
         This is the ONE place application code obtains a model client. ``FreeLLM``
@@ -184,16 +232,22 @@ class ModelGateway:
         seam (``llm_builder``) can inject a deterministic stub.
         """
         if self._llm_builder is not None:
-            return self._llm_builder(model=model, provider=provider, api_key=api_key,
-                                     base_url=base_url, temperature=temperature)
+            return self._llm_builder(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
         from .. import llm  # type: ignore
 
-        return llm.FreeLLM(model=model, api_key=api_key, base_url=base_url,
-                           provider=provider, temperature=temperature)
+        return llm.FreeLLM(model=model, api_key=api_key, base_url=base_url, provider=provider, temperature=temperature)
 
-    def chat(self, messages: list[dict[str, Any]], *, model: Optional[str] = None,
-             provider: Optional[str] = None, tools: Optional[list[dict[str, Any]]] = None,
-             trace_id: Optional[str] = None, max_retries: int = 1, **kw):
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        trace_id: str | None = None,
+        max_retries: int = 1,
+        **kw,
+    ):
         """Real completion through the canonical boundary.
 
         Resolves the model (default = configured/selected), invokes the provider
@@ -202,29 +256,45 @@ class ModelGateway:
         a structured ``failure_class``/``error_code`` so the caller can recover.
         Never fabricates a response on failure.
         """
-        llm_obj = self.llm(model=model, provider=provider, **{k: kw[k] for k in
-                            ("api_key", "base_url", "temperature") if k in kw})
+        llm_obj = self.llm(
+            model=model, provider=provider, **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw}
+        )
         started = time.time()
         try:
             resp = llm_obj.chat(messages, tools=tools)
         except Exception as exc:
-            self._record_outcome(getattr(llm_obj, "provider", provider or "unknown"),
-                                 self._failed_result(exc, trace_id))
-            raise ModelGatewayError(str(exc), failure_class=self._classify_failure(exc),
-                                    provider=getattr(llm_obj, "provider", provider or "unknown"),
-                                    model=getattr(llm_obj, "model_name", model or "")) from exc
-        self._record_outcome(getattr(llm_obj, "provider", provider or "unknown"),
-                             ModelGatewayResult(provider=provider or "unknown",
-                                                model=model or "", ok=True,
-                                                latency_ms=int((time.time() - started) * 1000),
-                                                content=resp.content, tool_calls=resp.tool_calls,
-                                                trace_id=trace_id))
+            self._record_outcome(getattr(llm_obj, "provider", provider or "unknown"), self._failed_result(exc, trace_id))
+            raise ModelGatewayError(
+                str(exc),
+                failure_class=self._classify_failure(exc),
+                provider=getattr(llm_obj, "provider", provider or "unknown"),
+                model=getattr(llm_obj, "model_name", model or ""),
+            ) from exc
+        self._record_outcome(
+            getattr(llm_obj, "provider", provider or "unknown"),
+            ModelGatewayResult(
+                provider=provider or "unknown",
+                model=model or "",
+                ok=True,
+                latency_ms=int((time.time() - started) * 1000),
+                content=resp.content,
+                tool_calls=resp.tool_calls,
+                trace_id=trace_id,
+            ),
+        )
         return resp
 
-    def vision_complete(self, image_base64: str, prompt: str, *,
-                        model: Optional[str] = None, provider: str = "ollama",
-                        api_key: Optional[str] = None, base_url: Optional[str] = None,
-                        temperature: Optional[float] = None) -> str:
+    def vision_complete(
+        self,
+        image_base64: str,
+        prompt: str,
+        *,
+        model: str | None = None,
+        provider: str = "ollama",
+        api_key: str | None = None,
+        base_url: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
         """Vision completion (image -> text) through the canonical boundary.
 
         Resolves the model (default the free-local Ollama LLaVA path), builds the
@@ -234,28 +304,40 @@ class ModelGateway:
         (``model_unavailable`` for a missing Ollama model, ``network`` when Ollama
         is not running). It never fabricates a description.
         """
-        from .. import llm  # type: ignore
 
         model = model or "llava:7b"
-        llm_obj = self.llm(model=model, provider=provider, api_key=api_key,
-                           base_url=base_url, temperature=temperature)
+        llm_obj = self.llm(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
         started = time.time()
         try:
             resp = llm_obj.generate_image(prompt, image_base64)
         except Exception as exc:  # noqa: BLE001 - classified below
             fc = self._classify_failure(exc)
-            self._record_outcome(llm_obj.provider, ModelGatewayResult(
-                provider=llm_obj.provider, model=model, ok=False, failure_class=fc,
-                error_message=str(exc), retryable=self._retryable_failure(fc),
-                latency_ms=int((time.time() - started) * 1000)))
-            raise ModelGatewayError(str(exc), failure_class=fc,
-                                    provider=llm_obj.provider, model=model) from exc
-        self._record_outcome(llm_obj.provider, ModelGatewayResult(
-            provider=llm_obj.provider, model=model, ok=True,
-            content=resp.content, latency_ms=int((time.time() - started) * 1000)))
+            self._record_outcome(
+                llm_obj.provider,
+                ModelGatewayResult(
+                    provider=llm_obj.provider,
+                    model=model,
+                    ok=False,
+                    failure_class=fc,
+                    error_message=str(exc),
+                    retryable=self._retryable_failure(fc),
+                    latency_ms=int((time.time() - started) * 1000),
+                ),
+            )
+            raise ModelGatewayError(str(exc), failure_class=fc, provider=llm_obj.provider, model=model) from exc
+        self._record_outcome(
+            llm_obj.provider,
+            ModelGatewayResult(
+                provider=llm_obj.provider,
+                model=model,
+                ok=True,
+                content=resp.content,
+                latency_ms=int((time.time() - started) * 1000),
+            ),
+        )
         return resp.content
 
-    def vision_models(self, base_url: Optional[str] = None) -> list[str]:
+    def vision_models(self, base_url: str | None = None) -> list[str]:
         """List the models exposed by the configured free-local Ollama node.
 
         This is discovery (not generation) and lives in the model subsystem;
@@ -268,12 +350,18 @@ class ModelGateway:
             return llm.list_ollama_models(base_url=base_url)
         except Exception as exc:  # noqa: BLE001 - classified below
             fc = self._classify_failure(exc)
-            raise ModelGatewayError(str(exc), failure_class=fc, provider="ollama",
-                                    model="") from exc
+            raise ModelGatewayError(str(exc), failure_class=fc, provider="ollama", model="") from exc
 
-    def stream(self, messages: list[dict[str, Any]], *, model: Optional[str] = None,
-               provider: Optional[str] = None, tools: Optional[list[dict[str, Any]]] = None,
-               on_delta: Optional[Any] = None, **kw):
+    def stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        on_delta: Any | None = None,
+        **kw,
+    ):
         """Streaming completion through the canonical boundary.
 
         Adapts the provider adapter's ``stream_chat`` generator; on failure it
@@ -281,33 +369,44 @@ class ModelGateway:
         when the underlying adapter supports it (the returned generator still yields
         text chunks regardless).
         """
-        llm_obj = self.llm(model=model, provider=provider, **{k: kw[k] for k in
-                            ("api_key", "base_url", "temperature") if k in kw})
+        llm_obj = self.llm(
+            model=model, provider=provider, **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw}
+        )
         try:
             gen = llm_obj.stream_chat(messages, tools=tools, on_delta=on_delta)
         except Exception as exc:
-            raise ModelGatewayError(str(exc), failure_class=self._classify_failure(exc),
-                                    provider=getattr(llm_obj, "provider", provider or "unknown"),
-                                    model=getattr(llm_obj, "model_name", model or "")) from exc
+            raise ModelGatewayError(
+                str(exc),
+                failure_class=self._classify_failure(exc),
+                provider=getattr(llm_obj, "provider", provider or "unknown"),
+                model=getattr(llm_obj, "model_name", model or ""),
+            ) from exc
+
         # §4.3 A failure during *iteration* (not generation) must be classified too —
         # a bare generator would let a late provider error propagate as a raw exception.
         def _guarded() -> Any:
             try:
-                for chunk in gen:
-                    yield chunk
+                yield from gen
             except Exception as exc:  # noqa: BLE001 - classified below
                 raise ModelGatewayError(
-                    str(exc), failure_class=self._classify_failure(exc),
+                    str(exc),
+                    failure_class=self._classify_failure(exc),
                     provider=getattr(llm_obj, "provider", provider or "unknown"),
                     model=getattr(llm_obj, "model_name", model or ""),
                 ) from exc
+
         return _guarded()
 
-    def chat_with_fallback(self, messages: list[dict[str, Any]], *,
-                           req: Optional[ModelRequirement] = None,
-                           tools: Optional[list[dict[str, Any]]] = None,
-                           max_retries: int = 2, max_fallbacks: int = 3,
-                           trace_id: Optional[str] = None) -> Any:
+    def chat_with_fallback(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        req: ModelRequirement | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_retries: int = 2,
+        max_fallbacks: int = 3,
+        trace_id: str | None = None,
+    ) -> Any:
         """Real retry + fallback execution (§4.2).
 
         Given a task requirement, this actually *executes* the completion:
@@ -333,8 +432,8 @@ class ModelGateway:
             order.append((sel.provider, sel.model))
         if not order:
             raise ModelGatewayError(
-                "no candidate model available for the requirement",
-                failure_class=FailureClass.PROVIDER_UNAVAILABLE.value)
+                "no candidate model available for the requirement", failure_class=FailureClass.PROVIDER_UNAVAILABLE.value
+            )
 
         attempts: list[dict[str, Any]] = []
         for i, (provider, model) in enumerate(order):
@@ -349,26 +448,48 @@ class ModelGateway:
                 started = time.time()
                 try:
                     resp = llm_obj.chat(messages, tools=tools)
-                    self._record_outcome(provider, ModelGatewayResult(
-                        provider=provider, model=model, ok=True,
-                        content=resp.content, tool_calls=resp.tool_calls,
-                        latency_ms=int((time.time() - started) * 1000),
-                        used_fallback=used_fallback, trace_id=trace_id))
+                    self._record_outcome(
+                        provider,
+                        ModelGatewayResult(
+                            provider=provider,
+                            model=model,
+                            ok=True,
+                            content=resp.content,
+                            tool_calls=resp.tool_calls,
+                            latency_ms=int((time.time() - started) * 1000),
+                            used_fallback=used_fallback,
+                            trace_id=trace_id,
+                        ),
+                    )
                     return resp
                 except Exception as exc:
                     fc = self._classify_failure(exc)
                     retryable = self._retryable_failure(fc)
-                    attempts.append({
-                        "provider": provider, "model": model,
-                        "failure_class": fc, "error": str(exc),
-                        "retryable": retryable, "attempt": attempt + 1,
-                        "retries": max_retries,
-                    })
-                    self._record_outcome(provider, ModelGatewayResult(
-                        provider=provider, model=model, ok=False, failure_class=fc,
-                        error_message=str(exc), retryable=retryable,
-                        latency_ms=int((time.time() - started) * 1000),
-                        used_fallback=used_fallback, trace_id=trace_id))
+                    attempts.append(
+                        {
+                            "provider": provider,
+                            "model": model,
+                            "failure_class": fc,
+                            "error": str(exc),
+                            "retryable": retryable,
+                            "attempt": attempt + 1,
+                            "retries": max_retries,
+                        }
+                    )
+                    self._record_outcome(
+                        provider,
+                        ModelGatewayResult(
+                            provider=provider,
+                            model=model,
+                            ok=False,
+                            failure_class=fc,
+                            error_message=str(exc),
+                            retryable=retryable,
+                            latency_ms=int((time.time() - started) * 1000),
+                            used_fallback=used_fallback,
+                            trace_id=trace_id,
+                        ),
+                    )
                     if not retryable:
                         break  # unrecoverable for this provider -> try next fallback
 
@@ -377,11 +498,14 @@ class ModelGateway:
             f"all {len(attempts)} model attempt(s) failed: "
             + "; ".join(f"{a['provider']}/{a['model']}={a['failure_class']}" for a in attempts),
             failure_class=last.get("failure_class") or FailureClass.UNKNOWN.value,
-            provider=last.get("provider", ""), model=last.get("model", ""),
-            retryable=any(a["retryable"] for a in attempts))
+            provider=last.get("provider", ""),
+            model=last.get("model", ""),
+            retryable=any(a["retryable"] for a in attempts),
+        )
 
-    def fallback(self, req: ModelRequirement, *, exclude: Optional[list[str]] = None,
-                 max_depth: Optional[int] = None) -> list[ModelSelection]:
+    def fallback(
+        self, req: ModelRequirement, *, exclude: list[str] | None = None, max_depth: int | None = None
+    ) -> list[ModelSelection]:
         """Deterministic ordered fallback candidates, avoiding infinite loops.
 
         Returns a non-repeating ordered list (primary first); the caller tries each
@@ -415,8 +539,7 @@ class ModelGateway:
         single ``select_usable_bundle`` choice), so fallback has real alternatives."""
         mod = self._resolver_mod()
         bundles: list[dict[str, Any]] = []
-        for fn_name, kwargs in (("discover_runtime_bundles", {"include_local": True}),
-                                ("list_available_providers", {})):
+        for fn_name, kwargs in (("discover_runtime_bundles", {"include_local": True}), ("list_available_providers", {})):
             fn = getattr(mod, fn_name, None)
             if not callable(fn):
                 continue
@@ -452,8 +575,7 @@ class ModelGateway:
         """Model capability report from the canonical capability registry."""
         cap_mod = self._capability_mod()
         try:
-            discover = getattr(cap_mod, "discover_runtime_bundles", None) or \
-                getattr(cap_mod, "list_available_providers", None)
+            discover = getattr(cap_mod, "discover_runtime_bundles", None) or getattr(cap_mod, "list_available_providers", None)
             if callable(discover):
                 return {"models": discover()}
         except Exception:
@@ -463,18 +585,29 @@ class ModelGateway:
     def status(self) -> dict[str, Any]:
         return self.health_check()
 
-    def _failed_result(self, exc: Exception, trace_id: Optional[str]) -> ModelGatewayResult:
+    def _failed_result(self, exc: Exception, trace_id: str | None) -> ModelGatewayResult:
         return ModelGatewayResult(
-            provider="", model="", ok=False, failure_class=self._classify_failure(exc),
-            error_code=self._classify_failure(exc), error_message=str(exc),
+            provider="",
+            model="",
+            ok=False,
+            failure_class=self._classify_failure(exc),
+            error_code=self._classify_failure(exc),
+            error_message=str(exc),
             retryable=self._retryable_failure(self._classify_failure(exc)),
             trace_id=trace_id,
         )
 
     # --------------------------------------------------------------------------
-    def complete(self, *, provider: str, model: str, content: Optional[str] = None,
-                 tool_calls: Optional[list[dict[str, Any]]] = None,
-                 trace_id: Optional[str] = None, **kw) -> ModelGatewayResult:
+    def complete(
+        self,
+        *,
+        provider: str,
+        model: str,
+        content: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        trace_id: str | None = None,
+        **kw,
+    ) -> ModelGatewayResult:
         """Record a completion outcome and update circuit/rate state.
 
         This is the observation hook: the actual provider call is delegated to the
@@ -497,12 +630,18 @@ class ModelGateway:
             latency = int((time.time() - started) * 1000)
             extra = {"error_message": str(exc)}
         result = ModelGatewayResult(
-            provider=provider, model=model, ok=ok,
-            failure_class=failure_class, error_code=extra.get("error_code"),
-            error_message=extra.get("error_message"), latency_ms=latency,
-            content=content, tool_calls=tool_calls,
+            provider=provider,
+            model=model,
+            ok=ok,
+            failure_class=failure_class,
+            error_code=extra.get("error_code"),
+            error_message=extra.get("error_message"),
+            latency_ms=latency,
+            content=content,
+            tool_calls=tool_calls,
             rate_state=extra.get("rate_state"),
-            trace_id=trace_id, used_fallback=bool(extra.get("used_fallback")),
+            trace_id=trace_id,
+            used_fallback=bool(extra.get("used_fallback")),
             fallback_reason=extra.get("fallback_reason"),
             retryable=self._retryable_failure(failure_class),
         )
@@ -510,20 +649,23 @@ class ModelGateway:
         return result
 
     # -- internals --------------------------------------------------------------
-    def _bundle_to_selection(self, bundle: dict[str, Any], req: ModelRequirement,
-                             reason: str) -> ModelSelection:
+    def _bundle_to_selection(self, bundle: dict[str, Any], req: ModelRequirement, reason: str) -> ModelSelection:
         provider = bundle.get("provider") or "custom"
         model = bundle.get("default_model") or ""
         cap = self._probe_capability(model, provider)
         tool_capable = cap.get("tools") is True
         vision_capable = cap.get("vision") is True
         return ModelSelection(
-            provider=provider, model=model,
-            score=_score(cap, req), reason=reason,
+            provider=provider,
+            model=model,
+            score=_score(cap, req),
+            reason=reason,
             capabilities=cap.get("capabilities", []),
             context_window=cap.get("context_window", 0),
-            tool_capable=tool_capable, vision_capable=vision_capable,
-            base_url=bundle.get("base_url"), api_key_ref=bundle.get("key_ref"),
+            tool_capable=tool_capable,
+            vision_capable=vision_capable,
+            base_url=bundle.get("base_url"),
+            api_key_ref=bundle.get("key_ref"),
             free=bool(bundle.get("free")),
         )
 
@@ -544,19 +686,24 @@ class ModelGateway:
             # Unknown capability: do not assume tool/vision support.
             return {}
 
-    def _find_vision_candidate(self, req: ModelRequirement) -> Optional[ModelSelection]:
+    def _find_vision_candidate(self, req: ModelRequirement) -> ModelSelection | None:
         cap_mod = self._capability_mod()
         try:
             model = cap_mod.select_compatible_model(None, require_vision=True)
             if model:
-                return ModelSelection(provider="ollama", model=str(model),
-                                      score=0.5, reason="vision.capability",
-                                      vision_capable=True, tool_capable=False)
+                return ModelSelection(
+                    provider="ollama",
+                    model=str(model),
+                    score=0.5,
+                    reason="vision.capability",
+                    vision_capable=True,
+                    tool_capable=False,
+                )
         except Exception:
             pass
         return None
 
-    def _router_candidate(self, req: ModelRequirement) -> Optional[ModelSelection]:
+    def _router_candidate(self, req: ModelRequirement) -> ModelSelection | None:
         try:
             router = self._router_mod()
             # Router exposes a ModelRouter; we only borrow its keyword scoring as
@@ -579,6 +726,7 @@ class ModelGateway:
         if hook is not None:
             return hook(provider, model, trace_id=trace_id)
         from .. import llm  # type: ignore
+
         if hasattr(llm, "complete"):
             res = llm.complete(provider=provider, model=model, trace_id=trace_id, **kw)
             if isinstance(res, dict):
@@ -591,7 +739,7 @@ class ModelGateway:
         if "429" in txt or "rate" in txt or "quota" in txt or "limit" in txt:
             return FailureClass.RATE_LIMIT.value
         if "401" in txt or "403" in txt or "auth" in txt or "unauthorized" in txt or "uknown key" in txt:
-            return FailureClass.AUTH.value            # authentication_failed
+            return FailureClass.AUTH.value  # authentication_failed
         if "timeout" in txt or "timed out" in txt:
             return FailureClass.TIMEOUT.value
         if "context" in txt and ("length" in txt or "window" in txt or "overflow" in txt or "too long" in txt):
@@ -605,18 +753,27 @@ class ModelGateway:
         if "policy" in txt or "denied" in txt or "permission" in txt:
             return FailureClass.POLICY_DENIED.value
         if _is_network_error(exc):
-            return FailureClass.NETWORK.value          # transient connection error
-        if "no provider" in txt or "no api key" in txt or "not configured" in txt or \
-                "provider unavailable" in txt or "no bundle" in txt:
-            return FailureClass.PROVIDER_UNAVAILABLE.value   # not configured/available
+            return FailureClass.NETWORK.value  # transient connection error
+        if (
+            "no provider" in txt
+            or "no api key" in txt
+            or "not configured" in txt
+            or "provider unavailable" in txt
+            or "no bundle" in txt
+        ):
+            return FailureClass.PROVIDER_UNAVAILABLE.value  # not configured/available
         return FailureClass.UNKNOWN.value
 
-    def _retryable_failure(self, fc: Optional[str]) -> bool:
+    def _retryable_failure(self, fc: str | None) -> bool:
         if fc is None:
             return False
-        return fc in (FailureClass.RATE_LIMIT.value, FailureClass.TIMEOUT.value,
-                      FailureClass.NETWORK.value, FailureClass.CONTEXT_OVERFLOW.value,
-                      FailureClass.PROVIDER_UNAVAILABLE.value)
+        return fc in (
+            FailureClass.RATE_LIMIT.value,
+            FailureClass.TIMEOUT.value,
+            FailureClass.NETWORK.value,
+            FailureClass.CONTEXT_OVERFLOW.value,
+            FailureClass.PROVIDER_UNAVAILABLE.value,
+        )
 
     def _record_outcome(self, provider: str, result: ModelGatewayResult) -> None:
         with self._lock:
@@ -634,7 +791,7 @@ class ModelGateway:
             return {p: dict(v) for p, v in self._circuit.items()}
 
 
-_gateway: Optional[ModelGateway] = None
+_gateway: ModelGateway | None = None
 _gateway_lock = threading.Lock()
 
 
@@ -660,7 +817,7 @@ def _score(cap: dict[str, Any], req: ModelRequirement) -> float:
     return score
 
 
-def _router_to_selection(scored: Any) -> Optional[ModelSelection]:
+def _router_to_selection(scored: Any) -> ModelSelection | None:
     if isinstance(scored, dict):
         if not scored:
             return None
@@ -668,8 +825,10 @@ def _router_to_selection(scored: Any) -> Optional[ModelSelection]:
         if not model:
             return None
         return ModelSelection(
-            provider=str(scored.get("provider") or "custom"), model=str(model),
-            score=float(scored.get("score", 0.5)), reason="router.keyword",
+            provider=str(scored.get("provider") or "custom"),
+            model=str(model),
+            score=float(scored.get("score", 0.5)),
+            reason="router.keyword",
             capabilities=[str(x) for x in scored.get("capabilities", [])],
         )
     if scored is None:
@@ -677,9 +836,12 @@ def _router_to_selection(scored: Any) -> Optional[ModelSelection]:
     model = getattr(scored, "model", None) or getattr(scored, "name", None)
     if not model:
         return None
-    return ModelSelection(provider=str(getattr(scored, "provider", "custom")),
-                          model=str(model), score=float(getattr(scored, "score", 0.5)),
-                          reason="router.keyword")
+    return ModelSelection(
+        provider=str(getattr(scored, "provider", "custom")),
+        model=str(model),
+        score=float(getattr(scored, "score", 0.5)),
+        reason="router.keyword",
+    )
 
 
 def _is_network_error(exc: Exception) -> bool:

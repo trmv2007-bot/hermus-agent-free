@@ -3,6 +3,7 @@
 jcode-style: truncate tool / observation payloads first so the model keeps
 the plan and recent reasoning. Default trigger is 90% of the budget.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -39,9 +40,7 @@ def compact_messages(
         content = str(copy.get("content") or "")
         role = copy.get("role")
         limit = tool_limit if i >= cutoff else max(240, tool_limit // 3)
-        is_obs = role in ("tool", "user") and (
-            content.startswith("Tool ") or "Tool results" in content[:40]
-        )
+        is_obs = role in ("tool", "user") and (content.startswith("Tool ") or "Tool results" in content[:40])
         if is_obs and len(content) > limit:
             copy["content"] = content[:limit] + f"\n...(compacted {len(content) - limit} chars)"
             dropped += len(content) - limit

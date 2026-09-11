@@ -1,17 +1,23 @@
 """Scheduler - Built-in cron with natural language, free APScheduler"""
+
+import json
 import re
 from datetime import datetime
 from pathlib import Path
-import json
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
+
     APSCHEDULER_AVAILABLE = True
 except ImportError:
     APSCHEDULER_AVAILABLE = False
 
-from core.config import config
 from core.agent import HermusAgent
+from core.config import config
+from core.log import get_logger
+
+logger = get_logger(__name__)
+
 
 class CronManager:
     """Free cron scheduler with natural language parsing"""
@@ -43,7 +49,7 @@ class CronManager:
             return "* * * * *"
 
         # Try extract time like "at 9am" or "at 14:30"
-        time_match = re.search(r'at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?', text_lower)
+        time_match = re.search(r"at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text_lower)
         if time_match:
             hour = int(time_match.group(1))
             minute = int(time_match.group(2) or 0)
@@ -57,13 +63,17 @@ class CronManager:
         # Fallback: try LLM to parse to cron (free via Ollama)
         try:
             from core.models import get_model_gateway
+
             messages = [
-                {"role": "system", "content": "Convert natural language schedule to cron expression. Only return cron, no explanation. Example: 'daily at 9am' -> '0 9 * * *'"},
-                {"role": "user", "content": text}
+                {
+                    "role": "system",
+                    "content": "Convert natural language schedule to cron expression. Only return cron, no explanation. Example: 'daily at 9am' -> '0 9 * * *'",
+                },
+                {"role": "user", "content": text},
             ]
             resp = get_model_gateway().chat(messages)
             # Extract cron-like pattern
-            cron_match = re.search(r'(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)', resp.content)
+            cron_match = re.search(r"(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)", resp.content)
             if cron_match:
                 return cron_match.group(0)
         except Exception:
@@ -86,7 +96,7 @@ class CronManager:
             "platform": platform,
             "user_id": user_id,
             "created": datetime.now().isoformat(),
-            "enabled": True
+            "enabled": True,
         }
 
         # Save to file
@@ -104,23 +114,23 @@ class CronManager:
                 minute, hour, day, month, dow = cron_expr.split()
                 self.scheduler.add_job(
                     self._execute_job,
-                    'cron',
+                    "cron",
                     minute=minute,
                     hour=hour,
                     day=day,
                     month=month,
                     day_of_week=dow,
                     args=[job],
-                    id=job["id"]
+                    id=job["id"],
                 )
             except Exception as e:
-                print(f"APScheduler failed to add job: {e} - but saved to file")
+                logger.error(f"APScheduler failed to add job: {e} - but saved to file")
 
         return job
 
     def _execute_job(self, job: dict):
         """Execute cron job - delivers to platform"""
-        print(f"[Cron] Executing job {job['id']}: {job['task']} -> {job['platform']}:{job['user_id']}")
+        logger.info(f"[Cron] Executing job {job['id']}: {job['task']} -> {job['platform']}:{job['user_id']}")
         try:
             # Scheduled tasks run on the universal mission runtime (same core
             # as /command, the queue and the CLI): goal-like tasks get the
@@ -131,11 +141,11 @@ class CronManager:
             result = runtime_execute(job["task"], agent=agent, prefer="auto")
             # In free version, delivery is via gateway - for now just log
             # Real gateway would send via Telegram/Discord API
-            print(f"[Cron] Result for {job['platform']}:{job['user_id']}: {result['response'][:200]}")
+            logger.info(f"[Cron] Result for {job['platform']}:{job['user_id']}: {result['response'][:200]}")
 
             # If platform is telegram/discord and token set, could send via API here (free)
         except Exception as e:
-            print(f"[Cron] Job {job['id']} failed: {e}")
+            logger.error(f"[Cron] Job {job['id']} failed: {e}")
 
     def list_jobs(self) -> list[dict]:
         try:
@@ -156,5 +166,6 @@ class CronManager:
             return True
         except Exception:
             return False
+
 
 cron_manager = CronManager()

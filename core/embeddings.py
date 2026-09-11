@@ -4,6 +4,7 @@ Semantic Memory / Embeddings - Free local stack
 - Hashing fallback embedding (no deps) so hybrid search always works offline
 - SQLite storage of vectors + chunk text (no Pinecone)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +14,6 @@ import re
 import sqlite3
 import struct
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -182,7 +182,7 @@ class EmbeddingStore:
     def add_text(
         self,
         text: str,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
         source: str = "manual",
         chunk_id: str = None,
     ) -> dict:
@@ -215,7 +215,7 @@ class EmbeddingStore:
             conn.commit()
         return {"success": True, "chunk_id": cid, "source": source, "dim": len(vec)}
 
-    def add_chunks(self, texts: list[str], source: str = "manual", metadata: Optional[dict] = None) -> dict:
+    def add_chunks(self, texts: list[str], source: str = "manual", metadata: dict | None = None) -> dict:
         added = 0
         for i, t in enumerate(texts):
             r = self.add_text(t, metadata={**(metadata or {}), "chunk_index": i}, source=source)

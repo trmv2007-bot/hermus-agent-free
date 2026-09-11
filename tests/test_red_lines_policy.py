@@ -73,15 +73,17 @@ def test_red_line_docs_and_capability_ledger_exist_and_are_linked():
 
 def test_red_line_control_plane_requires_review_not_auto_allow():
     policy = EvolutionPolicy()
-    protected = policy.protected_files([
-        "RED_LINES.md",
-        "AUTONOMY_BOUNDARIES.md",
-        "CAPABILITY_LEDGER.md",
-        "policies/red_lines.json",
-        "core/safety_policy.py",
-        "core/permissions.py",
-        "tests/test_red_lines_policy.py",
-    ])
+    protected = policy.protected_files(
+        [
+            "RED_LINES.md",
+            "AUTONOMY_BOUNDARIES.md",
+            "CAPABILITY_LEDGER.md",
+            "policies/red_lines.json",
+            "core/safety_policy.py",
+            "core/permissions.py",
+            "tests/test_red_lines_policy.py",
+        ]
+    )
     assert protected == [
         "AUTONOMY_BOUNDARIES.md",
         "CAPABILITY_LEDGER.md",

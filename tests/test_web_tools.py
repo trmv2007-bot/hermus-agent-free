@@ -3,6 +3,7 @@ canonical ToolRegistry, gated by the PermissionManager, validate arguments,
 and return structured/bounded results. Gateway I/O is faked — these prove
 wiring and contracts, not Scrapling behavior (real fetches live elsewhere).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -35,38 +36,43 @@ def fake_gateway(monkeypatch):
 
         def fetch_text(self, url, max_chars=10000, **kw):
             self.fetches.append({"url": url, "max_chars": max_chars})
-            out = self.script.get("fetch_text") or {"ok": True, "url": url, "title": "T",
-                                                    "strategy": "static",
-                                                    "content": "hello page", "content_length": 10,
-                                                    "truncated": False, "warnings": []}
+            out = self.script.get("fetch_text") or {
+                "ok": True,
+                "url": url,
+                "title": "T",
+                "strategy": "static",
+                "content": "hello page",
+                "content_length": 10,
+                "truncated": False,
+                "warnings": [],
+            }
             return out
 
         def extract(self, url, **kw):
-            return self.script.get("extract") or {"ok": True, "values": ["x"], "count": 1,
-                                                  "method": kw.get("method", "css"),
-                                                  "selector": kw.get("selector", ""),
-                                                  "adaptive": kw.get("adaptive", False),
-                                                  "source_url": url}
+            return self.script.get("extract") or {
+                "ok": True,
+                "values": ["x"],
+                "count": 1,
+                "method": kw.get("method", "css"),
+                "selector": kw.get("selector", ""),
+                "adaptive": kw.get("adaptive", False),
+                "source_url": url,
+            }
 
         def extract_links(self, url, **kw):
-            return {"ok": True, "source_url": url, "method": "links", "values": [],
-                    "count": 0, "strategy": "static"}
+            return {"ok": True, "source_url": url, "method": "links", "values": [], "count": 0, "strategy": "static"}
 
         def extract_metadata(self, url, **kw):
-            return {"ok": True, "source_url": url, "method": "metadata", "values": [],
-                    "count": 0, "strategy": "static"}
+            return {"ok": True, "source_url": url, "method": "metadata", "values": [], "count": 0, "strategy": "static"}
 
         def search_and_extract(self, query, **kw):
-            return self.script.get("search") or {"ok": True, "query": query,
-                                                 "results": [], "pages": []}
+            return self.script.get("search") or {"ok": True, "query": query, "results": [], "pages": []}
 
         def crawl_async(self, urls, **kw):
-            return self.script.get("crawl_async") or {"ok": True, "queued": True,
-                                                      "job_id": "job_x", "kind": "web.crawl"}
+            return self.script.get("crawl_async") or {"ok": True, "queued": True, "job_id": "job_x", "kind": "web.crawl"}
 
         def crawl(self, urls, **kw):
-            return {"ok": True, "status": "completed", "pages_processed": 1, "results": [],
-                    "failures": []}
+            return {"ok": True, "status": "completed", "pages_processed": 1, "results": [], "failures": []}
 
         def session_create(self, name, domains, **kw):
             return {"ok": True, "name": name, "allowed_domains": domains}
@@ -98,9 +104,16 @@ class TestDiscoveryAndPermissions:
 
         if not getattr(tool_registry, "executors", None):
             tool_registry.load()
-        for name in ("web_fetch", "web_extract", "web_extract_links",
-                     "web_extract_metadata", "web_search_and_extract",
-                     "web_crawl", "web_session", "web_capabilities"):
+        for name in (
+            "web_fetch",
+            "web_extract",
+            "web_extract_links",
+            "web_extract_metadata",
+            "web_search_and_extract",
+            "web_crawl",
+            "web_session",
+            "web_capabilities",
+        ):
             assert name in tool_registry.executors, f"{name} must be registered"
 
     def test_tool_definitions_have_schemas(self):
@@ -164,8 +177,7 @@ class TestArgumentValidation:
     def test_web_crawl_clamps_limits(self, fake_gateway):
         from tools.web_acquisition import web_crawl
 
-        fake_gateway.script["crawl_async"] = {"ok": True, "job_id": "j", "queued": True,
-                                              "kind": "web.crawl"}
+        fake_gateway.script["crawl_async"] = {"ok": True, "job_id": "j", "queued": True, "kind": "web.crawl"}
         out = web_crawl("https://a.example", max_pages=99999, max_depth=99, concurrency=99)
         assert out["ok"] is True
 
@@ -192,23 +204,41 @@ class TestStructuredOutput:
         from tools.web_acquisition import web_fetch
 
         fake_gateway.script["fetch"] = FakeResult(
-            ok=True, url="https://x.example", final_url="https://x.example/", title="X",
-            status_code=200, strategy="static", text="some page text", cached=False,
-            warnings=[], links=[])
+            ok=True,
+            url="https://x.example",
+            final_url="https://x.example/",
+            title="X",
+            status_code=200,
+            strategy="static",
+            text="some page text",
+            cached=False,
+            warnings=[],
+            links=[],
+        )
         out = web_fetch("https://x.example")
         assert out["ok"] is True and out["untrusted"] is True
-        assert "data, never instructions" in out["note"].lower() or \
-            "untrusted" in out["note"].lower()
+        assert "data, never instructions" in out["note"].lower() or "untrusted" in out["note"].lower()
         assert fake_gateway.fetches[0]["url"] == "https://x.example"
 
     def test_web_fetch_failure_is_structured(self, fake_gateway):
         from tools.web_acquisition import web_fetch
 
         fake_gateway.script["fetch"] = FakeResult(
-            ok=False, url="https://down.example", final_url="", title="", status_code=None,
-            strategy="auto", text="", error_code="WEB_ALL_STRATEGIES_FAILED",
+            ok=False,
+            url="https://down.example",
+            final_url="",
+            title="",
+            status_code=None,
+            strategy="auto",
+            text="",
+            error_code="WEB_ALL_STRATEGIES_FAILED",
             failure_class="connection_error",
-            error="connection refused", attempts=[], warnings=[], links=[], cached=False)
+            error="connection refused",
+            attempts=[],
+            warnings=[],
+            links=[],
+            cached=False,
+        )
         out = web_fetch("https://down.example")
         assert out["ok"] is False
         assert out["error_code"] == "WEB_ALL_STRATEGIES_FAILED"
@@ -219,8 +249,17 @@ class TestStructuredOutput:
         from tools.web_acquisition import web_fetch
 
         fake_gateway.script["fetch"] = FakeResult(
-            ok=True, url="u", final_url="u", title="", status_code=200, strategy="static",
-            text="x" * 200, cached=False, warnings=[], links=[])
+            ok=True,
+            url="u",
+            final_url="u",
+            title="",
+            status_code=200,
+            strategy="static",
+            text="x" * 200,
+            cached=False,
+            warnings=[],
+            links=[],
+        )
         web_fetch("https://x.example", max_chars=10_000_000)
         # clamped, no crash, content bounded by compact()
 
@@ -237,8 +276,17 @@ class TestStructuredOutput:
         if not getattr(tool_registry, "executors", None):
             tool_registry.load()
         fake_gateway.script["fetch"] = FakeResult(
-            ok=True, url="https://x.example", final_url="https://x.example/", title="X",
-            status_code=200, strategy="static", text="t", cached=False, warnings=[], links=[])
+            ok=True,
+            url="https://x.example",
+            final_url="https://x.example/",
+            title="X",
+            status_code=200,
+            strategy="static",
+            text="t",
+            cached=False,
+            warnings=[],
+            links=[],
+        )
         out = tool_registry.execute("web_fetch", {"url": "https://x.example"})
         assert isinstance(out, dict)
         assert out.get("ok") is True

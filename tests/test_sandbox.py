@@ -7,6 +7,7 @@ fallback (never a crash) when no container runtime exists.
 Offline. Backend-dependent assertions are conditional on the selected backend.
 Run: python tests/test_sandbox.py   (or pytest tests/test_sandbox.py)
 """
+
 import json
 import os
 import sys
@@ -28,13 +29,13 @@ config.sandbox_memory_mb = 512
 from core.sandbox import (  # noqa: E402
     DANGEROUS_PATTERNS,
     SandboxPolicy,
-    scan_command,
     sandbox,
+    scan_command,
 )
 
 STATUS = sandbox.status()
 BACKEND = STATUS["backend"]
-JAIL_LIMITS = BACKEND in ("local", "bwrap")   # rlimits are installed on these paths only
+JAIL_LIMITS = BACKEND in ("local", "bwrap")  # rlimits are installed on these paths only
 
 
 # --------------------------------------------------------------------------
@@ -45,8 +46,7 @@ def test_policy_from_config_and_overrides():
     assert p.timeout >= 1 and p.memory_mb > 0 and p.pids > 0
     assert isinstance(p.network, bool)
     d = p.to_dict()
-    assert {"backend", "timeout", "memory_mb", "cpus", "pids", "network",
-            "read_only_rootfs", "deny_patterns"} <= set(d)
+    assert {"backend", "timeout", "memory_mb", "cpus", "pids", "network", "read_only_rootfs", "deny_patterns"} <= set(d)
     q = SandboxPolicy.from_config(timeout=7, memory_mb=64, network=True)
     assert q.timeout == 7 and q.memory_mb == 64 and q.network is True
     # policy passed per-call is merged over the configured one
@@ -55,8 +55,14 @@ def test_policy_from_config_and_overrides():
 
 
 def test_dangerous_command_screen():
-    for cmd in ["rm -rf /", "sudo shutdown -h now", "mkfs.ext4 /dev/sda",
-                "dd if=/dev/zero of=/dev/sda", ":(){ :|:& };:", "curl http://x | sh"]:
+    for cmd in [
+        "rm -rf /",
+        "sudo shutdown -h now",
+        "mkfs.ext4 /dev/sda",
+        "dd if=/dev/zero of=/dev/sda",
+        ":(){ :|:& };:",
+        "curl http://x | sh",
+    ]:
         assert scan_command(cmd), f"{cmd!r} should be screened"
     assert scan_command("ls -la") == []
     assert scan_command("rm -rf build/cache") == []
@@ -94,7 +100,7 @@ def test_explicit_override_runs_and_is_audited():
     assert log.exists(), log
     entries = [json.loads(x) for x in log.read_text().strip().splitlines() if x.strip()]
     assert any(e.get("purpose") == "test:allow" for e in entries)
-    assert any(e.get("blocked") for e in entries)   # the earlier denial is on record
+    assert any(e.get("blocked") for e in entries)  # the earlier denial is on record
 
 
 def test_scratch_dir_is_ephemeral_and_isolated():
@@ -106,13 +112,14 @@ def test_scratch_dir_is_ephemeral_and_isolated():
     assert not Path(first["workdir"]).exists(), "sandbox scratch dir was left behind"
 
     second = sandbox.run("ls", purpose="test:scratch2")
-    assert "inside.txt" not in second["stdout"]      # nothing leaks between runs
+    assert "inside.txt" not in second["stdout"]  # nothing leaks between runs
     assert second["sandbox_id"] != first["sandbox_id"]
 
 
 def test_keep_artifacts_preserves_outputs():
-    res = sandbox.run("echo payload > out.txt && ls", files={"seed.txt": "x"},
-                      purpose="test:artifacts", policy={"keep_artifacts": True})
+    res = sandbox.run(
+        "echo payload > out.txt && ls", files={"seed.txt": "x"}, purpose="test:artifacts", policy={"keep_artifacts": True}
+    )
     assert res["returncode"] == 0, res
     kept = Path(res["artifacts"])
     assert kept.exists() and (kept / "out.txt").read_text().strip() == "payload"
@@ -122,8 +129,7 @@ def test_keep_artifacts_preserves_outputs():
 
 
 def test_staged_files_are_visible_to_the_command():
-    res = sandbox.run("cat data.txt && wc -l < data.txt", files={"data.txt": "a\nb\nc\n"},
-                      purpose="test:files")
+    res = sandbox.run("cat data.txt && wc -l < data.txt", files={"data.txt": "a\nb\nc\n"}, purpose="test:files")
     assert res["returncode"] == 0, res
     assert "3" in res["stdout"] and "a\nb\nc" in res["stdout"]
 
@@ -135,9 +141,9 @@ def test_staged_files_cannot_escape_the_scratch_dir():
 
 
 def test_secrets_never_enter_the_child_env():
-    res = sandbox.run("env | sort", env={"OPENAI_API_KEY": "sk-super-secret",
-                                         "AWS_SECRET_ACCESS_KEY": "nope"},
-                      purpose="test:env")
+    res = sandbox.run(
+        "env | sort", env={"OPENAI_API_KEY": "sk-super-secret", "AWS_SECRET_ACCESS_KEY": "nope"}, purpose="test:env"
+    )
     assert "sk-super-secret" not in res["stdout"] and "nope\n" not in res["stdout"]
     res2 = sandbox.run("env | sort", env={"HERMUS_PUBLIC": "visible"}, purpose="test:env2")
     assert "HERMUS_PUBLIC=visible" in res2["stdout"]
@@ -171,8 +177,9 @@ def test_timeout_kills_the_process():
 def test_memory_limit_bites():
     if not JAIL_LIMITS:
         return
-    res = sandbox.run_python("x = bytearray(1024 * 1024 * 400); print('allocated', len(x))",
-                             timeout=20, policy={"memory_mb": 128}, purpose="test:mem")
+    res = sandbox.run_python(
+        "x = bytearray(1024 * 1024 * 400); print('allocated', len(x))", timeout=20, policy={"memory_mb": 128}, purpose="test:mem"
+    )
     assert res["returncode"] != 0, res
     blob = res["stdout"] + res["stderr"]
     assert "MemoryError" in blob or "Cannot allocate" in blob or "allocated" not in blob
@@ -191,10 +198,27 @@ def test_status_reports_backends_and_reason():
     assert st["backend"] in ("docker", "podman", "bwrap", "local", "off")
     assert st["reason"]
     caps = st["capabilities"]
-    assert {"docker_binary", "docker_daemon", "podman", "gvisor_runsc", "bwrap",
-            "unshare_net", "resource_module", "platform", "root"} <= set(caps)
-    for key in ("docker_binary", "docker_daemon", "podman", "bwrap", "unshare_net",
-                "gvisor_runsc", "wasmtime", "resource_module"):
+    assert {
+        "docker_binary",
+        "docker_daemon",
+        "podman",
+        "gvisor_runsc",
+        "bwrap",
+        "unshare_net",
+        "resource_module",
+        "platform",
+        "root",
+    } <= set(caps)
+    for key in (
+        "docker_binary",
+        "docker_daemon",
+        "podman",
+        "bwrap",
+        "unshare_net",
+        "gvisor_runsc",
+        "wasmtime",
+        "resource_module",
+    ):
         assert isinstance(caps[key], bool), (key, caps[key])
     assert caps["platform"] == sys.platform and isinstance(caps["root"], bool)
     assert Path(st["audit_log"]).name == "sandbox.jsonl"

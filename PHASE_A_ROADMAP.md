@@ -104,24 +104,17 @@ from core.computer import WorldStateV2, ObservationType, GroundedTargetV2
 world = WorldStateV2()
 
 # Observe with provenance
-world.observe("active_application", "Calculator", 
-              ObservationType.OBSERVED, 0.95, "vision")
+world.observe("active_application", "Calculator", ObservationType.OBSERVED, 0.95, "vision")
 
 # Mark expectations (planner assumptions)
 world.expect("downloads", ["firefox-installer.exe"])
 
 # Infer from context
-world.infer("focused_element", "OK button", 
-            evidence={"near": "Install button", "above": "Cancel"})
+world.infer("focused_element", "OK button", evidence={"near": "Install button", "above": "Cancel"})
 
 # Add grounded targets
 target = GroundedTargetV2(
-    name="Install",
-    bbox=(100, 200, 200, 250),
-    confidence=0.94,
-    role="button",
-    state="enabled",
-    safe_to_click=True
+    name="Install", bbox=(100, 200, 200, 250), confidence=0.94, role="button", state="enabled", safe_to_click=True
 )
 world.add_target(target)
 
@@ -140,9 +133,7 @@ replanner = AdaptiveReplanner()
 
 # Analyze state mismatch
 analysis = replanner.analyze_mismatch(
-    expected="Download button visible",
-    observed={"dialogs": ["Installation dialog"], "targets": ["Cancel"]},
-    world_state=world
+    expected="Download button visible", observed={"dialogs": ["Installation dialog"], "targets": ["Cancel"]}, world_state=world
 )
 
 # Create plan modification
@@ -153,7 +144,7 @@ context = ReplanContext(
     observed_state=analysis,
     world_state=world,
     plan_so_far=[...],
-    remaining_plan=[...]
+    remaining_plan=[...],
 )
 
 new_graph, deltas = replanner.replan(context)
@@ -317,9 +308,9 @@ curl http://localhost:8000/computer/control/status
 ```python
 # In your config
 COMPUTER_AGENT = {
-    'max_retries': 2,
-    'replan_threshold': 0.3,  # Confidence below which to replan
-    'pause_timeout': 30,      # Seconds to wait for pause
-    'vision_confidence': 0.5, # Minimum confidence for targets
+    "max_retries": 2,
+    "replan_threshold": 0.3,  # Confidence below which to replan
+    "pause_timeout": 30,  # Seconds to wait for pause
+    "vision_confidence": 0.5,  # Minimum confidence for targets
 }
 ```

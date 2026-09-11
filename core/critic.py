@@ -4,16 +4,17 @@ Provides unbiased multi-perspective code review, security auditing, and strictly
 outcome verification. Requirements are only deemed satisfied when backed by executable verifier
 evidence or verified artifacts.
 """
+
 from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 
 class CriticVerdict(str, Enum):
@@ -34,8 +35,8 @@ class Finding:
     severity: str
     category: str  # correctness | security | completeness | performance | style
     description: str
-    file: Optional[str] = None
-    line: Optional[int] = None
+    file: str | None = None
+    line: int | None = None
     suggestion: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,14 +68,14 @@ class CriticReport:
 class IndependentCritic:
     """Orchestrates independent evaluation perspectives."""
 
-    def __init__(self, llm_caller: Optional[Callable[[str, str], str]] = None):
+    def __init__(self, llm_caller: Callable[[str, str], str] | None = None):
         self.llm_caller = llm_caller
 
     def review_code(
         self,
         task: str,
         files_content: dict[str, str],
-        requirements: Optional[list[str]] = None,
+        requirements: list[str] | None = None,
     ) -> CriticReport:
         findings: list[Finding] = []
         repair_directives: list[str] = []
@@ -96,37 +97,43 @@ class IndependentCritic:
                     for node in ast.walk(tree):
                         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                             if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
-                                findings.append(Finding(
-                                    severity=Severity.LOW.value,
-                                    category="completeness",
-                                    description=f"Function '{node.name}' only contains 'pass'",
-                                    file=filename,
-                                    line=node.lineno,
-                                    suggestion=f"Provide a full implementation for '{node.name}'",
-                                ))
+                                findings.append(
+                                    Finding(
+                                        severity=Severity.LOW.value,
+                                        category="completeness",
+                                        description=f"Function '{node.name}' only contains 'pass'",
+                                        file=filename,
+                                        line=node.lineno,
+                                        suggestion=f"Provide a full implementation for '{node.name}'",
+                                    )
+                                )
                 except SyntaxError as e:
-                    findings.append(Finding(
-                        severity=Severity.CRITICAL.value,
-                        category="correctness",
-                        description=f"Python syntax error: {e.msg}",
-                        file=filename,
-                        line=e.lineno,
-                        suggestion="Fix syntax errors before submitting.",
-                    ))
+                    findings.append(
+                        Finding(
+                            severity=Severity.CRITICAL.value,
+                            category="correctness",
+                            description=f"Python syntax error: {e.msg}",
+                            file=filename,
+                            line=e.lineno,
+                            suggestion="Fix syntax errors before submitting.",
+                        )
+                    )
                     repair_directives.append(f"Fix syntax error in {filename} at line {e.lineno}: {e.msg}")
 
             placeholders = ("TODO: implement", "REPLACE_ME", "YOUR_CODE_HERE", "FIXME")
             for idx, line in enumerate(content.splitlines(), start=1):
                 for ph in placeholders:
                     if ph in line:
-                        findings.append(Finding(
-                            severity=Severity.MEDIUM.value,
-                            category="completeness",
-                            description=f"Unimplemented placeholder '{ph}' detected",
-                            file=filename,
-                            line=idx,
-                            suggestion=f"Replace '{ph}' with actual logic.",
-                        ))
+                        findings.append(
+                            Finding(
+                                severity=Severity.MEDIUM.value,
+                                category="completeness",
+                                description=f"Unimplemented placeholder '{ph}' detected",
+                                file=filename,
+                                line=idx,
+                                suggestion=f"Replace '{ph}' with actual logic.",
+                            )
+                        )
                         repair_directives.append(f"Complete unfinished placeholder '{ph}' in {filename}:{idx}")
 
         critical_count = sum(1 for f in findings if f.severity == Severity.CRITICAL.value)
@@ -154,7 +161,7 @@ class IndependentCritic:
     def audit_security(
         self,
         files_content: dict[str, str],
-        command_history: Optional[list[str]] = None,
+        command_history: list[str] | None = None,
     ) -> CriticReport:
         findings: list[Finding] = []
         repair_directives: list[str] = []
@@ -162,7 +169,11 @@ class IndependentCritic:
         dangerous_patterns = [
             (r"eval\s*\(", "Use of eval() introduces arbitrary code execution risks", Severity.HIGH.value),
             (r"exec\s*\(", "Use of exec() introduces arbitrary code execution risks", Severity.HIGH.value),
-            (r"subprocess\.call\(.*shell=True", "shell=True in subprocess invocation can lead to command injection", Severity.HIGH.value),
+            (
+                r"subprocess\.call\(.*shell=True",
+                "shell=True in subprocess invocation can lead to command injection",
+                Severity.HIGH.value,
+            ),
             (r"os\.system\(", "os.system() is prone to shell injection vulnerabilities", Severity.MEDIUM.value),
             (r"password\s*=\s*['\"][^'\"]+['\"]", "Hardcoded plain-text password detected", Severity.HIGH.value),
             (r"api_key\s*=\s*['\"][a-zA-Z0-9_\-]{16,}['\"]", "Hardcoded API key detected in source", Severity.CRITICAL.value),
@@ -173,32 +184,40 @@ class IndependentCritic:
             for pattern, msg, sev in dangerous_patterns:
                 matches = list(re.finditer(pattern, content, re.IGNORECASE))
                 for m in matches:
-                    line_no = content[:m.start()].count("\n") + 1
-                    findings.append(Finding(
-                        severity=sev,
-                        category="security",
-                        description=msg,
-                        file=filename,
-                        line=line_no,
-                        suggestion="Sanitize inputs, avoid dangerous primitives, and load credentials from environment.",
-                    ))
+                    line_no = content[: m.start()].count("\n") + 1
+                    findings.append(
+                        Finding(
+                            severity=sev,
+                            category="security",
+                            description=msg,
+                            file=filename,
+                            line=line_no,
+                            suggestion="Sanitize inputs, avoid dangerous primitives, and load credentials from environment.",
+                        )
+                    )
                     repair_directives.append(f"Security fix in {filename}:{line_no}: {msg}")
 
         if command_history:
             for cmd in command_history:
                 if any(x in cmd for x in ("sudo ", "chmod 777", "curl | sh", "wget | bash")):
-                    findings.append(Finding(
-                        severity=Severity.HIGH.value,
-                        category="security",
-                        description=f"Insecure shell command executed: '{cmd}'",
-                        suggestion="Avoid unrestricted permissions or piping unverified remote scripts to shell.",
-                    ))
+                    findings.append(
+                        Finding(
+                            severity=Severity.HIGH.value,
+                            category="security",
+                            description=f"Insecure shell command executed: '{cmd}'",
+                            suggestion="Avoid unrestricted permissions or piping unverified remote scripts to shell.",
+                        )
+                    )
 
         crit = sum(1 for f in findings if f.severity == Severity.CRITICAL.value)
         high = sum(1 for f in findings if f.severity == Severity.HIGH.value)
 
         score = max(0, 100 - (crit * 50 + high * 25))
-        verdict = CriticVerdict.REJECTED.value if crit > 0 else (CriticVerdict.CHANGES_REQUESTED.value if high > 0 else CriticVerdict.APPROVED.value)
+        verdict = (
+            CriticVerdict.REJECTED.value
+            if crit > 0
+            else (CriticVerdict.CHANGES_REQUESTED.value if high > 0 else CriticVerdict.APPROVED.value)
+        )
 
         return CriticReport(
             reviewer_role="security_auditor",
@@ -214,8 +233,8 @@ class IndependentCritic:
         task: str,
         execution_log: str,
         artifacts: list[str],
-        requirements: Optional[list[str]] = None,
-        verification_evidence: Optional[list[dict[str, Any]]] = None,
+        requirements: list[str] | None = None,
+        verification_evidence: list[dict[str, Any]] | None = None,
     ) -> CriticReport:
         findings: list[Finding] = []
         repair_directives: list[str] = []
@@ -224,7 +243,12 @@ class IndependentCritic:
         satisfied_count = 0
 
         test_passed = bool(
-            ("passed in" in execution_log.lower() or "100%" in execution_log or "status: passed" in execution_log.lower() or "tests passed" in execution_log.lower())
+            (
+                "passed in" in execution_log.lower()
+                or "100%" in execution_log
+                or "status: passed" in execution_log.lower()
+                or "tests passed" in execution_log.lower()
+            )
             and "traceback" not in execution_log.lower()
             and "syntaxerror" not in execution_log.lower()
         )
@@ -232,10 +256,7 @@ class IndependentCritic:
         v_evidence = verification_evidence or []
         verified_checks = {e.get("check"): e.get("status") for e in v_evidence if isinstance(e, dict)}
 
-        valid_artifacts = [
-            a for a in artifacts
-            if Path(a).exists() and Path(a).stat().st_size > 0
-        ]
+        valid_artifacts = [a for a in artifacts if Path(a).exists() and Path(a).stat().st_size > 0]
 
         has_executable_proof = bool(
             test_passed
@@ -247,16 +268,22 @@ class IndependentCritic:
             if has_executable_proof:
                 satisfied_count += 1
             else:
-                findings.append(Finding(
-                    severity=Severity.HIGH.value,
-                    category="completeness",
-                    description=f"Requirement lacking executable proof or verified artifact: '{req}'",
-                    suggestion="Execute tests and generate verified tangible artifacts to prove completion.",
-                ))
+                findings.append(
+                    Finding(
+                        severity=Severity.HIGH.value,
+                        category="completeness",
+                        description=f"Requirement lacking executable proof or verified artifact: '{req}'",
+                        suggestion="Execute tests and generate verified tangible artifacts to prove completion.",
+                    )
+                )
                 repair_directives.append(f"Produce executable proof for requirement: {req}")
 
         score = int((satisfied_count / max(1, len(reqs))) * 100) if has_executable_proof else 0
-        verdict = CriticVerdict.APPROVED.value if score >= 80 else (CriticVerdict.CHANGES_REQUESTED.value if score >= 40 else CriticVerdict.REJECTED.value)
+        verdict = (
+            CriticVerdict.APPROVED.value
+            if score >= 80
+            else (CriticVerdict.CHANGES_REQUESTED.value if score >= 40 else CriticVerdict.REJECTED.value)
+        )
 
         return CriticReport(
             reviewer_role="outcome_verifier",
@@ -272,9 +299,9 @@ class IndependentCritic:
         task: str,
         files_content: dict[str, str],
         execution_log: str = "",
-        artifacts: Optional[list[str]] = None,
-        requirements: Optional[list[str]] = None,
-        verification_evidence: Optional[list[dict[str, Any]]] = None,
+        artifacts: list[str] | None = None,
+        requirements: list[str] | None = None,
+        verification_evidence: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         art_list = artifacts or []
         code_rep = self.review_code(task, files_content, requirements)
@@ -283,15 +310,15 @@ class IndependentCritic:
 
         all_reports = [code_rep, sec_rep, out_rep]
         combined_score = int(sum(r.score for r in all_reports) / len(all_reports))
-        combined_directives = list(dict.fromkeys(
-            d for r in all_reports for d in r.repair_directives
-        ))
+        combined_directives = list(dict.fromkeys(d for r in all_reports for d in r.repair_directives))
 
         is_rejected = any(r.verdict == CriticVerdict.REJECTED.value for r in all_reports)
         is_changes_req = any(r.verdict == CriticVerdict.CHANGES_REQUESTED.value for r in all_reports)
 
-        final_verdict = CriticVerdict.REJECTED.value if is_rejected else (
-            CriticVerdict.CHANGES_REQUESTED.value if is_changes_req else CriticVerdict.APPROVED.value
+        final_verdict = (
+            CriticVerdict.REJECTED.value
+            if is_rejected
+            else (CriticVerdict.CHANGES_REQUESTED.value if is_changes_req else CriticVerdict.APPROVED.value)
         )
 
         return {

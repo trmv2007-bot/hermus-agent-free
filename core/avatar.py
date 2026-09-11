@@ -13,6 +13,7 @@ Design constraints honored here:
 * no source-copy dependency on HeyGem.ai — this is a fresh connector targeting
   the documented endpoints only.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -43,16 +44,14 @@ class AvatarService:
     def __init__(
         self,
         *,
-        tts_base_url: Optional[str] = None,
-        face2face_base_url: Optional[str] = None,
-        root: Optional[Path] = None,
-        timeout_s: Optional[float] = None,
-        session: Optional[requests.Session] = None,
+        tts_base_url: str | None = None,
+        face2face_base_url: str | None = None,
+        root: Path | None = None,
+        timeout_s: float | None = None,
+        session: requests.Session | None = None,
     ) -> None:
         self.tts_base_url = (tts_base_url or getattr(config, "heygem_tts_url", "") or "").rstrip("/")
-        self.face2face_base_url = (
-            face2face_base_url or getattr(config, "heygem_face2face_url", "") or ""
-        ).rstrip("/")
+        self.face2face_base_url = (face2face_base_url or getattr(config, "heygem_face2face_url", "") or "").rstrip("/")
         self.root = Path(root) if root else config.resolve_path(getattr(config, "avatar_output_dir", "data/avatar"))
         self.timeout_s = float(timeout_s or getattr(config, "heygem_timeout_s", 120.0) or 120.0)
         self._session = session or requests.Session()
@@ -173,7 +172,7 @@ class AvatarService:
         meta_path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
         return {"success": True, "backend": "heygem-compatible", "voice_profile": profile, "path": str(meta_path)}
 
-    def get_voice_profile(self, voice_profile_id: str) -> Optional[dict[str, Any]]:
+    def get_voice_profile(self, voice_profile_id: str) -> dict[str, Any] | None:
         path = self.voices_dir / f"{_safe_name(voice_profile_id, 'voice')}.json"
         if not path.exists():
             return None
@@ -390,7 +389,7 @@ class AvatarService:
 
     # ----------------------------------------------------------------- helpers
     @staticmethod
-    def _resolve_local_file(path_value: str) -> Optional[Path]:
+    def _resolve_local_file(path_value: str) -> Path | None:
         text = str(path_value or "").strip()
         if not text:
             return None
@@ -404,7 +403,7 @@ class AvatarService:
         return path if path.exists() and path.is_file() else None
 
 
-_service: Optional[AvatarService] = None
+_service: AvatarService | None = None
 
 
 def get_avatar_service() -> AvatarService:

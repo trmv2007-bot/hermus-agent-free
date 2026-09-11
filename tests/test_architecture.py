@@ -6,6 +6,7 @@ HERMUS_HOME is set BEFORE importing modules that bind a global workspace.
 
 Run:  python tests/test_architecture.py   (or pytest tests/test_architecture.py)
 """
+
 import os
 import sys
 import tempfile
@@ -18,6 +19,7 @@ _TMP = tempfile.mkdtemp(prefix="hermus_test_")
 os.environ["HERMUS_HOME"] = _TMP
 
 from core.config import config  # noqa: E402
+
 config.model = "mock/mock"
 # Isolate memory stores so tests don't pollute the shared repo data/*.db
 config.memory_db_path = str(Path(_TMP) / "memory.db")
@@ -115,7 +117,7 @@ def test_router_classify_and_select_falls_back():
 # Autonomous loop
 # --------------------------------------------------------------------------
 def test_marker_verifier_and_failure_classification():
-    from core.verifiers import MarkerVerifier, MarkerDiagnoser
+    from core.verifiers import MarkerDiagnoser, MarkerVerifier
 
     # A clean result verifies; an error-marker result does not.
     assert MarkerVerifier().verify("task", "SUCCESS: completed work")["ok"] is True
@@ -136,6 +138,7 @@ def test_marker_verifier_and_failure_classification():
 # --------------------------------------------------------------------------
 def _new_agents_dir(tmp_path):
     from core.workspace import workspace
+
     ag = tmp_path / "agents"
     workspace.base_dir = tmp_path
     ag.mkdir(parents=True, exist_ok=True)
@@ -144,7 +147,6 @@ def _new_agents_dir(tmp_path):
 
 def test_agent_manager_lifecycle(tmp_path):
     """AgentManager is a registry + delegation facade; the canonical Job queue owns execution."""
-    import time
     from core.agent_manager import AgentManager
     from core.workspace import workspace
 
@@ -190,12 +192,13 @@ def test_no_production_path_creates_agent_json_jobs():
     per-agent JSON job queue.
     """
     import pathlib
+
     root = pathlib.Path(__file__).resolve().parents[1]
     src = (root / "core" / "agent_manager.py").read_text(encoding="utf-8")
     # Strip the module docstring so checks operate on code, not narrative.
     if src.startswith('"""'):
         end = src.index('"""', 3)
-        am = src[end + 3:]
+        am = src[end + 3 :]
     else:
         am = src
     # No bespoke file-based job/result queue remains.
@@ -245,10 +248,22 @@ def test_research_pipeline_offline():
     from core.research import ResearchPipeline
 
     fake = [
-        {"title": "Python is fast", "url": "https://a.com/x", "snippet": "Python is fast for prototyping and widely used. It has strong libraries."},
+        {
+            "title": "Python is fast",
+            "url": "https://a.com/x",
+            "snippet": "Python is fast for prototyping and widely used. It has strong libraries.",
+        },
         {"title": "Python is fast", "url": "https://a.com/x", "snippet": "duplicate url"},
-        {"title": "Python is slow", "url": "https://b.com/y", "snippet": "Python is not fast when compared to compiled languages like C."},
-        {"title": "Python ecosystem", "url": "https://c.com/z", "snippet": "Python has a huge ecosystem of libraries and frameworks."},
+        {
+            "title": "Python is slow",
+            "url": "https://b.com/y",
+            "snippet": "Python is not fast when compared to compiled languages like C.",
+        },
+        {
+            "title": "Python ecosystem",
+            "url": "https://c.com/z",
+            "snippet": "Python has a huge ecosystem of libraries and frameworks.",
+        },
     ]
     p = ResearchPipeline(search_fn=lambda q, limit: fake)
     out = p.run("Is Python fast?")
@@ -266,6 +281,7 @@ def test_research_pipeline_offline():
 # --------------------------------------------------------------------------
 def test_computer_recorder_sampler_verifier():
     from PIL import Image
+
     from core.computer import FrameSampler, ScreenVerifier
     from core.computer.recorder import CallableSource, ScreenRecorder
 
@@ -286,10 +302,10 @@ def test_computer_recorder_sampler_verifier():
 
     # recorder with a callable source: start/stop/recent
     colors = iter(["black", "white", "red", "blue"])
-    rec = ScreenRecorder(source=CallableSource(lambda: frame(next(colors, "blue"))),
-                         max_seconds=5, fps=50)
+    rec = ScreenRecorder(source=CallableSource(lambda: frame(next(colors, "blue"))), max_seconds=5, fps=50)
     assert rec.start()["success"]
     import time
+
     time.sleep(0.2)
     st = rec.stop()
     assert st["success"] and rec.recent(seconds=1) or rec.all_frames()

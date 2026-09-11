@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from _cli_source import cli_source
+
 from core.approval import ApprovalStore
 from core.capability_registry import CapabilityRegistry
 
@@ -50,7 +52,7 @@ def test_gateway_exposes_capability_registry_routes():
 
 
 def test_cli_and_dashboard_expose_capability_activation_flow():
-    cli = Path("hermus.py").read_text(encoding="utf-8")
+    cli = cli_source()
     dash = Path("gateway/control.html").read_text(encoding="utf-8")
     assert 'add_parser("registry"' in cli
     assert 'add_parser("setup"' in cli

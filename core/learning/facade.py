@@ -9,7 +9,8 @@ not *promoted*, and it can quarantine a skill after repeated failures.
 from __future__ import annotations
 
 import threading
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 DEFAULT_MIN_SUCCESSES = 3
 
@@ -17,10 +18,10 @@ DEFAULT_MIN_SUCCESSES = 3
 class LearningFacade:
     """One canonical learning API backed by SkillForge."""
 
-    def __init__(self, forge: Any = None, *, min_successes: int = DEFAULT_MIN_SUCCESSES,
-                 skills_dir: Optional[str] = None):
+    def __init__(self, forge: Any = None, *, min_successes: int = DEFAULT_MIN_SUCCESSES, skills_dir: str | None = None):
         if forge is None:
             from ..skill_forge import SkillForge  # type: ignore
+
             forge = SkillForge(skills_dir=skills_dir)
         self._forge = forge
         self._min_successes = min_successes
@@ -45,12 +46,10 @@ class LearningFacade:
             "observed_successes": count,
             "required": self._min_successes,
             "promotable": count >= self._min_successes,
-            "reason": "verified_successes_met" if count >= self._min_successes
-                      else "need_more_verified_successes",
+            "reason": "verified_successes_met" if count >= self._min_successes else "need_more_verified_successes",
         }
 
-    def promote(self, goal: str, tool_names: Sequence[str], *, candidate: Any = None,
-                validate: bool = True) -> dict[str, Any]:
+    def promote(self, goal: str, tool_names: Sequence[str], *, candidate: Any = None, validate: bool = True) -> dict[str, Any]:
         """Promote a skill only if the gate is satisfied.
 
         A single run never satisfies the gate; it is reported as observed, not
@@ -59,21 +58,32 @@ class LearningFacade:
         """
         gate = self.can_promote(goal, tool_names)
         if not gate["promotable"]:
-            return {"success": False, "promoted": False,
-                    "reason": gate["reason"], "required": self._min_successes,
-                    "observed": gate["observed_successes"]}
+            return {
+                "success": False,
+                "promoted": False,
+                "reason": gate["reason"],
+                "required": self._min_successes,
+                "observed": gate["observed_successes"],
+            }
         if candidate is None:
-            return {"success": False, "promoted": False, "reason": "no_candidate",
-                    "observed": gate["observed_successes"]}
+            return {"success": False, "promoted": False, "reason": "no_candidate", "observed": gate["observed_successes"]}
         try:
             result = self._forge.install(candidate, validate=validate)
-            return {"success": bool(result.get("success", result.get("installed", False))),
-                    "promoted": bool(result.get("success", result.get("installed", False))),
-                    "observed": gate["observed_successes"], "gate": gate,
-                    "result": result}
+            return {
+                "success": bool(result.get("success", result.get("installed", False))),
+                "promoted": bool(result.get("success", result.get("installed", False))),
+                "observed": gate["observed_successes"],
+                "gate": gate,
+                "result": result,
+            }
         except Exception as exc:
-            return {"success": False, "promoted": False, "reason": "install_failed",
-                    "error": str(exc), "observed": gate["observed_successes"]}
+            return {
+                "success": False,
+                "promoted": False,
+                "reason": "install_failed",
+                "error": str(exc),
+                "observed": gate["observed_successes"],
+            }
 
     def quarantine(self, name: str, *, reason: str = "repeated_failure") -> dict[str, Any]:
         """Quarantine a skill after repeated failures (versioned, reversible)."""
@@ -85,8 +95,7 @@ class LearningFacade:
                 reg[name]["quarantine_reason"] = reason
                 self._forge._save_registry(reg)  # noqa: SLF001
                 return {"success": True, "quarantined": True, "name": name, "reason": reason}
-            return {"success": False, "quarantined": False, "name": name,
-                    "reason": "not_installed"}
+            return {"success": False, "quarantined": False, "name": name, "reason": "not_installed"}
         except Exception:
             return {"success": False, "quarantined": False, "name": name}
 
@@ -97,7 +106,7 @@ class LearningFacade:
             return {}
 
 
-_learning: Optional[LearningFacade] = None
+_learning: LearningFacade | None = None
 _learning_lock = threading.Lock()
 
 

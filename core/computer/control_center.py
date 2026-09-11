@@ -4,6 +4,7 @@ Reads the shared controller state (last action, dry-run vs. real backends, and
 the global emergency stop) and renders a compact status panel.  It is purely
 observational; it never mutates agent state.
 """
+
 from __future__ import annotations
 
 from typing import Any

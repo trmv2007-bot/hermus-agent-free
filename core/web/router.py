@@ -17,11 +17,12 @@ strategy — including ``auto``, which then runs only its first (cheapest
 permitted) strategy and stops there. Security refusals are never escalated
 around — they abort the whole plan.
 """
+
 from __future__ import annotations
 
 import re
 import time
-from typing import Any, Optional
+from typing import Any
 
 from . import capabilities
 from .errors import (
@@ -64,8 +65,8 @@ _CHALLENGE_MARKERS = (
 _MIN_MEANINGFUL_TEXT = 120
 # A page with almost no text that is mostly <script> is a JS shell regardless of
 # byte size. We compare visible text against script bytes rather than total HTML.
-_SPA_TEXT_CEILING = 200          # below this, a shell is plausible
-_SCRIPT_DOMINANCE_RATIO = 0.60   # scripts are >60% of the HTML → content is JS-side
+_SPA_TEXT_CEILING = 200  # below this, a shell is plausible
+_SCRIPT_DOMINANCE_RATIO = 0.60  # scripts are >60% of the HTML → content is JS-side
 
 _SCRIPT_BLOCK = re.compile(r"<script\b[^>]*>.*?</script>", re.I | re.S)
 _BODY_TEXT_TAGS = re.compile(r"<(?:p|article|section|h1|h2|h3|li|td|main)\b", re.I)
@@ -134,7 +135,7 @@ def _looks_challenged(response: Any) -> bool:
     return any(p.search(html) or p.search(text) for p in _CHALLENGE_MARKERS)
 
 
-def _is_insufficient(response: Any, status: Optional[int]) -> bool:
+def _is_insufficient(response: Any, status: int | None) -> bool:
     """Heuristic: does this response carry meaningful content?"""
     if status and status >= 400:
         return True
@@ -154,8 +155,7 @@ class StrategyRouter:
         self._policy = policy
 
     # ------------------------------------------------------------------ plan
-    def plan(self, requested: str = FetchStrategy.AUTO.value, *,
-             require_js: bool = False) -> list[FetchStrategy]:
+    def plan(self, requested: str = FetchStrategy.AUTO.value, *, require_js: bool = False) -> list[FetchStrategy]:
         """Ordered strategy plan honoring config + capability, cheapest first."""
         cfg = self._config
         requested = (requested or FetchStrategy.AUTO.value).lower()
@@ -174,8 +174,7 @@ class StrategyRouter:
         elif requested == FetchStrategy.STATIC.value:
             plan = [FetchStrategy.STATIC]
         else:  # AUTO
-            plan = [FetchStrategy.DYNAMIC] if (require_js and dynamic_allowed) \
-                else [FetchStrategy.STATIC]
+            plan = [FetchStrategy.DYNAMIC] if (require_js and dynamic_allowed) else [FetchStrategy.STATIC]
             if dynamic_allowed and FetchStrategy.DYNAMIC not in plan:
                 plan.append(FetchStrategy.DYNAMIC)
             if stealth_allowed:
@@ -190,13 +189,21 @@ class StrategyRouter:
         return usable
 
     # --------------------------------------------------------------- execute
-    def fetch(self, url: str, *, strategy: str = FetchStrategy.AUTO.value,
-              require_js: bool = False, want_markdown: bool = True,
-              include_html: bool = False, session: Optional[Any] = None,
-              session_name: str = "", allow_fallback: bool = True,
-              capture_xhr: Optional[str] = None,
-              wait_selector: Optional[str] = None,
-              solve_cloudflare: bool = False) -> WebResult:
+    def fetch(
+        self,
+        url: str,
+        *,
+        strategy: str = FetchStrategy.AUTO.value,
+        require_js: bool = False,
+        want_markdown: bool = True,
+        include_html: bool = False,
+        session: Any | None = None,
+        session_name: str = "",
+        allow_fallback: bool = True,
+        capture_xhr: str | None = None,
+        wait_selector: str | None = None,
+        solve_cloudflare: bool = False,
+    ) -> WebResult:
         """Run the plan with escalation; returns a WebResult on every path."""
         started = time.monotonic()
         attempts: list[StrategyAttempt] = []
@@ -207,9 +214,9 @@ class StrategyRouter:
             plan = plan[:1]
         if not plan:
             return error_result(
-                url, strategy=strategy,
-                error="no acquisition strategy is available on this machine "
-                      "(install: pip install 'scrapling[fetchers]')",
+                url,
+                strategy=strategy,
+                error="no acquisition strategy is available on this machine (install: pip install 'scrapling[fetchers]')",
                 error_code="WEB_NO_STRATEGY",
                 failure_class=FailureClass.DEPENDENCY_MISSING.value,
             )
@@ -218,12 +225,16 @@ class StrategyRouter:
         for index, strat in enumerate(plan):
             try:
                 raw = self._run_strategy(
-                    strat, url, session=session,
+                    strat,
+                    url,
+                    session=session,
                     capture_xhr=capture_xhr if strat == FetchStrategy.DYNAMIC else None,
-                    wait_selector=wait_selector, solve_cloudflare=solve_cloudflare,
+                    wait_selector=wait_selector,
+                    solve_cloudflare=solve_cloudflare,
                 )
-                result = self._evaluate(strat, url, raw, want_markdown=want_markdown,
-                                        include_html=include_html, session_name=session_name)
+                result = self._evaluate(
+                    strat, url, raw, want_markdown=want_markdown, include_html=include_html, session_name=session_name
+                )
                 attempts.extend(result.attempts)
                 if result.ok and not _is_insufficient(raw.response, raw.status):
                     result.duration_ms = int((time.monotonic() - started) * 1000)
@@ -233,42 +244,66 @@ class StrategyRouter:
                 insufficient = True
                 last_reason = attempts[-1].reason if attempts else "content insufficient"
             except SecurityBlockedError as exc:
-                attempts.append(StrategyAttempt(
-                    strategy=strat.value, outcome="error",
-                    error_class=exc.failure_class.value, error=str(exc), reason="blocked",
-                ))
+                attempts.append(
+                    StrategyAttempt(
+                        strategy=strat.value,
+                        outcome="error",
+                        error_class=exc.failure_class.value,
+                        error=str(exc),
+                        reason="blocked",
+                    )
+                )
                 return error_result(
-                    url, strategy=strategy, error=str(exc),
+                    url,
+                    strategy=strategy,
+                    error=str(exc),
                     error_code=exc.error_code,
-                    failure_class=exc.failure_class.value, attempts=attempts,
+                    failure_class=exc.failure_class.value,
+                    attempts=attempts,
                 )
             except ResponseTooLargeError as exc:
                 # Size cap is terminal: a heavier strategy never shrinks a body,
                 # so abort the whole plan instead of escalating.
-                attempts.append(StrategyAttempt(
-                    strategy=strat.value, outcome="error",
-                    error_class=exc.failure_class.value, error=str(exc),
-                    reason="response exceeds size limit",
-                ))
+                attempts.append(
+                    StrategyAttempt(
+                        strategy=strat.value,
+                        outcome="error",
+                        error_class=exc.failure_class.value,
+                        error=str(exc),
+                        reason="response exceeds size limit",
+                    )
+                )
                 return error_result(
-                    url, strategy=strategy, error=str(exc),
+                    url,
+                    strategy=strategy,
+                    error=str(exc),
                     error_code=exc.error_code,
-                    failure_class=exc.failure_class.value, attempts=attempts,
+                    failure_class=exc.failure_class.value,
+                    attempts=attempts,
                 )
             except StrategyUnavailableError as exc:
-                attempts.append(StrategyAttempt(
-                    strategy=strat.value, outcome="error",
-                    error_class=exc.failure_class.value, error=str(exc), reason="unavailable",
-                ))
+                attempts.append(
+                    StrategyAttempt(
+                        strategy=strat.value,
+                        outcome="error",
+                        error_class=exc.failure_class.value,
+                        error=str(exc),
+                        reason="unavailable",
+                    )
+                )
                 last_reason = f"{strat.value} unavailable"
                 continue
             except Exception as exc:  # typed WebAcquisitionError from the backend
                 failure_class = getattr(exc, "failure_class", FailureClass.UNKNOWN)
-                attempts.append(StrategyAttempt(
-                    strategy=strat.value, outcome="error",
-                    error_class=failure_class.value, error=str(exc),
-                    reason="transport failure",
-                ))
+                attempts.append(
+                    StrategyAttempt(
+                        strategy=strat.value,
+                        outcome="error",
+                        error_class=failure_class.value,
+                        error=str(exc),
+                        reason="transport failure",
+                    )
+                )
                 last_reason = "transport failure"
 
             # Decide whether to escalate to the next strategy at all. The plan
@@ -285,20 +320,24 @@ class StrategyRouter:
         # connection error followed by an absent dynamic dependency should stay
         # a connection error in the final result, not become dependency_missing.
         meaningful = [
-            attempt for attempt in attempts
+            attempt
+            for attempt in attempts
             if attempt.error_class not in (FailureClass.NONE.value, FailureClass.DEPENDENCY_MISSING.value)
         ]
-        last = (meaningful[-1] if meaningful else attempts[-1]) if attempts else StrategyAttempt(
-            strategy=strategy, outcome="error", error_class=FailureClass.UNKNOWN.value)
+        last = (
+            (meaningful[-1] if meaningful else attempts[-1])
+            if attempts
+            else StrategyAttempt(strategy=strategy, outcome="error", error_class=FailureClass.UNKNOWN.value)
+        )
         if last.error:
             message = last.error
         elif last.reason:
             message = f"acquisition failed: {last.reason}"
         else:
-            message = ("last strategy returned insufficient content" if insufficient
-                       else "all strategies failed")
+            message = "last strategy returned insufficient content" if insufficient else "all strategies failed"
         failed = error_result(
-            url, strategy=strategy,
+            url,
+            strategy=strategy,
             error=message,
             error_code="WEB_ALL_STRATEGIES_FAILED",
             failure_class=last.error_class or FailureClass.UNKNOWN.value,
@@ -307,33 +346,44 @@ class StrategyRouter:
         )
         if insufficient and last.status_code and last.status_code < 400:
             failed.warnings.append(
-                f"content fetched but considered insufficient ({last_reason}); "
-                "no further strategy was permitted or available"
+                f"content fetched but considered insufficient ({last_reason}); no further strategy was permitted or available"
             )
         failed.duration_ms = int((time.monotonic() - started) * 1000)
         return failed
 
     # -------------------------------------------------------------- internals
-    def _run_strategy(self, strat: FetchStrategy, url: str, *, session: Optional[Any],
-                      capture_xhr: Optional[str], wait_selector: Optional[str],
-                      solve_cloudflare: bool) -> RawFetch:
+    def _run_strategy(
+        self,
+        strat: FetchStrategy,
+        url: str,
+        *,
+        session: Any | None,
+        capture_xhr: str | None,
+        wait_selector: str | None,
+        solve_cloudflare: bool,
+    ) -> RawFetch:
         cfg = self._config
         common = {"policy": self._policy, "session": session}
         if strat == FetchStrategy.STATIC:
             return backend.fetch_static(
-                url, timeout=float(getattr(cfg, "web_request_timeout", 20.0)),
-                stealthy_headers=True, **common,
+                url,
+                timeout=float(getattr(cfg, "web_request_timeout", 20.0)),
+                stealthy_headers=True,
+                **common,
             )
         if strat == FetchStrategy.DYNAMIC:
             return backend.fetch_dynamic(
-                url, timeout=float(getattr(cfg, "web_browser_timeout", 45.0)),
-                capture_xhr=capture_xhr, wait_selector=wait_selector,
-                network_idle=True, **common,
+                url,
+                timeout=float(getattr(cfg, "web_browser_timeout", 45.0)),
+                capture_xhr=capture_xhr,
+                wait_selector=wait_selector,
+                network_idle=True,
+                **common,
             )
         return backend.fetch_stealth(
-            url, timeout=float(getattr(cfg, "web_browser_timeout", 60.0)),
-            solve_cloudflare=solve_cloudflare and bool(
-                getattr(cfg, "web_stealth_solve_cloudflare", False)),
+            url,
+            timeout=float(getattr(cfg, "web_browser_timeout", 60.0)),
+            solve_cloudflare=solve_cloudflare and bool(getattr(cfg, "web_stealth_solve_cloudflare", False)),
             **common,
         )
 
@@ -344,25 +394,26 @@ class StrategyRouter:
         insufficient_reason = ""
         if status >= 400:
             challenged = _looks_challenged(raw.response)
-            result.failure_class = (FailureClass.CHALLENGE if challenged
-                                    else FailureClass.HTTP_STATUS).value
+            result.failure_class = (FailureClass.CHALLENGE if challenged else FailureClass.HTTP_STATUS).value
             insufficient_reason = "anti-bot challenge page" if challenged else f"HTTP {status}"
         elif _is_insufficient(raw.response, raw.status):
             shell = _looks_like_js_shell(raw.response)
-            result.failure_class = (FailureClass.JS_REQUIRED if shell
-                                    else FailureClass.EMPTY_CONTENT).value
-            insufficient_reason = ("page is a JS shell; content renders client-side" if shell
-                                   else "no meaningful text in response")
-        result.attempts = [StrategyAttempt(
-            strategy=strat.value,
-            outcome="insufficient" if insufficient_reason else "success",
-            status_code=status or None, duration_ms=raw.duration_ms,
-            error_class=result.failure_class, reason=insufficient_reason,
-        )]
+            result.failure_class = (FailureClass.JS_REQUIRED if shell else FailureClass.EMPTY_CONTENT).value
+            insufficient_reason = "page is a JS shell; content renders client-side" if shell else "no meaningful text in response"
+        result.attempts = [
+            StrategyAttempt(
+                strategy=strat.value,
+                outcome="insufficient" if insufficient_reason else "success",
+                status_code=status or None,
+                duration_ms=raw.duration_ms,
+                error_class=result.failure_class,
+                reason=insufficient_reason,
+            )
+        ]
         return result
 
 
-def requested_strategy(strategy: str) -> Optional[FetchStrategy]:
+def requested_strategy(strategy: str) -> FetchStrategy | None:
     """The explicit strategy a caller demanded, or None for AUTO."""
     try:
         strat = FetchStrategy((strategy or FetchStrategy.AUTO.value).lower())

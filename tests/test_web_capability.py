@@ -1,5 +1,6 @@
 """Capability detection tests (spec §20/§21): the four honest states, Termux
 detection, and verification only via REAL fetches — never import success."""
+
 from __future__ import annotations
 
 import pytest
@@ -20,7 +21,9 @@ def _reset_cache():
 class TestProbeStates:
     def test_states_vocabulary_is_exact(self):
         assert capabilities.probe(force=True)["static"]["status"] in (
-            capabilities.AVAILABLE, capabilities.NOT_VERIFIED, capabilities.UNAVAILABLE,
+            capabilities.AVAILABLE,
+            capabilities.NOT_VERIFIED,
+            capabilities.UNAVAILABLE,
             capabilities.NOT_INSTALLED,
         )
 
@@ -54,18 +57,21 @@ class TestProbeStates:
 
         monkeypatch.setattr(capabilities, "_importable", lambda name: True)
         monkeypatch.setattr(capabilities, "scrapling_version", lambda: "0.0.0")
-        monkeypatch.setattr(capabilities, "_playwright_chromium_path",
-                            lambda: Path("/tmp/fake-chrome"))
+        monkeypatch.setattr(capabilities, "_playwright_chromium_path", lambda: Path("/tmp/fake-chrome"))
         caps = capabilities.probe(force=True)
         assert caps["dynamic"]["status"] == capabilities.NOT_VERIFIED
         assert caps["dynamic"]["status"] != capabilities.AVAILABLE
 
     def test_strategy_ready_refuses_unavailable(self, monkeypatch):
-        monkeypatch.setattr(capabilities, "probe", lambda force=False: {
-            "static": {"status": capabilities.NOT_VERIFIED, "detail": ""},
-            "dynamic": {"status": capabilities.UNAVAILABLE, "detail": ""},
-            "stealth": {"status": capabilities.NOT_INSTALLED, "detail": ""},
-        })
+        monkeypatch.setattr(
+            capabilities,
+            "probe",
+            lambda force=False: {
+                "static": {"status": capabilities.NOT_VERIFIED, "detail": ""},
+                "dynamic": {"status": capabilities.UNAVAILABLE, "detail": ""},
+                "stealth": {"status": capabilities.NOT_INSTALLED, "detail": ""},
+            },
+        )
         assert capabilities.strategy_ready("static") is True
         assert capabilities.strategy_ready("dynamic") is False
         assert capabilities.strategy_ready("stealth") is False
@@ -80,8 +86,7 @@ class TestSessionPersistenceReporting:
         monkeypatch.setattr(capabilities, "_importable", lambda name: True)
         monkeypatch.setattr(capabilities, "scrapling_version", lambda: "0.4.15")
         caps = capabilities.probe(force=True)
-        assert caps["static_session_persistence"]["status"] in (
-            capabilities.AVAILABLE, capabilities.NOT_VERIFIED)
+        assert caps["static_session_persistence"]["status"] in (capabilities.AVAILABLE, capabilities.NOT_VERIFIED)
 
     def test_dynamic_persistence_always_unavailable_not_faked(self, monkeypatch):
         monkeypatch.setattr(capabilities, "_importable", lambda name: True)
@@ -126,8 +131,7 @@ class TestTermux:
     def test_not_termux_on_plain_linux(self, monkeypatch):
         monkeypatch.delenv("TERMUX_VERSION", raising=False)
         monkeypatch.setattr(capabilities.platform, "system", lambda: "Linux")
-        monkeypatch.setattr(capabilities.os.environ, "get",
-                            lambda k, d=None: "" if k == "PATH" else d)
+        monkeypatch.setattr(capabilities.os.environ, "get", lambda k, d=None: "" if k == "PATH" else d)
         assert capabilities.is_termux() is False
 
     def test_probe_reports_termux_flag(self, monkeypatch):

@@ -1,6 +1,7 @@
 """Computer-agent dashboard API: live status, tasks/checkpoints, plan graphs,
 world state, repairs, skills, recordings, episodes, benchmark, task control,
 remote control approvals, resources, and the computer event WebSocket."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +13,6 @@ import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -45,17 +45,23 @@ def _permission_guard(tool: str, args: dict | None = None):
             # The real execution path still runs through the same permission
             # gate and will require an approval when dry_run is removed.
             permission_manager.audit(
-                tool, "allow", None, check.get("risk"),
+                tool,
+                "allow",
+                None,
+                check.get("risk"),
                 extra={"safety": check.get("safety"), "dry_run": True},
             )
             return None
         if check.get("decision") == Decision.ALLOW.value:
             return None
-        return JSONResponse({
-            "success": False,
-            "error": f"Permission {check.get('decision')} for route action '{tool}'",
-            "permission": check,
-        }, status_code=403)
+        return JSONResponse(
+            {
+                "success": False,
+                "error": f"Permission {check.get('decision')} for route action '{tool}'",
+                "permission": check,
+            },
+            status_code=403,
+        )
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"success": False, "error": f"permission check failed closed: {exc}"}, status_code=403)
 
@@ -65,9 +71,9 @@ def _permission_guard(tool: str, args: dict | None = None):
 # ===========================================================================
 
 
-
 def _computer_task_store():
     from core.computer import TaskStore
+
     return TaskStore()
 
 
@@ -83,7 +89,7 @@ def _read_task_json(task_id: str, filename: str, default):
         return default
 
 
-def _recording_info(task_id: str) -> Optional[dict]:
+def _recording_info(task_id: str) -> dict | None:
     directory = _task_dir(task_id)
     candidates = sorted(directory.glob("recording.*")) if directory.exists() else []
     if not candidates:
@@ -103,7 +109,7 @@ def _recording_info(task_id: str) -> Optional[dict]:
     }
 
 
-def _checkpoint_summary(task_id: str) -> Optional[dict]:
+def _checkpoint_summary(task_id: str) -> dict | None:
     """Compact live view of one persisted task checkpoint (world + counters)."""
     store = _computer_task_store()
     checkpoint = store.load(task_id)
@@ -142,8 +148,8 @@ def _checkpoint_summary(task_id: str) -> Optional[dict]:
         "timeline_events": len(timeline.get("events") or []) if isinstance(timeline, dict) else 0,
         "last_action": world.get("last_action"),
         "world": {
-            key: world.get(key) for key in
-            ("active_application", "active_window", "visible_targets", "dialogs", "task_state", "confidence")
+            key: world.get(key)
+            for key in ("active_application", "active_window", "visible_targets", "dialogs", "task_state", "confidence")
         },
         "error": data.get("error"),
         "result": data.get("result"),
@@ -177,16 +183,12 @@ def _repairs_aggregate(limit_recent: int = 12) -> dict:
         for repair in payload.get("repairs") or []:
             if not isinstance(repair, dict):
                 continue
-            candidates = diagnoses_by_state.get(
-                str(repair.get("repair_for") or repair.get("state") or "")
-            ) or []
+            candidates = diagnoses_by_state.get(str(repair.get("repair_for") or repair.get("state") or "")) or []
             failure_text = repair.get("failure") or repair.get("failure_reason") or ""
             words = set(re.findall(r"[a-z0-9]+", str(failure_text).lower()))
             best, best_score = None, 0
             for candidate in candidates:
-                score = len(words & set(re.findall(
-                    r"[a-z0-9]+", str(candidate.get("failure_reason") or "").lower()
-                )))
+                score = len(words & set(re.findall(r"[a-z0-9]+", str(candidate.get("failure_reason") or "").lower())))
                 if score > best_score:
                     best, best_score = candidate, score
             diagnosis = best or (candidates[-1] if candidates else None)
@@ -201,21 +203,21 @@ def _repairs_aggregate(limit_recent: int = 12) -> dict:
             by_kind.setdefault(kind, {"count": 0, "successes": 0})
             by_kind[kind]["count"] += 1
             by_kind[kind]["successes"] += 1 if ok else 0
-            recent.append({
-                "task_id": task_id,
-                "task": task.get("task"),
-                "kind": kind,
-                "state": repair.get("repair_for") or repair.get("state"),
-                "action": action_name,
-                "success": ok,
-                "failure_reason": repair.get("failure") or repair.get("failure_reason"),
-                "updated": task.get("updated_at"),
-            })
+            recent.append(
+                {
+                    "task_id": task_id,
+                    "task": task.get("task"),
+                    "kind": kind,
+                    "state": repair.get("repair_for") or repair.get("state"),
+                    "action": action_name,
+                    "success": ok,
+                    "failure_reason": repair.get("failure") or repair.get("failure_reason"),
+                    "updated": task.get("updated_at"),
+                }
+            )
     recent.sort(key=lambda r: str(r.get("updated") or ""), reverse=True)
     for kind in by_kind:
-        by_kind[kind]["success_rate"] = round(
-            by_kind[kind]["successes"] / max(1, by_kind[kind]["count"]) * 100, 1
-        )
+        by_kind[kind]["success_rate"] = round(by_kind[kind]["successes"] / max(1, by_kind[kind]["count"]) * 100, 1)
     return {
         "total": total,
         "successes": successes,
@@ -234,8 +236,6 @@ def _skill_stats(skills: list) -> dict:
         "total_successes": successes,
         "avg_success_rate": round(successes / runs * 100, 1) if runs else None,
     }
-
-
 
 
 @router.get("/computer/status")
@@ -469,10 +469,12 @@ async def computer_skill_detail(skill_name: str):
 
 # ---- Episode Memory Endpoints -----------------------------------------------
 
+
 @router.get("/computer/episodes")
 async def computer_episodes(limit: int = 50, outcome: str = "", tag: str = ""):
     """List recorded episodes (task recordings with full action traces)."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     return {
         "episodes": store.list(
@@ -488,6 +490,7 @@ async def computer_episodes(limit: int = 50, outcome: str = "", tag: str = ""):
 async def computer_episodes_search(q: str = "", limit: int = 10):
     """Search episodes by task description."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     return {"results": store.search(q, limit=limit)}
 
@@ -496,6 +499,7 @@ async def computer_episodes_search(q: str = "", limit: int = 10):
 async def computer_episodes_stats():
     """Aggregate statistics across all episodes."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     return store.stats()
 
@@ -504,6 +508,7 @@ async def computer_episodes_stats():
 async def computer_episode_detail(task_id: str):
     """Get full detail for one recorded episode."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     episode = store.load(task_id)
     if episode is None:
@@ -515,6 +520,7 @@ async def computer_episode_detail(task_id: str):
 async def computer_episode_delete(task_id: str):
     """Delete a recorded episode."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     if store.delete(task_id):
         return {"success": True, "deleted": task_id}
@@ -525,6 +531,7 @@ async def computer_episode_delete(task_id: str):
 async def computer_episodes_clear():
     """Delete all episodes."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     count = store.clear()
     return {"success": True, "deleted_count": count}
@@ -534,6 +541,7 @@ async def computer_episodes_clear():
 async def computer_episodes_recall(task: str = ""):
     """Recall the most recent successful episode for a task description."""
     from core.computer import get_episode_store
+
     store = get_episode_store()
     trajectory = store.recall_trajectory(task)
     if trajectory is None:
@@ -543,10 +551,12 @@ async def computer_episodes_recall(task: str = ""):
 
 # ---- Benchmark Endpoints ----------------------------------------------------
 
+
 @router.get("/computer/benchmark/tasks")
 async def computer_benchmark_tasks(category: str = "", max_difficulty: int = 3):
     """List available benchmark tasks."""
-    from core.computer.benchmark import list_tasks, get_categories
+    from core.computer.benchmark import get_categories, list_tasks
+
     if category:
         tasks = list_tasks(category=category, max_difficulty=max_difficulty)
     else:
@@ -562,6 +572,7 @@ async def computer_benchmark_tasks(category: str = "", max_difficulty: int = 3):
 async def computer_benchmark_run(payload: dict = None):
     """Run the benchmark and return results."""
     from core.computer.benchmark import run_benchmark
+
     payload = payload or {}
     dry_run = bool(payload.get("dry_run", True))
     if not dry_run:
@@ -581,6 +592,7 @@ async def computer_benchmark_run(payload: dict = None):
 async def computer_benchmark_task(task_id: str):
     """Get details for a specific benchmark task."""
     from core.computer.benchmark import get_task
+
     task = get_task(task_id)
     if task is None:
         return JSONResponse({"success": False, "error": f"task '{task_id}' not found"}, status_code=404)
@@ -613,8 +625,14 @@ async def computer_run(payload: dict = None):
             publish("task_interrupted", {"task_id": task_id or task, "reason": f"run failed: {exc}"})
 
     threading.Thread(target=_run, daemon=True).start()
-    return {"success": True, "started": True, "task": task, "task_id": task_id,
-            "dry_run": dry_run, "note": "task running in background; watch the Computer page"}
+    return {
+        "success": True,
+        "started": True,
+        "task": task,
+        "task_id": task_id,
+        "dry_run": dry_run,
+        "note": "task running in background; watch the Computer page",
+    }
 
 
 @router.post("/computer/resume/{task_id}")
@@ -640,8 +658,13 @@ async def computer_resume(task_id: str, payload: dict = None):
             publish("task_interrupted", {"task_id": task_id, "reason": f"resume failed: {exc}"})
 
     threading.Thread(target=_run, daemon=True).start()
-    return {"success": True, "started": True, "task_id": task_id, "dry_run": dry_run,
-            "note": "resume running in background; watch the Computer page"}
+    return {
+        "success": True,
+        "started": True,
+        "task_id": task_id,
+        "dry_run": dry_run,
+        "note": "resume running in background; watch the Computer page",
+    }
 
 
 @router.delete("/computer/task/{task_id}")
@@ -670,8 +693,12 @@ async def computer_stop(payload: dict = None):
     reason = (payload or {}).get("reason") or "emergency stop from dashboard"
     get_emergency_stop().activate(reason, set_by="computer-route")
     emergency_stop.halt(reason)
-    return {"success": True, "halted": True, "reason": reason,
-            "note": "Computer actions are halted. Release via POST /computer/release."}
+    return {
+        "success": True,
+        "halted": True,
+        "reason": reason,
+        "note": "Computer actions are halted. Release via POST /computer/release.",
+    }
 
 
 @router.post("/computer/release")
@@ -687,6 +714,7 @@ async def computer_release():
 
 # ---- Task Control Endpoints (Pause/Resume/Cancel) ---------------------------
 
+
 @router.get("/computer/control/status")
 async def computer_control_status():
     """Get overall task control status - all running/paused tasks and control state."""
@@ -699,7 +727,7 @@ async def computer_control_status():
 @router.post("/computer/control/pause/{task_id}")
 async def computer_control_pause(task_id: str, payload: dict = None):
     """Request pause for a task at next safe boundary.
-    
+
     The task will pause after completing its current action.
     Use /computer/control/resume/{task_id} to continue.
     """
@@ -708,7 +736,7 @@ async def computer_control_pause(task_id: str, payload: dict = None):
     control = get_task_control()
     reason = (payload or {}).get("reason", "")
     success = control.request_pause(task_id, reason)
-    
+
     if success:
         return {
             "success": True,
@@ -733,7 +761,7 @@ async def computer_control_resume(task_id: str):
 
     control = get_task_control()
     success = control.resume(task_id)
-    
+
     if success:
         ctx = control.get_task_context(task_id)
         return {
@@ -755,7 +783,7 @@ async def computer_control_resume(task_id: str):
 @router.post("/computer/control/cancel/{task_id}")
 async def computer_control_cancel(task_id: str, payload: dict = None):
     """Request cancellation of a task.
-    
+
     The task will be marked as cancelled and terminated.
     This is different from pause - cancelled tasks cannot be resumed.
     """
@@ -764,7 +792,7 @@ async def computer_control_cancel(task_id: str, payload: dict = None):
     control = get_task_control()
     reason = (payload or {}).get("reason", "")
     success = control.request_cancel(task_id, reason)
-    
+
     if success:
         return {
             "success": True,
@@ -785,19 +813,18 @@ async def computer_control_cancel(task_id: str, payload: dict = None):
 @router.post("/computer/control/emergency-stop")
 async def computer_emergency_stop(payload: dict = None):
     """EMERGENCY STOP - immediately block all computer actions.
-    
+
     This is the safety override that stops ALL computer control instantly.
     Use /computer/control/emergency-release to re-enable control.
     """
     from core.computer.task_control import get_task_control
-
     from core.emergency_stop import get_emergency_stop
 
     control = get_task_control()
     reason = (payload or {}).get("reason", "")
     get_emergency_stop().activate(reason or "computer control emergency stop", set_by="computer-route")
     control.emergency_stop(reason)
-    
+
     return {
         "success": True,
         "action": "emergency_stop_activated",
@@ -809,17 +836,16 @@ async def computer_emergency_stop(payload: dict = None):
 @router.post("/computer/control/emergency-release")
 async def computer_emergency_release():
     """Release emergency stop - re-enable computer control.
-    
+
     After calling this, computer actions can resume normally.
     """
     from core.computer.task_control import get_task_control
-
     from core.emergency_stop import get_emergency_stop
 
     control = get_task_control()
     get_emergency_stop().clear("computer control emergency release", set_by="computer-route")
     success = control.release_emergency_stop()
-    
+
     return {
         "success": success,
         "action": "emergency_stop_released" if success else "emergency_stop_not_active",
@@ -834,10 +860,10 @@ async def computer_control_task(task_id: str):
 
     control = get_task_control()
     ctx = control.get_task_context(task_id)
-    
+
     if ctx is None:
         return {"success": False, "error": f"Task '{task_id}' not found"}
-    
+
     return {
         "success": True,
         **ctx.to_dict(),
@@ -851,6 +877,7 @@ async def computer_control_task(task_id: str):
 # The HTML-only computer / remote UI surfaces were removed in the single
 # control-room consolidation. Real capability is served by the /computer/* and
 # /remote/* data APIs below and projected by /control.
+
 
 @router.get("/computer/live-frame")
 async def computer_live_frame():
@@ -866,8 +893,7 @@ async def computer_live_frame():
     data = frame.get("data")
     if not data:
         return JSONResponse({"error": "live frame empty"}, status_code=404)
-    return Response(content=data, media_type="image/jpeg",
-                    headers={"Cache-Control": "no-store, max-age=0"})
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "no-store, max-age=0"})
 
 
 @router.get("/computer/resources")
@@ -897,10 +923,12 @@ async def computer_delegate(payload: dict = None):
     ``plan`` dict with ``units`` (WorkUnit records) for full control.
     """
     payload = payload or {}
-    denied = _permission_guard("computer_task", {"task": payload.get("task", ""), "action": "delegate", "dry_run": payload.get("dry_run", False)})
+    denied = _permission_guard(
+        "computer_task", {"task": payload.get("task", ""), "action": "delegate", "dry_run": payload.get("dry_run", False)}
+    )
     if denied is not None:
         return denied
-    from core.computer import MultiAgentDelegator, DelegationPlan, WorkUnit
+    from core.computer import DelegationPlan, MultiAgentDelegator, WorkUnit
 
     delegator = MultiAgentDelegator()
     dry_run = bool(payload.get("dry_run", False))
@@ -945,6 +973,7 @@ async def computer_delegations():
 
 
 # -- Remote / approval control (Phase C) --------------------------------------
+
 
 @router.get("/remote/status")
 async def remote_status():
@@ -1015,17 +1044,18 @@ async def remote_control_action(payload: dict = None):
         return remote_control.cancel(task_id, reason)
     if action in ("emergency-stop", "stop"):
         from core.emergency_stop import get_emergency_stop
+
         get_emergency_stop().activate(reason, set_by="remote-route")
         return remote_control.emergency_stop(reason)
     if action == "release":
         from core.emergency_stop import get_emergency_stop
+
         get_emergency_stop().clear("remote release", set_by="remote-route")
         return remote_control.release()
     return JSONResponse({"success": False, "error": f"unknown remote action '{action}'"}, status_code=400)
 
 
 # -- Dashboard live events + local Talking Mode speech -----------------------
-
 
 
 @ws_router.websocket("/computer/events")
@@ -1052,6 +1082,7 @@ async def computer_events_ws(websocket: WebSocket):
                 except asyncio.QueueEmpty:
                     pass
             queue.put_nowait(event)
+
         loop.call_soon_threadsafe(put)
 
     unsubscribe = computer_event_bus.subscribe(enqueue)
@@ -1115,5 +1146,3 @@ async def computer_events_ws(websocket: WebSocket):
             await websocket.close()
         except Exception:
             pass
-
-

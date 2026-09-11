@@ -8,13 +8,14 @@ with per-agent overrides, allow/deny lists, and an append-only audit log.
 Unified execution path:
   LLM Request → Policy Classifier → Capability Check → Permission/Sandbox Gate → Execution → Audit
 """
+
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .workspace import workspace
 
@@ -154,7 +155,7 @@ DEFAULT_CAPS = [Capability.READ]
 
 
 class PermissionManager:
-    def __init__(self, overrides_path: Optional[Path] = None, approvals_path: Optional[Path] = None):
+    def __init__(self, overrides_path: Path | None = None, approvals_path: Path | None = None):
         self.overrides_path = overrides_path or (workspace.dirs["memory"] / "permissions.json")
         self.overrides = self._load_overrides()
         try:
@@ -176,7 +177,7 @@ class PermissionManager:
         self.overrides_path.write_text(json.dumps(self.overrides, indent=2), encoding="utf-8")
 
     # -- classification -------------------------------------------------
-    def classify(self, tool_name: str, args: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def classify(self, tool_name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         args = args or {}
         risk = DEFAULT_RISK
         decision = DEFAULT_DECISION
@@ -200,6 +201,7 @@ class PermissionManager:
             if not dangerous:
                 try:
                     from .sandbox import scan_command
+
                     dangerous = bool(scan_command(cmd))
                 except Exception:
                     pass
@@ -225,6 +227,7 @@ class PermissionManager:
             # and reviewed independently.
             try:
                 from .evolution import EvolutionPolicy
+
                 if target and EvolutionPolicy().protected_files([target]):
                     risk, decision = Risk.ADMIN, Decision.DENY
                     caps = [Capability.ADMIN]
@@ -250,7 +253,12 @@ class PermissionManager:
         except Exception as exc:
             # The red-line classifier is part of the safety path; if it fails on
             # an obviously powerful action, require approval rather than greenlighting it.
-            safety_info = {"zone": "unknown", "red_lines": [], "reasons": [f"safety classifier unavailable: {exc}"], "suggested_decision": "ask"}
+            safety_info = {
+                "zone": "unknown",
+                "red_lines": [],
+                "reasons": [f"safety classifier unavailable: {exc}"],
+                "suggested_decision": "ask",
+            }
             if decision == Decision.ALLOW and risk in (Risk.ADMIN, Risk.EXECUTE, Risk.NETWORK, Risk.GUI):
                 decision = Decision.ASK
 
@@ -258,7 +266,9 @@ class PermissionManager:
             "tool": tool_name,
             "risk": risk.value,
             "default": decision.value,
-            "immutable": bool(tool_name in ("write_file", "create_file", "append_file") and decision == Decision.DENY and risk == Risk.ADMIN),
+            "immutable": bool(
+                tool_name in ("write_file", "create_file", "append_file") and decision == Decision.DENY and risk == Risk.ADMIN
+            ),
             "capabilities": [c.value if isinstance(c, Capability) else str(c) for c in caps],
             "safety": safety_info,
         }
@@ -266,8 +276,8 @@ class PermissionManager:
     def check(
         self,
         tool_name: str,
-        agent: Optional[str] = None,
-        args: Optional[dict[str, Any]] = None,
+        agent: str | None = None,
+        args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         info = self.classify(tool_name, args)
         decision = Decision(info["default"])
@@ -295,12 +305,12 @@ class PermissionManager:
         # overrides. Emergency stop is the Red Line 1 brake.
         if safety.get("zone") == "red":
             decision = Decision.DENY
-            self._record_capability_need(tool_name, args or {}, safety,
-                                         reason="red-line action blocked")
+            self._record_capability_need(tool_name, args or {}, safety, reason="red-line action blocked")
         elif info.get("immutable"):
             decision = Decision.DENY
-            self._record_capability_need(tool_name, args or {}, safety,
-                                         reason="protected safety/control-plane change requires independent review")
+            self._record_capability_need(
+                tool_name, args or {}, safety, reason="protected safety/control-plane change requires independent review"
+            )
         elif emergency is not None:
             decision = Decision.DENY
             info["emergency_stop"] = emergency
@@ -312,23 +322,41 @@ class PermissionManager:
                 request = self.approvals.create_request(tool_name, args or {}, safety)
                 if request.get("success"):
                     info["approval_request"] = request.get("request")
-                    self._record_capability_need(tool_name, args or {}, safety,
-                                                 reason="yellow action needs scoped approval")
+                    self._record_capability_need(tool_name, args or {}, safety, reason="yellow action needs scoped approval")
 
         info["decision"] = decision.value
         info["agent"] = agent
         if approval_match:
             info["approval"] = approval_match
-        self.audit(tool_name, decision.value, agent, info["risk"], extra={"safety": safety, "approval": approval_match, "approval_request": info.get("approval_request"), "emergency_stop": info.get("emergency_stop")})
+        self.audit(
+            tool_name,
+            decision.value,
+            agent,
+            info["risk"],
+            extra={
+                "safety": safety,
+                "approval": approval_match,
+                "approval_request": info.get("approval_request"),
+                "emergency_stop": info.get("emergency_stop"),
+            },
+        )
         return info
 
-    def _emergency_stop_decision(self, tool_name: str, info: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _emergency_stop_decision(self, tool_name: str, info: dict[str, Any]) -> dict[str, Any] | None:
         # Status/stop/read-only actions must remain available so the user can
         # inspect and recover the system after hitting the brake.
         safe_tools = {
-            "read_file", "list_files", "memory_search", "memory2", "sandbox_status",
-            "screen_record_status", "screen_get_recent", "computer_stop",
-            "emergency_stop", "emergency_status", "emergency_resume",
+            "read_file",
+            "list_files",
+            "memory_search",
+            "memory2",
+            "sandbox_status",
+            "screen_record_status",
+            "screen_get_recent",
+            "computer_stop",
+            "emergency_stop",
+            "emergency_status",
+            "emergency_resume",
         }
         if tool_name in safe_tools or tool_name.endswith("_status") or tool_name.endswith("_stop"):
             return None
@@ -357,7 +385,7 @@ class PermissionManager:
         self,
         tool_name: str,
         decision: str,
-        agent: Optional[str] = None,
+        agent: str | None = None,
     ) -> dict[str, Any]:
         if decision not in (Decision.ALLOW.value, Decision.ASK.value, Decision.DENY.value):
             return {"success": False, "error": f"decision must be allow/ask/deny, got '{decision}'"}
@@ -372,9 +400,9 @@ class PermissionManager:
         self,
         tool_name: str,
         decision: str,
-        agent: Optional[str],
-        risk: Optional[str] = None,
-        extra: Optional[dict[str, Any]] = None,
+        agent: str | None,
+        risk: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> Path:
         path = workspace.dirs["logs"] / "permissions.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -400,11 +428,11 @@ class PermissionManager:
         title: str,
         *,
         tool: str = "*",
-        red_lines: Optional[list[int]] = None,
-        resources: Optional[list[str]] = None,
+        red_lines: list[int] | None = None,
+        resources: list[str] | None = None,
         purpose: str = "",
-        ttl_minutes: Optional[int] = None,
-        max_uses: Optional[int] = None,
+        ttl_minutes: int | None = None,
+        max_uses: int | None = None,
         notes: str = "",
     ) -> dict[str, Any]:
         if self.approvals is None:
@@ -440,8 +468,8 @@ class PermissionManager:
         bundle_id: str,
         decision: str,
         *,
-        ttl_minutes: Optional[int] = None,
-        max_uses: Optional[int] = None,
+        ttl_minutes: int | None = None,
+        max_uses: int | None = None,
         notes: str = "",
     ) -> dict[str, Any]:
         if self.approvals is None or not hasattr(self.approvals, "resolve_bundle"):
@@ -453,10 +481,10 @@ class PermissionManager:
         request_id: str,
         decision: str,
         *,
-        resources: Optional[list[str]] = None,
+        resources: list[str] | None = None,
         purpose: str = "",
-        ttl_minutes: Optional[int] = None,
-        max_uses: Optional[int] = None,
+        ttl_minutes: int | None = None,
+        max_uses: int | None = None,
         notes: str = "",
     ) -> dict[str, Any]:
         if self.approvals is None:
@@ -512,15 +540,15 @@ class PermissionManager:
 class PolicyGate:
     """Unified policy enforcement layer guaranteeing no tool call bypasses security."""
 
-    def __init__(self, manager: Optional[PermissionManager] = None):
+    def __init__(self, manager: PermissionManager | None = None):
         self.manager = manager or permission_manager
 
     def enforce(
         self,
         tool_name: str,
-        args: Optional[dict[str, Any]] = None,
-        agent: Optional[str] = None,
-        granted_capabilities: Optional[set[str]] = None,
+        args: dict[str, Any] | None = None,
+        agent: str | None = None,
+        granted_capabilities: set[str] | None = None,
         strict: bool = False,
     ) -> dict[str, Any]:
         check_res = self.manager.check(tool_name, agent=agent, args=args)
@@ -532,7 +560,9 @@ class PolicyGate:
             missing_caps = req_caps - granted_capabilities
             if missing_caps:
                 reason = f"Missing required capabilities: {', '.join(missing_caps)}"
-                self.manager.audit(tool_name, Decision.DENY.value, agent, check_res.get("risk"), extra={"missing": list(missing_caps)})
+                self.manager.audit(
+                    tool_name, Decision.DENY.value, agent, check_res.get("risk"), extra={"missing": list(missing_caps)}
+                )
                 if strict:
                     raise PermissionError(f"Permission Denied for tool '{tool_name}': {reason}")
                 return {"allowed": False, "decision": Decision.DENY.value, "reason": reason, "tool": tool_name}

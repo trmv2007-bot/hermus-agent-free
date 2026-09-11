@@ -4,6 +4,7 @@ The crawl tests do REAL loopback fetching against the local fixture site
 (production blocks loopback; the test policy explicitly allows it) and a REAL
 JobQueue submission when the asyncio loop is running.
 """
+
 from __future__ import annotations
 
 import threading
@@ -20,14 +21,16 @@ class Site:
     """Five-page fixture site with a deliberate cross-site link."""
 
     def __init__(self):
-        pages = {"/": ["<a href='/a'>a</a><a href='/b'>b</a>",
-                       "Home page body text long enough to be sufficient for tests."],
-                 "/a": ["<a href='/c'>c</a><a href='http://outside.example/x'>out</a>",
-                        "Page A body text long enough to be sufficient for tests."],
-                 "/b": ["", "Page B body text long enough to be sufficient for tests."],
-                 "/c": ["<a href='/d'>d</a>",
-                        "Page C body text long enough to be sufficient for tests."],
-                 "/d": ["", "Page D body text long enough to be sufficient for tests."]}
+        pages = {
+            "/": ["<a href='/a'>a</a><a href='/b'>b</a>", "Home page body text long enough to be sufficient for tests."],
+            "/a": [
+                "<a href='/c'>c</a><a href='http://outside.example/x'>out</a>",
+                "Page A body text long enough to be sufficient for tests.",
+            ],
+            "/b": ["", "Page B body text long enough to be sufficient for tests."],
+            "/c": ["<a href='/d'>d</a>", "Page C body text long enough to be sufficient for tests."],
+            "/d": ["", "Page D body text long enough to be sufficient for tests."],
+        }
         self.pages = {k: (t, b) for k, (t, b) in pages.items()}
 
     def serve(self):
@@ -36,8 +39,7 @@ class Site:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 title, body = site.pages.get(self.path, ("", "missing page filler"))
-                html = (f"<html><head><title>{self.path}</title></head><body>{title}"
-                        f"<p>{body}</p></body></html>").encode()
+                html = (f"<html><head><title>{self.path}</title></head><body>{title}<p>{body}</p></body></html>").encode()
                 self.send_response(200 if self.path in site.pages else 404)
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Content-Length", str(len(html)))
@@ -67,9 +69,17 @@ class FakeRouter:
         self.base = base
         from core.web.router import StrategyRouter
 
-        cfg = type("C", (), {"web_dynamic_enabled": False, "web_stealth_enabled": False,
-                             "web_termux_restrict": True, "web_request_timeout": 5.0,
-                             "web_browser_timeout": 5.0})()
+        cfg = type(
+            "C",
+            (),
+            {
+                "web_dynamic_enabled": False,
+                "web_stealth_enabled": False,
+                "web_termux_restrict": True,
+                "web_request_timeout": 5.0,
+                "web_browser_timeout": 5.0,
+            },
+        )()
         self._real = StrategyRouter(cfg, WebSecurityPolicy(allow_private_addresses=True))
 
     def fetch(self, url, **kw):
@@ -85,16 +95,21 @@ def worker_policy():
 
 class TestPlanClamps:
     def test_limits_clamped_to_ceilings(self):
-        plan = plan_crawl(["http://x.example/"], requested_pages=10_000, requested_depth=99,
-                          requested_concurrency=999, max_pages_ceiling=100,
-                          max_depth_ceiling=4, max_concurrency_ceiling=8)
+        plan = plan_crawl(
+            ["http://x.example/"],
+            requested_pages=10_000,
+            requested_depth=99,
+            requested_concurrency=999,
+            max_pages_ceiling=100,
+            max_depth_ceiling=4,
+            max_concurrency_ceiling=8,
+        )
         assert plan.max_pages == 100
         assert plan.max_depth == 4
         assert plan.max_concurrency == 8
 
     def test_fragments_deduped(self):
-        plan = plan_crawl(["http://x.example/a#one", "http://x.example/a#two",
-                           "http://x.example/a"])
+        plan = plan_crawl(["http://x.example/a#one", "http://x.example/a#two", "http://x.example/a"])
         assert plan.start_urls == ["http://x.example/a"]
 
     def test_zero_pages_becomes_one(self):
@@ -105,12 +120,11 @@ class TestPlanClamps:
 class TestCrawlWorker:
     def test_crawl_respects_max_pages_and_stays_onsite(self, site, worker_policy):
         _local, base = site
-        plan = plan_crawl([f"{base}/"], requested_pages=3, requested_depth=2,
-                          requested_concurrency=2, max_pages_ceiling=10,
-                          max_depth_ceiling=3)
+        plan = plan_crawl(
+            [f"{base}/"], requested_pages=3, requested_depth=2, requested_concurrency=2, max_pages_ceiling=10, max_depth_ceiling=3
+        )
         events: list[tuple[str, dict]] = []
-        worker = CrawlWorker(plan, router=FakeRouter(base), policy=worker_policy,
-                             emit=lambda t, d: events.append((t, d)))
+        worker = CrawlWorker(plan, router=FakeRouter(base), policy=worker_policy, emit=lambda t, d: events.append((t, d)))
         summary = worker.run()
         assert summary["status"] == "completed"
         assert summary["pages_processed"] == 3  # hard cap honored
@@ -124,18 +138,28 @@ class TestCrawlWorker:
 
     def test_crawl_depth_limit(self, site, worker_policy):
         _local, base = site
-        plan = plan_crawl([f"{base}/"], requested_pages=10, requested_depth=0,
-                          requested_concurrency=1, max_pages_ceiling=10,
-                          max_depth_ceiling=2)
+        plan = plan_crawl(
+            [f"{base}/"],
+            requested_pages=10,
+            requested_depth=0,
+            requested_concurrency=1,
+            max_pages_ceiling=10,
+            max_depth_ceiling=2,
+        )
         worker = CrawlWorker(plan, router=FakeRouter(base), policy=worker_policy)
         summary = worker.run()
         assert summary["pages_processed"] == 1, "depth 0 means start pages only"
 
     def test_cancellation_stops_the_crawl(self, site, worker_policy):
         _local, base = site
-        plan = plan_crawl([f"{base}/", f"{base}/a", f"{base}/b"], requested_pages=10,
-                          requested_depth=2, requested_concurrency=1,
-                          max_pages_ceiling=10, max_depth_ceiling=2)
+        plan = plan_crawl(
+            [f"{base}/", f"{base}/a", f"{base}/b"],
+            requested_pages=10,
+            requested_depth=2,
+            requested_concurrency=1,
+            max_pages_ceiling=10,
+            max_depth_ceiling=2,
+        )
         state = {"cancelled": False}
 
         def cancel():
@@ -145,8 +169,9 @@ class TestCrawlWorker:
             if event_type == "crawl.progress":
                 state["cancelled"] = True
 
-        worker = CrawlWorker(plan, router=FakeRouter(base), policy=worker_policy,
-                             emit=flip_after_first_progress, should_cancel=cancel)
+        worker = CrawlWorker(
+            plan, router=FakeRouter(base), policy=worker_policy, emit=flip_after_first_progress, should_cancel=cancel
+        )
         summary = worker.run()
         assert summary["cancelled"] is True
         assert summary["status"] == "cancelled"
@@ -154,9 +179,14 @@ class TestCrawlWorker:
 
     def test_failures_are_recorded_not_fatal(self, site, worker_policy):
         _local, base = site
-        plan = plan_crawl([f"{base}/missing", f"{base}/b"], requested_pages=5,
-                          requested_depth=0, requested_concurrency=2,
-                          max_pages_ceiling=5, max_depth_ceiling=1)
+        plan = plan_crawl(
+            [f"{base}/missing", f"{base}/b"],
+            requested_pages=5,
+            requested_depth=0,
+            requested_concurrency=2,
+            max_pages_ceiling=5,
+            max_depth_ceiling=1,
+        )
         worker = CrawlWorker(plan, router=FakeRouter(base), policy=worker_policy)
         summary = worker.run()
         assert summary["pages_failed"] >= 1
@@ -166,12 +196,15 @@ class TestCrawlWorker:
     def test_discovered_links_filtered_by_security(self, site, worker_policy):
         """A link pointing at a blocked domain must never join the frontier."""
         _local, base = site
-        policy = WebSecurityPolicy(
-            allow_private_addresses=True,
-            blocked_domains=("outside.example",))
-        plan = plan_crawl([f"{base}/a"], requested_pages=10, requested_depth=2,
-                          requested_concurrency=2, max_pages_ceiling=10,
-                          max_depth_ceiling=2)
+        policy = WebSecurityPolicy(allow_private_addresses=True, blocked_domains=("outside.example",))
+        plan = plan_crawl(
+            [f"{base}/a"],
+            requested_pages=10,
+            requested_depth=2,
+            requested_concurrency=2,
+            max_pages_ceiling=10,
+            max_depth_ceiling=2,
+        )
         worker = CrawlWorker(plan, router=FakeRouter(base), policy=policy)
         summary = worker.run()
         fetched = [r["url"] for r in summary["results"]]
@@ -184,22 +217,37 @@ class TestJobQueueIntegration:
         crawl → job result. Uses the gateway with a test policy."""
         _local, base = site
         import core.web as web
-        from core.web.gateway import WebGateway
         from core.events import EventBus
+        from core.web.gateway import WebGateway
         from gateway.queue import job_queue
 
-        cfg = type("C", (), {
-            "web_enabled": True, "web_default_strategy": "static",
-            "web_dynamic_enabled": False, "web_stealth_enabled": False,
-            "web_termux_restrict": True, "web_request_timeout": 5.0,
-            "web_browser_timeout": 5.0, "web_max_response_bytes": 1_000_000,
-            "web_max_redirects": 5, "web_allow_private_addresses": True,
-            "web_allowed_domains": [], "web_blocked_domains": [],
-            "web_crawl_max_pages": 5, "web_crawl_max_depth": 2,
-            "web_crawl_concurrency": 2, "web_crawl_wall_clock": 30.0,
-            "web_max_sessions": 4, "web_session_ttl": 300.0,
-            "web_cache_enabled": False, "web_cache_size": 8, "web_cache_ttl": 60,
-        })()
+        cfg = type(
+            "C",
+            (),
+            {
+                "web_enabled": True,
+                "web_default_strategy": "static",
+                "web_dynamic_enabled": False,
+                "web_stealth_enabled": False,
+                "web_termux_restrict": True,
+                "web_request_timeout": 5.0,
+                "web_browser_timeout": 5.0,
+                "web_max_response_bytes": 1_000_000,
+                "web_max_redirects": 5,
+                "web_allow_private_addresses": True,
+                "web_allowed_domains": [],
+                "web_blocked_domains": [],
+                "web_crawl_max_pages": 5,
+                "web_crawl_max_depth": 2,
+                "web_crawl_concurrency": 2,
+                "web_crawl_wall_clock": 30.0,
+                "web_max_sessions": 4,
+                "web_session_ttl": 300.0,
+                "web_cache_enabled": False,
+                "web_cache_size": 8,
+                "web_cache_ttl": 60,
+            },
+        )()
         gateway = WebGateway(cfg, bus=EventBus())
         old = web.get_web_gateway()
         web.set_web_gateway(gateway)
@@ -223,8 +271,7 @@ class TestJobQueueIntegration:
             # from FastAPI handlers running on the loop); cross-thread
             # create_task would leave the lane un-woken.
             async def _submit():
-                return gateway.crawl_async([f"{base}/"], max_pages=2, max_depth=1,
-                                           concurrency=1)
+                return gateway.crawl_async([f"{base}/"], max_pages=2, max_depth=1, concurrency=1)
 
             submitted = asyncio.run_coroutine_threadsafe(_submit(), loop).result(timeout=10)
             assert submitted["ok"] is True and submitted["kind"] == "web.crawl"
@@ -264,18 +311,33 @@ class TestJobQueueIntegration:
         import core.web as web
         from core.web.gateway import WebGateway
 
-        cfg = type("C", (), {
-            "web_enabled": True, "web_default_strategy": "static",
-            "web_dynamic_enabled": False, "web_stealth_enabled": False,
-            "web_termux_restrict": True, "web_request_timeout": 5.0,
-            "web_browser_timeout": 5.0, "web_max_response_bytes": 1_000_000,
-            "web_max_redirects": 5, "web_allow_private_addresses": True,
-            "web_allowed_domains": [], "web_blocked_domains": [],
-            "web_crawl_max_pages": 5, "web_crawl_max_depth": 1,
-            "web_crawl_concurrency": 1, "web_crawl_wall_clock": 30.0,
-            "web_max_sessions": 4, "web_session_ttl": 300.0,
-            "web_cache_enabled": False, "web_cache_size": 8, "web_cache_ttl": 60,
-        })()
+        cfg = type(
+            "C",
+            (),
+            {
+                "web_enabled": True,
+                "web_default_strategy": "static",
+                "web_dynamic_enabled": False,
+                "web_stealth_enabled": False,
+                "web_termux_restrict": True,
+                "web_request_timeout": 5.0,
+                "web_browser_timeout": 5.0,
+                "web_max_response_bytes": 1_000_000,
+                "web_max_redirects": 5,
+                "web_allow_private_addresses": True,
+                "web_allowed_domains": [],
+                "web_blocked_domains": [],
+                "web_crawl_max_pages": 5,
+                "web_crawl_max_depth": 1,
+                "web_crawl_concurrency": 1,
+                "web_crawl_wall_clock": 30.0,
+                "web_max_sessions": 4,
+                "web_session_ttl": 300.0,
+                "web_cache_enabled": False,
+                "web_cache_size": 8,
+                "web_cache_ttl": 60,
+            },
+        )()
         gateway = WebGateway(cfg, bus=bus)
         old = web.get_web_gateway()
         web.set_web_gateway(gateway)

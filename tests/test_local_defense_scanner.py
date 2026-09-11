@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from core.local_defense_scanner import list_scan_reports, read_scan_report, save_scan_report, scan_folder
+from _cli_source import cli_source
+
+from core.local_defense_scanner import read_scan_report, save_scan_report, scan_folder
 
 
 def test_local_folder_defensive_scan_reports_indicators_without_contents(tmp_path):
@@ -41,7 +43,9 @@ def test_save_scan_report_returns_artifact_metadata_without_required_deps(tmp_pa
 
 
 def test_local_defense_report_reader_rejects_path_traversal(tmp_path):
-    saved = save_scan_report({"markdown": "# Local folder defensive scan\n", "root": str(tmp_path)}, output_dir=str(tmp_path / "reports"))
+    saved = save_scan_report(
+        {"markdown": "# Local folder defensive scan\n", "root": str(tmp_path)}, output_dir=str(tmp_path / "reports")
+    )
     assert Path(saved["path"]).exists()
     assert read_scan_report("../../etc/passwd")["success"] is False
 
@@ -59,10 +63,10 @@ def test_tool_registry_discovers_local_defense_tool_statically():
 
 def test_gateway_cli_and_dashboard_expose_local_defense_scan():
     routes = Path("gateway/routes_subsystems.py").read_text(encoding="utf-8")
-    cli = Path("hermus.py").read_text(encoding="utf-8")
+    cli = cli_source()
     dash = Path("gateway/control.html").read_text(encoding="utf-8")
     assert '@router.post("/local-defense/scan")' in routes
-    assert "_permission_guard(\"local_folder_defensive_scan\"" in routes
+    assert '_permission_guard("local_folder_defensive_scan"' in routes
     assert 'safety_sub.add_parser("scan-folder"' in cli
     assert "--save-report" in cli and "--mission-id" in cli
     assert "permission check failed closed" in cli
@@ -73,6 +77,9 @@ def test_gateway_cli_and_dashboard_expose_local_defense_scan():
 
 
 def test_preflight_uses_dedicated_local_defense_scanner():
+    import re
+
     src = Path("core/autonomy_preflight.py").read_text(encoding="utf-8")
-    assert 'add("local_folder_defensive_scan"' in src
+    # Tolerate the formatter splitting the add(...) call across lines.
+    assert re.search(r'add\(\s*"local_folder_defensive_scan"', src)
     assert "Read-only defensive local folder scan" in src

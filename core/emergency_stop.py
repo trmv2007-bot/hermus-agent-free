@@ -4,13 +4,14 @@ This is the small central brake that other subsystems can consult before doing
 risky work. It is deliberately dependency-free and persists outside the repo in
 Hermus workspace runtime state.
 """
+
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -48,7 +49,9 @@ class EmergencyStop:
         return self.state().active
 
     def activate(self, reason: str = "", *, set_by: str = "user") -> dict[str, Any]:
-        state = EmergencyStopState(active=True, reason=reason or "manual emergency stop", set_by=set_by or "user", updated_at=_now())
+        state = EmergencyStopState(
+            active=True, reason=reason or "manual emergency stop", set_by=set_by or "user", updated_at=_now()
+        )
         self._write(state)
         self._publish("emergency.stop.activated", state)
         return {"success": True, "state": state.to_dict()}
@@ -69,15 +72,17 @@ class EmergencyStop:
             from .contracts import Actor, CommandSource, CommandStatus, EventEnvelope, EventType
             from .events import get_bus
 
-            get_bus().publish(EventEnvelope(
-                actor=Actor.SYSTEM.value,
-                source=CommandSource.INTERNAL.value,
-                type=EventType.STATE_CHANGED.value,
-                command=command,
-                target="emergency_stop",
-                args_redacted=state.to_dict(),
-                status=CommandStatus.SUCCEEDED.value,
-            ))
+            get_bus().publish(
+                EventEnvelope(
+                    actor=Actor.SYSTEM.value,
+                    source=CommandSource.INTERNAL.value,
+                    type=EventType.STATE_CHANGED.value,
+                    command=command,
+                    target="emergency_stop",
+                    args_redacted=state.to_dict(),
+                    status=CommandStatus.SUCCEEDED.value,
+                )
+            )
         except Exception:
             pass
 
@@ -86,10 +91,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_emergency_stop: Optional[EmergencyStop] = None
+_emergency_stop: EmergencyStop | None = None
 
 
-def get_emergency_stop(path: Optional[Path] = None) -> EmergencyStop:
+def get_emergency_stop(path: Path | None = None) -> EmergencyStop:
     global _emergency_stop
     if path is not None:
         return EmergencyStop(path)

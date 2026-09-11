@@ -1,5 +1,6 @@
 """Management endpoints: API key CRUD, custom APIs, response-time testing,
 updater, and the plugin registry."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -12,8 +13,9 @@ router = APIRouter()
 async def keys_list():
     """List API keys - redacted preview + health/models metadata for dashboard"""
     try:
-        from core.multi_key import multi_key_manager
         from core.custom_api import custom_api_manager
+        from core.multi_key import multi_key_manager
+
         # Prefer rich redacted listing from multi_key manager
         redacted = multi_key_manager.list_keys(redact=True)
         llm_raw = multi_key_manager.list_keys(redact=False)
@@ -23,15 +25,19 @@ async def keys_list():
         custom_redacted = []
         for api in custom_apis:
             token = api.get("auth", {}).get("token") or api.get("auth", {}).get("value") or ""
-            custom_redacted.append({
-                "name": api["name"],
-                "description": api.get("description", ""),
-                "url": api.get("url", ""),
-                "method": api.get("method", "GET"),
-                "preview": f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else ("no-token" if not token else "****"),
-                "id": api.get("id", ""),
-                "created": api.get("created", ""),
-            })
+            custom_redacted.append(
+                {
+                    "name": api["name"],
+                    "description": api.get("description", ""),
+                    "url": api.get("url", ""),
+                    "method": api.get("method", "GET"),
+                    "preview": f"{token[:6]}...{token[-4:]}"
+                    if token and len(token) > 10
+                    else ("no-token" if not token else "****"),
+                    "id": api.get("id", ""),
+                    "created": api.get("created", ""),
+                }
+            )
 
         return {
             "llm_keys": redacted,
@@ -44,11 +50,13 @@ async def keys_list():
     except Exception as e:
         return {"error": str(e)}
 
+
 @router.get("/remote/pairing-info")
 async def remote_pairing_info():
     """Returns dynamic network addresses and Tailscale pairing status for Step 2 setup."""
     try:
         from core.tailscale import get_pairing_info
+
         return JSONResponse(get_pairing_info())
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -59,6 +67,7 @@ async def keys_auto_provision_free():
     """Autonomously discover and register free AI models & local engines."""
     try:
         from core.free_keys import discover_and_provision_free_models
+
         res = discover_and_provision_free_models(auto_register=True)
         return JSONResponse(res)
     except Exception as e:
@@ -70,6 +79,7 @@ async def keys_add(payload: dict):
     """Add ANY AI API key — auto health + model discovery"""
     try:
         from core.multi_key import multi_key_manager
+
         provider = payload.get("provider", "groq")
         key = payload.get("key") or payload.get("api_key") or payload.get("token")
         name = payload.get("name")
@@ -90,11 +100,13 @@ async def keys_add(payload: dict):
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+
 @router.post("/keys/remove")
 async def keys_remove(payload: dict):
     """Remove API key via Settings"""
     try:
         from core.multi_key import multi_key_manager
+
         provider = payload.get("provider")
         key = payload.get("key") or payload.get("name")
         if not provider or not key:
@@ -104,31 +116,37 @@ async def keys_remove(payload: dict):
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+
 @router.post("/custom-apis/add")
 async def custom_apis_add(payload: dict):
     """Add custom API via Settings panel - free"""
     try:
         from core.custom_api import custom_api_manager
+
         result = custom_api_manager.add_api(payload)
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
 
 @router.get("/custom-apis/list")
 async def custom_apis_list():
     """List custom APIs"""
     try:
         from core.custom_api import custom_api_manager
+
         apis = custom_api_manager.list_apis()
         return {"custom_apis": apis, "count": len(apis)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @router.post("/custom-apis/remove")
 async def custom_apis_remove(payload: dict):
     """Remove custom API by name or id - for Settings panel add API key in settings"""
     try:
         from core.custom_api import custom_api_manager
+
         name = payload.get("name")
         api_id = payload.get("id")
         # Try by id first, then name
@@ -143,22 +161,26 @@ async def custom_apis_remove(payload: dict):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @router.get("/response-times")
 async def response_times_list():
     """Get response time history - for Settings panel response test"""
     try:
         from core.response_tester import response_tester
+
         history = response_tester.get_history(limit=50)
         stats = response_tester.get_stats()
         return {"history": history, "stats": stats}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @router.post("/response-times/test")
 async def response_times_test(payload: dict):
     """Test response time for API key - how much time does API key take to get response from AI model - free"""
     try:
         from core.response_tester import response_tester
+
         provider = payload.get("provider", "groq")
         api_key = payload.get("api_key") or payload.get("key")
         model = payload.get("model")
@@ -171,6 +193,7 @@ async def response_times_test(payload: dict):
             if isinstance(test_args, str):
                 try:
                     import json
+
                     test_args = json.loads(test_args)
                 except Exception:
                     test_args = {}
@@ -193,48 +216,55 @@ async def response_times_test(payload: dict):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @router.get("/update/check")
 async def update_check():
     """Check if update available from GitHub - shows update in dashboard and CLI too - free"""
     try:
         from core.updater import get_updater_for_current_repo
+
         updater = get_updater_for_current_repo()
         result = updater.check_for_updates()
         return result
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @router.post("/update/pull")
 async def update_pull():
     """Update from GitHub via git pull + pip install - like hermes update - free - shows update in dashboard and CLI"""
     try:
         from core.updater import get_updater_for_current_repo
+
         updater = get_updater_for_current_repo()
         result = updater.update()
         return result
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @router.get("/update/local")
 async def update_local():
     """Get local commit info"""
     try:
         from core.updater import get_updater_for_current_repo
+
         updater = get_updater_for_current_repo()
         return updater.get_local_commit()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @router.get("/update/remote")
 async def update_remote():
     """Get remote commit info from GitHub API free"""
     try:
         from core.updater import get_updater_for_current_repo
+
         updater = get_updater_for_current_repo()
         return updater.get_remote_commit()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
 
 
 @router.get("/plugins")
@@ -262,7 +292,7 @@ async def plugins_reload():
 async def plugins_invoke(payload: dict = None):
     """Invoke a plugin-registered tool by name with keyword arguments."""
     payload = payload or {}
-    from core.plugins import plugin_registry, PluginError
+    from core.plugins import PluginError, plugin_registry
 
     name = str(payload.get("tool", ""))
     kwargs = dict(payload.get("args") or {})

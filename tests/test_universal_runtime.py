@@ -12,11 +12,11 @@ Covers:
   * step budgets scale with HERMUS_MAX_TOOL_STEPS (no hidden 12-step cap)
   * SWE coder phase is agent-backed with diff-grounded file evidence
 """
+
 from __future__ import annotations
 
 import io
 import json
-import pathlib
 import time
 import zipfile
 
@@ -42,13 +42,11 @@ def test_classify_request_chat_vs_mission():
     assert classify_request("what is the capital of France?") == "chat"
     assert classify_request("summarize this paragraph for me") == "chat"
     # goal-like, deliverable-shaped requests become missions
-    assert classify_request(
-        "Build a complete web app with user auth and tests, and keep going until it works"
-    ) == "mission"
-    assert classify_request(
-        "Write a script that scrapes prices daily, stores them in sqlite, "
-        "and then run it to verify the output"
-    ) == "mission"
+    assert classify_request("Build a complete web app with user auth and tests, and keep going until it works") == "mission"
+    assert (
+        classify_request("Write a script that scrapes prices daily, stores them in sqlite, and then run it to verify the output")
+        == "mission"
+    )
     # explicit markers always win
     assert classify_request("mission: tidy up my notes") == "mission"
     assert classify_request("do this autonomously please") == "mission"
@@ -61,9 +59,7 @@ def test_mission_auto_classify_flag_disables_promotion():
     old = config.mission_auto_classify
     config.mission_auto_classify = False
     try:
-        assert runtime.classify_request(
-            "Build a complete web app with user auth and tests for our team"
-        ) == "chat"
+        assert runtime.classify_request("Build a complete web app with user auth and tests for our team") == "chat"
         # explicit markers still promote
         assert runtime.classify_request("mission: tidy up my notes") == "mission"
     finally:
@@ -122,8 +118,7 @@ class _FakeNode:
 class _FakeAgent:
     """Agent stand-in with a scripted chat result and non-mock provider."""
 
-    def __init__(self, response="Here is how authentication should be implemented...",
-                 tool_calls=None):
+    def __init__(self, response="Here is how authentication should be implemented...", tool_calls=None):
         self._response = response
         self._tool_calls = tool_calls or []
         self.prompts = []
@@ -147,8 +142,7 @@ class _FakeAgent:
 def no_file_scan(monkeypatch):
     """Deterministic evidence: control the changed-files signal in tests."""
     changed = {"files": []}
-    monkeypatch.setattr("core.mission._scan_changed_files",
-                        lambda since_ts, roots=None: changed["files"])
+    monkeypatch.setattr("core.mission._scan_changed_files", lambda since_ts, roots=None: changed["files"])
     return changed
 
 
@@ -156,9 +150,7 @@ def test_executor_rejects_description_without_work(no_file_scan):
     """A coder node that only *describes* the work must NOT be successful."""
     from core.mission import make_agent_backed_executor
 
-    describer = _FakeAgent(
-        response="Authentication should use JWT tokens with a refresh rotation policy..."
-    )
+    describer = _FakeAgent(response="Authentication should use JWT tokens with a refresh rotation policy...")
     executor = make_agent_backed_executor(agent=describer)
     result = executor(_FakeNode(role="coder", goal="Implement authentication"), {})
 
@@ -360,10 +352,16 @@ def test_command_async_submits_runtime_turn(client):
     """The dashboard path: async:true → job handle → executed by the queue."""
     import time as _time
 
-    r = client.post("/command", json={
-        "text": "hello queue-first world", "user_id": "rt1", "platform": "dashboard",
-        "async": True, "stream": True,
-    })
+    r = client.post(
+        "/command",
+        json={
+            "text": "hello queue-first world",
+            "user_id": "rt1",
+            "platform": "dashboard",
+            "async": True,
+            "stream": True,
+        },
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["async"] is True
@@ -393,15 +391,21 @@ def test_command_async_mission_autonomous(client):
     """/command?autonomous=true&async=true runs the mission runtime via the queue."""
     import time as _time
 
-    r = client.post("/command", json={
-        "text": "mission: build a tiny tool and verify it", "user_id": "rt2",
-        "platform": "dashboard", "autonomous": True, "async": True,
-        # the autonomy control-plane pre-flight will (correctly) ask for an
-        # approval before execution; this test is specifically checking the
-        # honest no-model-backend blocker, so it deliberately opts out of
-        # the approval pre-flight for this offline/mock run.
-        "preflight": False,
-    })
+    r = client.post(
+        "/command",
+        json={
+            "text": "mission: build a tiny tool and verify it",
+            "user_id": "rt2",
+            "platform": "dashboard",
+            "autonomous": True,
+            "async": True,
+            # the autonomy control-plane pre-flight will (correctly) ask for an
+            # approval before execution; this test is specifically checking the
+            # honest no-model-backend blocker, so it deliberately opts out of
+            # the approval pre-flight for this offline/mock run.
+            "preflight": False,
+        },
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["async"] is True
@@ -444,16 +448,14 @@ def test_document_ingest_extracts_office_and_archives():
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("content.xml",
-                   "<office:body><text:p><text:span>ODT_MARKER body</text:span></text:p></office:body>")
+        z.writestr("content.xml", "<office:body><text:p><text:span>ODT_MARKER body</text:span></text:p></office:body>")
     d = extract_document("doc.odt", buf.getvalue())
     assert "ODT_MARKER" in (d.text or "")
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("xl/sharedStrings.xml", "<sst><si><t>alpha</t></si></sst>")
-        z.writestr("xl/worksheets/sheet1.xml",
-                   '<sheetData><row><c t="s"><v>0</v></c><c><v>7</v></c></row></sheetData>')
+        z.writestr("xl/worksheets/sheet1.xml", '<sheetData><row><c t="s"><v>0</v></c><c><v>7</v></c></row></sheetData>')
     d = extract_document("sheet.xlsx", buf.getvalue())
     assert "alpha" in (d.text or "")
 
@@ -492,7 +494,13 @@ def test_command_binary_attachment_extracted_into_prompt(client):
     original = gw.get_agent_for_user
     gw.get_agent_for_user = lambda *a, **k: FakeAgent()
     try:
-        files = {"files": ("notes.docx", _docx_bytes("MKR_DOCX_MARKER answer"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+        files = {
+            "files": (
+                "notes.docx",
+                _docx_bytes("MKR_DOCX_MARKER answer"),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        }
         data = {"platform": "dashboard", "user_id": "attach-bin", "text": "Summarize this"}
         resp = client.post("/command", data=data, files=files)
         assert resp.status_code == 200, resp.text[:400]
@@ -517,8 +525,16 @@ def test_record_issue_is_structured_and_streamed():
     events = []
     unsub = run_bus.add_sink(lambda r, e: events.append(e) if r == rid else None)
     try:
-        d = record_issue("memory", "recall", "db locked", error_type="OperationalError",
-                         run_id=rid, step=3, retryable=True, fallback="continued without memory")
+        d = record_issue(
+            "memory",
+            "recall",
+            "db locked",
+            error_type="OperationalError",
+            run_id=rid,
+            step=3,
+            retryable=True,
+            fallback="continued without memory",
+        )
         assert d["component"] == "memory"
         assert d["operation"] == "recall"
         assert d["step"] == 3
@@ -562,9 +578,11 @@ def test_step_budgets_scale_with_config():
     config.step_budget_full = False
     config.chat_max_steps = 2
     try:
-        hard = ("Build a full-stack web application with authentication, a database, "
-                "a test suite, and deployment scripts. Keep going until it works, "
-                "fixing every error you find along the way.")
+        hard = (
+            "Build a full-stack web application with authentication, a database, "
+            "a test suite, and deployment scripts. Keep going until it works, "
+            "fixing every error you find along the way."
+        )
         budget = governor.step_budget(hard, mode="agent")
         assert budget > 12, f"difficulty-5 tasks must exceed the old fixed cap (got {budget})"
         assert budget <= 32
@@ -589,8 +607,12 @@ def test_swe_coder_phase_is_agent_backed(tmp_path, no_file_scan):
         def chat(self, prompt, **kwargs):
             self.prompts.append(prompt)
             (root / "app.py").write_text("print('implemented')\n")
-            return {"response": "created app.py", "tool_calls": ["file_write"],
-                    "tool_results": [{"tool": "file_write"}], "steps": 1}
+            return {
+                "response": "created app.py",
+                "tool_calls": ["file_write"],
+                "tool_results": [{"tool": "file_write"}],
+                "steps": 1,
+            }
 
     swe = SoftwareEngineerMode(workspace_root=root)
     res = swe.execute(

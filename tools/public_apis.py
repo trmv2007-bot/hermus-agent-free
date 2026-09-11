@@ -9,27 +9,24 @@ register it as an executable custom tool.
 A bundled snapshot keeps discovery fast and available offline.  Users can
 explicitly refresh a runtime cache from GitHub without changing tracked files.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import re
 import tempfile
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Iterable
+from typing import Any
 from urllib.request import Request, urlopen
 
 from core.config import config
 
 SOURCE_REPO = "https://github.com/public-apis/public-apis"
-SOURCE_README = (
-    "https://raw.githubusercontent.com/public-apis/public-apis/master/README.md"
-)
-SOURCE_CONTENTS_API = (
-    "https://api.github.com/repos/public-apis/public-apis/contents/README.md?ref=master"
-)
+SOURCE_README = "https://raw.githubusercontent.com/public-apis/public-apis/master/README.md"
+SOURCE_CONTENTS_API = "https://api.github.com/repos/public-apis/public-apis/contents/README.md?ref=master"
 BUNDLED_CATALOG = config.base_dir / "resources" / "public_apis_catalog.json"
 RUNTIME_CACHE = config.resolve_path("data/public_apis_catalog_cache.json")
 
@@ -95,7 +92,7 @@ def build_catalog_payload(
     entries: Iterable[dict[str, str]],
     *,
     source_commit: str = "",
-    generated_at: Optional[str] = None,
+    generated_at: str | None = None,
 ) -> dict[str, Any]:
     apis = list(entries)
     categories = sorted({item["category"] for item in apis}, key=str.casefold)
@@ -104,8 +101,7 @@ def build_catalog_payload(
         "source": SOURCE_REPO,
         "source_readme": SOURCE_README,
         "source_commit": source_commit,
-        "generated_at": generated_at
-        or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "license": "MIT; Copyright (c) 2022 public-apis",
         "api_count": len(apis),
         "categories": categories,
@@ -127,18 +123,18 @@ class PublicAPICatalog:
 
     def __init__(
         self,
-        bundled_path: Optional[Path] = None,
-        cache_path: Optional[Path] = None,
+        bundled_path: Path | None = None,
+        cache_path: Path | None = None,
         source_url: str = SOURCE_README,
     ):
         self.bundled_path = Path(bundled_path or BUNDLED_CATALOG)
         self.cache_path = Path(cache_path or RUNTIME_CACHE)
         self.source_url = source_url
-        self._payload: Optional[dict[str, Any]] = None
+        self._payload: dict[str, Any] | None = None
         self._loaded_from = ""
 
     @staticmethod
-    def _read_json(path: Path) -> Optional[dict[str, Any]]:
+    def _read_json(path: Path) -> dict[str, Any] | None:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             return payload if _valid_payload(payload) else None
@@ -187,34 +183,25 @@ class PublicAPICatalog:
                             "User-Agent": "Hermus-Agent-Free public-api-catalog",
                         },
                     )
-                    with urlopen(
-                        request, timeout=max(1, min(int(timeout), 60))
-                    ) as response:
+                    with urlopen(request, timeout=max(1, min(int(timeout), 60))) as response:
                         # The upstream README is currently well below 1 MB.
                         # Bound the download so a bad endpoint cannot fill memory.
                         raw = response.read(5_000_001)
                         if len(raw) > 5_000_000:
-                            raise ValueError(
-                                "Catalog response exceeded the 5 MB safety limit"
-                            )
+                            raise ValueError("Catalog response exceeded the 5 MB safety limit")
                         charset = response.headers.get_content_charset() or "utf-8"
                         markdown = raw.decode(charset, errors="replace")
                     candidate_entries = parse_public_apis_markdown(markdown)
                     # A tiny result usually means GitHub returned an error or
                     # the upstream format changed. Try the alternate source.
                     if len(candidate_entries) < 100:
-                        raise ValueError(
-                            f"Only parsed {len(candidate_entries)} entries"
-                        )
+                        raise ValueError(f"Only parsed {len(candidate_entries)} entries")
                     entries = candidate_entries
                     break
                 except Exception as download_exc:
                     download_errors.append(f"{url}: {download_exc}")
             if not entries:
-                raise RuntimeError(
-                    "; ".join(download_errors)
-                    + "; refusing to replace the existing catalog"
-                )
+                raise RuntimeError("; ".join(download_errors) + "; refusing to replace the existing catalog")
 
             payload = build_catalog_payload(entries)
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,8 +324,7 @@ class PublicAPICatalog:
             result = dict(item)
             result["relevance"] = score
             result["usage_note"] = (
-                "Documentation URL only. Verify the provider's terms and endpoint "
-                "before registering it with `hermus api add`."
+                "Documentation URL only. Verify the provider's terms and endpoint before registering it with `hermus api add`."
             )
             results.append(result)
 
@@ -380,10 +366,7 @@ class PublicAPICatalog:
             stats["https"] += int(item.get("https") == "Yes")
             stats["cors_yes"] += int(item.get("cors") == "Yes")
 
-        categories = [
-            {"category": name, **stats}
-            for name, stats in sorted(counts.items(), key=lambda pair: pair[0].casefold())
-        ]
+        categories = [{"category": name, **stats} for name, stats in sorted(counts.items(), key=lambda pair: pair[0].casefold())]
         return {
             "success": True,
             "count": len(categories),

@@ -17,13 +17,14 @@ Storage:
   data/counsel/upgrade_log.json         (audit trail with before/after)
   data/counsel/pending_amendments.json  (awaiting approval)
 """
+
 from __future__ import annotations
 
 import json
 import shutil
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from ..config import config
 
@@ -31,12 +32,12 @@ DEFAULT_CONSTITUTION: dict[str, Any] = {
     "version": 1,
     "name": "Hermus Council Constitution v1",
     "rules": {
-        "critic_must_attach_evidence": True,   # critic must state an objection or explicit approval
+        "critic_must_attach_evidence": True,  # critic must state an objection or explicit approval
         "judge_scores_out_of": 10,
-        "tie_break": "chair",                  # chair breaks ties with evidence
-        "quorum": 0.6,                         # fraction of members needed to vote
-        "reconvene_on_failures": 2,            # tool failures before mini-reconvene
-        "max_replans": 2,                      # council may replan at most this many times
+        "tie_break": "chair",  # chair breaks ties with evidence
+        "quorum": 0.6,  # fraction of members needed to vote
+        "reconvene_on_failures": 2,  # tool failures before mini-reconvene
+        "max_replans": 2,  # council may replan at most this many times
     },
     "budget": {
         "max_members": 6,
@@ -109,7 +110,7 @@ DEFAULT_CONSTITUTION: dict[str, Any] = {
 class ConstitutionManager:
     """Versioned, self-upgradable constitution for the Council."""
 
-    def __init__(self, path: Optional[str] = None):
+    def __init__(self, path: str | None = None):
         self.path = config.resolve_path(path or "data/counsel/constitution.json")
         self.dir = self.path.parent
         self.log_path = self.dir / "upgrade_log.json"
@@ -176,7 +177,7 @@ class ConstitutionManager:
     ALLOWED_TARGETS = ("member_prompt", "rule", "budget", "strategy")
     LOW_RISK_TARGETS = ("member_prompt", "strategy")
 
-    def validate_amendment(self, a: dict) -> Optional[str]:
+    def validate_amendment(self, a: dict) -> str | None:
         """Return an error string if the amendment is invalid, else None."""
         if not isinstance(a, dict):
             return "amendment must be an object"
@@ -231,7 +232,6 @@ class ConstitutionManager:
         if target == "member_prompt":
             for m in doc["members"]:
                 if m["role"] == amendment["member"]:
-                    old_prompt = m.get("persona", "")
                     m["persona"] = amendment["change"]
                     break
         elif target == "rule":
@@ -282,9 +282,7 @@ class ConstitutionManager:
         doc = json.loads(snap.read_text())
         doc["version"] = version
         self.save(doc, log=True, reason=f"rollback to v{version}")
-        self._append_log(
-            {"event": "rollback", "to_version": version, "timestamp": datetime.now().isoformat()}
-        )
+        self._append_log({"event": "rollback", "to_version": version, "timestamp": datetime.now().isoformat()})
         return {"success": True, "version": version}
 
     # ---------- pending amendments (human approval for high-risk) ----------
@@ -316,7 +314,11 @@ class ConstitutionManager:
         pending = self._load_pending()
         # dedupe: same target+change text
         for p in pending:
-            if p.get("status") == "pending" and p.get("change") == amendment.get("change") and p.get("target") == amendment.get("target"):
+            if (
+                p.get("status") == "pending"
+                and p.get("change") == amendment.get("change")
+                and p.get("target") == amendment.get("target")
+            ):
                 return {"success": False, "error": "duplicate pending amendment", "amendment": p}
         amendment["status"] = "pending"
         pending.append(amendment)
@@ -351,6 +353,7 @@ class ConstitutionManager:
     def diff(self, amendment_id: str) -> dict:
         """Return a unified diff showing how the pending amendment would modify the constitution."""
         import difflib
+
         items = self._load_pending()
         amendment = next((p for p in items if p.get("id") == amendment_id), None)
         if not amendment:
@@ -376,7 +379,14 @@ class ConstitutionManager:
 
         curr_lines = json.dumps(current, indent=2).splitlines(keepends=True)
         sim_lines = json.dumps(simulated, indent=2).splitlines(keepends=True)
-        diff_text = "".join(difflib.unified_diff(curr_lines, sim_lines, fromfile=f"constitution_v{current.get('version', 1)}.json", tofile=f"constitution_v{simulated['version']}_proposed.json"))
+        diff_text = "".join(
+            difflib.unified_diff(
+                curr_lines,
+                sim_lines,
+                fromfile=f"constitution_v{current.get('version', 1)}.json",
+                tofile=f"constitution_v{simulated['version']}_proposed.json",
+            )
+        )
         return {"success": True, "amendment_id": amendment_id, "diff": diff_text, "amendment": amendment}
 
     # ---------- convenience ----------

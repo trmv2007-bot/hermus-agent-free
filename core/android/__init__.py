@@ -11,21 +11,31 @@ Status: the backend boundary + permission/audit/consent layers are implemented a
 unit/integration tested. Device/emulator **E2E requires a live Android device +
 the companion app and is UNTESTED here** — it is never reported as WORKING on mocks.
 """
-from .permissions import (AndroidPermissionManager, OP_CLASSES, PermissionDenied,
-                          get_permission_manager)
-from .secure import (new_pairing_secret, pairing_challenge, pairing_response,
-                     verify_pairing, verify, sign)
+
+from .audit import read_log, record
+from .permissions import OP_CLASSES, AndroidPermissionManager, PermissionDenied, get_permission_manager
+from .secure import new_pairing_secret, pairing_challenge, pairing_response, sign, verify, verify_pairing
 from .tool import AndroidTool, get_android_tool
-from .transport import (AdbAndroidTransport, AndroidTransport, AndroidUnavailable,
-                        BridgeAndroidTransport, detect_capability)
-from .audit import record, read_log
+from .transport import AdbAndroidTransport, AndroidTransport, AndroidUnavailable, BridgeAndroidTransport, detect_capability
 
 __all__ = [
-    "AndroidTool", "get_android_tool",
-    "AndroidTransport", "AdbAndroidTransport", "BridgeAndroidTransport",
-    "AndroidUnavailable", "detect_capability",
-    "AndroidPermissionManager", "PermissionDenied", "OP_CLASSES", "get_permission_manager",
-    "new_pairing_secret", "pairing_challenge", "pairing_response", "verify_pairing",
-    "sign", "verify",
-    "record", "read_log",
+    "AndroidTool",
+    "get_android_tool",
+    "AndroidTransport",
+    "AdbAndroidTransport",
+    "BridgeAndroidTransport",
+    "AndroidUnavailable",
+    "detect_capability",
+    "AndroidPermissionManager",
+    "PermissionDenied",
+    "OP_CLASSES",
+    "get_permission_manager",
+    "new_pairing_secret",
+    "pairing_challenge",
+    "pairing_response",
+    "verify_pairing",
+    "sign",
+    "verify",
+    "record",
+    "read_log",
 ]

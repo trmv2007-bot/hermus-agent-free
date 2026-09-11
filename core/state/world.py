@@ -22,7 +22,7 @@ import json
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 FACADE_V2 = "v1"  # canonical == the live V1 WorldState
 
@@ -44,7 +44,7 @@ def create_world_state(**kwargs: Any) -> Any:
     return _backend()(**kwargs)
 
 
-def world_state_from_dict(data: Optional[dict[str, Any]]) -> Any:
+def world_state_from_dict(data: dict[str, Any] | None) -> Any:
     """Rebuild a world state from a checkpoint snapshot."""
     return _backend().from_dict(data)
 
@@ -57,8 +57,7 @@ def load_world_state(path: str, *, strict: bool = False) -> Any:
 class WorldStateFacade:
     """One canonical world-state API over core.computer.world_state.WorldState."""
 
-    def __init__(self, state: Any = None, *, canonical: str = FACADE_V2,
-                 state_path: Optional[str] = None):
+    def __init__(self, state: Any = None, *, canonical: str = FACADE_V2, state_path: str | None = None):
         if state is None:
             if state_path and Path(state_path).exists():
                 state = load_world_state(state_path)
@@ -101,11 +100,11 @@ class WorldStateFacade:
     def to_dict(self, *args, **kw) -> dict[str, Any]:
         return self._state.to_dict(*args, **kw)
 
-    def from_dict(self, data: dict[str, Any]) -> "WorldStateFacade":
+    def from_dict(self, data: dict[str, Any]) -> WorldStateFacade:
         self._state = type(self._state).from_dict(data)
         return self
 
-    def load(self, path: str, *, strict: bool = False) -> "WorldStateFacade":
+    def load(self, path: str, *, strict: bool = False) -> WorldStateFacade:
         self._state = type(self._state).load(path, strict=strict)
         return self
 
@@ -114,11 +113,11 @@ class WorldStateFacade:
 
     # -- convenience properties ---------------------------------------------------
     @property
-    def active_application(self) -> Optional[str]:
+    def active_application(self) -> str | None:
         return getattr(self._state, "active_application", None)
 
     @property
-    def active_window(self) -> Optional[str]:
+    def active_window(self) -> str | None:
         return getattr(self._state, "active_window", None)
 
     @property
@@ -154,7 +153,7 @@ class WorldStateFacade:
         return str(getattr(self._state, "timestamp", ""))
 
 
-_world: Optional[WorldStateFacade] = None
+_world: WorldStateFacade | None = None
 _world_lock = threading.Lock()
 
 
@@ -172,10 +171,14 @@ def detect_legacy(path: str) -> bool:
     return Path(path).expanduser().is_file()
 
 
-def migrate_world_state(legacy_path: str, *, dry_run: bool = False,
-                        marker_path: Optional[str] = None,
-                        out_path: Optional[str] = None,
-                        allow_corrupt: bool = False) -> dict[str, Any]:
+def migrate_world_state(
+    legacy_path: str,
+    *,
+    dry_run: bool = False,
+    marker_path: str | None = None,
+    out_path: str | None = None,
+    allow_corrupt: bool = False,
+) -> dict[str, Any]:
     """Validate/load a world-state file into the canonical V1 schema.
 
     V1 ``WorldState`` is canonical, so this is a load + integrity check rather
@@ -193,7 +196,7 @@ def migrate_world_state(legacy_path: str, *, dry_run: bool = False,
     if not p.is_file():
         return {"success": False, "error": f"world-state {p} not found"}
 
-    corrupt_reason: Optional[str] = None
+    corrupt_reason: str | None = None
     try:
         state = load_world_state(str(p), strict=True)
     except Exception as exc:
@@ -202,19 +205,24 @@ def migrate_world_state(legacy_path: str, *, dry_run: bool = False,
                 "success": False,
                 "corrupt": True,
                 "error": f"world-state {p} is unreadable: {exc}",
-                "hint": ("re-run with allow_corrupt=True to write a canonical "
-                         "snapshot (the original is backed up, not overwritten)"),
+                "hint": (
+                    "re-run with allow_corrupt=True to write a canonical snapshot (the original is backed up, not overwritten)"
+                ),
             }
         corrupt_reason = str(exc)
         state = create_world_state()
 
     if dry_run:
-        return {"success": True, "dry_run": True, "corrupt": corrupt_reason is not None,
-                "keys": list(state.to_dict().keys()),
-                "revision": state.revision}
+        return {
+            "success": True,
+            "dry_run": True,
+            "corrupt": corrupt_reason is not None,
+            "keys": list(state.to_dict().keys()),
+            "revision": state.revision,
+        }
 
     out = Path(out_path).expanduser() if out_path else p
-    backup: Optional[str] = None
+    backup: str | None = None
     if corrupt_reason is not None and out.resolve() == p.resolve():
         stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
         backup_path = p.with_name(f"{p.name}.corrupt.{stamp}.bak")
@@ -234,12 +242,18 @@ def migrate_world_state(legacy_path: str, *, dry_run: bool = False,
     if marker_path:
         marker = Path(marker_path).expanduser()
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(json.dumps({
-            "migrated_at": datetime.now().astimezone().isoformat(),
-            "source": str(p),
-            "written": str(out),
-            "revision": state.revision,
-            "corrupt": corrupt_reason is not None,
-        }, indent=2), encoding="utf-8")
+        marker.write_text(
+            json.dumps(
+                {
+                    "migrated_at": datetime.now().astimezone().isoformat(),
+                    "source": str(p),
+                    "written": str(out),
+                    "revision": state.revision,
+                    "corrupt": corrupt_reason is not None,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         result["marker"] = str(marker)
     return result

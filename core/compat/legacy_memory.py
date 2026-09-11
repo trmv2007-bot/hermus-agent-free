@@ -1,12 +1,19 @@
 """Memory - SQLite FTS5 free, no vector DB cost, plus curated memory, nudges, user modeling (free Honcho alternative)"""
-import sqlite3
+
 import json
+import sqlite3
 import threading
 from contextlib import contextmanager
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
+
+from core.log import get_logger
+
 from ..config import config
+
+logger = get_logger(__name__)
+
 
 class Memory:
     """Free memory system: SQLite FTS5 for session search + curated memory + nudges + user model"""
@@ -179,7 +186,16 @@ class Memory:
         """)
         conn.commit()
 
-    def add_session_message(self, session_id: str, role: str, content: str, tool_calls: list[dict] = None, metadata: dict = None, project: str = None, tag: dict = None):
+    def add_session_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        tool_calls: list[dict] = None,
+        metadata: dict = None,
+        project: str = None,
+        tag: dict = None,
+    ):
         """Add message to session + FTS index.
 
         Phase 4: `project` scopes messages to a project (P4); `tag` attaches
@@ -188,14 +204,28 @@ class Memory:
         project = project or getattr(config, "project", "default")
         with self._write_txn() as conn:
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO sessions (session_id, timestamp, role, content, tool_calls, metadata, project)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, datetime.now().isoformat(), role, content, json.dumps(tool_calls or []), json.dumps(metadata or {}), project))
+            """,
+                (
+                    session_id,
+                    datetime.now().isoformat(),
+                    role,
+                    content,
+                    json.dumps(tool_calls or []),
+                    json.dumps(metadata or {}),
+                    project,
+                ),
+            )
             # Add to FTS
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO sessions_fts (content, session_id, role) VALUES (?, ?, ?)
-            """, (content, session_id, role))
+            """,
+                (content, session_id, role),
+            )
 
         # Also log to trajectory file for batch generation (+ Phase 4 tag)
         try:
@@ -222,33 +252,45 @@ class Memory:
         try:
             # FTS5 search with ranking
             if project:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT s.*, rank FROM sessions_fts
                     JOIN sessions s ON s.rowid = sessions_fts.rowid
                     WHERE sessions_fts MATCH ? AND s.project = ?
                     ORDER BY rank
                     LIMIT ?
-                """, (query, project, limit))
+                """,
+                    (query, project, limit),
+                )
             else:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT s.*, rank FROM sessions_fts
                     JOIN sessions s ON s.rowid = sessions_fts.rowid
                     WHERE sessions_fts MATCH ?
                     ORDER BY rank
                     LIMIT ?
-                """, (query, limit))
+                """,
+                    (query, limit),
+                )
             rows = cur.fetchall()
             result = [dict(r) for r in rows]
         except sqlite3.Error:
             # Fallback LIKE search if FTS fails (bad MATCH syntax etc.)
             if project:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT * FROM sessions WHERE content LIKE ? AND project = ? ORDER BY id DESC LIMIT ?
-                """, (f"%{query}%", project, limit))
+                """,
+                    (f"%{query}%", project, limit),
+                )
             else:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT * FROM sessions WHERE content LIKE ? ORDER BY id DESC LIMIT ?
-                """, (f"%{query}%", limit))
+                """,
+                    (f"%{query}%", limit),
+                )
             rows = cur.fetchall()
             result = [dict(r) for r in rows]
         return result
@@ -262,9 +304,13 @@ class Memory:
         # Use free LLM to summarize
         try:
             from ..models import get_model_gateway
+
             messages = [
                 {"role": "system", "content": "You are a memory summarizer. Summarize prior sessions relevant to query."},
-                {"role": "user", "content": f"Query: {query}\n\nPrior sessions:\n{context}\n\nSummarize what is relevant for cross-session recall."}
+                {
+                    "role": "user",
+                    "content": f"Query: {query}\n\nPrior sessions:\n{context}\n\nSummarize what is relevant for cross-session recall.",
+                },
             ]
             resp = get_model_gateway().chat(messages)
             return resp.content
@@ -276,10 +322,13 @@ class Memory:
         """Agent-curated memory - agent decides what to remember"""
         with self._write_txn() as conn:
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT OR REPLACE INTO curated_memory (timestamp, key, value, source_session, importance)
                 VALUES (?, ?, ?, ?, ?)
-            """, (datetime.now().isoformat(), key, value, source_session, importance))
+            """,
+                (datetime.now().isoformat(), key, value, source_session, importance),
+            )
 
     def get_curated_memory(self, limit: int = 20) -> list[dict]:
         cur = self._conn.cursor()
@@ -380,21 +429,24 @@ class Memory:
         try:
             with self._write_txn() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO token_usage (session_id, timestamp, model, prompt_tokens, completion_tokens, total_tokens, cost, is_free)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    session_id,
-                    datetime.now().isoformat(),
-                    usage.get("model",""),
-                    usage.get("prompt_tokens",0),
-                    usage.get("completion_tokens",0),
-                    usage.get("total_tokens",0),
-                    usage.get("total_cost",0.0),
-                    usage.get("is_free",True)
-                ))
+                """,
+                    (
+                        session_id,
+                        datetime.now().isoformat(),
+                        usage.get("model", ""),
+                        usage.get("prompt_tokens", 0),
+                        usage.get("completion_tokens", 0),
+                        usage.get("total_tokens", 0),
+                        usage.get("total_cost", 0.0),
+                        usage.get("is_free", True),
+                    ),
+                )
         except Exception as e:
-            print(f"Token usage tracking failed: {e}")
+            logger.error(f"Token usage tracking failed: {e}")
 
     def get_token_usage(self, session_id: str = None, limit: int = 100) -> dict:
         """Get token usage stats - free"""
@@ -407,7 +459,11 @@ class Memory:
                 cur.execute("SELECT * FROM token_usage ORDER BY id DESC LIMIT ?", (limit,))
             rows = cur.fetchall()
             # Sum totals
-            cur.execute("SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t, SUM(cost) as cost FROM token_usage" + (" WHERE session_id=?" if session_id else ""), (session_id,) if session_id else ())
+            cur.execute(
+                "SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t, SUM(cost) as cost FROM token_usage"
+                + (" WHERE session_id=?" if session_id else ""),
+                (session_id,) if session_id else (),
+            )
             totals = cur.fetchone()
             return {
                 "recent": [dict(r) for r in rows],
@@ -415,12 +471,17 @@ class Memory:
                     "prompt_tokens": totals["p"] or 0,
                     "completion_tokens": totals["c"] or 0,
                     "total_tokens": totals["t"] or 0,
-                    "total_cost": totals["cost"] or 0.0
+                    "total_cost": totals["cost"] or 0.0,
                 },
-                "count": len(rows)
+                "count": len(rows),
             }
         except Exception as e:
-            return {"error": str(e), "recent": [], "totals": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"total_cost":0.0}}
+            return {
+                "error": str(e),
+                "recent": [],
+                "totals": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "total_cost": 0.0},
+            }
+
 
 # Global memory instance
 memory = Memory()

@@ -9,12 +9,13 @@ If no safe repair is available, only the configured original-action retry is
 allowed.  Exhausted, non-retryable, and failed-repair paths terminate with a
 structured reason instead of remaining on the same state until a guard trips.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 from .task_control import get_task_control
 
@@ -28,9 +29,9 @@ class VisualState:
     name: str
     # The visual state that must be true *after* action execution.
     expected: str = ""
-    action: Optional[dict[str, Any]] = None
-    on_success: Optional[str] = None
-    on_failure: Optional[str] = None
+    action: dict[str, Any] | None = None
+    on_success: str | None = None
+    on_failure: str | None = None
     terminal: bool = False
     # Optional visual gate that must be true before executing the action.
     precondition: str = ""
@@ -73,7 +74,7 @@ def dispatch_action(controller: Any, spec: dict[str, Any]) -> dict[str, Any]:
 class _EventTrace(list):
     """List that emits every durable state-machine event as it is appended."""
 
-    def __init__(self, callback: Optional[Callable[[dict[str, Any]], None]] = None):
+    def __init__(self, callback: Callable[[dict[str, Any]], None] | None = None):
         super().__init__()
         self.callback = callback
 
@@ -95,21 +96,20 @@ class VisualStateMachine:
         self,
         controller: Any = None,
         recorder: Any = None,
-        wait_until: Optional[Callable[[str, float], dict[str, Any]]] = None,
-        execute: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
-        verify: Optional[Callable[[Any, Any, str], dict[str, Any]]] = None,
-        repair: Optional[Callable[[str, str, dict[str, Any]], Any]] = None,
+        wait_until: Callable[[str, float], dict[str, Any]] | None = None,
+        execute: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        verify: Callable[[Any, Any, str], dict[str, Any]] | None = None,
+        repair: Callable[[str, str, dict[str, Any]], Any] | None = None,
         max_retries: int = 2,
         world_state: Any = None,
-        on_event: Optional[Callable[[dict[str, Any]], None]] = None,
-        on_telemetry: Optional[Callable[[str, dict[str, Any]], None]] = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_telemetry: Callable[[str, dict[str, Any]], None] | None = None,
     ):
         self.controller = controller
         self.recorder = recorder
         self.wait_until = wait_until or (lambda _condition, _timeout: {"matched": True, "success": True})
         self.execute = execute or (
-            lambda spec: dispatch_action(self.controller, spec)
-            if self.controller else {"ok": False, "error": "no controller"}
+            lambda spec: dispatch_action(self.controller, spec) if self.controller else {"ok": False, "error": "no controller"}
         )
         self.verify = verify or (
             lambda _before, _after, _expected: {
@@ -216,7 +216,9 @@ class VisualStateMachine:
                 "description": f"Wait until: {condition}",
                 "condition": condition,
                 "condition_verified": matched,
-                "detail": result.get("detail") or result.get("error") or ("condition matched" if matched else "condition did not match"),
+                "detail": result.get("detail")
+                or result.get("error")
+                or ("condition matched" if matched else "condition did not match"),
                 "confidence": result.get("confidence", 0.0),
                 "wait_result": result,
                 "ts": _now(),
@@ -290,19 +292,21 @@ class VisualStateMachine:
         action_result: dict[str, Any],
         verification: dict[str, Any],
         reason: str,
-    ) -> tuple[dict[str, Any], Optional[str]]:
+    ) -> tuple[dict[str, Any], str | None]:
         if self.repair is None:
             return self._normalize_repair(None), None
         # Preserve top-level action result fields for old callbacks while adding
         # all structured evidence needed by RepairEngine.create_plan.
         context = dict(action_result)
-        context.update({
-            "state": state.name,
-            "attempt": attempt,
-            "spec": dict(state.action or {}),
-            "result": action_result,
-            "verification": verification,
-        })
+        context.update(
+            {
+                "state": state.name,
+                "attempt": attempt,
+                "spec": dict(state.action or {}),
+                "result": action_result,
+                "verification": verification,
+            }
+        )
         try:
             return self._normalize_repair(self.repair(reason, state.expected, context)), None
         except Exception as exc:  # noqa: BLE001
@@ -321,46 +325,77 @@ class VisualStateMachine:
             name = str(step.get("name") or f"STEP_{index}")
             if not isinstance(action, dict) or not action:
                 reason = f"repair step '{name}' has no executable action"
-                trace.append({
-                    "state": state.name,
+                trace.append(
+                    {
+                        "state": state.name,
+                        "phase": "repair",
+                        "repair_state": name,
+                        "repair_for": state.name,
+                        "repair_plan_id": plan_id,
+                        "attempt": attempt,
+                        "outcome": "failure",
+                        "failure_reason": reason,
+                    }
+                )
+                return False, reason
+
+            self._telemetry("screen_event", state=state.name, repair_state=name, attempt=attempt, stage="before_action")
+            before = self._capture()
+            self._telemetry(
+                "action_started", state=state.name, repair_state=name, attempt=attempt, action_spec=action, phase="repair"
+            )
+            executed = self._execute_action(action)
+            self._telemetry(
+                "action_completed",
+                state=state.name,
+                repair_state=name,
+                attempt=attempt,
+                action_spec=action,
+                action=executed,
+                phase="repair",
+                ok=bool(executed.get("ok")),
+            )
+            after = self._capture()
+            self._telemetry("screen_event", state=state.name, repair_state=name, attempt=attempt, stage="after_action")
+            expected = str(step.get("expected") or "")
+            self._telemetry(
+                "verification_started",
+                state=state.name,
+                repair_state=name,
+                attempt=attempt,
+                expected=expected,
+                phase="repair_verification",
+            )
+            verification = self._verify_action(before, after, expected, executed)
+            self._telemetry(
+                "verification_completed",
+                state=state.name,
+                repair_state=name,
+                attempt=attempt,
+                expected=expected,
+                verification=verification,
+                phase="repair_verification",
+                ok=bool(verification.get("ok")),
+            )
+            ok = bool(executed.get("ok")) and bool(verification.get("ok"))
+            reason = "" if ok else self._failure_reason(executed, verification)
+            trace.append(
+                {
+                    "state": f"REPAIR:{name}",
                     "phase": "repair",
                     "repair_state": name,
                     "repair_for": state.name,
                     "repair_plan_id": plan_id,
                     "attempt": attempt,
-                    "outcome": "failure",
-                    "failure_reason": reason,
-                })
-                return False, reason
-
-            self._telemetry("screen_event", state=state.name, repair_state=name, attempt=attempt, stage="before_action")
-            before = self._capture()
-            self._telemetry("action_started", state=state.name, repair_state=name, attempt=attempt, action_spec=action, phase="repair")
-            executed = self._execute_action(action)
-            self._telemetry("action_completed", state=state.name, repair_state=name, attempt=attempt, action_spec=action, action=executed, phase="repair", ok=bool(executed.get("ok")))
-            after = self._capture()
-            self._telemetry("screen_event", state=state.name, repair_state=name, attempt=attempt, stage="after_action")
-            expected = str(step.get("expected") or "")
-            self._telemetry("verification_started", state=state.name, repair_state=name, attempt=attempt, expected=expected, phase="repair_verification")
-            verification = self._verify_action(before, after, expected, executed)
-            self._telemetry("verification_completed", state=state.name, repair_state=name, attempt=attempt, expected=expected, verification=verification, phase="repair_verification", ok=bool(verification.get("ok")))
-            ok = bool(executed.get("ok")) and bool(verification.get("ok"))
-            reason = "" if ok else self._failure_reason(executed, verification)
-            trace.append({
-                "state": f"REPAIR:{name}",
-                "phase": "repair",
-                "repair_state": name,
-                "repair_for": state.name,
-                "repair_plan_id": plan_id,
-                "attempt": attempt,
-                "action_spec": action,
-                "action": executed,
-                "verification": verification,
-                "expected": expected,
-                "rationale": step.get("rationale", ""),
-                "outcome": "success" if ok else "failure",
-                "failure_reason": reason or None,
-            })
+                    "action_spec": action,
+                    "action": executed,
+                    "verification": verification,
+                    "expected": expected,
+                    "rationale": step.get("rationale", ""),
+                    "outcome": "success" if ok else "failure",
+                    "failure_reason": reason or None,
+                }
+            )
             if not ok:
                 return False, f"repair step '{name}' failed: {reason}"
         return True, "repair plan verified"
@@ -371,7 +406,7 @@ class VisualStateMachine:
         trace: list[dict[str, Any]],
         reason: str,
         category: str = "state_failed",
-        underlying_reason: Optional[str] = None,
+        underlying_reason: str | None = None,
     ) -> dict[str, Any]:
         failure = {
             "state": current.name,
@@ -395,31 +430,37 @@ class VisualStateMachine:
         by_name: dict[str, VisualState],
         trace: list[dict[str, Any]],
         reason: str,
-        underlying_reason: Optional[str] = None,
-    ) -> tuple[Optional[VisualState], Optional[dict[str, Any]]]:
+        underlying_reason: str | None = None,
+    ) -> tuple[VisualState | None, dict[str, Any] | None]:
         fallback = current.on_failure
         if not fallback:
             return None, self._failure_result(current, trace, reason, underlying_reason=underlying_reason)
         if fallback == current.name:
             explicit = f"{reason}; on_failure for '{current.name}' points to itself"
-            return None, self._failure_result(current, trace, explicit, category="invalid_failure_transition", underlying_reason=underlying_reason)
+            return None, self._failure_result(
+                current, trace, explicit, category="invalid_failure_transition", underlying_reason=underlying_reason
+            )
         if fallback not in by_name:
             explicit = f"{reason}; on_failure target '{fallback}' does not exist"
-            return None, self._failure_result(current, trace, explicit, category="invalid_failure_transition", underlying_reason=underlying_reason)
-        trace.append({
-            "state": current.name,
-            "phase": "transition",
-            "outcome": "failure_transition",
-            "next_state": fallback,
-            "failure_reason": reason,
-        })
+            return None, self._failure_result(
+                current, trace, explicit, category="invalid_failure_transition", underlying_reason=underlying_reason
+            )
+        trace.append(
+            {
+                "state": current.name,
+                "phase": "transition",
+                "outcome": "failure_transition",
+                "next_state": fallback,
+                "failure_reason": reason,
+            }
+        )
         return by_name[fallback], None
 
     def run(
         self,
         states: list[VisualState],
         timeout_per_state: float = 30.0,
-        start_state: Optional[str] = None,
+        start_state: str | None = None,
         task_id: str = "",
     ) -> dict[str, Any]:
         if not states:
@@ -464,44 +505,55 @@ class VisualStateMachine:
         max_transitions = max(4, len(states) * (self.max_retries + 2) + 4)
 
         # Helper to check for pause/cancel at a safe boundary
-        def _check_control() -> Optional[dict[str, Any]]:
+        def _check_control() -> dict[str, Any] | None:
             if task_control.is_emergency_stop_active():
-                trace.append({
-                    "state": current.name if current else "unknown",
-                    "phase": "emergency_stop",
-                    "outcome": "halted",
-                    "failure_reason": task_control._emergency_stop_reason,
-                })
+                trace.append(
+                    {
+                        "state": current.name if current else "unknown",
+                        "phase": "emergency_stop",
+                        "outcome": "halted",
+                        "failure_reason": task_control._emergency_stop_reason,
+                    }
+                )
                 return {
                     "success": False,
                     "states_visited": trace,
                     "trace": trace,
                     "final_state": current.name if current else "unknown",
                     "error": f"emergency stop: {task_control._emergency_stop_reason}",
-                    "failure": {"state": current.name if current else "unknown", "category": "emergency_stop",
-                               "reason": task_control._emergency_stop_reason},
+                    "failure": {
+                        "state": current.name if current else "unknown",
+                        "category": "emergency_stop",
+                        "reason": task_control._emergency_stop_reason,
+                    },
                 }
             if task_id and task_control.is_cancel_requested(task_id):
                 task_control.confirm_cancel(task_id, "Cancelled during execution")
-                trace.append({
-                    "state": current.name if current else "unknown",
-                    "phase": "cancelled",
-                    "outcome": "cancelled",
-                })
+                trace.append(
+                    {
+                        "state": current.name if current else "unknown",
+                        "phase": "cancelled",
+                        "outcome": "cancelled",
+                    }
+                )
                 return {
                     "success": False,
                     "states_visited": trace,
                     "trace": trace,
                     "final_state": current.name if current else "unknown",
                     "error": "task cancelled by user",
-                    "failure": {"state": current.name if current else "unknown", "category": "cancelled",
-                               "reason": "User requested cancellation"},
+                    "failure": {
+                        "state": current.name if current else "unknown",
+                        "category": "cancelled",
+                        "reason": "User requested cancellation",
+                    },
                 }
             if task_id and task_control.is_pause_requested(task_id):
                 task_control.confirm_pause(task_id, "Paused at state boundary")
                 # Wait here until resumed or cancelled
                 while task_control.is_task_paused(task_id):
                     import time
+
                     time.sleep(1)
                     if task_control.is_emergency_stop_active():
                         return {
@@ -510,24 +562,32 @@ class VisualStateMachine:
                             "trace": trace,
                             "final_state": current.name if current else "unknown",
                             "error": "emergency stop during pause",
-                            "failure": {"state": current.name if current else "unknown",
-                                       "category": "emergency_stop", "reason": task_control._emergency_stop_reason},
+                            "failure": {
+                                "state": current.name if current else "unknown",
+                                "category": "emergency_stop",
+                                "reason": task_control._emergency_stop_reason,
+                            },
                         }
                     if task_control.is_cancel_requested(task_id):
                         task_control.confirm_cancel(task_id, "Cancelled while paused")
-                        trace.append({
-                            "state": current.name if current else "unknown",
-                            "phase": "cancelled",
-                            "outcome": "cancelled",
-                        })
+                        trace.append(
+                            {
+                                "state": current.name if current else "unknown",
+                                "phase": "cancelled",
+                                "outcome": "cancelled",
+                            }
+                        )
                         return {
                             "success": False,
                             "states_visited": trace,
                             "trace": trace,
                             "final_state": current.name if current else "unknown",
                             "error": "task cancelled while paused",
-                            "failure": {"state": current.name if current else "unknown",
-                                       "category": "cancelled", "reason": "Cancelled while paused"},
+                            "failure": {
+                                "state": current.name if current else "unknown",
+                                "category": "cancelled",
+                                "reason": "Cancelled while paused",
+                            },
                         }
                 # Resumed - re-check emergency stop
                 if task_control.is_emergency_stop_active():
@@ -537,8 +597,11 @@ class VisualStateMachine:
                         "trace": trace,
                         "final_state": current.name if current else "unknown",
                         "error": "emergency stop after resume",
-                        "failure": {"state": current.name if current else "unknown",
-                                   "category": "emergency_stop", "reason": task_control._emergency_stop_reason},
+                        "failure": {
+                            "state": current.name if current else "unknown",
+                            "category": "emergency_stop",
+                            "reason": task_control._emergency_stop_reason,
+                        },
                     }
             return None
 
@@ -551,13 +614,15 @@ class VisualStateMachine:
                 return control_result
             if current.terminal:
                 success = current.name.upper() != "FAILURE"
-                trace.append({
-                    "state": current.name,
-                    "phase": "terminal",
-                    "terminal": True,
-                    "success": success,
-                    "outcome": "success" if success else "failure",
-                })
+                trace.append(
+                    {
+                        "state": current.name,
+                        "phase": "terminal",
+                        "terminal": True,
+                        "success": success,
+                        "outcome": "success" if success else "failure",
+                    }
+                )
                 if success:
                     return {
                         "success": True,
@@ -574,18 +639,23 @@ class VisualStateMachine:
                     condition = self.wait_until(current.precondition, timeout_per_state)
                 except Exception as exc:  # noqa: BLE001
                     condition = {"matched": False, "detail": f"precondition watcher raised: {exc}"}
-                matched = bool(condition.get("matched", condition.get("success", False))) if isinstance(condition, dict) else False
-                trace.append({
-                    "state": current.name,
-                    "phase": "precondition",
-                    "condition": current.precondition,
-                    "outcome": "success" if matched else "failure",
-                    "detail": condition.get("detail", "") if isinstance(condition, dict) else "invalid watcher result",
-                })
+                matched = (
+                    bool(condition.get("matched", condition.get("success", False))) if isinstance(condition, dict) else False
+                )
+                trace.append(
+                    {
+                        "state": current.name,
+                        "phase": "precondition",
+                        "condition": current.precondition,
+                        "outcome": "success" if matched else "failure",
+                        "detail": condition.get("detail", "") if isinstance(condition, dict) else "invalid watcher result",
+                    }
+                )
                 if not matched:
                     reason = f"precondition for state '{current.name}' was not reached: " + (
                         condition.get("detail") or condition.get("error") or "timeout"
-                        if isinstance(condition, dict) else "watcher returned an unsupported result"
+                        if isinstance(condition, dict)
+                        else "watcher returned an unsupported result"
                     )
                     current, failed = self._failure_transition(current, by_name, trace, reason)
                     if failed:
@@ -602,18 +672,23 @@ class VisualStateMachine:
                         condition = self.wait_until(current.expected, timeout_per_state)
                     except Exception as exc:  # noqa: BLE001
                         condition = {"matched": False, "detail": f"state watcher raised: {exc}"}
-                    matched = bool(condition.get("matched", condition.get("success", False))) if isinstance(condition, dict) else False
-                    trace.append({
-                        "state": current.name,
-                        "phase": "state_check",
-                        "condition": current.expected,
-                        "outcome": "success" if matched else "failure",
-                        "detail": condition.get("detail", "") if isinstance(condition, dict) else "invalid watcher result",
-                    })
+                    matched = (
+                        bool(condition.get("matched", condition.get("success", False))) if isinstance(condition, dict) else False
+                    )
+                    trace.append(
+                        {
+                            "state": current.name,
+                            "phase": "state_check",
+                            "condition": current.expected,
+                            "outcome": "success" if matched else "failure",
+                            "detail": condition.get("detail", "") if isinstance(condition, dict) else "invalid watcher result",
+                        }
+                    )
                     if not matched:
                         reason = f"state '{current.name}' condition was not reached: " + (
                             condition.get("detail") or condition.get("error") or "timeout"
-                            if isinstance(condition, dict) else "watcher returned an unsupported result"
+                            if isinstance(condition, dict)
+                            else "watcher returned an unsupported result"
                         )
                         current, failed = self._failure_transition(current, by_name, trace, reason)
                         if failed:
@@ -636,76 +711,114 @@ class VisualStateMachine:
             for attempt in range(1, max_attempts + 1):
                 self._telemetry("screen_event", state=current.name, attempt=attempt, stage="before_action")
                 before = self._capture()
-                self._telemetry("action_started", state=current.name, attempt=attempt, action_spec=current.action, phase="original_action")
+                self._telemetry(
+                    "action_started", state=current.name, attempt=attempt, action_spec=current.action, phase="original_action"
+                )
                 executed = self._execute_action(current.action)
-                self._telemetry("action_completed", state=current.name, attempt=attempt, action_spec=current.action, action=executed, phase="original_action", ok=bool(executed.get("ok")))
+                self._telemetry(
+                    "action_completed",
+                    state=current.name,
+                    attempt=attempt,
+                    action_spec=current.action,
+                    action=executed,
+                    phase="original_action",
+                    ok=bool(executed.get("ok")),
+                )
                 after = self._capture()
                 self._telemetry("screen_event", state=current.name, attempt=attempt, stage="after_action")
-                self._telemetry("verification_started", state=current.name, attempt=attempt, expected=current.expected, phase="action_verification")
+                self._telemetry(
+                    "verification_started",
+                    state=current.name,
+                    attempt=attempt,
+                    expected=current.expected,
+                    phase="action_verification",
+                )
                 verification = self._verify_action(before, after, current.expected, executed)
-                self._telemetry("verification_completed", state=current.name, attempt=attempt, expected=current.expected, verification=verification, phase="action_verification", ok=bool(verification.get("ok")))
+                self._telemetry(
+                    "verification_completed",
+                    state=current.name,
+                    attempt=attempt,
+                    expected=current.expected,
+                    verification=verification,
+                    phase="action_verification",
+                    ok=bool(verification.get("ok")),
+                )
                 ok = bool(executed.get("ok")) and bool(verification.get("ok"))
                 reason = "" if ok else self._failure_reason(executed, verification)
-                trace.append({
-                    "state": current.name,
-                    "phase": "original_action",
-                    "attempt": attempt,
-                    "max_attempts": max_attempts,
-                    "action_spec": current.action,
-                    "action": executed,
-                    "verification": verification,
-                    "expected": current.expected,
-                    "outcome": "success" if ok else "failure",
-                    "failure_reason": reason or None,
-                })
+                trace.append(
+                    {
+                        "state": current.name,
+                        "phase": "original_action",
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "action_spec": current.action,
+                        "action": executed,
+                        "verification": verification,
+                        "expected": current.expected,
+                        "outcome": "success" if ok else "failure",
+                        "failure_reason": reason or None,
+                    }
+                )
                 if ok:
                     state_succeeded = True
                     break
 
                 final_reason = f"state '{current.name}' attempt {attempt}/{max_attempts} failed: {reason}"
-                underlying_reason = verification.get("detail") or verification.get("error") or executed.get("detail") or executed.get("error") or reason
+                underlying_reason = (
+                    verification.get("detail")
+                    or verification.get("error")
+                    or executed.get("detail")
+                    or executed.get("error")
+                    or reason
+                )
                 retries_left = attempt < max_attempts
                 if not retries_left:
-                    trace.append({
-                        "state": current.name,
-                        "phase": "retry_decision",
-                        "attempt": attempt,
-                        "outcome": "fail",
-                        "retry_allowed": False,
-                        "failure": True,
-                        "decision": "fail_task",
-                        "failure_reason": final_reason,
-                    })
+                    trace.append(
+                        {
+                            "state": current.name,
+                            "phase": "retry_decision",
+                            "attempt": attempt,
+                            "outcome": "fail",
+                            "retry_allowed": False,
+                            "failure": True,
+                            "decision": "fail_task",
+                            "failure_reason": final_reason,
+                        }
+                    )
                     break
 
                 plan, repair_error = self._request_repair(current, attempt, executed, verification, reason)
                 diagnosis = plan.get("diagnosis", {})
                 retryable = bool(diagnosis.get("retryable", True))
-                trace.append({
-                    "state": f"DIAGNOSE:{current.name}",
-                    "phase": "diagnose",
-                    "attempt": attempt,
-                    "outcome": "repair_available" if plan.get("available") else "no_repair",
-                    "failure_reason": reason,
-                    "diagnosis": diagnosis,
-                    "repair_plan": plan,
-                    "repair_error": repair_error,
-                })
+                trace.append(
+                    {
+                        "state": f"DIAGNOSE:{current.name}",
+                        "phase": "diagnose",
+                        "attempt": attempt,
+                        "outcome": "repair_available" if plan.get("available") else "no_repair",
+                        "failure_reason": reason,
+                        "diagnosis": diagnosis,
+                        "repair_plan": plan,
+                        "repair_error": repair_error,
+                    }
+                )
 
                 if not retryable or not plan.get("retry_original", True):
                     final_category = "non_retryable"
                     detail = diagnosis.get("summary") or plan.get("reason") or reason
                     final_reason = f"state '{current.name}' is not safe to retry: {detail}"
-                    trace.append({
-                        "state": current.name,
-                        "phase": "retry_decision",
-                        "attempt": attempt,
-                        "outcome": "fail",
-                        "retry_allowed": False,
-                        "failure": True,
-                        "decision": "fail_task",
-                        "failure_reason": final_reason,
-                    })
+                    trace.append(
+                        {
+                            "state": current.name,
+                            "phase": "retry_decision",
+                            "attempt": attempt,
+                            "outcome": "fail",
+                            "retry_allowed": False,
+                            "failure": True,
+                            "decision": "fail_task",
+                            "failure_reason": final_reason,
+                        }
+                    )
                     break
 
                 if plan.get("available"):
@@ -715,34 +828,40 @@ class VisualStateMachine:
                         # repair; that is just blind retry with extra clicks.
                         final_category = "repair_failed"
                         final_reason = f"state '{current.name}' could not be repaired: {repair_reason}"
-                        trace.append({
+                        trace.append(
+                            {
+                                "state": current.name,
+                                "phase": "retry_decision",
+                                "attempt": attempt,
+                                "outcome": "fail",
+                                "retry_allowed": False,
+                                "failure": True,
+                                "decision": "fail_task",
+                                "failure_reason": final_reason,
+                            }
+                        )
+                        break
+                    trace.append(
+                        {
                             "state": current.name,
                             "phase": "retry_decision",
                             "attempt": attempt,
-                            "outcome": "fail",
-                            "retry_allowed": False,
-                            "failure": True,
-                            "decision": "fail_task",
-                            "failure_reason": final_reason,
-                        })
-                        break
-                    trace.append({
-                        "state": current.name,
-                        "phase": "retry_decision",
-                        "attempt": attempt,
-                        "outcome": "retry_after_repair",
-                        "retry_allowed": True,
-                        "reason": repair_reason,
-                    })
+                            "outcome": "retry_after_repair",
+                            "retry_allowed": True,
+                            "reason": repair_reason,
+                        }
+                    )
                 else:
-                    trace.append({
-                        "state": current.name,
-                        "phase": "retry_decision",
-                        "attempt": attempt,
-                        "outcome": "bounded_retry",
-                        "retry_allowed": True,
-                        "reason": plan.get("reason") or repair_error or "no repair callback configured",
-                    })
+                    trace.append(
+                        {
+                            "state": current.name,
+                            "phase": "retry_decision",
+                            "attempt": attempt,
+                            "outcome": "bounded_retry",
+                            "retry_allowed": True,
+                            "reason": plan.get("reason") or repair_error or "no repair callback configured",
+                        }
+                    )
 
             if state_succeeded:
                 nxt = current.on_success
@@ -772,28 +891,22 @@ class VisualStateMachine:
         states: list[VisualState] = []
         for index, step in enumerate(plan):
             name = str(step.get("name") or f"STATE_{index}")
-            next_name = (
-                str(plan[index + 1].get("name") or f"STATE_{index + 1}")
-                if index + 1 < len(plan) else terminal
+            next_name = str(plan[index + 1].get("name") or f"STATE_{index + 1}") if index + 1 < len(plan) else terminal
+            states.append(
+                VisualState(
+                    name=name,
+                    precondition=str(step.get("precondition") or ""),
+                    expected=str(step.get("expected") or ""),
+                    action=step.get("action") if isinstance(step.get("action"), dict) else None,
+                    on_success=step.get("on_success") or next_name,
+                    on_failure=step.get("on_failure"),
+                    terminal=bool(step.get("terminal", False)),
+                )
             )
-            states.append(VisualState(
-                name=name,
-                precondition=str(step.get("precondition") or ""),
-                expected=str(step.get("expected") or ""),
-                action=step.get("action") if isinstance(step.get("action"), dict) else None,
-                on_success=step.get("on_success") or next_name,
-                on_failure=step.get("on_failure"),
-                terminal=bool(step.get("terminal", False)),
-            ))
         # Materialize referenced terminal nodes.  Planners may explicitly route
         # failures to FAILURE while successful linear plans use SUCCESS.
         names = {state.name for state in states}
-        referenced = {
-            target
-            for state in states
-            for target in (state.on_success, state.on_failure)
-            if target
-        }
+        referenced = {target for state in states for target in (state.on_success, state.on_failure) if target}
         for terminal_name in (terminal, "FAILURE"):
             if terminal_name not in names and (terminal_name == terminal or terminal_name in referenced):
                 states.append(VisualState(name=terminal_name, terminal=True))

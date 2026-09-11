@@ -2,8 +2,8 @@
 
 
 def list_ai_providers() -> dict:
-    from core.providers import list_providers
     from core.provider_resolver import list_available_providers
+    from core.providers import list_providers
 
     provider_list = list_providers()
     status = {p["provider"]: p for p in list_available_providers()}
@@ -261,7 +261,10 @@ TOOLS = [
                         "enum": ["auto", "fanout", "map", "race"],
                         "default": "auto",
                     },
-                    "models": {"type": "string", "description": "comma-separated e.g. groq/openai/gpt-oss-20b,openai/gpt-4o-mini"},
+                    "models": {
+                        "type": "string",
+                        "description": "comma-separated e.g. groq/openai/gpt-oss-20b,openai/gpt-4o-mini",
+                    },
                     "providers": {"type": "string"},
                     "max_workers": {"type": "integer", "default": 4},
                 },

@@ -23,15 +23,15 @@ Each project:
 Everything is dependency-free: project.yaml uses a minimal flat YAML subset
 (no PyYAML required).
 """
+
 from __future__ import annotations
 
 import json
 import os
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
 
@@ -69,7 +69,7 @@ def dump_yaml(d: dict[str, Any]) -> str:
 def load_yaml(text: str) -> dict[str, Any]:
     """Parse the flat-YAML subset emitted by :func:`dump_yaml`."""
     out: dict[str, Any] = {}
-    current_list: Optional[str] = None
+    current_list: str | None = None
     for raw in text.splitlines():
         line = raw.rstrip()
         if not line.strip() or line.lstrip().startswith("#"):
@@ -147,7 +147,7 @@ class Workspace:
     def root(self) -> Path:
         return self.base_dir
 
-    def __init__(self, base_dir: Optional[str] = None):
+    def __init__(self, base_dir: str | None = None):
         raw = base_dir or os.environ.get("HERMUS_HOME") or getattr(config, "workspace_dir", "~/.hermus")
         self.base_dir = Path(raw).expanduser()
         self.ensure_layout()
@@ -251,7 +251,7 @@ class Workspace:
                 out.append(Project(p).to_dict())
         return out
 
-    def get_project(self, name: str) -> Optional[Project]:
+    def get_project(self, name: str) -> Project | None:
         path = self.project_dir(name)
         if not (path / "project.yaml").exists():
             return None
@@ -274,7 +274,7 @@ class Workspace:
         (self.base_dir / "current_project").write_text(name, encoding="utf-8")
         return {"success": True, "name": name}
 
-    def current_project(self) -> Optional[str]:
+    def current_project(self) -> str | None:
         p = self.base_dir / "current_project"
         if p.exists():
             name = p.read_text(encoding="utf-8").strip()

@@ -1,9 +1,10 @@
 """Base contracts for Hermus integrations."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from ..world_model import WorldModel, world_model
 
@@ -44,7 +45,7 @@ class Connector:
     name = "unnamed"
     capabilities: tuple[str, ...] = ()
 
-    def __init__(self, context: Optional[ConnectorContext] = None):
+    def __init__(self, context: ConnectorContext | None = None):
         self.context = context or ConnectorContext()
         self.enabled = False
         self.last_status = ConnectorStatus(self.name, capabilities=list(self.capabilities))
@@ -56,7 +57,9 @@ class Connector:
 
     def disable(self) -> ConnectorStatus:
         self.enabled = False
-        self.last_status = ConnectorStatus(self.name, "disabled", "disabled by configuration", capabilities=list(self.capabilities))
+        self.last_status = ConnectorStatus(
+            self.name, "disabled", "disabled by configuration", capabilities=list(self.capabilities)
+        )
         return self.last_status
 
     def health(self) -> ConnectorStatus:

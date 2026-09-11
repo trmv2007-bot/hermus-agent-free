@@ -1,5 +1,6 @@
 """Tests for Phase C & D — remote control, resources, plugins, delegation,
 skill profiles and the gateway endpoints that expose them."""
+
 from __future__ import annotations
 
 import pytest
@@ -31,6 +32,7 @@ def _controller(approval=None):
 # --------------------------------------------------------------------------
 # C11 — Remote approval gate
 # --------------------------------------------------------------------------
+
 
 def test_approval_gate_disabled_by_default_allows():
     gate = RemoteApprovalGate()
@@ -96,6 +98,7 @@ def test_controller_integration_blocks_until_approved():
 # C11 — Remote control hub
 # --------------------------------------------------------------------------
 
+
 def test_remote_control_hub_lifecycle():
     from core.computer.task_control import get_task_control
 
@@ -130,6 +133,7 @@ def test_remote_control_hub_snapshot_shape():
 # D13 — Resource monitor
 # --------------------------------------------------------------------------
 
+
 def test_resource_monitor_sample_shape():
     monitor = get_resource_monitor()
     sample = monitor.sample()
@@ -141,6 +145,7 @@ def test_resource_monitor_sample_shape():
 # --------------------------------------------------------------------------
 # D15 — Plugin ecosystem
 # --------------------------------------------------------------------------
+
 
 def test_plugin_registry_discovers_and_invokes():
     pr = PluginRegistry(search_dirs=["core/plugins"])
@@ -170,6 +175,7 @@ def test_plugin_dispatch_event_isolated():
 # C9 — Skill profiles
 # --------------------------------------------------------------------------
 
+
 def test_skill_profile_summary(tmp_path):
     store = ComputerSkillStore(str(tmp_path / "skills"))
     store.save_skill("Install Firefox", [{"step": 1}, {"step": 2}], duration=39.8)
@@ -190,9 +196,11 @@ def test_skill_profile_summary(tmp_path):
 # Gateway endpoints
 # --------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def client():
     from fastapi.testclient import TestClient
+
     from gateway.gateway import app
 
     with TestClient(app) as c:
@@ -234,8 +242,7 @@ def test_gateway_delegation_dry_run(client):
         "plan": {
             "units": [
                 {"unit_id": "unit-1", "role": "researcher", "task": "Research install steps"},
-                {"unit_id": "unit-2", "role": "computer-operator", "task": "Install X",
-                 "depends_on": ["unit-1"]},
+                {"unit_id": "unit-2", "role": "computer-operator", "task": "Install X", "depends_on": ["unit-1"]},
             ]
         },
         "dry_run": True,

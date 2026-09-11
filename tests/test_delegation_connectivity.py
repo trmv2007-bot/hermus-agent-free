@@ -18,13 +18,10 @@ in-process so the ModelGateway / ToolGateway / MemoryFacade boundaries and the
 EventBus are the same objects the test instruments — proving the sub-agent uses
 the *canonical* boundaries, not a second provider / tool path.
 """
+
 from __future__ import annotations
 
-import asyncio
 import os
-import tempfile
-import time
-from pathlib import Path
 
 import pytest
 
@@ -93,14 +90,22 @@ def test_delegation_connects_queue_to_canonical_boundaries_and_event_bus():
 
         bus.subscribe("job.lifecycle")(collect)
 
-        with mock.patch.object(type(gw), "llm", tr_llm), \
-             mock.patch.object(type(tg), "execute", tr_exec), \
-             mock.patch.object(MemoryFacade, "recall_context", tr_recall):
+        with (
+            mock.patch.object(type(gw), "llm", tr_llm),
+            mock.patch.object(type(tg), "execute", tr_exec),
+            mock.patch.object(MemoryFacade, "recall_context", tr_recall),
+        ):
             st = submit_and_wait(
                 DELEGATE_JOB,
-                {"tasks": ["search the web for clustering"], "goal": "cluster search",
-                 "depth": 1, "max_children": 1, "aggregate": "concat",
-                 "mission_id": "mission-conn", "parent_task_id": "task-node-1"},
+                {
+                    "tasks": ["search the web for clustering"],
+                    "goal": "cluster search",
+                    "depth": 1,
+                    "max_children": 1,
+                    "aggregate": "concat",
+                    "mission_id": "mission-conn",
+                    "parent_task_id": "task-node-1",
+                },
                 session_key="delegate:connectivity",
                 run_id="run-conn",
                 timeout=30.0,

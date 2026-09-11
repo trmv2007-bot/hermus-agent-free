@@ -6,6 +6,7 @@ settings, and a default rule that agent-created recordings stay under
 data/recordings) and the computer-control layer's own safety gates: a risk
 tier for every desktop action and a global, thread-safe emergency stop.
 """
+
 from __future__ import annotations
 
 import re
@@ -13,7 +14,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 class RecordingPolicy:
@@ -39,7 +40,7 @@ class RecordingPolicy:
             return {"ok": False, "error": f"buffer duration must be between 1 and {self.max_buffer_seconds:g} seconds"}
         return {"ok": True, "fps": float(fps), "max_seconds": float(max_seconds)}
 
-    def output_path(self, value: Optional[str], default_name: str = "recording.mp4") -> Path:
+    def output_path(self, value: str | None, default_name: str = "recording.mp4") -> Path:
         requested = Path(value or default_name).expanduser()
         target = requested.resolve() if requested.is_absolute() else (self.root / requested).resolve()
         if target.suffix.lower() not in {".mp4", ".webm"}:
@@ -116,7 +117,7 @@ class ComputerPolicy:
     explicit ``approve`` call and are denied until then.
     """
 
-    def __init__(self, approvals_path: Optional[str] = None) -> None:
+    def __init__(self, approvals_path: str | None = None) -> None:
         self.approvals_path = approvals_path
         self._approved: set = set()
         self._lock = threading.Lock()
@@ -124,7 +125,7 @@ class ComputerPolicy:
     def risk_of(self, action: str) -> RiskLevel:
         return ACTION_RISK.get(action, RiskLevel.MEDIUM)
 
-    def escalate(self, action: str, args: Optional[dict[str, Any]] = None) -> RiskLevel:
+    def escalate(self, action: str, args: dict[str, Any] | None = None) -> RiskLevel:
         """Raise a risk tier from dangerous argument content (e.g. sudo)."""
         risk = self.risk_of(action)
         text = " ".join(str(v) for v in (args or {}).values()).lower()
@@ -132,9 +133,7 @@ class ComputerPolicy:
             marker in text for marker in ("sudo", "rm -rf", "dd if", "--force", "-y")
         ):
             return RiskLevel.HIGH
-        if action == "type_text" and any(
-            marker in text for marker in ("sudo", "password", "rm -rf")
-        ):
+        if action == "type_text" and any(marker in text for marker in ("sudo", "password", "rm -rf")):
             return RiskLevel.HIGH
         return risk
 
@@ -153,7 +152,7 @@ class ComputerPolicy:
     def check(
         self,
         action: str,
-        args: Optional[dict[str, Any]] = None,
+        args: dict[str, Any] | None = None,
         scope: str = "",
     ) -> dict[str, Any]:
         """Return a decision record for an action (``allowed`` + reason)."""
@@ -182,10 +181,10 @@ class EmergencyStop:
     stop has been requested.
     """
 
-    def __init__(self, halt_path: Optional[str] = None) -> None:
+    def __init__(self, halt_path: str | None = None) -> None:
         self._halted = threading.Event()
         self._lock = threading.Lock()
-        self._reason: Optional[str] = None
+        self._reason: str | None = None
         if halt_path:
             self.halt_path = Path(halt_path).expanduser().resolve()
         else:
@@ -199,12 +198,12 @@ class EmergencyStop:
         return self.halt_path.exists()
 
     @property
-    def reason(self) -> Optional[str]:
+    def reason(self) -> str | None:
         if self._halted.is_set():
             return self._reason
         return self._read_file_reason()
 
-    def _read_file_reason(self) -> Optional[str]:
+    def _read_file_reason(self) -> str | None:
         try:
             import json
 

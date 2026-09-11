@@ -27,13 +27,12 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .workspace import workspace
 
 
-def _record_runtime_issue(component: str, operation: str, error: Any, *, run_id: str = "",
-                          fallback: str = "") -> None:
+def _record_runtime_issue(component: str, operation: str, error: Any, *, run_id: str = "", fallback: str = "") -> None:
     """Record a structured non-fatal runtime problem for an agent operation.
 
     Replaces silent ``except Exception: pass`` so a real operational failure is
@@ -43,14 +42,21 @@ def _record_runtime_issue(component: str, operation: str, error: Any, *, run_id:
     try:
         from .run_events import record_issue  # local import avoids cycles
 
-        record_issue(component, operation, error, run_id=run_id or None,
-                     retryable=False, fallback=fallback)
+        record_issue(component, operation, error, run_id=run_id or None, retryable=False, fallback=fallback)
     except Exception:
         pass
 
+
 ROLES = (
-    "researcher", "coder", "system-monitor", "scheduler", "memory-manager",
-    "watchdog", "computer-operator", "coordinator", "generic",
+    "researcher",
+    "coder",
+    "system-monitor",
+    "scheduler",
+    "memory-manager",
+    "watchdog",
+    "computer-operator",
+    "coordinator",
+    "generic",
 )
 
 # role -> handler(job_dict) -> result_dict. Custom role logic may register here;
@@ -65,6 +71,7 @@ def register_handler(role: str, handler) -> None:
 
 def _general_agent_handler(config: dict[str, Any]):
     """Build the handler that runs a general background task through the universal runtime."""
+
     def handle(job: dict[str, Any]) -> dict[str, Any]:
         from .agent import HermusAgent
         from .runtime import execute as runtime_execute
@@ -81,6 +88,7 @@ def _general_agent_handler(config: dict[str, Any]):
         if isinstance(result, dict) and result.get("run_kind") == "mission":
             ok = result.get("state") == "completed"
         return {"ok": ok, "task": task, "result": result}
+
     return handle
 
 
@@ -123,25 +131,34 @@ def _computer_agent_handler(job: dict[str, Any]) -> dict[str, Any]:
 # --- canonical Job handler builders (JobContext -> dict) -----------------------
 def make_agent_general_handler():
     """Canonical ``agent.general`` Job handler — runs the universal runtime."""
+
     def handle(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         agent_name = str(payload.get("agent") or payload.get("name") or "generic")
-        cfg = _read_json(_agent_dir(agent_name) / "agent.json", {
-            "name": agent_name, "role": "generic", "model": None,
-        })
+        cfg = _read_json(
+            _agent_dir(agent_name) / "agent.json",
+            {
+                "name": agent_name,
+                "role": "generic",
+                "model": None,
+            },
+        )
         # Allow an explicit role-specific in-process handler override.
         role = str(payload.get("role") or cfg.get("role") or "generic")
         handler = ROLE_HANDLERS.get(role)
         if handler is not None:
             return {"ok": True, "result": handler(payload)}
         return _general_agent_handler(cfg)(payload)
+
     return handle
 
 
 def make_agent_computer_handler():
     """Canonical ``agent.computer`` Job handler — desktop control."""
+
     def handle(ctx) -> dict[str, Any]:
         return _computer_agent_handler(dict(ctx.payload))
+
     return handle
 
 
@@ -151,8 +168,7 @@ def register_agent_handlers(queue, *, overwrite: bool = False) -> list[str]:
     By default it does **not** clobber a handler that is already registered, so
     tests/callers may inject a custom ``agent.general``/``agent.computer`` handler.
     """
-    for kind, build in (("agent.general", make_agent_general_handler),
-                        ("agent.computer", make_agent_computer_handler)):
+    for kind, build in (("agent.general", make_agent_general_handler), ("agent.computer", make_agent_computer_handler)):
         if kind in getattr(queue, "handlers", {}) and not overwrite:
             continue
         queue.register(kind, build(), overwrite=overwrite)
@@ -194,11 +210,11 @@ class AgentManager:
         if self._queue_override is not None:
             return self._queue_override
         from gateway.queue import job_queue  # lazy; no import-time layering cycle
+
         return job_queue
 
     # -- registry -----------------------------------------------------------
-    def create(self, name: str, role: str = "generic", model: Optional[str] = None,
-               persona: Optional[str] = None) -> dict[str, Any]:
+    def create(self, name: str, role: str = "generic", model: str | None = None, persona: str | None = None) -> dict[str, Any]:
         """Register a named agent (identity metadata only — no process spawned)."""
         if role not in ROLES:
             return {"success": False, "error": f"unknown role '{role}' (choose {ROLES})"}
@@ -206,10 +222,16 @@ class AgentManager:
         if adir.exists():
             return {"success": False, "error": f"agent '{name}' already exists"}
         adir.mkdir(parents=True, exist_ok=True)
-        _write_json(adir / "agent.json", {
-            "name": name, "role": role, "model": model, "persona": persona,
-            "created": datetime.now().isoformat(),
-        })
+        _write_json(
+            adir / "agent.json",
+            {
+                "name": name,
+                "role": role,
+                "model": model,
+                "persona": persona,
+                "created": datetime.now().isoformat(),
+            },
+        )
         return {"success": True, "name": name, "role": role}
 
     def start(self, name: str, handler=None, daemon: bool = True) -> dict[str, Any]:
@@ -226,13 +248,18 @@ class AgentManager:
             # A registration failure means this agent CANNOT actually execute on the
             # canonical queue, yet it was previously silently reported 'ready'.
             # Surface an explicit diagnostic state instead of hiding the failure.
-            _record_runtime_issue("agent_manager", "register_handlers", exc,
-                                  fallback="agent reported degraded; handlers not registered")
-            return {"success": False, "name": name, "status": "degraded",
-                    "error": f"handler registration failed: {exc}",
-                    "queue": "canonical", "registered": []}
-        return {"success": True, "name": name, "status": "ready", "queue": "canonical",
-                "registered": kinds}
+            _record_runtime_issue(
+                "agent_manager", "register_handlers", exc, fallback="agent reported degraded; handlers not registered"
+            )
+            return {
+                "success": False,
+                "name": name,
+                "status": "degraded",
+                "error": f"handler registration failed: {exc}",
+                "queue": "canonical",
+                "registered": [],
+            }
+        return {"success": True, "name": name, "status": "ready", "queue": "canonical", "registered": kinds}
 
     def stop(self, name: str) -> dict[str, Any]:
         """Mark an agent stopped (registry lifecycle). No signal is sent."""
@@ -245,8 +272,7 @@ class AgentManager:
         if not _agent_dir(name).exists():
             return {"success": False, "error": f"agent '{name}' not found"}
         cfg = _read_json(_agent_dir(name) / "agent.json", {})
-        return {"success": True, "name": name, **cfg, "status": "registered",
-                "queue": "canonical", "alive": self._enabled}
+        return {"success": True, "name": name, **cfg, "status": "registered", "queue": "canonical", "alive": self._enabled}
 
     def list(self) -> list[dict[str, Any]]:
         out = []
@@ -275,7 +301,8 @@ class AgentManager:
             payload.setdefault("name", name)
             payload["role"] = role
             queued = queue.submit(
-                kind, payload,
+                kind,
+                payload,
                 session_key=f"agent:{name}",
                 run_id=str(job.get("run_id") or ""),
             )
@@ -283,8 +310,7 @@ class AgentManager:
             return {"success": False, "error": str(exc)}
         except Exception as exc:  # queue unavailable in this process
             return {"success": False, "error": f"canonical queue unavailable: {exc}"}
-        return {"success": True, "name": name, "job_id": queued.id,
-                "queued": True, "status": queued.status}
+        return {"success": True, "name": name, "job_id": queued.id, "queued": True, "status": queued.status}
 
     def job_status(self, name: str, job_id: str) -> dict[str, Any]:
         """Read a canonical Job's status/result from the queue."""
@@ -293,17 +319,20 @@ class AgentManager:
         try:
             st = self._queue().status(job_id)
         except Exception as exc:
-            return {"success": False, "status": "unknown", "error": str(exc),
-                    "name": name, "job_id": job_id}
+            return {"success": False, "status": "unknown", "error": str(exc), "name": name, "job_id": job_id}
         status = st.get("status") or "unknown"
         if not st.get("found") and st.get("error"):
-            return {"success": False, "status": "unknown", "error": st.get("error"),
-                    "name": name, "job_id": job_id}
-        return {"success": True, "status": status, "name": name, "job_id": job_id,
-                "result": st.get("result"), "error": st.get("error")}
+            return {"success": False, "status": "unknown", "error": st.get("error"), "name": name, "job_id": job_id}
+        return {
+            "success": True,
+            "status": status,
+            "name": name,
+            "job_id": job_id,
+            "result": st.get("result"),
+            "error": st.get("error"),
+        }
 
-    def wait_job(self, name: str, job_id: str, timeout: float = 120.0,
-                 interval: float = 0.2) -> dict[str, Any]:
+    def wait_job(self, name: str, job_id: str, timeout: float = 120.0, interval: float = 0.2) -> dict[str, Any]:
         deadline = time.monotonic() + max(0.0, float(timeout))
         seen: dict[str, Any] = {}
         while time.monotonic() <= deadline:
@@ -316,9 +345,14 @@ class AgentManager:
             time.sleep(max(0.02, float(interval)))
         if seen.get("status") in ("succeeded", "failed", "cancelled", "blocked"):
             return seen
-        return {**seen, "success": False, "status": seen.get("status") or "timeout",
-                "name": name, "job_id": job_id,
-                "error": seen.get("error") or f"job did not finish within {timeout:g}s"}
+        return {
+            **seen,
+            "success": False,
+            "status": seen.get("status") or "timeout",
+            "name": name,
+            "job_id": job_id,
+            "error": seen.get("error") or f"job did not finish within {timeout:g}s",
+        }
 
     def watchdog_tick(self, stale_seconds: float = 30.0, restart: bool = True) -> dict[str, Any]:
         """Reconcile the registry against the canonical queue (no own process pool).
@@ -329,9 +363,14 @@ class AgentManager:
         process restarts by this module.
         """
         known = [a.get("name") for a in self.list() if a.get("name")]
-        return {"stale": [], "revived": [], "errors": [],
-                "recovery_owner": "canonical-job-queue",
-                "agents": known, "tick": datetime.now().isoformat()}
+        return {
+            "stale": [],
+            "revived": [],
+            "errors": [],
+            "recovery_owner": "canonical-job-queue",
+            "agents": known,
+            "tick": datetime.now().isoformat(),
+        }
 
 
 agent_manager = AgentManager()

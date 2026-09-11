@@ -9,6 +9,7 @@ Every Android operation is recorded in two places:
 
 Nothing is written here that could enable covert use — the audit is the point.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 def _log_path() -> str:
@@ -25,10 +26,19 @@ def _log_path() -> str:
     )
 
 
-def record(op: str, args: dict[str, Any], *, ok: bool, reason: Optional[str] = None,
-           result: Optional[dict[str, Any]] = None, device: Optional[str] = None,
-           op_class: Optional[str] = None, trace_id: Optional[str] = None,
-           mission_id: Optional[str] = None, run_id: Optional[str] = None) -> dict[str, Any]:
+def record(
+    op: str,
+    args: dict[str, Any],
+    *,
+    ok: bool,
+    reason: str | None = None,
+    result: dict[str, Any] | None = None,
+    device: str | None = None,
+    op_class: str | None = None,
+    trace_id: str | None = None,
+    mission_id: str | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
     """Append the op to the audit log and mirror it onto the canonical EventBus."""
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -60,25 +70,26 @@ def record(op: str, args: dict[str, Any], *, ok: bool, reason: Optional[str] = N
 
 def _new_id() -> str:
     import uuid
+
     return f"and_{uuid.uuid4().hex[:16]}"
 
 
 def _publish_event(entry: dict[str, Any]) -> None:
     try:
-        from ..events import get_bus
         from ..contracts import EventEnvelope
+        from ..events import get_bus
+
         env = EventEnvelope(
             event_id=entry["event_id"],
             trace_id=entry["trace_id"],
             run_id=entry["run_id"],
             mission_id=entry["mission_id"],
             source="android",
-            type="android.control",          # carries a type per spec
+            type="android.control",  # carries a type per spec
             command=entry["op"],
             status="ok" if entry["ok"] else "failed",
             error_code="unavailable" if not entry["ok"] else None,
-            args_redacted={k: v for k, v in (entry.get("args") or {}).items()
-                           if k not in ("data", "tree_xml")},
+            args_redacted={k: v for k, v in (entry.get("args") or {}).items() if k not in ("data", "tree_xml")},
         )
         get_bus().publish(env)
     except Exception:

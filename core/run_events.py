@@ -23,6 +23,7 @@ failures are recorded via :func:`record_issue` (component / operation / error /
 mission / run / step / retryable / fallback) instead of silent
 ``except Exception: pass``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,11 +31,15 @@ import json
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
+
+from core.log import get_logger
+
+logger = get_logger(__name__)
 
 
 def _now() -> str:
@@ -49,10 +54,10 @@ class Run:
     label: str = ""
     events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=2000))
     seq: int = 0
-    status: str = "running"          # running | finished | error | cancelled
+    status: str = "running"  # running | finished | error | cancelled
     started: float = field(default_factory=time.time)
-    finished: Optional[float] = None
-    result: Optional[dict[str, Any]] = None
+    finished: float | None = None
+    result: dict[str, Any] | None = None
     error: str = ""
     subscribers: set[Any] = field(default_factory=set)
     cancel: threading.Event = field(default_factory=threading.Event)
@@ -61,7 +66,6 @@ class Run:
     # is new into the conversation, so steering actually reaches the model
     # instead of only being recorded on the event stream.
     steer_inbox: deque[str] = field(default_factory=lambda: deque(maxlen=100))
-
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -105,8 +109,7 @@ class RunBus:
                 # keep memory flat: evict the oldest *finished* runs
                 while len(self._runs) > self._order.maxlen:
                     victim = next(
-                        (r for r in list(self._order)
-                         if self._runs.get(r) and self._runs[r].status != "running"),
+                        (r for r in list(self._order) if self._runs.get(r) and self._runs[r].status != "running"),
                         None,
                     )
                     if not victim:
@@ -124,7 +127,7 @@ class RunBus:
         self.publish(run_id, "run_started", {"label": label})
         return run
 
-    def get(self, run_id: str) -> Optional[Run]:
+    def get(self, run_id: str) -> Run | None:
         with self._lock:
             return self._runs.get(run_id)
 
@@ -132,8 +135,7 @@ class RunBus:
         with self._lock:
             return [r.to_dict() for r in self._runs.values()]
 
-    def finish(self, run_id: str, status: str = "finished", result: Optional[dict[str, Any]] = None,
-               error: str = "") -> None:
+    def finish(self, run_id: str, status: str = "finished", result: dict[str, Any] | None = None, error: str = "") -> None:
         run = self.get(run_id)
         payload: dict[str, Any] = {"status": status, "duration_ms": 0}
         if run is not None:
@@ -204,7 +206,7 @@ class RunBus:
         return drained
 
     # ----------------------------------------------------------------- publish
-    def publish(self, run_id: str, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def publish(self, run_id: str, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         event = {
             "id": None,
             "run_id": run_id,
@@ -264,10 +266,17 @@ class RunBus:
         with self._lock:
             return [e for e in list(run.events) if int(e["id"] or 0) > int(after)][-limit:]
 
-    def subscribe(self, run_id: str, *, loop: Optional[asyncio.AbstractEventLoop] = None,
-                  replay: bool = True, after: int = 0, queue_max: int = 2000):
+    def subscribe(
+        self,
+        run_id: str,
+        *,
+        loop: asyncio.AbstractEventLoop | None = None,
+        replay: bool = True,
+        after: int = 0,
+        queue_max: int = 2000,
+    ):
         """Return (queue, unsubscribe). Items are event dicts; ``__closed__`` ends the stream."""
-        aq: "asyncio.Queue" = asyncio.Queue(maxsize=queue_max)
+        aq: asyncio.Queue = asyncio.Queue(maxsize=queue_max)
         key = (loop, aq) if loop is not None else aq
         # Snapshot + registration must be atomic w.r.t. publish(): an event
         # published between the replay snapshot and subscribers.add(key) would
@@ -303,7 +312,7 @@ class RunBus:
         return out
 
 
-def _put_nowait(aq: "asyncio.Queue", event: dict[str, Any]) -> None:
+def _put_nowait(aq: asyncio.Queue, event: dict[str, Any]) -> None:
     try:
         if aq.full():
             try:
@@ -321,18 +330,18 @@ run_bus = RunBus()
 class RunHandle:
     """Convenience emitter object handed to agent code: ``run.emit(...)``."""
 
-    def __init__(self, run_id: str, bus: Optional[RunBus] = None, label: str = ""):
+    def __init__(self, run_id: str, bus: RunBus | None = None, label: str = ""):
         self.run_id = run_id
         self.bus = bus or run_bus
         self.label = label
         self.started = False
 
-    def start(self, label: str = "") -> "RunHandle":
+    def start(self, label: str = "") -> RunHandle:
         self.bus.start(self.run_id, label or self.label)
         self.started = True
         return self
 
-    def emit(self, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def emit(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.bus.publish(self.run_id, event_type, data)
 
     def token(self, text: str) -> None:
@@ -342,7 +351,7 @@ class RunHandle:
     def log(self, message: str, level: str = "info") -> None:
         self.emit("log", {"level": level, "message": str(message)[:2000]})
 
-    def finish(self, result: Optional[dict[str, Any]] = None, error: str = "") -> None:
+    def finish(self, result: dict[str, Any] | None = None, error: str = "") -> None:
         self.bus.finish(self.run_id, "error" if error else "finished", result, error)
 
     @property
@@ -360,15 +369,15 @@ class RuntimeIssue:
     (mission/run/step ids) to diagnose an autonomous run after the fact.
     """
 
-    component: str                 # memory | routing | telemetry | executor | ...
-    operation: str                 # recall | publish | scan | ...
+    component: str  # memory | routing | telemetry | executor | ...
+    operation: str  # recall | publish | scan | ...
     error: str
     error_type: str = ""
-    mission_id: Optional[str] = None
-    run_id: Optional[str] = None
-    step: Optional[int] = None
-    retryable: Optional[bool] = None
-    fallback: Optional[str] = None   # what was done instead ("continued without memory block")
+    mission_id: str | None = None
+    run_id: str | None = None
+    step: int | None = None
+    retryable: bool | None = None
+    fallback: str | None = None  # what was done instead ("continued without memory block")
     ts: str = field(default_factory=_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -390,7 +399,7 @@ _issue_ring: deque[dict[str, Any]] = deque(maxlen=500)
 _issue_lock = threading.Lock()
 
 
-def _issue_log_path() -> Optional[Path]:
+def _issue_log_path() -> Path | None:
     """Best-effort durable issue log under the hermus workspace logs dir."""
     try:
         from core.workspace import workspace
@@ -408,11 +417,11 @@ def record_issue(
     error: Any,
     *,
     error_type: str = "",
-    mission_id: Optional[str] = None,
-    run_id: Optional[str] = None,
-    step: Optional[int] = None,
-    retryable: Optional[bool] = None,
-    fallback: Optional[str] = None,
+    mission_id: str | None = None,
+    run_id: str | None = None,
+    step: int | None = None,
+    retryable: bool | None = None,
+    fallback: str | None = None,
 ) -> dict[str, Any]:
     """Record a structured runtime issue: log line + ring buffer + run event.
 
@@ -437,7 +446,7 @@ def record_issue(
         d = issue.to_dict()
         with _issue_lock:
             _issue_ring.append(d)
-        print(
+        logger.error(
             f"[issue] component={d['component']} op={d['operation']} "
             f"error={d['error_type']}: {d['error'][:160]} "
             f"retryable={d['retryable']} fallback={d['fallback'] or 'none'}"
@@ -458,14 +467,13 @@ def record_issue(
                 pass
         return d
     except Exception:
-        return {"component": str(component), "operation": str(operation),
-                "error": "issue-recorder-failed"}
+        return {"component": str(component), "operation": str(operation), "error": "issue-recorder-failed"}
 
 
 def recent_issues(limit: int = 100) -> list[dict[str, Any]]:
     """Most recent structured runtime issues (newest last)."""
     with _issue_lock:
-        return list(_issue_ring)[-max(1, int(limit)):]
+        return list(_issue_ring)[-max(1, int(limit)) :]
 
 
 def run_handle_from(run_id: str) -> RunHandle:
@@ -473,7 +481,6 @@ def run_handle_from(run_id: str) -> RunHandle:
 
 
 def sse_format(event: dict[str, Any]) -> str:
-
     """Server-Sent Events framing (id + event + data)."""
     payload = json.dumps(event, default=str)
     return f"id: {event.get('id')}\nevent: {event.get('type')}\ndata: {payload}\n\n"

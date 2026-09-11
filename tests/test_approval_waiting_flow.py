@@ -60,9 +60,12 @@ def test_tool_gateway_keeps_deny_as_policy_denied():
 
 
 def test_agent_preserves_approval_required_metadata_in_tool_result():
+    import re
+
     src = __import__("pathlib").Path("core/agent.py").read_text(encoding="utf-8")
     assert 'result.get("error_code") == "APPROVAL_REQUIRED"' in src
-    assert 'emit("approval_required"' in src
+    # Tolerate the formatter splitting the emit(...) call across lines.
+    assert re.search(r'emit\(\s*"approval_required"', src)
     assert '"waiting_for_approval": pending_approval' in src
     assert '"status": "waiting_for_approval" if pending_approval else "done"' in src
 
@@ -71,16 +74,16 @@ def test_mission_promotes_approval_required_to_blocked_state():
     src = __import__("pathlib").Path("core/mission.py").read_text(encoding="utf-8")
     assert 'res.get("status") == "waiting_for_approval"' in src
     assert '"error": "approval_required"' in src
-    assert 'report.approval_request = approval_request' in src
-    assert 'hermus perms resolve {req_id} approve --retry' in src
-    assert 'report.approval_request = None' in src
+    assert "report.approval_request = approval_request" in src
+    assert "hermus perms resolve {req_id} approve --retry" in src
+    assert "report.approval_request = None" in src
     assert '"approval_request": self.approval_request' in src
 
 
 def test_control_room_exposes_mission_approval_resume_controls():
     src = __import__("pathlib").Path("gateway/control.html").read_text(encoding="utf-8")
     assert 'id="tab-missions"' in src
-    assert 'approve+retry' in src
-    assert '/permissions/pending/resolve' in src
-    assert '/missions/' in src and '/resume' in src
-    assert 'refreshMissions' in src
+    assert "approve+retry" in src
+    assert "/permissions/pending/resolve" in src
+    assert "/missions/" in src and "/resume" in src
+    assert "refreshMissions" in src

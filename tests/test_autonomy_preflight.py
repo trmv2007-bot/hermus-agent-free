@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from _cli_source import cli_source
+
 from core.approval import ApprovalStore
 from core.autonomy_preflight import create_preflight_approval_requests, infer_actions, preflight_goal
 
@@ -50,7 +52,7 @@ def test_create_preflight_approval_requests_creates_pending_prompts(tmp_path):
 
 def test_gateway_and_cli_expose_preflight():
     routes = Path("gateway/routes_subsystems.py").read_text(encoding="utf-8")
-    cli = Path("hermus.py").read_text(encoding="utf-8")
+    cli = cli_source()
     assert '@router.post("/safety/preflight")' in routes
     assert '@router.post("/safety/preflight/approvals")' in routes
     assert "preflight_goal" in routes

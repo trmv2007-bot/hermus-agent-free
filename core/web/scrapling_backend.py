@@ -13,12 +13,13 @@ ImportError or curl traceback.
 
 Version target: Scrapling 0.4.x (tested against 0.4.15, BSD-3-Clause).
 """
+
 from __future__ import annotations
 
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from . import capabilities
 from .errors import (
@@ -27,10 +28,11 @@ from .errors import (
     WebAcquisitionError,
 )
 from .models import (
-    FetchStrategy,
     FailureClass,
+    FetchStrategy,
 )
 from .security import WebSecurityPolicy
+
 
 # curl_cffi network error families → failure classification.
 def _scrapling_session(session: Any, strategy: FetchStrategy) -> Any:
@@ -54,8 +56,7 @@ def _scrapling_session(session: Any, strategy: FetchStrategy) -> Any:
         try:
             return ensure()
         except ImportError as exc:
-            raise StrategyUnavailableError(
-                f"session backend unavailable: {exc}", strategy=strategy.value) from exc
+            raise StrategyUnavailableError(f"session backend unavailable: {exc}", strategy=strategy.value) from exc
     return session  # already a raw Scrapling session object
 
 
@@ -65,8 +66,7 @@ def _classify_network_error(exc: Exception) -> FailureClass:
         return FailureClass.TIMEOUT
     if "ssl" in text or "certificate" in text or "tls" in text:
         return FailureClass.TLS
-    if "resolve" in text or "getaddrinfo" in text or "name or service not known" in text \
-            or "nodename nor servname" in text:
+    if "resolve" in text or "getaddrinfo" in text or "name or service not known" in text or "nodename nor servname" in text:
         return FailureClass.DNS
     if any(k in text for k in ("connection", "connect", "refused", "reset", "unreachable")):
         return FailureClass.CONNECTION
@@ -100,7 +100,7 @@ class RawFetch:
 
     url: str
     final_url: str = ""
-    status: Optional[int] = None
+    status: int | None = None
     reason: str = ""
     content_type: str = ""
     size_bytes: int = 0
@@ -123,8 +123,9 @@ class ScraplingBackend:
 
     # ------------------------------------------------------------------ probe
     def status(self, strategy: FetchStrategy) -> dict[str, Any]:
-        return dict(capabilities.probe().get(strategy.value, {"status": capabilities.NOT_INSTALLED,
-                                                              "detail": "unknown strategy"}))
+        return dict(
+            capabilities.probe().get(strategy.value, {"status": capabilities.NOT_INSTALLED, "detail": "unknown strategy"})
+        )
 
     # ----------------------------------------------------------------- static
     def fetch_static(
@@ -133,8 +134,8 @@ class ScraplingBackend:
         *,
         policy: WebSecurityPolicy,
         timeout: float = 20.0,
-        headers: Optional[dict[str, str]] = None,
-        session: Optional[Any] = None,
+        headers: dict[str, str] | None = None,
+        session: Any | None = None,
         stealthy_headers: bool = True,
     ) -> RawFetch:
         """Fast HTTP fetch via Scrapling Fetcher (browser TLS fingerprint)."""
@@ -166,8 +167,8 @@ class ScraplingBackend:
             # importing playwright/patchright/browserforge) must degrade to a
             # typed 'strategy unavailable', not be misreported as a network error.
             raise StrategyUnavailableError(
-                f"static acquisition dependency missing: {exc}",
-                strategy=FetchStrategy.STATIC.value) from exc
+                f"static acquisition dependency missing: {exc}", strategy=FetchStrategy.STATIC.value
+            ) from exc
         except Exception as exc:  # curl_cffi network failures
             raise _raise_for_network_error(exc) from exc
         return self._to_raw(url, response, started, policy=policy)
@@ -179,11 +180,11 @@ class ScraplingBackend:
         *,
         policy: WebSecurityPolicy,
         timeout: float = 45.0,
-        wait_selector: Optional[str] = None,
+        wait_selector: str | None = None,
         network_idle: bool = True,
-        capture_xhr: Optional[str] = None,
-        session: Optional[Any] = None,
-        extra_headers: Optional[dict[str, str]] = None,
+        capture_xhr: str | None = None,
+        session: Any | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> RawFetch:
         """JS-rendered fetch via Scrapling DynamicFetcher (Playwright Chromium)."""
         _ensure(FetchStrategy.DYNAMIC)
@@ -212,8 +213,8 @@ class ScraplingBackend:
             raise
         except (ImportError, ModuleNotFoundError) as exc:
             raise StrategyUnavailableError(
-                f"dynamic acquisition dependency missing: {exc}",
-                strategy=FetchStrategy.DYNAMIC.value) from exc
+                f"dynamic acquisition dependency missing: {exc}", strategy=FetchStrategy.DYNAMIC.value
+            ) from exc
         except Exception as exc:
             raise _raise_for_network_error(exc) from exc
         raw = self._to_raw(url, response, started, policy=policy)
@@ -228,7 +229,7 @@ class ScraplingBackend:
         policy: WebSecurityPolicy,
         timeout: float = 60.0,
         solve_cloudflare: bool = False,
-        session: Optional[Any] = None,
+        session: Any | None = None,
     ) -> RawFetch:
         """Hardened anti-bot fetch via Scrapling StealthyFetcher.
 
@@ -256,8 +257,8 @@ class ScraplingBackend:
             raise
         except (ImportError, ModuleNotFoundError) as exc:
             raise StrategyUnavailableError(
-                f"stealth acquisition dependency missing: {exc}",
-                strategy=FetchStrategy.STEALTH.value) from exc
+                f"stealth acquisition dependency missing: {exc}", strategy=FetchStrategy.STEALTH.value
+            ) from exc
         except Exception as exc:
             raise _raise_for_network_error(exc) from exc
         return self._to_raw(url, response, started, policy=policy)
@@ -272,14 +273,11 @@ class ScraplingBackend:
         try:
             from scrapling.parser import Selector  # lazy: optional dependency
         except Exception as exc:  # pragma: no cover - covered by capability checks
-            raise StrategyUnavailableError(
-                f"scrapling parser unavailable: {exc}", strategy="parser"
-            ) from exc
+            raise StrategyUnavailableError(f"scrapling parser unavailable: {exc}", strategy="parser") from exc
         return Selector(content=html, url=url or "about:blank")
 
     # ---------------------------------------------------------------- helpers
-    def _to_raw(self, url: str, response: Any, started: float, *,
-                policy: Optional[WebSecurityPolicy] = None) -> RawFetch:
+    def _to_raw(self, url: str, response: Any, started: float, *, policy: WebSecurityPolicy | None = None) -> RawFetch:
         headers = getattr(response, "headers", None) or {}
         content_type = ""
         try:
@@ -289,9 +287,7 @@ class ScraplingBackend:
         body = getattr(response, "body", b"") or b""
         size_bytes = len(body)
         final_url = getattr(response, "url", "") or url
-        history = tuple(
-            getattr(h, "url", "") or "" for h in (getattr(response, "history", None) or [])
-        )
+        history = tuple(getattr(h, "url", "") or "" for h in (getattr(response, "history", None) or []))
         if policy is not None:
             # (1) Final-URL SSRF re-validation — the suspenders to Scrapling's
             # follow_redirects="safe" belt. A page can redirect a public host to
@@ -314,9 +310,7 @@ class ScraplingBackend:
         )
 
     @staticmethod
-    def _revalidate_final_url(requested: str, final_url: str,
-                              history: tuple[str, ...],
-                              policy: WebSecurityPolicy) -> None:
+    def _revalidate_final_url(requested: str, final_url: str, history: tuple[str, ...], policy: WebSecurityPolicy) -> None:
         """Re-run the full security battery on the final URL and every hop.
 
         Any redirect hop that lands on a forbidden target aborts the fetch with
@@ -347,11 +341,13 @@ def _bundle_captured_xhr(xhrs: list[Any]) -> list[dict[str, Any]]:
                 data = json.loads(body.decode("utf-8", errors="replace"))
             except Exception:
                 continue  # non-JSON XHR (images, blobs) is not worth keeping
-            out.append({
-                "url": getattr(xhr, "url", ""),
-                "status": int(getattr(xhr, "status", 0) or 0),
-                "json": data,
-            })
+            out.append(
+                {
+                    "url": getattr(xhr, "url", ""),
+                    "status": int(getattr(xhr, "status", 0) or 0),
+                    "json": data,
+                }
+            )
         except Exception:
             continue
     return out

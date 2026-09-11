@@ -11,8 +11,8 @@ Escape hatches (all audited to ``logs/sandbox.jsonl``):
   * ``sandbox="local"``     → force the hardened local path for this call
   * ``allow_dangerous=True``→ skip the dangerous-pattern screen
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 from core.config import config
 
@@ -28,8 +28,7 @@ def shell_execute(
     """Execute a shell command in an ephemeral sandbox with CPU/mem/pid limits."""
     command = (command or "").strip()
     if not command:
-        return {"command": command, "error": "empty command", "stdout": "", "stderr": "",
-                "returncode": 1, "success": False}
+        return {"command": command, "error": "empty command", "stdout": "", "stderr": "", "returncode": 1, "success": False}
 
     mode = str(sandbox or getattr(config, "sandbox_mode", "auto") or "auto").lower()
     if mode in ("", "off", "none", "disabled"):
@@ -37,8 +36,12 @@ def shell_execute(
 
         try:
             result = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
-                timeout=int(timeout), cwd=cwd or None,
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=int(timeout),
+                cwd=cwd or None,
             )
             return {
                 "command": command,
@@ -59,12 +62,15 @@ def shell_execute(
         import subprocess
 
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True,
-                                    timeout=int(timeout), cwd=cwd or None)
-            return {"command": command, "stdout": result.stdout[:5000],
-                    "stderr": result.stderr[:2000], "returncode": result.returncode,
-                    "success": result.returncode == 0,
-                    "sandbox": {"backend": "unavailable", "note": f"sandbox import failed: {e}"}}
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=int(timeout), cwd=cwd or None)
+            return {
+                "command": command,
+                "stdout": result.stdout[:5000],
+                "stderr": result.stderr[:2000],
+                "returncode": result.returncode,
+                "success": result.returncode == 0,
+                "sandbox": {"backend": "unavailable", "note": f"sandbox import failed: {e}"},
+            }
         except Exception as exc:
             return {"command": command, "error": str(exc)}
 

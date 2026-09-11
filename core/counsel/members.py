@@ -5,10 +5,10 @@ available (reusing multi_key + model_fleet discovery), so "all AIs talk to each
 other" is real: Groq free key for the Critic, Ollama local for the Chair, etc.
 If only one model exists, members still differ by persona.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from ..config import config
 from ..llm import FreeLLM
@@ -37,11 +37,13 @@ class CounselMember:
     base_url: str = ""
     weight: int = 1
     provider: str = ""
-    temperature: Optional[float] = None
+    temperature: float | None = None
 
     def llm(self) -> FreeLLM:
         temp = self.temperature if self.temperature is not None else ROLE_TEMPERATURES.get(self.role, 0.3)
-        return get_model_gateway().llm(model=self.model, api_key=self.api_key or None, base_url=self.base_url or None, temperature=temp)
+        return get_model_gateway().llm(
+            model=self.model, api_key=self.api_key or None, base_url=self.base_url or None, temperature=temp
+        )
 
 
 def _discover_workers() -> list[dict]:
@@ -54,7 +56,7 @@ def _discover_workers() -> list[dict]:
         return []
 
 
-def _assign_models(specs: list[dict], model: Optional[str] = None) -> list[dict]:
+def _assign_models(specs: list[dict], model: str | None = None) -> list[dict]:
     """Assign diverse model refs to member specs; fall back to `model` or config.model."""
     workers = _discover_workers()
     used_providers = set()
@@ -88,7 +90,7 @@ def _assign_models(specs: list[dict], model: Optional[str] = None) -> list[dict]
 def build_roster(
     constitution_doc: dict,
     max_members: int = 5,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> list[CounselMember]:
     """Build the debate roster (members only; judge is used later in voting)."""
     specs = [m for m in constitution_doc.get("members", []) if m.get("enabled")]

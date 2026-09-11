@@ -1,18 +1,25 @@
 from __future__ import annotations
 
-from core.capability_ledger import CapabilityEntry, CapabilityLedger, capability_entry_from_blocked_action, capability_setup_proposal
+from core.capability_ledger import (
+    CapabilityEntry,
+    CapabilityLedger,
+    capability_entry_from_blocked_action,
+    capability_setup_proposal,
+)
 
 
 def test_capability_ledger_adds_discovered_power_to_markdown(tmp_path):
     path = tmp_path / "CAPABILITY_LEDGER.md"
     ledger = CapabilityLedger(path)
-    result = ledger.add_discovered(CapabilityEntry.create(
-        power="Gmail delegated send",
-        use="reply to approved emails",
-        risk="privacy and reputation",
-        needed_approval_setup="Gmail connector plus send policy",
-        status="not_granted",
-    ))
+    result = ledger.add_discovered(
+        CapabilityEntry.create(
+            power="Gmail delegated send",
+            use="reply to approved emails",
+            risk="privacy and reputation",
+            needed_approval_setup="Gmail connector plus send policy",
+            status="not_granted",
+        )
+    )
     assert result["success"] is True
     text = path.read_text(encoding="utf-8")
     assert "Gmail delegated send" in text
@@ -77,7 +84,7 @@ def test_permission_manager_records_capability_need_when_yellow_has_no_grant():
 def test_tool_gateway_records_missing_tool_capability():
     src = __import__("pathlib").Path("core/tools/gateway.py").read_text(encoding="utf-8")
     assert "Tool capability:" in src
-    assert "source=\"tool_gateway\"" in src
+    assert 'source="tool_gateway"' in src
 
 
 def test_capability_setup_proposal_is_category_aware():

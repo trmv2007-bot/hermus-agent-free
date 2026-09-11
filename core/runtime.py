@@ -26,10 +26,12 @@ there is no second ``AutonomousRunner`` path. The legacy runner was removed;
 ``mission_runtime_enabled=0`` now raises a clear ``BLOCKED`` result rather than
 degrading autonomy into a different execution path.
 """
+
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .config import config
 from .run_events import record_issue
@@ -38,24 +40,70 @@ from .run_events import record_issue
 
 #: phrases that explicitly request the full autonomous/mission treatment
 MISSION_MARKERS = (
-    "mission:", "/mission", "autonomous:", "autonomously",
-    "keep going until", "until it works", "don't stop until",
-    "do not stop until", "end to end", "end-to-end", "unsupervised",
+    "mission:",
+    "/mission",
+    "autonomous:",
+    "autonomously",
+    "keep going until",
+    "until it works",
+    "don't stop until",
+    "do not stop until",
+    "end to end",
+    "end-to-end",
+    "unsupervised",
 )
 
 #: imperative verbs that imply producing/changing something
 ACTION_VERBS = (
-    "build", "create", "write", "implement", "develop", "fix", "repair",
-    "refactor", "deploy", "generate", "integrate", "migrate", "automate",
-    "scaffold", "port", "make me", "set up", "set it up",
+    "build",
+    "create",
+    "write",
+    "implement",
+    "develop",
+    "fix",
+    "repair",
+    "refactor",
+    "deploy",
+    "generate",
+    "integrate",
+    "migrate",
+    "automate",
+    "scaffold",
+    "port",
+    "make me",
+    "set up",
+    "set it up",
 )
 
 #: object keywords — the goal names a concrete artifact/system
 DELIVERABLE_HINTS = (
-    "app", "application", "website", "web app", "api", "script", "bot",
-    "tool", "service", "project", "repo", "repository", "code", "program",
-    "game", "dashboard", "cli", "server", "scraper", "pipeline", "tests",
-    "test suite", "report", "documentation", "docs", "app that", "page",
+    "app",
+    "application",
+    "website",
+    "web app",
+    "api",
+    "script",
+    "bot",
+    "tool",
+    "service",
+    "project",
+    "repo",
+    "repository",
+    "code",
+    "program",
+    "game",
+    "dashboard",
+    "cli",
+    "server",
+    "scraper",
+    "pipeline",
+    "tests",
+    "test suite",
+    "report",
+    "documentation",
+    "docs",
+    "app that",
+    "page",
 )
 
 # ---------------------------------------------------------------------------
@@ -68,10 +116,10 @@ DELIVERABLE_HINTS = (
 # The intent is therefore decided first, and only an ACTION intent can be
 # promoted to a mission.
 
-INTENT_QUESTION = "question"        # "what is the capital of France?"
+INTENT_QUESTION = "question"  # "what is the capital of France?"
 INTENT_EXPLANATION = "explanation"  # "explain how to fix my app", "best way to …"
-INTENT_ANALYSIS = "analysis"        # "review this diff", "summarize this"
-INTENT_ACTION = "action"            # "build me a web app and test it"
+INTENT_ANALYSIS = "analysis"  # "review this diff", "summarize this"
+INTENT_ACTION = "action"  # "build me a web app and test it"
 INTENT_CONVERSATION = "conversation"  # greetings, chit-chat, meta instructions
 
 #: leading filler/politeness stripped before the verb is inspected
@@ -84,10 +132,38 @@ _FILLER_RE = re.compile(
 
 #: interrogative openings (after filler removal)
 QUESTION_STARTERS = (
-    "what", "why", "when", "who", "whom", "whose", "which", "where", "how",
-    "is ", "are ", "was ", "were ", "do ", "does ", "did ", "can ", "could ",
-    "would ", "should ", "will ", "am ", "has ", "have ", "had ", "anyone",
-    "anybody", "isn't", "aren't", "don't", "doesn't", "shouldn't",
+    "what",
+    "why",
+    "when",
+    "who",
+    "whom",
+    "whose",
+    "which",
+    "where",
+    "how",
+    "is ",
+    "are ",
+    "was ",
+    "were ",
+    "do ",
+    "does ",
+    "did ",
+    "can ",
+    "could ",
+    "would ",
+    "should ",
+    "will ",
+    "am ",
+    "has ",
+    "have ",
+    "had ",
+    "anyone",
+    "anybody",
+    "isn't",
+    "aren't",
+    "don't",
+    "doesn't",
+    "shouldn't",
 )
 
 #: phrases that mean "teach me / describe it", even with an action verb inside
@@ -95,21 +171,62 @@ QUESTION_STARTERS = (
 # questions ("what is the capital of France?"), and the *how* phrases below
 # already cover "what is the best way to build an API?".
 EXPLANATION_HINTS = (
-    "explain", "how does", "how do i", "how do you", "how can i",
-    "how should i", "how would i", "how to", "why does", "why is", "why are",
-    "difference between", "pros and cons", "teach me", "walk me through",
-    "meaning of", "best way to", "best practice", "best approach",
-    "i don't understand", "help me understand", "clarify", "describe how",
-    "overview of", "eli5", "in layman", "tutorial on", "guide to",
-    "introduction to", "tell me about",
+    "explain",
+    "how does",
+    "how do i",
+    "how do you",
+    "how can i",
+    "how should i",
+    "how would i",
+    "how to",
+    "why does",
+    "why is",
+    "why are",
+    "difference between",
+    "pros and cons",
+    "teach me",
+    "walk me through",
+    "meaning of",
+    "best way to",
+    "best practice",
+    "best approach",
+    "i don't understand",
+    "help me understand",
+    "clarify",
+    "describe how",
+    "overview of",
+    "eli5",
+    "in layman",
+    "tutorial on",
+    "guide to",
+    "introduction to",
+    "tell me about",
 )
 
 #: phrases whose product is an assessment, not a change in the world
 ANALYSIS_HINTS = (
-    "analyze", "analyse", "review", "audit", "compare", "evaluate", "assess",
-    "summarize", "summarise", "investigate", "diagnose", "inspect", "critique",
-    "check whether", "look into", "findings", "pros and cons", "trade-offs",
-    "tradeoffs", "report on", "list the", "identify the",
+    "analyze",
+    "analyse",
+    "review",
+    "audit",
+    "compare",
+    "evaluate",
+    "assess",
+    "summarize",
+    "summarise",
+    "investigate",
+    "diagnose",
+    "inspect",
+    "critique",
+    "check whether",
+    "look into",
+    "findings",
+    "pros and cons",
+    "trade-offs",
+    "tradeoffs",
+    "report on",
+    "list the",
+    "identify the",
 )
 
 
@@ -132,17 +249,22 @@ def detect_intent(text: str) -> str:
     if any(h in low for h in EXPLANATION_HINTS):
         return INTENT_EXPLANATION
 
-    has_action_verb = any(
-        stripped.startswith(v) or f" {v} " in f" {stripped} " for v in ACTION_VERBS
-    )
+    has_action_verb = any(stripped.startswith(v) or f" {v} " in f" {stripped} " for v in ACTION_VERBS)
     has_deliverable = any(h in low for h in DELIVERABLE_HINTS)
-    has_plan_signal = len(low) > 120 or low.count("\n") >= 2 or bool(
-        re.search(r"\n\s*(?:\d+\.|-|\*)", text or "")
+    has_plan_signal = len(low) > 120 or low.count("\n") >= 2 or bool(re.search(r"\n\s*(?:\d+\.|-|\*)", text or ""))
+    multi_step = any(
+        w in low
+        for w in (
+            " and then ",
+            " then ",
+            "after that",
+            "next,",
+            "finally",
+            "step by step",
+            " and also ",
+            " and keep ",
+        )
     )
-    multi_step = any(w in low for w in (
-        " and then ", " then ", "after that", "next,", "finally",
-        "step by step", " and also ", " and keep ",
-    ))
 
     # 2. an imperative that names a deliverable is a real action request,
     #    even when phrased as a question ("can you build me a website?").
@@ -233,9 +355,7 @@ def _chat_fallback_allowed() -> bool:
     return bool(getattr(config, "mission_fallback_to_chat", False))
 
 
-def _emit_model_capability_warning(
-    agent: Any, prefer: str, emit: Callable[[str, dict], None]
-) -> Optional[dict]:
+def _emit_model_capability_warning(agent: Any, prefer: str, emit: Callable[[str, dict], None]) -> dict | None:
     """Pre-flight capability check (tools/vision/context/…).
 
     Never blocks by itself: it publishes ``model_capability_warning`` (and a
@@ -252,8 +372,7 @@ def _emit_model_capability_warning(
         from .model_capabilities import negotiate, select_compatible_model
 
         report = negotiate(model)
-        payload = {"model": model, "report": report.to_dict(),
-                   "warnings": report.warnings(["tools"])}
+        payload = {"model": model, "report": report.to_dict(), "warnings": report.warnings(["tools"])}
         if report.missing(["tools"]) and getattr(config, "auto_select_model", False):
             pick, info = select_compatible_model(["tools"])
             payload["recommended_model"] = pick
@@ -267,21 +386,25 @@ def _emit_model_capability_warning(
 
 def _resolve_agent(
     agent: Any = None,
-    agent_getter: Optional[Callable[..., Any]] = None,
+    agent_getter: Callable[..., Any] | None = None,
     *,
     platform: str = "api",
     user_id: str = "anonymous",
-    model: Optional[str] = None,
-    mode: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
+    model: str | None = None,
+    mode: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
 ) -> Any:
     if agent is not None:
         return agent
     if agent_getter is not None:
         resolved = agent_getter(
-            platform, user_id, model=model, mode=mode or "agent",
-            api_key=api_key, base_url=base_url,
+            platform,
+            user_id,
+            model=model,
+            mode=mode or "agent",
+            api_key=api_key,
+            base_url=base_url,
         )
         if resolved is not None:
             return resolved
@@ -290,8 +413,9 @@ def _resolve_agent(
     return HermusAgent(model=model, mode=mode or "agent", api_key=api_key, base_url=base_url)
 
 
-def _chat_with_compat(agent: Any, text: str, *, on_event=None, stream: bool = False,
-                      should_cancel=None, steer_source=None) -> dict[str, Any]:
+def _chat_with_compat(
+    agent: Any, text: str, *, on_event=None, stream: bool = False, should_cancel=None, steer_source=None
+) -> dict[str, Any]:
     """Call ``agent.chat`` passing only the kwargs the agent supports."""
     import inspect
 
@@ -379,12 +503,12 @@ def mission_failure_result(
     goal: str,
     *,
     exc: Any = None,
-    mission_id: Optional[str] = None,
-    stage: Optional[str] = None,
-    reason: Optional[str] = None,
+    mission_id: str | None = None,
+    stage: str | None = None,
+    reason: str | None = None,
     recoverable: bool = True,
     report: Any = None,
-    error_type: Optional[str] = None,
+    error_type: str | None = None,
 ) -> dict[str, Any]:
     """Build the structured **mission failure** contract.
 
@@ -410,8 +534,7 @@ def mission_failure_result(
           ...legacy autonomous fields (status/phases/steps/verified/repairs)
         }
     """
-    error_type = (error_type or (type(exc).__name__ if exc is not None else "")
-                  or reason or "mission_error")
+    error_type = error_type or (type(exc).__name__ if exc is not None else "") or reason or "mission_error"
     message = str(exc)[:500] if exc is not None else (reason or "mission failed")
     stage = stage or "unknown"
     mid = mission_id or ""
@@ -475,7 +598,7 @@ def mission_failure_result(
     return out
 
 
-def mission_report_to_result(report: Any, *, legacy_task: Optional[str] = None) -> dict[str, Any]:
+def mission_report_to_result(report: Any, *, legacy_task: str | None = None) -> dict[str, Any]:
     """Adapt a MissionReport into the unified (and legacy) result contract.
 
     Keeps the fields ``HermusAgent.autonomous`` consumers have always read
@@ -523,13 +646,9 @@ def mission_report_to_result(report: Any, *, legacy_task: Optional[str] = None) 
     # A non-completed mission carries structured diagnostics so every surface
     # (dashboard, CLI, channels, queue result) can explain *why* and *how to
     # recover* instead of showing an empty answer.
-    failure: Optional[dict[str, Any]] = None
+    failure: dict[str, Any] | None = None
     if not completed:
-        summary = (
-            report.failure_summary()
-            if hasattr(report, "failure_summary")
-            else {}
-        )
+        summary = report.failure_summary() if hasattr(report, "failure_summary") else {}
         failure = {
             "stage": summary.get("stage") or state,
             "reason": summary.get("reason") or (data.get("blocker_reason") or "mission did not complete"),
@@ -538,31 +657,31 @@ def mission_report_to_result(report: Any, *, legacy_task: Optional[str] = None) 
             "recoverable": bool(summary.get("recoverable", state != "completed")),
             "resumable": bool(summary.get("resumable", state in ("blocked", "paused"))),
             "resume_command": summary.get("resume_command", ""),
-            "resume_api": (f"POST /missions/{data.get('mission_id')}/resume"
-                           if data.get("mission_id") else ""),
+            "resume_api": (f"POST /missions/{data.get('mission_id')}/resume" if data.get("mission_id") else ""),
             "mission_id": data.get("mission_id"),
         }
-    out.update({
-        # canonical answer contract (what /command, SSE and TTS read)
-        "response": answer,
-        # legacy autonomous-runner contract (CLI, delegation, old callers)
-        "status": "done" if completed else ("failed" if not blocked else "blocked"),
-        "phases": phases,
-        "steps": steps,
-        "verified": completed,
-        "repairs": int((data.get("budget") or {}).get("repairs_used") or 0),
-        "final_answer": answer,
-        # runtime metadata
-        "run_kind": "mission",
-        "mission": data,
-    })
+    out.update(
+        {
+            # canonical answer contract (what /command, SSE and TTS read)
+            "response": answer,
+            # legacy autonomous-runner contract (CLI, delegation, old callers)
+            "status": "done" if completed else ("failed" if not blocked else "blocked"),
+            "phases": phases,
+            "steps": steps,
+            "verified": completed,
+            "repairs": int((data.get("budget") or {}).get("repairs_used") or 0),
+            "final_answer": answer,
+            # runtime metadata
+            "run_kind": "mission",
+            "mission": data,
+        }
+    )
     if failure:
         out["failure"] = failure
         out["mission_failed"] = not completed and not blocked
         if not answer:
-            out["response"] = out["final_answer"] = (
-                f"MISSION FAILED — {failure['reason']}"
-                + (f"\nresume: {failure['resume_command']}" if failure["resume_command"] else "")
+            out["response"] = out["final_answer"] = f"MISSION FAILED — {failure['reason']}" + (
+                f"\nresume: {failure['resume_command']}" if failure["resume_command"] else ""
             )
     return out
 
@@ -572,24 +691,24 @@ def execute(
     text: str,
     *,
     agent: Any = None,
-    agent_getter: Optional[Callable[..., Any]] = None,
+    agent_getter: Callable[..., Any] | None = None,
     platform: str = "api",
     user_id: str = "anonymous",
-    model: Optional[str] = None,
-    mode: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
+    model: str | None = None,
+    mode: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
     prefer: str = "auto",
-    on_event: Optional[Callable[..., None]] = None,
+    on_event: Callable[..., None] | None = None,
     stream: bool = False,
-    should_cancel: Optional[Callable[[], bool]] = None,
-    steer_source: Optional[Callable[[], list[str]]] = None,
+    should_cancel: Callable[[], bool] | None = None,
+    steer_source: Callable[[], list[str]] | None = None,
     max_repairs: int = 2,
-    budget_steps: Optional[int] = None,
-    requirements: Optional[list[str]] = None,
-    domain: Optional[str] = None,
-    subgoals: Optional[list[str]] = None,
-    preflight: Optional[bool] = None,
+    budget_steps: int | None = None,
+    requirements: list[str] | None = None,
+    domain: str | None = None,
+    subgoals: list[str] | None = None,
+    preflight: bool | None = None,
     allow_preflight_planning: bool = False,
     read_only: bool = False,
 ) -> dict[str, Any]:
@@ -639,11 +758,12 @@ def execute(
     # executable objective into chat or into a second, weaker autonomy path.
     if kind == "mission" and not runtime_on:
         from .mission_files import MissionFileScope  # noqa: F401
+
         blocked = mission_failure_result(
             text,
             stage="blocked",
             reason="HERMUS_MISSION_RUNTIME is disabled; the mission runtime is the "
-                   "only autonomy engine and cannot be downgraded.",
+            "only autonomy engine and cannot be downgraded.",
             error_type="mission_runtime_disabled",
             recoverable=True,
         )
@@ -659,15 +779,25 @@ def execute(
         return blocked
 
     resolved_agent = _resolve_agent(
-        agent, agent_getter, platform=platform, user_id=user_id,
-        model=model, mode=mode, api_key=api_key, base_url=base_url,
+        agent,
+        agent_getter,
+        platform=platform,
+        user_id=user_id,
+        model=model,
+        mode=mode,
+        api_key=api_key,
+        base_url=base_url,
     )
 
     if kind == "chat" or resolved_agent is None:
         chat_runner = _read_only_chat if read_only else _chat_with_compat
         result = chat_runner(
-            resolved_agent, text, on_event=on_event, stream=stream,
-            should_cancel=should_cancel, steer_source=steer_source,
+            resolved_agent,
+            text,
+            on_event=on_event,
+            stream=stream,
+            should_cancel=should_cancel,
+            steer_source=steer_source,
         )
         if not isinstance(result, dict):
             result = {"response": str(result or "")}
@@ -675,12 +805,15 @@ def execute(
         result.setdefault("run_kind", "chat")
         if on_event is not None:
             try:
-                on_event("agent_response", {
-                    "text": str(result.get("response") or "")[:12000],
-                    "steps": result.get("steps"),
-                    "tool_calls": list(result.get("tool_calls") or [])[:30],
-                    "run_kind": "chat",
-                })
+                on_event(
+                    "agent_response",
+                    {
+                        "text": str(result.get("response") or "")[:12000],
+                        "steps": result.get("steps"),
+                        "tool_calls": list(result.get("tool_calls") or [])[:30],
+                        "run_kind": "chat",
+                    },
+                )
             except Exception:
                 pass
         return result
@@ -688,7 +821,7 @@ def execute(
     # ------------------------------------------------------- mission runtime
     from .mission import MissionEngine, mission_engine
 
-    def _emit(event_type: str, data: Optional[dict] = None) -> None:
+    def _emit(event_type: str, data: dict | None = None) -> None:
         if on_event is not None:
             try:
                 on_event(event_type, data or {})
@@ -706,8 +839,10 @@ def execute(
     # approval first would hide the real blocker ("No model backend").
     do_preflight = bool(preflight) if preflight is not None else True
     if do_preflight and _agent_has_no_backend(resolved_agent):
-        _emit("preflight_state", {"status": "SKIPPED_NO_MODEL_BACKEND",
-                                  "reason": "no usable model backend; mission will report honest blocker"})
+        _emit(
+            "preflight_state",
+            {"status": "SKIPPED_NO_MODEL_BACKEND", "reason": "no usable model backend; mission will report honest blocker"},
+        )
         do_preflight = False
 
     try:
@@ -734,28 +869,34 @@ def execute(
         # hides the failure while looking intelligent.
         # ------------------------------------------------------------------
         record_issue(
-            "runtime", "mission", exc, retryable=True,
+            "runtime",
+            "mission",
+            exc,
+            retryable=True,
             fallback="structured MISSION_FAILED result (no chat downgrade)",
         )
         failure = mission_failure_result(
-            text, exc=exc, stage="mission_start",
+            text,
+            exc=exc,
+            stage="mission_start",
             reason=f"mission runtime error: {exc}",
             error_type=type(exc).__name__,
             recoverable=True,
         )
-        _emit("mission_error", {"error": str(exc)[:400],
-                                "stage": "mission_start",
-                                "recoverable": True})
+        _emit("mission_error", {"error": str(exc)[:400], "stage": "mission_start", "recoverable": True})
         _emit("mission_finished", {"state": "failed", "failure": failure["failure"]})
-        _emit("agent_response", {"text": failure["response"][:12000],
-                                 "run_kind": "mission_failed"})
+        _emit("agent_response", {"text": failure["response"][:12000], "run_kind": "mission_failed"})
         if _chat_fallback_allowed():
             # Opt-in escape hatch only (HERMUS_MISSION_FALLBACK_TO_CHAT=1).
             # The result is still labelled as a degraded chat turn so no caller
             # can mistake it for mission output.
             degraded = _chat_with_compat(
-                resolved_agent, text, on_event=on_event, stream=stream,
-                should_cancel=should_cancel, steer_source=steer_source,
+                resolved_agent,
+                text,
+                on_event=on_event,
+                stream=stream,
+                should_cancel=should_cancel,
+                steer_source=steer_source,
             )
             if isinstance(degraded, dict):
                 degraded["run_kind"] = "chat_fallback"
@@ -772,24 +913,36 @@ def execute(
         # the same structured failure contract.
         recorded_error = getattr(report, "error", None) or {}
         failure = mission_failure_result(
-            text, mission_id=getattr(report, "mission_id", None), report=report,
+            text,
+            mission_id=getattr(report, "mission_id", None),
+            report=report,
             stage=str(recorded_error.get("stage") or "lifecycle"),
             reason=str(recorded_error.get("message") or ""),
             error_type=str(recorded_error.get("type") or ""),
             recoverable=bool(getattr(report, "recoverable", True)),
         )
-        _emit("mission_finished", {"state": "failed",
-                                   "mission_id": getattr(report, "mission_id", None),
-                                   "failure": failure["failure"]})
-        _emit("agent_response", {"text": failure["response"][:12000],
-                                 "run_kind": "mission_failed",
-                                 "mission_id": getattr(report, "mission_id", None)})
+        _emit(
+            "mission_finished",
+            {"state": "failed", "mission_id": getattr(report, "mission_id", None), "failure": failure["failure"]},
+        )
+        _emit(
+            "agent_response",
+            {
+                "text": failure["response"][:12000],
+                "run_kind": "mission_failed",
+                "mission_id": getattr(report, "mission_id", None),
+            },
+        )
         return failure
 
     result = mission_report_to_result(report)
-    _emit("agent_response", {"text": result["response"][:12000],
-                             "run_kind": "mission",
-                             "mission_id": result.get("mission_id"),
-                             "state": result.get("state")})
+    _emit(
+        "agent_response",
+        {
+            "text": result["response"][:12000],
+            "run_kind": "mission",
+            "mission_id": result.get("mission_id"),
+            "state": result.get("state"),
+        },
+    )
     return result
-

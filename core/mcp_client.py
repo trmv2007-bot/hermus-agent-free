@@ -15,6 +15,7 @@ Config file: data/mcp_servers.json
 
 Protocol: newline-delimited JSON-RPC (simple servers) OR Content-Length framing (spec).
 """
+
 from __future__ import annotations
 
 import json
@@ -22,9 +23,8 @@ import os
 import subprocess
 import threading
 import time
-from pathlib import Path
-from typing import Optional
 from collections.abc import Callable
+from pathlib import Path
 
 from .config import config
 
@@ -41,12 +41,12 @@ class MCPServerConnection:
         self.command = command
         self.args = args or []
         self.env = env or {}
-        self.proc: Optional[subprocess.Popen] = None
+        self.proc: subprocess.Popen | None = None
         self._id = 0
         self._lock = threading.Lock()
         self._tools: list[dict] = []
         self._initialized = False
-        self.last_error: Optional[str] = None
+        self.last_error: str | None = None
         self._buf = b""
 
     def _next_id(self) -> int:
@@ -135,7 +135,7 @@ class MCPServerConnection:
             raise RuntimeError("MCP process not running")
         raw = json.dumps(msg).encode("utf-8")
         if framing == "content-length":
-            header = f"Content-Length: {len(raw)}\r\n\r\n".encode("utf-8")
+            header = f"Content-Length: {len(raw)}\r\n\r\n".encode()
             self.proc.stdin.write(header + raw)
         else:
             self.proc.stdin.write(raw + b"\n")
@@ -153,9 +153,7 @@ class MCPServerConnection:
                     err = self.proc.stderr.read() if self.proc.stderr else b""
                 except Exception:
                     pass
-                raise RuntimeError(
-                    f"MCP server exited code={self.proc.returncode}: {err.decode('utf-8','ignore')[:300]}"
-                )
+                raise RuntimeError(f"MCP server exited code={self.proc.returncode}: {err.decode('utf-8', 'ignore')[:300]}")
 
             # Try parse from buffer first
             parsed = self._try_parse_buffer()
@@ -176,7 +174,7 @@ class MCPServerConnection:
                 continue
         raise TimeoutError("MCP response timeout")
 
-    def _try_parse_buffer(self) -> Optional[dict]:
+    def _try_parse_buffer(self) -> dict | None:
         if not self._buf:
             return None
         # Content-Length framing

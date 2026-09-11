@@ -1,10 +1,14 @@
 """Backend Manager - Seven terminal backends: local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox - free with fallbacks"""
-import subprocess
+
+import importlib.util
 import os
 import shlex
+import subprocess
+
 
 class Backend:
     """Base backend"""
+
     def __init__(self, name: str):
         self.name = name
 
@@ -17,8 +21,10 @@ class Backend:
     def info(self) -> dict:
         return {"name": self.name, "available": self.is_available()}
 
+
 class LocalBackend(Backend):
     """Local terminal backend - always available, free"""
+
     def __init__(self):
         super().__init__("local")
 
@@ -27,29 +33,24 @@ class LocalBackend(Backend):
 
     def execute(self, command: str, workdir: str = None, timeout: int = 30) -> dict:
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=workdir
-            )
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout, cwd=workdir)
             return {
                 "backend": self.name,
                 "command": command,
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except subprocess.TimeoutExpired:
             return {"backend": self.name, "command": command, "error": f"Timeout {timeout}s"}
         except Exception as e:
             return {"backend": self.name, "command": command, "error": str(e)}
 
+
 class DockerBackend(Backend):
     """Docker backend - isolated container with security hardening, free if Docker installed"""
+
     def __init__(self, image: str = "python:3.11-slim", container_name: str = "hermus-agent"):
         super().__init__("docker")
         self.image = image
@@ -68,15 +69,21 @@ class DockerBackend(Backend):
 
         # Security hardening: read-only root, dropped capabilities, PID limits (as per Hermes docs)
         docker_cmd = [
-            "docker", "run", "--rm",
+            "docker",
+            "run",
+            "--rm",
             "--read-only",
             "--cap-drop=ALL",
             "--pids-limit=100",
             "--network=none" if "network" not in command else "",
-            "-v", f"{workdir or os.getcwd()}:/workspace",
-            "-w", "/workspace",
+            "-v",
+            f"{workdir or os.getcwd()}:/workspace",
+            "-w",
+            "/workspace",
             self.image,
-            "sh", "-c", command
+            "sh",
+            "-c",
+            command,
         ]
         # Filter empty args
         docker_cmd = [c for c in docker_cmd if c]
@@ -90,13 +97,15 @@ class DockerBackend(Backend):
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except Exception as e:
             return {"backend": self.name, "error": str(e)}
 
+
 class SSHBackend(Backend):
     """SSH Remote backend - execute on any remote server via SSH, free"""
+
     def __init__(self, host: str = None, user: str = None, key_path: str = None):
         super().__init__("ssh")
         self.host = host or os.getenv("HERMUS_SSH_HOST")
@@ -106,14 +115,17 @@ class SSHBackend(Backend):
     def is_available(self) -> bool:
         # Available if host configured or ssh command exists
         try:
-            result = subprocess.run(["ssh", "-V"], capture_output=True, text=True, timeout=2)
+            subprocess.run(["ssh", "-V"], capture_output=True, text=True, timeout=2)
             return True  # ssh exists
         except Exception:
             return False
 
     def execute(self, command: str, workdir: str = None, timeout: int = 60) -> dict:
         if not self.host:
-            return {"backend": self.name, "error": "SSH host not configured. Set HERMUS_SSH_HOST env or pass host. Example: HERMUS_SSH_HOST=user@host hermus --backend ssh"}
+            return {
+                "backend": self.name,
+                "error": "SSH host not configured. Set HERMUS_SSH_HOST env or pass host. Example: HERMUS_SSH_HOST=user@host hermus --backend ssh",
+            }
 
         ssh_cmd = ["ssh"]
         if self.key_path:
@@ -134,13 +146,15 @@ class SSHBackend(Backend):
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except Exception as e:
             return {"backend": self.name, "error": str(e)}
 
+
 class SingularityBackend(Backend):
     """Singularity / HPC execution backend - free for HPC"""
+
     def __init__(self, image: str = "docker://python:3.11-slim"):
         super().__init__("singularity")
         self.image = image
@@ -159,7 +173,10 @@ class SingularityBackend(Backend):
         try:
             result = subprocess.run(
                 ["singularity", "exec", self.image, "sh", "-c", command],
-                capture_output=True, text=True, timeout=timeout, cwd=workdir
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=workdir,
             )
             return {
                 "backend": self.name,
@@ -167,23 +184,24 @@ class SingularityBackend(Backend):
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except Exception as e:
             return {"backend": self.name, "error": str(e)}
 
+
 class ModalBackend(Backend):
     """Modal - serverless persistence, environment hibernates when idle and wakes on demand, costing nearly nothing between sessions, free tier"""
+
     def __init__(self):
         super().__init__("modal")
 
     def is_available(self) -> bool:
         # Check if modal package installed and token configured
+        # (find_spec probes availability without importing; check token via modal token current or env)
         try:
-            import modal
-            # Check token via modal token current or env
-            return True
-        except ImportError:
+            return importlib.util.find_spec("modal") is not None
+        except (ImportError, ValueError):
             return False
 
     def execute(self, command: str, workdir: str = None, timeout: int = 120) -> dict:
@@ -191,7 +209,7 @@ class ModalBackend(Backend):
             return {
                 "backend": self.name,
                 "error": "Modal not available. Install free: pip install modal && modal token new (free tier). Modal offers serverless persistence - your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.",
-                "install": "pip install modal && modal token new"
+                "install": "pip install modal && modal token new",
             }
 
         # For free version, we simulate Modal execution via local fallback with note
@@ -206,10 +224,11 @@ class ModalBackend(Backend):
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except Exception as e:
             return {"backend": self.name, "error": str(e)}
+
 
 class DaytonaBackend(Backend):
     """Daytona - serverless persistence, free tier, hibernates when idle"""
@@ -231,7 +250,7 @@ class DaytonaBackend(Backend):
             return {
                 "backend": self.name,
                 "error": "Daytona not available. Install free: https://www.daytona.io/docs/ - Daytona offers serverless persistence - your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions.",
-                "install": "Install Daytona CLI or set DAYTONA_API_KEY"
+                "install": "Install Daytona CLI or set DAYTONA_API_KEY",
             }
 
         # Fallback to local for free version
@@ -244,10 +263,11 @@ class DaytonaBackend(Backend):
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except Exception as e:
             return {"backend": self.name, "error": str(e)}
+
 
 class VercelBackend(Backend):
     """Vercel Sandbox - serverless sandbox for code execution, free tier"""
@@ -268,7 +288,7 @@ class VercelBackend(Backend):
             return {
                 "backend": self.name,
                 "error": "Vercel Sandbox not available. Install: npm i -g vercel && vercel login (free tier). Vercel Sandbox offers serverless code execution.",
-                "install": "npm i -g vercel"
+                "install": "npm i -g vercel",
             }
 
         # Fallback to local
@@ -281,10 +301,11 @@ class VercelBackend(Backend):
                 "stdout": result.stdout[:5000],
                 "stderr": result.stderr[:2000],
                 "returncode": result.returncode,
-                "success": result.returncode == 0
+                "success": result.returncode == 0,
             }
         except Exception as e:
             return {"backend": self.name, "error": str(e)}
+
 
 class BackendManager:
     """Manages seven terminal backends - free"""
@@ -328,6 +349,7 @@ class BackendManager:
         backend = self.get_backend(backend_name)
         return backend.execute(command, workdir, timeout)
 
+
 # Global manager free
 backend_manager = BackendManager()
 
@@ -339,18 +361,24 @@ TOOL_DEFINITION = {
         "parameters": {
             "type": "object",
             "properties": {
-                "backend": {"type": "string", "enum": ["local", "docker", "ssh", "singularity", "modal", "daytona", "vercel"], "default": "local"},
+                "backend": {
+                    "type": "string",
+                    "enum": ["local", "docker", "ssh", "singularity", "modal", "daytona", "vercel"],
+                    "default": "local",
+                },
                 "command": {"type": "string", "description": "Command to execute"},
                 "workdir": {"type": "string", "description": "Working directory"},
-                "timeout": {"type": "integer", "default": 30}
+                "timeout": {"type": "integer", "default": 30},
             },
-            "required": ["backend", "command"]
-        }
-    }
+            "required": ["backend", "command"],
+        },
+    },
 }
+
 
 def backend_execute(backend: str, command: str, workdir: str = None, timeout: int = 30) -> dict:
     return backend_manager.execute(backend, command, workdir, timeout)
+
 
 def list_backends() -> dict:
     return {"backends": backend_manager.list_backends()}

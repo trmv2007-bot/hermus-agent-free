@@ -3,6 +3,7 @@
 A session is not a window. Clients attach/detach; the session record
 (status, last prompt, trajectory pointer, swarm role) stays on disk.
 """
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import config
 
@@ -29,11 +30,11 @@ def _file(session_id: str) -> Path:
 
 
 def create(
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     *,
     task: str = "",
     role: str = "worker",
-    parent: Optional[str] = None,
+    parent: str | None = None,
     model: str = "",
 ) -> dict[str, Any]:
     sid = session_id or f"sess_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -55,7 +56,7 @@ def create(
     return rec
 
 
-def get(session_id: str) -> Optional[dict[str, Any]]:
+def get(session_id: str) -> dict[str, Any] | None:
     path = _file(session_id)
     if not path.exists():
         return None

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from _cli_source import cli_source
+
 from core.contracts import CommandStatus, EventEnvelope, EventType
 from core.events import configure_bus, get_bus
 from core.safety_report import generate_safety_report, is_safety_event, write_safety_report
@@ -15,12 +17,14 @@ def test_safety_event_filter_accepts_control_plane_events():
 
 def test_safety_report_markdown_contains_core_sections(tmp_path):
     configure_bus(reset=True)
-    get_bus().publish(EventEnvelope(
-        type=EventType.STATE_CHANGED.value,
-        command="permission.approval.requested",
-        args_redacted={"id": "approval_test", "tool": "shell_execute"},
-        status=CommandStatus.PENDING.value,
-    ))
+    get_bus().publish(
+        EventEnvelope(
+            type=EventType.STATE_CHANGED.value,
+            command="permission.approval.requested",
+            args_redacted={"id": "approval_test", "tool": "shell_execute"},
+            status=CommandStatus.PENDING.value,
+        )
+    )
     report = generate_safety_report()
     md = report.to_markdown()
     assert "Hermus Autonomy Safety Report" in md
@@ -50,7 +54,7 @@ def test_gateway_exposes_safety_report_endpoint():
 
 
 def test_cli_exposes_safety_report_command():
-    src = Path("hermus.py").read_text(encoding="utf-8")
+    src = cli_source()
     assert 'subparsers.add_parser("safety"' in src
     assert 'safety_report_p = safety_sub.add_parser("report"' in src
     assert "write_safety_report" in src

@@ -6,22 +6,25 @@ Free / Universal LLM Abstraction
 - Mock
 + multi-key round-robin, rate-limit awareness, tool calling
 """
+
 from __future__ import annotations
 
-import os
 import json
-import requests
-from typing import Optional
+import os
 from collections.abc import Generator
 
-from .config import config
-from .token_counter import token_counter
+import httpx
+import requests
+
+from .aio import get_async_client, run_sync
 from .cache import llm_cache
+from .config import config
 from .providers import get_provider, parse_model_ref
+from .token_counter import token_counter
 
 
 class LLMResponse:
-    def __init__(self, content: str, tool_calls: Optional[list[dict]] = None, usage: Optional[dict] = None):
+    def __init__(self, content: str, tool_calls: list[dict] | None = None, usage: dict | None = None):
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage or {}
@@ -36,14 +39,16 @@ class FreeLLM:
         api_key: str = None,
         base_url: str = None,
         provider: str = None,
-        temperature: Optional[float] = None,
+        temperature: float | None = None,
     ):
         self.model = model or config.model
         self.temperature = temperature
         # Allow override of provider/model
         if provider:
             self.provider = provider.lower()
-            self.model_name = model.split("/", 1)[-1] if model and "/" in model else (model or get_provider(provider).get("default_model"))
+            self.model_name = (
+                model.split("/", 1)[-1] if model and "/" in model else (model or get_provider(provider).get("default_model"))
+            )
         else:
             self.provider, self.model_name = parse_model_ref(self.model)
         self.api_key_override = api_key
@@ -52,11 +57,75 @@ class FreeLLM:
         # accept them (preset ``supports_tools: False``). The agent surfaces
         # this to the user instead of silently going tool-less — the model then
         # answers "I can't do agentic tasks" with no visible reason otherwise.
-        self.last_tools_disabled_reason: Optional[str] = None
+        self.last_tools_disabled_reason: str | None = None
         # Record when the call actually used a different provider than the one
         # requested (e.g. Ollama offline -> Groq/OpenRouter from .env). This
         # makes runtime behavior observable instead of implicit.
-        self.last_fallback: Optional[dict] = None
+        self.last_fallback: dict | None = None
+
+    def _no_provider_response(self, *, requested_tools, model: str, prompt_tokens: int) -> LLMResponse:
+        """Shared sync/async answer when no usable provider/key was found."""
+        from .provider_resolver import diagnose
+
+        diag = diagnose(
+            require_tools=bool(requested_tools),
+            model=f"{self.provider}/{self.model_name}",
+        )
+        usable = [p["provider"] for p in diag.get("usable_providers", [])]
+        configured = [f"{p['provider']} — {p.get('reason') or 'configured'}" for p in diag.get("configured", [])]
+        if requested_tools:
+            err = (
+                "No tool-capable provider is currently usable.\n"
+                f"Requested provider: {self.provider}\n"
+                f"Detected:\n- " + "\n- ".join(configured or ["none"]) + "\n"
+                f"Recommended provider: {diag.get('recommended_provider') or 'none'}\n"
+                f"Model: {diag.get('recommended_model') or '<none>'}"
+            )
+        else:
+            err = (
+                f"No usable provider for '{self.provider}'."
+                + ("\nDetected:\n- " + "\n- ".join(configured) if configured else "")
+                + f"\nRecommended provider: {diag.get('recommended_provider') or 'none'}"
+            )
+            if not usable:
+                err += f"\nAdd one: hermus multikey add --provider {self.provider} --key YOUR_KEY" + (
+                    " --base-url https://..." if self.provider in ("custom", "vllm", "azure") else ""
+                )
+        usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}")
+        return LLMResponse(err, usage=usage)
+
+    def _ollama_down_response(self, *, tools, prompt_tokens: int, messages: list[dict]) -> LLMResponse:
+        """Shared sync/async answer when Ollama is down and no fallback exists."""
+        try:
+            from .provider_resolver import diagnose
+
+            diag = diagnose(
+                require_tools=bool(tools),
+                model=f"ollama/{self.model_name}",
+            )
+            configured = [f"{p['provider']} — {p.get('reason') or 'configured'}" for p in diag.get("configured", [])]
+            detail = "\n".join(configured) if configured else "none"
+            mock_content = (
+                f"⚠️ Ollama not running at {config.ollama_base_url}. "
+                "No usable hosted provider was found"
+                + (" for tool calls." if tools else ".")
+                + f"\n\nDetected:\n- {detail}"
+                + f"\nRecommended provider: {diag.get('recommended_provider') or 'none'}"
+                + f"\nRecommended model: {diag.get('recommended_model') or 'none'}"
+                + "\nStart Ollama with: ollama serve && ollama pull "
+                + f"{self.model_name} — or add any key: "
+                + "hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
+                + f"Fallback mock for: {messages[-1].get('content', '')[:100]}"
+            )
+        except Exception:
+            mock_content = (
+                f"⚠️ Ollama not running at {config.ollama_base_url} and no API keys configured. "
+                f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
+                f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
+                f"Fallback mock for: {messages[-1].get('content', '')[:100]}"
+            )
+        usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(mock_content), model="ollama/mock")
+        return LLMResponse(mock_content, usage=usage)
 
     def _parse_model(self, model_str: str) -> tuple:
         return parse_model_ref(model_str)
@@ -100,7 +169,7 @@ class FreeLLM:
             "provider": self.provider,
         }
 
-    def _fallback_bundle(self, require_tools: bool = False) -> Optional[dict]:
+    def _fallback_bundle(self, require_tools: bool = False) -> dict | None:
         """First usable API key bundle across providers (custom preferred).
 
         ``require_tools=True`` skips providers whose presets reject tool
@@ -116,7 +185,7 @@ class FreeLLM:
         except Exception:
             return None
 
-    def _tools_for_provider(self, tools: Optional[list[dict]], provider: str) -> Optional[list[dict]]:
+    def _tools_for_provider(self, tools: list[dict] | None, provider: str) -> list[dict] | None:
         """Return a tool set accepted by the selected provider.
 
         The registry can contain more functions than hosted APIs permit.  In
@@ -144,8 +213,8 @@ class FreeLLM:
 
     def _call_openai_compat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Universal path for any OpenAI-compatible provider."""
-        from .openai_compat import chat_completions, CompatAPIError
         from .multi_key import multi_key_manager
+        from .openai_compat import CompatAPIError, chat_completions
 
         bundle = self._resolve_bundle()
         api_key = bundle.get("key") or ""
@@ -184,41 +253,7 @@ class FreeLLM:
                     "require_tools": bool(requested_tools),
                 }
             if not api_key:
-                from .provider_resolver import diagnose
-
-                diag = diagnose(
-                    require_tools=bool(requested_tools),
-                    model=f"{self.provider}/{self.model_name}",
-                )
-                usable = [p["provider"] for p in diag.get("usable_providers", [])]
-                configured = [
-                    f"{p['provider']} — {p.get('reason') or 'configured'}"
-                    for p in diag.get("configured", [])
-                ]
-                if requested_tools:
-                    err = (
-                        "No tool-capable provider is currently usable.\n"
-                        f"Requested provider: {self.provider}\n"
-                        f"Detected:\n- " + "\n- ".join(configured or ["none"]) + "\n"
-                        f"Recommended provider: {diag.get('recommended_provider') or 'none'}\n"
-                        f"Model: {diag.get('recommended_model') or '<none>'}"
-                    )
-                else:
-                    err = (
-                        f"No usable provider for '{self.provider}'."
-                        + (f"\nDetected:\n- " + "\n- ".join(configured) if configured else "")
-                        + f"\nRecommended provider: {diag.get('recommended_provider') or 'none'}"
-                    )
-                    if not usable:
-                        err += (
-                            "\nAdd one: hermus multikey add --provider "
-                            f"{self.provider} --key YOUR_KEY"
-                            + (f" --base-url https://..." if self.provider in ('custom','vllm','azure') else "")
-                        )
-                usage = token_counter.estimate_cost(
-                    prompt_tokens, token_counter.count_text(err), model=f"{self.provider}/{model}"
-                )
-                return LLMResponse(err, usage=usage)
+                return self._no_provider_response(requested_tools=requested_tools, model=model, prompt_tokens=prompt_tokens)
 
         # A fallback can change provider capabilities/limits (for example from
         # local Ollama to Groq), so enforce the final provider's tool contract.
@@ -277,9 +312,7 @@ class FreeLLM:
             except CompatAPIError as e:
                 last_err = e
                 try:
-                    multi_key_manager.mark_key_failed(
-                        used_provider, current_key, e.message, rate_limit=e.rate_limit
-                    )
+                    multi_key_manager.mark_key_failed(used_provider, current_key, e.message, rate_limit=e.rate_limit)
                 except Exception:
                     pass
                 # Retry with next key on rate limit / auth / 5xx
@@ -303,7 +336,7 @@ class FreeLLM:
         """Ollama — prefer OpenAI-compatible /v1, fallback to native /api/chat."""
         # Try openai compat first (tool calling better on newer ollama)
         try:
-            from .openai_compat import chat_completions, CompatAPIError
+            from .openai_compat import CompatAPIError, chat_completions
 
             base = config.ollama_base_url.rstrip("/")
             if not base.endswith("/v1"):
@@ -328,10 +361,14 @@ class FreeLLM:
 
         # Native Ollama chat
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
-        cache_key = llm_cache.make_key("ollama", self.model_name, messages[-1].get("content", "")[:200] if messages else "", len(messages))
+        cache_key = llm_cache.make_key(
+            "ollama", self.model_name, messages[-1].get("content", "")[:200] if messages else "", len(messages)
+        )
         cached = llm_cache.get(cache_key)
         if cached and not tools:
-            cached.usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(cached.content), model=f"ollama/{self.model_name}")
+            cached.usage = token_counter.estimate_cost(
+                prompt_tokens, token_counter.count_text(cached.content), model=f"ollama/{self.model_name}"
+            )
             return cached
 
         url = f"{config.ollama_base_url.rstrip('/')}/api/chat"
@@ -386,8 +423,8 @@ class FreeLLM:
                     "require_tools": bool(tools),
                 }
                 try:
-                    from .openai_compat import chat_completions, CompatAPIError
                     from .multi_key import multi_key_manager
+                    from .openai_compat import CompatAPIError, chat_completions
 
                     fallback_tools = self._tools_for_provider(tools, fb_provider)
                     resp = chat_completions(
@@ -415,39 +452,7 @@ class FreeLLM:
                         prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
                     )
                     return LLMResponse(fb_err, usage=usage)
-            try:
-                from .provider_resolver import diagnose
-
-                diag = diagnose(
-                    require_tools=bool(tools),
-                    model=f"ollama/{self.model_name}",
-                )
-                configured = [
-                    f"{p['provider']} — {p.get('reason') or 'configured'}"
-                    for p in diag.get("configured", [])
-                ]
-                detail = "\n".join(configured) if configured else "none"
-                mock_content = (
-                    f"⚠️ Ollama not running at {config.ollama_base_url}. "
-                    "No usable hosted provider was found"
-                    + (" for tool calls." if tools else ".")
-                    + f"\n\nDetected:\n- {detail}"
-                    + f"\nRecommended provider: {diag.get('recommended_provider') or 'none'}"
-                    + f"\nRecommended model: {diag.get('recommended_model') or 'none'}"
-                    + "\nStart Ollama with: ollama serve && ollama pull "
-                    + f"{self.model_name} — or add any key: "
-                    + "hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
-                    + f"Fallback mock for: {messages[-1].get('content','')[:100]}"
-                )
-            except Exception:
-                mock_content = (
-                    f"⚠️ Ollama not running at {config.ollama_base_url} and no API keys configured. "
-                    f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
-                    f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
-                    f"Fallback mock for: {messages[-1].get('content','')[:100]}"
-                )
-            usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(mock_content), model="ollama/mock")
-            return LLMResponse(mock_content, usage=usage)
+            return self._ollama_down_response(tools=tools, prompt_tokens=prompt_tokens, messages=messages)
         except Exception as e:
             err_content = f"Ollama error: {e}"
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err_content), model="ollama/mock")
@@ -473,7 +478,7 @@ class FreeLLM:
             return compat
 
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
-        current_token: Optional[str] = None
+        current_token: str | None = None
         try:
             from .multi_key import multi_key_manager
 
@@ -494,7 +499,7 @@ class FreeLLM:
             )
             content = response if isinstance(response, str) else str(response)
             if content.startswith(prompt):
-                content = content[len(prompt):].strip()
+                content = content[len(prompt) :].strip()
             completion_tokens = token_counter.count_text(content)
             try:
                 multi_key_manager.mark_key_success("hf", current_token, tokens=completion_tokens)
@@ -574,9 +579,7 @@ class FreeLLM:
                 f"Ollama not running at {base}. Start: ollama serve && ollama pull {self.model_name}"
             ) from None
         if resp.status_code == 404:
-            raise ValueError(
-                f"Model {self.model_name} not found. Pull with: ollama pull {self.model_name} (free)"
-            )
+            raise ValueError(f"Model {self.model_name} not found. Pull with: ollama pull {self.model_name} (free)")
         resp.raise_for_status()
         data = resp.json()
         content = data.get("response", "")
@@ -597,8 +600,320 @@ class FreeLLM:
         # Everything else (groq, openai, openrouter, together, gemini, custom, ...)
         return self._call_openai_compat(messages, tools)
 
+    # ------------------------------------------------------------- async API
+    async def achat(self, messages: list[dict], tools: list[dict] = None, client=None) -> LLMResponse:
+        """Async mirror of :meth:`chat` (httpx, pooled connections).
+
+        ``client`` defaults to the shared :mod:`core.aio` client; pass an
+        explicit client (e.g. a ``MockTransport`` one) in tests. The sync
+        :meth:`chat` path is untouched — same routing, fallbacks and cache.
+        """
+        self.last_tools_disabled_reason = None
+        self.last_fallback = None
+        p = self.provider
+        if p == "mock":
+            return self._call_mock(messages, tools)
+        if p == "ollama":
+            return await self._acall_ollama(messages, tools, client=client)
+        if p in ("hf", "huggingface"):
+            return await self._acall_hf_free(messages, tools, client=client)
+        return await self._acall_openai_compat(messages, tools, client=client)
+
+    async def _acall_openai_compat(self, messages: list[dict], tools: list[dict] = None, client=None) -> LLMResponse:
+        """Async mirror of :meth:`_call_openai_compat` (same fallbacks/keys)."""
+        from .multi_key import multi_key_manager
+        from .openai_compat import CompatAPIError, achat_completions
+
+        bundle = self._resolve_bundle()
+        api_key = bundle.get("key") or ""
+        base_url = bundle.get("base_url") or ""
+        model = self.model_name or bundle.get("default_model")
+        preset = get_provider(self.provider)
+        used_provider = self.provider
+        requested_tools = tools
+        tools = self._tools_for_provider(requested_tools, used_provider)
+        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
+
+        if not api_key and not preset.get("no_auth") and not self.base_url_override:
+            fb = self._fallback_bundle(require_tools=bool(requested_tools))
+            if fb:
+                used_provider = (fb.get("provider") or self.provider).lower()
+                api_key = fb.get("key") or ""
+                base_url = fb.get("base_url") or base_url
+                fb_model = fb.get("default_model") or ""
+                if used_provider != self.provider or not model or model in ("default", "", "auto"):
+                    model = fb_model or model
+                self.last_fallback = {
+                    "from_provider": self.provider,
+                    "to_provider": used_provider,
+                    "model": model,
+                    "source": fb.get("source") or "stored",
+                    "require_tools": bool(requested_tools),
+                }
+            if not api_key:
+                return self._no_provider_response(requested_tools=requested_tools, model=model, prompt_tokens=prompt_tokens)
+
+        tools = self._tools_for_provider(requested_tools, used_provider)
+        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
+
+        cache_key = None
+        if not tools:
+            cache_key = llm_cache.make_key(
+                used_provider,
+                model,
+                (messages[-1].get("content", "")[:200] if messages else ""),
+                len(messages),
+                api_key[-6:] if api_key else "nokey",
+            )
+            cached = llm_cache.get(cache_key)
+            if cached:
+                return cached
+
+        tries = 0
+        last_err = None
+        current_key = api_key
+        while tries < 3:
+            tries += 1
+            try:
+                extra_kwargs = {}
+                if self.temperature is not None:
+                    extra_kwargs["temperature"] = self.temperature
+                resp = await achat_completions(
+                    used_provider,
+                    model,
+                    messages,
+                    api_key=current_key,
+                    base_url=base_url,
+                    tools=tools,
+                    timeout=120,
+                    client=client,
+                    **extra_kwargs,
+                )
+                try:
+                    multi_key_manager.mark_key_success(
+                        used_provider,
+                        current_key,
+                        tokens=resp.usage.get("total_tokens", 0),
+                        latency_ms=resp.latency_ms,
+                        rate_limit=resp.headers or resp.usage.get("rate_limit"),
+                    )
+                except Exception:
+                    pass
+                out = LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                if not tools:
+                    try:
+                        llm_cache.set(cache_key, out)
+                    except Exception:
+                        pass
+                return out
+            except CompatAPIError as e:
+                last_err = e
+                try:
+                    multi_key_manager.mark_key_failed(used_provider, current_key, e.message, rate_limit=e.rate_limit)
+                except Exception:
+                    pass
+                if e.is_rate_limit or e.status_code >= 500 or e.is_auth_error:
+                    nxt = multi_key_manager.get_key(used_provider)
+                    if nxt and nxt != current_key:
+                        current_key = nxt
+                        b2 = multi_key_manager.get_entry(used_provider, nxt) or {}
+                        base_url = b2.get("base_url") or base_url
+                        continue
+                break
+            except Exception as e:
+                last_err = e
+                break
+
+        err = f"{used_provider} error (base_url={base_url or 'preset'}): {last_err}"
+        usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{used_provider}/{model}")
+        return LLMResponse(err, usage=usage)
+
+    async def _acall_ollama(self, messages: list[dict], tools: list[dict] = None, client=None) -> LLMResponse:
+        """Async mirror of :meth:`_call_ollama` (same fallbacks/cache)."""
+        try:
+            from .openai_compat import CompatAPIError, achat_completions
+
+            base = config.ollama_base_url.rstrip("/")
+            base_v1 = base if base.endswith("/v1") else base + "/v1"
+            try:
+                resp = await achat_completions(
+                    "ollama",
+                    self.model_name,
+                    messages,
+                    api_key="ollama",
+                    base_url=base_v1,
+                    tools=tools,
+                    timeout=120,
+                    client=client,
+                )
+                return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+            except CompatAPIError:
+                pass
+        except Exception:
+            pass
+
+        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
+        cache_key = llm_cache.make_key(
+            "ollama", self.model_name, messages[-1].get("content", "")[:200] if messages else "", len(messages)
+        )
+        cached = llm_cache.get(cache_key)
+        if cached and not tools:
+            cached.usage = token_counter.estimate_cost(
+                prompt_tokens, token_counter.count_text(cached.content), model=f"ollama/{self.model_name}"
+            )
+            return cached
+
+        url = f"{config.ollama_base_url.rstrip('/')}/api/chat"
+        payload = {"model": self.model_name, "messages": messages, "stream": False}
+        if self.temperature is not None:
+            payload["options"] = {"temperature": self.temperature}
+        if tools:
+            payload["tools"] = tools
+        http = client or get_async_client()
+        try:
+            resp = await http.post(url, json=payload, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("message", {}).get("content", "") or data.get("response", "")
+            tool_calls = []
+            if "message" in data and "tool_calls" in data["message"]:
+                for tc in data["message"]["tool_calls"]:
+                    args = tc.get("function", {}).get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {}
+                    tool_calls.append(
+                        {
+                            "name": tc.get("function", {}).get("name"),
+                            "arguments": args,
+                            "id": tc.get("id", ""),
+                        }
+                    )
+            completion_tokens = token_counter.count_text(content)
+            usage = token_counter.estimate_cost(prompt_tokens, completion_tokens, model=f"ollama/{self.model_name}")
+            response = LLMResponse(content, tool_calls, usage=usage)
+            if not tools:
+                llm_cache.set(cache_key, response)
+            return response
+        except httpx.ConnectError:
+            fb = self._fallback_bundle(require_tools=bool(tools))
+            if fb:
+                fb_provider = (fb.get("provider") or "custom").lower()
+                fb_model = fb.get("default_model") or ""
+                ollama_default = get_provider("ollama").get("default_model")
+                model = self.model_name
+                if not model or model == ollama_default or fb_provider != "ollama":
+                    model = fb_model or model
+                self.last_fallback = {
+                    "from_provider": "ollama",
+                    "to_provider": fb_provider,
+                    "model": model,
+                    "source": fb.get("source") or "stored",
+                    "require_tools": bool(tools),
+                }
+                try:
+                    from .multi_key import multi_key_manager
+                    from .openai_compat import CompatAPIError, achat_completions  # noqa: F811
+
+                    fallback_tools = self._tools_for_provider(tools, fb_provider)
+                    resp = await achat_completions(
+                        fb_provider,
+                        model or "default",
+                        messages,
+                        api_key=fb.get("key") or "",
+                        base_url=fb.get("base_url") or "",
+                        tools=fallback_tools,
+                        timeout=120,
+                        client=client,
+                    )
+                    try:
+                        multi_key_manager.mark_key_success(
+                            fb_provider,
+                            fb.get("key") or "",
+                            tokens=resp.usage.get("total_tokens", 0),
+                            latency_ms=resp.latency_ms,
+                        )
+                    except Exception:
+                        pass
+                    return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                except Exception as e:
+                    fb_err = f"Ollama not running and fallback key failed: {e}"
+                    usage = token_counter.estimate_cost(
+                        prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
+                    )
+                    return LLMResponse(fb_err, usage=usage)
+            return self._ollama_down_response(tools=tools, prompt_tokens=prompt_tokens, messages=messages)
+        except Exception as e:
+            err_content = f"Ollama error: {e}"
+            usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err_content), model="ollama/mock")
+            return LLMResponse(err_content, usage=usage)
+
+    async def _acall_hf_free(self, messages: list[dict], tools: list[dict] = None, client=None) -> LLMResponse:
+        """Async mirror of :meth:`_call_hf_free` (sync HF SDK runs off-loop)."""
+        compat = await self._acall_openai_compat(messages, tools=None, client=client)
+        compat_content = (compat.content or "").strip()
+        lowered = compat_content.lower()
+        error_like = (
+            not compat_content
+            or "no api key" in lowered
+            or "hf error" in lowered
+            or "huggingface error" in lowered
+            or lowered.startswith(("error", "huggingface"))
+            or lowered[:40].find("error:") >= 0
+        )
+        if not error_like:
+            return compat
+
+        prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
+        current_token: str | None = None
+        try:
+            from .multi_key import multi_key_manager
+
+            token = self.api_key_override or multi_key_manager.get_key("hf") or config.hf_token or os.getenv("HF_TOKEN")
+            current_token = token
+            from huggingface_hub import InferenceClient
+
+            sdk = InferenceClient(token=token)
+            prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+            response = await run_sync(
+                sdk.text_generation,
+                prompt=prompt,
+                model=self.model_name,
+                max_new_tokens=512,
+                temperature=0.7,
+            )
+            content = response if isinstance(response, str) else str(response)
+            if content.startswith(prompt):
+                content = content[len(prompt) :].strip()
+            completion_tokens = token_counter.count_text(content)
+            try:
+                multi_key_manager.mark_key_success("hf", current_token, tokens=completion_tokens)
+            except Exception:
+                pass
+            usage = token_counter.estimate_cost(prompt_tokens, completion_tokens, model=f"hf/{self.model_name}")
+            return LLMResponse(content, usage=usage)
+        except ImportError:
+            err = "huggingface_hub not installed. pip install huggingface_hub or use ollama/"
+            usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model="hf/mock")
+            return LLMResponse(err, usage=usage)
+        except Exception as e:
+            try:
+                if current_token:
+                    from .multi_key import multi_key_manager
+
+                    multi_key_manager.mark_key_failed("hf", current_token, str(e))
+            except Exception:
+                pass
+            if compat and compat.content:
+                return compat
+            err = f"HF error: {e} - Try ollama/ for free offline"
+            usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model="hf/mock")
+            return LLMResponse(err, usage=usage)
+
     # ------------------------------------------------------------- streaming
-    def _stream_target(self, require_tools: bool = False) -> Optional[dict]:
+    def _stream_target(self, require_tools: bool = False) -> dict | None:
         """Resolve (provider, model, base_url, api_key) for a streaming request.
 
         Returns None when the provider needs a key we do not have — the caller
@@ -613,8 +928,7 @@ class FreeLLM:
             base = (base_url or config.ollama_base_url).rstrip("/")
             if not base.endswith("/v1"):
                 base = base + "/v1"
-            return {"provider": "ollama", "model": model, "base_url": base,
-                    "api_key": api_key or "ollama"}
+            return {"provider": "ollama", "model": model, "base_url": base, "api_key": api_key or "ollama"}
         if not api_key and not preset.get("no_auth") and not self.base_url_override:
             fb = self._fallback_bundle(require_tools=require_tools)
             if not fb:
@@ -628,15 +942,19 @@ class FreeLLM:
                 "source": fb.get("source") or "stored",
                 "require_tools": require_tools,
             }
-            return {"provider": fb_provider, "model": fb_model,
-                    "base_url": fb.get("base_url") or base_url, "api_key": fb.get("key") or ""}
+            return {
+                "provider": fb_provider,
+                "model": fb_model,
+                "base_url": fb.get("base_url") or base_url,
+                "api_key": fb.get("key") or "",
+            }
         return {"provider": self.provider, "model": model, "base_url": base_url, "api_key": api_key}
 
     def stream_chat(
         self,
         messages: list[dict],
         tools: list[dict] = None,
-        on_delta: Optional[callable] = None,
+        on_delta: callable | None = None,
     ) -> LLMResponse:
         """Streaming chat: pushes text deltas to ``on_delta`` and returns the full response.
 
@@ -682,7 +1000,7 @@ class FreeLLM:
         import queue
         import threading
 
-        q: "queue.Queue" = queue.Queue()
+        q: queue.Queue = queue.Queue()
 
         def pump(piece: str) -> None:
             q.put(piece)
@@ -705,7 +1023,7 @@ class FreeLLM:
             yield item
 
 
-def _emit_chunks(text: str, on_delta: Optional[callable], size: int = 24) -> None:
+def _emit_chunks(text: str, on_delta: callable | None, size: int = 24) -> None:
     """Emit ``text`` in small pieces for subscribers when the provider cannot stream."""
     if not on_delta or not text:
         return
@@ -713,7 +1031,7 @@ def _emit_chunks(text: str, on_delta: Optional[callable], size: int = 24) -> Non
         on_delta(text[i : i + size])
 
 
-def list_ollama_models(base_url: Optional[str] = None) -> list[str]:
+def list_ollama_models(base_url: str | None = None) -> list[str]:
     """Return the model names visible at the local Ollama node (discovery, not generation).
 
     Kept in the model subsystem so no call outside it issues a request to a model

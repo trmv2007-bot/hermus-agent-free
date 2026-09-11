@@ -25,6 +25,7 @@ template still produces a valid, useful SKILL.md.
     from core.skill_forge import skill_forge
     skill_forge.harvest(goal, trajectory, verification=..., tool_results=...)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -34,14 +35,13 @@ import shutil
 import subprocess
 import sys
 import textwrap
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from .atomic_io import atomic_write_json
-from collections.abc import Callable, Sequence
-
 from .config import config
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -71,8 +71,7 @@ def _is_error_blob(value: Any) -> bool:
         return not value
     if isinstance(value, str):
         text = value.strip().lower()
-        return text.startswith(("error", "traceback", "failed", "exception", "timeout")) or \
-            text.startswith('"error"')
+        return text.startswith(("error", "traceback", "failed", "exception", "timeout")) or text.startswith('"error"')
     if isinstance(value, dict):
         if value.get("success") is True:
             return False
@@ -135,8 +134,8 @@ class TaskEvaluation:
 def evaluate_trajectory(
     trajectory: Sequence[dict[str, Any]],
     *,
-    verification: Optional[dict[str, Any]] = None,
-    tool_results: Optional[Sequence[dict[str, Any]]] = None,
+    verification: dict[str, Any] | None = None,
+    tool_results: Sequence[dict[str, Any]] | None = None,
     min_tool_calls: int = None,
     final_answer: str = "",
 ) -> TaskEvaluation:
@@ -145,33 +144,26 @@ def evaluate_trajectory(
     Returns a verdict + the evidence the distiller needs (tool sequence,
     recoveries, failure markers).
     """
-    min_tools = int(min_tool_calls if min_tool_calls is not None
-                    else getattr(config, "skill_forge_min_tools", 3))
+    min_tools = int(min_tool_calls if min_tool_calls is not None else getattr(config, "skill_forge_min_tools", 3))
     traj = [dict(t) for t in (trajectory or [])]
     tool_calls = [
-        {"tool": tc.get("name"), "args": tc.get("arguments") or tc.get("args") or {},
-         "turn": i}
+        {"tool": tc.get("name"), "args": tc.get("arguments") or tc.get("args") or {}, "turn": i}
         for i, turn in enumerate(traj)
         for tc in (turn.get("tool_calls") or [])
         if isinstance(tc, dict) and tc.get("name")
     ]
     tool_results = list(tool_results or [])
     n_results = len(tool_results)
-    failures = [
-        tr for tr in tool_results
-        if _is_error_blob(tr.get("result", tr))
-    ]
+    failures = [tr for tr in tool_results if _is_error_blob(tr.get("result", tr))]
     recovered = 0
     for idx, tr in enumerate(tool_results):
         if _is_error_blob(tr.get("result", tr)) and idx + 1 < len(tool_results):
             nxt = tool_results[idx + 1]
             if not _is_error_blob(nxt.get("result", nxt)):
                 recovered += 1
-    answer = final_answer or next(
-        (t.get("content", "") for t in reversed(traj) if t.get("role") == "assistant"), ""
-    )
+    answer = final_answer or next((t.get("content", "") for t in reversed(traj) if t.get("role") == "assistant"), "")
 
-    verified: Optional[bool] = None
+    verified: bool | None = None
     if isinstance(verification, dict) and "verified" in verification:
         verified = bool(verification.get("verified"))
 
@@ -224,7 +216,7 @@ def evaluate_trajectory(
         return TaskEvaluation(False, round(score, 3), reasons, metrics)
 
     # Reusability heuristic: goal text that is generic enough to recur.
-    if len((answer or "")) < 40:
+    if len(answer or "") < 40:
         score -= 0.5
         reasons.append("very short answer — thin evidence of a completed task")
     reasons.append(f"score {score:.2f} above harvest threshold")
@@ -235,8 +227,12 @@ def evaluate_trajectory(
 #: markers the mission/agent evidence gate emits when a run did NOT actually
 #: perform the work — such a trajectory must never be distilled into a skill.
 _NO_WORK_MARKERS = (
-    "no_evidence_of_work", "empty_analysis", "no_model_backend",
-    "mission failed", "mission_failed", "blocked:",
+    "no_evidence_of_work",
+    "empty_analysis",
+    "no_model_backend",
+    "mission failed",
+    "mission_failed",
+    "blocked:",
 )
 
 
@@ -249,8 +245,7 @@ def procedure_signature(goal: str, tool_names: Sequence[str]) -> str:
     successful-looking tool calls" was enough to install a skill learned from a
     single, possibly lucky, run.
     """
-    stop = {"the", "and", "for", "with", "from", "that", "this", "into",
-            "then", "please", "your", "their", "about", "using"}
+    stop = {"the", "and", "for", "with", "from", "that", "this", "into", "then", "please", "your", "their", "about", "using"}
     seen: list[str] = []
     for w in re.findall(r"[a-z]{3,}", str(goal or "").lower()):
         if w in stop or w in seen:
@@ -260,28 +255,27 @@ def procedure_signature(goal: str, tool_names: Sequence[str]) -> str:
             break
     shape = " ".join(seen)
     tools = ",".join(sorted({str(t) for t in (tool_names or []) if t}))
-    return hashlib.sha1(f"{shape}|{tools}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(f"{shape}|{tools}".encode()).hexdigest()[:16]
 
 
 @dataclass
 class SuccessProof:
     """Did this run *succeed*, and what independently proves it?"""
 
-    verified: Optional[bool] = None
+    verified: bool | None = None
     ok: bool = False
     reasons: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"verified": self.verified, "ok": self.ok,
-                "reasons": self.reasons, "evidence": self.evidence}
+        return {"verified": self.verified, "ok": self.ok, "reasons": self.reasons, "evidence": self.evidence}
 
 
 def evaluate_success_proof(
     trajectory: Sequence[dict[str, Any]] = (),
     *,
-    verification: Optional[dict[str, Any]] = None,
-    tool_results: Optional[Sequence[dict[str, Any]]] = None,
+    verification: dict[str, Any] | None = None,
+    tool_results: Sequence[dict[str, Any]] | None = None,
     final_answer: str = "",
 ) -> SuccessProof:
     """Require *verified success*, not just "several successful-looking calls".
@@ -301,7 +295,7 @@ def evaluate_success_proof(
        non-error results and the answer is substantive.
     """
     results = list(tool_results or [])
-    verified: Optional[bool] = None
+    verified: bool | None = None
     if isinstance(verification, dict) and "verified" in verification:
         verified = bool(verification.get("verified"))
 
@@ -309,8 +303,7 @@ def evaluate_success_proof(
     evidence: list[str] = []
     ok = True
 
-    joined = " ".join(str(t.get("content", "")) for t in (trajectory or [])
-                      if isinstance(t, dict)).lower()
+    joined = " ".join(str(t.get("content", "")) for t in (trajectory or []) if isinstance(t, dict)).lower()
     hit = [m for m in _NO_WORK_MARKERS if m in joined]
     if hit:
         ok = False
@@ -324,9 +317,7 @@ def evaluate_success_proof(
 
     failures = [r for r in results if _is_error_blob(r.get("result", r))]
     successes = [r for r in results if not _is_error_blob(r.get("result", r))]
-    distinct_ok_tools = sorted({
-        str(r.get("tool")) for r in successes if r.get("tool")
-    })
+    distinct_ok_tools = sorted({str(r.get("tool")) for r in successes if r.get("tool")})
     if failures:
         reasons.append(f"{len(failures)}/{len(results)} tool result(s) were errors")
     if len(distinct_ok_tools) >= 2:
@@ -335,8 +326,8 @@ def evaluate_success_proof(
         reasons.append(f"only {len(distinct_ok_tools)} distinct tool(s) succeeded — weak independent evidence")
 
     answer = final_answer or next(
-        (t.get("content", "") for t in reversed(list(trajectory or []))
-         if isinstance(t, dict) and t.get("role") == "assistant"), ""
+        (t.get("content", "") for t in reversed(list(trajectory or [])) if isinstance(t, dict) and t.get("role") == "assistant"),
+        "",
     )
     if len(str(answer or "").strip()) >= 80:
         evidence.append("substantive final answer")
@@ -361,7 +352,7 @@ class SkillSuccessLedger:
 
     MAX_ENTRIES = 500
 
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else Path(config.resolve_path(config.skills_dir)) / "success_ledger.json"
         self._data: dict[str, Any] = {}
         self._loaded = False
@@ -407,7 +398,7 @@ class SkillSuccessLedger:
         *,
         session_id: str = "",
         goal: str = "",
-        evidence: Optional[Sequence[str]] = None,
+        evidence: Sequence[str] | None = None,
     ) -> int:
         """Record one successful observation; returns the new (independent) count.
 
@@ -416,9 +407,16 @@ class SkillSuccessLedger:
         """
         data = self._load()
         entries = data.setdefault("entries", {})
-        entry = entries.setdefault(signature, {
-            "count": 0, "sessions": [], "goals": [], "first": _now(), "last": _now(),
-        })
+        entry = entries.setdefault(
+            signature,
+            {
+                "count": 0,
+                "sessions": [],
+                "goals": [],
+                "first": _now(),
+                "last": _now(),
+            },
+        )
         sid = str(session_id or "")
         independent = bool(sid) and sid not in (entry.get("sessions") or [])
         if independent or not sid:
@@ -463,7 +461,7 @@ class DistilledStep:
 
 def extract_steps(
     trajectory: Sequence[dict[str, Any]],
-    tool_results: Optional[Sequence[dict[str, Any]]] = None,
+    tool_results: Sequence[dict[str, Any]] | None = None,
 ) -> list[DistilledStep]:
     """Flatten a trajectory into an ordered, de-duplicated procedure."""
     traj = [dict(t) for t in (trajectory or [])]
@@ -540,7 +538,7 @@ class SkillCandidate:
     verification: str = ""
     pitfalls: list[str] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
-    merged_with: Optional[str] = None
+    merged_with: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = dict(self.__dict__)
@@ -560,11 +558,11 @@ class SkillForge:
         "run proves it worked). No code, no markdown fences, no commentary."
     )
 
-    def __init__(self, skills_dir: Optional[str] = None, llm: Optional[Callable[[list[dict]], str]] = None):
+    def __init__(self, skills_dir: str | None = None, llm: Callable[[list[dict]], str] | None = None):
         self.skills_dir = Path(skills_dir or config.resolve_path(config.skills_dir))
         self._llm = llm
         self.quarantine_dir = self.skills_dir / ".quarantine"
-        self._success_ledger: Optional[SkillSuccessLedger] = None
+        self._success_ledger: SkillSuccessLedger | None = None
 
     # ------------------------------------------------------------- repeatability
     def _ledger(self) -> SkillSuccessLedger:
@@ -628,7 +626,7 @@ class SkillForge:
             pass
         return out
 
-    def find_similar(self, description: str, *, threshold: float = None) -> Optional[dict[str, Any]]:
+    def find_similar(self, description: str, *, threshold: float = None) -> dict[str, Any] | None:
         th = float(threshold if threshold is not None else getattr(config, "skill_forge_dedupe_similarity", 0.55))
         best, best_score = None, 0.0
         for sk in self._existing_skills():
@@ -642,8 +640,7 @@ class SkillForge:
             if score > best_score:
                 best, best_score = sk, score
         if best and best_score >= th:
-            return {"name": best["name"], "doc": best.get("summary", "")[:400],
-                    "similarity": round(best_score, 3)}
+            return {"name": best["name"], "doc": best.get("summary", "")[:400], "similarity": round(best_score, 3)}
         # semantic second opinion, when embeddings are available
         try:
             from .embeddings import embedding_store
@@ -667,7 +664,7 @@ class SkillForge:
         self,
         goal: str,
         steps: Sequence[DistilledStep],
-        evaluation: Optional[TaskEvaluation] = None,
+        evaluation: TaskEvaluation | None = None,
         session_id: str = "",
     ) -> SkillCandidate:
         tools = [s.tool for s in steps]
@@ -690,9 +687,9 @@ class SkillForge:
                 "the final answer must reference the same artifacts as the recorded run."
             ),
             pitfalls=[
-                f"Step {s.index} ({s.tool}) errored during the recorded run and was recovered: "
-                f"{(s.outcome or '')[:120]}"
-                for s in steps if s.recovered
+                f"Step {s.index} ({s.tool}) errored during the recorded run and was recovered: {(s.outcome or '')[:120]}"
+                for s in steps
+                if s.recovered
             ],
             provenance={
                 "session": session_id,
@@ -711,7 +708,7 @@ class SkillForge:
     @staticmethod
     def _when_to_use(goal: str, tools: Sequence[str]) -> str:
         return (
-            f"Use when the user asks for something equivalent to: \"{(goal or '').strip()[:160]}\". "
+            f'Use when the user asks for something equivalent to: "{(goal or "").strip()[:160]}". '
             f"The recorded run used {len(set(tools))} distinct tool(s) in a fixed order, so prefer "
             f"this skill over re-planning from scratch."
         )
@@ -720,7 +717,7 @@ class SkillForge:
     def _inputs_for(steps: Sequence[DistilledStep]) -> list[str]:
         keys: list[str] = []
         for s in steps:
-            for k in (s.args or {}):
+            for k in s.args or {}:
                 if k not in keys:
                     keys.append(str(k))
         return keys[:12]
@@ -730,8 +727,13 @@ class SkillForge:
         payload = {
             "goal": goal[:600],
             "procedure": [
-                {"step": s.index, "tool": s.tool, "args_keys": sorted((s.args or {}).keys()),
-                 "intent": s.intent[:120], "error": s.error}
+                {
+                    "step": s.index,
+                    "tool": s.tool,
+                    "args_keys": sorted((s.args or {}).keys()),
+                    "intent": s.intent[:120],
+                    "error": s.error,
+                }
                 for s in steps
             ],
         }
@@ -787,10 +789,7 @@ class SkillForge:
             "source_session": cand.provenance.get("session"),
             "trajectory_hash": cand.provenance.get("hash"),
         }
-        fm = "\n".join(
-            f"{k}: {json.dumps(v) if isinstance(v, (list, dict)) else _yaml_str(v)}"
-            for k, v in front.items()
-        )
+        fm = "\n".join(f"{k}: {json.dumps(v) if isinstance(v, (list, dict)) else _yaml_str(v)}" for k, v in front.items())
         lines = [f"---\n{fm}\n---", "", f"# {cand.title}", "", cand.description, ""]
         lines += ["## When to use", "", cand.when_to_use, ""]
         if cand.inputs:
@@ -807,11 +806,15 @@ class SkillForge:
         if cand.pitfalls:
             lines += ["## Pitfalls observed", ""] + [f"- {p}" for p in cand.pitfalls] + [""]
         lines += [
-            "## Usage", "", "```python",
+            "## Usage",
+            "",
+            "```python",
             "from core.skill_forge import skill_forge",
             f"skill_forge.run('{cand.name}', task='...')   # or skill_use('{cand.name}', ...)",
-            "```", "",
-            "## Provenance", "",
+            "```",
+            "",
+            "## Provenance",
+            "",
             f"- session: `{cand.provenance.get('session', '')}`",
             f"- created: {cand.provenance.get('created')}",
             f"- trajectory hash: `{cand.provenance.get('hash')}`",
@@ -890,7 +893,8 @@ class SkillForge:
                          "steps": results, "hint": "recorded step failed; re-plan or override args"}}
         return {{"success": True, "skill": SKILL_META["name"], "steps": results,
                  "verification": SKILL_META["verification"]}}
-    ''').lstrip("\n")
+    '''
+        ).lstrip("\n")
 
     def smoke_test(self, cand: SkillCandidate) -> str:
         return textwrap.dedent(
@@ -922,7 +926,8 @@ class SkillForge:
         mod = _load()
         res = mod.run(task="smoke", execute=False)
         assert res["success"] and res["dry_run"]
-    ''').lstrip("\n")
+    '''
+        ).lstrip("\n")
 
     # -------------------------------------------------------------- validation
     def validate(self, skill_dir: Path, *, timeout: int = 25) -> dict[str, Any]:
@@ -939,11 +944,21 @@ class SkillForge:
         if not py.exists():
             return {**report, "valid": False, "error": "skill.py missing"}
         text = md.read_text(errors="ignore")
-        report["checks"].append({"name": "frontmatter", "ok": text.startswith("---") and "---" in text[3:],
-                                 "detail": "SKILL.md must start with YAML frontmatter"})
+        report["checks"].append(
+            {
+                "name": "frontmatter",
+                "ok": text.startswith("---") and "---" in text[3:],
+                "detail": "SKILL.md must start with YAML frontmatter",
+            }
+        )
         for key in ("name:", "description:", "when_to_use:"):
-            report["checks"].append({"name": f"frontmatter:{key[:-1]}", "ok": key in text.split("---")[1],
-                                     "detail": f"required frontmatter key '{key[:-1]}'"})
+            report["checks"].append(
+                {
+                    "name": f"frontmatter:{key[:-1]}",
+                    "ok": key in text.split("---")[1],
+                    "detail": f"required frontmatter key '{key[:-1]}'",
+                }
+            )
         try:
             import py_compile
 
@@ -960,8 +975,9 @@ class SkillForge:
             "print(json.dumps({'ok':bool(r.get('success')),'steps':len(steps)}))"
         )
         rc, out, err = self._probe(probe, timeout=timeout)
-        report["checks"].append({"name": "import+entrypoint", "ok": rc == 0 and '"ok": true' in out,
-                                 "detail": (out or err)[:400]})
+        report["checks"].append(
+            {"name": "import+entrypoint", "ok": rc == 0 and '"ok": true' in out, "detail": (out or err)[:400]}
+        )
         if rc != 0:
             return {**report, "valid": False, "error": f"import failed: {(err or out)[:300]}"}
         report["valid"] = all(c["ok"] for c in report["checks"])
@@ -978,7 +994,10 @@ class SkillForge:
             pass
         try:
             proc = subprocess.run(
-                [sys.executable, "-c", code], capture_output=True, text=True, timeout=timeout,
+                [sys.executable, "-c", code],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
                 cwd=str(self.skills_dir.parent),
             )
             return proc.returncode, proc.stdout, proc.stderr
@@ -1075,8 +1094,8 @@ class SkillForge:
         goal: str,
         trajectory: Sequence[dict[str, Any]],
         *,
-        verification: Optional[dict[str, Any]] = None,
-        tool_results: Optional[Sequence[dict[str, Any]]] = None,
+        verification: dict[str, Any] | None = None,
+        tool_results: Sequence[dict[str, Any]] | None = None,
         session_id: str = "",
         final_answer: str = "",
         dry_run: bool = False,
@@ -1085,7 +1104,9 @@ class SkillForge:
         # ---- gate 1: VERIFIED SUCCESS -------------------------------------
         # never learn a procedure from a run that did not demonstrably work
         proof = evaluate_success_proof(
-            trajectory, verification=verification, tool_results=tool_results,
+            trajectory,
+            verification=verification,
+            tool_results=tool_results,
             final_answer=final_answer,
         )
         require_verified = bool(getattr(config, "skill_forge_require_verified", True))
@@ -1093,7 +1114,8 @@ class SkillForge:
         # task is reported as "unverified", not as "not harvestable".
         if require_verified and proof.verified is False:
             return {
-                "created": False, "stage": "unverified",
+                "created": False,
+                "stage": "unverified",
                 "reason": "; ".join(proof.reasons) or "verification failed",
                 "proof": proof.to_dict(),
             }
@@ -1102,11 +1124,11 @@ class SkillForge:
             trajectory, verification=verification, tool_results=tool_results, final_answer=final_answer
         )
         if not evaluation.harvest:
-            return {"created": False, "stage": "evaluation", "evaluation": evaluation.to_dict(),
-                    "proof": proof.to_dict()}
+            return {"created": False, "stage": "evaluation", "evaluation": evaluation.to_dict(), "proof": proof.to_dict()}
         if require_verified and not proof.ok:
             return {
-                "created": False, "stage": "unverified",
+                "created": False,
+                "stage": "unverified",
                 "reason": "; ".join(proof.reasons) or "no verified success",
                 "proof": proof.to_dict(),
                 "evaluation": evaluation.to_dict(),
@@ -1114,9 +1136,12 @@ class SkillForge:
 
         steps = extract_steps(trajectory, tool_results)
         if len(steps) < 2:
-            return {"created": False, "stage": "extraction",
-                    "reason": f"only {len(steps)} distinct step(s) after collapsing retries",
-                    "evaluation": evaluation.to_dict()}
+            return {
+                "created": False,
+                "stage": "extraction",
+                "reason": f"only {len(steps)} distinct step(s) after collapsing retries",
+                "evaluation": evaluation.to_dict(),
+            }
         cand = self.distill(goal, steps, evaluation, session_id=session_id)
         similar = self.find_similar(cand.description)
         if similar and similar.get("name"):
@@ -1124,22 +1149,33 @@ class SkillForge:
                 from .memory import memory
 
                 memory.remember(
-                    "procedural", cand.description,
-                    importance=6.0, success=True, session=session_id,
+                    "procedural",
+                    cand.description,
+                    importance=6.0,
+                    success=True,
+                    session=session_id,
                     metadata={"skill": similar["name"], "deduped": True},
                 )
             except Exception:
                 pass
             return {
-                "created": False, "stage": "dedupe", "merged_into": similar["name"],
-                "similarity": similar.get("similarity"), "name": cand.name,
+                "created": False,
+                "stage": "dedupe",
+                "merged_into": similar["name"],
+                "similarity": similar.get("similarity"),
+                "name": cand.name,
                 "evaluation": evaluation.to_dict(),
                 "skill_md": cand.to_dict() if dry_run else None,
             }
         if dry_run:
-            return {"created": False, "stage": "dry_run", "candidate": cand.to_dict(),
-                    "skill_md": self.skill_md(cand), "evaluation": evaluation.to_dict(),
-                    "proof": proof.to_dict()}
+            return {
+                "created": False,
+                "stage": "dry_run",
+                "candidate": cand.to_dict(),
+                "skill_md": self.skill_md(cand),
+                "evaluation": evaluation.to_dict(),
+                "proof": proof.to_dict(),
+            }
 
         # ---- gate 2: REPEATABILITY ----------------------------------------
         # One successful run is a hypothesis; a procedure is only distilled
@@ -1149,17 +1185,24 @@ class SkillForge:
         ledger = self._ledger()
         min_repeats = max(1, int(getattr(config, "skill_forge_min_repeats", 2) or 1))
         observed = ledger.record(
-            signature, session_id=session_id, goal=goal, evidence=proof.evidence,
+            signature,
+            session_id=session_id,
+            goal=goal,
+            evidence=proof.evidence,
         )
         if observed < min_repeats:
             return {
-                "created": False, "stage": "awaiting_repeat",
+                "created": False,
+                "stage": "awaiting_repeat",
                 "name": cand.name,
                 "signature": signature,
-                "observed": observed, "required": min_repeats,
-                "reason": (f"procedure observed {observed}/{min_repeats} times — "
-                           "needs a repeat success in an independent run before "
-                           "it is distilled into a skill"),
+                "observed": observed,
+                "required": min_repeats,
+                "reason": (
+                    f"procedure observed {observed}/{min_repeats} times — "
+                    "needs a repeat success in an independent run before "
+                    "it is distilled into a skill"
+                ),
                 "proof": proof.to_dict(),
                 "evaluation": evaluation.to_dict(),
             }
@@ -1167,13 +1210,11 @@ class SkillForge:
         result = self.install(cand)
         result["evaluation"] = evaluation.to_dict()
         result["proof"] = proof.to_dict()
-        result["repeatability"] = {"signature": signature, "observed": observed,
-                                   "required": min_repeats}
+        result["repeatability"] = {"signature": signature, "observed": observed, "required": min_repeats}
         result["steps"] = len(steps)
         # normalised verdict so callers (agent loop, CLI, /command) read one shape
         result["created"] = bool(result.get("installed"))
-        result["stage"] = ("installed" if result["created"]
-                           else "quarantined" if result.get("quarantined") else "install_failed")
+        result["stage"] = "installed" if result["created"] else "quarantined" if result.get("quarantined") else "install_failed"
         result.setdefault("name", cand.name)
         result.setdefault("path", str(self.skills_dir / cand.name))
         return result
@@ -1218,8 +1259,7 @@ class SkillForge:
             if entry is not None:
                 entry["runs"] = int(entry.get("runs") or 0) + 1
                 entry["successes"] = int(entry.get("successes") or 0) + (1 if success else 0)
-                entry["last_outcome"] = {"success": bool(success), "note": (note or "")[:200],
-                                         "ts": _now()}
+                entry["last_outcome"] = {"success": bool(success), "note": (note or "")[:200], "ts": _now()}
                 self._save_registry(reg)
         except Exception:
             pass
@@ -1227,8 +1267,10 @@ class SkillForge:
         try:
             self.skills_dir.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"ts": _now(), "skill": name, "success": bool(success),
-                                    "note": (note or "")[:300]}, default=str) + "\n")
+                f.write(
+                    json.dumps({"ts": _now(), "skill": name, "success": bool(success), "note": (note or "")[:300]}, default=str)
+                    + "\n"
+                )
         except Exception:
             pass
         return {"recorded": True, "skill": name, "success": success}
@@ -1253,9 +1295,7 @@ class SkillForge:
             "harvested": harvested,
             "quarantined": len(quarantined),
             "quarantine_names": quarantined[:10],
-            "recent_outcome_rate": (
-                round(sum(1 for o in outcomes if o) / len(outcomes), 3) if outcomes else None
-            ),
+            "recent_outcome_rate": (round(sum(1 for o in outcomes if o) / len(outcomes), 3) if outcomes else None),
             "registry": str(self.registry_path),
             "skills_dir": str(self.skills_dir),
         }
@@ -1285,7 +1325,7 @@ def _frontmatter_summary(doc: str) -> str:
     return " ".join(bits)[:600] or head.strip()[:200]
 
 
-def _parse_json_object(text: str) -> Optional[dict[str, Any]]:
+def _parse_json_object(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     text = text.strip()

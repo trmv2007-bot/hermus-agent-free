@@ -5,15 +5,16 @@ important transitions.  It then sends a baseline image and before/after
 composites to an injected vision model (or Hermus's local Ollama vision tool)
 and returns an agent-readable :class:`Timeline`.
 """
+
 from __future__ import annotations
 
 import heapq
 import re
 import subprocess
 import tempfile
-from pathlib import Path
-from typing import Any, Optional
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from .event_detector import EventDetector
 from .frame_sampler import _image_diff
@@ -55,14 +56,14 @@ class OllamaVisionModel:
 class VideoAnalyzer:
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
-        event_detector: Optional[EventDetector] = None,
+        vision_model: Callable[[Any, str], dict[str, Any]] | None = None,
+        event_detector: EventDetector | None = None,
     ):
         self.vision_model = vision_model
         self.event_detector = event_detector or EventDetector()
 
     @classmethod
-    def with_ollama(cls, model: str = "llava:7b", **kwargs: Any) -> "VideoAnalyzer":
+    def with_ollama(cls, model: str = "llava:7b", **kwargs: Any) -> VideoAnalyzer:
         return cls(vision_model=OllamaVisionModel(model), **kwargs)
 
     @staticmethod
@@ -100,13 +101,7 @@ class VideoAnalyzer:
             return {"success": True, "description": response, "confidence": 0.6}
         if not isinstance(response, dict):
             return {"success": False, "error": "vision model returned an unsupported result"}
-        text = (
-            response.get("description")
-            or response.get("detail")
-            or response.get("response")
-            or response.get("result")
-            or ""
-        )
+        text = response.get("description") or response.get("detail") or response.get("response") or response.get("result") or ""
         return {
             **response,
             "success": response.get("success", True),
@@ -115,7 +110,7 @@ class VideoAnalyzer:
         }
 
     @staticmethod
-    def _evidence(event: dict[str, Any], recording: Optional[str] = None) -> dict[str, Any]:
+    def _evidence(event: dict[str, Any], recording: str | None = None) -> dict[str, Any]:
         evidence = {
             "sequence": event.get("sequence"),
             "timestamp": event.get("ts"),
@@ -132,7 +127,7 @@ class VideoAnalyzer:
         baseline: dict[str, Any],
         detected: list[dict[str, Any]],
         task: str,
-        recording: Optional[str],
+        recording: str | None,
         frames_total: int,
     ) -> dict[str, Any]:
         """Run vision only on a baseline and already-selected transitions."""
@@ -165,8 +160,9 @@ class VideoAnalyzer:
                 "in one concise sentence: application/dialog opened or closed, command/result, error, progress, "
                 "or button/text state change. Do not merely say that pixels changed."
             )
-            result = ({"success": False, "error": semantic_failures[0]}
-                      if vision_unavailable else self._call_vision(composite, prompt))
+            result = (
+                {"success": False, "error": semantic_failures[0]} if vision_unavailable else self._call_vision(composite, prompt)
+            )
             description = result.get("description")
             if not description:
                 description = f"Screen changed (score {event.get('change_score', 0.0):.3f})"
@@ -198,7 +194,7 @@ class VideoAnalyzer:
         frames: list[dict[str, Any]],
         task: str = "",
         max_events: int = 12,
-        recording: Optional[str] = None,
+        recording: str | None = None,
     ) -> dict[str, Any]:
         if not frames:
             timeline = Timeline(task=task, recording=recording)
@@ -209,14 +205,17 @@ class VideoAnalyzer:
                 "events": [],
             }
         detected = self.event_detector.detect(frames, max_events=max_events)
-        return self._analyze_detected(
-            frames[0], detected, task, recording, frames_total=len(frames)
-        )
+        return self._analyze_detected(frames[0], detected, task, recording, frames_total=len(frames))
 
     @staticmethod
     def _match_result(response: dict[str, Any]) -> dict[str, Any]:
         if not response.get("success"):
-            return {"matched": False, "confidence": 0.0, "detail": response.get("error", "vision failed"), "error": response.get("error")}
+            return {
+                "matched": False,
+                "confidence": 0.0,
+                "detail": response.get("error", "vision failed"),
+                "error": response.get("error"),
+            }
         text = response.get("description", "")
         explicit = re.search(r"MATCH\s*:\s*(YES|NO)", text, flags=re.IGNORECASE)
         if explicit:
@@ -242,8 +241,7 @@ class VideoAnalyzer:
             "confidence (0 to 1), detail (one evidence sentence).",
         )
         if not response.get("success"):
-            return {"confidence": 0.0, "detail": response.get("error", "vision failed"),
-                    "source": "vision_error"}
+            return {"confidence": 0.0, "detail": response.get("error", "vision failed"), "source": "vision_error"}
         text = str(response.get("description") or "").strip()
         parsed = None
         decoder = __import__("json").JSONDecoder()
@@ -323,14 +321,14 @@ class VideoAnalyzer:
 
         threshold = self.event_detector.sampler.threshold
         debounce = self.event_detector.debounce_seconds
-        baseline: Optional[dict[str, Any]] = None
-        previous: Optional[dict[str, Any]] = None
-        pending: Optional[dict[str, Any]] = None
+        baseline: dict[str, Any] | None = None
+        previous: dict[str, Any] | None = None
+        pending: dict[str, Any] | None = None
         selected: list[Any] = []  # min-heap: (score, order, event)
         order = 0
         count = 0
 
-        def finalize(event: Optional[dict[str, Any]]) -> None:
+        def finalize(event: dict[str, Any] | None) -> None:
             nonlocal order
             if event is None or max_events <= 0:
                 return
@@ -413,8 +411,8 @@ class VideoAnalyzer:
                         if start:
                             del buffer[:start]
                         break
-                    consume(bytes(buffer[start:end + 2]))
-                    del buffer[:end + 2]
+                    consume(bytes(buffer[start : end + 2]))
+                    del buffer[: end + 2]
             return_code = process.wait(timeout=max(30.0, float(max_seconds) * 2))
             error_file.seek(0)
             stderr = error_file.read()
@@ -477,15 +475,17 @@ class VideoAnalyzer:
             for index, path in enumerate(sorted(Path(directory).glob("frame-*.jpg"))):
                 data = path.read_bytes()
                 offset = index / fps
-                frames.append({
-                    "ts": None,
-                    "captured_at": offset,
-                    "offset": round(offset, 4),
-                    "sequence": index + 1,
-                    "encoding": "jpeg",
-                    "bytes": len(data),
-                    "data": data,
-                })
+                frames.append(
+                    {
+                        "ts": None,
+                        "captured_at": offset,
+                        "offset": round(offset, 4),
+                        "sequence": index + 1,
+                        "encoding": "jpeg",
+                        "bytes": len(data),
+                        "data": data,
+                    }
+                )
         return {"success": True, "frames": frames, "sample_fps": fps, "video": str(source)}
 
     def analyze_video(

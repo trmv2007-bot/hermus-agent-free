@@ -4,15 +4,13 @@ These are used by the ADB transport tests so that the transport is exercised wit
 *screen-accurate* payloads (real PNG bytes, real schema) rather than placeholders.
 They are fixtures, not mocks of the tool path.
 """
+
 from __future__ import annotations
 
 import base64
 
 # A 1x1 transparent PNG (valid signature + IHDR + IDAT + IEND, ending with \x1a\n).
-PNG_1x1_BYTES = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-    "YAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-)
+PNG_1x1_BYTES = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
 
 # Realistic uiautomator `dump` payload: a Tasks screen with a title, an input field,
 # and two buttons (Add/Clear), plus an existing task row.

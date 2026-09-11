@@ -23,6 +23,7 @@ of who wrote it, and the canned path removes model latency and the 20K-token
 prefill from the critical path entirely. Set ``HERMUS_VOICE_ACK_MODE=llm`` if
 you want a personalised acknowledgment and are willing to pay for it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,8 +46,12 @@ router = APIRouter()
 _DEFAULT_ACK = "On it."
 _MAX_AUDIO_BYTES = 25 * 1024 * 1024
 _SUFFIXES = {
-    "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/wav": ".wav",
-    "audio/x-wav": ".wav", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
 }
 
 
@@ -82,8 +87,7 @@ def synthesize_speech(text: str) -> dict:
 
         result = speech_engine.synthesize(text)
     except Exception as exc:
-        return {"spoken": False, "text": text, "audio_url": None,
-                "error": f"{type(exc).__name__}: {exc}"[:200]}
+        return {"spoken": False, "text": text, "audio_url": None, "error": f"{type(exc).__name__}: {exc}"[:200]}
     if not isinstance(result, dict) or not result.get("success"):
         reason = (result or {}).get("error") if isinstance(result, dict) else "speech engine returned no result"
         return {"spoken": False, "text": text, "audio_url": None, "error": str(reason)[:200]}
@@ -131,21 +135,26 @@ def _llm_ack(transcript: str) -> str:
         llm = getattr(agent, "llm", None)
         if llm is None:
             return ""
-        response = llm.chat([
-            {"role": "system", "content": (
-                "You are a voice assistant acknowledging a spoken request. Reply with ONE "
-                "short spoken sentence (max 12 words) confirming you are starting the work. "
-                "No preamble, no markdown, no tool calls."
-            )},
-            {"role": "user", "content": str(transcript or "")[:500]},
-        ], tools=None)
+        response = llm.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a voice assistant acknowledging a spoken request. Reply with ONE "
+                        "short spoken sentence (max 12 words) confirming you are starting the work. "
+                        "No preamble, no markdown, no tool calls."
+                    ),
+                },
+                {"role": "user", "content": str(transcript or "")[:500]},
+            ],
+            tools=None,
+        )
         return str(getattr(response, "content", "") or "").strip()[:200]
     except Exception:
         return ""
 
 
-async def _transcribe_body(body: bytes, content_type: str, *, model: str,
-                           language: str | None, session_id: str) -> dict:
+async def _transcribe_body(body: bytes, content_type: str, *, model: str, language: str | None, session_id: str) -> dict:
     """Write the browser blob to a temp file and run local STT on it."""
     from core.speech import speech_root
     from tools.voice import transcribe_audio
@@ -157,9 +166,15 @@ async def _transcribe_body(body: bytes, content_type: str, *, model: str,
     path.write_bytes(body)
     try:
         return await asyncio.to_thread(
-            transcribe_audio, str(path), model or config.voice_stt_model, language,
-            normalize=True, strip_fillers=False, remember=False,
-            session_id=session_id or "", project="",
+            transcribe_audio,
+            str(path),
+            model or config.voice_stt_model,
+            language,
+            normalize=True,
+            strip_fillers=False,
+            remember=False,
+            session_id=session_id or "",
+            project="",
         )
     finally:
         try:
@@ -172,13 +187,19 @@ def _enqueue(payload: dict, session_key: str, dedupe_key: str = "") -> dict | No
     """Queue a voice.reply job. Returns the job handle, or None if unavailable."""
     try:
         job = _job_queue.submit(
-            "voice.reply", payload, session_key=session_key, dedupe_key=dedupe_key,
+            "voice.reply",
+            payload,
+            session_key=session_key,
+            dedupe_key=dedupe_key,
         )
-        return {"job_id": job.id, "run_id": job.run_id,
-                "status_url": f"/jobs/{job.id}",
-                "result_url": f"/jobs/{job.id}/result",
-                "events_url": f"/jobs/{job.id}/events",
-                "stream_url": f"/stream/run/{job.run_id}"}
+        return {
+            "job_id": job.id,
+            "run_id": job.run_id,
+            "status_url": f"/jobs/{job.id}",
+            "result_url": f"/jobs/{job.id}/result",
+            "events_url": f"/jobs/{job.id}/events",
+            "stream_url": f"/stream/run/{job.run_id}",
+        }
     except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"[:200]}
 
@@ -190,8 +211,11 @@ def _run_inline(payload: dict) -> dict:
 
         result = runtime_execute(payload)
         answer = str(result.get("response") or result.get("error") or "")
-        speech = synthesize_speech(answer[:config.voice_answer_max_chars]) \
-            if answer and config.voice_speak_answer else {"spoken": False, "audio_url": None}
+        speech = (
+            synthesize_speech(answer[: config.voice_answer_max_chars])
+            if answer and config.voice_speak_answer
+            else {"spoken": False, "audio_url": None}
+        )
         return {"answer": answer[:4000], "speech": speech, "inline": True}
     except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"[:300], "inline": True}
@@ -237,8 +261,7 @@ async def voice_status():
             "max_utterance_ms": int(config.voice_max_utterance_ms),
             "barge_in": bool(config.voice_barge_in),
         },
-        "queue_ready": bool(getattr(_job_queue, "enabled", False)
-                            and getattr(_job_queue, "_started", False)),
+        "queue_ready": bool(getattr(_job_queue, "enabled", False) and getattr(_job_queue, "_started", False)),
         "presence": get_presence().current(),
         "tts": tts,
         "stt": stt,
@@ -257,7 +280,8 @@ async def voice_ack(payload: dict | None = None):
         from core.presence import get_presence
 
         get_presence().record_moment(
-            "voice_ack", "Spoke a voice acknowledgement",
+            "voice_ack",
+            "Spoke a voice acknowledgement",
             session_id=str(payload.get("session_id") or ""),
             user_id=str(payload.get("user_id") or "default"),
             metadata={"spoken": bool(clip.get("spoken")), "mode": "manual"},
@@ -283,8 +307,7 @@ async def voice_command(
     work. The client plays the ack immediately and streams the answer later.
     """
     if not config.voice_enabled:
-        return JSONResponse({"success": False, "error": "voice mode disabled "
-                                                        "(set HERMUS_VOICE_ENABLED=1)"}, status_code=503)
+        return JSONResponse({"success": False, "error": "voice mode disabled (set HERMUS_VOICE_ENABLED=1)"}, status_code=503)
     started = time.time()
     body = await request.body()
     if not body:
@@ -293,16 +316,18 @@ async def voice_command(
         return JSONResponse({"success": False, "error": "audio exceeds 25 MB limit"}, status_code=413)
 
     transcript = await _transcribe_body(
-        body, request.headers.get("content-type") or "audio/webm",
-        model=model, language=language, session_id=session_id,
+        body,
+        request.headers.get("content-type") or "audio/webm",
+        model=model,
+        language=language,
+        session_id=session_id,
     )
     if not transcript.get("success"):
         return JSONResponse({"success": False, "stage": "transcribe", **transcript}, status_code=503)
 
     text = str(transcript.get("text") or "").strip()
     if not text:
-        return JSONResponse({"success": False, "stage": "transcribe",
-                             "error": "no speech detected"}, status_code=422)
+        return JSONResponse({"success": False, "stage": "transcribe", "error": "no speech detected"}, status_code=422)
 
     # Acknowledgment first: this is the latency the user actually perceives.
     ack = await _make_ack(text)
@@ -310,8 +335,10 @@ async def voice_command(
         from core.presence import get_presence
 
         get_presence().record_moment(
-            "voice_request", "Received a voice request",
-            session_id=session_id, user_id=user_id or "default",
+            "voice_request",
+            "Received a voice request",
+            session_id=session_id,
+            user_id=user_id or "default",
             metadata={"ack_spoken": bool(ack.get("spoken")), "input": "microphone"},
             emit=False,
         )
@@ -319,8 +346,14 @@ async def voice_command(
         pass
 
     queued = _enqueue(
-        {"text": text, "platform": "voice", "session_id": session_id,
-         "user_id": user_id or "default", "prefer": "auto", "voice": True},
+        {
+            "text": text,
+            "platform": "voice",
+            "session_id": session_id,
+            "user_id": user_id or "default",
+            "prefer": "auto",
+            "voice": True,
+        },
         session_key=f"voice:{session_id or 'default'}",
         dedupe_key=f"voice:{session_id}:{int(started * 1000)}",
     )
@@ -328,14 +361,20 @@ async def voice_command(
 
     if queued is None or queued.get("error"):
         # No queue: degrade to running inline rather than dropping the request.
-        result = _run_inline({"text": text, "prefer": "auto"})
-        return JSONResponse({"success": bool(result.get("answer") or result.get("error")),
-                             "queued": False, "transcript": text, "ack": ack,
-                             "ack_ms": ack_ms, **result})
+        result = await asyncio.to_thread(_run_inline, {"text": text, "prefer": "auto"})
+        return JSONResponse(
+            {
+                "success": bool(result.get("answer") or result.get("error")),
+                "queued": False,
+                "transcript": text,
+                "ack": ack,
+                "ack_ms": ack_ms,
+                **result,
+            }
+        )
 
     return JSONResponse(
-        {"success": True, "queued": True, "transcript": text, "ack": ack,
-         "ack_ms": ack_ms, **queued},
+        {"success": True, "queued": True, "transcript": text, "ack": ack, "ack_ms": ack_ms, **queued},
         status_code=202,
     )
 
@@ -358,25 +397,40 @@ async def voice_say(payload: dict | None = None):
         from core.presence import get_presence
 
         get_presence().record_moment(
-            "voice_request", "Received a typed voice-mode request",
-            session_id=session_id, user_id=user_id,
+            "voice_request",
+            "Received a typed voice-mode request",
+            session_id=session_id,
+            user_id=user_id,
             metadata={"ack_spoken": bool(ack.get("spoken")), "input": "typed"},
             emit=False,
         )
     except Exception:
         pass
     queued = _enqueue(
-        {"text": text, "platform": "voice", "session_id": session_id,
-         "user_id": user_id,
-         "prefer": str(payload.get("prefer") or "auto"), "voice": True},
+        {
+            "text": text,
+            "platform": "voice",
+            "session_id": session_id,
+            "user_id": user_id,
+            "prefer": str(payload.get("prefer") or "auto"),
+            "voice": True,
+        },
         session_key=f"voice:{session_id or 'default'}",
         dedupe_key=f"voice:{session_id}:{int(started * 1000)}",
     )
     ack_ms = int((time.time() - started) * 1000)
     if queued is None or queued.get("error"):
-        result = _run_inline({"text": text, "prefer": str(payload.get("prefer") or "auto")})
-        return JSONResponse({"success": bool(result.get("answer") or result.get("error")),
-                             "queued": False, "transcript": text, "ack": ack,
-                             "ack_ms": ack_ms, **result})
-    return JSONResponse({"success": True, "queued": True, "transcript": text,
-                         "ack": ack, "ack_ms": ack_ms, **queued}, status_code=202)
+        result = await asyncio.to_thread(_run_inline, {"text": text, "prefer": str(payload.get("prefer") or "auto")})
+        return JSONResponse(
+            {
+                "success": bool(result.get("answer") or result.get("error")),
+                "queued": False,
+                "transcript": text,
+                "ack": ack,
+                "ack_ms": ack_ms,
+                **result,
+            }
+        )
+    return JSONResponse(
+        {"success": True, "queued": True, "transcript": text, "ack": ack, "ack_ms": ack_ms, **queued}, status_code=202
+    )

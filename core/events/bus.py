@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any
 
 from ..contracts import EventEnvelope
 
@@ -28,9 +28,9 @@ Subscriber = Callable[[EventEnvelope], None]
 class EventBus:
     """In-process + durable event bus with subscription and replay."""
 
-    def __init__(self, log_path: Optional[os.PathLike] = None, *, max_memory: int = 20000):
+    def __init__(self, log_path: os.PathLike | None = None, *, max_memory: int = 20000):
         self._lock = threading.RLock()
-        self._subscribers: list[tuple[Optional[str], Subscriber]] = []
+        self._subscribers: list[tuple[str | None, Subscriber]] = []
         self._buffer: list[EventEnvelope] = []
         self._cursor = 0
         self._max_memory = max_memory
@@ -48,7 +48,7 @@ class EventBus:
         if not path.exists():
             return 0
         n = 0
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             for _ in fh:
                 n += 1
         return n
@@ -70,7 +70,7 @@ class EventBus:
             self._buffer.append(envelope)
             self._cursor += 1
             if len(self._buffer) > self._max_memory:
-                self._buffer = self._buffer[-self._max_memory:]
+                self._buffer = self._buffer[-self._max_memory :]
             self._write_log(envelope)
             subscribers = list(self._subscribers)
         for match, cb in subscribers:
@@ -82,16 +82,18 @@ class EventBus:
                     pass
         return envelope
 
-    def subscribe(self, event_type: Optional[str] = None) -> Callable[[Subscriber], Subscriber]:
+    def subscribe(self, event_type: str | None = None) -> Callable[[Subscriber], Subscriber]:
         """Decorator/registration helper.
 
         ``event_type`` is a wildcard when ``None``; otherwise the subscriber only
         receives events whose ``type`` matches exactly.
         """
+
         def register(cb: Subscriber) -> Subscriber:
             with self._lock:
                 self._subscribers.append((event_type, cb))
             return cb
+
         return register
 
     def unsubscribe(self, cb: Subscriber) -> None:
@@ -103,8 +105,7 @@ class EventBus:
     def cursor(self) -> int:
         return self._cursor
 
-    def replay(self, since_cursor: int = 0, *, event_type: Optional[str] = None,
-               limit: Optional[int] = None) -> list[EventEnvelope]:
+    def replay(self, since_cursor: int = 0, *, event_type: str | None = None, limit: int | None = None) -> list[EventEnvelope]:
         """Replay events with cursor > ``since_cursor`` from the buffer + log.
 
         If a durable log exists, events are read from disk so replay survives a
@@ -112,7 +113,7 @@ class EventBus:
         """
         out: list[EventEnvelope] = []
         if self._log_path and self._log_path.exists():
-            with open(self._log_path, "r", encoding="utf-8") as fh:
+            with open(self._log_path, encoding="utf-8") as fh:
                 idx = 0
                 for line in fh:
                     idx += 1
@@ -129,7 +130,6 @@ class EventBus:
                         break
         else:
             for env in self._buffer:
-                i = getattr(env, "_cursor", None)
                 # buffer replay keyed by cursor ordering is approximate without log
                 out.append(env)
                 if limit and len(out) >= limit:
@@ -141,7 +141,7 @@ class EventBus:
         with self._lock:
             return list(self._buffer)
 
-    def recent(self, limit: int = 100, *, event_type: Optional[str] = None) -> list[EventEnvelope]:
+    def recent(self, limit: int = 100, *, event_type: str | None = None) -> list[EventEnvelope]:
         envs = self.replay(since_cursor=0, event_type=event_type, limit=limit)
         return envs[-limit:]
 
@@ -151,7 +151,7 @@ class EventBus:
             self._log_fh = None
 
 
-_bus: Optional[EventBus] = None
+_bus: EventBus | None = None
 _bus_lock = threading.Lock()
 
 
@@ -165,7 +165,7 @@ def get_bus() -> EventBus:
         return _bus
 
 
-def configure_bus(log_path: Optional[os.PathLike] = None, *, reset: bool = False) -> EventBus:
+def configure_bus(log_path: os.PathLike | None = None, *, reset: bool = False) -> EventBus:
     """Install (or reconfigure) the process-wide bus with an optional durable log.
 
     Call this once at bootstrap/gateway startup so the canonical bus persists its

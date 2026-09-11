@@ -25,18 +25,17 @@ Nothing is left in a "processing" state: :meth:`HermusDoctor.find_stuck_work`
 looks for runs/jobs that never reached a terminal status, and
 :meth:`HermusDoctor.reap_stuck` can close them out with an explicit reason.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
 
@@ -93,7 +92,7 @@ def _finding(
     category: str,
     title: str,
     evidence: str,
-    fixes: Optional[list[str]] = None,
+    fixes: list[str] | None = None,
     *,
     component: str = "",
     auto_fixable: bool = False,
@@ -113,17 +112,15 @@ def _finding(
 class HermusDoctor:
     """Collect → diagnose → (optionally) ask a model and the internet → report."""
 
-    def __init__(self, reports_dir: Optional[str] = None) -> None:
-        self.reports_dir = Path(
-            reports_dir or config.resolve_path(getattr(config, "doctor_reports_dir", "data/doctor"))
-        )
+    def __init__(self, reports_dir: str | None = None) -> None:
+        self.reports_dir = Path(reports_dir or config.resolve_path(getattr(config, "doctor_reports_dir", "data/doctor")))
         self._runs: list[dict[str, Any]] = []
         self._auto_last = 0.0
         self._auto_today = ""
         self._auto_count = 0
 
     # ------------------------------------------------------------------ signals
-    def collect(self, *, stuck_minutes: Optional[int] = None) -> dict[str, Any]:
+    def collect(self, *, stuck_minutes: int | None = None) -> dict[str, Any]:
         """Gather every signal the doctor reasons over. Never raises."""
         signals: dict[str, Any] = {
             "collected_at": _now(),
@@ -176,9 +173,10 @@ class HermusDoctor:
     @staticmethod
     def _media_state() -> dict[str, Any]:
         try:
+            from tools.voice import voice_available_models
+
             from .avatar import get_avatar_service
             from .speech import speech_engine
-            from tools.voice import voice_available_models
 
             return {
                 "speech": speech_engine.status(),
@@ -195,17 +193,17 @@ class HermusDoctor:
             import psutil  # type: ignore
 
             disk = psutil.disk_usage(str(Path.cwd()))
-            out["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
+            out["disk_free_gb"] = round(disk.free / (1024**3), 2)
             out["disk_percent"] = disk.percent
             mem = psutil.virtual_memory()
-            out["ram_free_gb"] = round(mem.available / (1024 ** 3), 2)
+            out["ram_free_gb"] = round(mem.available / (1024**3), 2)
             out["ram_percent"] = mem.percent
         except Exception as exc:  # noqa: BLE001
             out["error"] = f"{type(exc).__name__}: {exc}"
         return out
 
     # ------------------------------------------------------------- stuck work
-    def find_stuck_work(self, *, stuck_minutes: Optional[int] = None) -> dict[str, Any]:
+    def find_stuck_work(self, *, stuck_minutes: int | None = None) -> dict[str, Any]:
         """Runs/jobs that never reached a terminal state.
 
         A dashboard showing "processing" forever is not a UI bug to wait out —
@@ -263,7 +261,7 @@ class HermusDoctor:
             "count": len(jobs) + len(runs),
         }
 
-    def reap_stuck(self, *, dry_run: bool = True, stuck_minutes: Optional[int] = None) -> dict[str, Any]:
+    def reap_stuck(self, *, dry_run: bool = True, stuck_minutes: int | None = None) -> dict[str, Any]:
         """Close out stuck work so no state stays open forever."""
         stuck = self.find_stuck_work(stuck_minutes=stuck_minutes)
         reaped: list[dict[str, Any]] = []
@@ -298,7 +296,7 @@ class HermusDoctor:
         return {"dry_run": False, "candidates": stuck, "reaped": reaped}
 
     # ------------------------------------------------------------------ analyse
-    def analyze(self, signals: Optional[dict[str, Any]] = None) -> list[Finding]:
+    def analyze(self, signals: dict[str, Any] | None = None) -> list[Finding]:
         """Deterministic diagnosis — works with no model and no network."""
         signals = signals or self.collect()
         findings: list[Finding] = []
@@ -330,29 +328,33 @@ class HermusDoctor:
         except Exception:  # noqa: BLE001
             return findings
         if getattr(_config, "web_allow_private_addresses", False):
-            findings.append(_finding(
-                SEVERITY_HIGH, "web-security",
-                "SSRF protection disabled: private/internal addresses are fetchable",
-                "HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1 lets web fetching reach loopback, "
-                "link-local (169.254.169.254) and RFC1918 addresses.",
-                [
-                    "Remove HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES from .env (or set it to 0)",
-                    "Use HERMUS_WEB_BLOCKED_DOMAINS / HERMUS_WEB_ALLOWED_DOMAINS to scope targets instead",
-                ],
-                component="core.web",
-            ))
-        if getattr(_config, "web_stealth_enabled", False) and \
-                getattr(_config, "web_stealth_solve_cloudflare", False):
-            findings.append(_finding(
-                SEVERITY_LOW, "web-security",
-                "Stealth fetching with challenge-solving is enabled",
-                "HERMUS_WEB_STEALTH=1 and HERMUS_WEB_STEALTH_CF=1 permit anti-bot bypass "
-                "acquisition. It only triggers after cheaper strategies fail, but the "
-                "operator should confirm this is intended for this deployment.",
-                ["Set HERMUS_WEB_STEALTH_CF=0 to allow stealth fetching without automatic "
-                 "interstitial solving"],
-                component="core.web",
-            ))
+            findings.append(
+                _finding(
+                    SEVERITY_HIGH,
+                    "web-security",
+                    "SSRF protection disabled: private/internal addresses are fetchable",
+                    "HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1 lets web fetching reach loopback, "
+                    "link-local (169.254.169.254) and RFC1918 addresses.",
+                    [
+                        "Remove HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES from .env (or set it to 0)",
+                        "Use HERMUS_WEB_BLOCKED_DOMAINS / HERMUS_WEB_ALLOWED_DOMAINS to scope targets instead",
+                    ],
+                    component="core.web",
+                )
+            )
+        if getattr(_config, "web_stealth_enabled", False) and getattr(_config, "web_stealth_solve_cloudflare", False):
+            findings.append(
+                _finding(
+                    SEVERITY_LOW,
+                    "web-security",
+                    "Stealth fetching with challenge-solving is enabled",
+                    "HERMUS_WEB_STEALTH=1 and HERMUS_WEB_STEALTH_CF=1 permit anti-bot bypass "
+                    "acquisition. It only triggers after cheaper strategies fail, but the "
+                    "operator should confirm this is intended for this deployment.",
+                    ["Set HERMUS_WEB_STEALTH_CF=0 to allow stealth fetching without automatic interstitial solving"],
+                    component="core.web",
+                )
+            )
         return findings
 
     # -- grouped runtime issues --------------------------------------------
@@ -391,7 +393,7 @@ class HermusDoctor:
                 finding.references = list(known.references)
             if not known:
                 finding.fixes = [
-                    f"Reproduce with the operation above and capture the traceback from /runtime/issues",
+                    "Reproduce with the operation above and capture the traceback from /runtime/issues",
                     "Ask the doctor to research this signature (POST /doctor/run with ask_internet=true)",
                 ]
             out.append(finding)
@@ -454,14 +456,12 @@ class HermusDoctor:
                     f"{nollama.get('models_dir')}",
                     [
                         f"Dashboard → System Overview → Download {recommended.get('name') or 'the recommended model'}",
-                        f"or: POST /engine/models/download {{\"model\": \"{recommended.get('id') or 'minicpm'}\"}}",
+                        f'or: POST /engine/models/download {{"model": "{recommended.get("id") or "minicpm"}"}}',
                     ],
                     component="local_engine",
                 )
             )
-        elif status == "unavailable" and any(
-            role.get("engine") == "nollama" for role in (plan.get("roles") or {}).values()
-        ):
+        elif status == "unavailable" and any(role.get("engine") == "nollama" for role in (plan.get("roles") or {}).values()):
             # Only blame NoLlama when the plan actually routes work to it — on a
             # CPU-only box "unavailable" means Ollama is down, and saying
             # otherwise sends the user to the wrong fix.
@@ -601,7 +601,7 @@ class HermusDoctor:
                 f"{count} run(s)/job(s) stuck in a non-terminal state",
                 f"Older than {stuck.get('threshold_minutes')} minutes: {examples}",
                 [
-                    "POST /doctor/reap {\"dry_run\": false} to close them out with an explicit reason",
+                    'POST /doctor/reap {"dry_run": false} to close them out with an explicit reason',
                     "Check the owning worker: a crash mid-run leaves the job 'running' forever",
                 ],
                 component="queue",
@@ -655,7 +655,7 @@ class HermusDoctor:
                 "watchdog",
                 f"Watchdog could not repair {len(failed)} error(s)",
                 f"latest: {str(last.get('error'))[:160]} (category {last.get('category')})",
-                ["Run the doctor with the model enabled: POST /doctor/run {\"use_llm\": true}"],
+                ['Run the doctor with the model enabled: POST /doctor/run {"use_llm": true}'],
                 component="watchdog",
             )
         ]
@@ -714,8 +714,9 @@ class HermusDoctor:
         if provider != "nollama":
             return True  # nothing to ensure
 
-        import requests
         from time import time as _now
+
+        import requests
 
         def models_served() -> list[str]:
             try:
@@ -749,9 +750,8 @@ class HermusDoctor:
                     return False
             if not nollama_manager.installed() or not nollama_manager.venv_ready():
                 return False
-            row = (
-                nollama_manager.best_installed_model("CPU", ("doctor",))
-                or nollama_manager.best_installed_model("GPU", ("doctor",))
+            row = nollama_manager.best_installed_model("CPU", ("doctor",)) or nollama_manager.best_installed_model(
+                "GPU", ("doctor",)
             )
             if not row:
                 return False
@@ -783,9 +783,8 @@ class HermusDoctor:
         try:
             from .nollama import nollama_manager
 
-            row = (
-                nollama_manager.best_installed_model("CPU", ("doctor",))
-                or nollama_manager.best_installed_model("GPU", ("doctor",))
+            row = nollama_manager.best_installed_model("CPU", ("doctor",)) or nollama_manager.best_installed_model(
+                "GPU", ("doctor",)
             )
             if row and row.get("repo"):
                 return f"nollama/{str(row['repo']).split('/')[-1]}"
@@ -793,7 +792,7 @@ class HermusDoctor:
             pass
         return ref
 
-    def _configured_doctor_fallback(self) -> Optional[tuple[str, str]]:
+    def _configured_doctor_fallback(self) -> tuple[str, str] | None:
         """A configured API provider to use if the local engine is unavailable."""
         try:
             from .provider_resolver import select_usable_bundle
@@ -809,7 +808,7 @@ class HermusDoctor:
             pass
         return None
 
-    def _doctor_llm(self, model: Optional[str] = None):
+    def _doctor_llm(self, model: str | None = None):
         """Build the LLM the doctor speaks through (its own engine role)."""
         from .accelerators import model_ref_for
         from .models import get_model_gateway
@@ -833,9 +832,9 @@ class HermusDoctor:
     def triage(
         self,
         findings: list[Finding],
-        signals: Optional[dict[str, Any]] = None,
+        signals: dict[str, Any] | None = None,
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
         max_findings: int = 8,
     ) -> dict[str, Any]:
         """Ask the small doctor model for a plain-language explanation + plan.
@@ -883,11 +882,11 @@ class HermusDoctor:
     def run(
         self,
         *,
-        ask_internet: Optional[bool] = None,
+        ask_internet: bool | None = None,
         use_llm: bool = True,
         reap: bool = False,
-        model: Optional[str] = None,
-        stuck_minutes: Optional[int] = None,
+        model: str | None = None,
+        stuck_minutes: int | None = None,
         max_findings: int = 8,
         save: bool = True,
         auto: bool = False,
@@ -937,12 +936,8 @@ class HermusDoctor:
             "triage": triage,
             "signals_summary": {
                 "issues": len(signals.get("issues") or []),
-                "diagnostics_failed": sum(
-                    1 for c in (signals.get("diagnostics") or {}).get("checks", []) if not c.get("ok")
-                ),
-                "watchdog_failures": len(
-                    [h for h in (signals.get("watchdog") or []) if h.get("ok") is False]
-                ),
+                "diagnostics_failed": sum(1 for c in (signals.get("diagnostics") or {}).get("checks", []) if not c.get("ok")),
+                "watchdog_failures": len([h for h in (signals.get("watchdog") or []) if h.get("ok") is False]),
                 "media": signals.get("media") or {},
                 "resources": signals.get("resources") or {},
             },
@@ -1019,8 +1014,7 @@ class HermusDoctor:
             "finding_count": len(findings),
             "stuck": signals.get("stuck") or {},
             "reports": [
-                {"id": r.get("id"), "ts": r.get("ts"), "status": r.get("status"), "path": r.get("path")}
-                for r in self.recent(5)
+                {"id": r.get("id"), "ts": r.get("ts"), "status": r.get("status"), "path": r.get("path")} for r in self.recent(5)
             ],
         }
 
@@ -1042,7 +1036,7 @@ class _KnownFixTable:
     def __init__(self, entries: list[_KnownFix]) -> None:
         self._entries = entries
 
-    def match(self, error: str) -> Optional[_KnownFix]:
+    def match(self, error: str) -> _KnownFix | None:
         for entry in self._entries:
             if entry.match(error or ""):
                 return entry
@@ -1149,9 +1143,7 @@ def _deterministic_summary(findings: list[Finding]) -> dict[str, Any]:
             "management_plan": [],
         }
     worst = findings[0]
-    lines = [
-        f"{len(findings)} finding(s); worst is {worst.severity}: {worst.title}."
-    ]
+    lines = [f"{len(findings)} finding(s); worst is {worst.severity}: {worst.title}."]
     plan: list[str] = []
     for finding in findings[:6]:
         if finding.fixes:
@@ -1161,7 +1153,7 @@ def _deterministic_summary(findings: list[Finding]) -> dict[str, Any]:
     return {"summary": " ".join(lines), "management_plan": plan}
 
 
-def _triage_prompt(findings: list[Finding], signals: Optional[dict[str, Any]]) -> str:
+def _triage_prompt(findings: list[Finding], signals: dict[str, Any] | None) -> str:
     """Compact prompt sized for a 1-3B model: short, structured, no preamble."""
     lines = ["You are the internal doctor for the Hermus agent runtime. Be brief and concrete.", ""]
     lines.append("FINDINGS:")

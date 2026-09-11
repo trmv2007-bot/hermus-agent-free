@@ -21,14 +21,15 @@ Two mechanisms live here:
 
 Dependency-free (stdlib), deterministic, and testable offline.
 """
+
 from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
-from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 BANDS = ("hot", "warm", "cold", "archived")
 
@@ -37,7 +38,7 @@ DEFAULT_HALF_LIFE_DAYS = 30.0
 DEFAULT_WORKING_TTL_HOURS = 48.0
 
 
-def _parse_ts(ts: Any) -> Optional[datetime]:
+def _parse_ts(ts: Any) -> datetime | None:
     if isinstance(ts, datetime):
         return ts
     if not ts:
@@ -48,13 +49,13 @@ def _parse_ts(ts: Any) -> Optional[datetime]:
         return None
 
 
-def age_days(ts: Any, now: Optional[datetime] = None) -> float:
+def age_days(ts: Any, now: datetime | None = None) -> float:
     dt = _parse_ts(ts)
     if not dt:
         return float("inf")
     now = now or datetime.now()
     if dt.tzinfo is not None:
-        now = (now if now.tzinfo else datetime.now().astimezone())
+        now = now if now.tzinfo else datetime.now().astimezone()
         return max(0.0, (now - dt).total_seconds() / 86400.0)
     return max(0.0, (now - dt).total_seconds() / 86400.0)
 
@@ -128,7 +129,7 @@ class MemoryDecay:
         self.access_adaptive = bool(access_adaptive)
 
     # ------------------------------------------------------------------ scoring
-    def recency_factor(self, ts: Any, half_life: float, now: Optional[datetime] = None) -> float:
+    def recency_factor(self, ts: Any, half_life: float, now: datetime | None = None) -> float:
         age = age_days(ts, now)
         if not math.isfinite(age):
             return 0.0
@@ -140,8 +141,7 @@ class MemoryDecay:
             return self.half_life_days
         return self.half_life_days * (1.0 + math.log1p(max(0.0, float(access_count or 0.0))))
 
-    def frequency_factor(self, access_count: float, last_access_ts: Any = None,
-                         now: Optional[datetime] = None) -> float:
+    def frequency_factor(self, access_count: float, last_access_ts: Any = None, now: datetime | None = None) -> float:
         """0..1, saturating in the number of accesses, gated by its own freshness."""
         n = max(0.0, float(access_count or 0.0))
         raw = 1.0 - math.exp(-n / self.saturate_access)
@@ -151,10 +151,10 @@ class MemoryDecay:
     def evaluate(
         self,
         row: dict[str, Any],
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
         *,
-        access_count: Optional[float] = None,
-        last_access_ts: Optional[Any] = None,
+        access_count: float | None = None,
+        last_access_ts: Any | None = None,
     ) -> DecayReport:
         now = now or datetime.now()
         meta = row.get("metadata") or {}
@@ -164,9 +164,7 @@ class MemoryDecay:
             except Exception:
                 meta = {}
         acc = access_count if access_count is not None else access_count_of(row)
-        last = last_access_ts if last_access_ts is not None else (
-            row.get("last_access_ts") or row.get("ts")
-        )
+        last = last_access_ts if last_access_ts is not None else (row.get("last_access_ts") or row.get("ts"))
         hl = self.effective_half_life(float(acc or 0.0))
         rec = self.recency_factor(row.get("ts"), hl, now)
         freq = self.frequency_factor(float(acc or 0.0), last, now)
@@ -208,10 +206,17 @@ class MemoryDecay:
         return "archived"
 
     # -------------------------------------------------------------------- policy
-    def plan(self, row: dict[str, Any], now: Optional[datetime] = None, *,
-             archive_below: float = 0.08, purge_below: float = 0.02,
-             protect_importance: float = 8.0, working_ttl_hours: float = DEFAULT_WORKING_TTL_HOURS,
-             consolidate_after: int = 3) -> tuple[str, list[str]]:
+    def plan(
+        self,
+        row: dict[str, Any],
+        now: datetime | None = None,
+        *,
+        archive_below: float = 0.08,
+        purge_below: float = 0.02,
+        protect_importance: float = 8.0,
+        working_ttl_hours: float = DEFAULT_WORKING_TTL_HOURS,
+        consolidate_after: int = 3,
+    ) -> tuple[str, list[str]]:
         """Decide a lifecycle action: keep | decay | archive | purge | promote."""
         rep = self.evaluate(row, now)
         actions: list[str] = []
@@ -269,11 +274,11 @@ def fit_to_budget(
     budget_tokens: int,
     text_key: str = "content",
     score_key: str = "score",
-    per_kind_cap: Optional[int] = 3,
+    per_kind_cap: int | None = 3,
     always_keep_key: str = "pinned",
     min_items: int = 1,
-    token_counter: Optional[Callable[[str], int]] = None,
-    prefix: Optional[Callable[[dict[str, Any]], str]] = None,
+    token_counter: Callable[[str], int] | None = None,
+    prefix: Callable[[dict[str, Any]], str] | None = None,
 ) -> dict[str, Any]:
     """Pack ranked memories into a token budget by value density.
 
@@ -286,18 +291,27 @@ def fit_to_budget(
     count = token_counter or _count_tokens_default
     items = list(items or [])
     if not items:
-        return {"kept": [], "evicted": [], "tokens": 0, "budget_tokens": int(budget_tokens),
-                "text": "", "dropped_tokens": 0, "utilization": 0.0}
+        return {
+            "kept": [],
+            "evicted": [],
+            "tokens": 0,
+            "budget_tokens": int(budget_tokens),
+            "text": "",
+            "dropped_tokens": 0,
+            "utilization": 0.0,
+        }
 
     decorated = []
     for it in items:
         text = str(it.get(text_key) or "")
         t = count(text)
-        decorated.append({
-            "item": it,
-            "tokens": t,
-            "density": value_density(float(it.get(score_key) or 0.0), t),
-        })
+        decorated.append(
+            {
+                "item": it,
+                "tokens": t,
+                "density": value_density(float(it.get(score_key) or 0.0), t),
+            }
+        )
 
     kept_idx: set = set()
     used = 0
@@ -320,9 +334,7 @@ def fit_to_budget(
     for idx, d in enumerate(decorated):
         if d["item"].get(always_keep_key):
             try_take(idx)
-    for idx in sorted(range(len(decorated)),
-                      key=lambda i: float(decorated[i]["item"].get(score_key) or 0.0),
-                      reverse=True):
+    for idx in sorted(range(len(decorated)), key=lambda i: float(decorated[i]["item"].get(score_key) or 0.0), reverse=True):
         if idx in kept_idx:
             continue
         try_take(idx)
@@ -333,14 +345,11 @@ def fit_to_budget(
     # keep filling: a cap should never leave 80% of the window empty.
     if per_kind_cap is not None and budget_tokens and kept_idx:
         room = used < 0.85 * float(budget_tokens)
-        blocked = [i for i, d in enumerate(decorated)
-                   if i not in kept_idx and used + d["tokens"] <= budget_tokens]
+        blocked = [i for i, d in enumerate(decorated) if i not in kept_idx and used + d["tokens"] <= budget_tokens]
         if room and blocked:
             saved_cap = per_kind_cap
             per_kind_cap = None
-            for idx in sorted(blocked,
-                              key=lambda i: float(decorated[i]["item"].get(score_key) or 0.0),
-                              reverse=True):
+            for idx in sorted(blocked, key=lambda i: float(decorated[i]["item"].get(score_key) or 0.0), reverse=True):
                 try_take(idx)
                 if used >= 0.85 * float(budget_tokens):
                     break
@@ -367,8 +376,9 @@ def fit_to_budget(
     }
 
 
-def consolidate(rows: Iterable[dict[str, Any]], *, similarity: float = 0.55,
-                text_key: str = "content") -> list[list[dict[str, Any]]]:
+def consolidate(
+    rows: Iterable[dict[str, Any]], *, similarity: float = 0.55, text_key: str = "content"
+) -> list[list[dict[str, Any]]]:
     """Cluster near-duplicate memories (token Jaccard) for consolidation.
 
     Returns groups of size >= 2, biggest-importance-first inside a group.

@@ -1,7 +1,8 @@
 """Living Control Room dashboard + local Talking Mode integration tests."""
+
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -25,10 +26,20 @@ def test_single_control_room_is_served_projection():
     assert "Pending yellow-action approval prompts" in page.text
     assert "Approval bundles" in page.text and "approve all" in page.text and "deny all" in page.text
     assert "Jarvis Safety Core" in page.text and "pendingCount" in page.text and "blockedMissionCount" in page.text
-    assert "Allow Downloads malware scan" in page.text and "Start Downloads scan mission" in page.text and "Run approved Downloads scan" in page.text and "List scan reports" in page.text and "Propose Gmail delegated send" in page.text
+    assert (
+        "Allow Downloads malware scan" in page.text
+        and "Start Downloads scan mission" in page.text
+        and "Run approved Downloads scan" in page.text
+        and "List scan reports" in page.text
+        and "Propose Gmail delegated send" in page.text
+    )
     assert "Safety Event Timeline" in page.text and "/safety/events" in page.text
     assert "Generate safety report" in page.text and "/safety/report" in page.text
-    assert "Pre-flight autonomy check" in page.text and "/safety/preflight" in page.text and "Create draft approval prompts" in page.text
+    assert (
+        "Pre-flight autonomy check" in page.text
+        and "/safety/preflight" in page.text
+        and "Create draft approval prompts" in page.text
+    )
     assert "Capability ledger" in page.text and "Record power" in page.text and "Propose setup" in page.text
     assert "Capability readiness / activation registry" in page.text and "Request activation" in page.text
     # No legacy dashboard/static surface remains reachable.
@@ -108,14 +119,17 @@ def test_talking_command_returns_backend_audio(monkeypatch):
     )
 
     client = TestClient(app)
-    response = client.post("/command", json={
-        "platform": "dashboard",
-        "user_id": "talk-test",
-        "text": "hello",
-        "mode": "agent",
-        "talking": True,
-        "run_id": "run_talk_test",
-    })
+    response = client.post(
+        "/command",
+        json={
+            "platform": "dashboard",
+            "user_id": "talk-test",
+            "text": "hello",
+            "mode": "agent",
+            "talking": True,
+            "run_id": "run_talk_test",
+        },
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["talking"] is True

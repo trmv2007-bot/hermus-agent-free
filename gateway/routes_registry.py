@@ -1,5 +1,6 @@
 """Read-mostly registry endpoints: tools, public-API catalog, MCP, embeddings,
 providers, eval/counsel status, model fleet, and key health/rates/models."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -93,7 +94,7 @@ async def providers_available():
     and setup wizard all see the same answer instead of re-implementing
     provider discovery.
     """
-    from core.provider_resolver import list_available_providers, diagnose
+    from core.provider_resolver import diagnose, list_available_providers
 
     return {
         "providers": list_available_providers(),
@@ -194,4 +195,3 @@ async def embeddings_search(payload: dict):
     if hybrid:
         return embedding_store.hybrid_search(query, limit=limit)
     return embedding_store.search(query, limit=limit)
-

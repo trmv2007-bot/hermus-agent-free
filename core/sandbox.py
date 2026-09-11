@@ -27,6 +27,7 @@ Not a silver bullet: ``local`` cannot stop a determined exploit the way a VM or
 gVisor can — it is defence in depth, and the docstrings say so rather than
 pretending otherwise.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,11 +41,11 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable, Sequence
+from typing import Any
 
 from .config import config
 
@@ -55,12 +56,12 @@ except Exception:  # pragma: no cover - windows
 
 
 DANGEROUS_PATTERNS = (
-    r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+/(?:\s|$)",       # rm -rf /
-    r"\brm\s+-[a-z]*[rf][a-z]*\s+\*",                   # rm -rf *
+    r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+/(?:\s|$)",  # rm -rf /
+    r"\brm\s+-[a-z]*[rf][a-z]*\s+\*",  # rm -rf *
     r"\bmkfs(\.|\s)",
     r"\bdd\b.*\bof=/dev/",
     r">\s*/dev/(sd|nvme|md|disk)",
-    r":\(\)\s*\{\s*:\|:&\s*\}\s*;:",                    # fork bomb
+    r":\(\)\s*\{\s*:\|:&\s*\}\s*;:",  # fork bomb
     r"\bchmod\s+-R\s+777\s+/",
     r"\bcurl\b.*\|\s*(ba)?sh",
     r"\bwget\b.*\|\s*(ba)?sh",
@@ -83,9 +84,9 @@ def _now() -> str:
 class SandboxPolicy:
     """Everything an unprivileged execution boundary needs, in one place."""
 
-    backend: str = ""                      # "" → auto-detect
+    backend: str = ""  # "" → auto-detect
     image: str = ""
-    runtime: str = ""                      # runsc / kata-runtime / ""
+    runtime: str = ""  # runsc / kata-runtime / ""
     cpus: float = 1.0
     memory_mb: int = 1024
     pids: int = 128
@@ -94,7 +95,7 @@ class SandboxPolicy:
     network: bool = False
     read_only_rootfs: bool = True
     tmpfs_size_mb: int = 128
-    workspace_mode: str = "rw"             # rw | ro | none
+    workspace_mode: str = "rw"  # rw | ro | none
     drop_capabilities: tuple[str, ...] = ("ALL",)
     add_capabilities: tuple[str, ...] = ()
     env_allowlist: tuple[str, ...] = ENV_ALLOW_DEFAULT
@@ -106,7 +107,7 @@ class SandboxPolicy:
     soft_no_new_privs: bool = True
 
     @classmethod
-    def from_config(cls, **overrides: Any) -> "SandboxPolicy":
+    def from_config(cls, **overrides: Any) -> SandboxPolicy:
         p = cls(
             backend=str(getattr(config, "sandbox_mode", "auto") or "auto").lower(),
             image=str(getattr(config, "sandbox_image", "python:3.11-alpine")),
@@ -160,13 +161,13 @@ class CapabilityProbe:
         self._cache: dict[str, Any] = {}
         self._lock = threading.Lock()
 
-    def _which(self, name: str) -> Optional[str]:
+    def _which(self, name: str) -> str | None:
         return shutil.which(name)
 
     def has(self, name: str) -> bool:
         return bool(self.binary(name))
 
-    def binary(self, name: str) -> Optional[str]:
+    def binary(self, name: str) -> str | None:
         with self._lock:
             if name in self._cache:
                 return self._cache[name]
@@ -180,8 +181,9 @@ class CapabilityProbe:
         ok = False
         if self.binary("docker"):
             try:
-                r = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
-                                   capture_output=True, text=True, timeout=6)
+                r = subprocess.run(
+                    ["docker", "info", "--format", "{{.ServerVersion}}"], capture_output=True, text=True, timeout=6
+                )
                 ok = r.returncode == 0 and bool(r.stdout.strip())
             except Exception:
                 ok = False
@@ -195,8 +197,9 @@ class CapabilityProbe:
             return True
         if self.docker_daemon():
             try:
-                r = subprocess.run(["docker", "info", "--format", "{{json .Runtimes}}"],
-                                   capture_output=True, text=True, timeout=8)
+                r = subprocess.run(
+                    ["docker", "info", "--format", "{{json .Runtimes}}"], capture_output=True, text=True, timeout=8
+                )
                 return "runsc" in (r.stdout or "")
             except Exception:
                 return False
@@ -211,9 +214,9 @@ class CapabilityProbe:
         if binpath:
             try:
                 r = subprocess.run(
-                    [binpath, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-                     "--unshare-net", "--", "/bin/true"],
-                    capture_output=True, timeout=10,
+                    [binpath, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-net", "--", "/bin/true"],
+                    capture_output=True,
+                    timeout=10,
                 )
                 ok = r.returncode == 0
             except Exception:
@@ -278,7 +281,7 @@ def scan_command(command: str, patterns: Sequence[str] = DANGEROUS_PATTERNS) -> 
 class Sandbox:
     """Ephemeral execution boundary shared by shell/file/skill tooling."""
 
-    def __init__(self, policy: Optional[SandboxPolicy] = None, probe_: Optional[CapabilityProbe] = None):
+    def __init__(self, policy: SandboxPolicy | None = None, probe_: CapabilityProbe | None = None):
         self.policy = policy or SandboxPolicy.from_config()
         self.probe = probe_ or probe
         self._sem = threading.Semaphore(max(1, int(os.getenv("HERMUS_SANDBOX_MAX_CONCURRENT", "4"))))
@@ -318,7 +321,7 @@ class Sandbox:
             return "local", f"{want} requested but unavailable → hardened local execution"
         return "local", "hardened local execution"
 
-    def _env(self, policy: SandboxPolicy, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    def _env(self, policy: SandboxPolicy, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Scrubbed environment: allowlist only, secrets never forwarded."""
         env: dict[str, str] = {}
         for key in policy.env_allowlist:
@@ -329,18 +332,22 @@ class Sandbox:
         env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         if not policy.network:
             # Blackhole proxies so naive HTTP clients fail fast instead of dialling out.
-            env.update({
-                "HTTP_PROXY": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9",
-                "http_proxy": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9",
-                "NO_PROXY": "",
-            })
+            env.update(
+                {
+                    "HTTP_PROXY": "http://127.0.0.1:9",
+                    "HTTPS_PROXY": "http://127.0.0.1:9",
+                    "http_proxy": "http://127.0.0.1:9",
+                    "https_proxy": "http://127.0.0.1:9",
+                    "NO_PROXY": "",
+                }
+            )
         for k, v in (extra or {}).items():
             if SECRET_ENV_RE.search(str(k)) and not policy.network:
                 continue  # never hand a secret to a sandboxed process
             env[str(k)] = str(v)
         return env
 
-    def _preexec(self, policy: SandboxPolicy, timeout: int) -> Optional[Callable[[], None]]:
+    def _preexec(self, policy: SandboxPolicy, timeout: int) -> Callable[[], None] | None:
         """Build the child-process jail (POSIX rlimits + session + no-new-privs)."""
         if os.name != "posix":
             return None
@@ -363,9 +370,7 @@ class Sandbox:
                 _prctl_no_new_privs()
             if resource is not None:
                 soft_cpu = max(1, int(timeout))
-                for name, value in (
-                    ("RLIMIT_CPU", soft_cpu),
-                ):
+                for name, value in (("RLIMIT_CPU", soft_cpu),):
                     try:
                         resource.setrlimit(getattr(resource, name), (value, value + 2))
                     except Exception:
@@ -447,15 +452,13 @@ class Sandbox:
             "active": len(self._active),
             "root": str(self.root),
             "audit_log": str(self.audit_log),
-            "active_runs": [
-                {"sandbox_id": k, **{a: b for a, b in v.items()}}
-                for k, v in list(self._active.items())[:20]
-            ],
+            "active_runs": [{"sandbox_id": k, **{a: b for a, b in v.items()}} for k, v in list(self._active.items())[:20]],
             "note": (
                 "local backend applies rlimits/session/no-new-privs and (when possible) "
                 "drops network via unshare; it is defence in depth, not a VM. "
                 "Install Docker (+ gVisor runsc) for kernel-level isolation."
-                if backend == "local" else "container backend active"
+                if backend == "local"
+                else "container backend active"
             ),
         }
 
@@ -463,14 +466,14 @@ class Sandbox:
         self,
         command: str,
         *,
-        timeout: Optional[int] = None,
-        cwd: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
-        files: Optional[dict[str, str]] = None,
-        input_text: Optional[str] = None,
-        backend: Optional[str] = None,
-        network: Optional[bool] = None,
-        policy: Optional[dict[str, Any]] = None,
+        timeout: int | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        files: dict[str, str] | None = None,
+        input_text: str | None = None,
+        backend: str | None = None,
+        network: bool | None = None,
+        policy: dict[str, Any] | None = None,
         allow_dangerous: bool = False,
         purpose: str = "shell",
     ) -> dict[str, Any]:
@@ -487,13 +490,26 @@ class Sandbox:
 
         denied = scan_command(command, pol.deny_patterns)
         if denied and not allow_dangerous:
-            self._audit({"sandbox_id": sandbox_id, "backend": chosen, "purpose": purpose,
-                         "command": command[:400], "blocked": True, "matched": denied})
+            self._audit(
+                {
+                    "sandbox_id": sandbox_id,
+                    "backend": chosen,
+                    "purpose": purpose,
+                    "command": command[:400],
+                    "blocked": True,
+                    "matched": denied,
+                }
+            )
             return SandboxResult(
-                success=False, returncode=126, backend=chosen, sandbox_id=sandbox_id,
-                error=("blocked by sandbox policy — command matches dangerous pattern(s): "
-                       f"{denied}. Re-run with allow_dangerous=true (audited) or "
-                       "raise the permission decision via `hermus perms set <tool> allow`."),
+                success=False,
+                returncode=126,
+                backend=chosen,
+                sandbox_id=sandbox_id,
+                error=(
+                    "blocked by sandbox policy — command matches dangerous pattern(s): "
+                    f"{denied}. Re-run with allow_dangerous=true (audited) or "
+                    "raise the permission decision via `hermus perms set <tool> allow`."
+                ),
                 duration_ms=int((time.time() - t0) * 1000),
             ).to_dict()
 
@@ -503,10 +519,13 @@ class Sandbox:
             for name, content in (files or {}).items():
                 try:
                     safe = (workdir / str(name).lstrip("/")).resolve()
-                    if pol.confine_to_workspace and workdir.exists() and \
-                            str(safe) != str(workdir.resolve()) and \
-                            not str(safe).startswith(str(workdir.resolve()) + os.sep):
-                        continue          # refuse ../ escapes out of the scratch dir
+                    if (
+                        pol.confine_to_workspace
+                        and workdir.exists()
+                        and str(safe) != str(workdir.resolve())
+                        and not str(safe).startswith(str(workdir.resolve()) + os.sep)
+                    ):
+                        continue  # refuse ../ escapes out of the scratch dir
                     safe.parent.mkdir(parents=True, exist_ok=True)
                     safe.write_text(str(content))
                     staged += 1
@@ -520,14 +539,14 @@ class Sandbox:
                 command = f"cd {shlex.quote(str(base))} && {command}"
 
         if not self._sem.acquire(timeout=max(1.0, pol.timeout)):
-            return SandboxResult(success=False, error="sandbox busy (concurrency cap reached)",
-                                 backend=chosen, sandbox_id=sandbox_id).to_dict()
+            return SandboxResult(
+                success=False, error="sandbox busy (concurrency cap reached)", backend=chosen, sandbox_id=sandbox_id
+            ).to_dict()
         try:
             with self._lock:
                 self._active[sandbox_id] = {"started": _now(), "backend": chosen, "purpose": purpose}
             if chosen in ("docker", "podman"):
-                res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id,
-                                          env, input_text, reason)
+                res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id, env, input_text, reason)
             elif chosen == "bwrap":
                 res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason)
             elif chosen == "off":
@@ -535,8 +554,7 @@ class Sandbox:
             else:
                 res = self._run_local(command, pol, workdir, sandbox_id, env, input_text, reason)
         except Exception as e:
-            res = SandboxResult(success=False, error=f"sandbox failure: {e}", backend=chosen,
-                                sandbox_id=sandbox_id)
+            res = SandboxResult(success=False, error=f"sandbox failure: {e}", backend=chosen, sandbox_id=sandbox_id)
         finally:
             self._sem.release()
             with self._lock:
@@ -546,13 +564,20 @@ class Sandbox:
 
         out = res.to_dict() if isinstance(res, SandboxResult) else dict(res)
         out["duration_ms"] = int((time.time() - t0) * 1000)
-        out.setdefault("limits", {})[ "reason"] = reason
-        self._audit({
-            "sandbox_id": sandbox_id, "backend": out.get("backend"), "purpose": purpose,
-            "command": command[:400], "returncode": out.get("returncode"),
-            "timeout": out.get("timeout"), "blocked": False,
-            "limits": out.get("limits"), "duration_ms": out.get("duration_ms"),
-        })
+        out.setdefault("limits", {})["reason"] = reason
+        self._audit(
+            {
+                "sandbox_id": sandbox_id,
+                "backend": out.get("backend"),
+                "purpose": purpose,
+                "command": command[:400],
+                "returncode": out.get("returncode"),
+                "timeout": out.get("timeout"),
+                "blocked": False,
+                "limits": out.get("limits"),
+                "duration_ms": out.get("duration_ms"),
+            }
+        )
         return out
 
     def run_python(self, code: str, **kw) -> dict[str, Any]:
@@ -568,13 +593,18 @@ class Sandbox:
         cmd = ["wasmtime", "run", "--dir=.", "--env=", "-S", "threads=false", str(module_path), *args]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=int(timeout))
-            return {"success": r.returncode == 0, "stdout": r.stdout[:4000], "stderr": r.stderr[:2000],
-                    "returncode": r.returncode, "backend": "wasm"}
+            return {
+                "success": r.returncode == 0,
+                "stdout": r.stdout[:4000],
+                "stderr": r.stderr[:2000],
+                "returncode": r.returncode,
+                "backend": "wasm",
+            }
         except Exception as e:
             return {"success": False, "error": str(e), "backend": "wasm"}
 
     # ------------------------------------------------------------------ backends
-    def _workdirs(self, pol: SandboxPolicy, cwd: Optional[str], sandbox_id: str) -> tuple[Path, str]:
+    def _workdirs(self, pol: SandboxPolicy, cwd: str | None, sandbox_id: str) -> tuple[Path, str]:
         workdir = self._spawn_dir(sandbox_id)
         mounted = str(cwd) if cwd else str(Path(config.base_dir))
         if pol.confine_to_workspace and cwd:
@@ -587,19 +617,28 @@ class Sandbox:
                 mounted = str(workdir)
         return workdir, mounted
 
-    def _docker_args(self, binary: str, command: str, pol: SandboxPolicy, workdir: Path,
-                     mounted_cwd: str) -> tuple[list[str], str]:
+    def _docker_args(
+        self, binary: str, command: str, pol: SandboxPolicy, workdir: Path, mounted_cwd: str
+    ) -> tuple[list[str], str]:
         name = f"hermus-{sandbox_tag()}-{uuid.uuid4().hex[:6]}"
-        args = [binary, "run", "--rm", "-i", "--name", name,
-                "--label", "hermus.sandbox=1",
-                f"--memory={max(32, int(pol.memory_mb))}m",
-                f"--memory-swap={max(32, int(pol.memory_mb))}m",
-                f"--cpus={float(pol.cpus):g}",
-                f"--pids-limit={max(16, int(pol.pids))}",
-                "--cap-drop=ALL",
-                "--security-opt=no-new-privileges",
-                "--network=none" if not pol.network else "--network=bridge",
-                "--workdir=/hermus"]
+        args = [
+            binary,
+            "run",
+            "--rm",
+            "-i",
+            "--name",
+            name,
+            "--label",
+            "hermus.sandbox=1",
+            f"--memory={max(32, int(pol.memory_mb))}m",
+            f"--memory-swap={max(32, int(pol.memory_mb))}m",
+            f"--cpus={float(pol.cpus):g}",
+            f"--pids-limit={max(16, int(pol.pids))}",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--network=none" if not pol.network else "--network=bridge",
+            "--workdir=/hermus",
+        ]
         if pol.runtime:
             args.append(f"--runtime={pol.runtime}")
         elif pol.backend in ("auto", "docker") and self.probe.gvisor():
@@ -617,51 +656,80 @@ class Sandbox:
         if mounted_cwd and Path(mounted_cwd).is_dir() and pol.workspace_mode != "none":
             try:
                 if Path(mounted_cwd).resolve() != workdir.resolve():
-                    args += ["-v", f"{mounted_cwd}:/workspace:{'ro' if pol.workspace_mode == 'ro' else 'rw'}",
-                             "--workdir=/workspace"]
+                    args += [
+                        "-v",
+                        f"{mounted_cwd}:/workspace:{'ro' if pol.workspace_mode == 'ro' else 'rw'}",
+                        "--workdir=/workspace",
+                    ]
             except Exception:
                 pass
         args.append(pol.image or "alpine:latest")
         args += ["/bin/sh", "-lc", command]
         return args, name
 
-    def _run_container(self, binary: str, command: str, pol: SandboxPolicy, workdir: Path,
-                       mounted_cwd: str, sandbox_id: str, env: Optional[dict[str, str]],
-                       input_text: Optional[str], reason: str) -> SandboxResult:
+    def _run_container(
+        self,
+        binary: str,
+        command: str,
+        pol: SandboxPolicy,
+        workdir: Path,
+        mounted_cwd: str,
+        sandbox_id: str,
+        env: dict[str, str] | None,
+        input_text: str | None,
+        reason: str,
+    ) -> SandboxResult:
         args, name = self._docker_args(binary, command, pol, workdir, mounted_cwd)
         for k, v in (self._env(pol, env)).items():
             args[3:3] = ["-e", f"{k}={v}"]
         limits = {
-            "cpus": pol.cpus, "memory_mb": pol.memory_mb, "pids": pol.pids,
-            "disk_mb": pol.disk_mb, "read_only_rootfs": pol.read_only_rootfs,
-            "network": pol.network, "runtime": pol.runtime or ("runsc" if self.probe.gvisor() else ""),
+            "cpus": pol.cpus,
+            "memory_mb": pol.memory_mb,
+            "pids": pol.pids,
+            "disk_mb": pol.disk_mb,
+            "read_only_rootfs": pol.read_only_rootfs,
+            "network": pol.network,
+            "runtime": pol.runtime or ("runsc" if self.probe.gvisor() else ""),
             "capabilities_dropped": list(pol.drop_capabilities),
             "image": pol.image or "alpine:latest",
         }
         try:
             proc = subprocess.run(
-                args, capture_output=True, text=True, timeout=pol.timeout,
+                args,
+                capture_output=True,
+                text=True,
+                timeout=pol.timeout,
                 input=input_text or "",
             )
             return SandboxResult(
                 success=proc.returncode == 0,
                 stdout=proc.stdout[: pol.max_output_chars],
                 stderr=proc.stderr[: pol.max_output_chars // 2],
-                returncode=proc.returncode, backend=binary, sandbox_id=sandbox_id,
-                container=name, workdir=str(workdir), limits=limits,
+                returncode=proc.returncode,
+                backend=binary,
+                sandbox_id=sandbox_id,
+                container=name,
+                workdir=str(workdir),
+                limits=limits,
                 artifacts=str(workdir) if pol.keep_artifacts else "",
             )
         except subprocess.TimeoutExpired as e:
             _kill_container(binary, name)
             return SandboxResult(
-                success=False, stdout=(e.stdout or b"").decode(errors="ignore")[: pol.max_output_chars]
-                if isinstance(e.stdout, bytes) else str(e.stdout or "")[: pol.max_output_chars],
-                stderr="container killed at timeout", returncode=124, timeout=True,
-                backend=binary, sandbox_id=sandbox_id, container=name, limits=limits,
+                success=False,
+                stdout=(e.stdout or b"").decode(errors="ignore")[: pol.max_output_chars]
+                if isinstance(e.stdout, bytes)
+                else str(e.stdout or "")[: pol.max_output_chars],
+                stderr="container killed at timeout",
+                returncode=124,
+                timeout=True,
+                backend=binary,
+                sandbox_id=sandbox_id,
+                container=name,
+                limits=limits,
             )
         except Exception as e:
-            return SandboxResult(success=False, error=f"{binary} run failed: {e}", backend=binary,
-                                 sandbox_id=sandbox_id)
+            return SandboxResult(success=False, error=f"{binary} run failed: {e}", backend=binary, sandbox_id=sandbox_id)
 
     def _exec_cwd(self, pol: SandboxPolicy, workdir: Path) -> str:
         """Where a jail runs: the project root when writable, else the scratch dir."""
@@ -670,32 +738,62 @@ class Sandbox:
         root = Path(config.base_dir)
         return str(root) if root.is_dir() else str(workdir)
 
-    def _run_local(self, command: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-                   env: Optional[dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
+    def _run_local(
+        self,
+        command: str,
+        pol: SandboxPolicy,
+        workdir: Path,
+        sandbox_id: str,
+        env: dict[str, str] | None,
+        input_text: str | None,
+        reason: str,
+    ) -> SandboxResult:
         """Hardened local execution: rlimits + new session + no new privs."""
         argv: list[str] = ["/bin/sh", "-c", command]
         if not pol.network and self.probe.unshare_net():
             # A real network cut (empty netns), not just an env hint.
             argv = [self.probe.binary("unshare"), "-n", *argv]
         limits = {
-            "memory_mb": pol.memory_mb, "cpu_seconds": pol.timeout, "pids": pol.pids,
-            "disk_mb": pol.disk_mb, "network": pol.network,
+            "memory_mb": pol.memory_mb,
+            "cpu_seconds": pol.timeout,
+            "pids": pol.pids,
+            "disk_mb": pol.disk_mb,
+            "network": pol.network,
             "network_dropped": argv[0].endswith("unshare"),
-            "rlimits": resource is not None, "no_new_privs": pol.soft_no_new_privs,
-            "setsid": os.name == "posix", "cwd": self._exec_cwd(pol, workdir), "reason": reason,
+            "rlimits": resource is not None,
+            "no_new_privs": pol.soft_no_new_privs,
+            "setsid": os.name == "posix",
+            "cwd": self._exec_cwd(pol, workdir),
+            "reason": reason,
         }
         return self._exec(argv, "local", pol, workdir, sandbox_id, env, input_text, limits)
 
-    def _run_bwrap(self, command: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-                   env: Optional[dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
+    def _run_bwrap(
+        self,
+        command: str,
+        pol: SandboxPolicy,
+        workdir: Path,
+        sandbox_id: str,
+        env: dict[str, str] | None,
+        input_text: str | None,
+        reason: str,
+    ) -> SandboxResult:
         """bubblewrap jail: read-only /, writable scratch, no network, clean env."""
         exec_cwd = self._exec_cwd(pol, workdir)
         argv = [
             self.probe.binary("bwrap") or "bwrap",
-            "--ro-bind", "/", "/",
-            "--dev", "/dev", "--proc", "/proc",
-            "--tmpfs", "/tmp",
-            "--bind", str(workdir), str(workdir),
+            "--ro-bind",
+            "/",
+            "/",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--tmpfs",
+            "/tmp",
+            "--bind",
+            str(workdir),
+            str(workdir),
         ]
         if pol.workspace_mode == "rw" and exec_cwd != str(workdir):
             argv += ["--bind", exec_cwd, exec_cwd]
@@ -707,24 +805,44 @@ class Sandbox:
                 continue
             argv += ["--setenv", k, v]
         limits = {
-            "memory_mb": pol.memory_mb, "cpu_seconds": pol.timeout, "pids": pol.pids,
-            "disk_mb": pol.disk_mb, "network": pol.network, "network_dropped": not pol.network,
-            "read_only_rootfs": pol.read_only_rootfs, "rlimits": resource is not None,
-            "cwd": exec_cwd, "reason": reason, "tool": "bubblewrap",
+            "memory_mb": pol.memory_mb,
+            "cpu_seconds": pol.timeout,
+            "pids": pol.pids,
+            "disk_mb": pol.disk_mb,
+            "network": pol.network,
+            "network_dropped": not pol.network,
+            "read_only_rootfs": pol.read_only_rootfs,
+            "rlimits": resource is not None,
+            "cwd": exec_cwd,
+            "reason": reason,
+            "tool": "bubblewrap",
         }
         argv += ["/bin/sh", "-c", command]
         return self._exec(argv, "bwrap", pol, workdir, sandbox_id, env, input_text, limits)
 
-    def _exec(self, argv: list[str], backend: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-              env: Optional[dict[str, str]], input_text: Optional[str],
-              limits: dict[str, Any]) -> SandboxResult:
+    def _exec(
+        self,
+        argv: list[str],
+        backend: str,
+        pol: SandboxPolicy,
+        workdir: Path,
+        sandbox_id: str,
+        env: dict[str, str] | None,
+        input_text: str | None,
+        limits: dict[str, Any],
+    ) -> SandboxResult:
         """Shared hardened execution for the non-container backends."""
         env_final = self._env(pol, env)
         proc = None
         try:
             proc = subprocess.Popen(
-                argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                cwd=limits.get("cwd") or str(workdir), env=env_final, stdin=subprocess.PIPE,
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=limits.get("cwd") or str(workdir),
+                env=env_final,
+                stdin=subprocess.PIPE,
                 preexec_fn=self._preexec(pol, pol.timeout),
             )
             try:
@@ -741,28 +859,50 @@ class Sandbox:
                 success=(rc == 0) and not timed_out,
                 stdout=(out or "")[: pol.max_output_chars],
                 stderr=(err or "")[: pol.max_output_chars // 2],
-                returncode=int(rc if rc is not None else 1), timeout=bool(timed_out),
-                backend="local", sandbox_id=sandbox_id, workdir=str(workdir), limits=limits,
+                returncode=int(rc if rc is not None else 1),
+                timeout=bool(timed_out),
+                backend="local",
+                sandbox_id=sandbox_id,
+                workdir=str(workdir),
+                limits=limits,
                 artifacts=str(workdir) if pol.keep_artifacts else "",
             )
         except FileNotFoundError as e:
-            return SandboxResult(success=False, error=f"shell not available for sandbox exec: {e}",
-                                 backend="local", sandbox_id=sandbox_id, limits=limits)
+            return SandboxResult(
+                success=False,
+                error=f"shell not available for sandbox exec: {e}",
+                backend="local",
+                sandbox_id=sandbox_id,
+                limits=limits,
+            )
         except Exception as e:
             if proc is not None:
                 _kill_group(proc)
-            return SandboxResult(success=False, error=str(e), backend="local",
-                                 sandbox_id=sandbox_id, limits=limits)
+            return SandboxResult(success=False, error=str(e), backend="local", sandbox_id=sandbox_id, limits=limits)
 
-    def _run_raw(self, command: str, pol: SandboxPolicy, workdir: Path, sandbox_id: str,
-                 env: Optional[dict[str, str]], input_text: Optional[str], reason: str) -> SandboxResult:
+    def _run_raw(
+        self,
+        command: str,
+        pol: SandboxPolicy,
+        workdir: Path,
+        sandbox_id: str,
+        env: dict[str, str] | None,
+        input_text: str | None,
+        reason: str,
+    ) -> SandboxResult:
         try:
-            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                                  timeout=pol.timeout, cwd=str(workdir), input=input_text or "")
-            return SandboxResult(success=proc.returncode == 0, stdout=proc.stdout[: pol.max_output_chars],
-                                 stderr=proc.stderr[: pol.max_output_chars // 2],
-                                 returncode=proc.returncode, backend="off", sandbox_id=sandbox_id,
-                                 limits={"enforced": False, "reason": reason})
+            proc = subprocess.run(
+                command, shell=True, capture_output=True, text=True, timeout=pol.timeout, cwd=str(workdir), input=input_text or ""
+            )
+            return SandboxResult(
+                success=proc.returncode == 0,
+                stdout=proc.stdout[: pol.max_output_chars],
+                stderr=proc.stderr[: pol.max_output_chars // 2],
+                returncode=proc.returncode,
+                backend="off",
+                sandbox_id=sandbox_id,
+                limits={"enforced": False, "reason": reason},
+            )
         except Exception as e:
             return SandboxResult(success=False, error=str(e), backend="off", sandbox_id=sandbox_id)
 

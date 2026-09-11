@@ -28,6 +28,7 @@ Three independent isolation concerns are handled here:
    while tests that explicitly construct ``CapabilityLedger(tmp_path / ...)``
    keep using their own path.
 """
+
 from __future__ import annotations
 
 import os
