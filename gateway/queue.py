@@ -293,6 +293,11 @@ class JobQueue:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._started = False
         self._stopped = False
+        # Queue-owned drain flag. It is deliberately NOT the process-wide
+        # lifecycle flag: a queue instance knows when *it* is shutting down,
+        # and a freshly constructed queue (tests, an in-process restart) starts
+        # accepting work again.
+        self._draining = False
         self.retry_backoff = float(getattr(config, "gateway_queue_retry_backoff", 1.5) or 1.5)
         self.cancel_grace = float(getattr(config, "gateway_queue_cancel_grace", 15) or 15)
         self.persist_path = Path(persist or config.resolve_path(str(getattr(config, "gateway_jobs_log", "data/jobs/jobs.jsonl"))))
@@ -320,6 +325,7 @@ class JobQueue:
         self._sem = asyncio.Semaphore(max(1, self.workers))
         self._started = True
         self._stopped = False
+        self._draining = False
         recovered = self._load_durable_log()
         if self.backend == "redis":
             try:
@@ -344,6 +350,9 @@ class JobQueue:
         return info
 
     async def stop(self, drain_timeout: float = 5.0) -> None:
+        # Refuse new work for the rest of this instance's life: jobs accepted
+        # now would only be cancelled by the drain that is about to run.
+        self._draining = True
         self._stopped = True
         if self._redis is not None:
             try:
@@ -372,6 +381,23 @@ class JobQueue:
 
         return emit
 
+    def _refuse_if_draining(self, kind: str) -> None:
+        """Reject new work once this queue has begun shutting down.
+
+        A drain is a promise that in-flight jobs may finish; a job accepted
+        now would only be cancelled a moment later, so refusing it here (503,
+        retryable) is both honest and cheap for the caller — and it matches
+        the 503 ``/readyz`` already advertises.
+        """
+        if not self._draining:
+            return
+        from core.errors import UnavailableError
+
+        raise UnavailableError(
+            f"gateway is shutting down; not accepting new '{kind}' work",
+            details={"kind": kind},
+        )
+
     def submit(
         self,
         kind: str,
@@ -386,8 +412,15 @@ class JobQueue:
         run_id: str | None = None,
     ) -> Job:
         """Enqueue a job. Synchronous on purpose: FastAPI handlers, channel
-        callbacks and the CLI all share one entry point, and nothing here blocks."""
+        callbacks and the CLI all share one entry point, and nothing here blocks.
+
+        Raises :class:`core.errors.UnavailableError` while the gateway is
+        draining for shutdown: accepting new work during a drain would let
+        jobs start that the shutdown is about to cancel, and it contradicts
+        the 503 that ``/readyz`` already advertises.
+        """
         payload = dict(payload or {})
+        self._refuse_if_draining(kind)
         if kind not in self.handlers:
             raise KeyError(f"no handler registered for job kind '{kind}' (known: {sorted(self.handlers)})")
         if len(self.jobs) >= self.maxsize * 2:

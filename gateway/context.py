@@ -81,6 +81,25 @@ def _check_gateway_auth(request: Request, x_hermus_token: str | None = None) -> 
     return None
 
 
+def ws_token_ok(websocket) -> bool:
+    """Authenticate a WebSocket upgrade against the optional gateway token.
+
+    WS routes cannot use the ``_check_gateway_auth`` FastAPI dependency (a
+    WebSocket handler cannot inject ``Request``), so every WS endpoint calls
+    this instead. Single-sourcing it here means the policy — open when no
+    token is configured, constant-time match otherwise, token accepted from
+    ``?token=`` or ``X-Hermus-Token`` — has exactly one owner.
+
+    Returns ``True`` when no token is configured (local default) or the client
+    presented a matching one.
+    """
+    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    if not expected:
+        return True
+    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
+    return _token_matches(provided, expected)
+
+
 def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False, steer_source=None) -> dict:
     """Call ``agent.chat`` with only the keyword arguments it actually accepts.
 

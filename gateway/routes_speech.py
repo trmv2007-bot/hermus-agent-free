@@ -10,9 +10,8 @@ from datetime import datetime
 from fastapi import APIRouter, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 
-from core.config import config
 from core.task_tracker import task_tracker
-from gateway.context import AGENTS, _token_matches
+from gateway.context import AGENTS, ws_token_ok
 
 try:
     from gateway.channels import get_channel_status
@@ -345,9 +344,7 @@ async def dashboard_events_ws(websocket: WebSocket):
     """Live chat/speech lifecycle stream used by fullscreen Talking Mode."""
     from core.dashboard_events import dashboard_event_bus
 
-    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
-    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
-    if expected and not _token_matches(provided, expected):
+    if not ws_token_ok(websocket):
         await websocket.close(code=1008, reason="Unauthorized")
         return
 

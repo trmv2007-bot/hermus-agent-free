@@ -130,6 +130,20 @@ class ProviderError(HermusError):
     retryable = True
 
 
+class UnavailableError(HermusError):
+    """The service cannot take this work right now, but can later.
+
+    Raised while the gateway is draining for shutdown (or before its lifespan
+    has finished starting): the process is alive, so liveness stays green, but
+    new work is refused so a supervisor can send it elsewhere and in-flight
+    jobs can finish. Marked retryable so clients retry after backoff.
+    """
+
+    code = "unavailable"
+    status = 503
+    retryable = True
+
+
 class ToolError(HermusError):
     """A tool execution failed."""
 
@@ -175,6 +189,7 @@ __all__ = [
     "RateLimitError",
     "OperationTimeoutError",
     "ProviderError",
+    "UnavailableError",
     "ToolError",
     "ToolNotFoundError",
     "MissionError",

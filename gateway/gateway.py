@@ -45,6 +45,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core.config import config
 from core.log import get_logger, setup_logging
 from core.task_tracker import task_tracker
+from gateway import lifecycle as _lifecycle
 from gateway.channels import get_channel_status, set_agent_factory, start_all_channels
 
 # Realtime layer: async job queue + SSE/WebSocket streaming (see gateway/realtime.py)
@@ -271,6 +272,7 @@ async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
     setup_logging()
     set_agent_factory(_agent_factory)
+    _lifecycle.state.mark_started()
     if getattr(config, "auto_start_channels", True):
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
@@ -308,6 +310,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Graceful drain: stop advertising readiness first (so a supervisor can
+        # route new traffic elsewhere), then give in-flight jobs a bounded
+        # window to finish before the process tears itself down.
+        _lifecycle.state.begin_drain("shutdown")
         if presence_task and not presence_task.done():
             presence_task.cancel()
         if maintenance_task and not maintenance_task.done():
@@ -316,10 +322,33 @@ async def lifespan(app: FastAPI):
             watchdog_task.cancel()
         if engine_task and not engine_task.done():
             engine_task.cancel()
+        # Drain in-flight work with a hard bound so SIGTERM can never hang the
+        # process (previously the queue stopped with a fixed 5s and ignored
+        # whether jobs were actually mid-flight).
+        try:
+            from gateway.queue import job_queue as _drain_queue
+
+            if getattr(_drain_queue, "_started", False):
+                await asyncio.wait_for(
+                    _drain_queue.stop(drain_timeout=_lifecycle.drain_timeout_seconds()),
+                    timeout=max(1.0, _lifecycle.drain_timeout_seconds() * 2),
+                )
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning("[Gateway] drain window expired — stopping anyway")
+        except Exception as e:  # noqa: BLE001 - shutdown must not raise
+            logger.error(f"[Gateway] queue drain failed: {e}")
         try:
             await _realtime.shutdown()
         except Exception:
             pass
+        # Release the shared async HTTP pool (core.aio) so shutdown does not
+        # leave sockets in CLOSE_WAIT behind it.
+        try:
+            from core.aio import aclose_async_client as _aclose_http
+
+            await _aclose_http()
+        except Exception as e:  # noqa: BLE001 - shutdown must not raise
+            logger.debug(f"[Gateway] async http pool close skipped: {e}")
         # Release every SQLite handle Hermus still owns (memory, memory2,
         # hybrid index, web-read cache, engine state). Without this, Ctrl+C
         # ended with a screenful of "ResourceWarning: unclosed database".
@@ -409,6 +438,30 @@ def _cors_credentials() -> bool:
     return os.environ.get("HERMUS_CORS_CREDENTIALS", "0") not in ("0", "false", "False")
 
 
+# --- Cross-cutting HTTP middleware (see gateway/middleware.py) -----------------
+# Starlette footgun worth spelling out: ``add_middleware`` *inserts at index 0*
+# and ``build_middleware_stack`` then applies the stack in reverse, so the
+# **last** middleware registered is the **outermost**. The registrations below
+# are therefore written innermost-first, giving this effective order:
+#
+#   CORS             outermost - preflight short-circuits before any work
+#   RequestContext             - ids + timing for everything below, including
+#                                rate-limit rejections and unhandled 500s
+#   RateLimit                  - reject abuse before the app sees the request
+#   GZip                       - compresses what the app renders
+#   ErrorEnvelope    innermost - normalizes every 4xx/5xx JSON body it produces
+from gateway.middleware import (  # noqa: E402
+    ErrorEnvelopeMiddleware,
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+)
+
+# Every error response — including FastAPI's own {"detail": ...} — leaves with
+# the canonical envelope ({success, error, code, message, retryable, details}).
+app.add_middleware(ErrorEnvelopeMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -416,9 +469,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Add GZip compression for faster dashboard - optimized
-app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # The single production control room is served from /control (see control_room
 # below); it is a self-contained snapshot + replay projection with no external
@@ -1048,6 +1098,52 @@ async def platforms():
         "active_agents": len(AGENTS),
         "task_tracker": task_tracker.get_status(),
     }
+
+
+# --- Health probes -------------------------------------------------------------
+# Distinct from /api/v1/system/health (which probes *capabilities* via the
+# doctor). These are the two answers a supervisor needs: is the process
+# serving, and may it be given traffic right now. They are deliberately
+# unauthenticated and uncached so a probe can never be blocked by a token
+# rotation, and they read real state (see gateway/lifecycle.py).
+@app.get("/healthz")
+@app.get("/livez")
+async def healthz():
+    """Liveness: the event loop is serving. Never gated, never cached."""
+    from gateway.envelope import ok
+
+    return ok(
+        {
+            "status": "ok",
+            "uptime": _lifecycle.uptime_seconds(),
+            "pid": os.getpid(),
+        }
+    )
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness: 200 when traffic may be routed here, 503 while draining."""
+    from gateway.envelope import error_body
+
+    ready, detail = _lifecycle.readiness()
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        **detail,
+    }
+    if ready:
+        return payload
+    return JSONResponse(
+        status_code=503,
+        content=error_body(
+            code="not_ready",
+            message="; ".join(detail.get("reasons") or ["not ready"]),
+            status=503,
+            retryable=True,
+            details=detail,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # CLI for gateway setup/start - free

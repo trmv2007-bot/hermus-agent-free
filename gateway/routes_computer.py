@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import threading
 import time
@@ -17,8 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from core.config import config
-from gateway.context import _token_matches
+from gateway.context import ws_token_ok
 
 router = APIRouter()
 
@@ -1064,9 +1062,7 @@ async def computer_events_ws(websocket: WebSocket):
     repair_*, task_completed, emergency_stop, world_changed, ..."""
     from core.computer.events import computer_event_bus
 
-    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
-    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
-    if expected and not _token_matches(provided, expected):
+    if not ws_token_ok(websocket):
         await websocket.close(code=1008, reason="Unauthorized")
         return
 
