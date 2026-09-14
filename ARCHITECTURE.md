@@ -166,6 +166,25 @@ Assets are served from an explicit allow-list (`_serve_control_asset`), not a
 pin control-room wording search `tests/_control_room_source.py`, which
 concatenates all four files.
 
+The UI consumes the same contracts as every other client:
+
+- **`requestJSON()`** reads the canonical envelope, so a failure yields
+  `code` / `message` / `retryable` / `requestId` instead of a bare status.
+  Panels offer Retry only when `retryable` is true, and show the
+  `X-Request-ID` so a UI error correlates with the gateway log line.
+- **Panel states** (`stateHtml` / `stateRowHtml`) render loading / empty /
+  error uniformly — an unconfigured backend never looks like a working one
+  that happens to be blank.
+- **The connection pill** reports `/readyz`, so it shows "not ready" (with the
+  server's reason) while the gateway is draining rather than a fabricated
+  "live". Liveness (`/healthz`) is separate.
+- **Tabs are a real ARIA tablist** with roving tabindex and arrow/Home/End
+  navigation, and toasts live in an `aria-live` region.
+
+Browser code is exercised by `tests/test_control_room_ux.py`, which evaluates
+the real script in Node against a minimal DOM stub — behaviour, not just
+syntax.
+
 ### 3.1 Delegation execution path (canonical)
 
 Delegation is **entered only through the canonical JobQueue**; there is no second

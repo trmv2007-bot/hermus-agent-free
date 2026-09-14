@@ -21,22 +21,22 @@
     <button id="emergencyBtn" class="danger">Emergency stop</button>
   </div>
 </header>
-<nav>
-  <button data-tab="overview" class="on">Overview</button>
-  <button data-tab="presence">Presence</button>
-  <button data-tab="voice">Voice</button>
-  <button data-tab="jobs">Jobs</button>
-  <button data-tab="missions">Missions</button>
-  <button data-tab="telemetry">Telemetry</button>
-  <button data-tab="computer">Computer</button>
-  <button data-tab="remote">Remote</button>
-  <button data-tab="safety">Safety</button>
-  <button data-tab="doctor">Doctor</button>
+<nav role="tablist" aria-label="Control room sections">
+  <button data-tab="overview" class="on" role="tab" id="tabbtn-overview" aria-controls="tab-overview" aria-selected="true" tabindex="0">Overview</button>
+  <button data-tab="presence" role="tab" id="tabbtn-presence" aria-controls="tab-presence" aria-selected="false" tabindex="-1">Presence</button>
+  <button data-tab="voice" role="tab" id="tabbtn-voice" aria-controls="tab-voice" aria-selected="false" tabindex="-1">Voice</button>
+  <button data-tab="jobs" role="tab" id="tabbtn-jobs" aria-controls="tab-jobs" aria-selected="false" tabindex="-1">Jobs</button>
+  <button data-tab="missions" role="tab" id="tabbtn-missions" aria-controls="tab-missions" aria-selected="false" tabindex="-1">Missions</button>
+  <button data-tab="telemetry" role="tab" id="tabbtn-telemetry" aria-controls="tab-telemetry" aria-selected="false" tabindex="-1">Telemetry</button>
+  <button data-tab="computer" role="tab" id="tabbtn-computer" aria-controls="tab-computer" aria-selected="false" tabindex="-1">Computer</button>
+  <button data-tab="remote" role="tab" id="tabbtn-remote" aria-controls="tab-remote" aria-selected="false" tabindex="-1">Remote</button>
+  <button data-tab="safety" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1">Safety</button>
+  <button data-tab="doctor" role="tab" id="tabbtn-doctor" aria-controls="tab-doctor" aria-selected="false" tabindex="-1">Doctor</button>
 </nav>
 
 <main>
   <!-- ============ OVERVIEW ============ -->
-  <div class="tab on" id="tab-overview">
+  <div class="tab on" id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview">
     <div class="grid">
       <section>
         <h2>Snapshot · System health</h2>
@@ -72,7 +72,7 @@
   </div>
 
   <!-- ============ PRESENCE ============ -->
-  <div class="tab" id="tab-presence">
+  <div class="tab" id="tab-presence" role="tabpanel" aria-labelledby="tabbtn-presence">
     <div class="grid">
       <section class="full">
         <h2>Hermus presence <span id="presenceState" class="presence-state">connecting…</span></h2>
@@ -116,7 +116,7 @@
   </div>
 
   <!-- ============ VOICE ============ -->
-  <div class="tab" id="tab-voice">
+  <div class="tab" id="tab-voice" role="tabpanel" aria-labelledby="tabbtn-voice">
     <div class="grid">
       <section class="full">
         <h2>Voice-first mode <span id="voiceState" class="tag">idle</span></h2>
@@ -156,7 +156,7 @@
   </div>
 
   <!-- ============ JOBS ============ -->
-  <div class="tab" id="tab-jobs">
+  <div class="tab" id="tab-jobs" role="tabpanel" aria-labelledby="tabbtn-jobs">
     <section>
       <h2>Snapshot · Job queue <span id="qstatus" class="tag"></span></h2>
       <table id="jobs">
@@ -168,7 +168,7 @@
   </div>
 
   <!-- ============ MISSIONS ============ -->
-  <div class="tab" id="tab-missions">
+  <div class="tab" id="tab-missions" role="tabpanel" aria-labelledby="tabbtn-missions">
     <section>
       <h2>Autonomous missions · approval-aware lifecycle</h2>
       <div class="bar"><input id="missionGoal" placeholder="mission goal" /></div>
@@ -184,7 +184,7 @@
   </div>
 
   <!-- ============ TELEMETRY ============ -->
-  <div class="tab" id="tab-telemetry">
+  <div class="tab" id="tab-telemetry" role="tabpanel" aria-labelledby="tabbtn-telemetry">
     <section>
       <h2>Live telemetry · dashboard event bus → canonical EventBus</h2>
       <div class="bar">
@@ -197,7 +197,7 @@
   </div>
 
   <!-- ============ COMPUTER ============ -->
-  <div class="tab" id="tab-computer">
+  <div class="tab" id="tab-computer" role="tabpanel" aria-labelledby="tabbtn-computer">
     <div class="grid">
       <section>
         <h2>Computer agent · status</h2>
@@ -221,7 +221,7 @@
   </div>
 
   <!-- ============ REMOTE ============ -->
-  <div class="tab" id="tab-remote">
+  <div class="tab" id="tab-remote" role="tabpanel" aria-labelledby="tabbtn-remote">
     <div class="grid">
       <section>
         <h2>Remote control · snapshot</h2>
@@ -237,7 +237,7 @@
   </div>
 
   <!-- ============ SAFETY ============ -->
-  <div class="tab" id="tab-safety">
+  <div class="tab" id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety">
     <div class="grid">
       <section class="full">
         <h2>Jarvis Safety Core · live authority state</h2>
@@ -331,7 +331,7 @@
   </div>
 
   <!-- ============ DOCTOR ============ -->
-  <div class="tab" id="tab-doctor">
+  <div class="tab" id="tab-doctor" role="tabpanel" aria-labelledby="tabbtn-doctor">
     <section>
       <h2>Doctor · real diagnostics</h2>
       <div class="cells" id="doctor"></div>
@@ -345,6 +345,11 @@
   HERMUS control room — the single production UI. Snapshot (live probe) + replay (durable
   event log) + typed commands only. The UI never owns truth and never simulates success.
 </footer>
+
+<!-- Action feedback. aria-live="polite" so a failed action is announced to
+     screen readers without stealing focus; errors are also logged with the
+     gateway's X-Request-ID so the UI and the server log correlate. -->
+<div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <script src="/static/control-client.js"></script>
 <script>

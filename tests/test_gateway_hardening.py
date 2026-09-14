@@ -337,6 +337,10 @@ def test_readiness_is_503_while_draining(client):
         assert body["code"] == "not_ready"
         assert body["retryable"] is True
         assert any("draining" in r for r in body["details"]["reasons"])
+        # The control-room readiness pill renders `message` and
+        # `details.reasons` (tests/test_control_room_ux.py pins the UI side),
+        # so both must stay populated — not just the status code.
+        assert "draining" in body["message"]
         # Liveness stays up: the process is serving, just not taking traffic.
         assert client.get("/healthz").json()["status"] == "ok"
     finally:

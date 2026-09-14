@@ -33,7 +33,192 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
   (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 function healthy(){ conn.textContent="live"; conn.className="pill ok"; }
 function down(){ conn.textContent="offline (preview)"; conn.className="pill err"; }
+
+/* The connection pill reports the gateway's OWN readiness probe (/readyz)
+ * rather than inferring health from whichever snapshot happened to succeed:
+ *   200        -> ready (taking traffic)
+ *   503        -> up, but draining or not started: honest and actionable
+ *   unreachable-> offline
+ * Readiness is derived server-side from real state, so the pill cannot claim
+ * "live" over a gateway that is refusing work. */
+async function refreshReadiness(){
+  if (!conn) return;
+  const res = await requestJSON("/readyz");
+  if (res.ok) {
+    conn.textContent = "live"; conn.className = "pill ok";
+    conn.title = "gateway ready — accepting traffic";
+    return;
+  }
+  if (res.status === 503) {
+    // Prefer the envelope's own reasons; fall back to the raw body's reasons
+    // (a 503 from something other than /readyz may not be enveloped) and
+    // finally to the message, so the pill never hides *why* it is not ready.
+    const d = res.details || {};
+    const raw = res.data || {};
+    const reasons = (d.reasons && d.reasons.length) ? d.reasons.join("; ")
+      : ((raw.reasons && raw.reasons.length) ? raw.reasons.join("; ") : res.message);
+    conn.textContent = "not ready"; conn.className = "pill warn";
+    conn.title = "gateway is up but not accepting traffic: " + reasons;
+    return;
+  }
+  conn.textContent = res.status ? ("gateway " + res.status) : "offline";
+  conn.className = "pill err";
+  conn.title = res.message || "gateway unreachable";
+}
 function setPill(id, text, cls){ const el = $(id); if (el) { el.textContent = text; el.className = "pill " + (cls || ""); } }
+
+/* ===========================================================================
+ * Canonical API layer
+ *
+ * Every gateway response — success or failure — follows one contract
+ * (gateway/envelope.py). Failures carry {success:false, error, code, message,
+ * retryable, details} and every response carries X-Request-ID. requestJSON()
+ * understands that contract, so a panel can show the server's own message and
+ * offer a retry when `retryable` is true, instead of the old "url -> 500".
+ * ======================================================================== */
+function requestJSON(url, opts) {
+  const options = Object.assign({ headers: { "Accept": "application/json" } }, opts || {});
+  const t0 = Date.now();
+  return fetch(url, options).then((r) => {
+    const ms = Date.now() - t0;
+    const requestId = r.headers ? r.headers.get("x-request-id") : null;
+    return r.text().then((text) => {
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
+      if (r.ok) {
+        return { ok: true, data: body, ms: ms, status: r.status, requestId: requestId };
+      }
+      // Canonical envelope (ErrorEnvelopeMiddleware guarantees these keys on
+      // every 4xx/5xx JSON response), with a fallback for non-JSON errors.
+      const env = (body && typeof body === "object") ? body : {};
+      return {
+        ok: false, data: null, ms: ms, status: r.status, requestId: requestId,
+        code: env.code || env.error || ("http_" + r.status),
+        message: env.message || env.detail || env.error || ("Request failed (" + r.status + ")"),
+        retryable: env.retryable === true,
+        details: env.details || {},
+      };
+    });
+  }).catch((e) => ({
+    // Network-level failure: no response, so no envelope. Always retryable —
+    // the gateway may simply be restarting.
+    ok: false, data: null, ms: Date.now() - t0, status: 0, requestId: null,
+    code: "network_error", message: (e && e.message) ? e.message : "Network error",
+    retryable: true, details: {},
+  }));
+}
+
+/* getJSON keeps its historical {j, ms} shape so the ~15 existing call sites
+ * keep working, but the error it throws now carries the parsed envelope. */
+function getJSON(url){
+  return requestJSON(url).then((res) => {
+    if (!res.ok) {
+      const err = new Error(res.message || (url + " -> " + res.status));
+      err.envelope = res; err.status = res.status; err.retryable = res.retryable;
+      err.requestId = res.requestId;
+      throw err;
+    }
+    return { j: res.data, ms: res.ms };
+  });
+}
+
+/* Toasts: one place for action feedback. `retryable` failures get a Retry
+ * button, because the envelope tells us whether resending can succeed. */
+function toast(message, kind, opts) {
+  const o = opts || {};
+  const host = $("#toasts");
+  if (!host) return null;
+  const el = document.createElement("div");
+  el.className = "toast " + (kind || "info");
+  const text = document.createElement("span");
+  text.className = "toast-msg";
+  text.textContent = message;
+  el.appendChild(text);
+  if (o.requestId) {
+    const rid = document.createElement("code");
+    rid.className = "toast-rid";
+    rid.textContent = o.requestId;
+    rid.title = "X-Request-ID — quote this when reporting a problem";
+    el.appendChild(rid);
+  }
+  if (o.retry && o.onRetry) {
+    const btn = document.createElement("button");
+    btn.className = "toast-retry ghost";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", () => { dismiss(); o.onRetry(); });
+    el.appendChild(btn);
+  }
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss notification");
+  close.textContent = "×";
+  close.addEventListener("click", dismiss);
+  el.appendChild(close);
+  host.appendChild(el);
+  const ttl = o.retry ? 12000 : (kind === "error" ? 9000 : 4000);
+  const timer = setTimeout(dismiss, ttl);
+  function dismiss() {
+    clearTimeout(timer);
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+  return dismiss;
+}
+
+/* Report a failed request once, consistently: toast with the server's own
+ * message, a Retry button when the envelope says retryable, and the
+ * X-Request-ID for correlation with the gateway log. */
+function reportFailure(what, err, onRetry) {
+  const env = err && err.envelope ? err.envelope : null;
+  const code = (env && env.code) || (err && err.code) || "error";
+  const message = (env && env.message) || (err && err.message) || String(err);
+  const retryable = env ? env.retryable === true : (err ? err.retryable === true : true);
+  console.error("[control-room] " + what + " failed", {
+    code: code, message: message, status: (env && env.status) || 0,
+    requestId: (env && env.requestId) || null,
+  });
+  toast(what + ": " + message, "error", {
+    requestId: (env && env.requestId) || null,
+    retry: retryable, onRetry: onRetry,
+  });
+}
+
+/* Panel states: loading / empty / error, rendered the same everywhere so an
+ * unconfigured backend never looks like a working one that happens to be
+ * blank. Returned as HTML strings (not nodes) so they can be dropped into a
+ * <tbody> without producing invalid markup. */
+function stateHtml(state, opts) {
+  const o = opts || {};
+  if (state.loading) {
+    return '<div class="skeleton"></div><div class="skeleton" style="width:70%"></div>'
+      + '<div class="skeleton" style="width:85%"></div>';
+  }
+  if (state.empty) {
+    return '<div class="panel-state">' + esc(state.empty) + '</div>';
+  }
+  const e = state.error || {};
+  const label = o.label ? esc(o.label) + ": " : "";
+  const code = e.code ? ' <span class="tag">(' + esc(e.code) + ')</span>' : "";
+  const rid = e.requestId ? ' <code>' + esc(e.requestId) + '</code>' : "";
+  const retry = (e.retryable && o.onRetryId)
+    ? '<div class="panel-retry"><button class="ghost" data-retry="' + esc(o.onRetryId) + '">Retry</button></div>'
+    : "";
+  return '<div class="panel-state error">' + label + esc(e.message || "Request failed") + code + rid + retry + '</div>';
+}
+
+/* Same, wrapped in a table row (for <tbody> panels such as the job queue). */
+function stateRowHtml(state, colspan, opts) {
+  return '<tr><td colspan="' + colspan + '">' + stateHtml(state, opts) + "</td></tr>";
+}
+
+/* Retry buttons rendered by stateHtml() are delegated here: each panel
+ * registers the function that should re-run. */
+const RETRY_ACTIONS = {};
+document.addEventListener("click", (ev) => {
+  const btn = ev.target && ev.target.closest ? ev.target.closest("[data-retry]") : null;
+  if (!btn) return;
+  const fn = RETRY_ACTIONS[btn.getAttribute("data-retry")];
+  if (fn) fn();
+});
 function updateSafetyCore(){
   const brake = $("#emergencyState")?.textContent || "brake: —";
   const pending = $("#pendingCount")?.textContent || "approvals: —";
@@ -58,14 +243,49 @@ function getJSON(url){
 function kpi(v,l){ return `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`; }
 
 // ---------- tabs ----------
-document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
-  document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
-  document.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
-  b.classList.add("on");
-  const tab = document.getElementById("tab-" + b.dataset.tab);
-  if (tab) tab.classList.add("on");
-  refreshTab(b.dataset.tab);
-}));
+/* Tabs are a real ARIA tablist (see control.html), not just styled buttons:
+ * aria-selected tracks the visible panel, only the selected tab is tabbable
+ * (roving tabindex), and the arrow / Home / End keys move between tabs the way
+ * a native tab strip does. */
+function selectTab(name, opts) {
+  const o = opts || {};
+  document.querySelectorAll("nav [role=tab]").forEach((b) => {
+    const on = b.dataset.tab === name;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+    b.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll(".tab").forEach((t) => {
+    const on = t.id === "tab-" + name;
+    t.classList.toggle("on", on);
+    if (on) t.removeAttribute("aria-hidden");
+    else t.setAttribute("aria-hidden", "true");
+  });
+  if (!o.noRefresh) refreshTab(name);
+}
+
+document.querySelectorAll("nav [role=tab]").forEach((b) => {
+  b.addEventListener("click", () => selectTab(b.dataset.tab));
+  b.addEventListener("keydown", (ev) => {
+    const tabs = Array.prototype.slice.call(document.querySelectorAll("nav [role=tab]"));
+    const i = tabs.indexOf(b);
+    let next = -1;
+    if (ev.key === "ArrowRight") next = (i + 1) % tabs.length;
+    else if (ev.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+    else if (ev.key === "Home") next = 0;
+    else if (ev.key === "End") next = tabs.length - 1;
+    if (next < 0) return;
+    ev.preventDefault();
+    tabs[next].focus();
+    selectTab(tabs[next].dataset.tab);
+  });
+});
+
+// Mark the initially hidden panels without triggering a refresh on load.
+(function initTabs(){
+  const active = document.querySelector("nav [role=tab].on");
+  selectTab(active ? active.dataset.tab : "overview", { noRefresh: true });
+})();
 function refreshTab(name){
   if (name === "jobs") refreshJobs();
   else if (name === "missions") refreshMissions();
@@ -192,8 +412,10 @@ function renderCaps(c){
   $("#caps").innerHTML = html;
 }
 async function refreshOverview(){
-  try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; healthy(); }
-  catch(e){ down(); $("#health").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">api offline</div></div>'; }
+  try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; }
+  catch(e){ $("#health").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+    { label: "system health", onRetryId: "overview" }); }
+  try { await refreshReadiness(); } catch(e){}
   try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); } catch(e){}
   try { await refreshEmergency(); } catch(e){}
 }
@@ -250,15 +472,19 @@ async function refreshJobs(){
   try {
     const { j } = await getJSON("/jobs");
     const rows = (Array.isArray(j) ? j : j.jobs || []).slice(0, 60);
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="hint">queue idle</td></tr>'; }
+    if (!rows.length) { body.innerHTML = stateRowHtml({ empty: "queue idle — no jobs yet" }, 6); }
     else body.innerHTML = rows.map((x) => `<tr><td><code>${esc(x.id)}</code></td><td>${esc(x.kind)}</td><td><span class="status s-${esc(x.status)}">${esc(x.status)}</span></td><td>${esc(x.attempts)}/${esc(x.max_attempts)}</td><td>${esc(x.run_id || "")}</td><td>${esc(x.created_at || "")}</td></tr>`).join("");
     const n = Array.isArray(j) ? j.length : (j.jobs || []).length;
     $("#jobcount").textContent = n + " jobs";
     const { j: st } = await getJSON("/queue/status");
     const bs = st.by_status || {};
     $("#qstatus").textContent = "backend=" + (st.backend || "?") + " · workers=" + (st.workers || "?") + " · " + Object.entries(bs).map(([k,v])=>v+" "+k).join(", ");
-  } catch(e){ body.innerHTML = `<tr><td colspan="6" class="hint">queue unavailable: ${esc(e.message)}</td></tr>`; }
+  } catch(e){
+    body.innerHTML = stateRowHtml({ error: e.envelope || { message: e.message } }, 6,
+      { label: "queue", onRetryId: "jobs" });
+  }
 }
+RETRY_ACTIONS.jobs = refreshJobs;
 
 // ---------- MISSIONS ----------
 async function refreshMissions(){
@@ -269,7 +495,7 @@ async function refreshMissions(){
     const blockedN = rows.filter((m) => String(m.state).toLowerCase() === "blocked" || m.approval_request).length;
     setPill("#blockedMissionCount", "blocked missions: " + blockedN, blockedN ? "warn" : "ok");
     updateSafetyCore();
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="hint">no missions yet</td></tr>'; return; }
+    if (!rows.length) { body.innerHTML = stateRowHtml({ empty: "no missions yet" }, 5); return; }
     body.innerHTML = rows.map((m) => {
       const ap = m.approval_request || {};
       const failure = m.failure || {};
@@ -283,8 +509,12 @@ async function refreshMissions(){
     body.querySelectorAll("button[data-mission-approve]").forEach((b) => b.addEventListener("click", () => approveMission(b.dataset.missionApprove, b.dataset.approvalId)));
     body.querySelectorAll("button[data-mission-prompts]").forEach((b) => b.addEventListener("click", () => createMissionPrompts(b.dataset.missionPrompts)));
     body.querySelectorAll("button[data-mission-resume]").forEach((b) => b.addEventListener("click", () => resumeMission(b.dataset.missionResume)));
-  } catch(e){ setPill("#blockedMissionCount", "blocked missions: ?", "warn"); updateSafetyCore(); body.innerHTML = `<tr><td colspan="5" class="hint">missions unavailable: ${esc(e.message)}</td></tr>`; }
+  } catch(e){ setPill("#blockedMissionCount", "blocked missions: ?", "warn"); updateSafetyCore();
+    body.innerHTML = stateRowHtml({ error: e.envelope || { message: e.message } }, 5,
+      { label: "missions", onRetryId: "missions" });
+  }
 }
+RETRY_ACTIONS.missions = refreshMissions;
 function missionPreflight(){
   const goal = $("#missionGoal").value.trim();
   const out = $("#missionPreflightOut");
@@ -350,8 +580,18 @@ async function refreshTelemetry(force){
       (j.events || []).slice().reverse().forEach(tmAppend);
       feed.dataset.ready = "1";
     }
-  } catch(e){}
+  } catch(e){
+    const feed = $("#tmFeed");
+    if (feed && !feed.childElementCount) {
+      feed.innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+        { label: "telemetry", onRetryId: "telemetry" });
+    }
+  }
 }
+RETRY_ACTIONS.telemetry = () => refreshTelemetry(true);
+RETRY_ACTIONS.safetyEvents = refreshSafetyEvents;
+RETRY_ACTIONS.safetyReport = refreshSafetyReport;
+
 function openTmStream(){
   try {
     const wsToken = gatewayToken ? "?token=" + encodeURIComponent(gatewayToken) : "";
@@ -374,9 +614,13 @@ async function refreshComputer(){
     const body = $("#compTasks tbody");
     const tasks = st.tasks || st.list || [];
     body.innerHTML = tasks.slice(0, 30).map((t) => `<tr><td><code>${esc(t.task_id || t.id || "")}</code></td><td><span class="status s-${esc(t.status)}">${esc(t.status)}</span></td><td>${esc(t.updated_at || "")}</td><td>${esc(t.goal || t.task || t.summary || "")}</td></tr>`).join("")
-      || '<tr><td colspan="4" class="hint">no computer tasks</td></tr>';
-  } catch(e){ $("#compStatus").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">computer api unavailable</div></div>'; }
+      || stateRowHtml({ empty: "no computer tasks" }, 4);
+  } catch(e){
+    $("#compStatus").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+      { label: "computer", onRetryId: "computer" });
+  }
 }
+RETRY_ACTIONS.computer = refreshComputer;
 function compRun(){
   const out = $("#compOut");
   const task = $("#compTask").value.trim();
@@ -412,8 +656,12 @@ async function refreshRemote(){
       <button class="ghost" data-act="reject" data-id="` + esc(p.prompt_id || p.id || "") + `">reject</button></span>
     </li>`).join("");
     ul.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => remoteAct(b.dataset.act, b.dataset.id)));
-  } catch(e){ $("#remoteStatus").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">remote api unavailable</div></div>'; }
+  } catch(e){
+    $("#remoteStatus").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+      { label: "remote", onRetryId: "remote" });
+  }
 }
+RETRY_ACTIONS.remote = refreshRemote;
 function remoteAct(act, id){
   const out = $("#remoteOut");
   fetch("/remote/" + act, { method:"POST", headers:{ "Content-Type":"application/json" },
@@ -451,7 +699,8 @@ async function refreshSafetyEvents(){
     const rows = j.events || [];
     feed.innerHTML = rows.slice().reverse().map((e) => `<div><span class="t">${esc(e.timestamp || "")}</span> <span class="e">${esc(safetyEventLabel(e))}</span> <span class="tag">${esc(e.status || "")}</span></div>`).join("")
       || '<div class="note">no safety events recorded yet</div>';
-  } catch(e){ feed.innerHTML = '<div class="note">safety events unavailable: ' + esc(e.message) + '</div>'; }
+  } catch(e){ feed.innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+    { label: "safety events", onRetryId: "safetyEvents" }); }
 }
 async function refreshSafetyReport(){
   const feed = $("#safetyReport");
@@ -460,7 +709,8 @@ async function refreshSafetyReport(){
   try {
     const { j } = await getJSON("/safety/report?format=markdown");
     feed.innerHTML = mdLite(j.markdown || JSON.stringify(j, null, 2));
-  } catch(e){ feed.innerHTML = '<div class="note">safety report unavailable: ' + esc(e.message) + '</div>'; }
+  } catch(e){ feed.innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+    { label: "safety report", onRetryId: "safetyReport" }); }
 }
 async function refreshSafety(){
   try {
@@ -677,8 +927,12 @@ async function refreshDoctor(){
     $("#doctor").innerHTML = kpi(esc(String(d.engine_status || d.status || "-")), "engine")
       + kpi(esc(String(d.worst_severity || "-")), "worst") + kpi(String(d.finding_count ?? d.counts?.total ?? 0), "findings")
       + kpi(String(d.stuck?.length ?? 0), "stuck");
-  } catch(e){ $("#doctor").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">doctor api unavailable</div></div>'; }
+  } catch(e){
+    $("#doctor").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
+      { label: "doctor", onRetryId: "doctor" });
+  }
 }
+RETRY_ACTIONS.doctor = refreshDoctor;
 function docRun(){
   const out = $("#docOut");
   out.innerHTML = '<div class="note">running doctor…</div>';
@@ -931,3 +1185,4 @@ async function boot(){
 }
 boot();
 setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
+RETRY_ACTIONS.overview = refreshOverview;
