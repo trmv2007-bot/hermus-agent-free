@@ -1,3 +1,9 @@
+> **Archived — historical document.**
+> This is a design record for the counsel subsystem, which is now documented in the README, kept for provenance. It is **not** the current
+> reference: see [`README.md`](../../README.md).
+> Moved here by the documentation consolidation; the content below is
+> preserved verbatim.
+>
 # 🧠 Hermus Counsel — Council of AIs That Plans Everything & Upgrades Itself
 
 > **Status: ALL PHASES (0–4) IMPLEMENTED (2026-08-13).** The rest of this document is the

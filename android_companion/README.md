@@ -7,7 +7,7 @@ does **not** bypass Android security — it uses the documented, permission-gate
 
 > Status: **reference implementation provided; NOT compiled/verified on a device.**
 > Building and running it requires an Android SDK + a device/emulator. The
-> physical-device E2E is marked **NOT VERIFIED** in `FINAL_REPORT.md`.
+> physical-device E2E is marked **NOT VERIFIED** in `docs/archive/FINAL_REPORT.md`.
 
 ## What it does
 - **Bridge service** (`HermusBridgeService`) — a loopback-only control socket on
@@ -51,5 +51,5 @@ app scans). **Implement and test this on your device** — it is not verified he
 ## Unsupported here
 - Raw keyevent injection (not permitted via accessibility) — keys are the host/ADB
   path; the companion reports this honestly.
-- Everything requiring a real device/emulator — see `FINAL_REPORT.md` §48 for exact
+- Everything requiring a real device/emulator — see `docs/archive/FINAL_REPORT.md` §48 for exact
   verification steps.

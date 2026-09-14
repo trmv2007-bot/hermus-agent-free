@@ -1,3 +1,9 @@
+> **Archived — historical document.**
+> This is a historical narrative superseded by `ARCHITECTURE.md`, kept for provenance. It is **not** the current
+> reference: see [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+> Moved here by the documentation consolidation; the content below is
+> preserved verbatim.
+>
 # Architecture Upgrades (foundation)
 
 This branch adds the core architectural subsystems as **working foundations**:

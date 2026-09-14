@@ -105,7 +105,7 @@ adb reverse tcp:8080 tcp:8080
 > Android backend, consent, audit and secure pairing are unit-tested, and a deterministic
 > simulated device drives the full agentic loop. Building the companion and running the
 > real device/with-emulator E2E here was **not possible** (no Android SDK / device). See
-> `FINAL_REPORT.md` §50–§52 for exact verification steps and the honest capability matrix.
+> `docs/archive/FINAL_REPORT.md` §50–§52 for exact verification steps and the honest capability matrix.
 
 ### Backend-only / autonomous operation
 
@@ -114,3 +114,63 @@ verifies and continues **without the dashboard being open**. Closing/reloading t
 room during a mission recovers state from the backend (there is no client-owned mission
 state). Battery — the control room is a *client* of backend state, never the owner of the
 autonomy loop, tool execution or device state.
+
+
+---
+
+## 🎛️ The Control Room (single production UI)
+
+The canonical control room is at **`http://localhost:8000/control`** (root `/` redirects
+here). It is a single self-contained surface streamed from backend state + event
+replay — it is a *projection*, not a separate store. It covers chat, the multi-model
+fleet, key vault, semantic RAG memory, tools registry, channel webhooks, computer/agent
+autonomy and remote-pocket control, reconstructed from durable backend state. The
+older `/dashboard`, `/jarvis`, `/computer/dashboard` and `/remote` surfaces and their
+assets were removed and folded into `/control`.
+
+---
+
+---
+
+## 🤖 What Can Hermus Do?
+
+### 💬 Chat, Memory & Skill Forge
+* **Persistent Memory:** SQLite FTS5 + semantic vector embeddings store project context, code snippets, and user preferences with exponential decay.
+* **Skill Forge:** Automatically packages multi-step trajectories into reusable skills (`skills/name/`) so repetitive tasks cost zero tokens in the future.
+
+### 🌪️ Free Model Fleet & Consensus
+* **Groq LPU:** 300+ tokens/sec lightning-fast responses for daily conversation.
+* **Mistral Devstral:** Free developer tier model (`devstral-latest`) with a 256k context window for code analysis and deep refactoring.
+* **DeepThink Council:** Fan-out prompts to multiple models simultaneously and synthesize final consensus.
+
+### 🖥️ Computer Agent Automation
+* Uses Playwright and Chromium to navigate web apps, click UI elements, fill forms, and take screenshot trajectories autonomously.
+
+### 📡 Remote Mesh Access via Tailscale
+* Pair your phone and PC over an encrypted WireGuard mesh without opening router ports or exposing your IP to the public internet.
+
+---
+
+---
+
+## ⌨️ Command Line (CLI) Cheatsheet
+
+```bash
+# Chat in terminal
+./hermus
+
+# API keys in .env are auto-discovered (OPENROUTER_API_KEY, GEMINI_API_KEY,
+# NVIDIA_API_KEY, ...) — you do NOT have to add them again with `multikey add`.
+# Optional: show which providers Hermus sees as configured/usable.
+./hermus multikey providers
+
+# Add API keys
+./hermus multikey add --provider mistral --key YOUR_KEY --model devstral-latest
+./hermus multikey add --provider groq --key YOUR_KEY
+
+# Check fleet status
+./hermus multikey health
+
+# Run autonomous mission
+./hermus mission start "Build a Python CLI for file search"
+```

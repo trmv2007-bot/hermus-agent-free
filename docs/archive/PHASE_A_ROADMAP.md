@@ -1,3 +1,9 @@
+> **Archived — historical document.**
+> This is a completed work plan, kept for provenance. It is **not** the current
+> reference: see [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+> Moved here by the documentation consolidation; the content below is
+> preserved verbatim.
+>
 # Phase A: Foundation - Implementation Summary
 
 ## Overview

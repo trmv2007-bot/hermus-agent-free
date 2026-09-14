@@ -1,3 +1,8 @@
+> **Archived — historical document.**
+> This was a second getting-started guide. Its unique sections (control room,
+> capability overview, CLI cheatsheet) were merged into [`QUICKSTART.md`](../../QUICKSTART.md);
+> this copy is kept for provenance.
+>
 # Hermus Agent Free — Simple Guide
 
 **One sentence:** Free, autonomous multi-model AI agent that lives on your machine/server, remembers your work, auto-creates skills, writes & verifies code, executes browser automation, and connects to your phone over Tailscale — 100% free with zero paywalls.
