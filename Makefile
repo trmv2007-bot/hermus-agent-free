@@ -4,7 +4,7 @@ VENV ?= .venv
 PY := $(VENV)/bin/python
 RUFF := $(VENV)/bin/ruff
 
-.PHONY: help setup test test-full lint format format-check typecheck run doctor clean
+.PHONY: help setup test test-full test-cov bench lint format format-check typecheck run doctor clean
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -22,6 +22,12 @@ test-full: ## Entire suite including evals.
 
 test-cov: ## Suite with coverage report for core/ + gateway/.
 	$(PY) -m pytest tests/ -q --ignore=tests/eval --cov=core --cov=gateway --cov-report=term-missing
+
+bench: ## Performance benchmarks (async fan-out, gateway middleware, CLI startup).
+	$(PY) scripts/bench.py
+
+bench-json: ## Same as bench, writing bench.json for before/after comparison.
+	$(PY) scripts/bench.py --json bench.json
 
 lint: ## Ruff lint over the whole tree (must be clean).
 	$(RUFF) check .
