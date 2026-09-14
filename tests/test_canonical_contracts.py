@@ -14,6 +14,7 @@ import os
 import sys
 
 import pytest
+from _control_room_source import control_room_source
 
 # Ensure core is importable.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -532,7 +533,7 @@ def test_control_room_is_snapshot_replay_projection():
     r = client.get("/control")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    html = r.text
+    html = control_room_source()
     # snapshot sources (real probes, never fabricated)
     assert "/api/v1/system/health" in html
     assert "/api/v1/system/capabilities" in html

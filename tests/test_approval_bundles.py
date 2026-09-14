@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from _cli_source import cli_source
+from _control_room_source import control_room_source
 
 from core.approval import ApprovalStore
 from core.autonomy_preflight import create_preflight_approval_requests
@@ -60,7 +61,7 @@ def test_gateway_exposes_bundle_routes_and_mission_bridge():
 
 def test_cli_and_dashboard_expose_bundle_flow():
     cli = cli_source()
-    dash = Path("gateway/control.html").read_text(encoding="utf-8")
+    dash = control_room_source()
     assert 'add_parser("bundles"' in cli
     assert 'add_parser("resolve-bundle"' in cli
     assert "Approval bundles" in dash

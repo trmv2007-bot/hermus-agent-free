@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 sys.path.append(str(Path(__file__).parent.parent))
 
+from _control_room_source import control_room_source
 from fastapi.testclient import TestClient
 
 from core.dashboard_events import DashboardEventBus, dashboard_event_bus
@@ -18,30 +19,34 @@ def test_single_control_room_is_served_projection():
     client = TestClient(app)
     page = client.get("/control")
     assert page.status_code == 200
-    assert "HERMUS" in page.text and "Snapshot" in page.text and "Replay" in page.text
-    assert "Emergency stop" in page.text
-    assert "Missions" in page.text and "approval-aware lifecycle" in page.text
-    assert "Pre-flight mission" in page.text and "Record planning-mode blocker" in page.text and "create prompts" in page.text
-    assert "Safety" in page.text and "Create scoped approval grant" in page.text
-    assert "Pending yellow-action approval prompts" in page.text
-    assert "Approval bundles" in page.text and "approve all" in page.text and "deny all" in page.text
-    assert "Jarvis Safety Core" in page.text and "pendingCount" in page.text and "blockedMissionCount" in page.text
+    # The UI is markup (served page) + assets (static/control*.{css,js}); the
+    # wording pinned below lives in the markup, but the panels it describes are
+    # wired in the scripts, so search the whole control-room source.
+    page_text = control_room_source()
+    assert "HERMUS" in page_text and "Snapshot" in page_text and "Replay" in page_text
+    assert "Emergency stop" in page_text
+    assert "Missions" in page_text and "approval-aware lifecycle" in page_text
+    assert "Pre-flight mission" in page_text and "Record planning-mode blocker" in page_text and "create prompts" in page_text
+    assert "Safety" in page_text and "Create scoped approval grant" in page_text
+    assert "Pending yellow-action approval prompts" in page_text
+    assert "Approval bundles" in page_text and "approve all" in page_text and "deny all" in page_text
+    assert "Jarvis Safety Core" in page_text and "pendingCount" in page_text and "blockedMissionCount" in page_text
     assert (
-        "Allow Downloads malware scan" in page.text
-        and "Start Downloads scan mission" in page.text
-        and "Run approved Downloads scan" in page.text
-        and "List scan reports" in page.text
-        and "Propose Gmail delegated send" in page.text
+        "Allow Downloads malware scan" in page_text
+        and "Start Downloads scan mission" in page_text
+        and "Run approved Downloads scan" in page_text
+        and "List scan reports" in page_text
+        and "Propose Gmail delegated send" in page_text
     )
-    assert "Safety Event Timeline" in page.text and "/safety/events" in page.text
-    assert "Generate safety report" in page.text and "/safety/report" in page.text
+    assert "Safety Event Timeline" in page_text and "/safety/events" in page_text
+    assert "Generate safety report" in page_text and "/safety/report" in page_text
     assert (
-        "Pre-flight autonomy check" in page.text
-        and "/safety/preflight" in page.text
-        and "Create draft approval prompts" in page.text
+        "Pre-flight autonomy check" in page_text
+        and "/safety/preflight" in page_text
+        and "Create draft approval prompts" in page_text
     )
-    assert "Capability ledger" in page.text and "Record power" in page.text and "Propose setup" in page.text
-    assert "Capability readiness / activation registry" in page.text and "Request activation" in page.text
+    assert "Capability ledger" in page_text and "Record power" in page_text and "Propose setup" in page_text
+    assert "Capability readiness / activation registry" in page_text and "Request activation" in page_text
     # No legacy dashboard/static surface remains reachable.
     assert client.get("/dashboard").status_code == 404
     assert client.get("/dashboard/legacy").status_code == 404

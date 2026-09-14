@@ -33,6 +33,7 @@ import pathlib
 from typing import Any
 
 import pytest
+from _control_room_source import control_room_source
 
 
 @pytest.fixture()
@@ -682,8 +683,7 @@ def test_single_control_room_is_queue_first_and_failure_aware():
 
     from gateway.gateway import app
 
-    root = pathlib.Path(__file__).resolve().parent.parent / "gateway"
-    html = (root / "control.html").read_text(encoding="utf-8")
+    html = control_room_source()
     # queue-first / command submission
     assert "/api/v1/commands" in html
     assert "typed Command" in html

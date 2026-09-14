@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from _cli_source import cli_source
+from _control_room_source import control_room_source
 
 
 def test_local_defense_workflow_defines_gated_mission_lifecycle():
@@ -32,7 +33,7 @@ def test_cli_exposes_local_defense_scan_mission_commands():
 
 
 def test_control_room_exposes_local_scan_mission_button():
-    src = Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "Start Downloads scan mission" in src
     assert "/local-defense/missions" in src
     assert "function startDownloadsScanMission" in src

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from _cli_source import cli_source
+from _control_room_source import control_room_source
 
 from core.contracts import CommandStatus, EventEnvelope, EventType
 from core.events import configure_bus, get_bus
@@ -61,7 +62,7 @@ def test_cli_exposes_safety_report_command():
 
 
 def test_control_room_can_generate_safety_report():
-    src = Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "Generate safety report" in src
     assert "/safety/report?format=markdown" in src
     assert "refreshSafetyReport" in src

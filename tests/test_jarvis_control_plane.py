@@ -3,6 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from _control_room_source import control_room_source
 from fastapi.testclient import TestClient
 
 from gateway.gateway import app
@@ -124,21 +125,28 @@ def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
 
 
 def test_control_room_inline_javascript_parses_with_node():
-    """The single control room's inline JS is syntactically valid.
+    """Every control-room script is syntactically valid.
 
     The legacy jarvis-control.js / hermus-client.js assets were removed with the
-    surfaces they drove; /control is self-contained inline JS.
+    surfaces they drove; /control is now markup + the assets it ships, all of
+    which must parse.
     """
     import subprocess
     import tempfile
 
-    html = Path("gateway/control.html").read_text()
-    inline = html.split("<script>")[1].split("</script>", 1)[0]
+    scripts = [
+        Path("gateway/static/control-client.js").read_text(encoding="utf-8"),
+        Path("gateway/static/control-room.js").read_text(encoding="utf-8"),
+    ]
+    # The one inline block left in the document is the token bootstrap.
+    inline = control_room_source().split("<script>")[1].split("</script>", 1)[0]
+    scripts.append(inline)
     import shutil
 
     if not shutil.which("node"):
         return
-    with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
-        fh.write(inline)
-        fh.flush()
-        subprocess.run(["node", "--check", fh.name], check=True)
+    for script in scripts:
+        with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
+            fh.write(script)
+            fh.flush()
+            subprocess.run(["node", "--check", fh.name], check=True)

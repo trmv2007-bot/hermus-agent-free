@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from _control_room_source import control_room_source
+
 
 def _client():
     from fastapi.testclient import TestClient
@@ -39,7 +41,7 @@ def test_control_room_serves_from_real_backend_seeds():
     r = c.get("/control")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    text = r.text
+    text = control_room_source()
     # snapshot + replay + command architecture, no UI-owned truth
     assert "Snapshot" in text and "Replay" in text
     assert "/api/v1/commands" in text
@@ -147,7 +149,7 @@ def test_computer_controls_map_to_real_backend():
     # emergency stop is a real, guarded action; always release it afterwards so
     # the global brake does not bleed into every later test/run.
     assert c.post("/computer/control/emergency-stop", json={}).status_code in (200, 400, 503)
-    assert "/computer/control/emergency-stop" in _client().get("/control").text
+    assert "/computer/control/emergency-stop" in control_room_source()
     # release the brake so the global state does not leak into later tests/runs
     assert c.post("/computer/control/emergency-release", json={}).status_code in (200, 400, 503)
 

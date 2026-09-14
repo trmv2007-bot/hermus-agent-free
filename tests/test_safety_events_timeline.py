@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from _control_room_source import control_room_source
+
 
 def test_safety_events_endpoint_filters_canonical_audit_events():
     src = Path("gateway/routes_subsystems.py").read_text(encoding="utf-8")
@@ -12,7 +14,7 @@ def test_safety_events_endpoint_filters_canonical_audit_events():
 
 
 def test_control_room_renders_safety_event_timeline():
-    src = Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "Safety Event Timeline" in src
     assert "#safetyEvents" in src
     assert "/safety/events?limit=80" in src
@@ -20,7 +22,7 @@ def test_control_room_renders_safety_event_timeline():
 
 
 def test_safety_core_header_is_live_projection_not_static_copy():
-    src = Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "pendingCount" in src
     assert "blockedMissionCount" in src
     assert "updateSafetyCore" in src

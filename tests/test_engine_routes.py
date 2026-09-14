@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _control_room_source import control_room_source
 from fastapi.testclient import TestClient
 
 from gateway.gateway import app
@@ -214,7 +215,7 @@ def test_events_recent_limit_is_clamped(client):
 
 def test_control_room_wires_the_telemetry_feed():
     """The canonical control room must actually consume the live telemetry feed."""
-    html = Path("gateway/control.html").read_text(encoding="utf-8")
+    html = control_room_source()
     # Live event stream (WS /dashboard/events) + polling fallback (/events/recent).
     assert "/events/recent?limit=" in html
     assert "/dashboard/events" in html, "the live event stream is the telemetry path"
@@ -267,7 +268,7 @@ def test_doctor_report_round_trip(client, monkeypatch):
 
 def test_control_room_has_doctor_and_computer_panels():
     """The canonical control room surfaces the real engine/computer/doctor capability."""
-    html = Path("gateway/control.html").read_text(encoding="utf-8")
+    html = control_room_source()
     # The control room drives the real /doctor/* and /computer/* backend APIs.
     assert "/doctor/run" in html
     assert "/doctor/status" in html

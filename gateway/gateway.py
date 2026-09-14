@@ -650,22 +650,40 @@ async def control_room():
     )
 
 
-@app.get("/static/control-client.js")
-async def control_client_js():
-    """Serve the browser client (SSE + voice-first flow).
+def _serve_control_asset(name: str, media_type: str) -> Response:
+    """Read one control-room asset from ``gateway/static``.
 
-    Served from a route rather than a StaticFiles mount: the control room is the
-    only UI surface and it is same-origin, so a single explicit file keeps the
-    gateway from exposing the whole directory.
+    Served from explicit routes rather than a ``StaticFiles`` mount: the control
+    room is the only UI surface and it is same-origin, so a fixed allow-list
+    keeps the gateway from exposing the whole directory (or anything else that
+    later lands in ``static/``).
     """
-    js_path = Path(__file__).parent / "static" / "control-client.js"
-    if not js_path.exists():
-        return Response("control-client.js not found", status_code=404, media_type="text/plain")
+    path = Path(__file__).parent / "static" / name
+    if not path.exists():
+        return Response(f"{name} not found", status_code=404, media_type="text/plain")
     return Response(
-        js_path.read_text(encoding="utf-8"),
-        media_type="application/javascript; charset=utf-8",
+        path.read_text(encoding="utf-8"),
+        media_type=media_type,
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+@app.get("/static/control-client.js")
+async def control_client_js():
+    """Browser client: typed SSE stream handling + the voice-first (Jarvis) flow."""
+    return _serve_control_asset("control-client.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-room.js")
+async def control_room_js():
+    """Control-room application script (markup lives in control.html)."""
+    return _serve_control_asset("control-room.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control.css")
+async def control_room_css():
+    """Control-room stylesheet."""
+    return _serve_control_asset("control.css", "text/css; charset=utf-8")
 
 
 @app.get("/cache/stats")

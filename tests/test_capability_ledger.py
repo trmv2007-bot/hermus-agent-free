@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from _control_room_source import control_room_source
+
 from core.capability_ledger import (
     CapabilityEntry,
     CapabilityLedger,
@@ -37,7 +39,7 @@ def test_capability_ledger_deduplicates_by_power_name(tmp_path):
 
 
 def test_control_room_can_record_discovered_power():
-    src = __import__("pathlib").Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "/capabilities/ledger/discover" in src
     assert "Record power" in src
     assert "function addPower" in src
@@ -108,7 +110,7 @@ def test_capability_ledger_can_write_setup_proposal(tmp_path):
 
 
 def test_control_room_can_generate_setup_proposal():
-    src = __import__("pathlib").Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "/capabilities/ledger/propose" in src
     assert "Propose setup" in src
     assert "function proposePower" in src

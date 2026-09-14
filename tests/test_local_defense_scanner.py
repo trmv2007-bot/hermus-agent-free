@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from _cli_source import cli_source
+from _control_room_source import control_room_source
 
 from core.local_defense_scanner import read_scan_report, save_scan_report, scan_folder
 
@@ -64,7 +65,7 @@ def test_tool_registry_discovers_local_defense_tool_statically():
 def test_gateway_cli_and_dashboard_expose_local_defense_scan():
     routes = Path("gateway/routes_subsystems.py").read_text(encoding="utf-8")
     cli = cli_source()
-    dash = Path("gateway/control.html").read_text(encoding="utf-8")
+    dash = control_room_source()
     assert '@router.post("/local-defense/scan")' in routes
     assert '_permission_guard("local_folder_defensive_scan"' in routes
     assert 'safety_sub.add_parser("scan-folder"' in cli

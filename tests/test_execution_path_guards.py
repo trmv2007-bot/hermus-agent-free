@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from _control_room_source import control_room_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -46,6 +48,6 @@ def test_computer_and_remote_emergency_routes_mirror_global_red_line_brake():
 
 
 def test_control_room_computer_task_payload_matches_route_contract():
-    src = (ROOT / "gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "body: JSON.stringify({ task: task })" in src
     assert "body: JSON.stringify({ objective: task })" not in src

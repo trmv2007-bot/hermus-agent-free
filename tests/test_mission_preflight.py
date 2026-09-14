@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from _cli_source import cli_source
+from _control_room_source import control_room_source
 
 
 def test_mission_report_serializes_preflight_metadata_statically():
@@ -47,7 +48,7 @@ def test_cli_mission_start_exposes_preflight_controls():
 
 
 def test_control_room_mission_launcher_uses_preflight():
-    src = Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "Pre-flight mission" in src
     assert "Start mission if ready" in src
     assert "Record planning-mode blocker" in src

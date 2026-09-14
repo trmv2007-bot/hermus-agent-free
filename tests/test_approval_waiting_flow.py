@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from _control_room_source import control_room_source
+
 from core.tools.gateway import ToolGateway
 
 
@@ -81,7 +83,7 @@ def test_mission_promotes_approval_required_to_blocked_state():
 
 
 def test_control_room_exposes_mission_approval_resume_controls():
-    src = __import__("pathlib").Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert 'id="tab-missions"' in src
     assert "approve+retry" in src
     assert "/permissions/pending/resolve" in src
