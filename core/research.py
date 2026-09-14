@@ -16,21 +16,61 @@ Output shape:
       "contradictions": [...], "uncertain": [...]
     }
 """
+
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Any, Optional
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlparse
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 _STOPWORDS = {
-    "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "when", "like",
-    "it", "its", "with", "that", "this", "these", "those", "are", "was", "were",
-    "be", "been", "being", "as", "by", "from", "has", "have", "had", "is", "not",
-    "no", "but", "than", "then", "about", "into", "at", "also", "while", "which",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "for",
+    "to",
+    "of",
+    "in",
+    "on",
+    "when",
+    "like",
+    "it",
+    "its",
+    "with",
+    "that",
+    "this",
+    "these",
+    "those",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "as",
+    "by",
+    "from",
+    "has",
+    "have",
+    "had",
+    "is",
+    "not",
+    "no",
+    "but",
+    "than",
+    "then",
+    "about",
+    "into",
+    "at",
+    "also",
+    "while",
+    "which",
 }
 
 
@@ -49,13 +89,19 @@ class Source:
     evidence_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        return {"title": self.title, "url": self.url, "rank": round(self.rank, 3),
-                "claims": self.claims, "evidence_count": self.evidence_count}
+        return {
+            "title": self.title,
+            "url": self.url,
+            "rank": round(self.rank, 3),
+            "claims": self.claims,
+            "evidence_count": self.evidence_count,
+        }
 
 
 def _default_search(query: str, limit: int = 10) -> list[dict[str, str]]:
     try:
         from tools.web_search import search  # noqa: F401
+
         try:
             from ddgs import DDGS
         except ImportError:
@@ -66,11 +112,13 @@ def _default_search(query: str, limit: int = 10) -> list[dict[str, str]]:
         with DDGS() as ddgs:
             results = []
             for r in ddgs.text(query, max_results=limit):
-                results.append({
-                    "title": r.get("title") or "",
-                    "url": r.get("href") or r.get("url") or "",
-                    "snippet": r.get("body") or r.get("snippet") or "",
-                })
+                results.append(
+                    {
+                        "title": r.get("title") or "",
+                        "url": r.get("href") or r.get("url") or "",
+                        "snippet": r.get("body") or r.get("snippet") or "",
+                    }
+                )
             return results
     except Exception:
         return []
@@ -104,8 +152,11 @@ def _claim_norm(claim: str) -> str:
 
 
 class ResearchPipeline:
-    def __init__(self, search_fn: Optional[Callable[[str, int], list[dict[str, str]]]] = None,
-                 synthesizer: Optional[Callable[[str, list[Source]], str]] = None):
+    def __init__(
+        self,
+        search_fn: Callable[[str, int], list[dict[str, str]]] | None = None,
+        synthesizer: Callable[[str, list[Source]], str] | None = None,
+    ):
         self.search_fn = search_fn or _default_search
         self.synthesizer = synthesizer
 
@@ -194,8 +245,7 @@ class ResearchPipeline:
         agreement = 1.0 if not contradictions else max(0.1, 1.0 - len(contradictions) / 10.0)
         confidence = round((min(len(non_empty) / max(1, limit), 1.0)) * 0.5 + agreement * 0.5, 3)
 
-        uncertain = [c for c in (s.claims[0] for s in ranked if s.claims)
-                     if len(support.get(_claim_norm(c), set())) == 1][:5]
+        uncertain = [c for c in (s.claims[0] for s in ranked if s.claims) if len(support.get(_claim_norm(c), set())) == 1][:5]
 
         return {
             "answer": answer,

@@ -6,16 +6,17 @@ returns screen coordinates with a confidence and a description.  The vision
 model is injectable, so the detector is testable offline; a pure-PIL template
 matcher is also provided for the (rare) case where an exact image is known.
 """
+
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 from .recorder import decode_frame
 
 
-def extract_json_object(text: str) -> Optional[dict[str, Any]]:
+def extract_json_object(text: str) -> dict[str, Any] | None:
     """Best-effort parse of a JSON object embedded in model prose."""
     if not text:
         return None
@@ -40,14 +41,14 @@ def extract_json_object(text: str) -> Optional[dict[str, Any]]:
             depth -= 1
             if depth == 0:
                 try:
-                    parsed = json.loads(text[start:index + 1])
+                    parsed = json.loads(text[start : index + 1])
                     return parsed if isinstance(parsed, dict) else None
                 except Exception:
                     return None
     return None
 
 
-def _number(value: Any) -> Optional[float]:
+def _number(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -59,8 +60,8 @@ class TargetDetector:
 
     def __init__(
         self,
-        vision_model: Optional[Callable[[Any, str], Any]] = None,
-        locator: Optional[Callable[[Any, str], dict[str, Any]]] = None,
+        vision_model: Callable[[Any, str], Any] | None = None,
+        locator: Callable[[Any, str], dict[str, Any]] | None = None,
         min_confidence: float = 0.4,
     ):
         # vision_model(image, prompt) -> dict|str  (same contract as VideoAnalyzer)
@@ -80,17 +81,11 @@ class TargetDetector:
             return {"success": True, "description": response}
         if not isinstance(response, dict):
             return {"success": False, "error": "vision model returned an unsupported result"}
-        text = (
-            response.get("description")
-            or response.get("detail")
-            or response.get("response")
-            or response.get("result")
-            or ""
-        )
+        text = response.get("description") or response.get("detail") or response.get("response") or response.get("result") or ""
         return {**response, "success": response.get("success", True), "description": str(text).strip()}
 
     @staticmethod
-    def _screen_size(frame: Any) -> Optional[tuple[int, int]]:
+    def _screen_size(frame: Any) -> tuple[int, int] | None:
         if isinstance(frame, dict) and frame.get("size"):
             try:
                 width, height = frame["size"]
@@ -101,7 +96,7 @@ class TargetDetector:
         return None
 
     @staticmethod
-    def _decode_size(frame: Any) -> Optional[tuple[int, int]]:
+    def _decode_size(frame: Any) -> tuple[int, int] | None:
         image = decode_frame(frame)
         if image is None:
             return None
@@ -196,7 +191,6 @@ class TargetDetector:
         if screen is None or needle is None:
             return {"found": False, "confidence": 0.0, "description": "could not decode images"}
         try:
-
             screen_rgb = screen.convert("RGB")
             needle_rgb = needle.convert("RGB")
             max_side = 320

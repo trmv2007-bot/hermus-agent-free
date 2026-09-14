@@ -7,31 +7,32 @@ cache, so the dashboard and remote clients can watch whether Hermus is healthy
 ``psutil`` is used when available; otherwise POSIX ``resource``/``os`` fallbacks
 keep the module importable and testable anywhere.
 """
+
 from __future__ import annotations
 
 import os
 import threading
 import time
-from datetime import datetime
-from typing import Any, Optional
 from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _read_pid_stat() -> Optional[dict[str, float]]:
+def _read_pid_stat() -> dict[str, float] | None:
     """Parse /proc/<pid>/stat + /proc/<pid>/status on Linux for CPU/mem."""
     try:
         pid = os.getpid()
-        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as fh:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
             fields = fh.read().split()
         # Field indexes are fixed by the kernel ABI (see `man 5 proc`).
         utime = float(fields[13])
         stime = float(fields[14])
         starttime = float(fields[21])
-        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as fh:
+        with open(f"/proc/{pid}/status", encoding="utf-8") as fh:
             status = fh.read()
         rss = None
         for line in status.splitlines():
@@ -39,11 +40,10 @@ def _read_pid_stat() -> Optional[dict[str, float]]:
                 parts = line.split()
                 if len(parts) >= 2:
                     rss = float(parts[1]) * 1024.0  # kB -> bytes
-        with open("/proc/stat", "r", encoding="utf-8") as fh:
+        with open("/proc/stat", encoding="utf-8") as fh:
             cpu_line = fh.readline().split()
         total_cpu = sum(float(v) for v in cpu_line[1:8])
-        return {"utime": utime, "stime": stime, "starttime": starttime,
-                "rss": rss, "total_cpu": total_cpu}
+        return {"utime": utime, "stime": stime, "starttime": starttime, "rss": rss, "total_cpu": total_cpu}
     except Exception:  # noqa: BLE001  (non-Linux or restricted)
         return None
 
@@ -53,11 +53,11 @@ class ResourceMonitor:
 
     def __init__(
         self,
-        subsystem_readers: Optional[dict[str, Callable[[], dict[str, Any]]]] = None,
+        subsystem_readers: dict[str, Callable[[], dict[str, Any]]] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._subsystem_readers = dict(subsystem_readers or {})
-        self._prev: Optional[dict[str, float]] = None
+        self._prev: dict[str, float] | None = None
 
     def register_subsystem(self, name: str, reader: Callable[[], dict[str, Any]]) -> None:
         with self._lock:
@@ -132,7 +132,6 @@ class ResourceMonitor:
             now = time.monotonic()
             prev = self._prev
             if prev is not None and now_total and prev.get("now_total") is not None:
-                dt = max(0.0001, now - prev["now"])
                 dt_cpu = max(0.0, now_total - prev["now_total"])
                 dt_proc = max(0.0, proc_total - prev.get("proc_total", 0.0))
                 if dt_cpu > 0:
@@ -163,6 +162,7 @@ class ResourceMonitor:
                 return {"recent_events": len(getattr(bus, "_recent", ()) or ())}
             except Exception:  # noqa: BLE001
                 return {}
+
         self.register_subsystem("event_bus", reader)
 
     def register_cache(self, cache_stats: Callable[[], dict[str, Any]]) -> None:

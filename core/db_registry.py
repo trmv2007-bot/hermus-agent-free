@@ -29,15 +29,16 @@ handle nobody closed is exactly the handle we need to be able to close.
 Closing is best-effort and never raises — shutdown must not become a new
 failure mode just because a worker thread is mid-commit.
 """
+
 from __future__ import annotations
 
 import atexit
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from collections.abc import Iterator
 
 
 class _Handle:

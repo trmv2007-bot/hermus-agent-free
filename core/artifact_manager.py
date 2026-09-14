@@ -4,6 +4,7 @@ Treats tangible work products (APKs, ZIPs, wheels, binaries, test reports,
 diffs, documentation, builds) as first-class objects tracked across mission
 lifecycles with mission-aware attribution (time, diff, and ID scoping).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +14,7 @@ import zipfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .workspace import workspace
 
@@ -75,7 +76,7 @@ class Artifact:
     size_bytes: int
     sha256: str
     created_at: str
-    mission_id: Optional[str] = None
+    mission_id: str | None = None
     previewable: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -88,7 +89,7 @@ class Artifact:
 
 
 class ArtifactManager:
-    def __init__(self, storage_dir: Optional[Path] = None, workspace_root: Optional[Path] = None):
+    def __init__(self, storage_dir: Path | None = None, workspace_root: Path | None = None):
         self.workspace_root = workspace_root or workspace.root
         self.storage_dir = storage_dir or (workspace.root / "artifacts")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -108,10 +109,10 @@ class ArtifactManager:
     def register_artifact(
         self,
         path: str | Path,
-        name: Optional[str] = None,
-        artifact_type: Optional[str] = None,
-        mission_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        name: str | None = None,
+        artifact_type: str | None = None,
+        mission_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Artifact:
         p = Path(path)
         if not p.is_absolute():
@@ -186,15 +187,15 @@ class ArtifactManager:
         self._save_manifest(manifest)
         return art
 
-    def get_artifact(self, artifact_id: str) -> Optional[Artifact]:
+    def get_artifact(self, artifact_id: str) -> Artifact | None:
         manifest = self._load_manifest()
         data = manifest.get(artifact_id)
         return Artifact.from_dict(data) if data else None
 
     def list_artifacts(
         self,
-        mission_id: Optional[str] = None,
-        artifact_type: Optional[str] = None,
+        mission_id: str | None = None,
+        artifact_type: str | None = None,
     ) -> list[Artifact]:
         manifest = self._load_manifest()
         results: list[Artifact] = []
@@ -210,9 +211,9 @@ class ArtifactManager:
 
     def scan_workspace(
         self,
-        target_dir: Optional[Path] = None,
-        mission_id: Optional[str] = None,
-        since_timestamp: Optional[float] = None,
+        target_dir: Path | None = None,
+        mission_id: str | None = None,
+        since_timestamp: float | None = None,
     ) -> list[Artifact]:
         """Scan workspace for build outputs, deliverables, and reports.
         Scopes attribution to files modified since mission start when `since_timestamp` is given.
@@ -260,8 +261,8 @@ class ArtifactManager:
     def export_bundle(
         self,
         output_zip_path: str | Path,
-        mission_id: Optional[str] = None,
-        artifact_ids: Optional[list[str]] = None,
+        mission_id: str | None = None,
+        artifact_ids: list[str] | None = None,
     ) -> str:
         out_p = Path(output_zip_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)

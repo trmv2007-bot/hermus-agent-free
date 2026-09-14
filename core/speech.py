@@ -15,6 +15,7 @@ Generated audio is stored under ``data/speech`` and can be served by the
 FastAPI gateway. Missing TTS software is reported as a normal unavailable state
 rather than breaking chat or the dashboard.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,14 +23,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
-import sys
 from ctypes.util import find_library
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
 
@@ -62,7 +63,7 @@ def _now_iso() -> str:
 class SpeechEngine:
     """Discover and invoke local speech backends."""
 
-    def __init__(self, root: Optional[Path] = None):
+    def __init__(self, root: Path | None = None):
         self.root = Path(root) if root else speech_root()
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -89,8 +90,8 @@ class SpeechEngine:
         self,
         ref_audio: str,
         *,
-        ref_text: Optional[str] = None,
-        prompt_id: Optional[str] = None,
+        ref_text: str | None = None,
+        prompt_id: str | None = None,
         label: str = "",
     ) -> dict[str, Any]:
         path = self._resolve_input_file(ref_audio)
@@ -128,6 +129,7 @@ class SpeechEngine:
         pyttsx3_reason = None
         try:
             import pyttsx3  # noqa: F401
+
             pyttsx3_ok = not sys.platform.startswith("linux") or bool(find_library("espeak-ng") or find_library("espeak"))
             if not pyttsx3_ok:
                 pyttsx3_reason = "pyttsx3 imported but no native eSpeak library is available"
@@ -169,13 +171,16 @@ class SpeechEngine:
             "prompt_dir": str(prompt_dir),
             "prompt_count": prompt_count,
             "features": ["multilingual_tts", "voice_cloning", "voice_design", "prompt_cache"],
-            "reason": None if (enabled and package and soundfile and torch) else (
+            "reason": None
+            if (enabled and package and soundfile and torch)
+            else (
                 "Install optional dependencies for OmniVoice (omnivoice, torch, soundfile)"
-                if enabled else "OmniVoice backend disabled by configuration"
+                if enabled
+                else "OmniVoice backend disabled by configuration"
             ),
         }
 
-    def _discover(self, *, requested: Optional[str] = None, needs_advanced: bool = False) -> tuple[Optional[str], dict[str, Any]]:
+    def _discover(self, *, requested: str | None = None, needs_advanced: bool = False) -> tuple[str | None, dict[str, Any]]:
         requested = (requested or os.getenv("HERMUS_TTS_BACKEND", "auto") or "auto").strip().lower()
         requested = "espeak" if requested == "espeak-ng" else requested
         omni = self._omnivoice_status()
@@ -215,25 +220,27 @@ class SpeechEngine:
                 "Install optional OmniVoice dependencies for multilingual voice cloning/design, or set "
                 "HERMUS_PIPER_MODEL and install piper, or install espeak-ng. Optional fallback: pyttsx3 "
                 "with a supported OS speech driver."
-            ) if not backend else None,
+            )
+            if not backend
+            else None,
         }
 
     # ---------------------------------------------------------------- synth
     def synthesize(
         self,
         text: str,
-        voice: Optional[str] = None,
+        voice: str | None = None,
         rate: int = 165,
         *,
-        backend: Optional[str] = None,
-        language: Optional[str] = None,
-        ref_audio: Optional[str] = None,
-        ref_text: Optional[str] = None,
-        instruct: Optional[str] = None,
-        duration: Optional[float] = None,
-        speed: Optional[float] = None,
-        prompt_id: Optional[str] = None,
-        create_prompt_id: Optional[str] = None,
+        backend: str | None = None,
+        language: str | None = None,
+        ref_audio: str | None = None,
+        ref_text: str | None = None,
+        instruct: str | None = None,
+        duration: float | None = None,
+        speed: float | None = None,
+        prompt_id: str | None = None,
+        create_prompt_id: str | None = None,
         normalize_text: bool = False,
     ) -> dict[str, Any]:
         # Runtime cleanup or an operator may remove data/speech while the
@@ -247,7 +254,20 @@ class SpeechEngine:
         if not spoken:
             return {"success": False, "error": "text required"}
 
-        advanced = any((backend == "omnivoice", language, ref_audio, ref_text, instruct, duration, speed, prompt_id, create_prompt_id, normalize_text))
+        advanced = any(
+            (
+                backend == "omnivoice",
+                language,
+                ref_audio,
+                ref_text,
+                instruct,
+                duration,
+                speed,
+                prompt_id,
+                create_prompt_id,
+                normalize_text,
+            )
+        )
         if str(backend or "").strip().lower() == "omnivoice":
             return self._synthesize_omnivoice(
                 spoken,
@@ -291,8 +311,11 @@ class SpeechEngine:
             with self._lock:
                 if selected_backend == "piper":
                     command = [
-                        detail["executable"], "--model", detail["model"],
-                        "--output_file", str(path),
+                        detail["executable"],
+                        "--model",
+                        detail["model"],
+                        "--output_file",
+                        str(path),
                     ]
                     if voice:
                         try:
@@ -350,14 +373,14 @@ class SpeechEngine:
         self,
         text: str,
         *,
-        language: Optional[str],
-        ref_audio: Optional[str],
-        ref_text: Optional[str],
-        instruct: Optional[str],
-        duration: Optional[float],
-        speed: Optional[float],
-        prompt_id: Optional[str],
-        create_prompt_id: Optional[str],
+        language: str | None,
+        ref_audio: str | None,
+        ref_text: str | None,
+        instruct: str | None,
+        duration: float | None,
+        speed: float | None,
+        prompt_id: str | None,
+        create_prompt_id: str | None,
         normalize_text: bool,
         rate: int,
     ) -> dict[str, Any]:
@@ -366,7 +389,7 @@ class SpeechEngine:
             return {"success": False, "backend": "omnivoice", "error": runtime["error"], "status": self.status()}
         model = runtime["model"]
         sf = runtime["soundfile"]
-        VoiceClonePrompt = runtime["VoiceClonePrompt"]
+        voice_clone_prompt_cls = runtime["VoiceClonePrompt"]
 
         loaded_prompt = None
         prompt_meta = None
@@ -376,7 +399,7 @@ class SpeechEngine:
                 return created
             prompt_id = created.get("prompt_id")
         if prompt_id:
-            loaded_prompt, prompt_meta = self._load_clone_prompt(prompt_id, VoiceClonePrompt)
+            loaded_prompt, prompt_meta = self._load_clone_prompt(prompt_id, voice_clone_prompt_cls)
             if loaded_prompt is None:
                 return {"success": False, "backend": "omnivoice", "error": f"clone prompt not found: {prompt_id}"}
 
@@ -503,7 +526,7 @@ class SpeechEngine:
             return None, None
 
     # ---------------------------------------------------------------- general
-    def audio_path(self, audio_id: str) -> Optional[Path]:
+    def audio_path(self, audio_id: str) -> Path | None:
         if not re.fullmatch(r"[a-f0-9]{32}", str(audio_id or "")):
             return None
         path = (self.root / f"{audio_id}.wav").resolve()
@@ -526,7 +549,7 @@ class SpeechEngine:
         return removed
 
     @staticmethod
-    def _resolve_input_file(value: Optional[str]) -> Optional[Path]:
+    def _resolve_input_file(value: str | None) -> Path | None:
         text = str(value or "").strip()
         if not text:
             return None

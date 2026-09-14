@@ -24,29 +24,62 @@ Every extraction reports its ``method`` and a ``note`` when it fell short, so
 the agent (and the user) can tell "extracted the real contents" from
 "couldn't read this format".
 """
+
 from __future__ import annotations
 
-import os
 import re
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # same set the gateway already treats as plain text
 TEXT_UPLOAD_EXTS = {
-    ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx", ".json", ".csv", ".yaml",
-    ".yml", ".html", ".htm", ".css", ".xml", ".log", ".ini", ".cfg", ".toml",
-    ".sh", ".sql", ".rst", ".env", ".c", ".cc", ".cpp", ".h", ".hpp", ".java",
-    ".go", ".rs", ".rb", ".php", ".kt", ".swift", ".vue", ".svelte",
+    ".txt",
+    ".md",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".json",
+    ".csv",
+    ".yaml",
+    ".yml",
+    ".html",
+    ".htm",
+    ".css",
+    ".xml",
+    ".log",
+    ".ini",
+    ".cfg",
+    ".toml",
+    ".sh",
+    ".sql",
+    ".rst",
+    ".env",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".java",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".kt",
+    ".swift",
+    ".vue",
+    ".svelte",
 }
 
 ZIP_TEXT_EXTS = {".docx", ".xlsx", ".pptx", ".odt", ".ods", ".epub", ".odp"}
 ARCHIVE_EXTS = {".zip", ".jar", ".apk", ".whl", ".egg", ".ipa"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
 
-MAX_TEXT_CHARS = 120_000          # per attachment inlined into the prompt
+MAX_TEXT_CHARS = 120_000  # per attachment inlined into the prompt
 MAX_ARCHIVE_ENTRIES = 200
 
 
@@ -55,10 +88,10 @@ class ExtractedDocument:
     filename: str
     content_type: str = ""
     size_bytes: int = 0
-    text: Optional[str] = None          # None = could not extract anything
-    method: str = "none"                # plain | docx | xlsx | pptx | archive | pdf | image | salvage
-    note: Optional[str] = None          # honest limitation, when there is one
-    saved_path: Optional[str] = None    # where binary bytes were persisted for tools
+    text: str | None = None  # None = could not extract anything
+    method: str = "none"  # plain | docx | xlsx | pptx | archive | pdf | image | salvage
+    note: str | None = None  # honest limitation, when there is one
+    saved_path: str | None = None  # where binary bytes were persisted for tools
     truncated: bool = False
 
     @property
@@ -101,9 +134,7 @@ def _looks_binary(sample: bytes) -> bool:
 
 
 # ---------------------------------------------------------------- zip formats
-_XML_TEXT_TAG = re.compile(
-    r"<(?:w:t|a:t|t|text|p)[^>]*>(.*?)</(?:w:t|a:t|t|text|p)>", re.S
-)
+_XML_TEXT_TAG = re.compile(r"<(?:w:t|a:t|t|text|p)[^>]*>(.*?)</(?:w:t|a:t|t|text|p)>", re.S)
 
 
 def _xml_texts(xml: str) -> list[str]:
@@ -112,8 +143,7 @@ def _xml_texts(xml: str) -> list[str]:
         chunk = m.group(1)
         chunk = re.sub(r"<[^>]+>", "", chunk)
         chunk = (
-            chunk.replace("&amp;", "&").replace("&lt;", "<")
-            .replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
+            chunk.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
         )
         if chunk.strip():
             out.append(chunk.strip())
@@ -133,8 +163,11 @@ def _paragraph_texts(xml: str, para_tag: str = "w:p", run_tag: str = "w:t") -> l
         for rm in re.finditer(rf"<{run_tag}[^>]*>(.*?)</{run_tag}>", body, re.S):
             chunk = (
                 rm.group(1)
-                .replace("&amp;", "&").replace("&lt;", "<")
-                .replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", '"')
+                .replace("&apos;", "'")
             )
             if chunk:
                 runs.append(chunk)
@@ -165,10 +198,7 @@ def _extract_docx(zf: zipfile.ZipFile) -> str:
 
 
 def _extract_pptx(zf: zipfile.ZipFile) -> str:
-    slides = sorted(
-        n for n in zf.namelist()
-        if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)
-    )
+    slides = sorted(n for n in zf.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n))
     out = []
     for i, name in enumerate(slides, start=1):
         xml = zf.read(name).decode("utf-8", errors="ignore")
@@ -190,9 +220,7 @@ def _extract_xlsx(zf: zipfile.ZipFile) -> str:
     except KeyError:
         pass
     out = []
-    sheet_names = sorted(
-        n for n in zf.namelist() if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)
-    )
+    sheet_names = sorted(n for n in zf.namelist() if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n))
     for name in sheet_names:
         xml = zf.read(name).decode("utf-8", errors="ignore")
         rows = []
@@ -227,7 +255,7 @@ def _extract_archive_listing(zf: zipfile.ZipFile) -> str:
     return "\n".join(entries)
 
 
-def _extract_zip_family(data: bytes, ext: str) -> tuple[Optional[str], str, Optional[str]]:
+def _extract_zip_family(data: bytes, ext: str) -> tuple[str | None, str, str | None]:
     try:
         zf = zipfile.ZipFile(__import__("io").BytesIO(data))
     except Exception as e:
@@ -256,7 +284,7 @@ def _extract_zip_family(data: bytes, ext: str) -> tuple[Optional[str], str, Opti
 
 
 # ------------------------------------------------------------------------ pdf
-def _extract_pdf(data: bytes) -> tuple[Optional[str], str, Optional[str]]:
+def _extract_pdf(data: bytes) -> tuple[str | None, str, str | None]:
     try:
         from pypdf import PdfReader  # type: ignore
 
@@ -283,9 +311,10 @@ def _extract_pdf(data: bytes) -> tuple[Optional[str], str, Optional[str]]:
         text = _clean("\n".join(c.replace("\\(", "(").replace("\\)", ")") for c in chunks))
         if text:
             capped, truncated = _cap(text)
-            return capped, "pdf", (
-                "naive extraction (install pypdf for reliable PDF text)"
-                + ("; truncated" if truncated else "")
+            return (
+                capped,
+                "pdf",
+                ("naive extraction (install pypdf for reliable PDF text)" + ("; truncated" if truncated else "")),
             )
         return None, "pdf", "PDF text not extractable without pypdf (pip install pypdf)"
     except Exception as e:
@@ -293,7 +322,7 @@ def _extract_pdf(data: bytes) -> tuple[Optional[str], str, Optional[str]]:
 
 
 # ---------------------------------------------------------------------- image
-def _extract_image(data: bytes, filename: str) -> tuple[Optional[str], str, Optional[str]]:
+def _extract_image(data: bytes, filename: str) -> tuple[str | None, str, str | None]:
     meta: list[str] = []
     try:
         from PIL import Image  # type: ignore
@@ -303,13 +332,12 @@ def _extract_image(data: bytes, filename: str) -> tuple[Optional[str], str, Opti
     except Exception:
         meta.append("image (metadata unavailable)")
     note = (
-        "image bytes saved to workspace uploads; the model needs a vision/"
-        "OCR tool or multimodal model to see the actual pixels"
+        "image bytes saved to workspace uploads; the model needs a vision/OCR tool or multimodal model to see the actual pixels"
     )
     return "; ".join(meta), "image", note
 
 
-def _salvage_text(data: bytes) -> Optional[str]:
+def _salvage_text(data: bytes) -> str | None:
     """Printable-run salvage for unknown binary formats (never fabricated)."""
     try:
         text = data.decode("utf-8", errors="ignore")
@@ -327,7 +355,7 @@ def extract_document(
     data: bytes,
     content_type: str = "",
     *,
-    save_binary_to: Optional[Path] = None,
+    save_binary_to: Path | None = None,
 ) -> ExtractedDocument:
     """Extract usable text from an uploaded file, honestly.
 

@@ -1,5 +1,6 @@
 """Talking Mode endpoints: dashboard status aggregate, local TTS synthesize/
 audio/transcribe, and the dashboard lifecycle WebSocket."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,9 +10,8 @@ from datetime import datetime
 from fastapi import APIRouter, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 
-from core.config import config
 from core.task_tracker import task_tracker
-from gateway.context import AGENTS, _token_matches
+from gateway.context import AGENTS, ws_token_ok
 
 try:
     from gateway.channels import get_channel_status
@@ -64,7 +64,7 @@ async def speech_transcription_status():
     The dashboard's Voice panel shows this so a user on an Intel NPU box can
     see that transcription runs cool on the NPU while the GPU stays free.
     """
-    from tools.voice import local_engine_status, FASTER_WHISPER_AVAILABLE, voice_available_models
+    from tools.voice import FASTER_WHISPER_AVAILABLE, local_engine_status, voice_available_models
 
     engine = local_engine_status()
     catalog = voice_available_models()
@@ -127,7 +127,8 @@ async def speech_synthesize(payload: dict):
         from core.presence import get_presence
 
         get_presence().record_moment(
-            "speech_generated", "Generated a local spoken response",
+            "speech_generated",
+            "Generated a local spoken response",
             session_id=str(payload.get("session_id") or ""),
             user_id=str(payload.get("user_id") or "default"),
             metadata={"backend": result.get("backend"), "audio_id": result.get("audio_id")},
@@ -135,16 +136,19 @@ async def speech_synthesize(payload: dict):
         )
     except Exception:
         pass
-    dashboard_event_bus.publish("speech_ready", {
-        "audio_url": result["audio_url"],
-        "audio_id": result["audio_id"],
-        "backend": result.get("backend"),
-        "estimated_duration": result.get("estimated_duration"),
-        "session_id": payload.get("session_id"),
-        "prompt_id": result.get("prompt_id"),
-        "voice_clone": result.get("voice_clone"),
-        "voice_design": result.get("voice_design"),
-    })
+    dashboard_event_bus.publish(
+        "speech_ready",
+        {
+            "audio_url": result["audio_url"],
+            "audio_id": result["audio_id"],
+            "backend": result.get("backend"),
+            "estimated_duration": result.get("estimated_duration"),
+            "session_id": payload.get("session_id"),
+            "prompt_id": result.get("prompt_id"),
+            "voice_clone": result.get("voice_clone"),
+            "voice_design": result.get("voice_design"),
+        },
+    )
     return result
 
 
@@ -157,7 +161,9 @@ async def speech_audio(audio_id: str):
     if path is None:
         return JSONResponse({"success": False, "error": "audio not found"}, status_code=404)
     return FileResponse(
-        str(path), media_type="audio/wav", filename=f"hermus-{audio_id[:8]}.wav",
+        str(path),
+        media_type="audio/wav",
+        filename=f"hermus-{audio_id[:8]}.wav",
         headers={"Cache-Control": "private, max-age=3600"},
     )
 
@@ -191,8 +197,12 @@ async def speech_transcribe(
         return JSONResponse({"success": False, "error": "audio exceeds 25 MB limit"}, status_code=413)
     content_type = (request.headers.get("content-type") or "audio/webm").split(";", 1)[0].lower()
     suffix = {
-        "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/wav": ".wav",
-        "audio/x-wav": ".wav", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+        "audio/webm": ".webm",
+        "audio/ogg": ".ogg",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/mpeg": ".mp3",
+        "audio/mp4": ".m4a",
     }.get(content_type, ".webm")
     input_dir = speech_root() / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -217,11 +227,14 @@ async def speech_transcribe(
             pass
     if result.get("success"):
         result.pop("audio_path", None)
-        dashboard_event_bus.publish("user_transcript", {
-            "text": result.get("text", ""),
-            "session_id": session_id,
-            "remembered": bool((result.get("memory") or {}).get("remembered")),
-        })
+        dashboard_event_bus.publish(
+            "user_transcript",
+            {
+                "text": result.get("text", ""),
+                "session_id": session_id,
+                "remembered": bool((result.get("memory") or {}).get("remembered")),
+            },
+        )
         return result
     return JSONResponse(result, status_code=503)
 
@@ -253,18 +266,22 @@ async def speech_avatar_prepare_voice(payload: dict):
             from core.presence import get_presence
 
             get_presence().record_moment(
-                "avatar_voice_prepared", "Prepared an optional talking-avatar voice profile",
+                "avatar_voice_prepared",
+                "Prepared an optional talking-avatar voice profile",
                 user_id=str(payload.get("user_id") or "default"),
                 metadata={"voice_profile_id": profile.get("voice_profile_id"), "lang": profile.get("lang")},
                 emit=False,
             )
         except Exception:
             pass
-        dashboard_event_bus.publish("avatar_voice_prepared", {
-            "voice_profile_id": profile.get("voice_profile_id"),
-            "lang": profile.get("lang"),
-            "reference_audio": profile.get("reference_audio"),
-        })
+        dashboard_event_bus.publish(
+            "avatar_voice_prepared",
+            {
+                "voice_profile_id": profile.get("voice_profile_id"),
+                "lang": profile.get("lang"),
+                "reference_audio": profile.get("reference_audio"),
+            },
+        )
         return result
     return JSONResponse(result, status_code=503)
 
@@ -291,18 +308,22 @@ async def speech_avatar_render(payload: dict):
             from core.presence import get_presence
 
             get_presence().record_moment(
-                "avatar_render_submitted", "Submitted an optional talking-avatar render",
+                "avatar_render_submitted",
+                "Submitted an optional talking-avatar render",
                 user_id=str(payload.get("user_id") or "default"),
                 metadata={"code": result.get("code"), "backend": result.get("backend")},
                 emit=False,
             )
         except Exception:
             pass
-        dashboard_event_bus.publish("avatar_render_submitted", {
-            "code": result.get("code"),
-            "backend": result.get("backend"),
-            "voice_profile_id": (result.get("audio") or {}).get("voice_profile_id"),
-        })
+        dashboard_event_bus.publish(
+            "avatar_render_submitted",
+            {
+                "code": result.get("code"),
+                "backend": result.get("backend"),
+                "voice_profile_id": (result.get("audio") or {}).get("voice_profile_id"),
+            },
+        )
         return result
     return JSONResponse(result, status_code=503)
 
@@ -323,9 +344,7 @@ async def dashboard_events_ws(websocket: WebSocket):
     """Live chat/speech lifecycle stream used by fullscreen Talking Mode."""
     from core.dashboard_events import dashboard_event_bus
 
-    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
-    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
-    if expected and not _token_matches(provided, expected):
+    if not ws_token_ok(websocket):
         await websocket.close(code=1008, reason="Unauthorized")
         return
 
@@ -341,6 +360,7 @@ async def dashboard_events_ws(websocket: WebSocket):
                 except asyncio.QueueEmpty:
                     pass
             queue.put_nowait(event)
+
         loop.call_soon_threadsafe(put)
 
     unsubscribe = dashboard_event_bus.subscribe(enqueue)
@@ -363,4 +383,3 @@ async def dashboard_events_ws(websocket: WebSocket):
 
 
 # -- Plugin / MCP ecosystem (Phase D) -----------------------------------------
-

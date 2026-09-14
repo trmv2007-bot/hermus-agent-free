@@ -1,9 +1,9 @@
 """Unit tests for the Unified Mission Autonomous Loop, Behavioral Verification, and Git Transactions."""
+
 from __future__ import annotations
 
 import os
 import time
-
 
 from core.artifact_manager import ArtifactManager
 from core.critic import CriticVerdict, critic_manager
@@ -62,24 +62,28 @@ def test_structural_vs_behavioral_verification(tmp_path):
     pv = PythonVerifier()
 
     # Case 1: Structurally valid, but behavioral runtime output contains unhandled exception
-    res_failed_behavior = pv.verify({
-        "task": "Test calc",
-        "workspace_dir": str(tmp_path),
-        "files_modified": [str(py_file)],
-        "output": "Traceback (most recent call last):\n  File 'test.py', line 2\nAssertionError: add(1, 1) != 3",
-    })
+    res_failed_behavior = pv.verify(
+        {
+            "task": "Test calc",
+            "workspace_dir": str(tmp_path),
+            "files_modified": [str(py_file)],
+            "output": "Traceback (most recent call last):\n  File 'test.py', line 2\nAssertionError: add(1, 1) != 3",
+        }
+    )
 
     assert res_failed_behavior.structural_verified is True
     assert res_failed_behavior.behavioral_verified is False
     assert res_failed_behavior.verified is False
 
     # Case 2: Both structural and behavioral pass
-    res_clean = pv.verify({
-        "task": "Test calc",
-        "workspace_dir": str(tmp_path),
-        "files_modified": [str(py_file)],
-        "output": "1 passed in 0.01s",
-    })
+    res_clean = pv.verify(
+        {
+            "task": "Test calc",
+            "workspace_dir": str(tmp_path),
+            "files_modified": [str(py_file)],
+            "output": "1 passed in 0.01s",
+        }
+    )
     assert res_clean.structural_verified is True
     assert res_clean.behavioral_verified is True
     assert res_clean.verified is True
@@ -131,6 +135,7 @@ def test_git_transaction_state_transitions(tmp_path):
     """Verify Git transaction state machine: CREATED -> ACTIVE -> COMMITTING -> MERGING -> COMMITTED."""
     # Initialize a dummy git repo in tmp_path
     import subprocess
+
     subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "test"], cwd=str(tmp_path), check=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(tmp_path), check=True)

@@ -1,10 +1,12 @@
 """Browser Automation Playwright Free - No API key, free"""
+
 from pathlib import Path
 
 # Playwright optional - free, no API key
 PLAYWRIGHT_AVAILABLE = False
 try:
     from playwright.sync_api import sync_playwright
+
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -14,11 +16,12 @@ _browser = None
 _playwright = None
 _page = None
 
+
 def _ensure_browser():
     global _browser, _playwright, _page
     if not PLAYWRIGHT_AVAILABLE:
         return None, "Playwright not installed. Install free: pip install playwright && playwright install chromium"
-    
+
     if _browser is None:
         try:
             _playwright = sync_playwright().start()
@@ -27,8 +30,9 @@ def _ensure_browser():
             _page = context.new_page()
         except Exception as e:
             return None, f"Failed to launch browser: {e}. Try: playwright install chromium"
-    
+
     return _page, None
+
 
 def browser_navigate(url: str) -> dict:
     """Navigate to URL - free"""
@@ -41,6 +45,7 @@ def browser_navigate(url: str) -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 def browser_click(selector: str) -> dict:
     """Click element by selector - free"""
     page, err = _ensure_browser()
@@ -52,6 +57,7 @@ def browser_click(selector: str) -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 def browser_type(selector: str, text: str) -> dict:
     """Type text into element - free"""
     page, err = _ensure_browser()
@@ -62,6 +68,7 @@ def browser_type(selector: str, text: str) -> dict:
         return {"success": True, "selector": selector, "text": text[:100]}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def browser_screenshot(path: str = "screenshot.png", full_page: bool = False) -> dict:
     """Screenshot - free"""
@@ -75,6 +82,7 @@ def browser_screenshot(path: str = "screenshot.png", full_page: bool = False) ->
         return {"success": True, "path": str(p), "full_page": full_page}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def browser_extract(selector: str = "body") -> dict:
     """Extract text/HTML from selector - free"""
@@ -96,6 +104,7 @@ def browser_extract(selector: str = "body") -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 def browser_close() -> dict:
     """Close browser - free"""
     global _browser, _playwright, _page
@@ -111,6 +120,7 @@ def browser_close() -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 # Tool definitions for free LLM
 TOOLS = [
     {
@@ -118,48 +128,67 @@ TOOLS = [
         "function": {
             "name": "browser_navigate",
             "description": "Navigate browser to URL - free Playwright, no API key, for web automation, page extraction",
-            "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "URL to navigate"}}, "required": ["url"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "URL to navigate"}},
+                "required": ["url"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "browser_click",
             "description": "Click element by CSS selector in browser - free",
-            "parameters": {"type": "object", "properties": {"selector": {"type": "string", "description": "CSS selector"}}, "required": ["selector"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"selector": {"type": "string", "description": "CSS selector"}},
+                "required": ["selector"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "browser_type",
             "description": "Type text into element - free browser automation",
-            "parameters": {"type": "object", "properties": {"selector": {"type": "string"}, "text": {"type": "string"}}, "required": ["selector", "text"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"selector": {"type": "string"}, "text": {"type": "string"}},
+                "required": ["selector", "text"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "browser_screenshot",
             "description": "Take screenshot of current page - free, saves to path",
-            "parameters": {"type": "object", "properties": {"path": {"type": "string", "default": "screenshot.png"}, "full_page": {"type": "boolean", "default": False}}, "required": []}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "default": "screenshot.png"},
+                    "full_page": {"type": "boolean", "default": False},
+                },
+                "required": [],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "browser_extract",
             "description": "Extract text and HTML from selector - free for page extraction, scraping",
-            "parameters": {"type": "object", "properties": {"selector": {"type": "string", "default": "body"}}, "required": []}
-        }
+            "parameters": {"type": "object", "properties": {"selector": {"type": "string", "default": "body"}}, "required": []},
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "browser_close",
             "description": "Close browser - free",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     },
 ]
 

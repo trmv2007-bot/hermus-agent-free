@@ -5,12 +5,13 @@ pending approvals, active grants, blocked missions, recent policy/safety events,
 capability discoveries, and emergency-stop state/history. It is read/reporting
 only; generating a report never grants or activates a power.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .contracts import CommandStatus, EventEnvelope, EventType
 
@@ -18,7 +19,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_DIR = ROOT / "docs" / "safety_reports"
 
 SAFETY_COMMAND_PREFIXES = (
-    "permission.", "capability.", "emergency.stop", "mission_", "mission.", "safety.",
+    "permission.",
+    "capability.",
+    "emergency.stop",
+    "mission_",
+    "mission.",
+    "safety.",
 )
 SAFETY_EVENT_TYPES = {"permission.checked", "state.changed", "command.failed"}
 SAFETY_ERROR_CODES = {"APPROVAL_REQUIRED", "POLICY_DENIED", "PERMISSION_DENIED"}
@@ -30,9 +36,17 @@ def is_safety_event(event: dict[str, Any]) -> bool:
     args = event.get("args_redacted") if isinstance(event.get("args_redacted"), dict) else {}
     if command.startswith(SAFETY_COMMAND_PREFIXES):
         return True
-    if event_type in SAFETY_EVENT_TYPES and any(k in args for k in (
-        "safety", "approval_request", "emergency_stop", "red_lines", "permission", "proposal",
-    )):
+    if event_type in SAFETY_EVENT_TYPES and any(
+        k in args
+        for k in (
+            "safety",
+            "approval_request",
+            "emergency_stop",
+            "red_lines",
+            "permission",
+            "proposal",
+        )
+    ):
         return True
     if event.get("error_code") in SAFETY_ERROR_CODES:
         return True
@@ -154,7 +168,7 @@ def generate_safety_report(*, event_limit: int = 80) -> SafetyReport:
     )
 
 
-def write_safety_report(report: Optional[SafetyReport] = None, *, output: Optional[Path] = None) -> dict[str, Any]:
+def write_safety_report(report: SafetyReport | None = None, *, output: Path | None = None) -> dict[str, Any]:
     report = report or generate_safety_report()
     path = Path(output) if output is not None else DEFAULT_REPORT_DIR / f"autonomy-safety-report-{_stamp()}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,12 +254,14 @@ def _publish_report_event(path: str, report: SafetyReport) -> None:
     try:
         from .events import get_bus
 
-        get_bus().publish(EventEnvelope(
-            type=EventType.STATE_CHANGED.value,
-            command="safety.report.written",
-            args_redacted={"path": path, "summary": report.summary()},
-            status=CommandStatus.SUCCEEDED.value,
-        ))
+        get_bus().publish(
+            EventEnvelope(
+                type=EventType.STATE_CHANGED.value,
+                command="safety.report.written",
+                args_redacted={"path": path, "summary": report.summary()},
+                status=CommandStatus.SUCCEEDED.value,
+            )
+        )
     except Exception:
         pass
 

@@ -4,9 +4,10 @@ Inputs may contain legacy PIL images or the recorder's compressed JPEG records.
 Images are decoded lazily and downscaled before comparison, keeping the hot
 change-detection path inexpensive.
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from .recorder import decode_frame
 
@@ -48,20 +49,22 @@ class FrameSampler:
     def detect_changes(self, frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Mark frames that differ from the previous frame beyond threshold."""
         events: list[dict[str, Any]] = []
-        prev: Optional[dict[str, Any]] = None
+        prev: dict[str, Any] | None = None
         for index, frame in enumerate(frames):
             if prev is None:
                 prev = frame
                 continue
             diff = _image_diff(prev, frame)
             if diff >= self.threshold:
-                events.append({
-                    **frame,
-                    "change_score": round(diff, 4),
-                    "type": "change",
-                    "frame_index": index,
-                    "before_index": index - 1,
-                })
+                events.append(
+                    {
+                        **frame,
+                        "change_score": round(diff, 4),
+                        "type": "change",
+                        "frame_index": index,
+                        "before_index": index - 1,
+                    }
+                )
             prev = frame
         return events
 
@@ -74,7 +77,7 @@ class FrameSampler:
         """Pick frames with the largest changes, optionally restoring time order."""
         events = self.detect_changes(frames)
         events.sort(key=lambda event: event.get("change_score", 0.0), reverse=True)
-        selected = events[:max(0, int(max_frames))]
+        selected = events[: max(0, int(max_frames))]
         if chronological:
             selected.sort(key=lambda event: event.get("frame_index", 0))
         return selected
@@ -83,7 +86,7 @@ class FrameSampler:
         self,
         frames: list[dict[str, Any]],
         event_index: int,
-    ) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+    ) -> tuple[Any | None, Any | None, Any | None]:
         """Return decoded ``(before, event, after)`` around a frame index."""
         if not frames or event_index < 0 or event_index >= len(frames):
             return None, None, None

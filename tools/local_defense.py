@@ -1,4 +1,5 @@
 """Local defensive scanning tools."""
+
 from __future__ import annotations
 
 from core.local_defense_scanner import scan_folder

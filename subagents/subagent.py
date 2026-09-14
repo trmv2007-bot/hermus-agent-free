@@ -13,13 +13,14 @@ Kept for backward compatibility:
 New: ``delegate(goal, tasks=…)`` for plan→fan-out→aggregate, plus
 ``subagent_status()`` / ``cancel_subagent()``.
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
 import uuid
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 # Canonical job kinds for delegation on the JobQueue.
 DELEGATE_JOB = "subagent.delegate"
@@ -63,7 +64,7 @@ def submit_and_wait(
     timeout: float = 300.0,
     run_id: str = "",
     job_id: str = "",
-    register: Optional[Callable[[Any], None]] = None,
+    register: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
     """Submit a canonical Job and block until it is terminal (or times out).
 
@@ -79,7 +80,7 @@ def submit_and_wait(
     cancellation, persistence, restart recovery) is owned by the canonical queue,
     not by the delegation module.
     """
-    from gateway.queue import job_queue, STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED
+    from gateway.queue import STATUS_CANCELLED, STATUS_DONE, STATUS_FAILED, job_queue
 
     q = job_queue
     if register is not None:
@@ -103,17 +104,16 @@ def submit_and_wait(
             pass
     if getattr(q, "_started", False) and getattr(q, "_loop", None) is not None and not q._loop.is_closed():
         loop = q._loop
-        job = asyncio.run_coroutine_threadsafe(
-            _submit_job(q, kind, payload, session_key, run_id, job_id), loop
-        ).result(timeout=max(10.0, float(timeout)))
+        job = asyncio.run_coroutine_threadsafe(_submit_job(q, kind, payload, session_key, run_id, job_id), loop).result(
+            timeout=max(10.0, float(timeout))
+        )
         deadline = time.monotonic() + max(1.0, float(timeout))
         while time.monotonic() <= deadline:
             st = asyncio.run_coroutine_threadsafe(_job_status(q, job.id), loop).result()
             if st.get("status") in (STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED):
                 return st
             time.sleep(0.05)
-        return {**q.status(job.id), "found": True, "status": "timeout",
-                "error": f"job did not finish within {timeout:g}s"}
+        return {**q.status(job.id), "found": True, "status": "timeout", "error": f"job did not finish within {timeout:g}s"}
 
     async def _drive() -> dict[str, Any]:
         await q.start()
@@ -127,15 +127,13 @@ def submit_and_wait(
             await asyncio.sleep(0.05)
         await q.stop()
         if st.get("status") not in (STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED):
-            st = {**st, "found": True, "status": "timeout",
-                  "error": f"job did not finish within {timeout:g}s"}
+            st = {**st, "found": True, "status": "timeout", "error": f"job did not finish within {timeout:g}s"}
         return st
 
     return asyncio.run(_drive())
 
 
-def _delegate_result_to_task_result(node: dict[str, Any], *, subagent_id: str,
-                                    task: str, started: float) -> dict[str, Any]:
+def _delegate_result_to_task_result(node: dict[str, Any], *, subagent_id: str, task: str, started: float) -> dict[str, Any]:
     """Adapt a delegation node into the legacy ``spawn_subagent`` return shape.
 
     ``out["nodes"]`` carries the node's ``to_dict()`` projection (answer/evidence/
@@ -160,9 +158,13 @@ def _delegate_result_to_task_result(node: dict[str, Any], *, subagent_id: str,
         "backend": node.get("backend") or "queue",
         "pid": node.get("pid") or 0,
         "duration_ms": int((time.time() - started) * 1000),
-        "tree": {"status": node.get("status"), "children": 1,
-                 "succeeded": 1 if success else 0, "failed": 0 if success else 1,
-                 "duration_ms": int((time.time() - started) * 1000)},
+        "tree": {
+            "status": node.get("status"),
+            "children": 1,
+            "succeeded": 1 if success else 0,
+            "failed": 0 if success else 1,
+            "duration_ms": int((time.time() - started) * 1000),
+        },
     }
 
 
@@ -171,8 +173,8 @@ def spawn_subagent(
     *,
     model: str = "",
     max_steps: int = 4,
-    timeout: Optional[float] = None,
-    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+    timeout: float | None = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Spawn one isolated sub-agent through the canonical JobQueue.
 
@@ -183,26 +185,29 @@ def spawn_subagent(
     """
     subagent_id = f"sub_{uuid.uuid4().hex[:6]}"
     if not str(task or "").strip():
-        return {"subagent_id": subagent_id, "task": task,
-                "error": "task required", "success": False}
+        return {"subagent_id": subagent_id, "task": task, "error": "task required", "success": False}
     started = time.time()
     try:
         st = submit_and_wait(
             DELEGATE_JOB,
-            {"tasks": [str(task)], "goal": str(task)[:120], "depth": 1,
-             "max_children": 1, "aggregate": "concat", "model": model,
-             "max_steps": int(max_steps)},
+            {
+                "tasks": [str(task)],
+                "goal": str(task)[:120],
+                "depth": 1,
+                "max_children": 1,
+                "aggregate": "concat",
+                "model": model,
+                "max_steps": int(max_steps),
+            },
             session_key=f"delegate:{subagent_id}",
             timeout=float(timeout) if timeout else 300.0,
             register=_register_delegate_handler,
         )
         if st.get("status") == "failed":
-            return {"subagent_id": subagent_id, "task": task,
-                    "error": st.get("error") or "subagent job failed", "success": False}
+            return {"subagent_id": subagent_id, "task": task, "error": st.get("error") or "subagent job failed", "success": False}
         result = st.get("result") or {}
         node = (result.get("nodes") or [{}])[0]
-        return _delegate_result_to_task_result(node, subagent_id=subagent_id,
-                                               task=str(task), started=started)
+        return _delegate_result_to_task_result(node, subagent_id=subagent_id, task=str(task), started=started)
     except Exception as e:
         return {"subagent_id": subagent_id, "task": task, "error": str(e), "success": False}
 
@@ -212,9 +217,9 @@ def spawn_parallel_subagents(
     *,
     model: str = "",
     max_steps: int = 4,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     aggregate: str = "concat",
-    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Spawn many sub-agents in parallel — one canonical delegate job each step."""
     tasks = [str(t) for t in (tasks or []) if str(t).strip()]
@@ -223,42 +228,51 @@ def spawn_parallel_subagents(
     try:
         st = submit_and_wait(
             DELEGATE_JOB,
-            {"tasks": tasks, "goal": "", "depth": 1, "max_children": len(tasks),
-             "aggregate": aggregate, "model": model, "max_steps": int(max_steps)},
+            {
+                "tasks": tasks,
+                "goal": "",
+                "depth": 1,
+                "max_children": len(tasks),
+                "aggregate": aggregate,
+                "model": model,
+                "max_steps": int(max_steps),
+            },
             session_key=f"delegate:{uuid.uuid4().hex[:6]}",
             timeout=float(timeout) if timeout else 300.0,
             register=_register_delegate_handler,
         )
         if st.get("status") == "failed":
-            return [{"subagent_id": f"sub_{i}", "task": t,
-                     "error": st.get("error") or "subagent job failed", "success": False}
-                    for i, t in enumerate(tasks)]
+            return [
+                {"subagent_id": f"sub_{i}", "task": t, "error": st.get("error") or "subagent job failed", "success": False}
+                for i, t in enumerate(tasks)
+            ]
         results: list[dict[str, Any]] = []
         for node in (st.get("result") or {}).get("nodes") or []:
-            results.append({
-                "subagent_id": node.get("id"),
-                "task": node.get("task"),
-                "result": node.get("result") or {},
-                "response": (node.get("result") or {}).get("answer", ""),
-                "success": node.get("status") == "done",
-                "error": node.get("error") or "",
-                "backend": node.get("backend"),
-                "pid": node.get("pid"),
-            })
+            results.append(
+                {
+                    "subagent_id": node.get("id"),
+                    "task": node.get("task"),
+                    "result": node.get("result") or {},
+                    "response": (node.get("result") or {}).get("answer", ""),
+                    "success": node.get("status") == "done",
+                    "error": node.get("error") or "",
+                    "backend": node.get("backend"),
+                    "pid": node.get("pid"),
+                }
+            )
         return results
     except Exception as e:
-        return [{"subagent_id": f"sub_{i}", "task": t, "error": str(e), "success": False}
-                for i, t in enumerate(tasks)]
+        return [{"subagent_id": f"sub_{i}", "task": t, "error": str(e), "success": False} for i, t in enumerate(tasks)]
 
 
 def delegate(
     goal: str,
-    tasks: Optional[list[str]] = None,
+    tasks: list[str] | None = None,
     *,
     model: str = "",
     max_children: int = 4,
     aggregate: str = "synthesize",
-    on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Plan the work (unless ``tasks`` given), run it in parallel, return one answer.
 
@@ -266,17 +280,19 @@ def delegate(
     so the whole delegation inherits the JobQueue lifecycle (retry/timeout/cancel/
     persistence), and is traceable by the parent mission/run via correlation IDs.
     """
-    payload: dict[str, Any] = {"goal": str(goal), "max_children": int(max_children),
-                               "aggregate": aggregate, "model": model}
+    payload: dict[str, Any] = {"goal": str(goal), "max_children": int(max_children), "aggregate": aggregate, "model": model}
     if tasks:
         payload["tasks"] = [str(t) for t in tasks]
     try:
-        st = submit_and_wait(DELEGATE_JOB, payload,
-                             session_key=f"delegate:{uuid.uuid4().hex[:6]}",
-                             timeout=300.0, register=_register_delegate_handler)
+        st = submit_and_wait(
+            DELEGATE_JOB,
+            payload,
+            session_key=f"delegate:{uuid.uuid4().hex[:6]}",
+            timeout=300.0,
+            register=_register_delegate_handler,
+        )
         if st.get("status") == "failed":
-            return {"ok": False, "error": st.get("error") or "delegate job failed",
-                    "status": "failed", "nodes": []}
+            return {"ok": False, "error": st.get("error") or "delegate job failed", "status": "failed", "nodes": []}
         return st.get("result") or {"ok": False, "error": "no result", "nodes": []}
     except Exception as e:
         return {"ok": False, "error": str(e), "status": "failed", "nodes": []}
@@ -298,11 +314,10 @@ def write_python_tool_via_rpc(tool_name: str, steps: list[str]) -> dict:
     """
     from pathlib import Path
 
-    from core.skill_forge import SkillForge, DistilledStep
+    from core.skill_forge import DistilledStep, SkillForge
 
     code_steps = [
-        DistilledStep(index=i + 1, tool=str(s).split("(")[0].strip() or "shell_execute",
-                      args={"step": i + 1}, intent=str(s))
+        DistilledStep(index=i + 1, tool=str(s).split("(")[0].strip() or "shell_execute", args={"step": i + 1}, intent=str(s))
         for i, s in enumerate(steps or [])
     ]
     cand = None
@@ -311,21 +326,30 @@ def write_python_tool_via_rpc(tool_name: str, steps: list[str]) -> dict:
         from core.skill_forge import SkillCandidate
 
         cand = SkillCandidate(
-            name=str(tool_name), title=str(tool_name).replace("_", " ").capitalize(),
+            name=str(tool_name),
+            title=str(tool_name).replace("_", " ").capitalize(),
             description=f"RPC-collapsed pipeline: {', '.join(str(s) for s in steps)[:200]}",
-            goal=str(tool_name), steps=code_steps,
+            goal=str(tool_name),
+            steps=code_steps,
             when_to_use="Use when the same multi-step tool pipeline is needed again.",
-            inputs=["task", "query"], tags=["rpc", "auto"],
+            inputs=["task", "query"],
+            tags=["rpc", "auto"],
             verification="All steps report success and the final step returns a non-empty result.",
-            provenance={"created": time.strftime("%Y-%m-%dT%H:%M:%S"), "generator": "write_python_tool_via_rpc",
-                        "hash": uuid.uuid4().hex[:12], "evaluation": {}},
+            provenance={
+                "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "generator": "write_python_tool_via_rpc",
+                "hash": uuid.uuid4().hex[:12],
+                "evaluation": {},
+            },
         )
         res = forge.install(cand)
         if res.get("installed"):
-            return {**res, "tool_name": cand.name,
-                    "path": str(Path(forge.skills_dir) / cand.name),
-                    "code": f"# {len(code_steps)} steps collapsed into one RPC-driven skill"}
-        return {"success": False, "error": res.get("report", {}).get("error") or "validation failed",
-                "detail": res}
+            return {
+                **res,
+                "tool_name": cand.name,
+                "path": str(Path(forge.skills_dir) / cand.name),
+                "code": f"# {len(code_steps)} steps collapsed into one RPC-driven skill",
+            }
+        return {"success": False, "error": res.get("report", {}).get("error") or "validation failed", "detail": res}
     except Exception as e:
         return {"success": False, "error": str(e)}

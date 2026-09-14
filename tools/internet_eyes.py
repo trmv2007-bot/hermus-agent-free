@@ -16,14 +16,14 @@ Supported platforms:
 All free, zero API fees, no paid API keys needed for core (except optional free tiers)
 """
 
-import requests
-from pathlib import Path
-from typing import Optional
 import subprocess
-import sqlite3
 import time
+from pathlib import Path
+
+import requests
 
 _WEB_CACHE_DB = None
+
 
 def _get_web_cache_db():
     global _WEB_CACHE_DB
@@ -47,7 +47,8 @@ def _get_web_cache_db():
             """)
     return _WEB_CACHE_DB
 
-def _get_cached_web_read(url: str, ttl_seconds: int = 43200) -> Optional[dict]:
+
+def _get_cached_web_read(url: str, ttl_seconds: int = 43200) -> dict | None:
     try:
         db = _get_web_cache_db()
         with db:
@@ -63,11 +64,12 @@ def _get_cached_web_read(url: str, ttl_seconds: int = 43200) -> Optional[dict]:
                         "content": content,
                         "content_length": content_length,
                         "cached": True,
-                        "note": "Returned from local persistent cache"
+                        "note": "Returned from local persistent cache",
                     }
     except Exception:
         pass
     return None
+
 
 def _set_cached_web_read(url: str, content: str, method: str) -> None:
     try:
@@ -75,10 +77,11 @@ def _set_cached_web_read(url: str, content: str, method: str) -> None:
         with db:
             db.execute(
                 "INSERT OR REPLACE INTO web_cache (url, content, content_length, method, created_at) VALUES (?, ?, ?, ?, ?)",
-                (url, content, len(content), method, time.time())
+                (url, content, len(content), method, time.time()),
             )
     except Exception:
         pass
+
 
 def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> dict:
     """Read any webpage through the canonical WebGateway (Scrapling-backed).
@@ -134,32 +137,37 @@ def web_read(url: str, use_jina: bool = True, use_cache: bool = True) -> dict:
 
     return result
 
+
 def rss_read(rss_url: str) -> dict:
     """Read any RSS/Atom feed - free via feedparser"""
     try:
         import feedparser
+
         feed = feedparser.parse(rss_url)
         entries = []
         for entry in feed.entries[:10]:
-            entries.append({
-                "title": entry.get("title",""),
-                "link": entry.get("link",""),
-                "published": entry.get("published",""),
-                "summary": entry.get("summary","")[:500]
-            })
+            entries.append(
+                {
+                    "title": entry.get("title", ""),
+                    "link": entry.get("link", ""),
+                    "published": entry.get("published", ""),
+                    "summary": entry.get("summary", "")[:500],
+                }
+            )
         return {
             "success": True,
             "rss_url": rss_url,
-            "feed_title": feed.feed.get("title",""),
+            "feed_title": feed.feed.get("title", ""),
             "entries": entries,
             "count": len(entries),
-            "method": "feedparser_free_no_config"
+            "method": "feedparser_free_no_config",
         }
     except ImportError:
         # Fallback via Jina
         return web_read(rss_url, use_jina=True)
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def youtube_transcript(video_url: str) -> dict:
     """YouTube subtitle extraction + video details - free via yt-dlp, no config needed for public videos"""
@@ -171,7 +179,16 @@ def youtube_transcript(video_url: str) -> dict:
             raise FileNotFoundError("yt-dlp not found")
 
         # Extract info without downloading
-        cmd = ["yt-dlp", "--skip-download", "--write-auto-sub", "--sub-lang", "en", "--print", "%(title)s|%(description)s|%(duration)s|%(uploader)s", video_url]
+        cmd = [
+            "yt-dlp",
+            "--skip-download",
+            "--write-auto-sub",
+            "--sub-lang",
+            "en",
+            "--print",
+            "%(title)s|%(description)s|%(duration)s|%(uploader)s",
+            video_url,
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             parts = result.stdout.strip().split("|")
@@ -183,7 +200,7 @@ def youtube_transcript(video_url: str) -> dict:
                 "title": title,
                 "description": description[:2000],
                 "method": "yt-dlp_free_no_config",
-                "note": "Free via yt-dlp, no API key, for public YouTube videos"
+                "note": "Free via yt-dlp, no API key, for public YouTube videos",
             }
 
         # Fallback to Jina reading YouTube page
@@ -197,18 +214,32 @@ def youtube_transcript(video_url: str) -> dict:
     except Exception as e:
         return {"success": False, "url": video_url, "error": str(e), "fallback": web_read(video_url, use_jina=True)}
 
+
 def youtube_search(query: str, max_results: int = 5) -> dict:
     """YouTube video search - free via yt-dlp search or DuckDuckGo"""
     try:
         # yt-dlp search: ytsearch5:query
-        cmd = ["yt-dlp", f"ytsearch{max_results}:{query}", "--skip-download", "--print", "%(title)s|%(webpage_url)s|%(duration)s", "--no-warnings"]
+        cmd = [
+            "yt-dlp",
+            f"ytsearch{max_results}:{query}",
+            "--skip-download",
+            "--print",
+            "%(title)s|%(webpage_url)s|%(duration)s",
+            "--no-warnings",
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         if result.returncode == 0:
             videos = []
             for line in result.stdout.strip().split("\n"):
                 if "|" in line:
                     parts = line.split("|")
-                    videos.append({"title": parts[0], "url": parts[1] if len(parts)>1 else "", "duration": parts[2] if len(parts)>2 else ""})
+                    videos.append(
+                        {
+                            "title": parts[0],
+                            "url": parts[1] if len(parts) > 1 else "",
+                            "duration": parts[2] if len(parts) > 2 else "",
+                        }
+                    )
             return {"success": True, "query": query, "videos": videos, "method": "yt-dlp_search_free"}
     except Exception:
         pass
@@ -216,10 +247,12 @@ def youtube_search(query: str, max_results: int = 5) -> dict:
     # Fallback to DuckDuckGo search for YouTube
     try:
         from tools.web_search import web_search
+
         results = web_search(f"site:youtube.com {query}", max_results=max_results)
         return {"success": True, "query": query, "videos": results, "method": "duckduckgo_fallback_free"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def github_read(repo: str, path: str = "") -> dict:
     """Read GitHub repo - public repo + search free via gh CLI or API, no config for public"""
@@ -249,6 +282,7 @@ def github_read(repo: str, path: str = "") -> dict:
     except Exception as e:
         return {"success": False, "repo": repo, "error": str(e)}
 
+
 def github_search(query: str, max_results: int = 5) -> dict:
     """GitHub search free"""
     try:
@@ -256,10 +290,14 @@ def github_search(query: str, max_results: int = 5) -> dict:
         resp = requests.get(url, timeout=10, headers={"User-Agent": "Hermus Free"})
         if resp.status_code == 200:
             data = resp.json()
-            repos = [{"name": r["full_name"], "description": r["description"], "stars": r["stargazers_count"], "url": r["html_url"]} for r in data.get("items", [])[:max_results]]
+            repos = [
+                {"name": r["full_name"], "description": r["description"], "stars": r["stargazers_count"], "url": r["html_url"]}
+                for r in data.get("items", [])[:max_results]
+            ]
             return {"success": True, "query": query, "repos": repos, "method": "github_search_api_free"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def twitter_read(tweet_url: str) -> dict:
     """Twitter/X read single tweet - free via Jina Reader + browser cookies if available"""
@@ -270,11 +308,14 @@ def twitter_read(tweet_url: str) -> dict:
     # Try Jina
     result = web_read(tweet_url, use_jina=True)
     result["method"] = "jina_reader_free_no_config_single_tweet"
-    result["note"] = "Free via Jina Reader for single tweet, no config. For search/timeline/long articles, tell Agent 'help me config Twitter' - needs Cookie-Editor manual export, free, local only"
+    result["note"] = (
+        "Free via Jina Reader for single tweet, no config. For search/timeline/long articles, tell Agent 'help me config Twitter' - needs Cookie-Editor manual export, free, local only"
+    )
 
     # Check if OpenCLI available (free if user has Chrome session)
     try:
         import shutil
+
         # OpenCLI would be via opencli tool if installed
         # For free version, we just note
         result["opencli_available"] = shutil.which("opencli") is not None
@@ -283,6 +324,7 @@ def twitter_read(tweet_url: str) -> dict:
 
     return result
 
+
 def twitter_search(query: str) -> dict:
     """Twitter search - needs config for full access per Agent Reach"""
     return {
@@ -290,14 +332,16 @@ def twitter_search(query: str) -> dict:
         "query": query,
         "error": "Twitter search needs login. Free method: Tell Agent 'help me config Twitter' - needs Cookie-Editor manual export of TWITTER_AUTH_TOKEN and TWITTER_CT0, free, local only, per Agent Reach docs. No API fees, but requires your Chrome session.",
         "method": "requires_config",
-        "config_guide": "Use Cookie-Editor extension to export Twitter cookies, then set env TWITTER_AUTH_TOKEN and TWITTER_CT0. See Agent Reach docs."
+        "config_guide": "Use Cookie-Editor extension to export Twitter cookies, then set env TWITTER_AUTH_TOKEN and TWITTER_CT0. See Agent Reach docs.",
     }
+
 
 def bilibili_search(query: str, max_results: int = 5) -> dict:
     """Bilibili search + video details via bili-cli free no login"""
     # Try bili-cli if available
     try:
         import shutil
+
         if shutil.which("bili-cli"):
             cmd = ["bili-cli", "search", query, "--limit", str(max_results)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
@@ -309,10 +353,18 @@ def bilibili_search(query: str, max_results: int = 5) -> dict:
     # Fallback to DuckDuckGo search site:bilibili.com
     try:
         from tools.web_search import web_search
+
         results = web_search(f"site:bilibili.com {query}", max_results=max_results)
-        return {"success": True, "query": query, "results": results, "method": "duckduckgo_fallback_free", "note": "Free via DuckDuckGo site search, no login. For full details, install bili-cli free: pip install bili-cli"}
+        return {
+            "success": True,
+            "query": query,
+            "results": results,
+            "method": "duckduckgo_fallback_free",
+            "note": "Free via DuckDuckGo site search, no login. For full details, install bili-cli free: pip install bili-cli",
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def reddit_read(subreddit: str, post_id: str = None) -> dict:
     """Reddit search + read posts/comments - free via old.reddit.com .json + Jina fallback"""
@@ -334,7 +386,12 @@ def reddit_read(subreddit: str, post_id: str = None) -> dict:
                 jina_url += f"comments/{post_id}/"
             return web_read(jina_url, use_jina=True)
     except Exception as e:
-        return {"success": False, "error": str(e), "note": "Reddit anonymous API blocked, try Jina Reader free or OpenCLI with browser login (Chrome session) free as per Agent Reach: desktop OpenCLI reuses Chrome login"}
+        return {
+            "success": False,
+            "error": str(e),
+            "note": "Reddit anonymous API blocked, try Jina Reader free or OpenCLI with browser login (Chrome session) free as per Agent Reach: desktop OpenCLI reuses Chrome login",
+        }
+
 
 def reddit_search(query: str, subreddit: str = None) -> dict:
     """Reddit search - needs config for full access, free via OpenCLI + browser login"""
@@ -343,8 +400,9 @@ def reddit_search(query: str, subreddit: str = None) -> dict:
         "query": query,
         "error": "Reddit search has no zero-config path (anonymous API blocked). Free methods: 1) Desktop OpenCLI using browser login (Chrome session, free), 2) rdt-cli + Cookie (free). Tell Agent 'help me config Reddit'",
         "method": "requires_config",
-        "free_alternatives": "Use web_search with site:reddit.com as fallback free"
+        "free_alternatives": "Use web_search with site:reddit.com as fallback free",
     }
+
 
 def v2ex_hot() -> dict:
     """V2EX hot posts, node posts, post details + replies, user info - free no config"""
@@ -357,6 +415,7 @@ def v2ex_hot() -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 def xueqiu_stock_search(query: str) -> dict:
     """Xueqiu stock search free but needs cookies for some endpoints"""
     try:
@@ -367,6 +426,7 @@ def xueqiu_stock_search(query: str) -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 # Tool definitions for LLM - free, no API fees
 TOOLS = [
     {
@@ -374,80 +434,110 @@ TOOLS = [
         "function": {
             "name": "web_read",
             "description": "Read any webpage via free Jina AI Reader https://r.jina.ai/http:// - no config, no API key, zero fees. Converts HTML to markdown readable for AI. Use for any URL.",
-            "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "URL to read"}, "use_jina": {"type": "boolean", "default": True}}, "required": ["url"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to read"},
+                    "use_jina": {"type": "boolean", "default": True},
+                },
+                "required": ["url"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "rss_read",
             "description": "Read any RSS/Atom feed via free feedparser, no config",
-            "parameters": {"type": "object", "properties": {"rss_url": {"type": "string"}}, "required": ["rss_url"]}
-        }
+            "parameters": {"type": "object", "properties": {"rss_url": {"type": "string"}}, "required": ["rss_url"]},
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "youtube_transcript",
             "description": "YouTube subtitle extraction + video details via free yt-dlp, no config for public videos, zero fees",
-            "parameters": {"type": "object", "properties": {"video_url": {"type": "string"}}, "required": ["video_url"]}
-        }
+            "parameters": {"type": "object", "properties": {"video_url": {"type": "string"}}, "required": ["video_url"]},
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "youtube_search",
             "description": "YouTube video search free via yt-dlp search or DuckDuckGo fallback",
-            "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}}, "required": ["query"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}},
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "github_read",
             "description": "Read GitHub public repo + search free via gh CLI or API no key, private needs login Tell Agent 'help me login GitHub'",
-            "parameters": {"type": "object", "properties": {"repo": {"type": "string", "description": "Repo owner/name"}, "path": {"type": "string", "description": "Optional path inside repo"}}, "required": ["repo"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repo owner/name"},
+                    "path": {"type": "string", "description": "Optional path inside repo"},
+                },
+                "required": ["repo"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "github_search",
             "description": "GitHub search free via API no key",
-            "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}}, "required": ["query"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}},
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "twitter_read",
             "description": "Read single tweet via free Jina Reader no config, for search/timeline needs config Tell Agent 'help me config Twitter' - Cookie-Editor manual export free local only",
-            "parameters": {"type": "object", "properties": {"tweet_url": {"type": "string"}}, "required": ["tweet_url"]}
-        }
+            "parameters": {"type": "object", "properties": {"tweet_url": {"type": "string"}}, "required": ["tweet_url"]},
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "bilibili_search",
             "description": "Bilibili search + video details via bili-cli free no login, zero API fees",
-            "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}}, "required": ["query"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}},
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "reddit_read",
             "description": "Reddit read posts/comments via old.reddit.com .json + Jina fallback free, search needs config OpenCLI browser login free",
-            "parameters": {"type": "object", "properties": {"subreddit": {"type": "string"}, "post_id": {"type": "string"}}, "required": ["subreddit"]}
-        }
+            "parameters": {
+                "type": "object",
+                "properties": {"subreddit": {"type": "string"}, "post_id": {"type": "string"}},
+                "required": ["subreddit"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "v2ex_hot",
             "description": "V2EX hot posts, node posts, post details + replies, user info - free no config",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     },
 ]
 

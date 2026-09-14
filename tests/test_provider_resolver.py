@@ -5,8 +5,9 @@ The core regression this guards: a provider configured only in ``.env``
 the fallback, fleet and auto-selection paths even when nothing was added to the
 multikey store.
 """
-from pathlib import Path
+
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -84,8 +85,9 @@ def test_fallback_recovers_without_depending_on_config_default(monkeypatch):
 def test_fallback_uses_env_provider_for_explicit_non_default_model(monkeypatch):
     """Tool fallback must not depend on ``self.model == config.model``."""
     from types import SimpleNamespace
-    import core.openai_compat as compat
+
     import core.multi_key as mk
+    import core.openai_compat as compat
     from core.llm import FreeLLM
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-recovery")

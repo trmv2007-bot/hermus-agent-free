@@ -3,6 +3,7 @@
 Inspired by jcode swarm messaging. Persistence is a single JSON file so
 sessions on different processes can talk without a socket server.
 """
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import config
 
@@ -41,8 +42,8 @@ def send(
     body: str,
     sender: str,
     *,
-    to: Optional[str] = None,
-    channel: Optional[str] = None,
+    to: str | None = None,
+    channel: str | None = None,
     kind: str = "dm",
 ) -> dict[str, Any]:
     """kind: dm | broadcast | channel."""
@@ -66,7 +67,7 @@ def send(
     return msg
 
 
-def inbox(session_id: str, channel: Optional[str] = None, unread_only: bool = True) -> list[dict[str, Any]]:
+def inbox(session_id: str, channel: str | None = None, unread_only: bool = True) -> list[dict[str, Any]]:
     with _LOCK:
         data = _load()
         out = []
@@ -87,7 +88,7 @@ def inbox(session_id: str, channel: Optional[str] = None, unread_only: bool = Tr
         return out
 
 
-def mark_read(session_id: str, message_ids: Optional[list[str]] = None) -> int:
+def mark_read(session_id: str, message_ids: list[str] | None = None) -> int:
     with _LOCK:
         data = _load()
         n = 0

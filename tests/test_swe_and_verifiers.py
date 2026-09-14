@@ -1,7 +1,6 @@
 """Unit tests for Domain Verifiers, Software Engineer Mode, Model Router, and Skill Reliability."""
+
 from __future__ import annotations
-
-
 
 from core.router2 import ModelRouter
 from core.skill_manager import SkillManager
@@ -21,12 +20,14 @@ def test_python_verifier_ast_and_clean_run(tmp_path):
 """)
 
     pv = PythonVerifier()
-    res = pv.verify({
-        "task": "Write python greeting",
-        "workspace_dir": str(tmp_path),
-        "files_modified": [str(py_file)],
-        "output": "Process exited with 0",
-    })
+    res = pv.verify(
+        {
+            "task": "Write python greeting",
+            "workspace_dir": str(tmp_path),
+            "files_modified": [str(py_file)],
+            "output": "Process exited with 0",
+        }
+    )
 
     assert res.verified is True
     assert res.score >= 0.8
@@ -35,11 +36,13 @@ def test_python_verifier_ast_and_clean_run(tmp_path):
 
 def test_python_verifier_detects_traceback(tmp_path):
     pv = PythonVerifier()
-    res = pv.verify({
-        "task": "Run script",
-        "workspace_dir": str(tmp_path),
-        "output": "Traceback (most recent call last):\n  File 'app.py', line 1\nModuleNotFoundError: No module named 'unknown_pkg'",
-    })
+    res = pv.verify(
+        {
+            "task": "Run script",
+            "workspace_dir": str(tmp_path),
+            "output": "Traceback (most recent call last):\n  File 'app.py', line 1\nModuleNotFoundError: No module named 'unknown_pkg'",
+        }
+    )
 
     assert res.verified is False
     assert len(res.errors) >= 1
@@ -50,16 +53,20 @@ def test_android_verifier_structure_and_artifacts(tmp_path):
     app_dir = tmp_path / "app" / "src" / "main"
     app_dir.mkdir(parents=True)
     manifest = app_dir / "AndroidManifest.xml"
-    manifest.write_text('<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"></manifest>')
+    manifest.write_text(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"></manifest>'
+    )
 
     gradle = tmp_path / "build.gradle"
     gradle.write_text('plugins { id "com.android.application" }')
 
     av = AndroidVerifier()
-    res = av.verify({
-        "task": "Create Android chat app",
-        "workspace_dir": str(tmp_path),
-    })
+    res = av.verify(
+        {
+            "task": "Create Android chat app",
+            "workspace_dir": str(tmp_path),
+        }
+    )
 
     assert res.score >= 0.6
     assert any(e["check"] == "manifest_exists" for e in res.evidence)
@@ -72,10 +79,12 @@ def test_web_verifier_html_and_assets(tmp_path):
     css.write_text("body { background: #000; }")
 
     wv = WebVerifier()
-    res = wv.verify({
-        "task": "Create landing page",
-        "workspace_dir": str(tmp_path),
-    })
+    res = wv.verify(
+        {
+            "task": "Create landing page",
+            "workspace_dir": str(tmp_path),
+        }
+    )
 
     assert res.verified is True
     assert res.score >= 0.8
@@ -105,8 +114,10 @@ Key frameworks evaluate task completion using domain-specific ground truths.
 
 def test_swe_toolchain_detection(tmp_path):
     # Test Node/TypeScript
-    (tmp_path / "package.json").write_text('{"name": "test-app", "dependencies": {"react": "^18.0.0"}, "scripts": {"build": "vite build"}}')
-    (tmp_path / "tsconfig.json").write_text('{}')
+    (tmp_path / "package.json").write_text(
+        '{"name": "test-app", "dependencies": {"react": "^18.0.0"}, "scripts": {"build": "vite build"}}'
+    )
+    (tmp_path / "tsconfig.json").write_text("{}")
 
     info = detect_toolchain(tmp_path)
     assert info.language == "typescript"

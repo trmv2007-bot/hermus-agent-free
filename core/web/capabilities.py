@@ -15,6 +15,7 @@ Android/Termux is detected explicitly: the full browser stack is reported as
 ``not_verified`` there until a real fetch succeeds, and config keeps it
 disabled by default — we do not claim Android browser support without testing.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -25,7 +26,7 @@ import platform
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Statuses (exposed verbatim to Doctor — see spec §21 vocabulary).
 AVAILABLE = "available"
@@ -55,7 +56,7 @@ def is_termux() -> bool:
     return False
 
 
-def scrapling_version() -> Optional[str]:
+def scrapling_version() -> str | None:
     try:
         return importlib.metadata.version("scrapling")
     except Exception:
@@ -69,7 +70,7 @@ def _importable(name: str) -> bool:
         return False
 
 
-def _playwright_chromium_path() -> Optional[Path]:
+def _playwright_chromium_path() -> Path | None:
     """Locate the Playwright Chromium binary without launching a browser.
 
     Playwright installs browsers under a browsers root (``$PLAYWRIGHT_BROWSERS_PATH``
@@ -100,9 +101,11 @@ def _playwright_chromium_path() -> Optional[Path]:
         pass
 
     exe_names = ("chrome",) if platform.system() != "Windows" else ("chrome.exe",)
-    subdirs = ("chrome-linux64", "chrome-linux", "chrome-win64", "chrome-win",
-               "chrome-mac", "chrome-mac-arm64") if platform.system() != "Windows" \
+    subdirs = (
+        ("chrome-linux64", "chrome-linux", "chrome-win64", "chrome-win", "chrome-mac", "chrome-mac-arm64")
+        if platform.system() != "Windows"
         else ("chrome-win64", "chrome-win")
+    )
     for root in roots:
         if not root.is_dir():
             continue
@@ -115,7 +118,7 @@ def _playwright_chromium_path() -> Optional[Path]:
     return None
 
 
-def chromium_executable_path() -> Optional[Path]:
+def chromium_executable_path() -> Path | None:
     """Public, side-effect-free Chromium executable discovery for Doctor/setup."""
     return _playwright_chromium_path()
 
@@ -148,9 +151,9 @@ def probe(*, force: bool = False) -> dict[str, Any]:
         caps["scrapling_version"] = version
         parser_ok = _importable("scrapling") and _importable("scrapling.parser")
         caps["parser"] = (
-            {"status": AVAILABLE, "detail": f"scrapling {version}"} if parser_ok and version
-            else {"status": NOT_INSTALLED, "detail": "scrapling not installed — "
-                   "pip install 'scrapling[fetchers]'"}
+            {"status": AVAILABLE, "detail": f"scrapling {version}"}
+            if parser_ok and version
+            else {"status": NOT_INSTALLED, "detail": "scrapling not installed — pip install 'scrapling[fetchers]'"}
         )
 
         fetchers_ok = parser_ok and _importable("scrapling.fetchers") and _importable("curl_cffi")
@@ -162,27 +165,25 @@ def probe(*, force: bool = False) -> dict[str, Any]:
         elif _verified.get("static"):
             caps["static"] = {"status": AVAILABLE, "detail": "verified by a live fetch this process"}
         else:
-            caps["static"] = {"status": NOT_VERIFIED,
-                              "detail": "scrapling fetchers importable; no live fetch yet this process"}
+            caps["static"] = {"status": NOT_VERIFIED, "detail": "scrapling fetchers importable; no live fetch yet this process"}
 
         browser_status, browser_detail = _browser_status()
-        for strat, label in (("dynamic", "DynamicFetcher (Playwright Chromium)"),
-                             ("stealth", "StealthyFetcher (hardened Chromium)")):
+        for strat, label in (
+            ("dynamic", "DynamicFetcher (Playwright Chromium)"),
+            ("stealth", "StealthyFetcher (hardened Chromium)"),
+        ):
             if not fetchers_ok:
                 caps[strat] = dict(caps["static"])
             elif _verified.get(strat):
-                caps[strat] = {"status": AVAILABLE,
-                               "detail": f"{label}: verified by a live fetch this process"}
+                caps[strat] = {"status": AVAILABLE, "detail": f"{label}: verified by a live fetch this process"}
             else:
-                caps[strat] = {"status": browser_status,
-                               "detail": f"{label}: {browser_detail}"}
+                caps[strat] = {"status": browser_status, "detail": f"{label}: {browser_detail}"}
 
         # Markdown conversion needs the optional `markdownify` dependency.
         caps["markdown"] = (
             {"status": AVAILABLE, "detail": "markdownify present"}
             if _importable("markdownify")
-            else {"status": NOT_INSTALLED,
-                  "detail": "pip install 'scrapling[ai]' for markdown extraction (text still works)"}
+            else {"status": NOT_INSTALLED, "detail": "pip install 'scrapling[ai]' for markdown extraction (text still works)"}
         )
 
         # Session persistence — reported honestly per fetcher (spec §12).
@@ -196,14 +197,19 @@ def probe(*, force: bool = False) -> dict[str, Any]:
         static_persist = caps["static"]["status"] in (AVAILABLE, NOT_VERIFIED)
         caps["static_session_persistence"] = {
             "status": AVAILABLE if static_persist else caps["static"]["status"],
-            "detail": ("FetcherSession keeps a live client + cookie jar across fetches"
-                       if static_persist else "static fetcher unavailable"),
+            "detail": (
+                "FetcherSession keeps a live client + cookie jar across fetches"
+                if static_persist
+                else "static fetcher unavailable"
+            ),
         }
         caps["dynamic_session_persistence"] = {
             "status": UNAVAILABLE,
-            "detail": ("browser sessions use one-off fetchers per call — persistent "
-                       "cross-fetch browser contexts are not implemented (no fake "
-                       "persistence claimed)"),
+            "detail": (
+                "browser sessions use one-off fetchers per call — persistent "
+                "cross-fetch browser contexts are not implemented (no fake "
+                "persistence claimed)"
+            ),
         }
 
         caps["verified"] = dict(_verified)

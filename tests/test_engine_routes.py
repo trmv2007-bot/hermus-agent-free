@@ -7,12 +7,14 @@ Also covers the two dashboard bugs these endpoints exist to fix:
 * the System Overview must show the local engine, and the "download the model"
   banner must disappear once the model is installed.
 """
+
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
 import pytest
+from _control_room_source import control_room_source
 from fastapi.testclient import TestClient
 
 from gateway.gateway import app
@@ -38,7 +40,7 @@ def sandbox_manager_paths(tmp_path, monkeypatch):
 def _write_ir(path: Path, declared: int = 512, actual: int = 1024) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     (path / "openvino_model.xml").write_text(
-        '<net><weights><blob offset="0" size="%d"/></weights></net>' % declared, encoding="utf-8"
+        f'<net><weights><blob offset="0" size="{declared}"/></weights></net>', encoding="utf-8"
     )
     (path / "openvino_model.bin").write_bytes(b"x" * actual)
     return path
@@ -57,11 +59,11 @@ def test_engine_status_reports_a_definite_state(client, monkeypatch):
         lambda refresh=False: HardwareSnapshot(
             npu=[Device("npu", "intel", "Intel AI Boost", "x", source="openvino")],
             gpus=[Device("gpu", "intel", "Intel Arc 140V", "x", source="openvino")],
-            cpu_count=8, ram_mb=32000,
+            cpu_count=8,
+            ram_mb=32000,
         ),
     )
-    monkeypatch.setattr(acc, "probe_endpoint",
-                        lambda base_url, timeout=2.0: {"reachable": False, "models": [], "detail": "down"})
+    monkeypatch.setattr(acc, "probe_endpoint", lambda base_url, timeout=2.0: {"reachable": False, "models": [], "detail": "down"})
     acc.reset_cache()
     body = client.get("/engine/status").json()
 
@@ -108,8 +110,7 @@ def test_api_status_carries_the_engine_summary(client):
 def test_nollama_install_route_reports_failure_cleanly(client, monkeypatch):
     from core.nollama import nollama_manager
 
-    monkeypatch.setattr(nollama_manager, "install",
-                        lambda **kw: {"success": False, "stage": "clone", "error": "git missing"})
+    monkeypatch.setattr(nollama_manager, "install", lambda **kw: {"success": False, "stage": "clone", "error": "git missing"})
     response = client.post("/engine/nollama/install")
     assert response.status_code == 500
     assert response.json()["stage"] == "clone"
@@ -119,8 +120,7 @@ def test_nollama_start_and_stop_routes(client, monkeypatch):
     from core.nollama import nollama_manager
 
     seen = {}
-    monkeypatch.setattr(nollama_manager, "start",
-                        lambda **kw: seen.update(kw) or {"success": True, "pid": 1, "port": 8010})
+    monkeypatch.setattr(nollama_manager, "start", lambda **kw: seen.update(kw) or {"success": True, "pid": 1, "port": 8010})
     monkeypatch.setattr(nollama_manager, "stop", lambda: {"stopped": True, "pid": 1})
     started = client.post("/engine/nollama/start", json={"device": "npu"})
     assert started.status_code == 200
@@ -143,10 +143,7 @@ def test_models_catalog_shows_minicpm_and_what_is_installed(client):
 def test_download_route_starts_a_job_and_reports_progress(client, monkeypatch):
     import huggingface_hub
 
-    from core.nollama import nollama_manager
-
-    monkeypatch.setattr(huggingface_hub, "snapshot_download",
-                        lambda **kw: str(_write_ir(Path(kw["local_dir"]))))
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kw: str(_write_ir(Path(kw["local_dir"]))))
     started = client.post("/engine/models/download", json={"model": "whisper-base"})
     assert started.status_code == 200
     job = started.json()["job"]
@@ -176,9 +173,14 @@ def test_download_defaults_to_minicpm(client, monkeypatch):
     from core.nollama import nollama_manager
 
     captured = {}
-    monkeypatch.setattr(nollama_manager, "download_model",
-                        lambda model_id, force=False: captured.update(model=model_id) or
-                        {"success": True, "started": False, "job": {"id": "x", "state": "ready", "terminal": True}})
+    monkeypatch.setattr(
+        nollama_manager,
+        "download_model",
+        lambda model_id, force=False: (
+            captured.update(model=model_id)
+            or {"success": True, "started": False, "job": {"id": "x", "state": "ready", "terminal": True}}
+        ),
+    )
     assert client.post("/engine/models/download", json={}).status_code == 200
     assert captured["model"] == "minicpm"
 
@@ -213,7 +215,7 @@ def test_events_recent_limit_is_clamped(client):
 
 def test_control_room_wires_the_telemetry_feed():
     """The canonical control room must actually consume the live telemetry feed."""
-    html = Path("gateway/control.html").read_text(encoding="utf-8")
+    html = control_room_source()
     # Live event stream (WS /dashboard/events) + polling fallback (/events/recent).
     assert "/events/recent?limit=" in html
     assert "/dashboard/events" in html, "the live event stream is the telemetry path"
@@ -228,8 +230,7 @@ def test_control_room_wires_the_telemetry_feed():
 # ---------------------------------------------------------------------------
 def test_doctor_status_route(client):
     body = client.get("/doctor/status").json()
-    for key in ("enabled", "model", "engine_status", "worst_severity", "counts",
-                "finding_count", "stuck", "reports"):
+    for key in ("enabled", "model", "engine_status", "worst_severity", "counts", "finding_count", "stuck", "reports"):
         assert key in body
 
 
@@ -267,7 +268,7 @@ def test_doctor_report_round_trip(client, monkeypatch):
 
 def test_control_room_has_doctor_and_computer_panels():
     """The canonical control room surfaces the real engine/computer/doctor capability."""
-    html = Path("gateway/control.html").read_text(encoding="utf-8")
+    html = control_room_source()
     # The control room drives the real /doctor/* and /computer/* backend APIs.
     assert "/doctor/run" in html
     assert "/doctor/status" in html

@@ -17,13 +17,17 @@ and steering hooks.
 ``agent_getter`` is injected by ``gateway.gateway`` to avoid a circular import:
 the queue module must not import the app, and the app owns the per-user agents.
 """
+
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 from core.config import config
+from core.log import get_logger
+
+logger = get_logger(__name__)
 
 
 def _agent_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
@@ -52,8 +56,9 @@ def _resolve_key_from_store(payload: dict[str, Any]) -> dict[str, Any]:
                 # Surface a missing selected key instead of silently running
                 # with no usable model (which produced "key looks configured but
                 # the agent doesn't respond" failures).
-                print(f"[Gateway] key resolution: no stored key for "
-                      f"provider={payload['provider']} name={payload['key_name']!r}")
+                logger.warning(
+                    f"[Gateway] key resolution: no stored key for provider={payload['provider']} name={payload['key_name']!r}"
+                )
                 payload = dict(payload)
                 payload["_key_warning"] = (
                     f"No stored API key named {payload['key_name']!r} for provider "
@@ -62,8 +67,10 @@ def _resolve_key_from_store(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             # Log instead of swallowing: a broken key-store lookup used to turn
             # into a request with no usable key and no diagnostic.
-            print(f"[Gateway] key resolution error for {payload.get('provider')}/"
-                  f"{payload.get('key_name')}: {type(exc).__name__}: {exc}")
+            logger.error(
+                f"[Gateway] key resolution error for {payload.get('provider')}/"
+                f"{payload.get('key_name')}: {type(exc).__name__}: {exc}"
+            )
     return payload
 
 
@@ -81,7 +88,7 @@ def _runtime_execute(
     if not text.strip():
         return {"error": "text required"}
 
-    def _emit(event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+    def _emit(event_type: str, data: dict[str, Any] | None = None) -> None:
         try:
             ctx.emit(event_type, dict(data or {}))
         except Exception:
@@ -113,8 +120,7 @@ def _runtime_execute(
         domain=payload.get("domain"),
         subgoals=payload.get("subgoals"),
         preflight=payload.get("preflight"),
-        allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower()
-                                      in {"1", "true", "yes"}),
+        allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower() in {"1", "true", "yes"}),
         read_only=bool(payload.get("read_only", False)),
     )
     if not isinstance(result, dict):
@@ -141,7 +147,8 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
         want_stream = bool(payload.get("stream", getattr(config, "gateway_stream_enabled", True)))
         started = time.time()
         result = _chat_with_optional_kwargs(
-            agent, text,
+            agent,
+            text,
             on_event=ctx.emit,
             stream=want_stream and bool(getattr(config, "gateway_stream_tokens", True)),
             should_cancel=ctx.should_cancel,
@@ -152,12 +159,15 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
         result["elapsed_ms"] = int((time.time() - started) * 1000)
         # Full final answer on the run stream: queued (dashboard) clients read
         # the authoritative response from SSE instead of only the HTTP reply.
-        ctx.emit("agent_response", {
-            "text": str(result.get("response") or "")[:12000],
-            "steps": result.get("steps"),
-            "tool_calls": list(result.get("tool_calls") or [])[:30],
-            "run_kind": result.get("run_kind", "chat"),
-        })
+        ctx.emit(
+            "agent_response",
+            {
+                "text": str(result.get("response") or "")[:12000],
+                "steps": result.get("steps"),
+                "tool_calls": list(result.get("tool_calls") or [])[:30],
+                "run_kind": result.get("run_kind", "chat"),
+            },
+        )
         try:
             from core.integrations import maybe_self_heal
 
@@ -170,14 +180,11 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
 
                 answer = str(result.get("response") or "")
                 if answer:
-                    speech = speech_engine.synthesize(
-                        answer, payload.get("voice"), int(payload.get("speech_rate") or 165)
-                    )
+                    speech = speech_engine.synthesize(answer, payload.get("voice"), int(payload.get("speech_rate") or 165))
                     speech.pop("path", None)
                     if speech.get("success"):
                         speech["audio_url"] = f"/speech/audio/{speech['audio_id']}"
-                        ctx.emit("speech_ready", {"audio_url": speech["audio_url"],
-                                                   "backend": speech.get("backend")})
+                        ctx.emit("speech_ready", {"audio_url": speech["audio_url"], "backend": speech.get("backend")})
                     result["speech"] = speech
             except Exception as e:
                 result["speech"] = {"success": False, "error": str(e)[:200]}
@@ -186,8 +193,9 @@ def make_chat_handler(agent_getter: Callable[..., Any]):
     return chat
 
 
-def _chat_with_optional_kwargs(agent, text: str, *, on_event=None, stream: bool = False,
-                               should_cancel=None, steer_source=None) -> dict[str, Any]:
+def _chat_with_optional_kwargs(
+    agent, text: str, *, on_event=None, stream: bool = False, should_cancel=None, steer_source=None
+) -> dict[str, Any]:
     """agent.chat with only the kwargs this agent actually supports."""
     import inspect
 
@@ -236,8 +244,7 @@ def make_runtime_turn_handler(agent_getter: Callable[..., Any]):
         prefer = str(payload.get("prefer") or "auto").lower()
         if prefer not in ("auto", "chat", "mission"):
             prefer = "auto"
-        ctx.emit("turn_started", {"prefer": prefer,
-                                  "text": str(payload.get("text") or "")[:200]})
+        ctx.emit("turn_started", {"prefer": prefer, "text": str(payload.get("text") or "")[:200]})
         return _runtime_execute(ctx, prefer=prefer, agent_getter=agent_getter)
 
     return turn
@@ -261,22 +268,26 @@ def make_mission_start_handler(agent_getter: Callable[..., Any]):
             budget_steps=int(payload.get("budget_steps", 20)),
             on_event=ctx.emit,
             preflight=str(payload.get("preflight", "true")).lower() not in {"0", "false", "no"},
-            allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower()
-                                          in {"1", "true", "yes"}),
+            allow_preflight_planning=bool(str(payload.get("allow_preflight_planning", "false")).lower() in {"1", "true", "yes"}),
         )
         out = report.to_dict()
         out["job_id"] = ctx.id
         out["run_kind"] = "mission"
-        ctx.emit("agent_response", {"text": (out.get("response") or "")[:12000],
-                                    "run_kind": "mission",
-                                    "mission_id": out.get("mission_id"),
-                                    "state": out.get("state")})
+        ctx.emit(
+            "agent_response",
+            {
+                "text": (out.get("response") or "")[:12000],
+                "run_kind": "mission",
+                "mission_id": out.get("mission_id"),
+                "state": out.get("state"),
+            },
+        )
         return out
 
     return mission_start
 
 
-def make_swe_develop_handler(agent_getter: Optional[Callable[..., Any]] = None):
+def make_swe_develop_handler(agent_getter: Callable[..., Any] | None = None):
     def swe_develop(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
         task = str(payload.get("task") or payload.get("text") or "")
@@ -297,8 +308,7 @@ def make_swe_develop_handler(agent_getter: Optional[Callable[..., Any]] = None):
                     **_agent_kwargs(payload),
                 )
             except Exception as exc:
-                ctx.emit("log", {"level": "warning",
-                                 "message": f"agent unavailable for SWE coder phase: {exc}"})
+                ctx.emit("log", {"level": "warning", "message": f"agent unavailable for SWE coder phase: {exc}"})
         res = swe_mode.execute(
             task=task,
             max_repairs=int(payload.get("max_repairs", 3)),
@@ -309,8 +319,7 @@ def make_swe_develop_handler(agent_getter: Optional[Callable[..., Any]] = None):
         )
         out = res.to_dict()
         out["job_id"] = ctx.id
-        ctx.emit("agent_response", {"text": (out.get("change_report") or "")[:12000],
-                                    "run_kind": "swe"})
+        ctx.emit("agent_response", {"text": (out.get("change_report") or "")[:12000], "run_kind": "swe"})
         return out
 
     return swe_develop
@@ -326,7 +335,8 @@ def make_research_handler():
 
         ctx.emit("research_started", {"query": query[:200]})
         out = research_pipeline.run(
-            query, max_sources=int(payload.get("max_sources", 6)),
+            query,
+            max_sources=int(payload.get("max_sources", 6)),
             synthesize=bool(payload.get("synthesize", True)),
         )
         out["job_id"] = ctx.id
@@ -409,9 +419,7 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
         # runtime as the dashboard and CLI — auto-classified, so a goal-like
         # channel message gets the full mission lifecycle.
         runtime_result = _runtime_execute(
-            _PseudoCtx(ctx.id, ctx.run_id,
-                       {**payload, "platform": payload.get("platform", "telegram")},
-                       ctx.emit),
+            _PseudoCtx(ctx.id, ctx.run_id, {**payload, "platform": payload.get("platform", "telegram")}, ctx.emit),
             prefer=str(payload.get("prefer") or "auto"),
             agent_getter=agent_getter,
         )
@@ -426,8 +434,10 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
                 raw = telegram_send_message(int(payload["chat_id"]), answer)
                 if isinstance(raw, dict):
                     ok = bool(raw.get("ok") or raw.get("delivered") or raw.get("message_id"))
-                    sent = {"delivered": ok, "detail": {k: v for k, v in raw.items()
-                                                        if k in ("ok", "error", "status_code", "stub")}}
+                    sent = {
+                        "delivered": ok,
+                        "detail": {k: v for k, v in raw.items() if k in ("ok", "error", "status_code", "stub")},
+                    }
                 else:
                     sent = {"delivered": bool(raw)}
             except Exception as e:
@@ -452,8 +462,7 @@ def make_channel_reply_handler(agent_getter: Callable[..., Any]):
             ctx.emit("channel_delivery", {"platform": platform, **sent})
         except Exception:
             pass
-        return {"answer": answer[:4000], "delivery": sent, "chat": chat_result,
-                "delivered": bool(sent.get("delivered"))}
+        return {"answer": answer[:4000], "delivery": sent, "chat": chat_result, "delivered": bool(sent.get("delivered"))}
 
     return channel_reply
 
@@ -487,14 +496,12 @@ def make_voice_reply_handler(agent_getter: Callable[..., Any]):
 
                 speech = synthesize_speech(answer[:limit])
             except Exception as exc:
-                speech = {"spoken": False, "audio_url": None,
-                          "error": f"{type(exc).__name__}: {exc}"[:200]}
+                speech = {"spoken": False, "audio_url": None, "error": f"{type(exc).__name__}: {exc}"[:200]}
         try:
             ctx.emit("voice_answer", {"text": answer[:4000], **speech})
         except Exception:
             pass
-        return {"answer": answer[:4000], "speech": speech, "chat": runtime_result,
-                "spoken": bool(speech.get("spoken"))}
+        return {"answer": answer[:4000], "speech": speech, "chat": runtime_result, "spoken": bool(speech.get("spoken"))}
 
     return voice_reply
 
@@ -508,7 +515,7 @@ class _PseudoCtx:
         self.payload = payload
         self._emit = emit
 
-    def emit(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+    def emit(self, event_type: str, data: dict[str, Any] | None = None) -> None:
         try:
             self._emit(event_type, data)
         except Exception:
@@ -524,20 +531,36 @@ class _PseudoCtx:
 def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: bool = True) -> dict[str, str]:
     """Register every gateway job kind. Returns the kind → description map."""
     from core.agent_manager import make_agent_computer_handler, make_agent_general_handler
+
     kinds = {
-        "runtime.turn": (make_runtime_turn_handler(agent_getter), "canonical runtime turn: auto-classified chat or full mission (universal core)"),
+        "runtime.turn": (
+            make_runtime_turn_handler(agent_getter),
+            "canonical runtime turn: auto-classified chat or full mission (universal core)",
+        ),
         "agent.general": (make_agent_general_handler(), "named-agent general task through the universal runtime (role dispatch)"),
         "agent.computer": (make_agent_computer_handler(), "named-agent desktop/computer task (role dispatch)"),
         "agent.chat": (make_chat_handler(agent_getter), "run one agent turn (ReAct loop, streamed events)"),
-        "agent.autonomous": (make_autonomous_handler(agent_getter), "goal through the universal mission runtime (plan→execute→verify→repair)"),
+        "agent.autonomous": (
+            make_autonomous_handler(agent_getter),
+            "goal through the universal mission runtime (plan→execute→verify→repair)",
+        ),
         "mission.start": (make_mission_start_handler(agent_getter), "objective-driven mission with verifiers & dynamic budgets"),
-        "swe.develop": (make_swe_develop_handler(agent_getter), "repository-level software engineering lifecycle (agent-backed coder phase)"),
+        "swe.develop": (
+            make_swe_develop_handler(agent_getter),
+            "repository-level software engineering lifecycle (agent-backed coder phase)",
+        ),
         "research.deep": (make_research_handler(), "multi-source research pipeline with citations"),
         "subagent.delegate": (make_delegate_handler(), "hierarchical sub-agent fan-out + aggregation"),
         "memory.sweep": (make_memory_sweep_handler(), "decay/archive/purge pass over typed memory"),
         "channel.reply": (make_channel_reply_handler(agent_getter), "runtime turn + deliver answer back to the channel"),
-        "voice.reply": (make_voice_reply_handler(agent_getter), "voice-first turn: work in background, then synthesize the spoken answer"),
-        "web.crawl": (make_web_crawl_handler(), "bounded background web crawl through the canonical WebGateway (Scrapling-backed)"),
+        "voice.reply": (
+            make_voice_reply_handler(agent_getter),
+            "voice-first turn: work in background, then synthesize the spoken answer",
+        ),
+        "web.crawl": (
+            make_web_crawl_handler(),
+            "bounded background web crawl through the canonical WebGateway (Scrapling-backed)",
+        ),
     }
     for kind, (fn, _desc) in kinds.items():
         queue.register(kind, fn, overwrite=overwrite)
@@ -552,9 +575,11 @@ def make_web_crawl_handler() -> Callable[[Any], dict[str, Any]]:
     canonical web subsystem. Progress events flow through ctx.emit (run bus)
     and are mirrored onto the canonical EventBus by the gateway.
     """
+
     def handler(ctx) -> dict[str, Any]:
         from core.web import get_web_gateway
 
         return get_web_gateway().crawl_job_handler(ctx)
+
     handler.__doc__ = "web.crawl: bounded background crawl via core.web.WebGateway"
     return handler

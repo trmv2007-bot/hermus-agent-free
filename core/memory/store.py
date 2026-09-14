@@ -21,7 +21,7 @@ public memory object.
 from __future__ import annotations
 
 import threading
-from typing import Any, Optional
+from typing import Any
 
 # Canonical memory kinds (must match memory2.KINDS order).
 KINDS: tuple[str, ...] = ("working", "episodic", "semantic", "procedural", "project")
@@ -30,19 +30,20 @@ KINDS: tuple[str, ...] = ("working", "episodic", "semantic", "procedural", "proj
 class MemoryFacade:
     """One canonical memory API covering typed memory + session/curated/ui state."""
 
-    def __init__(self, store: Any = None, *, db_path: Optional[str] = None,
-                 v1_store: Any = None):
+    def __init__(self, store: Any = None, *, db_path: str | None = None, v1_store: Any = None):
         # --- typed memory backend (Memory2) -----------------------------------
         if store is None:
             from ..memory2 import Memory2  # type: ignore
+
             store = Memory2(db_path=db_path)
         self._store = store
         # --- session / curated / user-model / token backend (legacy v1) --------
         # Private backend owned by this facade; not a competing public singleton.
         if v1_store is None:
-            from ..compat.legacy_memory import Memory as _V1  # type: ignore
+            from ..compat.legacy_memory import Memory as MemoryV1  # type: ignore
+
             try:
-                v1_store = _V1()
+                v1_store = MemoryV1()
             except Exception:
                 v1_store = None
         self._v1 = v1_store
@@ -64,18 +65,22 @@ class MemoryFacade:
             return {"success": False, "error": f"unknown kind '{kind}' (choose {KINDS})"}
         return self._store.remember(kind, content, **kwargs)
 
-    def recall(self, query: str, *, project: Optional[str] = None,
-               kinds: Optional[list[str]] = None, limit: int = 10,
-               record_access: bool = True) -> list[dict[str, Any]]:
-        return self._store.recall(query, project=project, kinds=kinds,
-                                  limit=limit, record_access=record_access)
+    def recall(
+        self,
+        query: str,
+        *,
+        project: str | None = None,
+        kinds: list[str] | None = None,
+        limit: int = 10,
+        record_access: bool = True,
+    ) -> list[dict[str, Any]]:
+        return self._store.recall(query, project=project, kinds=kinds, limit=limit, record_access=record_access)
 
-    def hybrid_recall(self, query: str, *, project: Optional[str] = None,
-                      kinds: Optional[list[str]] = None, limit: int = 10,
-                      **kw) -> list[dict[str, Any]]:
+    def hybrid_recall(
+        self, query: str, *, project: str | None = None, kinds: list[str] | None = None, limit: int = 10, **kw
+    ) -> list[dict[str, Any]]:
         try:
-            return self._store.hybrid_recall(query, project=project, kinds=kinds,
-                                             limit=limit, **kw)
+            return self._store.hybrid_recall(query, project=project, kinds=kinds, limit=limit, **kw)
         except Exception:
             return self.recall(query, project=project, kinds=kinds, limit=limit)
 
@@ -97,23 +102,44 @@ class MemoryFacade:
         except TypeError:
             # Store doesn't accept these kwargs — retry with the core ones only.
             try:
-                subset = {k: kw[k] for k in ("limit", "hybrid", "per_kind_cap",
-                                             "project", "max_tokens") if k in kw}
+                subset = {k: kw[k] for k in ("limit", "hybrid", "per_kind_cap", "project", "max_tokens") if k in kw}
                 return self._store.recall_context(query, **subset)
             except Exception:
-                return {"text": "", "kept": [], "evicted": [], "tokens": 0,
-                        "budget_tokens": budget, "mode": "empty", "ids": [], "index": {}}
+                return {
+                    "text": "",
+                    "kept": [],
+                    "evicted": [],
+                    "tokens": 0,
+                    "budget_tokens": budget,
+                    "mode": "empty",
+                    "ids": [],
+                    "index": {},
+                }
         except Exception:
             # Fall back to a text-only block when the typed backend is unavailable.
             try:
-                text = self._store.recall_prompt_block(query, **{k: kw[k] for k in
-                                                                 ("limit", "project")
-                                                                 if k in kw})
-                return {"text": text or "", "kept": [], "evicted": [], "tokens": 0,
-                        "budget_tokens": budget, "mode": "fallback", "ids": [], "index": {}}
+                text = self._store.recall_prompt_block(query, **{k: kw[k] for k in ("limit", "project") if k in kw})
+                return {
+                    "text": text or "",
+                    "kept": [],
+                    "evicted": [],
+                    "tokens": 0,
+                    "budget_tokens": budget,
+                    "mode": "fallback",
+                    "ids": [],
+                    "index": {},
+                }
             except Exception:
-                return {"text": "", "kept": [], "evicted": [], "tokens": 0,
-                        "budget_tokens": budget, "mode": "empty", "ids": [], "index": {}}
+                return {
+                    "text": "",
+                    "kept": [],
+                    "evicted": [],
+                    "tokens": 0,
+                    "budget_tokens": budget,
+                    "mode": "empty",
+                    "ids": [],
+                    "index": {},
+                }
 
     def recall_prompt_block(self, *args, **kw) -> str:
         try:
@@ -127,8 +153,7 @@ class MemoryFacade:
         except AttributeError:
             return {"error": "no explain"}
 
-    def all(self, *, kind: Optional[str] = None, project: Optional[str] = None,
-            limit: int = 100) -> list[dict[str, Any]]:
+    def all(self, *, kind: str | None = None, project: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         try:
             return self._store.store.all(kind=kind, project=project, limit=limit)
         except Exception:
@@ -149,7 +174,7 @@ class MemoryFacade:
         except AttributeError:
             return {}
 
-    def sweep(self, *, project: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
+    def sweep(self, *, project: str | None = None, dry_run: bool = True) -> dict[str, Any]:
         """Run the typed backend's decay lifecycle pass (archive/purge/consolidate)."""
         if self._store is not None and hasattr(self._store, "sweep"):
             return self._store.sweep(project=project, dry_run=bool(dry_run))
@@ -221,7 +246,7 @@ class MemoryFacade:
                 pass
 
 
-_facade: Optional[MemoryFacade] = None
+_facade: MemoryFacade | None = None
 _facade_lock = threading.Lock()
 
 

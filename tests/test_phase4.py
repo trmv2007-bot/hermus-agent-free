@@ -1,7 +1,8 @@
 """Tests for Phase 4 — Eval harness, router, tool fallbacks, project memory,
 trajectory tagging, plan resume. Offline (mock model)."""
-import sys
+
 import json
+import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -26,7 +27,9 @@ def test_eval_harness_runs_and_checks():
     r2 = harness.check_task({"checks": [{"type": "substring", "value": "london"}]}, "Paris it is.")
     assert not r2["success"] and len(r2["failed"]) == 1
     # regex + not_substring
-    r3 = harness.check_task({"checks": [{"type": "regex", "value": "\\b42\\b"}, {"type": "not_substring", "value": "error"}]}, "answer is 42")
+    r3 = harness.check_task(
+        {"checks": [{"type": "regex", "value": "\\b42\\b"}, {"type": "not_substring", "value": "error"}]}, "answer is 42"
+    )
     assert r3["success"]
 
     # run offline with mock (no council, no network strategies)
@@ -76,7 +79,7 @@ def test_router_deterministic():
 
 
 def test_tool_fallback_chain():
-    from core.tool_registry import tool_registry, TOOL_FALLBACK_CHAINS
+    from core.tool_registry import TOOL_FALLBACK_CHAINS, tool_registry
 
     def boom(**kwargs):
         raise RuntimeError("simulated failure")
@@ -105,7 +108,7 @@ def test_tool_fallback_chain():
 
 
 def test_retry_fallback():
-    from core.tool_registry import tool_registry, TOOL_FALLBACK_CHAINS
+    from core.tool_registry import TOOL_FALLBACK_CHAINS, tool_registry
 
     calls = {"n": 0}
 
@@ -154,17 +157,19 @@ def test_project_scoped_memory():
 def test_trajectory_tagging():
     import uuid
 
-    from core.memory import memory
     from core.config import config
+    from core.memory import memory
 
     sid = f"tag_{uuid.uuid4().hex[:6]}"
     memory.add_session_message(
-        sid, "assistant", "tagged answer",
+        sid,
+        "assistant",
+        "tagged answer",
         tag={"strategy": "reflexion", "difficulty": 3, "council": False},
     )
     traj_path = config.resolve_path(config.trajectory_path)
-    lines = [json.loads(l) for l in traj_path.read_text().splitlines() if l.strip()]
-    tagged = [l for l in lines if l.get("session_id") == sid]
+    lines = [json.loads(line) for line in traj_path.read_text().splitlines() if line.strip()]
+    tagged = [line for line in lines if line.get("session_id") == sid]
     assert tagged, "trajectory line should exist"
     assert tagged[-1].get("tag", {}).get("strategy") == "reflexion"
     print("✅ Trajectory tagging: strategy/difficulty attached to JSONL")

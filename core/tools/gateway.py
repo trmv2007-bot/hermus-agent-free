@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
-from ..contracts import ToolDescriptor, ToolResult
+from ..contracts import CommandStatus, EventEnvelope, EventType, ToolDescriptor, ToolResult
 from ..events import get_bus
-from ..contracts import EventEnvelope, EventType, CommandStatus
 
 
 class ToolGateway:
@@ -27,7 +27,9 @@ class ToolGateway:
 
     def __init__(self, registry: Any = None, *, bus=None, policy: Any = None):
         if registry is None:
-            from ..tool_registry import ToolRegistry, tool_registry as _singleton  # type: ignore
+            from ..tool_registry import ToolRegistry  # type: ignore
+            from ..tool_registry import tool_registry as _singleton
+
             try:
                 # Prefer the real process-wide registry so discovered tools (and
                 # their fallback chains) are what the gateway actually drives.
@@ -94,7 +96,7 @@ class ToolGateway:
             result[name] = self.describe(name)
         return result
 
-    def describe(self, name: str, call: Optional[Callable] = None) -> ToolDescriptor:
+    def describe(self, name: str, call: Callable | None = None) -> ToolDescriptor:
         desc = self._descriptor_cache.get(name)
         if desc is not None:
             return desc
@@ -126,10 +128,18 @@ class ToolGateway:
             pass
         return {}
 
-    def execute(self, name: str, args: Optional[dict[str, Any]] = None, *,
-                trace_id: Optional[str] = None, mission_id: Optional[str] = None,
-                run_id: Optional[str] = None, actor: str = "agent",
-                dry_run: bool = False, timeout_s: Optional[float] = None) -> ToolResult:
+    def execute(
+        self,
+        name: str,
+        args: dict[str, Any] | None = None,
+        *,
+        trace_id: str | None = None,
+        mission_id: str | None = None,
+        run_id: str | None = None,
+        actor: str = "agent",
+        dry_run: bool = False,
+        timeout_s: float | None = None,
+    ) -> ToolResult:
         """Execute one tool through the gateway, emitting canonical events.
 
         Returns a :class:`ToolResult` on **every** path (success, error, blocked,
@@ -145,50 +155,72 @@ class ToolGateway:
             return blocked
 
         started = time.time()
-        self._emit_state(name, EventType.COMMAND_STARTED.value, CommandStatus.RUNNING.value,
-                         trace_id, mission_id, run_id, actor, args)
+        self._emit_state(
+            name, EventType.COMMAND_STARTED.value, CommandStatus.RUNNING.value, trace_id, mission_id, run_id, actor, args
+        )
         try:
             if dry_run:
-                r = ToolResult.ok_result({"dry_run": True, "tool": name, "args": _redact(args)},
-                                         trace_id=trace_id)
+                r = ToolResult.ok_result({"dry_run": True, "tool": name, "args": _redact(args)}, trace_id=trace_id)
             else:
                 ok, output, meta = self._execute_raw(name, args)
                 r = _coerce_result(output, ok=ok, trace_id=trace_id, meta=meta)
         except TimeoutError as exc:
             r = ToolResult.error("TOOL_TIMEOUT", str(exc), retryable=True, trace_id=trace_id)
         except Exception as exc:
-            r = ToolResult.error("TOOL_ERROR", f"{type(exc).__name__}: {exc}",
-                                 retryable=_retryable(exc), trace_id=trace_id)
+            r = ToolResult.error("TOOL_ERROR", f"{type(exc).__name__}: {exc}", retryable=_retryable(exc), trace_id=trace_id)
         finally:
             r.finished_at = _now_iso()
         r.duration_ms = int((time.time() - started) * 1000)
         self._emit(name, args, r, trace_id, mission_id, run_id, actor)
         return r
 
-    def _gate(self, name: str, args: dict[str, Any]) -> Optional[ToolResult]:
+    def _gate(self, name: str, args: dict[str, Any]) -> ToolResult | None:
         if self._policy is None or not callable(self._policy):
             return None
         decision = self._policy(name, args)
         if decision in (True, None, "allow", "ALLOW"):
             return None
-        return ToolResult.error("POLICY_DENIED", f"policy denied tool '{name}'",
-                                retryable=False, status="blocked",
-                                next_action="blocked_by_policy")
+        return ToolResult.error(
+            "POLICY_DENIED", f"policy denied tool '{name}'", retryable=False, status="blocked", next_action="blocked_by_policy"
+        )
 
-    def _emit(self, name: str, args: dict[str, Any], result: ToolResult, trace_id: str,
-              mission_id: Optional[str], run_id: Optional[str], actor: str) -> None:
+    def _emit(
+        self,
+        name: str,
+        args: dict[str, Any],
+        result: ToolResult,
+        trace_id: str,
+        mission_id: str | None,
+        run_id: str | None,
+        actor: str,
+    ) -> None:
         etype = EventType.COMMAND_SUCCEEDED.value if result.ok else EventType.COMMAND_FAILED.value
         status = CommandStatus.SUCCEEDED.value if result.ok else CommandStatus.FAILED.value
-        self._emit_state(name, etype, status, trace_id, mission_id, run_id, actor,
-                         args, result=result)
+        self._emit_state(name, etype, status, trace_id, mission_id, run_id, actor, args, result=result)
 
-    def _emit_state(self, name: str, etype: str, status: str, trace_id: str,
-                    mission_id: Optional[str], run_id: Optional[str], actor: str,
-                    args: dict[str, Any], result: Optional[ToolResult] = None) -> None:
+    def _emit_state(
+        self,
+        name: str,
+        etype: str,
+        status: str,
+        trace_id: str,
+        mission_id: str | None,
+        run_id: str | None,
+        actor: str,
+        args: dict[str, Any],
+        result: ToolResult | None = None,
+    ) -> None:
         env = EventEnvelope(
-            trace_id=trace_id, mission_id=mission_id, run_id=run_id, actor=actor,
-            source="agent", type=etype, command="tool.invoke", target=name,
-            args_redacted=_redact(args), status=status,
+            trace_id=trace_id,
+            mission_id=mission_id,
+            run_id=run_id,
+            actor=actor,
+            source="agent",
+            type=etype,
+            command="tool.invoke",
+            target=name,
+            args_redacted=_redact(args),
+            status=status,
             error_code=result.error_code if result else None,
             evidence_refs=result.evidence_refs if result else [],
             duration_ms=result.duration_ms if result else None,
@@ -196,7 +228,7 @@ class ToolGateway:
         self._bus.publish(env)
 
 
-_gateway: Optional[ToolGateway] = None
+_gateway: ToolGateway | None = None
 _gateway_lock = threading.Lock()
 
 
@@ -208,7 +240,7 @@ def get_tool_gateway(registry: Any = None) -> ToolGateway:
         return _gateway
 
 
-def gateway_result_dict(res: 'ToolResult') -> dict[str, Any]:
+def gateway_result_dict(res: ToolResult) -> dict[str, Any]:
     """Flatten a ToolResult into a plain dict shaped like the registry's raw tool output.
 
     This is the *one* place callers that previously read ``tool_registry.execute(...)``
@@ -219,8 +251,7 @@ def gateway_result_dict(res: 'ToolResult') -> dict[str, Any]:
     if res.ok:
         out = res.output
         return out if isinstance(out, dict) else {"result": out}
-    return {"error": res.error_message or res.error_code or "tool failed",
-            "error_code": res.error_code}
+    return {"error": res.error_message or res.error_code or "tool failed", "error_code": res.error_code}
 
 
 def tool_response(ok: bool, output: Any = None, **kw) -> ToolResult:
@@ -230,16 +261,19 @@ def tool_response(ok: bool, output: Any = None, **kw) -> ToolResult:
 # -- helpers -------------------------------------------------------------------
 def _new_token() -> str:
     import uuid
+
     return str(uuid.uuid4())
 
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 
 def _redact(value: Any) -> Any:
     from ..contracts import redact
+
     return redact(value)
 
 
@@ -249,48 +283,58 @@ def _retryable(exc: Exception) -> bool:
     return any(k in txt for k in transient)
 
 
-def _coerce_result(output: Any, *, ok: bool = True, trace_id: Optional[str] = None,
-                   meta: Optional[dict] = None) -> ToolResult:
+def _coerce_result(output: Any, *, ok: bool = True, trace_id: str | None = None, meta: dict | None = None) -> ToolResult:
     if isinstance(output, ToolResult):
         output.trace_id = output.trace_id or trace_id
         return output
     # Honest handling of an already-classified failure (output may be None).
     if ok is False and meta and meta.get("error_code") and (output is None or isinstance(output, dict)):
-        return ToolResult.error(meta["error_code"],
-                                str(meta.get("error_message") or meta.get("error") or "failed"),
-                                retryable=bool(meta.get("retryable", False)),
-                                trace_id=trace_id,
-                                status=str(meta.get("status") or "error"),
-                                next_action=meta.get("next_action"),
-                                data=dict(meta.get("data") or {}))
+        return ToolResult.error(
+            meta["error_code"],
+            str(meta.get("error_message") or meta.get("error") or "failed"),
+            retryable=bool(meta.get("retryable", False)),
+            trace_id=trace_id,
+            status=str(meta.get("status") or "error"),
+            next_action=meta.get("next_action"),
+            data=dict(meta.get("data") or {}),
+        )
     if isinstance(output, dict) and ("ok" in output or "error" in output) and "status" in output:
         try:
             return ToolResult(
-                ok=bool(output.get("ok", ok)), status=str(output.get("status", "ok")),
-                output=output.get("output"), error_code=output.get("error_code"),
+                ok=bool(output.get("ok", ok)),
+                status=str(output.get("status", "ok")),
+                output=output.get("output"),
+                error_code=output.get("error_code"),
                 error_message=output.get("error_message"),
                 evidence_refs=output.get("evidence_refs") or [],
                 changed_resources=output.get("changed_resources") or [],
-                trace_id=trace_id, retryable=bool(output.get("retryable", False)),
+                trace_id=trace_id,
+                retryable=bool(output.get("retryable", False)),
                 next_action=output.get("next_action"),
             )
         except Exception:
             pass
     if isinstance(output, dict) and (output.get("error") or output.get("ok") is False):
         if meta and meta.get("error_code"):
-            return ToolResult.error(meta["error_code"],
-                                    str(meta.get("error_message") or output.get("error") or "failed"),
-                                    retryable=bool(meta.get("retryable", False)), trace_id=trace_id,
-                                    status=str(meta.get("status") or "error"),
-                                    next_action=meta.get("next_action"),
-                                    data=dict(meta.get("data") or {}))
-        return ToolResult.error((output.get("error_code") or "TOOL_ERROR"),
-                                str(output.get("error") or output.get("error_message") or "failed"),
-                                retryable=_retryable_from_meta(meta), trace_id=trace_id)
+            return ToolResult.error(
+                meta["error_code"],
+                str(meta.get("error_message") or output.get("error") or "failed"),
+                retryable=bool(meta.get("retryable", False)),
+                trace_id=trace_id,
+                status=str(meta.get("status") or "error"),
+                next_action=meta.get("next_action"),
+                data=dict(meta.get("data") or {}),
+            )
+        return ToolResult.error(
+            (output.get("error_code") or "TOOL_ERROR"),
+            str(output.get("error") or output.get("error_message") or "failed"),
+            retryable=_retryable_from_meta(meta),
+            trace_id=trace_id,
+        )
     return ToolResult.ok_result(output, trace_id=trace_id)
 
 
-def _retryable_from_meta(meta: Optional[dict]) -> bool:
+def _retryable_from_meta(meta: dict | None) -> bool:
     if not meta:
         return False
     return _retryable(Exception(str(meta.get("error", ""))))
@@ -300,17 +344,13 @@ def _typed_exception(exc: Exception) -> tuple[bool, Any, dict]:
     """Classify an exception raised during tool execution into a typed result."""
     err = f"{type(exc).__name__}: {exc}"
     if isinstance(exc, TimeoutError):
-        return False, None, {"error": err, "error_code": "TOOL_TIMEOUT",
-                             "error_message": str(exc), "retryable": True}
+        return False, None, {"error": err, "error_code": "TOOL_TIMEOUT", "error_message": str(exc), "retryable": True}
     if isinstance(exc, PermissionError):
-        return False, None, {"error": err, "error_code": "TOOL_BLOCKED",
-                             "error_message": str(exc), "retryable": False}
+        return False, None, {"error": err, "error_code": "TOOL_BLOCKED", "error_message": str(exc), "retryable": False}
     low = err.lower()
     if "timeout" in low or "timed out" in low or "took too long" in low:
-        return False, None, {"error": err, "error_code": "TOOL_TIMEOUT",
-                             "error_message": str(exc), "retryable": True}
-    return False, None, {"error": err, "error_code": "TOOL_ERROR",
-                         "error_message": str(exc), "retryable": _retryable(exc)}
+        return False, None, {"error": err, "error_code": "TOOL_TIMEOUT", "error_message": str(exc), "retryable": True}
+    return False, None, {"error": err, "error_code": "TOOL_ERROR", "error_message": str(exc), "retryable": _retryable(exc)}
 
 
 def _classify_registry_result(raw: Any) -> tuple[bool, Any, dict]:
@@ -331,46 +371,48 @@ def _classify_registry_result(raw: Any) -> tuple[bool, Any, dict]:
         permission = raw.get("permission") if isinstance(raw.get("permission"), dict) else {}
         approval_request = permission.get("approval_request") if isinstance(permission, dict) else None
         if approval_request or str(permission.get("decision", "")).lower() == "ask":
-            return False, raw, {
-                "error": err,
-                "error_code": "APPROVAL_REQUIRED",
-                "error_message": errmsg,
-                "retryable": True,
-                "status": "blocked",
-                "next_action": "wait_for_approval",
-                "data": {
-                    "approval_request": approval_request,
-                    "safety": permission.get("safety"),
-                    "permission": permission,
+            return (
+                False,
+                raw,
+                {
+                    "error": err,
+                    "error_code": "APPROVAL_REQUIRED",
+                    "error_message": errmsg,
+                    "retryable": True,
+                    "status": "blocked",
+                    "next_action": "wait_for_approval",
+                    "data": {
+                        "approval_request": approval_request,
+                        "safety": permission.get("safety"),
+                        "permission": permission,
+                    },
                 },
-            }
+            )
         # Tool-not-found marker: registry returns available_sample/hint.
         if "Unknown tool" in err or "not found" in err.lower() or "available_sample" in raw:
             try:
                 from ..capability_ledger import CapabilityEntry, get_capability_ledger
 
-                get_capability_ledger().add_discovered(CapabilityEntry.create(
-                    power=f"Tool capability: {str(raw.get('tool') or err).replace('Unknown tool', '').strip() or 'unknown'}",
-                    use="Needed because a requested tool/capability was not registered",
-                    risk="unknown until connector/tool is implemented and scoped",
-                    needed_approval_setup=f"Implement/register the tool behind ToolGateway with permissions and tests. Reason: {errmsg}",
-                    status="missing",
-                    source="tool_gateway",
-                ))
+                get_capability_ledger().add_discovered(
+                    CapabilityEntry.create(
+                        power=f"Tool capability: {str(raw.get('tool') or err).replace('Unknown tool', '').strip() or 'unknown'}",
+                        use="Needed because a requested tool/capability was not registered",
+                        risk="unknown until connector/tool is implemented and scoped",
+                        needed_approval_setup=f"Implement/register the tool behind ToolGateway with permissions and tests. Reason: {errmsg}",
+                        status="missing",
+                        source="tool_gateway",
+                    )
+                )
             except Exception:
                 pass
-            return False, raw, {"error": err, "error_code": "TOOL_NOT_FOUND",
-                                "error_message": errmsg, "retryable": False}
+            return False, raw, {"error": err, "error_code": "TOOL_NOT_FOUND", "error_message": errmsg, "retryable": False}
         if "denied" in err.lower() or "DENY" in err.upper():
-            return False, raw, {"error": err, "error_code": "POLICY_DENIED",
-                                "error_message": errmsg, "retryable": False}
+            return False, raw, {"error": err, "error_code": "POLICY_DENIED", "error_message": errmsg, "retryable": False}
         # Classify transient/timeout-style failures so retry policy can act.
         if "timeout" in err.lower() or "timed out" in err.lower() or "took too long" in err.lower():
-            return False, raw, {"error": err, "error_code": "TOOL_TIMEOUT",
-                                "error_message": errmsg, "retryable": True}
+            return False, raw, {"error": err, "error_code": "TOOL_TIMEOUT", "error_message": errmsg, "retryable": True}
         fc = raw.get("error_code") or "TOOL_ERROR"
         retryable = bool(raw.get("retryable", _retryable(Exception(err))))
-        return False, raw, {"error": err, "error_code": fc,
-                            "error_message": errmsg, "retryable": retryable}
+        return False, raw, {"error": err, "error_code": fc, "error_message": errmsg, "retryable": retryable}
     ok = bool(raw.get("ok", raw.get("success", True)))
     return ok, raw, {"ok": ok}

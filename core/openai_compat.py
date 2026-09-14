@@ -4,15 +4,18 @@ Works with: OpenAI, Groq, OpenRouter, Together, Fireworks, DeepSeek, Mistral,
 Gemini OpenAI mode, Cerebras, SambaNova, HF router, GitHub Models, Azure,
 Ollama /v1, LM Studio, vLLM, and any custom base_url.
 """
+
 from __future__ import annotations
 
 import json
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
+from .aio import get_async_client, run_sync
+from .errors import HermusError
 from .providers import (
     build_auth_headers,
     get_provider,
@@ -25,12 +28,12 @@ class CompatResponse:
     def __init__(
         self,
         content: str,
-        tool_calls: Optional[list[dict]] = None,
-        usage: Optional[dict] = None,
-        raw: Optional[dict] = None,
+        tool_calls: list[dict] | None = None,
+        usage: dict | None = None,
+        raw: dict | None = None,
         model: str = "",
         latency_ms: int = 0,
-        headers: Optional[dict] = None,
+        headers: dict | None = None,
     ):
         self.content = content or ""
         self.tool_calls = tool_calls or []
@@ -59,7 +62,7 @@ def _normalize_messages(messages: list[dict]) -> list[dict]:
     return out
 
 
-def _normalize_tools(tools: list[dict] = None) -> Optional[list[dict]]:
+def _normalize_tools(tools: list[dict] = None) -> list[dict] | None:
     if not tools:
         return None
     # Already OpenAI style
@@ -90,6 +93,7 @@ def _parse_tool_calls(msg: dict) -> list[dict]:
 def _extract_rate_headers(headers: dict) -> dict[str, Any]:
     """Parse common rate-limit headers from providers."""
     h = {k.lower(): v for k, v in (headers or {}).items()}
+
     def pick(*keys):
         for k in keys:
             if k in h:
@@ -140,6 +144,100 @@ def _extract_rate_headers(headers: dict) -> dict[str, Any]:
     return {k: v for k, v in out.items() if v is not None}
 
 
+def _build_chat_request(
+    provider: str,
+    model: str,
+    messages: list[dict],
+    api_key: str = None,
+    base_url: str = None,
+    tools: list[dict] = None,
+    temperature: float = 0.7,
+    max_tokens: int = None,
+    extra_headers: dict = None,
+    extra_body: dict = None,
+) -> tuple[dict, str, dict, dict]:
+    """Pure request builder shared by the sync and async chat paths."""
+    preset = get_provider(provider)
+    url = resolve_endpoint(provider, base_url=base_url, path_key="chat_path")
+    headers = build_auth_headers(provider, api_key, extra=extra_headers)
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": _normalize_messages(messages),
+        "temperature": temperature,
+    }
+    if max_tokens:
+        body["max_tokens"] = max_tokens
+    norm_tools = _normalize_tools(tools)
+    if norm_tools and preset.get("supports_tools", True):
+        body["tools"] = norm_tools
+        body["tool_choice"] = "auto"
+    if extra_body:
+        body.update(extra_body)
+    return preset, url, headers, body
+
+
+def _parse_chat_response(
+    provider: str,
+    model: str,
+    messages: list[dict],
+    *,
+    status_code: int,
+    headers: dict,
+    text: str,
+    data: dict,
+    latency_ms: int,
+) -> CompatResponse:
+    """Pure response parser shared by the sync and async chat paths."""
+    rate = _extract_rate_headers(headers)
+    if status_code >= 400:
+        err = data.get("error") if isinstance(data, dict) else None
+        if isinstance(err, dict):
+            msg = err.get("message") or err.get("code") or str(err)
+        else:
+            msg = str(err or text)[:800]
+        usage = token_counter.estimate_cost(
+            token_counter.count_messages(messages),
+            0,
+            model=f"{provider}/{model}",
+        )
+        usage["error"] = msg
+        usage["status_code"] = status_code
+        usage["rate_limit"] = rate
+        raise CompatAPIError(
+            msg,
+            status_code=status_code,
+            rate_limit=rate,
+            body=data,
+            latency_ms=latency_ms,
+        )
+
+    # Parse success
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    content = msg.get("content") or choice.get("text") or ""
+    # Some providers put reasoning separately
+    if not content and msg.get("reasoning_content"):
+        content = msg.get("reasoning_content")
+    tool_calls = _parse_tool_calls(msg)
+
+    usage_raw = data.get("usage") or {}
+    pt = usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or token_counter.count_messages(messages)
+    ct = usage_raw.get("completion_tokens") or usage_raw.get("output_tokens") or token_counter.count_text(content or "")
+    usage = token_counter.estimate_cost(pt, ct, model=f"{provider}/{model}")
+    usage["rate_limit"] = rate
+    usage["latency_ms"] = latency_ms
+
+    return CompatResponse(
+        content=content or "",
+        tool_calls=tool_calls,
+        usage=usage,
+        raw=data,
+        model=data.get("model") or model,
+        latency_ms=latency_ms,
+        headers=rate,
+    )
+
+
 def chat_completions(
     provider: str,
     model: str,
@@ -173,78 +271,36 @@ def chat_completions(
             timeout=timeout,
         )
 
-    url = resolve_endpoint(provider, base_url=base_url, path_key="chat_path")
-    headers = build_auth_headers(provider, api_key, extra=extra_headers)
-    body: dict[str, Any] = {
-        "model": model,
-        "messages": _normalize_messages(messages),
-        "temperature": temperature,
-    }
-    if max_tokens:
-        body["max_tokens"] = max_tokens
-    norm_tools = _normalize_tools(tools)
-    if norm_tools and preset.get("supports_tools", True):
-        body["tools"] = norm_tools
-        body["tool_choice"] = "auto"
-    if extra_body:
-        body.update(extra_body)
+    _, url, headers, body = _build_chat_request(
+        provider,
+        model,
+        messages,
+        api_key,
+        base_url,
+        tools,
+        temperature,
+        max_tokens,
+        extra_headers,
+        extra_body,
+    )
 
     try:
         resp = requests.post(url, headers=headers, json=body, timeout=timeout)
         latency_ms = int((time.time() - start) * 1000)
-        rate = _extract_rate_headers(dict(resp.headers))
         text = resp.text
         try:
             data = resp.json()
         except Exception:
             data = {"raw_text": text[:2000]}
-
-        if resp.status_code >= 400:
-            err = data.get("error") if isinstance(data, dict) else None
-            if isinstance(err, dict):
-                msg = err.get("message") or err.get("code") or str(err)
-            else:
-                msg = str(err or text)[:800]
-            usage = token_counter.estimate_cost(
-                token_counter.count_messages(messages),
-                0,
-                model=f"{provider}/{model}",
-            )
-            usage["error"] = msg
-            usage["status_code"] = resp.status_code
-            usage["rate_limit"] = rate
-            raise CompatAPIError(
-                msg,
-                status_code=resp.status_code,
-                rate_limit=rate,
-                body=data,
-                latency_ms=latency_ms,
-            )
-
-        # Parse success
-        choice = (data.get("choices") or [{}])[0]
-        msg = choice.get("message") or {}
-        content = msg.get("content") or choice.get("text") or ""
-        # Some providers put reasoning separately
-        if not content and msg.get("reasoning_content"):
-            content = msg.get("reasoning_content")
-        tool_calls = _parse_tool_calls(msg)
-
-        usage_raw = data.get("usage") or {}
-        pt = usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or token_counter.count_messages(messages)
-        ct = usage_raw.get("completion_tokens") or usage_raw.get("output_tokens") or token_counter.count_text(content or "")
-        usage = token_counter.estimate_cost(pt, ct, model=f"{provider}/{model}")
-        usage["rate_limit"] = rate
-        usage["latency_ms"] = latency_ms
-
-        return CompatResponse(
-            content=content or "",
-            tool_calls=tool_calls,
-            usage=usage,
-            raw=data,
-            model=data.get("model") or model,
+        return _parse_chat_response(
+            provider,
+            model,
+            messages,
+            status_code=resp.status_code,
+            headers=dict(resp.headers),
+            text=text,
+            data=data,
             latency_ms=latency_ms,
-            headers=rate,
         )
     except CompatAPIError:
         raise
@@ -252,6 +308,89 @@ def chat_completions(
         raise CompatAPIError("Request timeout", status_code=408, latency_ms=int((time.time() - start) * 1000)) from e
     except requests.exceptions.ConnectionError as e:
         raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
+    except Exception as e:
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
+
+
+async def achat_completions(
+    provider: str,
+    model: str,
+    messages: list[dict],
+    api_key: str = None,
+    base_url: str = None,
+    tools: list[dict] = None,
+    temperature: float = 0.7,
+    max_tokens: int = None,
+    timeout: int = 120,
+    extra_headers: dict = None,
+    extra_body: dict = None,
+    client=None,
+) -> CompatResponse:
+    """Async mirror of :func:`chat_completions` (httpx, pooled connections).
+
+    ``client`` defaults to the shared :mod:`core.aio` client; tests inject a
+    ``MockTransport`` client. The Anthropic native path stays sync (thin
+    adapter) and runs in a worker thread.
+    """
+    import httpx
+
+    preset = get_provider(provider)
+    start = time.time()
+
+    # Anthropic native path (sync adapter — honest thread hop)
+    if preset.get("native_anthropic") and (not base_url or "anthropic.com" in (base_url or preset.get("base_url") or "")):
+        return await run_sync(
+            _anthropic_messages,
+            model=model,
+            messages=messages,
+            api_key=api_key,
+            base_url=base_url or preset.get("base_url"),
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens or 2048,
+            timeout=timeout,
+        )
+
+    _, url, headers, body = _build_chat_request(
+        provider,
+        model,
+        messages,
+        api_key,
+        base_url,
+        tools,
+        temperature,
+        max_tokens,
+        extra_headers,
+        extra_body,
+    )
+
+    http = client or get_async_client()
+    try:
+        resp = await http.post(url, headers=headers, json=body, timeout=timeout)
+        latency_ms = int((time.time() - start) * 1000)
+        text = resp.text
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw_text": text[:2000]}
+        return _parse_chat_response(
+            provider,
+            model,
+            messages,
+            status_code=resp.status_code,
+            headers=dict(resp.headers),
+            text=text,
+            data=data,
+            latency_ms=latency_ms,
+        )
+    except CompatAPIError:
+        raise
+    except httpx.TimeoutException as e:
+        raise CompatAPIError("Request timeout", status_code=408, latency_ms=int((time.time() - start) * 1000)) from e
+    except httpx.ConnectError as e:
+        raise CompatAPIError(f"Connection error: {e}", status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
+    except httpx.HTTPError as e:
+        raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
     except Exception as e:
         raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - start) * 1000)) from e
 
@@ -267,7 +406,7 @@ def stream_chat_completions(
     max_tokens: int = None,
     timeout: int = 120,
     extra_headers: dict = None,
-    on_delta: Optional[callable] = None,
+    on_delta: callable | None = None,
 ) -> CompatResponse:
     """Streaming (SSE) variant of :func:`chat_completions`.
 
@@ -311,13 +450,14 @@ def stream_chat_completions(
                 rate = _extract_rate_headers(dict(resp.headers))
                 raise CompatAPIError(
                     f"streaming HTTP {resp.status_code}: {resp.text[:400]}",
-                    status_code=resp.status_code, rate_limit=rate,
+                    status_code=resp.status_code,
+                    rate_limit=rate,
                 )
             for raw_line in resp.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
                 line = raw_line.strip()
-                if line.startswith(":"):        # SSE comment / keep-alive
+                if line.startswith(":"):  # SSE comment / keep-alive
                     continue
                 if line.startswith("data:"):
                     line = line[5:].strip()
@@ -378,11 +518,13 @@ def stream_chat_completions(
                 parsed = {"raw": args}
             if not slot.get("name"):
                 continue
-            tool_calls.append({
-                "name": slot["name"],
-                "arguments": parsed if isinstance(parsed, dict) else {},
-                "id": slot.get("id") or f"call_{uuid.uuid4().hex[:8]}",
-            })
+            tool_calls.append(
+                {
+                    "name": slot["name"],
+                    "arguments": parsed if isinstance(parsed, dict) else {},
+                    "id": slot.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+                }
+            )
         content = "".join(content_parts)
         latency_ms = int((time.time() - started) * 1000)
         pt = usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or token_counter.count_messages(messages)
@@ -392,8 +534,11 @@ def stream_chat_completions(
         usage["streamed"] = True
         usage["finish_reason"] = finish_reason
         return CompatResponse(
-            content=content, tool_calls=tool_calls, usage=usage,
-            raw={"stream": True, "finish_reason": finish_reason}, model=model,
+            content=content,
+            tool_calls=tool_calls,
+            usage=usage,
+            raw={"stream": True, "finish_reason": finish_reason},
+            model=model,
             latency_ms=latency_ms,
         )
     except CompatAPIError:
@@ -406,7 +551,17 @@ def stream_chat_completions(
         raise CompatAPIError(str(e), status_code=0, latency_ms=int((time.time() - started) * 1000)) from e
 
 
-class CompatAPIError(Exception):
+class CompatAPIError(HermusError):
+    """An OpenAI-compatible provider call failed.
+
+    Re-based onto :class:`HermusError`. ``status_code`` is the *upstream*
+    provider status (0 when no HTTP response was received); the gateway
+    envelope uses :attr:`status`, which falls back to 502 in that case.
+    """
+
+    code = "provider_error"
+    status = 502
+
     def __init__(
         self,
         message: str,
@@ -415,12 +570,18 @@ class CompatAPIError(Exception):
         body: Any = None,
         latency_ms: int = 0,
     ):
-        super().__init__(message)
         self.status_code = status_code
         self.rate_limit = rate_limit or {}
         self.body = body
         self.latency_ms = latency_ms
-        self.message = message
+        gateway_status = status_code if 100 <= status_code <= 599 else 502
+        super().__init__(
+            message,
+            code="provider_rate_limited" if status_code == 429 else "provider_error",
+            status=gateway_status,
+            retryable=status_code in (408, 429, 502, 503, 504) or status_code == 0,
+            details={"provider_status": status_code, "latency_ms": latency_ms} if status_code or latency_ms else None,
+        )
 
     @property
     def is_rate_limit(self) -> bool:
@@ -558,12 +719,15 @@ def _normalize_models_list(data: Any, provider: str) -> list[dict]:
                 "id": mid,
                 "owned_by": m.get("owned_by") or m.get("organization") or "",
                 "created": m.get("created"),
-                "context_length": m.get("context_length") or m.get("context_window") or (m.get("top_provider") or {}).get("context_length"),
+                "context_length": m.get("context_length")
+                or m.get("context_window")
+                or (m.get("top_provider") or {}).get("context_length"),
                 "pricing": m.get("pricing"),
                 "provider": provider,
                 "raw_keys": list(m.keys())[:12],
             }
         )
+
     # Sort chat-likely first
     def score(x):
         i = (x.get("id") or "").lower()
@@ -687,17 +851,46 @@ def _rank_chat_models(model_ids: list[str]) -> list[str]:
     chat models are present later in the list.
     """
     excluded = (
-        "embed", "embedding", "bge", "rerank", "retriev", "whisper",
-        "tts", "speech", "moderation", "dall", "diffusion", "stable-diffusion",
-        "image", "clip", "fuyu", "ocr",
+        "embed",
+        "embedding",
+        "bge",
+        "rerank",
+        "retriev",
+        "whisper",
+        "tts",
+        "speech",
+        "moderation",
+        "dall",
+        "diffusion",
+        "stable-diffusion",
+        "image",
+        "clip",
+        "fuyu",
+        "ocr",
     )
     chat_markers = (
-        "instruct", "chat", "llama", "qwen", "mistral", "mixtral",
-        "gemma", "deepseek", "nemotron", "command-r", "jamba",
+        "instruct",
+        "chat",
+        "llama",
+        "qwen",
+        "mistral",
+        "mixtral",
+        "gemma",
+        "deepseek",
+        "nemotron",
+        "command-r",
+        "jamba",
     )
     preferred_families = (
-        "nemotron", "llama-3", "llama3", "qwen2", "qwen3", "mistral",
-        "mixtral", "deepseek", "gemma",
+        "nemotron",
+        "llama-3",
+        "llama3",
+        "qwen2",
+        "qwen3",
+        "mistral",
+        "mixtral",
+        "deepseek",
+        "gemma",
     )
 
     ranked = []
@@ -834,7 +1027,9 @@ def health_ping(
         result["rate_limit"] = last_error.rate_limit
         if _is_model_error(last_error.message, last_error.status_code):
             result["status"] = "model_not_found"
-            result["note"] = f"Tried {len(candidate_models[:5])} models including '{original_model}'; all returned model-not-found. The provider may have deprecated this model."
+            result["note"] = (
+                f"Tried {len(candidate_models[:5])} models including '{original_model}'; all returned model-not-found. The provider may have deprecated this model."
+            )
         elif last_error.is_auth_error:
             result["status"] = "auth_failed"
         elif last_error.is_rate_limit:

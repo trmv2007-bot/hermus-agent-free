@@ -7,42 +7,81 @@ Routes each call to the best available model for that specific step, role, and t
 - Critic & Verification → independent models distinct from generator
 - Historical provider reliability & cooldown tracking
 """
+
 from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
 
 # task type -> (preferred model keywords, needs_tools, wants_vision)
 TASK_PROFILES: dict[str, dict[str, Any]] = {
-    "chat":        {"keywords": ("instruct", "chat", "8b", "7b", "small", "llama"), "tools": False, "vision": False},
-    "code":        {"keywords": ("code", "coder", "deepseek", "qwen", "starcoder"), "tools": True, "vision": False},
-    "reasoning":   {"keywords": ("reason", "thinking", "r1", "70b", "large", "o3", "o1"), "tools": True, "vision": False},
-    "vision":      {"keywords": ("vision", "llava", "bakllava", "moondream", "llama3.2-vision"), "tools": False, "vision": True},
-    "research":    {"keywords": ("research", "70b", "large", "llama3.3", "deepseek"), "tools": True, "vision": False},
-    "summary":     {"keywords": ("8b", "7b", "small", "mini", "instruct"), "tools": False, "vision": False},
-    "tooling":     {"keywords": ("function", "tool", "instruct", "qwen", "8b"), "tools": True, "vision": False},
+    "chat": {"keywords": ("instruct", "chat", "8b", "7b", "small", "llama"), "tools": False, "vision": False},
+    "code": {"keywords": ("code", "coder", "deepseek", "qwen", "starcoder"), "tools": True, "vision": False},
+    "reasoning": {"keywords": ("reason", "thinking", "r1", "70b", "large", "o3", "o1"), "tools": True, "vision": False},
+    "vision": {"keywords": ("vision", "llava", "bakllava", "moondream", "llama3.2-vision"), "tools": False, "vision": True},
+    "research": {"keywords": ("research", "70b", "large", "llama3.3", "deepseek"), "tools": True, "vision": False},
+    "summary": {"keywords": ("8b", "7b", "small", "mini", "instruct"), "tools": False, "vision": False},
+    "tooling": {"keywords": ("function", "tool", "instruct", "qwen", "8b"), "tools": True, "vision": False},
     "longcontext": {"keywords": ("context", "128k", "long", "qwen", "llama3.1"), "tools": False, "vision": False},
-    "critic":      {"keywords": ("critic", "reviewer", "eval", "70b", "r1", "claude", "gpt", "deepseek"), "tools": False, "vision": False},
-    "verifier":    {"keywords": ("verifier", "check", "coder", "deepseek", "qwen", "instruct"), "tools": True, "vision": False},
+    "critic": {
+        "keywords": ("critic", "reviewer", "eval", "70b", "r1", "claude", "gpt", "deepseek"),
+        "tools": False,
+        "vision": False,
+    },
+    "verifier": {"keywords": ("verifier", "check", "coder", "deepseek", "qwen", "instruct"), "tools": True, "vision": False},
 }
 
-CODE_HINTS = ("def ", "class ", "import ", "function", "code", "bug", "fix", "refactor", "python", "javascript",
-              "sql", "```", "api", "script", "compile", "deploy", "docker", "regex")
-REASON_HINTS = ("why", "explain", "analyze", "prove", "reason", "compare", "design", "architecture",
-                "trade-off", "tradeoff", "think", "plan", "strategy", "evaluate")
+CODE_HINTS = (
+    "def ",
+    "class ",
+    "import ",
+    "function",
+    "code",
+    "bug",
+    "fix",
+    "refactor",
+    "python",
+    "javascript",
+    "sql",
+    "```",
+    "api",
+    "script",
+    "compile",
+    "deploy",
+    "docker",
+    "regex",
+)
+REASON_HINTS = (
+    "why",
+    "explain",
+    "analyze",
+    "prove",
+    "reason",
+    "compare",
+    "design",
+    "architecture",
+    "trade-off",
+    "tradeoff",
+    "think",
+    "plan",
+    "strategy",
+    "evaluate",
+)
 VISION_HINTS = ("image", "photo", "picture", "screenshot", "see", "look at", "what is in", "ocr")
 RESEARCH_HINTS = ("research", "find", "search", "sources", "cite", "latest", "news", "investigate")
 
 
 class ModelRouter:
-    def __init__(self, ollama_base_url: Optional[str] = None):
+    def __init__(self, ollama_base_url: str | None = None):
         self.ollama_base_url = ollama_base_url or config.ollama_base_url
-        self._provider_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"successes": 0, "failures": 0, "consecutive_failures": 0, "last_failure_ts": 0.0})
+        self._provider_stats: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"successes": 0, "failures": 0, "consecutive_failures": 0, "last_failure_ts": 0.0}
+        )
 
-    def record_outcome(self, provider: str, model: str, success: bool, latency_ms: Optional[float] = None) -> None:
+    def record_outcome(self, provider: str, model: str, success: bool, latency_ms: float | None = None) -> None:
         key = f"{provider}:{model}".lower()
         stats = self._provider_stats[key]
         if success:
@@ -90,13 +129,15 @@ class ModelRouter:
         workers: list[dict[str, Any]] = []
         try:
             from .model_fleet import _available_workers
+
             workers = _available_workers(limit=32)
         except Exception:
             workers = []
         return workers
 
-    def _score_worker(self, w: dict[str, Any], task_type: str, needs_tools: bool,
-                      wants_vision: bool, context_tokens: int) -> tuple[float, str]:
+    def _score_worker(
+        self, w: dict[str, Any], task_type: str, needs_tools: bool, wants_vision: bool, context_tokens: int
+    ) -> tuple[float, str]:
         provider = (w.get("provider") or "").lower()
         model = (w.get("model") or "").lower()
         profile = TASK_PROFILES.get(task_type, TASK_PROFILES["chat"])
@@ -156,8 +197,9 @@ class ModelRouter:
 
         return score, ",".join(reasons)
 
-    def rank(self, task_type: str, context_tokens: int = 100, needs_tools: bool = False,
-             wants_vision: bool = False) -> list[dict[str, Any]]:
+    def rank(
+        self, task_type: str, context_tokens: int = 100, needs_tools: bool = False, wants_vision: bool = False
+    ) -> list[dict[str, Any]]:
         profile = TASK_PROFILES.get(task_type, TASK_PROFILES["chat"])
         needs_tools = needs_tools or profile["tools"]
         wants_vision = wants_vision or profile["vision"]
@@ -180,10 +222,15 @@ class ModelRouter:
         except Exception:
             return True
 
-    def select(self, text: str, context_tokens: Optional[int] = None,
-               needs_tools: bool = False, wants_vision: bool = False,
-               exclude_models: Optional[list[str]] = None,
-               task_type: Optional[str] = None) -> dict[str, Any]:
+    def select(
+        self,
+        text: str,
+        context_tokens: int | None = None,
+        needs_tools: bool = False,
+        wants_vision: bool = False,
+        exclude_models: list[str] | None = None,
+        task_type: str | None = None,
+    ) -> dict[str, Any]:
         """Choose the best model for a single step from the given text."""
         task_type = task_type or self.classify_task(text)
         ctx = context_tokens or self.estimate_context_tokens(text)
@@ -191,7 +238,12 @@ class ModelRouter:
 
         if exclude_models:
             exclude_set = {m.lower() for m in exclude_models}
-            ranked = [r for r in ranked if f"{r.get('provider')}/{r.get('model')}".lower() not in exclude_set and r.get("model", "").lower() not in exclude_set]
+            ranked = [
+                r
+                for r in ranked
+                if f"{r.get('provider')}/{r.get('model')}".lower() not in exclude_set
+                and r.get("model", "").lower() not in exclude_set
+            ]
 
         if ranked:
             top = ranked[0]
@@ -203,9 +255,7 @@ class ModelRouter:
                 "provider": top["provider"],
                 "model": f"{top['provider']}/{top['model']}",
                 "reason": top["reason"],
-                "alternatives": [
-                    f"{r['provider']}/{r['model']}" for r in ranked[1:6]
-                ],
+                "alternatives": [f"{r['provider']}/{r['model']}" for r in ranked[1:6]],
             }
         # graceful fallback to configured default
         reason = "no workers discovered; using configured default"
@@ -215,10 +265,7 @@ class ModelRouter:
             diag = diagnose(require_tools=needs_tools, model=config.model)
             configured = [p["provider"] for p in diag.get("configured", [])]
             if configured:
-                reason = (
-                    f"no usable workers discovered; configured providers: "
-                    f"{', '.join(configured)}. Using configured default."
-                )
+                reason = f"no usable workers discovered; configured providers: {', '.join(configured)}. Using configured default."
             else:
                 reason = "no usable workers discovered; no provider credentials"
         except Exception:
@@ -234,7 +281,7 @@ class ModelRouter:
             "alternatives": [],
         }
 
-    def select_for_role(self, role: str, text: str, exclude_models: Optional[list[str]] = None) -> dict[str, Any]:
+    def select_for_role(self, role: str, text: str, exclude_models: list[str] | None = None) -> dict[str, Any]:
         """Select a capability-appropriate model for specific roles (coder, critic, verifier, architect)."""
         role_map = {
             "coder": "code",
@@ -246,7 +293,9 @@ class ModelRouter:
             "researcher": "research",
         }
         task_type = role_map.get(role.lower(), "chat")
-        return self.select(text, task_type=task_type, needs_tools=(task_type in ("code", "verifier", "research")), exclude_models=exclude_models)
+        return self.select(
+            text, task_type=task_type, needs_tools=(task_type in ("code", "verifier", "research")), exclude_models=exclude_models
+        )
 
 
 router2 = ModelRouter()

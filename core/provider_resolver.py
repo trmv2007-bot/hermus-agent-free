@@ -18,10 +18,12 @@ All runtime consumers (FreeLLM fallback, MultiKeyManager.first_available_bundle,
 model fleet, router, capability auto-selection) should read from here rather
 than re-implementing credential discovery.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from .config import config
 from .providers import PROVIDER_PRESETS, get_provider
@@ -36,9 +38,26 @@ _FALLBACK_EXCLUDE_LOCAL = {"ollama", "lmstudio", "nollama"}
 
 #: canonical ordering used when nothing else differentiates two providers.
 _PROVIDER_ORDER = (
-    "openai", "groq", "openrouter", "gemini", "nvidia", "together", "fireworks",
-    "deepseek", "mistral", "codestral", "cerebras", "sambanova", "anthropic",
-    "azure", "huggingface", "github", "custom", "ollama", "lmstudio", "nollama",
+    "openai",
+    "groq",
+    "openrouter",
+    "gemini",
+    "nvidia",
+    "together",
+    "fireworks",
+    "deepseek",
+    "mistral",
+    "codestral",
+    "cerebras",
+    "sambanova",
+    "anthropic",
+    "azure",
+    "huggingface",
+    "github",
+    "custom",
+    "ollama",
+    "lmstudio",
+    "nollama",
     "vllm",
 )
 
@@ -65,7 +84,7 @@ def _supports_tools(provider: str) -> bool:
         return True
 
 
-def _env_key(provider: str) -> Optional[str]:
+def _env_key(provider: str) -> str | None:
     try:
         return get_provider(provider).get("env_key")
     except Exception:
@@ -79,14 +98,14 @@ def _base_url(provider: str) -> str:
         return ""
 
 
-def _default_model(provider: str) -> Optional[str]:
+def _default_model(provider: str) -> str | None:
     try:
         return get_provider(provider).get("default_model")
     except Exception:
         return None
 
 
-def _max_tools(provider: str) -> Optional[int]:
+def _max_tools(provider: str) -> int | None:
     try:
         return get_provider(provider).get("max_tools")
     except Exception:
@@ -226,9 +245,9 @@ def discover_runtime_bundles(include_local: bool = True) -> list[dict[str, Any]]
 def select_usable_bundle(
     require_tools: bool = False,
     *,
-    prefer: Optional[Iterable[str]] = None,
+    prefer: Iterable[str] | None = None,
     exclude_local: bool = True,
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Pick the best currently available credential bundle.
 
@@ -241,8 +260,7 @@ def select_usable_bundle(
         bundles = [
             b
             for b in bundles
-            if b.get("provider") not in _FALLBACK_EXCLUDE_LOCAL
-            and not (b.get("key") == "" and b.get("source") == "local")
+            if b.get("provider") not in _FALLBACK_EXCLUDE_LOCAL and not (b.get("key") == "" and b.get("source") == "local")
         ]
     if not bundles:
         return None
@@ -298,7 +316,7 @@ def list_available_providers(probe: bool = False) -> list[dict[str, Any]]:
         env_key = _env_key(provider)
         env_cred = _env_credential(provider)
         no_auth = _no_auth(provider)
-        source: Optional[str] = None
+        source: str | None = None
         if provider_bundles:
             source = provider_bundles[0].get("source") or "stored"
         elif env_cred:
@@ -307,22 +325,24 @@ def list_available_providers(probe: bool = False) -> list[dict[str, Any]]:
             source = "local"
 
         configured = bool(provider_bundles or env_cred or no_auth)
-        models = sorted({
-            m for b in provider_bundles for m in (b.get("models") or [])
-        }) or []
+        models = sorted({m for b in provider_bundles for m in (b.get("models") or [])}) or []
         # Cache a reachability verdict from the last health check; ``None``
         # means "not known yet" rather than "offline".
         healthy_flags = [b.get("healthy") for b in provider_bundles if b.get("healthy") is not None]
-        reachable = True if healthy_flags and all(healthy_flags) else (
-            False if healthy_flags and any(f is False for f in healthy_flags) else None
+        reachable = (
+            True
+            if healthy_flags and all(healthy_flags)
+            else (False if healthy_flags and any(f is False for f in healthy_flags) else None)
         )
         status = next((b.get("health_status") for b in provider_bundles if b.get("health_status")), None)
-        default_model = next((b.get("default_model") for b in provider_bundles if b.get("default_model")), _default_model(provider))
+        default_model = next(
+            (b.get("default_model") for b in provider_bundles if b.get("default_model")), _default_model(provider)
+        )
         reason = []
         if not configured:
             reason.append("not configured")
-        elif not env_cred and provider_bundles and all(
-            b.get("key") == "" and b.get("source") == "local" for b in provider_bundles
+        elif (
+            not env_cred and provider_bundles and all(b.get("key") == "" and b.get("source") == "local" for b in provider_bundles)
         ):
             reason.append("local runtime configured (no credential needed)")
         elif env_cred:
@@ -363,8 +383,10 @@ def list_available_providers(probe: bool = False) -> list[dict[str, Any]]:
         source = provider_bundles[0].get("source") or "stored"
         models = sorted({m for b in provider_bundles for m in (b.get("models") or [])})
         healthy_flags = [b.get("healthy") for b in provider_bundles if b.get("healthy") is not None]
-        reachable = True if healthy_flags and all(healthy_flags) else (
-            False if healthy_flags and any(f is False for f in healthy_flags) else None
+        reachable = (
+            True
+            if healthy_flags and all(healthy_flags)
+            else (False if healthy_flags and any(f is False for f in healthy_flags) else None)
         )
         out.append(
             {
@@ -394,7 +416,7 @@ def list_available_providers(probe: bool = False) -> list[dict[str, Any]]:
 def diagnose(
     require_tools: bool = False,
     *,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """
     Human-readable provider diagnosis used for better error messages.
@@ -430,11 +452,7 @@ def diagnose(
     except Exception:
         bundle = None
     recommended = bundle or {}
-    recommended_model = (
-        recommended.get("default_model")
-        or _default_model(recommended.get("provider") or "")
-        or None
-    )
+    recommended_model = recommended.get("default_model") or _default_model(recommended.get("provider") or "") or None
     if recommended_model and recommended.get("provider"):
         recommended_model = f"{recommended['provider']}/{recommended_model}"
     elif model:
@@ -446,9 +464,7 @@ def diagnose(
         "providers": providers,
         "usable_providers": usable,
         "tools_capable": [
-            p["provider"]
-            for p in providers
-            if p.get("configured") and p.get("supports_tools") and not p.get("retired")
+            p["provider"] for p in providers if p.get("configured") and p.get("supports_tools") and not p.get("retired")
         ],
         "recommended_provider": (recommended or {}).get("provider"),
         "recommended_model": recommended_model,

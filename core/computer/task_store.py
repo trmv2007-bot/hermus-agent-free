@@ -1,17 +1,18 @@
 """Crash-safe persistence and resume support for computer tasks."""
+
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from .world_state import WorldState
 from ..state import create_world_state
-import builtins
+from .world_state import WorldState
 
 
 def _now() -> str:
@@ -43,7 +44,7 @@ class TaskCheckpoint:
     status: str = "created"  # created|planning|running|interrupted|failed|success|cancelled
     plan: list[dict[str, Any]] = field(default_factory=list)
     graph: dict[str, Any] = field(default_factory=dict)
-    current_state: Optional[str] = None
+    current_state: str | None = None
     completed_states: list[str] = field(default_factory=list)
     pending_states: list[str] = field(default_factory=list)
     failed_states: list[str] = field(default_factory=list)
@@ -54,8 +55,8 @@ class TaskCheckpoint:
     attempts: int = 0
     resume_count: int = 0
     last_event: dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    result: Optional[dict[str, Any]] = None
+    error: str | None = None
+    result: dict[str, Any] | None = None
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
 
@@ -63,7 +64,7 @@ class TaskCheckpoint:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TaskCheckpoint":
+    def from_dict(cls, data: dict[str, Any]) -> TaskCheckpoint:
         fields = cls.__dataclass_fields__
         clean = {key: value for key, value in (data or {}).items() if key in fields}
         clean.setdefault("task_id", str(data.get("task_id") or ""))
@@ -111,8 +112,8 @@ class TaskStore:
         task_id: str,
         task: str,
         plan: builtins.list[dict[str, Any]],
-        graph: Optional[dict[str, Any]] = None,
-        world_state: Optional[WorldState] = None,
+        graph: dict[str, Any] | None = None,
+        world_state: WorldState | None = None,
         resume: bool = False,
     ) -> TaskCheckpoint:
         task_id = _safe_id(task_id)
@@ -159,7 +160,7 @@ class TaskStore:
         self._write_json(self.directory(checkpoint.task_id) / "task_state.json", checkpoint.to_dict())
         return str(path)
 
-    def load(self, task_id: str) -> Optional[TaskCheckpoint]:
+    def load(self, task_id: str) -> TaskCheckpoint | None:
         path = self.state_path(task_id)
         if not path.exists():
             legacy = self.directory(task_id) / "task_state.json"
@@ -177,7 +178,7 @@ class TaskStore:
         self,
         checkpoint: TaskCheckpoint,
         event: dict[str, Any],
-        world_state: Optional[WorldState] = None,
+        world_state: WorldState | None = None,
     ) -> TaskCheckpoint:
         state = str(event.get("state") or "")
         phase = event.get("phase")
@@ -196,22 +197,26 @@ class TaskStore:
         elif phase == "transition" and event.get("next_state"):
             checkpoint.current_state = str(event["next_state"])
         elif phase == "diagnose":
-            checkpoint.known_failures.append({
-                "state": state,
-                "attempt": event.get("attempt"),
-                "reason": event.get("failure_reason"),
-                "diagnosis": event.get("diagnosis", {}),
-                "timestamp": _now(),
-            })
+            checkpoint.known_failures.append(
+                {
+                    "state": state,
+                    "attempt": event.get("attempt"),
+                    "reason": event.get("failure_reason"),
+                    "diagnosis": event.get("diagnosis", {}),
+                    "timestamp": _now(),
+                }
+            )
         elif phase == "repair":
-            checkpoint.repairs.append({
-                "state": event.get("repair_state"),
-                "repair_for": event.get("repair_for"),
-                "action": event.get("action_spec"),
-                "verification": event.get("verification"),
-                "outcome": outcome,
-                "timestamp": _now(),
-            })
+            checkpoint.repairs.append(
+                {
+                    "state": event.get("repair_state"),
+                    "repair_for": event.get("repair_for"),
+                    "action": event.get("action_spec"),
+                    "verification": event.get("verification"),
+                    "outcome": outcome,
+                    "timestamp": _now(),
+                }
+            )
         elif phase == "terminal":
             checkpoint.status = "success" if event.get("success") else "failed"
             checkpoint.current_state = state or checkpoint.current_state
@@ -226,8 +231,8 @@ class TaskStore:
         checkpoint: TaskCheckpoint,
         success: bool,
         result: dict[str, Any],
-        world_state: Optional[WorldState] = None,
-        recording: Optional[str] = None,
+        world_state: WorldState | None = None,
+        recording: str | None = None,
     ) -> TaskCheckpoint:
         checkpoint.status = "success" if success else "failed"
         checkpoint.error = result.get("error")
@@ -248,7 +253,7 @@ class TaskStore:
         self.save(checkpoint)
         return checkpoint
 
-    def mark_interrupted(self, task_id: str, reason: str = "process interrupted") -> Optional[TaskCheckpoint]:
+    def mark_interrupted(self, task_id: str, reason: str = "process interrupted") -> TaskCheckpoint | None:
         checkpoint = self.load(task_id)
         if checkpoint is None:
             return None
@@ -257,7 +262,7 @@ class TaskStore:
         self.save(checkpoint)
         return checkpoint
 
-    def next_state(self, checkpoint: TaskCheckpoint) -> Optional[str]:
+    def next_state(self, checkpoint: TaskCheckpoint) -> str | None:
         names = [str(step.get("name") or f"STATE_{index}") for index, step in enumerate(checkpoint.plan)]
         completed = set(checkpoint.completed_states)
         if checkpoint.current_state in names and checkpoint.current_state not in completed:
@@ -274,14 +279,16 @@ class TaskStore:
             checkpoint = self.load(path.name)
             if checkpoint is None:
                 continue
-            output.append({
-                "task_id": checkpoint.task_id,
-                "task": checkpoint.task,
-                "status": checkpoint.status,
-                "current_state": checkpoint.current_state,
-                "completed": len(checkpoint.completed_states),
-                "pending": len(checkpoint.pending_states),
-                "resume_count": checkpoint.resume_count,
-                "updated_at": checkpoint.updated_at,
-            })
+            output.append(
+                {
+                    "task_id": checkpoint.task_id,
+                    "task": checkpoint.task,
+                    "status": checkpoint.status,
+                    "current_state": checkpoint.current_state,
+                    "completed": len(checkpoint.completed_states),
+                    "pending": len(checkpoint.pending_states),
+                    "resume_count": checkpoint.resume_count,
+                    "updated_at": checkpoint.updated_at,
+                }
+            )
         return output

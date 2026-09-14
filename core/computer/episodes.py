@@ -25,16 +25,17 @@ An episode stores:
     ├── world_states      — world state snapshots at key points
     └── metrics           — counts of actions/retries/repairs/verifications
 """
+
 from __future__ import annotations
 
+import builtins
 import json
 import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-import builtins
+from typing import Any
 
 
 def _now() -> str:
@@ -49,9 +50,9 @@ class Episode:
     task: str
     outcome: str = "UNKNOWN"  # SUCCESS / FAILURE / CANCELLED / INTERRUPTED
     started: str = field(default_factory=_now)
-    ended: Optional[str] = None
+    ended: str | None = None
     duration: float = 0.0
-    recording: Optional[str] = None
+    recording: str | None = None
     plan: list[dict[str, Any]] = field(default_factory=list)
     actions: list[dict[str, Any]] = field(default_factory=list)
     verifications: list[dict[str, Any]] = field(default_factory=list)
@@ -59,28 +60,19 @@ class Episode:
     diagnoses: list[dict[str, Any]] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     world_states: list[dict[str, Any]] = field(default_factory=list)
-    error: Optional[str] = None
-    failure: Optional[dict[str, Any]] = None
+    error: str | None = None
+    failure: dict[str, Any] | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     version: int = 2
 
     def compute_metrics(self) -> dict[str, Any]:
         """Auto-compute metrics from recorded data."""
-        actions_ok = sum(
-            1 for a in self.actions
-            if a.get("outcome") == "success"
-        )
+        actions_ok = sum(1 for a in self.actions if a.get("outcome") == "success")
         actions_total = max(len(self.actions), 1)
-        repairs_success = sum(
-            1 for r in self.repairs
-            if r.get("success") or r.get("outcome") == "success"
-        )
+        repairs_success = sum(1 for r in self.repairs if r.get("success") or r.get("outcome") == "success")
         repairs_total = max(len(self.repairs), 1)
-        retries = sum(
-            1 for a in self.actions
-            if int(a.get("attempt", 1) or 1) > 1
-        )
+        retries = sum(1 for a in self.actions if int(a.get("attempt", 1) or 1) > 1)
 
         self.metrics = {
             "total_actions": len(self.actions),
@@ -90,9 +82,7 @@ class Episode:
             "total_verifications": len(self.verifications),
             "retries": retries,
             "duration_seconds": round(self.duration, 2),
-            "actions_per_minute": round(
-                len(self.actions) / (self.duration / 60.0), 2
-            ) if self.duration > 0 else 0.0,
+            "actions_per_minute": round(len(self.actions) / (self.duration / 60.0), 2) if self.duration > 0 else 0.0,
         }
         return self.metrics
 
@@ -120,7 +110,7 @@ class Episode:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Episode":
+    def from_dict(cls, data: dict[str, Any]) -> Episode:
         return cls(
             task_id=str(data.get("task_id", "")),
             task=str(data.get("task", "")),
@@ -144,19 +134,22 @@ class Episode:
         )
 
     @classmethod
-    def from_task_result(cls, task_id: str, task: str, result: dict[str, Any]) -> "Episode":
+    def from_task_result(cls, task_id: str, task: str, result: dict[str, Any]) -> Episode:
         """Build an Episode from a ComputerAgent.run() result dict."""
         started = result.get("checkpoint", {}).get("created_at") or result.get("started", _now())
-        timeline_raw = result.get("timeline", {}).get("events", []) if isinstance(
-            result.get("timeline"), dict) else result.get("timeline", [])
+        timeline_raw = (
+            result.get("timeline", {}).get("events", [])
+            if isinstance(result.get("timeline"), dict)
+            else result.get("timeline", [])
+        )
         success = bool(result.get("success"))
 
         return cls(
             task_id=task_id,
             task=task,
-            outcome="SUCCESS" if success else (
-                "CANCELLED" if str(result.get("result", "")).upper() == "CANCELLED" else "FAILURE"
-            ),
+            outcome="SUCCESS"
+            if success
+            else ("CANCELLED" if str(result.get("result", "")).upper() == "CANCELLED" else "FAILURE"),
             started=started,
             ended=_now(),
             duration=float(result.get("duration", 0.0)),
@@ -187,10 +180,8 @@ class EpisodeStore:
     - aggregate statistics across all episodes
     """
 
-    def __init__(self, root: Optional[str] = None):
-        root_path = Path(root).expanduser() if root else (
-            Path(__file__).resolve().parents[2] / "data" / "episodes"
-        )
+    def __init__(self, root: str | None = None):
+        root_path = Path(root).expanduser() if root else (Path(__file__).resolve().parents[2] / "data" / "episodes")
         self.root = root_path.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -213,7 +204,7 @@ class EpisodeStore:
         episode = Episode.from_task_result(task_id, task, result)
         return self.save(episode)
 
-    def load(self, task_id: str) -> Optional[Episode]:
+    def load(self, task_id: str) -> Episode | None:
         """Load an episode by task_id."""
         path = self._path(task_id)
         if not path.exists():
@@ -226,8 +217,8 @@ class EpisodeStore:
     def list(
         self,
         limit: int = 50,
-        outcome: Optional[str] = None,
-        tag: Optional[str] = None,
+        outcome: str | None = None,
+        tag: str | None = None,
     ) -> builtins.list[dict[str, Any]]:
         """List episodes as summaries, newest first.
 
@@ -293,7 +284,7 @@ class EpisodeStore:
             for _, ep in scored[:limit]
         ]
 
-    def recall(self, task: str, min_success_rate: float = 0.5) -> Optional[Episode]:
+    def recall(self, task: str, min_success_rate: float = 0.5) -> Episode | None:
         """Recall the most recent SUCCESSFUL episode for a similar task."""
         results = self.search(task, limit=5)
         for r in results:
@@ -307,7 +298,7 @@ class EpisodeStore:
                 return ep
         return None
 
-    def recall_trajectory(self, task: str) -> Optional[dict[str, Any]]:
+    def recall_trajectory(self, task: str) -> dict[str, Any] | None:
         """Recall just the visual/action trajectory (for replay).
 
         Returns a minimal dict with just the essential replay data:
@@ -354,17 +345,9 @@ class EpisodeStore:
             "success": sum(1 for e in episodes if e.outcome == "SUCCESS"),
             "failure": sum(1 for e in episodes if e.outcome == "FAILURE"),
             "cancelled": sum(1 for e in episodes if e.outcome in ("CANCELLED", "INTERRUPTED")),
-            "avg_duration": round(
-                sum(e.duration for e in episodes) / len(episodes), 2
-            ),
-            "avg_action_success_rate": round(
-                sum(e.metrics.get("action_success_rate", 0) for e in episodes)
-                / len(episodes), 4
-            ),
-            "avg_repair_success_rate": round(
-                sum(e.metrics.get("repair_success_rate", 1.0) for e in episodes)
-                / len(episodes), 4
-            ),
+            "avg_duration": round(sum(e.duration for e in episodes) / len(episodes), 2),
+            "avg_action_success_rate": round(sum(e.metrics.get("action_success_rate", 0) for e in episodes) / len(episodes), 4),
+            "avg_repair_success_rate": round(sum(e.metrics.get("repair_success_rate", 1.0) for e in episodes) / len(episodes), 4),
             "total_actions": sum(len(e.actions) for e in episodes),
             "total_repairs": sum(len(e.repairs) for e in episodes),
         }
@@ -392,7 +375,7 @@ class EpisodeStore:
 
 
 # Global singleton
-_episode_store: Optional[EpisodeStore] = None
+_episode_store: EpisodeStore | None = None
 
 
 def get_episode_store() -> EpisodeStore:

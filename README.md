@@ -602,7 +602,7 @@ Then inspect the available commands:
 hermus --help
 ```
 
-For the project-specific setup flow, see [`QUICKSTART.md`](QUICKSTART.md) and [`SIMPLE_GUIDE.md`](SIMPLE_GUIDE.md).
+For the project-specific setup flow, see [`QUICKSTART.md`](QUICKSTART.md) (install, onboarding wizard, CLI cheatsheet and a control-room tour).
 
 > Some capabilities require optional system packages, model runtimes, browser tooling, containers or provider credentials. The base project remains usable without every optional dependency.
 
@@ -749,23 +749,26 @@ The goal is to measure success rate, steps and tool failures instead of treating
 
 # 📚 Architecture & Design Docs
 
+**Current reference** (start here):
+
 | Document | Purpose |
 |---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | **Post-consolidation architecture (canonical ownership model)** |
-| [`ARCHITECTURE_UPGRADES.md`](ARCHITECTURE_UPGRADES.md) | Historical architecture narrative (superseded, kept for reference) |
-| [`THINKING_SYSTEM_PLAN.md`](THINKING_SYSTEM_PLAN.md) | Counsel/deep-thinking design |
-| [`LIVING_CONTROL_ROOM.md`](LIVING_CONTROL_ROOM.md) | Dashboard/control-room design |
-| [`AUTONOMY_BOUNDARIES.md`](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | **Canonical architecture and ownership model** |
+| [`QUICKSTART.md`](QUICKSTART.md) | Install, onboarding, CLI cheatsheet, control-room tour |
+| [`LIVING_CONTROL_ROOM.md`](LIVING_CONTROL_ROOM.md) | Control-room design: snapshot + replay + typed commands |
 | [`RED_LINES.md`](RED_LINES.md) | Human-readable red-line constitution for Jarvis-style reach without Ultron drift (`hermus safety report`, `hermus safety preflight`) |
+| [`AUTONOMY_BOUNDARIES.md`](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
 | [`CAPABILITY_LEDGER.md`](CAPABILITY_LEDGER.md) | Visible ledger of current, missing, discovered and blocked powers (`hermus powers list/add/propose`) |
-| [`policies/red_lines.json`](policies/red_lines.json) | Machine-readable red-line policy for tests and future enforcement |
-| [`PHASE_A_ROADMAP.md`](PHASE_A_ROADMAP.md) | Development roadmap |
-| [`PHASE_C_D.md`](PHASE_C_D.md) | Later architecture phases |
-| [`QUICKSTART.md`](QUICKSTART.md) | Quick setup |
-| [`SIMPLE_GUIDE.md`](SIMPLE_GUIDE.md) | Beginner-oriented guide |
+| [`policies/red_lines.json`](policies/red_lines.json) | Machine-readable red-line policy for tests and enforcement |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Third-party notices |
 | [`docs/LOCAL_ENGINE.md`](docs/LOCAL_ENGINE.md) | Local engine: NPU/GPU routing, NoLlama, on-demand model downloads, the Hermus doctor |
 | [`docs/WEB_ACQUISITION.md`](docs/WEB_ACQUISITION.md) | Web acquisition: Scrapling-powered gateway, strategy router, security model, crawling |
+
+**Archived** — point-in-time records kept for provenance, all under
+[`docs/archive/`](docs/archive/): `ARCHITECTURE_UPGRADES.md`, `FINAL_REPORT.md`,
+`PHASE_A_ROADMAP.md`, `PHASE_C_D.md`, `PRODUCTION_READINESS_REPORT.md`,
+`SIMPLE_GUIDE.md`, `THINKING_SYSTEM_PLAN.md`. None of them is the current
+reference; each carries a banner pointing at the document that replaced it.
 
 ---
 

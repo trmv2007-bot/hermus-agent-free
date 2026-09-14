@@ -5,6 +5,7 @@ refactoring, and autonomous tasks. Features an explicit Git transaction state ma
 (CREATED → ACTIVE → TESTING → VERIFIED → COMMITTING → MERGING → COMMITTED)
 with crash recovery and automatic rollback on abort.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .workspace import workspace
 
@@ -52,9 +53,9 @@ class Checkpoint:
     timestamp: str
     workspace_path: str
     files: dict[str, str] = field(default_factory=dict)  # rel_path -> sha256
-    snapshot_dir: Optional[str] = None
-    git_branch: Optional[str] = None
-    git_commit: Optional[str] = None
+    snapshot_dir: str | None = None
+    git_branch: str | None = None
+    git_commit: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,16 +71,16 @@ class RollbackManager:
 
     def __init__(
         self,
-        storage_dir: Optional[Path] = None,
-        workspace_dir: Optional[Path] = None,
+        storage_dir: Path | None = None,
+        workspace_dir: Path | None = None,
     ):
         self.storage_dir = storage_dir or (workspace.root / "checkpoints")
         self.workspace_dir = workspace_dir or workspace.root
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self._active_tx_file = self.storage_dir / "git_tx_active.json"
-        self._active_git_tx: Optional[dict[str, Any]] = self._load_active_tx()
+        self._active_git_tx: dict[str, Any] | None = self._load_active_tx()
 
-    def _load_active_tx(self) -> Optional[dict[str, Any]]:
+    def _load_active_tx(self) -> dict[str, Any] | None:
         if self._active_tx_file.exists():
             try:
                 return json.loads(self._active_tx_file.read_text(encoding="utf-8"))
@@ -87,7 +88,7 @@ class RollbackManager:
                 return None
         return None
 
-    def _save_active_tx(self, tx: Optional[dict[str, Any]]) -> None:
+    def _save_active_tx(self, tx: dict[str, Any] | None) -> None:
         if tx is None:
             if self._active_tx_file.exists():
                 try:
@@ -113,17 +114,28 @@ class RollbackManager:
     def _ignore_file(self, rel_path: Path) -> bool:
         parts = rel_path.parts
         ignored_names = {
-            ".git", "__pycache__", ".venv", "venv", "node_modules",
-            ".mypy_cache", ".pytest_cache", ".tox", "dist", "build",
-            ".hermus", "checkpoints", "artifacts", "missions"
+            ".git",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "node_modules",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".tox",
+            "dist",
+            "build",
+            ".hermus",
+            "checkpoints",
+            "artifacts",
+            "missions",
         }
         return any(p in ignored_names or p.endswith(".pyc") for p in parts)
 
     def checkpoint(
         self,
         label: str,
-        target_dir: Optional[Path] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        target_dir: Path | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Checkpoint:
         root = target_dir or self.workspace_dir
         cid = f"chk_{int(time.time())}_{os.urandom(3).hex()}"
@@ -204,7 +216,7 @@ class RollbackManager:
         checkpoints.sort(key=lambda c: c.timestamp, reverse=True)
         return checkpoints
 
-    def get_checkpoint(self, checkpoint_id: str) -> Optional[Checkpoint]:
+    def get_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
         meta = self.storage_dir / checkpoint_id / "meta.json"
         if not meta.exists():
             return None
@@ -236,14 +248,8 @@ class RollbackManager:
 
         added = list(new_files - old_files)
         deleted = list(old_files - new_files)
-        modified = [
-            f for f in (old_files & new_files)
-            if cp.files[f] != current_files[f]
-        ]
-        unchanged = [
-            f for f in (old_files & new_files)
-            if cp.files[f] == current_files[f]
-        ]
+        modified = [f for f in (old_files & new_files) if cp.files[f] != current_files[f]]
+        unchanged = [f for f in (old_files & new_files) if cp.files[f] == current_files[f]]
 
         return {
             "success": True,
@@ -313,8 +319,8 @@ class RollbackManager:
     # -- Hardened Git-aware transactional state machine -----------------
     def start_git_transaction(
         self,
-        repo_dir: Optional[Path] = None,
-        transaction_name: Optional[str] = None,
+        repo_dir: Path | None = None,
+        transaction_name: str | None = None,
     ) -> dict[str, Any]:
         root = repo_dir or self.workspace_dir
         self._ensure_git_exclude(root)

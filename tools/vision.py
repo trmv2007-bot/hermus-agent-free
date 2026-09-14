@@ -5,12 +5,13 @@ single owner of provider/credential/capability resolution and outcome recording 
 this module never issues a request to a model backend directly. The free-local
 Ollama LLaVA path is the model the tool advertises by default.
 """
-from pathlib import Path
+
 import base64
+from pathlib import Path
 
 from core.config import config
-from core.models import get_model_gateway, ModelGatewayError
 from core.contracts import FailureClass
+from core.models import ModelGatewayError, get_model_gateway
 
 OLLAMA_AVAILABLE = True  # Vision via the free-local Ollama node (no API key).
 
@@ -54,9 +55,7 @@ def vision_analyze(image_path: str, prompt: str = "Describe this image in detail
         return {"success": False, "error": "Failed to encode image"}
 
     try:
-        description = get_model_gateway().vision_complete(
-            base64_image, prompt, model=model, provider="ollama"
-        )
+        description = get_model_gateway().vision_complete(base64_image, prompt, model=model, provider="ollama")
     except ModelGatewayError as exc:
         return _vision_error(exc, model)
     except Exception as exc:
@@ -90,10 +89,7 @@ def vision_available_models() -> dict:
             "vision_models": [],
             "suggestion": "Install Ollama and pull free vision model: ollama pull llava:7b",
         }
-    vision_models = [
-        m for m in all_models
-        if any(k in m.lower() for k in ("llava", "vision", "bakllava"))
-    ]
+    vision_models = [m for m in all_models if any(k in m.lower() for k in ("llava", "vision", "bakllava"))]
     return {
         "all_models": all_models,
         "vision_models": vision_models,
@@ -112,8 +108,16 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "image_path": {"type": "string", "description": "Path to image file"},
-                    "prompt": {"type": "string", "description": "Prompt for vision analysis", "default": "Describe this image in detail"},
-                    "model": {"type": "string", "description": "Vision model, e.g., llava:7b, llava:13b, bakllava", "default": "llava:7b"},
+                    "prompt": {
+                        "type": "string",
+                        "description": "Prompt for vision analysis",
+                        "default": "Describe this image in detail",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Vision model, e.g., llava:7b, llava:13b, bakllava",
+                        "default": "llava:7b",
+                    },
                 },
                 "required": ["image_path"],
             },

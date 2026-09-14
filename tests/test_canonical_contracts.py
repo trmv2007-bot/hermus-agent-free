@@ -11,27 +11,31 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import sys
 
 import pytest
+from _control_room_source import control_room_source
 
 # Ensure core is importable.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import sys
+
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 
 def test_contracts_package_all_exports():
-    from core.contracts import (EventEnvelope, Command, ToolDescriptor, ToolResult,
-                                Evidence, MissionNode, ModelRequirement, ModelSelection,
-                                ModelGatewayResult, Job, FailureClass, Capability,
-                                redact, CommandStatus, EventType)
+    from core.contracts import (
+        MissionNode,
+        ToolDescriptor,
+    )
+
     assert ToolDescriptor.__name__ == "ToolDescriptor"
     assert MissionNode.__name__ == "MissionNode"
 
 
 def test_event_envelope_defaults_and_roundtrip():
     from core.contracts import EventEnvelope
+
     e = EventEnvelope()
     assert e.command_id is None
     assert e.status == "pending"
@@ -43,8 +47,8 @@ def test_event_envelope_defaults_and_roundtrip():
 
 def test_command_redacts_secrets():
     from core.contracts import Command, EventType
-    c = Command(command="provider.set", args={"api_key": "secret", "model": "qwen"},
-                idempotency_key="ui-7f1")
+
+    c = Command(command="provider.set", args={"api_key": "secret", "model": "qwen"}, idempotency_key="ui-7f1")
     env = c.to_envelope(type=EventType.COMMAND_REQUESTED.value)
     assert env.args_redacted["api_key"] == "<redacted>"
     assert env.args_redacted["model"] == "qwen"
@@ -53,6 +57,7 @@ def test_command_redacts_secrets():
 
 def test_redact_recursive_and_off():
     from core.contracts import redact
+
     assert redact({"a": {"token": "x"}, "b": [1]}) == {"a": {"token": "<redacted>"}, "b": [1]}
     assert redact({"key": "keep"}, enabled=False) == {"key": "keep"}
 
@@ -60,10 +65,10 @@ def test_redact_recursive_and_off():
 def test_registry_result_with_empty_error_classifies_as_ok():
     """§5 regression: tools that use ``\"error\": \"\"`` to mean success (e.g. sandbox_run)
     must be classified as ok by the gateway, not as a TOOL_ERROR."""
-    from core.tools.gateway import _classify_registry_result, gateway_result_dict, get_tool_gateway, ToolGateway
+    from core.tools.gateway import _classify_registry_result
+
     # sandbox_run-style output: success=True, error="" (no-error sentinel).
-    raw = {"success": True, "stdout": "over_socket\n", "stderr": "", "returncode": 0,
-           "error": "", "backend": "local"}
+    raw = {"success": True, "stdout": "over_socket\n", "stderr": "", "returncode": 0, "error": "", "backend": "local"}
     ok, output, meta = _classify_registry_result(raw)
     assert ok is True, f"empty error string must not be treated as a tool failure: {meta}"
     assert output is raw
@@ -75,6 +80,7 @@ def test_registry_result_with_empty_error_classifies_as_ok():
 
 def test_tool_result_shape():
     from core.contracts import ToolResult, ToolStatus
+
     r = ToolResult.error("TIMEOUT", "slow", retryable=True)
     assert r.ok is False
     assert r.status == ToolStatus.ERROR.value
@@ -87,7 +93,8 @@ def test_tool_result_shape():
 
 
 def test_mission_node_and_job():
-    from core.contracts import MissionNode, Job
+    from core.contracts import Job, MissionNode
+
     n = MissionNode(id="n1", goal="make tests pass", expected_output_type="execution")
     assert n.expected_output_type == "execution"
     assert n.state == "CREATED"
@@ -98,17 +105,18 @@ def test_mission_node_and_job():
 
 
 def test_model_requirement_and_result():
-    from core.contracts import ModelRequirement, ModelGatewayResult, Capability
+    from core.contracts import ModelGatewayResult, ModelRequirement
+
     req = ModelRequirement(task="code", capabilities=["tooling"], tools=True, vision=False)
     assert req.requires_tools() is True
-    res = ModelGatewayResult(provider="openrouter", model="qwen", ok=False,
-                             failure_class="rate_limit", retryable=True)
+    res = ModelGatewayResult(provider="openrouter", model="qwen", ok=False, failure_class="rate_limit", retryable=True)
     assert res.ok is False
     assert res.retryable is True
 
 
 def test_contracts_failure_class_enum():
-    from core.contracts import FailureClass, Capability
+    from core.contracts import Capability, FailureClass
+
     assert FailureClass.RATE_LIMIT.value == "rate_limit"
     assert Capability.TOOLING.value == "tooling"
 
@@ -117,8 +125,9 @@ def test_contracts_failure_class_enum():
 # Event bus
 # ---------------------------------------------------------------------------
 def test_event_bus_publish_subscribe_replay(tmp_path):
-    from core.events import EventBus
     from core.contracts import EventEnvelope, EventType
+    from core.events import EventBus
+
     bus = EventBus(tmp_path / "events.jsonl")
     seen = []
     bus.subscribe(EventType.COMMAND_STARTED.value)(seen.append)
@@ -144,13 +153,16 @@ def test_canonical_publish_from_dict_envelope(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMUS_EVENTS_DIR", str(tmp_path))
     from core.events import publish
     from core.events.bus import configure_bus, get_bus
+
     configure_bus(tmp_path / "events.jsonl", reset=True)
-    env = publish({
-        "type": "command.requested",
-        "status": "running",
-        "command": "mission.resume",
-        "source": "dashboard",
-    })
+    env = publish(
+        {
+            "type": "command.requested",
+            "status": "running",
+            "command": "mission.resume",
+            "source": "dashboard",
+        }
+    )
     assert env.source == "dashboard"
     assert env.command == "mission.resume"
     recent = get_bus().recent(10)
@@ -160,8 +172,10 @@ def test_canonical_publish_from_dict_envelope(tmp_path, monkeypatch):
 def test_dashboard_events_bridge_to_canonical_bus(tmp_path):
     """Dashboard events (dict API) are bridged onto the one canonical EventBus."""
     from core.events.bus import configure_bus, get_bus
-    bus = configure_bus(tmp_path / "e.jsonl", reset=True)
+
+    _bus = configure_bus(tmp_path / "e.jsonl", reset=True)
     from core.dashboard_events import dashboard_event_bus
+
     dashboard_event_bus.publish("session_started", {"run_id": "r1", "label": "fix build"})
     dashboard_event_bus.publish("tool_call", {"tool": "shell", "args": "pytest"})
     # The dict API keeps working for realtime/speech consumers.
@@ -179,6 +193,7 @@ def test_dashboard_events_bridge_to_canonical_bus(tmp_path):
 # ---------------------------------------------------------------------------
 def _stub_registry(name_to_fn):
     """A registry stub with the same ``execute``/``executors`` shape as ToolRegistry."""
+
     class Reg:
         def __init__(self):
             self.executors = dict(name_to_fn)
@@ -195,12 +210,14 @@ def _stub_registry(name_to_fn):
 
         def list_tools(self):
             return {"tools": sorted(self.executors.keys()), "catalog": []}
+
     return Reg()
 
 
 def test_tool_gateway_success_error_missing(tmp_path):
-    from core.tools import ToolGateway
     from core.events import EventBus
+    from core.tools import ToolGateway
+
     reg = _stub_registry({"mock_add": lambda a, b: {"result": a + b}})
     bus = EventBus(tmp_path / "e.jsonl")
     gw = ToolGateway(reg, bus=bus)
@@ -219,8 +236,9 @@ def test_tool_gateway_success_error_missing(tmp_path):
 
 
 def test_tool_gateway_timeout_and_policy(tmp_path):
-    from core.tools import ToolGateway
     from core.events import EventBus
+    from core.tools import ToolGateway
+
     reg = _stub_registry({"boom": lambda: (_ for _ in ()).throw(TimeoutError("slow"))})
     bus = EventBus(tmp_path / "e.jsonl")
     gw = ToolGateway(reg, bus=bus)
@@ -235,9 +253,10 @@ def test_tool_gateway_timeout_and_policy(tmp_path):
 
 
 def test_tool_gateway_real_registry(tmp_path):
-    from core.tools import ToolGateway
     from core.events import EventBus
     from core.tool_registry import tool_registry
+    from core.tools import ToolGateway
+
     tool_registry.load()
     bus = EventBus(tmp_path / "e.jsonl")
     gw = ToolGateway(tool_registry, bus=bus)
@@ -251,8 +270,13 @@ def test_tool_gateway_real_registry(tmp_path):
 # ---------------------------------------------------------------------------
 class _FakeResolver:
     def __init__(self):
-        self.bundle = {"provider": "openrouter", "default_model": "qwen2.5-coder",
-                       "supports_tools": True, "base_url": "https://x", "free": True}
+        self.bundle = {
+            "provider": "openrouter",
+            "default_model": "qwen2.5-coder",
+            "supports_tools": True,
+            "base_url": "https://x",
+            "free": True,
+        }
 
     def select_usable_bundle(self, require_tools=False, prefer=None):
         return self.bundle
@@ -265,8 +289,9 @@ class _FakeResolver:
 
 
 def test_model_gateway_select_and_classify(tmp_path):
+    from core.contracts import FailureClass, ModelRequirement
     from core.models import ModelGateway
-    from core.contracts import ModelRequirement, FailureClass
+
     gw = ModelGateway()
     gw._resolver = _FakeResolver()
     gw._probe_capability = lambda model, provider: _report()
@@ -278,7 +303,9 @@ def test_model_gateway_select_and_classify(tmp_path):
     assert sel[0].score > 0
 
     # failure classification maps to typed classes with proper retryability
-    out = gw.complete(provider="m", model="x", _complete=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 429 rate limit")))
+    out = gw.complete(
+        provider="m", model="x", _complete=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 429 rate limit"))
+    )
     assert out.failure_class == FailureClass.RATE_LIMIT.value
     assert out.retryable is True
 
@@ -289,17 +316,16 @@ def test_model_gateway_select_and_classify(tmp_path):
 
 
 def _report():
-    return {"tools": True, "vision": False, "capabilities": ["chat", "code"],
-            "context_window": 32000, "reasoning": True}
+    return {"tools": True, "vision": False, "capabilities": ["chat", "code"], "context_window": 32000, "reasoning": True}
 
 
 # ---------------------------------------------------------------------------
 # Memory facade + migration
 # ---------------------------------------------------------------------------
 def test_memory_facade_and_migration(tmp_path):
-    from core.memory import MemoryFacade, migrate_legacy, detect_legacy
+    from core.compat.legacy_memory import Memory as MemoryV1
+    from core.memory import MemoryFacade, detect_legacy, migrate_legacy
     from core.memory2 import Memory2
-    from core.compat.legacy_memory import Memory as V1
 
     m = MemoryFacade(Memory2(db_path=str(tmp_path / "m2.db")))
     assert m.remember("semantic", "the api uses qwen", project="p1")["success"] is True
@@ -307,7 +333,7 @@ def test_memory_facade_and_migration(tmp_path):
     assert len(m.hybrid_recall("api", project="p1")) >= 1
 
     v1path = str(tmp_path / "legacy.db")
-    v1 = V1(db_path=v1path)
+    v1 = MemoryV1(db_path=v1path)
     v1.curate_memory("project", "legacy fact", source_session="s1", importance=7)
     assert detect_legacy(v1path) is True
     res = migrate_legacy(v1path, facade=m)
@@ -319,11 +345,11 @@ def test_memory_facade_and_migration(tmp_path):
 
 def test_memory_facade_is_single_writable_owner(tmp_path):
     """The facade is the ONLY writable path and delivers the full feature union."""
+    from core.compat.legacy_memory import Memory as MemoryV1
     from core.memory import MemoryFacade
     from core.memory2 import Memory2
-    from core.compat.legacy_memory import Memory as V1
 
-    v1 = V1(db_path=str(tmp_path / "sess.db"))
+    v1 = MemoryV1(db_path=str(tmp_path / "sess.db"))
     m = MemoryFacade(Memory2(db_path=str(tmp_path / "m2.db")), v1_store=v1)
 
     # typed memory
@@ -349,13 +375,23 @@ def test_memory_facade_is_single_writable_owner(tmp_path):
 
 def test_legacy_memory_singleton_is_facade():
     # `from core.memory import memory` is now the canonical facade (single owner).
-    from core.memory import memory, get_memory
+    from core.memory import get_memory, memory
+
     assert type(memory).__name__ == "MemoryFacade"
     assert memory is get_memory()
     # facade exposes the union of typed + v1 methods
-    for meth in ("remember", "recall", "add_session_message", "search_sessions",
-                 "curate_memory", "get_curated_memory", "load_user_model",
-                 "update_user_model", "get_token_usage", "periodic_nudges"):
+    for meth in (
+        "remember",
+        "recall",
+        "add_session_message",
+        "search_sessions",
+        "curate_memory",
+        "get_curated_memory",
+        "load_user_model",
+        "update_user_model",
+        "get_token_usage",
+        "periodic_nudges",
+    ):
         assert callable(getattr(memory, meth)), meth
 
 
@@ -363,7 +399,8 @@ def test_legacy_memory_singleton_is_facade():
 # World-state facade + migration
 # ---------------------------------------------------------------------------
 def test_world_state_facade_and_migration(tmp_path):
-    from core.state import WorldStateFacade, migrate_world_state, detect_legacy
+    from core.state import WorldStateFacade, detect_legacy, migrate_world_state
+
     ws = WorldStateFacade()
     ws.begin_task("open browser", "PLANNING")
     assert ws.task_state == "PLANNING"
@@ -391,8 +428,8 @@ def test_world_state_v2_duplicate_removed():
     # The dead parallel WorldStateV2 implementation was removed; V1 is canonical.
     with pytest.raises(ImportError):
         importlib.import_module("core.computer.world_state_v2")
-    from core.computer import WorldState
     from core.state import get_world_state
+
     assert get_world_state().canonical == "v1"
 
 
@@ -407,11 +444,19 @@ def test_queue_job_is_canonical_contract_subtype():
     """
     from core.contracts import Job as ContractJob
     from gateway.queue import Job as QueueJob
+
     assert issubclass(QueueJob, ContractJob)
 
-    job = QueueJob(id="job_1", type="agent.chat", payload={"q": 1},
-                   session_key="telegram:u", run_id="run_1",
-                   max_attempts=3, idempotency_key="dd", timeout=30.0)
+    job = QueueJob(
+        id="job_1",
+        type="agent.chat",
+        payload={"q": 1},
+        session_key="telegram:u",
+        run_id="run_1",
+        max_attempts=3,
+        idempotency_key="dd",
+        timeout=30.0,
+    )
 
     # canonical contract fields present
     assert job.type == "agent.chat"
@@ -446,6 +491,7 @@ def test_queue_job_is_canonical_contract_subtype():
 # ---------------------------------------------------------------------------
 def test_bootstrap_doctor_reports(monkeypatch):
     import bootstrap as boot
+
     # Ensure required modules report ready in the test venv.
     report = boot.doctor()
     assert "capabilities" in report
@@ -457,9 +503,18 @@ def test_bootstrap_doctor_reports(monkeypatch):
 
 
 def test_canonical_packages_import_cleanly():
-    for mod in ("core.contracts", "core.events", "core.tools", "core.models",
-                "core.memory", "core.state", "core.compat", "core.learning",
-                "core.avatar", "bootstrap"):
+    for mod in (
+        "core.contracts",
+        "core.events",
+        "core.tools",
+        "core.models",
+        "core.memory",
+        "core.state",
+        "core.compat",
+        "core.learning",
+        "core.avatar",
+        "bootstrap",
+    ):
         importlib.import_module(mod)
 
 
@@ -471,12 +526,14 @@ def test_control_room_is_snapshot_replay_projection():
     /api/v1 endpoints and NOT fabricate any status on its own.
     """
     from fastapi.testclient import TestClient
+
     from gateway.gateway import app
+
     client = TestClient(app)
     r = client.get("/control")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    html = r.text
+    html = control_room_source()
     # snapshot sources (real probes, never fabricated)
     assert "/api/v1/system/health" in html
     assert "/api/v1/system/capabilities" in html
@@ -499,6 +556,7 @@ class _FakeSkillCandidate:
 
 class _FakeForge:
     """Stub SkillForge that records observed successes and installs."""
+
     def __init__(self):
         self.observations = 0
         self.installed = []
@@ -522,6 +580,7 @@ class _FakeForge:
 
 def test_learning_gate_requires_repeated_verified_success():
     from core.learning import LearningFacade
+
     forge = _FakeForge()
     lr = LearningFacade(forge, min_successes=3)
     # single run -> observed but NOT promoted
@@ -543,6 +602,7 @@ def test_learning_gate_requires_repeated_verified_success():
 
 def test_learning_quarantine():
     from core.learning import LearningFacade
+
     forge = _FakeForge()
     lr = LearningFacade(forge, min_successes=2)
     out = lr.quarantine("demo_skill", reason="repeated_failure")

@@ -15,6 +15,7 @@ redirect server needed) plus an end-to-end path through the backend/router using
 a fake Scrapling response whose ``final_url`` / ``history`` point at forbidden
 targets.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -28,8 +29,15 @@ from core.web.security import WebSecurityPolicy
 class FakeResponse:
     """Minimal Scrapling-Response stand-in for backend._to_raw()."""
 
-    def __init__(self, *, url: str, body: bytes = b"<html><body>hi</body></html>",
-                 status: int = 200, history=None, content_type: str = "text/html"):
+    def __init__(
+        self,
+        *,
+        url: str,
+        body: bytes = b"<html><body>hi</body></html>",
+        status: int = 200,
+        history=None,
+        content_type: str = "text/html",
+    ):
         self.url = url
         self.body = body
         self.status = status
@@ -60,8 +68,7 @@ class TestFinalUrlRevalidation:
     def test_public_to_link_local_metadata_refused(self):
         policy = WebSecurityPolicy()
         with pytest.raises(SecurityBlockedError):
-            policy.check_final_url("http://169.254.169.254/latest/meta-data/",
-                                   purpose="redirect")
+            policy.check_final_url("http://169.254.169.254/latest/meta-data/", purpose="redirect")
 
     def test_public_to_private_rfc1918_refused(self):
         policy = WebSecurityPolicy()
@@ -69,8 +76,7 @@ class TestFinalUrlRevalidation:
             policy.check_final_url("http://10.0.0.5/internal", purpose="redirect")
 
     def test_public_to_blocked_domain_refused(self):
-        policy = WebSecurityPolicy(blocked_domains=("evil.example",),
-                                   allow_private_addresses=True)
+        policy = WebSecurityPolicy(blocked_domains=("evil.example",), allow_private_addresses=True)
         with pytest.raises(SecurityBlockedError):
             policy.check_final_url("https://evil.example/landing", purpose="redirect")
 
@@ -92,8 +98,7 @@ class TestFinalUrlRevalidation:
 
     def test_identical_url_fast_path(self):
         policy = WebSecurityPolicy()  # would normally resolve DNS
-        out = policy.check_final_url("https://ok.example/x",
-                                     requested_url="https://ok.example/x")
+        out = policy.check_final_url("https://ok.example/x", requested_url="https://ok.example/x")
         assert out == "https://ok.example/x"
 
 
@@ -112,17 +117,16 @@ class TestBackendRedirectEnforcement:
         backend = ScraplingBackend()
         policy = WebSecurityPolicy()
         # final URL is public but an intermediate hop touched loopback.
-        resp = FakeResponse(url="https://public.example/final",
-                            history=["https://public.example/start",
-                                     "http://127.0.0.1/pivot"])
+        resp = FakeResponse(
+            url="https://public.example/final", history=["https://public.example/start", "http://127.0.0.1/pivot"]
+        )
         with pytest.raises(SecurityBlockedError):
             backend._to_raw("https://public.example/start", resp, 0.0, policy=policy)
 
     def test_benign_public_redirect_passes(self):
         backend = ScraplingBackend()
         policy = WebSecurityPolicy(allow_private_addresses=True)
-        resp = FakeResponse(url="https://example.com/final",
-                            history=["https://example.com/start"])
+        resp = FakeResponse(url="https://example.com/final", history=["https://example.com/start"])
         raw = backend._to_raw("https://example.com/start", resp, 0.0, policy=policy)
         assert raw.final_url == "https://example.com/final"
 
@@ -179,12 +183,15 @@ class TestRouterAbortsOnSize:
             web_request_timeout = 5.0
             web_browser_timeout = 5.0
 
-        monkeypatch.setattr(capabilities, "probe", lambda force=False: {
-            "static": {"status": capabilities.NOT_VERIFIED, "detail": ""},
-            "dynamic": {"status": capabilities.AVAILABLE, "detail": ""},
-        })
-        router = StrategyRouter(Cfg(), WebSecurityPolicy(allow_private_addresses=True,
-                                                         max_response_bytes=10))
+        monkeypatch.setattr(
+            capabilities,
+            "probe",
+            lambda force=False: {
+                "static": {"status": capabilities.NOT_VERIFIED, "detail": ""},
+                "dynamic": {"status": capabilities.AVAILABLE, "detail": ""},
+            },
+        )
+        router = StrategyRouter(Cfg(), WebSecurityPolicy(allow_private_addresses=True, max_response_bytes=10))
         calls: list[str] = []
 
         def fake_run(strat, url, **kw):

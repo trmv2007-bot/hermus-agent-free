@@ -1,7 +1,13 @@
 """Task Tracker - Tracks what agents/AI models are running or doing the task - free - for slide panel"""
+
 import uuid
 from datetime import datetime
 from threading import Lock
+
+from core.log import get_logger
+
+logger = get_logger(__name__)
+
 
 class TaskTracker:
     """Tracks active agents, models, tasks for slide panel UI"""
@@ -25,10 +31,10 @@ class TaskTracker:
                 "task": task[:200],
                 "status": "running",
                 "started": datetime.now().isoformat(),
-                "last_update": datetime.now().isoformat()
+                "last_update": datetime.now().isoformat(),
             }
             self.active_agents[agent_id] = info
-            print(f"[TaskTracker] Agent started: {name} ({model}) - {task[:50]}")
+            logger.info(f"[TaskTracker] Agent started: {name} ({model}) - {task[:50]}")
             return agent_id
 
     def update_agent(self, agent_id: str, status: str = None, task: str = None, progress: str = None):
@@ -52,7 +58,7 @@ class TaskTracker:
                 # Keep only last 20 completed
                 if len(self.completed_tasks) > 20:
                     self.completed_tasks = self.completed_tasks[-20:]
-                print(f"[TaskTracker] Agent {info['name']} {final_status}")
+                logger.info(f"[TaskTracker] Agent {info['name']} {final_status}")
 
     def add_task(self, task_id: str, task_type: str, description: str, model: str = "", agent: str = "") -> str:
         """Add running task (subagent, cron, tool, etc)"""
@@ -67,7 +73,7 @@ class TaskTracker:
                 "agent": agent,
                 "status": "running",
                 "started": datetime.now().isoformat(),
-                "progress": "starting"
+                "progress": "starting",
             }
             self.active_tasks[task_id] = info
             return task_id
@@ -105,14 +111,21 @@ class TaskTracker:
                 "active_tasks_count": len(self.active_tasks),
                 "completed_tasks": self.completed_tasks[-10:],  # last 10
                 "completed_count": len(self.completed_tasks),
-                "models_in_use": list(set([a["model"] for a in self.active_agents.values()] + [t["model"] for t in self.active_tasks.values() if t.get("model")]))
+                "models_in_use": list(
+                    set(
+                        [a["model"] for a in self.active_agents.values()]
+                        + [t["model"] for t in self.active_tasks.values() if t.get("model")]
+                    )
+                ),
             }
 
     def get_for_tui(self) -> str:
         """Get formatted text for TUI panel"""
         status = self.get_status()
         lines = []
-        lines.append(f"⏱️ {status['timestamp'][:19]} | Agents: {status['active_agents_count']} | Tasks: {status['active_tasks_count']}")
+        lines.append(
+            f"⏱️ {status['timestamp'][:19]} | Agents: {status['active_agents_count']} | Tasks: {status['active_tasks_count']}"
+        )
         lines.append("")
 
         if status["active_agents"]:
@@ -120,14 +133,16 @@ class TaskTracker:
             for agent in status["active_agents"]:
                 lines.append(f"  - {agent['name']} ({agent['model']})")
                 lines.append(f"    Task: {agent['task'][:60]}")
-                lines.append(f"    Status: {agent['status']} | Started: {agent['started'][11:19]} | {agent.get('progress','')}")
+                lines.append(f"    Status: {agent['status']} | Started: {agent['started'][11:19]} | {agent.get('progress', '')}")
             lines.append("")
 
         if status["active_tasks"]:
             lines.append("📋 Active Tasks:")
             for task in status["active_tasks"]:
                 lines.append(f"  - [{task['type']}] {task['description'][:60]}")
-                lines.append(f"    Model: {task.get('model','')} | Agent: {task.get('agent','')} | {task['status']} | {task.get('progress','')}")
+                lines.append(
+                    f"    Model: {task.get('model', '')} | Agent: {task.get('agent', '')} | {task['status']} | {task.get('progress', '')}"
+                )
             lines.append("")
 
         if status["models_in_use"]:
@@ -137,14 +152,15 @@ class TaskTracker:
         if status["completed_tasks"]:
             lines.append("✅ Recently Completed (last 5):")
             for task in status["completed_tasks"][-5:]:
-                name = task.get("name") or task.get("task_id") or task.get("description","")[:30]
-                lines.append(f"  - {name} -> {task.get('status')} at {task.get('ended','')[11:19]}")
+                name = task.get("name") or task.get("task_id") or task.get("description", "")[:30]
+                lines.append(f"  - {name} -> {task.get('status')} at {task.get('ended', '')[11:19]}")
 
         if not status["active_agents"] and not status["active_tasks"]:
             lines.append("💤 No active agents or tasks - idle")
             lines.append("Try: 'Research Python async' or 'hermus subagent spawn ...' or 'hermus multiai debate ...'")
 
         return "\n".join(lines)
+
 
 # Global tracker free
 task_tracker = TaskTracker()

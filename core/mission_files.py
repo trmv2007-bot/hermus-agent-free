@@ -25,21 +25,41 @@ Roots always include the mission's own workspace
 another mission's directory, and never the standard skip-list
 (``.git``, ``node_modules``, caches, …).
 """
+
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional
 
 from .run_events import record_issue
 from .workspace import workspace
 
 #: directories never treated as mission evidence
-SKIP_DIRS = frozenset({
-    ".git", "node_modules", "__pycache__", ".venv", "venv", ".pytest_cache",
-    ".mypy_cache", ".ruff_cache", "dist", "build", "target", ".next", ".cache",
-    ".tox", "site-packages", ".mypy", ".idea", ".vscode", ".eggs", "htmlcov",
-})
+SKIP_DIRS = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".cache",
+        ".tox",
+        "site-packages",
+        ".mypy",
+        ".idea",
+        ".vscode",
+        ".eggs",
+        "htmlcov",
+    }
+)
 
 #: hard cap so a pathological tree cannot stall a mission round
 MAX_FILES = 20_000
@@ -98,7 +118,7 @@ class FileSnapshot:
         *,
         skip_dirs: Iterable[str] = SKIP_DIRS,
         max_files: int = MAX_FILES,
-    ) -> "FileSnapshot":
+    ) -> FileSnapshot:
         entries: dict[str, tuple[int, int, int]] = {}
         skip = set(skip_dirs)
         seen = 0
@@ -129,13 +149,16 @@ class FileSnapshot:
                         entries[str(fp)] = _fingerprint(fp, st)
             except Exception as exc:
                 record_issue(
-                    "mission_files", "snapshot", exc, retryable=False,
+                    "mission_files",
+                    "snapshot",
+                    exc,
+                    retryable=False,
                     fallback=f"snapshot incomplete for {root}",
                 )
         return cls(entries)
 
     # -- queries --------------------------------------------------------
-    def diff(self, newer: "FileSnapshot") -> list[str]:
+    def diff(self, newer: FileSnapshot) -> list[str]:
         """Paths added or modified between this baseline and ``newer``."""
         changed: list[str] = []
         for path, fingerprint in newer.entries.items():
@@ -143,7 +166,7 @@ class FileSnapshot:
                 changed.append(path)
         return sorted(changed)
 
-    def removed(self, newer: "FileSnapshot") -> list[str]:
+    def removed(self, newer: FileSnapshot) -> list[str]:
         return sorted(p for p in self.entries if p not in newer.entries)
 
     def __len__(self) -> int:
@@ -176,9 +199,9 @@ class MissionFileScope:
         cls,
         mission_id: str,
         *,
-        extra_roots: Optional[Iterable[Path]] = None,
-        include_cwd: Optional[bool] = None,
-    ) -> "MissionFileScope":
+        extra_roots: Iterable[Path] | None = None,
+        include_cwd: bool | None = None,
+    ) -> MissionFileScope:
         """Create the scope and take the mission baseline snapshot.
 
         ``include_cwd`` defaults to ``HERMUS_MISSION_SCAN_CWD`` (on): real
@@ -193,7 +216,7 @@ class MissionFileScope:
             cwd = Path.cwd()
             if cwd not in roots:
                 roots.append(cwd)
-        for r in (extra_roots or []):
+        for r in extra_roots or []:
             if Path(r) not in roots:
                 roots.append(Path(r))
         roots = cls._exclude_other_missions(mission_id, roots)

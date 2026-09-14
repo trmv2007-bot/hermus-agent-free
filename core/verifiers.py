@@ -12,9 +12,20 @@ from __future__ import annotations
 from typing import Any
 
 ERROR_MARKERS = (
-    "error", "exception", "traceback", "failed", "failure", "no such file",
-    "command not found", "refused", "timeout", "not running", "no api key",
-    "not installed", "permission denied", "denied",
+    "error",
+    "exception",
+    "traceback",
+    "failed",
+    "failure",
+    "no such file",
+    "command not found",
+    "refused",
+    "timeout",
+    "not running",
+    "no api key",
+    "not installed",
+    "permission denied",
+    "denied",
 )
 
 

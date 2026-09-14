@@ -27,23 +27,36 @@ Event types (stable, documented for consumers):
 
 The bus is dependency-free (stdlib only) and safe to import from anywhere.
 """
+
 from __future__ import annotations
 
 import json
 import threading
 import uuid
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 _EVENT_TYPES = {
-    "task_started", "plan_created", "state_changed", "screen_event",
-    "action_started", "action_completed", "verification_started",
-    "verification_completed", "verification", "repair_started",
-    "repair_completed", "skill_recalled", "checkpoint_saved",
-    "task_completed", "task_failed", "task_interrupted", "world_changed",
+    "task_started",
+    "plan_created",
+    "state_changed",
+    "screen_event",
+    "action_started",
+    "action_completed",
+    "verification_started",
+    "verification_completed",
+    "verification",
+    "repair_started",
+    "repair_completed",
+    "skill_recalled",
+    "checkpoint_saved",
+    "task_completed",
+    "task_failed",
+    "task_interrupted",
+    "world_changed",
     "emergency_stop",
 }
 
@@ -60,7 +73,7 @@ def _default_journal_path() -> Path:
 class ComputerEventBus:
     """Thread-safe pub/sub bus with an on-disk journal for cross-process tails."""
 
-    def __init__(self, journal_path: Optional[str] = None, max_journal_bytes: int = 16 * 1024 * 1024):
+    def __init__(self, journal_path: str | None = None, max_journal_bytes: int = 16 * 1024 * 1024):
         self.journal_path = Path(journal_path).expanduser().resolve() if journal_path else _default_journal_path()
         self.max_journal_bytes = int(max_journal_bytes)
         self._lock = threading.RLock()
@@ -80,8 +93,9 @@ class ComputerEventBus:
         single authoritative, replayable event source. Mirrors
         ``core.dashboard_events``' bridge — the bridge must never break publishing.
         """
-        from ..contracts import EventEnvelope, EventType, CommandStatus
+        from ..contracts import CommandStatus, EventEnvelope, EventType
         from ..events import get_bus
+
         try:
             env = EventEnvelope(
                 type=EventType.STATE_CHANGED.value,
@@ -95,7 +109,7 @@ class ComputerEventBus:
         except Exception:
             pass
 
-    def publish(self, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def publish(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         event = {
             "id": uuid.uuid4().hex,
             "type": event_type,
@@ -163,7 +177,7 @@ class ComputerEventBus:
         journal = self.read_journal(limit=limit, reverse=True)
         if journal:
             return journal
-        return list(reversed(memory))[: limit]
+        return list(reversed(memory))[:limit]
 
     def read_journal(self, limit: int = 200, reverse: bool = False) -> list[dict[str, Any]]:
         """Read events from the journal file (oldest first by default)."""
@@ -171,7 +185,7 @@ class ComputerEventBus:
             if not self.journal_path.exists():
                 return []
             lines = self.journal_path.read_text(encoding="utf-8").splitlines()
-            lines = lines[-int(limit):]
+            lines = lines[-int(limit) :]
             events: list[dict[str, Any]] = []
             for line in lines:
                 try:
@@ -250,7 +264,7 @@ class ComputerEventBus:
 computer_event_bus = ComputerEventBus()
 
 
-def publish(event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def publish(event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
     """Publish an event on the global computer event bus."""
     return computer_event_bus.publish(event_type, data)
 
@@ -260,12 +274,7 @@ def _action_label(action: Any) -> str:
         return str(action or "")
     kind = str(action.get("kind") or action.get("action") or "")
     target = str(
-        action.get("target")
-        or action.get("name")
-        or action.get("text")
-        or action.get("condition")
-        or action.get("key")
-        or ""
+        action.get("target") or action.get("name") or action.get("text") or action.get("condition") or action.get("key") or ""
     )
     return f"{kind} {target}".strip() or str(action.get("description") or kind)
 
@@ -290,34 +299,49 @@ def machine_event(
     published: list[dict[str, Any]] = []
 
     if phase == "transition":
-        published.append(publish("state_changed", {
-            **context,
-            "next_state": event.get("next_state"),
-            "outcome": event.get("outcome"),
-            "failure_reason": event.get("failure_reason"),
-        }))
+        published.append(
+            publish(
+                "state_changed",
+                {
+                    **context,
+                    "next_state": event.get("next_state"),
+                    "outcome": event.get("outcome"),
+                    "failure_reason": event.get("failure_reason"),
+                },
+            )
+        )
     elif phase == "original_action":
         attempt = int(event.get("attempt", 1) or 1)
         action = event.get("action") or event.get("action_spec") or {}
         action_label = _action_label(event.get("action_spec") or action)
         if emit_lifecycle_starts:
-            published.append(publish("action_started", {
-                **context,
-                "attempt": attempt,
-                "action": action_label,
-                "spec": event.get("action_spec"),
-            }))
+            published.append(
+                publish(
+                    "action_started",
+                    {
+                        **context,
+                        "attempt": attempt,
+                        "action": action_label,
+                        "spec": event.get("action_spec"),
+                    },
+                )
+            )
         outcome = event.get("outcome")
         if emit_lifecycle_starts and outcome in ("success", "failure"):
-            published.append(publish("action_completed", {
-                **context,
-                "attempt": attempt,
-                "outcome": outcome,
-                "action": action_label,
-                "detail": event.get("failure_reason") or event.get("action", {}).get("detail", ""),
-                "ok": outcome == "success",
-                "expected": event.get("expected"),
-            }))
+            published.append(
+                publish(
+                    "action_completed",
+                    {
+                        **context,
+                        "attempt": attempt,
+                        "outcome": outcome,
+                        "action": action_label,
+                        "detail": event.get("failure_reason") or event.get("action", {}).get("detail", ""),
+                        "ok": outcome == "success",
+                        "expected": event.get("expected"),
+                    },
+                )
+            )
         verification = event.get("verification")
         if emit_lifecycle_starts and isinstance(verification, dict) and "ok" in verification:
             payload = {
@@ -334,31 +358,41 @@ def machine_event(
     elif phase == "diagnose":
         diagnosis = event.get("diagnosis") if isinstance(event.get("diagnosis"), dict) else {}
         plan = event.get("repair_plan") if isinstance(event.get("repair_plan"), dict) else {}
-        published.append(publish("repair_started", {
-            **context,
-            "attempt": event.get("attempt"),
-            "kind": diagnosis.get("kind", "unknown"),
-            "summary": diagnosis.get("summary", ""),
-            "confidence": diagnosis.get("confidence", 0.0),
-            "plan_id": plan.get("plan_id", ""),
-            "steps": len(plan.get("steps") or []),
-            "repair_available": bool(plan.get("available")),
-            "failure_reason": event.get("failure_reason"),
-        }))
+        published.append(
+            publish(
+                "repair_started",
+                {
+                    **context,
+                    "attempt": event.get("attempt"),
+                    "kind": diagnosis.get("kind", "unknown"),
+                    "summary": diagnosis.get("summary", ""),
+                    "confidence": diagnosis.get("confidence", 0.0),
+                    "plan_id": plan.get("plan_id", ""),
+                    "steps": len(plan.get("steps") or []),
+                    "repair_available": bool(plan.get("available")),
+                    "failure_reason": event.get("failure_reason"),
+                },
+            )
+        )
     elif phase == "repair":
         action = event.get("action") or event.get("action_spec") or {}
-        published.append(publish("repair_completed", {
-            **context,
-            "repair_state": event.get("repair_state"),
-            "repair_for": event.get("repair_for"),
-            "plan_id": event.get("repair_plan_id"),
-            "attempt": event.get("attempt"),
-            "outcome": event.get("outcome"),
-            "ok": event.get("outcome") == "success",
-            "action": _action_label(event.get("action_spec") or action),
-            "expected": event.get("expected"),
-            "failure_reason": event.get("failure_reason"),
-        }))
+        published.append(
+            publish(
+                "repair_completed",
+                {
+                    **context,
+                    "repair_state": event.get("repair_state"),
+                    "repair_for": event.get("repair_for"),
+                    "plan_id": event.get("repair_plan_id"),
+                    "attempt": event.get("attempt"),
+                    "outcome": event.get("outcome"),
+                    "ok": event.get("outcome") == "success",
+                    "action": _action_label(event.get("action_spec") or action),
+                    "expected": event.get("expected"),
+                    "failure_reason": event.get("failure_reason"),
+                },
+            )
+        )
         verification = event.get("verification")
         if emit_lifecycle_starts and isinstance(verification, dict) and "ok" in verification:
             payload = {

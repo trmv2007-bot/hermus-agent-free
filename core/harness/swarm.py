@@ -4,9 +4,10 @@ One session can spawn workers. The parent becomes coordinator; workers
 register on the session store and talk over the bus. File writes notify
 siblings via file-shift events.
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from . import bus, sessions
 
@@ -44,11 +45,13 @@ def run_workers(task: str, parent: str, *, model: str = "", count: int = 1) -> d
             agent = HermusAgent(model=model or None, session_id=worker["id"], max_steps=4)
             out = agent.chat(task)
             sessions.touch(worker["id"], status="done", last_error=None)
-            results.append({
-                "id": worker["id"],
-                "success": True,
-                "response": (out.get("response") or "")[:2000],
-            })
+            results.append(
+                {
+                    "id": worker["id"],
+                    "success": True,
+                    "response": (out.get("response") or "")[:2000],
+                }
+            )
             bus.send((out.get("response") or "")[:500], sender=worker["id"], to=parent, kind="dm")
         except Exception as e:
             sessions.touch(worker["id"], status="failed", last_error=str(e))
@@ -56,7 +59,7 @@ def run_workers(task: str, parent: str, *, model: str = "", count: int = 1) -> d
     return {"ok": True, "parent": parent, "results": results, "workers": spec["workers"]}
 
 
-def status(parent: Optional[str] = None) -> dict[str, Any]:
+def status(parent: str | None = None) -> dict[str, Any]:
     all_s = sessions.list_sessions()
     if parent:
         kids = [s for s in all_s if s.get("parent") == parent or s.get("id") == parent]

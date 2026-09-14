@@ -5,15 +5,16 @@ buffer in RAM and can fan the same compressed frames out to ``VideoWriter`` for
 an optional full MP4/WebM recording.  Vision code decodes only the frames it
 selects, rather than retaining hundreds of full-size PIL images.
 """
+
 from __future__ import annotations
 
 import io
 import threading
 import time
 from collections import deque
-from datetime import datetime
-from typing import Any, Optional
 from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 
 class ScreenSource:
@@ -52,7 +53,7 @@ class CallableSource(ScreenSource):
         return self.fn()
 
 
-def encode_image(image: Any, quality: int = 70, max_width: Optional[int] = None) -> Optional[bytes]:
+def encode_image(image: Any, quality: int = 70, max_width: int | None = None) -> bytes | None:
     """Encode a PIL-compatible image as JPEG bytes.
 
     ``bytes`` are accepted too, which makes synthetic/test sources cheap.  A
@@ -121,13 +122,13 @@ class ScreenRecorder:
 
     def __init__(
         self,
-        source: Optional[ScreenSource] = None,
+        source: ScreenSource | None = None,
         max_seconds: float = 30.0,
         fps: float = 10.0,
         jpeg_quality: int = 70,
-        max_width: Optional[int] = None,
+        max_width: int | None = None,
         max_buffer_mb: float = 128.0,
-        writer_factory: Optional[Callable[..., Any]] = None,
+        writer_factory: Callable[..., Any] | None = None,
     ):
         self.source = source or ImageGrabSource()
         self.max_seconds = float(max_seconds)
@@ -140,16 +141,16 @@ class ScreenRecorder:
         self._frames: deque[dict[str, Any]] = deque()
         self._buffer_bytes = 0
         self._lock = threading.RLock()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._running = False
-        self._started: Optional[float] = None
-        self._started_monotonic: Optional[float] = None
+        self._started: float | None = None
+        self._started_monotonic: float | None = None
         self._sequence = 0
         self._captured = 0
         self._dropped = 0
         self._capture_errors = 0
-        self._writer: Optional[Any] = None
-        self._last_video: Optional[dict[str, Any]] = None
+        self._writer: Any | None = None
+        self._last_video: dict[str, Any] | None = None
         self._markers: list[dict[str, Any]] = []
 
     @property
@@ -160,7 +161,7 @@ class ScreenRecorder:
     def interval(self) -> float:
         return 1.0 / max(0.1, self.fps)
 
-    def _make_record(self, image: Any, now_wall: float, now_mono: float) -> Optional[dict[str, Any]]:
+    def _make_record(self, image: Any, now_wall: float, now_mono: float) -> dict[str, Any] | None:
         data = encode_image(image, quality=self.jpeg_quality, max_width=self.max_width)
         if not data:
             return None
@@ -184,7 +185,7 @@ class ScreenRecorder:
             "data": data,
         }
 
-    def _capture(self) -> Optional[dict[str, Any]]:
+    def _capture(self) -> dict[str, Any] | None:
         try:
             image = self.source.capture()
         except Exception:
@@ -224,7 +225,7 @@ class ScreenRecorder:
                 # creating a CPU-heavy catch-up burst.
                 next_capture = time.monotonic()
 
-    def _prune(self, newest_at: Optional[float] = None) -> None:
+    def _prune(self, newest_at: float | None = None) -> None:
         newest_at = newest_at or time.time()
         cutoff = newest_at - max(0.1, self.max_seconds)
         max_frames = max(1, int(self.max_seconds * max(0.1, self.fps)) + 1)
@@ -238,9 +239,9 @@ class ScreenRecorder:
 
     def start(
         self,
-        max_seconds: Optional[float] = None,
-        fps: Optional[float] = None,
-        output_path: Optional[str] = None,
+        max_seconds: float | None = None,
+        fps: float | None = None,
+        output_path: str | None = None,
     ) -> dict[str, Any]:
         """Start capture, optionally streaming the full session to MP4/WebM."""
         with self._lock:
@@ -344,11 +345,11 @@ class ScreenRecorder:
         with self._lock:
             return list(self._frames)
 
-    def latest(self) -> Optional[dict[str, Any]]:
+    def latest(self) -> dict[str, Any] | None:
         with self._lock:
             return self._frames[-1] if self._frames else None
 
-    def capture_now(self, store: bool = True) -> Optional[dict[str, Any]]:
+    def capture_now(self, store: bool = True) -> dict[str, Any] | None:
         """Capture an explicit action boundary frame (BEFORE or AFTER)."""
         record = self._capture()
         if record is not None and store:
@@ -357,7 +358,7 @@ class ScreenRecorder:
                 self._writer.write(record)
         return record
 
-    def mark(self, label: str, kind: str = "action", metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def mark(self, label: str, kind: str = "action", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Add a lightweight action marker tied to the current recording time."""
         marker = {
             "id": len(self._markers) + 1,
@@ -376,7 +377,7 @@ class ScreenRecorder:
         with self._lock:
             return list(self._markers)
 
-    def save(self, output_path: str, seconds: Optional[float] = None) -> dict[str, Any]:
+    def save(self, output_path: str, seconds: float | None = None) -> dict[str, Any]:
         """Encode the current rolling buffer as a conventional MP4/WebM file."""
         frames = self.recent(seconds) if seconds is not None else self.all_frames()
         if not frames:

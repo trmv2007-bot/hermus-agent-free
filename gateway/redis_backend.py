@@ -10,11 +10,12 @@ raises and :class:`gateway.queue.JobQueue` prints a notice and keeps using its
 in-process lanes. The agent must stay runnable on a laptop with zero services,
 so this is an accelerator, never a requirement.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Any
 
 from core.config import config
 
@@ -55,7 +56,7 @@ class RedisStreamsConsumer:
         self.stream = stream
         self.group = group
         self._redis = None
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._consumer = f"gw-{id(self):x}"
 
     async def start(self) -> dict[str, Any]:
@@ -88,24 +89,20 @@ class RedisStreamsConsumer:
                 pass
             self._redis = None
 
-    async def publish(self, job_id: str, kind: str, payload: dict[str, Any],
-                      session_key: str = "") -> Optional[str]:
+    async def publish(self, job_id: str, kind: str, payload: dict[str, Any], session_key: str = "") -> str | None:
         if self._redis is None:
             return None
-        body = {"job_id": job_id, "kind": kind, "session_key": session_key,
-                "payload": json.dumps(payload or {}, default=str)}
+        body = {"job_id": job_id, "kind": kind, "session_key": session_key, "payload": json.dumps(payload or {}, default=str)}
         return await self._redis.xadd(self.stream, body, maxlen=10_000, approximate=True)
 
     async def _loop(self) -> None:
         assert self._redis is not None
         while True:
             try:
-                resp = await self._redis.xreadgroup(
-                    self.group, self._consumer, {self.stream: ">"}, count=4, block=2000
-                )
+                resp = await self._redis.xreadgroup(self.group, self._consumer, {self.stream: ">"}, count=4, block=2000)
             except asyncio.CancelledError:
                 raise
-            except Exception as e:
+            except Exception:
                 await asyncio.sleep(1.0)
                 continue
             for _stream, entries in resp or []:
@@ -121,9 +118,12 @@ class RedisStreamsConsumer:
             payload = {}
         try:
             # Local lane executes it (keeps one execution path for both transports).
-            self.queue.submit(str(fields.get("kind") or "agent.chat"), payload,
-                              session_key=str(fields.get("session_key") or "default"),
-                              job_id=job_id or None)
+            self.queue.submit(
+                str(fields.get("kind") or "agent.chat"),
+                payload,
+                session_key=str(fields.get("session_key") or "default"),
+                job_id=job_id or None,
+            )
         except Exception as e:
             self.queue._record({"job_id": job_id, "event": "redis_dispatch_failed", "error": str(e)[:300]})
         finally:

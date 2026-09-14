@@ -12,10 +12,11 @@ verifier domain and an integration test.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict, fields as _fields
+from dataclasses import asdict, dataclass, field
+from dataclasses import fields as _fields
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 def _now_iso() -> str:
@@ -81,7 +82,7 @@ class ToolDescriptor:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ToolDescriptor":
+    def from_dict(cls, data: dict[str, Any]) -> ToolDescriptor:
         known = {f.name for f in _fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
 
@@ -108,18 +109,18 @@ class ToolResult:
     ok: bool
     status: str = ToolStatus.OK.value
     output: Any = None
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
+    error_code: str | None = None
+    error_message: str | None = None
     evidence_refs: list[str] = field(default_factory=list)
     evidence: list[Evidence] = field(default_factory=list)
     changed_resources: list[str] = field(default_factory=list)
     started_at: str = field(default_factory=_now_iso)
-    finished_at: Optional[str] = None
-    trace_id: Optional[str] = None
+    finished_at: str | None = None
+    trace_id: str | None = None
     retryable: bool = False
-    next_action: Optional[str] = None
-    sandbox: Optional[str] = None
-    duration_ms: Optional[int] = None
+    next_action: str | None = None
+    sandbox: str | None = None
+    duration_ms: int | None = None
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -127,15 +128,33 @@ class ToolResult:
         return d
 
     @classmethod
-    def error(cls, code: str, message: str, *, retryable: bool = False,
-              trace_id: Optional[str] = None, status: str = ToolStatus.ERROR.value,
-              **kw) -> "ToolResult":
-        return cls(ok=False, status=status, error_code=code, error_message=message,
-                   retryable=retryable, trace_id=trace_id, **kw)
+    def error(
+        cls,
+        code: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        trace_id: str | None = None,
+        status: str = ToolStatus.ERROR.value,
+        **kw,
+    ) -> ToolResult:
+        return cls(ok=False, status=status, error_code=code, error_message=message, retryable=retryable, trace_id=trace_id, **kw)
 
     @classmethod
-    def ok_result(cls, output: Any = None, *, evidence_refs: Optional[list[str]] = None,
-                  changed_resources: Optional[list[str]] = None,
-                  trace_id: Optional[str] = None, **kw) -> "ToolResult":
-        return cls(ok=True, output=output, evidence_refs=evidence_refs or [],
-                   changed_resources=changed_resources or [], trace_id=trace_id, **kw)
+    def ok_result(
+        cls,
+        output: Any = None,
+        *,
+        evidence_refs: list[str] | None = None,
+        changed_resources: list[str] | None = None,
+        trace_id: str | None = None,
+        **kw,
+    ) -> ToolResult:
+        return cls(
+            ok=True,
+            output=output,
+            evidence_refs=evidence_refs or [],
+            changed_resources=changed_resources or [],
+            trace_id=trace_id,
+            **kw,
+        )

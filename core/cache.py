@@ -1,11 +1,13 @@
 """Cache - Optimize everything - Free - LRU cache for LLM, memory, tools, etc."""
-import time
-import json
+
 import hashlib
+import json
+import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
 from threading import Lock
+from typing import Any
+
 
 class LRUCache:
     """Simple LRU cache with TTL - free, no external deps"""
@@ -24,7 +26,7 @@ class LRUCache:
             return True
         return time.time() - self.timestamps[key] > self.ttl
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self.lock:
             if key not in self.cache or self._is_expired(key):
                 if key in self.cache:
@@ -63,7 +65,7 @@ class LRUCache:
             "hits": self.hits,
             "misses": self.misses,
             "hit_rate": round(hit_rate, 3),
-            "ttl_seconds": self.ttl
+            "ttl_seconds": self.ttl,
         }
 
     def make_key(self, *args, **kwargs) -> str:
@@ -72,12 +74,14 @@ class LRUCache:
         data = json.dumps({"args": args, "kwargs": kwargs}, sort_keys=True, default=str)
         return hashlib.md5(data.encode()).hexdigest()
 
+
 # Global caches - free, optimized
 llm_cache = LRUCache(max_size=100, ttl_seconds=600)  # LLM responses cached 10 min
 memory_search_cache = LRUCache(max_size=50, ttl_seconds=300)  # Memory search cached 5 min
 web_search_cache = LRUCache(max_size=50, ttl_seconds=600)  # Web search cached 10 min
 tool_result_cache = LRUCache(max_size=100, ttl_seconds=300)  # Tool results cached 5 min
 skill_cache = LRUCache(max_size=20, ttl_seconds=600)  # Skills cached 10 min
+
 
 class OptimizedFileCache:
     """Optimized file cache - cache file reads"""
@@ -86,7 +90,7 @@ class OptimizedFileCache:
         self.cache = {}
         self.mtimes = {}
 
-    def read(self, path: str) -> Optional[str]:
+    def read(self, path: str) -> str | None:
         p = Path(path)
         if not p.exists():
             return None
@@ -94,9 +98,9 @@ class OptimizedFileCache:
         if path in self.cache and self.mtimes.get(path) == mtime:
             return self.cache[path]
         try:
-            content = p.read_text(encoding='utf-8', errors='ignore')
+            content = p.read_text(encoding="utf-8", errors="ignore")
             # Only cache if < 1MB
-            if len(content) < 1024*1024:
+            if len(content) < 1024 * 1024:
                 self.cache[path] = content
                 self.mtimes[path] = mtime
             return content
@@ -107,7 +111,9 @@ class OptimizedFileCache:
         self.cache.clear()
         self.mtimes.clear()
 
+
 file_cache = OptimizedFileCache()
+
 
 def clear_all_caches():
     """Clear all caches - for /clear or memory management"""
@@ -119,6 +125,7 @@ def clear_all_caches():
     file_cache.clear()
     return {"cleared": True, "message": "All caches cleared"}
 
+
 def get_cache_stats() -> dict:
     """Get stats for all caches - for dashboard analytics"""
     return {
@@ -128,8 +135,16 @@ def get_cache_stats() -> dict:
         "tool_result_cache": tool_result_cache.stats(),
         "skill_cache": skill_cache.stats(),
         "total_hit_rate": round(
-            (llm_cache.hits + memory_search_cache.hits + web_search_cache.hits) /
-            max(1, llm_cache.hits + llm_cache.misses + memory_search_cache.hits + memory_search_cache.misses + web_search_cache.hits + web_search_cache.misses),
-            3
-        )
+            (llm_cache.hits + memory_search_cache.hits + web_search_cache.hits)
+            / max(
+                1,
+                llm_cache.hits
+                + llm_cache.misses
+                + memory_search_cache.hits
+                + memory_search_cache.misses
+                + web_search_cache.hits
+                + web_search_cache.misses,
+            ),
+            3,
+        ),
     }

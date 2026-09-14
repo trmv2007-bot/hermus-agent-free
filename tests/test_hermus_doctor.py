@@ -9,6 +9,7 @@ that make it trustworthy:
 * "ask the internet" never presents the offline mock search as research,
 * reports are written to disk in both JSON and Markdown.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,11 +18,11 @@ import time
 import pytest
 
 from core.doctor import (
+    KNOWN_ERROR_FIXES,
     SEVERITY_HIGH,
     SEVERITY_INFO,
     Finding,
     HermusDoctor,
-    KNOWN_ERROR_FIXES,
     to_markdown,
 )
 
@@ -38,14 +39,15 @@ def signals(**overrides):
         "stuck": {"threshold_minutes": 20, "jobs": [], "runs": [], "count": 0},
         "diagnostics": {"checks": []},
         "watchdog": [],
-        "engines": {"status": "ready", "plan": {"mode": "cpu_only", "roles": {}},
-                    "engines": {"ollama": {"reachable": True, "detail": "200"},
-                                "nollama": {"reachable": True, "detail": "200"}},
-                    "nollama": {"installed": True, "models_dir": "/tmp/models",
-                                "home": "/tmp/nollama", "log": "data/nollama.log"},
-                    "recommended_model": {"id": "minicpm", "name": "MiniCPM5 1B"},
-                    "nollama_base_url": "http://localhost:8010/v1",
-                    "ollama_base_url": "http://localhost:11434/v1"},
+        "engines": {
+            "status": "ready",
+            "plan": {"mode": "cpu_only", "roles": {}},
+            "engines": {"ollama": {"reachable": True, "detail": "200"}, "nollama": {"reachable": True, "detail": "200"}},
+            "nollama": {"installed": True, "models_dir": "/tmp/models", "home": "/tmp/nollama", "log": "data/nollama.log"},
+            "recommended_model": {"id": "minicpm", "name": "MiniCPM5 1B"},
+            "nollama_base_url": "http://localhost:8010/v1",
+            "ollama_base_url": "http://localhost:11434/v1",
+        },
         "media": {
             "speech": {"available": True, "detail": {}},
             "avatar": {
@@ -99,13 +101,13 @@ def test_issue_grouping_ignores_volatile_ids(doc):
 
 
 def test_failed_diagnostics_are_reported_with_their_hint(doc):
-    diag = {"checks": [
-        {"name": "pydantic", "ok": True, "level": "required"},
-        {"name": "fastapi", "ok": False, "level": "recommended", "detail": "installed=False",
-         "hint": "pip install fastapi"},
-        {"name": "data_dir", "ok": False, "level": "required", "detail": "read-only",
-         "hint": "make data/ writable"},
-    ]}
+    diag = {
+        "checks": [
+            {"name": "pydantic", "ok": True, "level": "required"},
+            {"name": "fastapi", "ok": False, "level": "recommended", "detail": "installed=False", "hint": "pip install fastapi"},
+            {"name": "data_dir", "ok": False, "level": "required", "detail": "read-only", "hint": "make data/ writable"},
+        ]
+    }
     findings = doc.analyze(signals(diagnostics=diag))
     severities = {f.category: f.severity for f in findings}
     assert severities == {"install": SEVERITY_HIGH} or len(findings) == 2
@@ -116,8 +118,7 @@ def test_failed_diagnostics_are_reported_with_their_hint(doc):
 def test_missing_engine_is_explained_with_the_dashboard_route(doc):
     engines = signals()["engines"]
     engines["status"] = "needs_install"
-    findings = doc.analyze(signals(engines=engines,
-                                   issues=[]))
+    findings = doc.analyze(signals(engines=engines, issues=[]))
     cats = {f.category for f in findings}
     assert "engine_missing" in cats
     fix = next(f for f in findings if f.category == "engine_missing").fixes[0]
@@ -136,8 +137,7 @@ def test_missing_model_points_at_the_download_button(doc):
 def test_dead_engine_is_high_severity(doc):
     engines = signals()["engines"]
     engines["status"] = "unavailable"
-    engines["plan"] = {"mode": "npu_only",
-                       "roles": {"reasoning": {"engine": "nollama", "device": "NPU"}}}
+    engines["plan"] = {"mode": "npu_only", "roles": {"reasoning": {"engine": "nollama", "device": "NPU"}}}
     findings = doc.analyze(signals(engines=engines))
     finding = next(f for f in findings if f.category == "engine_down")
     assert finding.severity == SEVERITY_HIGH
@@ -149,8 +149,10 @@ def test_unavailable_does_not_blame_nollama_on_a_cpu_box(doc):
     engines = signals()["engines"]
     engines["status"] = "unavailable"
     engines["plan"] = {"mode": "cpu_only", "roles": {"reasoning": {"engine": "ollama", "device": "CPU"}}}
-    engines["engines"] = {"ollama": {"reachable": False, "detail": "ConnectionError"},
-                          "nollama": {"reachable": False, "detail": "ConnectionError"}}
+    engines["engines"] = {
+        "ollama": {"reachable": False, "detail": "ConnectionError"},
+        "nollama": {"reachable": False, "detail": "ConnectionError"},
+    }
     findings = doc.analyze(signals(engines=engines))
     components = {f.component for f in findings if f.category == "engine_down"}
     assert components == {"ollama"}
@@ -160,7 +162,9 @@ def test_unavailable_does_not_blame_nollama_on_a_cpu_box(doc):
 def test_overall_status_reserves_critical_for_critical_findings(doc, monkeypatch):
     from core.doctor import SEVERITY_CRITICAL, SEVERITY_LOW, SEVERITY_MEDIUM, _overall_status
 
-    finding = lambda sev: Finding(id="f", severity=sev, category="c", title="t", evidence="e")
+    def finding(sev):
+        return Finding(id="f", severity=sev, category="c", title="t", evidence="e")
+
     assert _overall_status(SEVERITY_INFO, []) == "ok"
     assert _overall_status(SEVERITY_LOW, [finding(SEVERITY_LOW)]) == "ok"
     assert _overall_status(SEVERITY_MEDIUM, [finding(SEVERITY_MEDIUM)]) == "attention"
@@ -172,8 +176,10 @@ def test_ollama_down_while_the_plan_needs_it(doc):
     engines = signals()["engines"]
     engines["status"] = "unavailable"
     engines["plan"] = {"mode": "cpu_only", "roles": {"reasoning": {"engine": "ollama", "device": "CPU"}}}
-    engines["engines"] = {"ollama": {"reachable": False, "detail": "ConnectionError"},
-                          "nollama": {"reachable": False, "detail": "no"}}
+    engines["engines"] = {
+        "ollama": {"reachable": False, "detail": "ConnectionError"},
+        "nollama": {"reachable": False, "detail": "no"},
+    }
     findings = doc.analyze(signals(engines=engines))
     assert any(f.component == "ollama" for f in findings)
 
@@ -187,8 +193,7 @@ def test_pipelined_plan_is_reported_as_info(doc):
 
 
 def test_low_disk_and_ram_are_findings(doc):
-    findings = doc.analyze(signals(resources={"disk_free_gb": 2.1, "disk_percent": 96,
-                                              "ram_free_gb": 0.8, "ram_percent": 95}))
+    findings = doc.analyze(signals(resources={"disk_free_gb": 2.1, "disk_percent": 96, "ram_free_gb": 0.8, "ram_percent": 95}))
     cats = {f.category for f in findings}
     assert cats == {"disk", "memory"}
     assert next(f for f in findings if f.category == "disk").severity == SEVERITY_HIGH
@@ -223,8 +228,9 @@ def test_findings_are_sorted_worst_first(doc):
     engines = signals()["engines"]
     engines["status"] = "unavailable"
     found = doc.analyze(signals(engines=engines, resources={"disk_free_gb": 1.0, "ram_free_gb": 0.5}))
-    assert [f.severity for f in found] == sorted([f.severity for f in found],
-                                                 key=lambda s: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}[s])
+    assert [f.severity for f in found] == sorted(
+        [f.severity for f in found], key=lambda s: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}[s]
+    )
 
 
 def test_known_error_table_covers_the_shutdown_leak(doc):
@@ -292,8 +298,7 @@ def test_no_stuck_work_is_not_a_finding(doc):
 # Research (ask the internet)
 # ---------------------------------------------------------------------------
 def test_research_is_skipped_when_everything_has_a_fix(doc):
-    out = doc.research([Finding(id="f1", severity=SEVERITY_HIGH, category="x", title="t",
-                                evidence="e", fixes=["do this"])])
+    out = doc.research([Finding(id="f1", severity=SEVERITY_HIGH, category="x", title="t", evidence="e", fixes=["do this"])])
     assert out["performed"] is False
     assert "no unexplained findings" in out["reason"]
 
@@ -303,8 +308,7 @@ def test_research_refuses_to_pass_mock_results_off_as_research(doc, monkeypatch)
     import tools.web_search as ws
 
     monkeypatch.setattr(ws, "DDG_AVAILABLE", False)
-    findings = [Finding(id="f1", severity=SEVERITY_HIGH, category="mystery", title="weird crash",
-                        evidence="e", fixes=[])]
+    findings = [Finding(id="f1", severity=SEVERITY_HIGH, category="mystery", title="weird crash", evidence="e", fixes=[])]
     out = doc.research(findings)
     assert out["performed"] is False
     assert out["offline"] is True
@@ -323,8 +327,7 @@ def test_research_attaches_real_references(doc, monkeypatch):
             {"title": "No link", "href": "", "body": "useless"},
         ],
     )
-    findings = [Finding(id="f1", severity=SEVERITY_HIGH, category="mystery", title="weird crash",
-                        evidence="e", fixes=[])]
+    findings = [Finding(id="f1", severity=SEVERITY_HIGH, category="mystery", title="weird crash", evidence="e", fixes=[])]
     out = doc.research(findings)
     assert out["performed"] is True
     assert findings[0].references == ["https://example.com/a"], "linkless results are dropped"
@@ -337,8 +340,7 @@ def test_research_is_bounded(doc, monkeypatch):
     calls = []
     monkeypatch.setattr(ws, "DDG_AVAILABLE", True)
     monkeypatch.setattr(ws, "web_search", lambda query, max_results=5: calls.append(query) or [])
-    many = [Finding(id=f"f{i}", severity=SEVERITY_HIGH, category="c", title=f"t{i}",
-                    evidence="e", fixes=[]) for i in range(10)]
+    many = [Finding(id=f"f{i}", severity=SEVERITY_HIGH, category="c", title=f"t{i}", evidence="e", fixes=[]) for i in range(10)]
     doc.research(many, max_queries=2)
     assert len(calls) == 2
 
@@ -352,8 +354,11 @@ def test_triage_falls_back_when_no_model_answers(doc, monkeypatch):
             raise ConnectionError("engine down")
 
     monkeypatch.setattr(doc, "_doctor_llm", lambda model=None: (DeadLLM(), "nollama/minicpm"))
-    findings = [Finding(id="f1", severity=SEVERITY_HIGH, category="c", title="engine down",
-                        evidence="no response", fixes=["start the engine"])]
+    findings = [
+        Finding(
+            id="f1", severity=SEVERITY_HIGH, category="c", title="engine down", evidence="no response", fixes=["start the engine"]
+        )
+    ]
     out = doc.triage(findings)
     assert out["used_model"] is False
     assert out["model"] == "nollama/minicpm"
@@ -368,14 +373,24 @@ def test_triage_uses_the_model_when_it_answers(doc, monkeypatch):
 
         def chat(self, messages, tools=None):
             self.prompt = messages[0]["content"]
+
             class R:
                 content = "WHAT WENT WRONG: the KV pool was too small."
+
             return R()
 
     llm = LLM()
     monkeypatch.setattr(doc, "_doctor_llm", lambda model=None: (llm, "nollama/minicpm"))
-    findings = [Finding(id="f1", severity=SEVERITY_HIGH, category="c", title="generation failed",
-                        evidence="unfinished GenerationStatus", fixes=[])]
+    findings = [
+        Finding(
+            id="f1",
+            severity=SEVERITY_HIGH,
+            category="c",
+            title="generation failed",
+            evidence="unfinished GenerationStatus",
+            fixes=[],
+        )
+    ]
     out = doc.triage(findings)
     assert out["used_model"] is True
     assert "KV pool" in out["summary"]
@@ -389,6 +404,7 @@ def test_triage_treats_a_refusal_as_no_model(doc, monkeypatch):
         def chat(self, messages, tools=None):
             class R:
                 content = "nollama error (base_url=http://localhost:8010/v1): connection refused"
+
             return R()
 
     monkeypatch.setattr(doc, "_doctor_llm", lambda model=None: (LLM(), "nollama/minicpm"))
@@ -444,8 +460,11 @@ def test_run_feeds_the_lessons_loop(doc, monkeypatch):
     added = []
     import core.reasoning.lessons as lessons_mod
 
-    monkeypatch.setattr(lessons_mod.lessons_store, "add",
-                        lambda lesson, category="general", **kw: added.append((lesson, category)) or {"success": True})
+    monkeypatch.setattr(
+        lessons_mod.lessons_store,
+        "add",
+        lambda lesson, category="general", **kw: added.append((lesson, category)) or {"success": True},
+    )
     doc.run(use_llm=False, ask_internet=False, save=False)
     assert added, "the top finding must become a lesson"
     assert added[0][1].startswith("doctor:")
@@ -479,16 +498,28 @@ def test_status_is_cheap_and_shaped_for_the_dashboard(doc, monkeypatch):
     monkeypatch.setattr(doc, "collect", lambda **kw: signals())
     monkeypatch.setattr(doc, "_doctor_llm", lambda model=None: (None, "nollama/minicpm"))
     st = doc.status()
-    for key in ("enabled", "auto", "ask_internet", "model", "engine_status",
-                "media", "worst_severity", "counts", "finding_count", "stuck", "reports"):
+    for key in (
+        "enabled",
+        "auto",
+        "ask_internet",
+        "model",
+        "engine_status",
+        "media",
+        "worst_severity",
+        "counts",
+        "finding_count",
+        "stuck",
+        "reports",
+    ):
         assert key in st
     assert st["model"] == "nollama/minicpm"
 
 
 def test_doctor_starts_downloaded_local_engine_instead_of_bailing(doc, monkeypatch):
     """The doctor must start a downloaded MiniCPM model if the engine is off."""
-    import core.nollama as nl
     import requests
+
+    import core.nollama as nl
 
     started = {}
 
@@ -513,6 +544,7 @@ def test_doctor_starts_downloaded_local_engine_instead_of_bailing(doc, monkeypat
     monkeypatch.setattr(nl.nollama_manager, "venv_ready", fake_venv)
     monkeypatch.setattr(nl.nollama_manager, "best_installed_model", fake_best)
     monkeypatch.setattr(nl.nollama_manager, "start", fake_start)
+
     class _OK:
         status_code = 200
         content = b"{}"
@@ -538,10 +570,7 @@ def test_doctor_prefers_downloaded_minicpm_over_ollama(doc, monkeypatch):
             "path": "/tmp/models/MiniCPM5-1B-int4-g128-ov",
         },
     )
-    assert (
-        doc._prefer_downloaded_doctor("ollama/llama3.1:8b")
-        == "nollama/MiniCPM5-1B-int4-g128-ov"
-    )
+    assert doc._prefer_downloaded_doctor("ollama/llama3.1:8b") == "nollama/MiniCPM5-1B-int4-g128-ov"
 
 
 def test_doctor_falls_back_to_configured_provider_when_local_unavailable(doc, monkeypatch):

@@ -9,19 +9,20 @@ Covers:
   * /run/steer is a real endpoint that records instructions (P0 #2)
   * HEAD / and /favicon.ico behave (transport noise from screenshot)
 """
+
 from __future__ import annotations
 
 import pathlib
 import tempfile
 
 import pytest
-
 from starlette.testclient import TestClient
 
 
 @pytest.fixture()
 def client():
     from gateway.gateway import app
+
     with TestClient(app) as c:
         yield c
 
@@ -47,6 +48,7 @@ def test_command_multipart_attachment_reaches_prompt(client):
 
             def _resolve_bundle(self):
                 return {}
+
         llm = _LLM()
 
         def chat(self, text, **kwargs):
@@ -105,6 +107,7 @@ def test_steer_endpoint_exists_and_reports_no_run(client):
 def test_steer_delivered_to_active_run(client):
     import threading
     import time
+
     from core.run_events import run_bus
 
     rid = "run_steer_probe"
@@ -142,7 +145,7 @@ def test_autonomous_report_has_response_field():
     # The autonomy contract exposes a canonical `response` field. The MissionEngine
     # is the only autonomy engine, so this now checks the mission report contract
     # exposes a non-empty human-readable response mirroring the final proof.
-    from core.mission import MissionEngine, MissionReport
+    from core.mission import MissionEngine
 
     with tempfile.TemporaryDirectory() as tmp:
         eng = MissionEngine(storage_dir=pathlib.Path(tmp) / "missions")
@@ -189,7 +192,7 @@ def test_budget_extension_counted_once():
     serialized = b.to_dict()
     assert serialized["total_steps"] == 40
     # Deserialization must tolerate the computed total_steps key.
-    from core.mission import MissionReport
+
     assert MissionBudget(**{k: v for k, v in serialized.items() if k in MissionBudget.__dataclass_fields__})
 
 

@@ -4,10 +4,11 @@ Each task is a realistic desktop interaction that Hermus might be asked to
 perform.  Tasks span difficulty levels and failure modes so the benchmark
 measures not just success but recovery capability.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -15,13 +16,13 @@ class TaskSpec:
     """Specification for one benchmark task."""
 
     id: str
-    category: str          # app, browser, file, install, dialog, recovery, multi
-    difficulty: int        # 1=easy, 2=medium, 3=hard
-    prompt: str            # The natural-language instruction for the agent
+    category: str  # app, browser, file, install, dialog, recovery, multi
+    difficulty: int  # 1=easy, 2=medium, 3=hard
+    prompt: str  # The natural-language instruction for the agent
     expected_states: list[str] = field(default_factory=list)
     failure_modes: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
-    timeout: int = 120     # Max seconds
+    timeout: int = 120  # Max seconds
     min_steps: int = 1
     max_steps: int = 30
     description: str = ""
@@ -75,7 +76,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["wrong_window", "navigation_failed", "timeout"],
         tags=["open_app", "navigate", "verify"],
     ),
-
     # === BROWSER: Web navigation tasks ===
     TaskSpec(
         id="COMPUTER-004",
@@ -104,7 +104,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["hotkey_not_recognized", "wrong_window"],
         tags=["browser", "hotkey"],
     ),
-
     # === DIALOG: Handle popups and prompts ===
     TaskSpec(
         id="COMPUTER-007",
@@ -124,7 +123,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["wrong_button_clicked", "dialog_not_found"],
         tags=["dialog", "permission", "click_target"],
     ),
-
     # === FILE: Download and manage files ===
     TaskSpec(
         id="COMPUTER-009",
@@ -153,7 +151,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["no_text_file_found", "app_not_found", "wrong_window"],
         tags=["file", "open", "read"],
     ),
-
     # === INSTALL: Software installation simulation ===
     TaskSpec(
         id="COMPUTER-012",
@@ -173,7 +170,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["download_failed", "extract_failed", "app_not_found"],
         tags=["install", "download", "extract", "multi_step"],
     ),
-
     # === RECOVERY: Error handling and repair ===
     TaskSpec(
         id="COMPUTER-014",
@@ -211,7 +207,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["dialog_not_handled"],
         tags=["recovery", "dialog", "blocking"],
     ),
-
     # === MULTI-STEP: Complex sequences ===
     TaskSpec(
         id="COMPUTER-018",
@@ -258,7 +253,6 @@ COMPUTER_TASKS: list[TaskSpec] = [
         failure_modes=["save_failed", "file_not_found", "wrong_window"],
         tags=["multi_step", "file_save", "verify"],
     ),
-
     # === EDGE CASES ===
     TaskSpec(
         id="COMPUTER-023",
@@ -339,21 +333,21 @@ COMPUTER_TASKS: list[TaskSpec] = [
 _TASK_MAP = {task.id: task for task in COMPUTER_TASKS}
 
 
-def get_task(task_id: str) -> Optional[TaskSpec]:
+def get_task(task_id: str) -> TaskSpec | None:
     """Get a benchmark task by id (e.g. 'COMPUTER-005')."""
     return _TASK_MAP.get(task_id)
 
 
 def list_tasks(
-    category: Optional[str] = None,
+    category: str | None = None,
     max_difficulty: int = 3,
     min_difficulty: int = 1,
 ) -> list[TaskSpec]:
     """List tasks with optional filters."""
     return [
-        t for t in COMPUTER_TASKS
-        if (category is None or t.category == category)
-        and min_difficulty <= t.difficulty <= max_difficulty
+        t
+        for t in COMPUTER_TASKS
+        if (category is None or t.category == category) and min_difficulty <= t.difficulty <= max_difficulty
     ]
 
 

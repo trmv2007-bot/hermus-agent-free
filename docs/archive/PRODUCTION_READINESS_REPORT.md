@@ -1,3 +1,9 @@
+> **Archived — historical document.**
+> This is a point-in-time audit report pinned to a specific commit, kept for provenance. It is **not** the current
+> reference: see [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+> Moved here by the documentation consolidation; the content below is
+> preserved verbatim.
+>
 # Hermus — Production-Readiness & Integration-Completion Report
 
 Branch: `clean-slate/final-consolidation`

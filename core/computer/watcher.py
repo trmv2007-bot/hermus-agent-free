@@ -1,9 +1,10 @@
 """Continuous, event-driven visual condition watching."""
+
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 from .frame_sampler import _image_diff
 from .video_analyzer import VideoAnalyzer
@@ -13,8 +14,8 @@ class ScreenWatcher:
     def __init__(
         self,
         recorder: Any,
-        analyzer: Optional[VideoAnalyzer] = None,
-        evaluator: Optional[Callable[[Any, str], dict[str, Any]]] = None,
+        analyzer: VideoAnalyzer | None = None,
+        evaluator: Callable[[Any, str], dict[str, Any]] | None = None,
         change_threshold: float = 0.02,
     ):
         self.recorder = recorder
@@ -59,9 +60,7 @@ class ScreenWatcher:
                 # Normally call vision only for changes. Once a match is seen,
                 # inspect subsequent frames too so ``stable_matches`` can
                 # confirm that the state did not merely flash for one frame.
-                should_check = (previous is None
-                                or _image_diff(previous, frame) >= self.change_threshold
-                                or consecutive > 0)
+                should_check = previous is None or _image_diff(previous, frame) >= self.change_threshold or consecutive > 0
                 previous = frame
                 if not should_check:
                     time.sleep(poll_interval)
@@ -70,7 +69,12 @@ class ScreenWatcher:
                 try:
                     last_result = self.evaluator(frame, condition) or {}
                 except Exception as exc:
-                    return {"success": False, "matched": False, "error": f"condition evaluator failed: {exc}", "frames_checked": checked}
+                    return {
+                        "success": False,
+                        "matched": False,
+                        "error": f"condition evaluator failed: {exc}",
+                        "frames_checked": checked,
+                    }
                 if last_result.get("error"):
                     return {
                         "success": False,

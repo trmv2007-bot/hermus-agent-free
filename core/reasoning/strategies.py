@@ -8,16 +8,21 @@ Each strategy is a thin, cost-capped layer around the draft final answer:
 All are bounded (extra calls capped), audited (strategy + reason logged), and
 degrade gracefully: ANY failure returns the original draft unchanged.
 """
+
 from __future__ import annotations
 
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Optional
+from typing import Any
+
+from core.log import get_logger
 
 from ..config import config
 from ..llm import FreeLLM
 from ..models import get_model_gateway
+
+logger = get_logger(__name__)
 
 
 def _chat(llm: FreeLLM, system: str, user: str) -> str:
@@ -49,7 +54,7 @@ def reflexion_in_loop(
     user_message: str,
     evidence: list[dict],
     draft: str,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Critique the draft, then revise it. 2 extra calls max."""
     llm = get_model_gateway().llm(model=model or config.model)
@@ -77,7 +82,7 @@ def reflexion_in_loop(
         if revised:
             return revised, {"strategy": "reflexion", "critique": critique[:500]}
     except Exception as e:
-        print(f"[DeepThink] reflexion failed ({e}) - using original draft")
+        logger.error(f"[DeepThink] reflexion failed ({e}) - using original draft")
     return draft, {"strategy": "reflexion", "fallback": True}
 
 
@@ -85,8 +90,8 @@ def self_consistency(
     user_message: str,
     evidence: list[dict],
     draft: str,
-    model: Optional[str] = None,
-    k: Optional[int] = None,
+    model: str | None = None,
+    k: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """k parallel drafts + one merge/consensus call. k extra LLM calls total."""
     k = k or getattr(config, "self_consistency_k", 3)
@@ -128,13 +133,12 @@ def self_consistency(
                 "on, resolves disagreements with the tool evidence, and drops anything unique "
                 "to a single draft unless clearly correct. Do not mention the drafts."
             ),
-            f"Task: {user_message}\n\nTool evidence:\n{ev}\n\nDrafts:\n"
-            + "\n---DRAFT---\n".join(d[:1500] for d in drafts),
+            f"Task: {user_message}\n\nTool evidence:\n{ev}\n\nDrafts:\n" + "\n---DRAFT---\n".join(d[:1500] for d in drafts),
         )
         if merged:
             return merged, {"strategy": "self_consistency", "drafts": len(drafts)}
     except Exception as e:
-        print(f"[DeepThink] self-consistency merge failed ({e}) - using best draft")
+        logger.error(f"[DeepThink] self-consistency merge failed ({e}) - using best draft")
     # Fallback: longest non-empty draft (usually the most complete)
     best = max(drafts, key=len)
     return best, {"strategy": "self_consistency", "drafts": len(drafts), "fallback_merge": True}
@@ -144,7 +148,7 @@ def verify_with_tools(
     user_message: str,
     evidence: list[dict],
     draft: str,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Extract key claims, verify each with a web search, then revise. Bounded.
 
@@ -152,7 +156,6 @@ def verify_with_tools(
     verification step keeps the draft and continues (never blocks the answer).
     """
     llm = get_model_gateway().llm(model=model or config.model)
-    ev = _evidence_text(evidence)
     claims: list[str] = []
     try:
         claims_text = _chat(
@@ -169,16 +172,16 @@ def verify_with_tools(
             data = json.loads(m.group(0))
             claims = [str(c)[:180] for c in data.get("claims", [])][:3]
     except Exception as e:
-        print(f"[DeepThink] verify claims extraction failed ({e})")
+        logger.error(f"[DeepThink] verify claims extraction failed ({e})")
 
     verified = []
     for claim in claims:
         try:
             # §5 canonical path: route the search through the ToolGateway.
-            from ..tools import get_tool_gateway, gateway_result_dict
+            from ..tools import gateway_result_dict, get_tool_gateway
+
             gw = get_tool_gateway()
-            res = gw.execute("web_search", {"query": claim, "max_results": 3},
-                             actor="reasoning")
+            res = gw.execute("web_search", {"query": claim, "max_results": 3}, actor="reasoning")
             out = gateway_result_dict(res)
             text = json.dumps(out, ensure_ascii=False, default=str)[:400]
             verified.append(f"Claim: {claim}\nSearch: {text}")
@@ -201,7 +204,7 @@ def verify_with_tools(
             if revised:
                 return revised, {"strategy": "verify", "claims": claims, "searches": len(verified)}
         except Exception as e:
-            print(f"[DeepThink] verify revise failed ({e}) - using original draft")
+            logger.error(f"[DeepThink] verify revise failed ({e}) - using original draft")
     return draft, {"strategy": "verify", "claims": claims, "searches": len(verified), "fallback": True}
 
 
@@ -220,8 +223,8 @@ def apply_strategy(
     user_message: str,
     evidence: list[dict],
     draft: str,
-    model: Optional[str] = None,
-    k: Optional[int] = None,
+    model: str | None = None,
+    k: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Run one strategy safely; returns (content, meta). Never raises."""
     fn = STRATEGIES.get(strategy)
@@ -232,5 +235,5 @@ def apply_strategy(
             return fn(user_message, evidence, draft, model=model, k=k)
         return fn(user_message, evidence, draft, model=model)
     except Exception as e:
-        print(f"[DeepThink] strategy {strategy} failed ({e})")
+        logger.error(f"[DeepThink] strategy {strategy} failed ({e})")
         return draft, {"strategy": strategy, "error": str(e)}

@@ -18,12 +18,13 @@ The runner:
    - Resume success
    - Skill reuse success
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from ..computer_agent import ComputerAgent
 from ..episodes import EpisodeStore, record_episode
@@ -46,12 +47,12 @@ class TaskResult:
     repairs: int = 0
     verifications: int = 0
     replan_attempts: int = 0
-    error: Optional[str] = None
+    error: str | None = None
     outcome: str = "UNKNOWN"
     false_clicks: int = 0
     vision_calls: int = 0
     llm_calls: int = 0
-    episode_path: Optional[str] = None
+    episode_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,13 +138,13 @@ class BenchmarkRunner:
 
     def __init__(
         self,
-        agent: Optional[ComputerAgent] = None,
+        agent: ComputerAgent | None = None,
         dry_run: bool = True,
-        episode_store: Optional[EpisodeStore] = None,
+        episode_store: EpisodeStore | None = None,
         max_tasks: int = 0,  # 0 = all
-        categories: Optional[list[str]] = None,
+        categories: list[str] | None = None,
         max_difficulty: int = 3,
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
     ):
         self.agent = agent
         self.dry_run = dry_run
@@ -165,13 +166,14 @@ class BenchmarkRunner:
 
         # Select tasks
         tasks = [
-            t for t in COMPUTER_TASKS
+            t
+            for t in COMPUTER_TASKS
             if t.difficulty <= self.max_difficulty
             and (self.categories is None or t.category in self.categories)
             and (self.tags is None or any(tag in t.tags for tag in self.tags))
         ]
         if self.max_tasks > 0:
-            tasks = tasks[:self.max_tasks]
+            tasks = tasks[: self.max_tasks]
 
         result.total_tasks = len(tasks)
 
@@ -253,10 +255,7 @@ class BenchmarkRunner:
                 tr.outcome = str(result.get("result", "UNKNOWN"))
                 tr.error = result.get("error")
                 tr.replan_attempts = int(result.get("replan_attempts", 0))
-                tr.false_clicks = sum(
-                    1 for a in result.get("actions", [])
-                    if isinstance(a, dict) and a.get("grounding_failure")
-                )
+                tr.false_clicks = sum(1 for a in result.get("actions", []) if isinstance(a, dict) and a.get("grounding_failure"))
 
                 # Save the episode
                 try:
@@ -277,10 +276,10 @@ class BenchmarkRunner:
 
 
 def run_benchmark(
-    agent: Optional[ComputerAgent] = None,
+    agent: ComputerAgent | None = None,
     dry_run: bool = True,
     max_tasks: int = 0,
-    categories: Optional[list[str]] = None,
+    categories: list[str] | None = None,
     **kwargs,
 ) -> BenchmarkResult:
     """Convenience: create runner and execute benchmark."""

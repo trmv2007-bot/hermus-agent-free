@@ -1,4 +1,5 @@
 """Hermus Computer Agent v2: autonomous plan → act → record → verify → repair."""
+
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from core.computer import (
+    CallableSource,
     ComputerActionController,
     ComputerAgent,
     ComputerPolicy,
@@ -19,7 +21,6 @@ from core.computer import (
     RecordingPolicy,
     RepairEngine,
     ScreenRecorder,
-    CallableSource,
     TargetDetector,
     VisualStateMachine,
     dispatch_action,
@@ -44,6 +45,7 @@ class _FreshController:
 
 
 # -- primitives ---------------------------------------------------------
+
 
 def test_controller_action_primitives_are_recorded_dry_run():
     controller = _FreshController.make()
@@ -98,9 +100,14 @@ def test_emergency_stop_persists_across_instances(tmp_path):
 
 # -- target detection ---------------------------------------------------
 
+
 def test_target_detector_scales_to_screen_coordinates():
     locator = lambda frame, target: {  # noqa: E731
-        "found": True, "x": 50, "y": 25, "confidence": 0.9, "description": target
+        "found": True,
+        "x": 50,
+        "y": 25,
+        "confidence": 0.9,
+        "description": target,
     }
     detector = TargetDetector(locator=locator)
     image = Image.new("RGB", (320, 160), "white")
@@ -112,7 +119,9 @@ def test_target_detector_scales_to_screen_coordinates():
 
 
 def test_extract_json_object_from_vision_prose():
-    text = 'The Install button is visible. {"found": true, "x": 742, "y": 381, "confidence": 0.94, "description": "Install button"}'
+    text = (
+        'The Install button is visible. {"found": true, "x": 742, "y": 381, "confidence": 0.94, "description": "Install button"}'
+    )
     parsed = extract_json_object(text)
     assert parsed["found"] is True and parsed["x"] == 742 and parsed["confidence"] == 0.94
     assert extract_json_object("no json here") is None
@@ -130,6 +139,7 @@ def test_click_target_locates_then_clicks():
 
 
 # -- state machine ------------------------------------------------------
+
 
 def test_state_machine_runs_plan_to_success():
     controller = _FreshController.make(
@@ -186,6 +196,7 @@ def test_state_machine_fails_explicitly_when_retries_exhausted():
 def test_state_machine_repairs_on_failure():
     calls = {"n": 0}
     controller = _FreshController.make()
+
     # First attempt fails; the runner retries and succeeds on attempt 2.
     def flaky_verify(before, after, expected):
         calls["n"] += 1
@@ -243,13 +254,15 @@ def test_repair_engine_will_not_retry_permission_rejection():
 
 def test_repair_engine_sanitizes_model_actions():
     class FakeResponse:
-        content = json.dumps({
-            "retry_original": True,
-            "steps": [
-                {"name": "UNSAFE_COORDINATE", "action": {"kind": "click", "x": 10, "y": 10}, "expected": "gone"},
-                {"name": "SAFE_ESCAPE", "action": {"kind": "press_key", "key": "escape"}, "expected": "The overlay is gone"},
-            ],
-        })
+        content = json.dumps(
+            {
+                "retry_original": True,
+                "steps": [
+                    {"name": "UNSAFE_COORDINATE", "action": {"kind": "click", "x": 10, "y": 10}, "expected": "gone"},
+                    {"name": "SAFE_ESCAPE", "action": {"kind": "press_key", "key": "escape"}, "expected": "The overlay is gone"},
+                ],
+            }
+        )
 
     class FakeLLM:
         def chat(self, messages):
@@ -285,11 +298,15 @@ def test_state_machine_executes_verified_repair_before_original_retry():
             return {"ok": False, "detail": "Unexpected popup with a Not now button", "confidence": 0.9}
         return {"ok": True, "detail": "YouTube loaded", "confidence": 0.95}
 
-    states = VisualStateMachine.plan_to_states([{
-        "name": "OPEN_YOUTUBE",
-        "action": {"kind": "press_key", "key": "enter"},
-        "expected": "YouTube is loaded",
-    }])
+    states = VisualStateMachine.plan_to_states(
+        [
+            {
+                "name": "OPEN_YOUTUBE",
+                "action": {"kind": "press_key", "key": "enter"},
+                "expected": "YouTube is loaded",
+            }
+        ]
+    )
     engine = RepairEngine(use_llm=False)
     report = VisualStateMachine(
         execute=execute,
@@ -315,16 +332,24 @@ def test_failed_repair_never_blindly_retries_original_action():
     def verify(before, after, expected):
         return {"ok": False, "detail": "popup still visible"}
 
-    repair = lambda detail, expected, context: [{  # noqa: E731
-        "name": "DISMISS",
-        "action": {"kind": "press_key", "key": "escape"},
-        "expected": "popup is gone",
-    }]
-    states = VisualStateMachine.plan_to_states([{
-        "name": "ACT",
-        "action": {"kind": "click_target", "target": "Continue"},
-        "expected": "Next page is visible",
-    }])
+    def repair(detail, expected, context):
+        return [
+            {
+                "name": "DISMISS",
+                "action": {"kind": "press_key", "key": "escape"},
+                "expected": "popup is gone",
+            }
+        ]
+
+    states = VisualStateMachine.plan_to_states(
+        [
+            {
+                "name": "ACT",
+                "action": {"kind": "click_target", "target": "Continue"},
+                "expected": "Next page is visible",
+            }
+        ]
+    )
     report = VisualStateMachine(
         execute=execute,
         verify=verify,
@@ -345,11 +370,15 @@ def test_non_retryable_diagnosis_stops_even_with_retry_budget():
         calls["actions"] += 1
         return {"ok": False, "action": spec["kind"], "error": "permission policy denied"}
 
-    states = VisualStateMachine.plan_to_states([{
-        "name": "DENIED",
-        "action": {"kind": "click_target", "target": "Allow"},
-        "expected": "Permission accepted",
-    }])
+    states = VisualStateMachine.plan_to_states(
+        [
+            {
+                "name": "DENIED",
+                "action": {"kind": "click_target", "target": "Allow"},
+                "expected": "Permission accepted",
+            }
+        ]
+    )
     engine = RepairEngine(use_llm=False)
     report = VisualStateMachine(
         execute=denied,
@@ -365,12 +394,17 @@ def test_non_retryable_diagnosis_stops_even_with_retry_budget():
 
 
 def test_plan_preserves_explicit_failure_transition():
-    states = VisualStateMachine.plan_to_states([{
-        "name": "ACT",
-        "action": {"kind": "press_key", "key": "enter"},
-        "expected": "Next page",
-        "on_failure": "FAILURE",
-    }], terminal="FAILURE")
+    states = VisualStateMachine.plan_to_states(
+        [
+            {
+                "name": "ACT",
+                "action": {"kind": "press_key", "key": "enter"},
+                "expected": "Next page",
+                "on_failure": "FAILURE",
+            }
+        ],
+        terminal="FAILURE",
+    )
     assert states[0].on_failure == "FAILURE"
     report = VisualStateMachine(
         execute=lambda spec: {"ok": False, "error": "backend failed"},
@@ -401,8 +435,7 @@ def test_state_machine_invokes_repair_then_retries_original():
 
     def repair(detail, expected, last):
         assert "popup" in detail.lower()
-        return [{"name": "close_popup", "expected": "popup gone",
-                 "action": {"kind": "click_target", "target": "Close"}}]
+        return [{"name": "close_popup", "expected": "popup gone", "action": {"kind": "click_target", "target": "Close"}}]
 
     plan = [{"name": "go", "expected": "page ready", "action": {"kind": "type_text", "text": "youtube.com"}}]
     states = VisualStateMachine.plan_to_states(plan)
@@ -423,12 +456,15 @@ def test_state_machine_invokes_repair_then_retries_original():
 
 # -- skill store --------------------------------------------------------
 
+
 def test_skill_store_save_recall_and_list(tmp_path):
     store = ComputerSkillStore(str(tmp_path / "skills"))
     store.save_skill(
         "Install Foo",
-        [{"name": "open", "action": "open_application", "args": {"name": "Foo"}},
-         {"name": "click", "action": "click_target", "args": {"target": "Install"}}],
+        [
+            {"name": "open", "action": "open_application", "args": {"name": "Foo"}},
+            {"name": "click", "action": "click_target", "args": {"target": "Install"}},
+        ],
         evidence={"recording": "recording.mp4"},
     )
     assert len(store.list_skills()) == 1
@@ -438,6 +474,7 @@ def test_skill_store_save_recall_and_list(tmp_path):
 
 
 # -- full autonomous agent ----------------------------------------------
+
 
 def test_agent_run_produces_evidence_bundle_and_skill(tmp_path):
     state = {"n": 0}
@@ -494,11 +531,13 @@ def test_computer_agent_wires_injected_repair_engine_into_state_machine(tmp_path
     agent = ComputerAgent(
         controller=controller,
         recorder=recorder,
-        planner=lambda task: [{
-            "name": "TYPE",
-            "action": {"kind": "type_text", "text": "hello"},
-            "expected": "The text hello is visible",
-        }],
+        planner=lambda task: [
+            {
+                "name": "TYPE",
+                "action": {"kind": "type_text", "text": "hello"},
+                "expected": "The text hello is visible",
+            }
+        ],
         repair_engine=spy,
         policy=RecordingPolicy(str(tmp_path / "recordings")),
         skills=ComputerSkillStore(str(tmp_path / "recordings" / "skills")),
@@ -536,6 +575,7 @@ def test_agent_failure_is_diagnosed_not_blindly_repeated(tmp_path):
 
 
 # -- control center -----------------------------------------------------
+
 
 def test_control_center_renders_panel():
     controller = _FreshController.make()

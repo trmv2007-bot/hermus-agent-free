@@ -1,4 +1,5 @@
 """Tests for universal API keys, model discovery, health, fleet distribution."""
+
 import json
 import sys
 import threading
@@ -83,7 +84,7 @@ def _start_fake_server():
 
 
 def test_providers_list():
-    from core.providers import list_providers, get_provider
+    from core.providers import get_provider, list_providers
 
     providers = list_providers()
     ids = {p["id"] for p in providers}
@@ -100,10 +101,7 @@ def test_provider_tool_limit_and_chat_model_ranking():
     from core.llm import FreeLLM
     from core.openai_compat import _filter_nvidia_free_chat_models, _rank_chat_models
 
-    tools = [
-        {"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}}
-        for i in range(140)
-    ]
+    tools = [{"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}} for i in range(140)]
     assert len(FreeLLM()._tools_for_provider(tools, "groq")) == 128
     assert len(FreeLLM()._tools_for_provider(tools, "openai")) == 140
     hf_llm = FreeLLM()
@@ -114,13 +112,15 @@ def test_provider_tool_limit_and_chat_model_ranking():
 
     # Mixed catalogs must prefer chat-capable models and exclude embedding /
     # multimodal-only IDs such as the NVIDIA models seen in the dashboard.
-    ranked = _rank_chat_models([
-        "01-ai/yi-large",
-        "adept/fuyu-8b",
-        "baai/bge-m3",
-        "meta/llama-3.1-8b-instruct",
-        "nvidia/llama-3.1-nemotron-70b-instruct",
-    ])
+    ranked = _rank_chat_models(
+        [
+            "01-ai/yi-large",
+            "adept/fuyu-8b",
+            "baai/bge-m3",
+            "meta/llama-3.1-8b-instruct",
+            "nvidia/llama-3.1-nemotron-70b-instruct",
+        ]
+    )
     assert ranked[0] in {
         "meta/llama-3.1-8b-instruct",
         "nvidia/llama-3.1-nemotron-70b-instruct",
@@ -128,12 +128,14 @@ def test_provider_tool_limit_and_chat_model_ranking():
     assert "baai/bge-m3" not in ranked
     assert "adept/fuyu-8b" not in ranked
 
-    filtered = _filter_nvidia_free_chat_models([
-        {"id": "baai/bge-m3"},
-        {"id": "meta/llama-3.1-70b-instruct"},
-        {"id": "nvidia/llama-3.3-nemotron-super-49b-v1.5"},
-        {"id": "downloadable/paid-model"},
-    ])
+    filtered = _filter_nvidia_free_chat_models(
+        [
+            {"id": "baai/bge-m3"},
+            {"id": "meta/llama-3.1-70b-instruct"},
+            {"id": "nvidia/llama-3.3-nemotron-super-49b-v1.5"},
+            {"id": "downloadable/paid-model"},
+        ]
+    )
     assert [m["id"] for m in filtered] == [
         "meta/llama-3.1-70b-instruct",
         "nvidia/llama-3.3-nemotron-super-49b-v1.5",
@@ -141,7 +143,7 @@ def test_provider_tool_limit_and_chat_model_ranking():
 
 
 def test_openai_compat_models_and_chat():
-    from core.openai_compat import list_models, chat_completions, health_ping
+    from core.openai_compat import chat_completions, health_ping, list_models
 
     server, base = _start_fake_server()
     try:
@@ -232,10 +234,10 @@ def test_llm_uses_any_provider(tmp_path):
 
 
 def test_model_fleet_fanout_and_map(tmp_path):
-    from core.multi_key import MultiKeyManager
-    from core.model_fleet import ModelFleet
-    import core.multi_key as mk_mod
     import core.model_fleet as fleet_mod
+    import core.multi_key as mk_mod
+    from core.model_fleet import ModelFleet
+    from core.multi_key import MultiKeyManager
 
     server, base = _start_fake_server()
     db = tmp_path / "keys.json"
@@ -293,10 +295,10 @@ def test_fleet_tools_registered():
 
 
 def test_multi_ai_diverse_team(tmp_path):
-    from core.multi_key import MultiKeyManager
-    import core.multi_key as mk_mod
     import core.model_fleet as fleet_mod
+    import core.multi_key as mk_mod
     from core.multi_ai import MultiAIChat
+    from core.multi_key import MultiKeyManager
 
     server, base = _start_fake_server()
     mgr = MultiKeyManager(db_path=str(tmp_path / "k.json"))
@@ -368,9 +370,7 @@ def test_new_key_inherits_provider_free_tier_budget(tmp_path):
 
     # An explicit budget always wins over the preset and is marked as such,
     # so header adoption will not later overwrite it.
-    mgr.add_key(
-        "groq", "gsk-test-0000000002", name="g2", rpm_limit=5, tpm_limit=1000, auto_discover=False
-    )
+    mgr.add_key("groq", "gsk-test-0000000002", name="g2", rpm_limit=5, tpm_limit=1000, auto_discover=False)
     manual = mgr.get_entry("groq", "gsk-test-0000000002")
     assert manual["rpm_limit"] == 5
     assert manual["tpm_limit"] == 1000
@@ -380,15 +380,12 @@ def test_new_key_inherits_provider_free_tier_budget(tmp_path):
 def test_existing_keys_backfill_free_tier_budget(tmp_path):
     """Keys stored before presets existed pick up the defaults on load."""
     import json as json_mod
+
     from core.multi_key import MultiKeyManager
 
     db = tmp_path / "keys.json"
     # A key persisted by an older build: no rpm_limit/tpm_limit at all.
-    db.write_text(
-        json_mod.dumps(
-            {"gemini": [{"key": "AIza-legacy-key-123", "name": "old", "provider": "gemini"}]}
-        )
-    )
+    db.write_text(json_mod.dumps({"gemini": [{"key": "AIza-legacy-key-123", "name": "old", "provider": "gemini"}]}))
     mgr = MultiKeyManager(db_path=str(db))
     entry = mgr.get_entry("gemini", "AIza-legacy-key-123")
     assert entry["rpm_limit"] == 10
@@ -417,9 +414,7 @@ def test_reported_limits_override_preset_defaults(tmp_path):
 
     # A hand-set budget is deliberate and must survive header reports.
     mgr.add_key("openai", "sk-openai-000000002", name="o2", rpm_limit=2, auto_discover=False)
-    mgr.mark_key_success(
-        "openai", "sk-openai-000000002", tokens=10, rate_limit={"limit_requests": 500}
-    )
+    mgr.mark_key_success("openai", "sk-openai-000000002", tokens=10, rate_limit={"limit_requests": 500})
     pinned = mgr.get_entry("openai", "sk-openai-000000002")
     assert pinned["rpm_limit"] == 2
 

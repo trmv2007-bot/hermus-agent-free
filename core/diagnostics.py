@@ -10,6 +10,7 @@ The deep probes deliberately use a temporary loopback page and never call an
 LLM, write credentials, or alter user projects/memory.  A browser is closed in
 all paths and the temporary server is always shut down.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -21,10 +22,11 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,12 +109,14 @@ def run_diagnostics(*, deep: bool = False) -> dict[str, Any]:
 
     # Python version
     py_ok = sys.version_info >= (3, 10)
-    checks.append(_check(
-        "python",
-        py_ok,
-        f"Python {platform.python_version()} ({platform.system()})",
-        "Python 3.10+ is required.",
-    ))
+    checks.append(
+        _check(
+            "python",
+            py_ok,
+            f"Python {platform.python_version()} ({platform.system()})",
+            "Python 3.10+ is required.",
+        )
+    )
 
     # Required packages: import, not just find_spec, so broken native imports
     # are surfaced to the operator.
@@ -127,20 +131,29 @@ def run_diagnostics(*, deep: bool = False) -> dict[str, Any]:
 
     # FFmpeg
     ff = _ffmpeg_available()
-    checks.append(_check("ffmpeg", ff, "video encoding available" if ff else "not detected",
-                         "pip install imageio-ffmpeg (or provide ffmpeg) for MP4/WebM recording", level="recommended"))
+    checks.append(
+        _check(
+            "ffmpeg",
+            ff,
+            "video encoding available" if ff else "not detected",
+            "pip install imageio-ffmpeg (or provide ffmpeg) for MP4/WebM recording",
+            level="recommended",
+        )
+    )
 
     # Computer control backends
     pyautogui = _importable("pyautogui")
     pygetwindow = _importable("pygetwindow")
     control_ok = pyautogui and pygetwindow
-    checks.append(_check(
-        "desktop_control",
-        control_ok,
-        f"pyautogui={pyautogui}, pygetwindow={pygetwindow}",
-        "pip install pyautogui pygetwindow for real pointer/keyboard control (dry-run otherwise).",
-        level="recommended",
-    ))
+    checks.append(
+        _check(
+            "desktop_control",
+            control_ok,
+            f"pyautogui={pyautogui}, pygetwindow={pygetwindow}",
+            "pip install pyautogui pygetwindow for real pointer/keyboard control (dry-run otherwise).",
+            level="recommended",
+        )
+    )
 
     # Data directory writability
     data_root = REPO_ROOT / "data"
@@ -155,13 +168,15 @@ def run_diagnostics(*, deep: bool = False) -> dict[str, Any]:
 
     # Gateway token (recommended when exposing the control room / remote control)
     token = os.getenv("HERMUS_GATEWAY_TOKEN") or os.getenv("HERMUS_TOKEN")
-    checks.append(_check(
-        "gateway_auth",
-        bool(token),
-        "gateway token configured" if token else "no gateway token (open local access)",
-        "Set HERMUS_GATEWAY_TOKEN before exposing /control (or /remote, /computer APIs) beyond localhost.",
-        level="recommended",
-    ))
+    checks.append(
+        _check(
+            "gateway_auth",
+            bool(token),
+            "gateway token configured" if token else "no gateway token (open local access)",
+            "Set HERMUS_GATEWAY_TOKEN before exposing /control (or /remote, /computer APIs) beyond localhost.",
+            level="recommended",
+        )
+    )
 
     # Computer agent import (core system)
     try:
@@ -169,8 +184,7 @@ def run_diagnostics(*, deep: bool = False) -> dict[str, Any]:
 
         checks.append(_check("computer_agent", True, "core.computer imports OK", ""))
     except Exception as exc:  # noqa: BLE001
-        checks.append(_check("computer_agent", False, f"import error: {exc}",
-                             "Run: pip install -r requirements.txt"))
+        checks.append(_check("computer_agent", False, f"import error: {exc}", "Run: pip install -r requirements.txt"))
 
     checks.extend(_web_acquisition_checks())
 
@@ -178,14 +192,16 @@ def run_diagnostics(*, deep: bool = False) -> dict[str, Any]:
     if deep:
         subsystems = _deep_subsystems()
         for item in subsystems.values():
-            checks.append({
-                "name": item["name"],
-                "ok": item["ok"],
-                "detail": item["detail"],
-                "hint": item.get("hint", ""),
-                "level": "required" if item.get("required") else "recommended",
-                "status": item["status"],
-            })
+            checks.append(
+                {
+                    "name": item["name"],
+                    "ok": item["ok"],
+                    "detail": item["detail"],
+                    "hint": item.get("hint", ""),
+                    "level": "required" if item.get("required") else "recommended",
+                    "status": item["status"],
+                }
+            )
         # This is the Doctor boundary itself; no second installer-specific
         # capability implementation is allowed to claim a different result.
         subsystems["doctor"] = _subsystem(
@@ -197,8 +213,7 @@ def run_diagnostics(*, deep: bool = False) -> dict[str, Any]:
 
     required_ok = all(c["ok"] for c in checks if c["level"] == "required")
     recommended_ok = all(c["ok"] for c in checks if c["level"] == "recommended")
-    if (os.environ.get("TERMUX_VERSION") or "android" in platform.system().lower()
-            or "android" in platform.platform().lower()):
+    if os.environ.get("TERMUX_VERSION") or "android" in platform.system().lower() or "android" in platform.platform().lower():
         platform_family = "android-termux"
     elif platform.system() == "Linux":
         platform_family = "linux"
@@ -250,7 +265,7 @@ def _subsystem(
     *,
     required: bool = False,
     hint: str = "",
-    evidence: Optional[dict[str, Any]] = None,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "name": name,
@@ -343,7 +358,7 @@ def _local_verification_page() -> Iterator[str]:
             body = (
                 "<!doctype html><html><head><title>Hermus local verification</title></head>"
                 f"<body><main id='hermus-verification'>{marker}</main></body></html>"
-            ).encode("utf-8")
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -365,36 +380,44 @@ def _local_verification_page() -> Iterator[str]:
         thread.join(timeout=3)
 
 
-def _verify_scrapling(local_url: Optional[str], *, required: bool) -> dict[str, Any]:
+def _verify_scrapling(local_url: str | None, *, required: bool) -> dict[str, Any]:
     if not required:
         return _subsystem("Scrapling", OPTIONAL_UNAVAILABLE, "web subsystem disabled by configuration")
     if not local_url:
         return _subsystem(
-            "Scrapling", MISSING_BROKEN,
-            "local verification page could not be started", required=True,
+            "Scrapling",
+            MISSING_BROKEN,
+            "local verification page could not be started",
+            required=True,
             hint="Check that loopback binding is available, then re-run setup.sh",
         )
     try:
         from core.config import config
-        from core.web.gateway import WebGateway
         from core.web import capabilities
+        from core.web.gateway import WebGateway
 
         # The production policy remains private-address blocking. Only this
         # isolated, temporary Doctor gateway permits its own loopback fixture;
         # no global config or user setting is changed.
-        local_config = config.model_copy(update={
-            "web_allow_private_addresses": True,
-            "web_cache_enabled": False,
-            "web_default_strategy": "static",
-        })
+        local_config = config.model_copy(
+            update={
+                "web_allow_private_addresses": True,
+                "web_cache_enabled": False,
+                "web_default_strategy": "static",
+            }
+        )
         result = WebGateway(local_config).fetch(
-            local_url, strategy="static", want_markdown=False,
-            include_html=False, use_cache=False,
+            local_url,
+            strategy="static",
+            want_markdown=False,
+            include_html=False,
+            use_cache=False,
         )
         text = result.text or ""
         if not result.ok or "HERMUS_LOCAL_VERIFICATION_OK" not in text:
             return _subsystem(
-                "Scrapling", MISSING_BROKEN,
+                "Scrapling",
+                MISSING_BROKEN,
                 f"real static fetch failed: {result.error or result.error_code or 'marker missing'}",
                 required=True,
                 hint="Install/repair Scrapling with: pip install -r requirements.txt",
@@ -402,28 +425,34 @@ def _verify_scrapling(local_url: Optional[str], *, required: bool) -> dict[str, 
             )
         capabilities.mark_verified("static")
         return _subsystem(
-            "Scrapling", INSTALLED_VERIFIED,
+            "Scrapling",
+            INSTALLED_VERIFIED,
             f"canonical WebGateway static fetch returned the local marker (HTTP {result.status_code})",
             required=True,
             evidence={"strategy": "static", "status_code": result.status_code, "source": result.source},
         )
     except Exception as exc:  # noqa: BLE001
         return _subsystem(
-            "Scrapling", MISSING_BROKEN,
+            "Scrapling",
+            MISSING_BROKEN,
             f"canonical Scrapling/WebGateway smoke failed: {type(exc).__name__}: {exc}",
             required=True,
             hint="pip install -r requirements.txt and re-run setup.sh",
         )
 
 
-def _verify_browser(local_url: Optional[str], *, required: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+def _verify_browser(local_url: str | None, *, required: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     """Exercise the existing browser tool and always close its browser."""
     if not required:
         optional = _subsystem("Chromium", OPTIONAL_UNAVAILABLE, "browser strategy disabled or unavailable on this platform")
-        return optional, _subsystem("Browser navigation", OPTIONAL_UNAVAILABLE, "browser strategy disabled or unavailable on this platform")
+        return optional, _subsystem(
+            "Browser navigation", OPTIONAL_UNAVAILABLE, "browser strategy disabled or unavailable on this platform"
+        )
     if not local_url:
         failure = _subsystem("Chromium", MISSING_BROKEN, "local verification page could not be started", required=True)
-        return failure, _subsystem("Browser navigation", MISSING_BROKEN, "local verification page could not be started", required=True)
+        return failure, _subsystem(
+            "Browser navigation", MISSING_BROKEN, "local verification page could not be started", required=True
+        )
 
     chromium_path = None
     try:
@@ -437,13 +466,15 @@ def _verify_browser(local_url: Optional[str], *, required: bool) -> tuple[dict[s
 
     if chromium_path is None:
         failure = _subsystem(
-            "Chromium", MISSING_BROKEN,
+            "Chromium",
+            MISSING_BROKEN,
             chromium_lookup_error or "Playwright is installed but no Chromium executable was discovered",
             required=True,
             hint="Run: .venv/bin/python -m playwright install chromium",
         )
         return failure, _subsystem(
-            "Browser navigation", MISSING_BROKEN,
+            "Browser navigation",
+            MISSING_BROKEN,
             "Chromium executable discovery failed; launch was not attempted",
             required=True,
             hint="Install the Chromium browser for the selected .venv, then re-run setup.sh",
@@ -483,14 +514,16 @@ def _verify_browser(local_url: Optional[str], *, required: bool) -> tuple[dict[s
         reason = (navigation or {}).get("error") or "unknown browser navigation failure"
         return (
             _subsystem(
-                "Chromium", INSTALLED_UNVERIFIED,
+                "Chromium",
+                INSTALLED_UNVERIFIED,
                 f"executable discovered at {chromium_path}, but launch/navigation failed: {reason}",
                 required=True,
                 hint="Repair Chromium/system browser dependencies and re-run setup.sh",
                 evidence={"executable": str(chromium_path), "navigation": navigation, "closed": close_result},
             ),
             _subsystem(
-                "Browser navigation", MISSING_BROKEN,
+                "Browser navigation",
+                MISSING_BROKEN,
                 f"headless launch/navigation failed: {reason}",
                 required=True,
                 hint="Repair Chromium/system browser dependencies and re-run setup.sh",
@@ -501,19 +534,23 @@ def _verify_browser(local_url: Optional[str], *, required: bool) -> tuple[dict[s
     if not close_result.get("success"):
         reason = str(close_result.get("error") or "browser_close returned failure")
         return (
-            _subsystem("Chromium", MISSING_BROKEN, f"browser content verified but clean shutdown failed: {reason}", required=True),
+            _subsystem(
+                "Chromium", MISSING_BROKEN, f"browser content verified but clean shutdown failed: {reason}", required=True
+            ),
             _subsystem("Browser navigation", MISSING_BROKEN, f"clean browser shutdown failed: {reason}", required=True),
         )
 
     return (
         _subsystem(
-            "Chromium", INSTALLED_VERIFIED,
-            f"Playwright executable discovered and headless Chromium launched, served content, and closed cleanly",
+            "Chromium",
+            INSTALLED_VERIFIED,
+            "Playwright executable discovered and headless Chromium launched, served content, and closed cleanly",
             required=True,
             evidence={"executable": str(chromium_path), "title": navigation.get("title", "")},
         ),
         _subsystem(
-            "Browser navigation", INSTALLED_VERIFIED,
+            "Browser navigation",
+            INSTALLED_VERIFIED,
             "existing Hermus browser tool navigated to a local page and verified its content marker; shutdown was clean",
             required=True,
             evidence={"url": local_url, "title": navigation.get("title", ""), "content_verified": True},
@@ -525,20 +562,38 @@ def _verify_gateway_and_queue() -> tuple[dict[str, Any], dict[str, Any]]:
     """Start the real FastAPI lifespan in-process and exercise core routes."""
     try:
         from fastapi.testclient import TestClient
+
         from gateway.gateway import app
         from gateway.queue import job_queue
     except Exception as exc:  # noqa: BLE001
         failure = f"gateway import failed: {type(exc).__name__}: {exc}"
         return (
-            _subsystem("Gateway", MISSING_BROKEN, failure, required=True,
-                       hint="Repair gateway dependencies with: pip install -r requirements.txt"),
-            _subsystem("JobQueue", MISSING_BROKEN, failure, required=True,
-                       hint="Repair queue/gateway dependencies with: pip install -r requirements.txt"),
+            _subsystem(
+                "Gateway",
+                MISSING_BROKEN,
+                failure,
+                required=True,
+                hint="Repair gateway dependencies with: pip install -r requirements.txt",
+            ),
+            _subsystem(
+                "JobQueue",
+                MISSING_BROKEN,
+                failure,
+                required=True,
+                hint="Repair queue/gateway dependencies with: pip install -r requirements.txt",
+            ),
         )
 
     routes = (
-        "/control", "/api/status", "/api/v1/system/health", "/queue/status",
-        "/jobs", "/presence", "/voice/status", "/speech/status", "/api/jarvis/status",
+        "/control",
+        "/api/status",
+        "/api/v1/system/health",
+        "/queue/status",
+        "/jobs",
+        "/presence",
+        "/voice/status",
+        "/speech/status",
+        "/api/jarvis/status",
     )
     responses: dict[str, Any] = {}
     try:
@@ -574,26 +629,43 @@ def _verify_gateway_and_queue() -> tuple[dict[str, Any], dict[str, Any]]:
                     f"/queue/status reported an incomplete canonical queue: started={queue_started}, "
                     f"handlers={handler_count}, state={queue_state}"
                 )
-                queue_result = _subsystem("JobQueue", MISSING_BROKEN, queue_detail, required=True,
-                                         hint="Check queue startup logs and HERMUS_QUEUE_* configuration",
-                                         evidence={"queue": queue_state, "handler_count": handler_count})
+                queue_result = _subsystem(
+                    "JobQueue",
+                    MISSING_BROKEN,
+                    queue_detail,
+                    required=True,
+                    hint="Check queue startup logs and HERMUS_QUEUE_* configuration",
+                    evidence={"queue": queue_state, "handler_count": handler_count},
+                )
             elif not queue_enabled:
                 queue_result = _subsystem("JobQueue", OPTIONAL_UNAVAILABLE, "queue disabled by HERMUS_QUEUE_ENABLED=0")
             else:
                 queue_result = _subsystem(
-                    "JobQueue", INSTALLED_VERIFIED,
+                    "JobQueue",
+                    INSTALLED_VERIFIED,
                     f"canonical JobQueue initialized by the FastAPI lifespan with {handler_count} handlers",
-                    required=True, evidence={"queue": queue_state, "handler_count": handler_count},
+                    required=True,
+                    evidence={"queue": queue_state, "handler_count": handler_count},
                 )
     except Exception as exc:  # noqa: BLE001
         reason = f"gateway lifespan/route verification failed: {type(exc).__name__}: {exc}"
         return (
-            _subsystem("Gateway", MISSING_BROKEN, reason, required=True,
-                       hint="Read the gateway traceback, repair the reported dependency, and re-run setup.sh",
-                       evidence={"responses": responses}),
-            _subsystem("JobQueue", MISSING_BROKEN, reason, required=True,
-                       hint="Read the gateway traceback, repair the reported dependency, and re-run setup.sh",
-                       evidence={"responses": responses}),
+            _subsystem(
+                "Gateway",
+                MISSING_BROKEN,
+                reason,
+                required=True,
+                hint="Read the gateway traceback, repair the reported dependency, and re-run setup.sh",
+                evidence={"responses": responses},
+            ),
+            _subsystem(
+                "JobQueue",
+                MISSING_BROKEN,
+                reason,
+                required=True,
+                hint="Read the gateway traceback, repair the reported dependency, and re-run setup.sh",
+                evidence={"responses": responses},
+            ),
         )
 
     acceptable_statuses = {200, 401, 403}
@@ -627,17 +699,22 @@ def _verify_computer() -> dict[str, Any]:
                 f"{capability.get('reason') or 'no display or optional desktop backend'}"
             )
         return _subsystem(
-            "Computer agent", status, detail,
+            "Computer agent",
+            status,
+            detail,
             # Desktop control is an optional host capability. A headless server
             # must not be reported as a broken core install merely because the
             # safe ComputerAgent constructor fell back to dry-run backends.
             required=bool(capability.get("available")),
-            hint="Install desktop-control packages and run under a graphical session for real control" if not capability.get("available") else "",
+            hint="Install desktop-control packages and run under a graphical session for real control"
+            if not capability.get("available")
+            else "",
             evidence={"backend": capability, "agent": type(agent).__name__},
         )
     except Exception as exc:  # noqa: BLE001
         return _subsystem(
-            "Computer agent", MISSING_BROKEN,
+            "Computer agent",
+            MISSING_BROKEN,
             f"ComputerAgent/backend initialization failed: {type(exc).__name__}: {exc}",
             required=True,
             hint="Repair core computer dependencies with: pip install -r requirements.txt",
@@ -656,7 +733,8 @@ def _verify_voice() -> dict[str, Any]:
         models = voice_available_models()
         if not FASTER_WHISPER_AVAILABLE:
             return _subsystem(
-                "Voice", OPTIONAL_UNAVAILABLE,
+                "Voice",
+                OPTIONAL_UNAVAILABLE,
                 "voice routes loaded, but optional faster-whisper is unavailable; no local STT model was exercised",
                 hint="Install faster-whisper or configure an available local STT backend, then re-run setup.sh",
                 evidence={"speech": speech, "models": models},
@@ -669,13 +747,14 @@ def _verify_voice() -> dict[str, Any]:
         else:
             detail = "faster-whisper is installed; no local TTS backend/model is configured for synthesis"
         return _subsystem(
-            "Voice", INSTALLED_UNVERIFIED, detail,
+            "Voice",
+            INSTALLED_UNVERIFIED,
+            detail,
             hint="Select/download a voice model or configure HERMUS_TTS_BACKEND/Piper/eSpeak when desired",
             evidence={"faster_whisper": True, "speech": speech, "models": models},
         )
     except Exception as exc:  # noqa: BLE001
-        return _subsystem("Voice", OPTIONAL_UNAVAILABLE,
-                          f"optional voice capability unavailable: {type(exc).__name__}: {exc}")
+        return _subsystem("Voice", OPTIONAL_UNAVAILABLE, f"optional voice capability unavailable: {type(exc).__name__}: {exc}")
 
 
 def _verify_model_provider() -> dict[str, Any]:
@@ -704,7 +783,9 @@ def _verify_model_provider() -> dict[str, Any]:
             status = OPTIONAL_UNAVAILABLE
             detail = "no model provider credentials/runtime configured"
         return _subsystem(
-            "LLM/model providers", status, detail,
+            "LLM/model providers",
+            status,
+            detail,
             hint="Start Ollama and pull the selected model, or configure a provider in .env / the Control Room",
             evidence={
                 "selected_model": str(config.model),
@@ -713,9 +794,12 @@ def _verify_model_provider() -> dict[str, Any]:
             },
         )
     except Exception as exc:  # noqa: BLE001
-        return _subsystem("LLM/model providers", MISSING_BROKEN,
-                          f"model/provider discovery failed: {type(exc).__name__}: {exc}",
-                          hint="Repair model gateway dependencies and configuration")
+        return _subsystem(
+            "LLM/model providers",
+            MISSING_BROKEN,
+            f"model/provider discovery failed: {type(exc).__name__}: {exc}",
+            hint="Repair model gateway dependencies and configuration",
+        )
 
 
 def _verify_storage_config() -> dict[str, Any]:
@@ -746,16 +830,20 @@ def _verify_storage_config() -> dict[str, Any]:
         if bad:
             return _subsystem("Storage/config", MISSING_BROKEN, f"SQLite integrity check failed: {bad}", required=True)
         return _subsystem(
-            "Storage/config", INSTALLED_VERIFIED,
+            "Storage/config",
+            INSTALLED_VERIFIED,
             f"configuration loaded; writable data paths are available; checked {len(integrity)} existing SQLite database(s)",
             required=True,
             evidence={"memory_index": memory_stats, "sqlite_integrity": integrity, "base_dir": str(config.base_dir)},
         )
     except Exception as exc:  # noqa: BLE001
-        return _subsystem("Storage/config", MISSING_BROKEN,
-                          f"configuration/storage initialization failed: {type(exc).__name__}: {exc}",
-                          required=True,
-                          hint="Check data/ permissions and database integrity; user files were not deleted")
+        return _subsystem(
+            "Storage/config",
+            MISSING_BROKEN,
+            f"configuration/storage initialization failed: {type(exc).__name__}: {exc}",
+            required=True,
+            hint="Check data/ permissions and database integrity; user files were not deleted",
+        )
 
 
 def _verify_security() -> dict[str, Any]:
@@ -791,18 +879,28 @@ def _verify_security() -> dict[str, Any]:
         else:
             failures.append("web security policy did not block URL credentials")
         if failures:
-            return _subsystem("Security", MISSING_BROKEN, "; ".join(failures), required=True,
-                              hint="Restore the existing permission/SSRF/red-line protections before running Hermus")
+            return _subsystem(
+                "Security",
+                MISSING_BROKEN,
+                "; ".join(failures),
+                required=True,
+                hint="Restore the existing permission/SSRF/red-line protections before running Hermus",
+            )
         return _subsystem(
-            "Security", INSTALLED_VERIFIED,
+            "Security",
+            INSTALLED_VERIFIED,
             f"red-line policy ({len(policy.rules)} rules), permission enforcement, URL scheme/credential/SSRF guards verified",
             required=True,
             evidence={"red_line_policy": policy.name, "private_addresses_allowed": web_policy.allow_private_addresses},
         )
     except Exception as exc:  # noqa: BLE001
-        return _subsystem("Security", MISSING_BROKEN,
-                          f"security verification failed: {type(exc).__name__}: {exc}", required=True,
-                          hint="Do not disable security settings to make setup pass")
+        return _subsystem(
+            "Security",
+            MISSING_BROKEN,
+            f"security verification failed: {type(exc).__name__}: {exc}",
+            required=True,
+            hint="Do not disable security settings to make setup pass",
+        )
 
 
 def _verify_sandbox() -> dict[str, Any]:
@@ -811,13 +909,13 @@ def _verify_sandbox() -> dict[str, Any]:
 
         state = sandbox.status()
         return _subsystem(
-            "Sandbox", INSTALLED_VERIFIED,
+            "Sandbox",
+            INSTALLED_VERIFIED,
             f"sandbox policy initialized with backend={state.get('backend')} (container runtime is optional)",
             evidence={"backend": state.get("backend"), "configured": state.get("configured"), "policy": state.get("policy")},
         )
     except Exception as exc:  # noqa: BLE001
-        return _subsystem("Sandbox", OPTIONAL_UNAVAILABLE,
-                          f"optional sandbox backend unavailable: {type(exc).__name__}: {exc}")
+        return _subsystem("Sandbox", OPTIONAL_UNAVAILABLE, f"optional sandbox backend unavailable: {type(exc).__name__}: {exc}")
 
 
 def _verify_android() -> dict[str, Any]:
@@ -828,12 +926,16 @@ def _verify_android() -> dict[str, Any]:
             return _subsystem("Android/Termux", OPTIONAL_UNAVAILABLE, "not an Android/Termux host")
         import core.android  # noqa: F401
 
-        return _subsystem("Android/Termux", INSTALLED_VERIFIED,
-                          "Android companion/control package imports; live device transport requires explicit pairing",
-                          evidence={"termux": True})
+        return _subsystem(
+            "Android/Termux",
+            INSTALLED_VERIFIED,
+            "Android companion/control package imports; live device transport requires explicit pairing",
+            evidence={"termux": True},
+        )
     except Exception as exc:  # noqa: BLE001
-        return _subsystem("Android/Termux", OPTIONAL_UNAVAILABLE,
-                          f"Android/Termux integration unavailable: {type(exc).__name__}: {exc}")
+        return _subsystem(
+            "Android/Termux", OPTIONAL_UNAVAILABLE, f"Android/Termux integration unavailable: {type(exc).__name__}: {exc}"
+        )
 
 
 def _verify_host_runtime() -> dict[str, Any]:
@@ -844,14 +946,17 @@ def _verify_host_runtime() -> dict[str, Any]:
     ssh_ok, ssh_detail = _command_check("ssh", "-V")
     required_ok = git_ok and curl_ok
     detail = f"git={git_detail}; curl={curl_detail}; "
-    detail += f"ffmpeg={ffmpeg_detail if ffmpeg_ok else 'system command unavailable (imageio-ffmpeg fallback is checked separately)'}; "
+    detail += (
+        f"ffmpeg={ffmpeg_detail if ffmpeg_ok else 'system command unavailable (imageio-ffmpeg fallback is checked separately)'}; "
+    )
     detail += f"ssh={ssh_detail if ssh_ok else 'optional/unavailable'}"
     return _subsystem(
-        "Host runtimes", INSTALLED_VERIFIED if required_ok else MISSING_BROKEN,
-        detail, required=True,
+        "Host runtimes",
+        INSTALLED_VERIFIED if required_ok else MISSING_BROKEN,
+        detail,
+        required=True,
         hint="Install Git and curl, then re-run setup.sh" if not required_ok else "",
-        evidence={"git": git_ok, "curl": curl_ok, "ffmpeg": ffmpeg_ok, "ssh": ssh_ok,
-                  "bundled_ffmpeg": _ffmpeg_available()},
+        evidence={"git": git_ok, "curl": curl_ok, "ffmpeg": ffmpeg_ok, "ssh": ssh_ok, "bundled_ffmpeg": _ffmpeg_available()},
     )
 
 
@@ -862,8 +967,11 @@ def _verify_node_runtime() -> dict[str, Any]:
     if node_ok and npm_ok:
         bun_note = f"; bun {bun_detail}" if bun_ok else "; bun unavailable (optional)"
         return _subsystem("Node/npm", INSTALLED_VERIFIED, f"node {node_detail}; npm {npm_detail}{bun_note}")
-    return _subsystem("Node/npm", OPTIONAL_UNAVAILABLE,
-                      f"Node/npm is optional for this Python-only checkout (node: {node_detail}; npm: {npm_detail}; bun: {bun_detail})")
+    return _subsystem(
+        "Node/npm",
+        OPTIONAL_UNAVAILABLE,
+        f"Node/npm is optional for this Python-only checkout (node: {node_detail}; npm: {npm_detail}; bun: {bun_detail})",
+    )
 
 
 def _deep_subsystems() -> dict[str, dict[str, Any]]:
@@ -871,7 +979,10 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
     try:
         from core.web.capabilities import is_termux
     except Exception as exc:  # pragma: no cover - damaged dependency path
-        is_termux = lambda: False  # type: ignore[assignment]
+
+        def is_termux() -> bool:
+            return False
+
         capability_import_error = f"web capability import failed: {type(exc).__name__}: {exc}"
     else:
         capability_import_error = ""
@@ -886,19 +997,29 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
 
     py_detail = f"{sys.executable} · Python {platform.python_version()}"
-    if sys.version_info < (3, 10):
-        out["python_venv"] = _subsystem("Python/venv", MISSING_BROKEN, f"{py_detail}; Python 3.10+ required", required=True,
-                                        hint="Install Python 3.10 or newer and re-run setup.sh")
+    if sys.version_info < (3, 10):  # noqa: UP036 - hermus may run under a pre-3.10 system interpreter before .venv exists
+        out["python_venv"] = _subsystem(
+            "Python/venv",
+            MISSING_BROKEN,
+            f"{py_detail}; Python 3.10+ required",
+            required=True,
+            hint="Install Python 3.10 or newer and re-run setup.sh",
+        )
     elif not _interpreter_is_project_venv():
-        out["python_venv"] = _subsystem("Python/venv", MISSING_BROKEN,
-                                        f"{py_detail}; process is not using {REPO_ROOT / '.venv'}",
-                                        required=True,
-                                        hint="Run setup.sh or activate .venv before running Hermus")
+        out["python_venv"] = _subsystem(
+            "Python/venv",
+            MISSING_BROKEN,
+            f"{py_detail}; process is not using {REPO_ROOT / '.venv'}",
+            required=True,
+            hint="Run setup.sh or activate .venv before running Hermus",
+        )
     else:
         pip_ok, pip_detail = _command_check(sys.executable, "-m", "pip", "--version")
         out["python_venv"] = _subsystem(
-            "Python/venv", INSTALLED_VERIFIED if pip_ok else MISSING_BROKEN,
-            f"{py_detail}; project .venv active; {pip_detail}", required=True,
+            "Python/venv",
+            INSTALLED_VERIFIED if pip_ok else MISSING_BROKEN,
+            f"{py_detail}; project .venv active; {pip_detail}",
+            required=True,
             hint="Repair .venv with: python3 -m venv .venv" if not pip_ok else "",
         )
 
@@ -906,8 +1027,10 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
 
     dep_ok, dep_detail, dep_evidence = _dependency_runtime_check()
     out["dependencies"] = _subsystem(
-        "Dependencies", INSTALLED_VERIFIED if dep_ok else MISSING_BROKEN,
-        dep_detail, required=True,
+        "Dependencies",
+        INSTALLED_VERIFIED if dep_ok else MISSING_BROKEN,
+        dep_detail,
+        required=True,
         hint="Run: .venv/bin/python -m pip install -r requirements.txt" if not dep_ok else "",
         evidence=dep_evidence,
     )
@@ -923,8 +1046,10 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001 - loopback failure must become report rows
         reason = f"local verification fixture could not start: {type(exc).__name__}: {exc}"
         out["scrapling"] = _subsystem(
-            "Scrapling", MISSING_BROKEN if web_required else OPTIONAL_UNAVAILABLE,
-            reason, required=web_required,
+            "Scrapling",
+            MISSING_BROKEN if web_required else OPTIONAL_UNAVAILABLE,
+            reason,
+            required=web_required,
             hint="Check loopback binding/permissions and re-run setup.sh" if web_required else "",
         )
         browser_status = MISSING_BROKEN if browser_required else OPTIONAL_UNAVAILABLE
@@ -945,18 +1070,25 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
 
     # A single deep, real dependency check is the Core runtime evidence. It is
     # intentionally based on the results above rather than a second import list.
-    core_required = (out["python_venv"]["ok"] and out["host_runtimes"]["ok"] and
-                     out["dependencies"]["ok"] and out["gateway"]["ok"] and
-                     out["storage_config"]["ok"] and out["security"]["ok"])
+    core_required = (
+        out["python_venv"]["ok"]
+        and out["host_runtimes"]["ok"]
+        and out["dependencies"]["ok"]
+        and out["gateway"]["ok"]
+        and out["storage_config"]["ok"]
+        and out["security"]["ok"]
+    )
     import_errors = "; ".join(error for error in (capability_import_error, config_import_error) if error)
     core_detail = (
         "Hermus core, configuration, tool/gateway lifecycle, storage and security probes completed"
-        if core_required else "one or more required runtime probes failed; see the detailed rows above"
+        if core_required
+        else "one or more required runtime probes failed; see the detailed rows above"
     )
     if import_errors:
         core_detail = f"{core_detail}; {import_errors}"
     out["core_runtime"] = _subsystem(
-        "Core runtime", INSTALLED_VERIFIED if core_required else MISSING_BROKEN,
+        "Core runtime",
+        INSTALLED_VERIFIED if core_required else MISSING_BROKEN,
         core_detail,
         required=True,
     )
@@ -968,20 +1100,23 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
         tool_gateway = get_tool_gateway()
         descriptors = tool_gateway.descriptors()
         out["tool_system"] = _subsystem(
-            "Tool system", INSTALLED_VERIFIED if descriptors else MISSING_BROKEN,
+            "Tool system",
+            INSTALLED_VERIFIED if descriptors else MISSING_BROKEN,
             f"canonical ToolGateway initialized with {len(descriptors)} descriptors",
             required=True,
             hint="Repair tool registration/import errors shown by tool_registry" if not descriptors else "",
             evidence={"count": len(descriptors)},
         )
     except Exception as exc:  # noqa: BLE001
-        out["tool_system"] = _subsystem("Tool system", MISSING_BROKEN,
-                                        f"ToolGateway initialization failed: {type(exc).__name__}: {exc}", required=True)
+        out["tool_system"] = _subsystem(
+            "Tool system", MISSING_BROKEN, f"ToolGateway initialization failed: {type(exc).__name__}: {exc}", required=True
+        )
 
     # Configuration is represented by the storage/config check; expose the
     # requested human-facing label without another probe.
     out["configuration"] = _subsystem(
-        "Configuration loading", INSTALLED_VERIFIED if out["storage_config"]["ok"] else MISSING_BROKEN,
+        "Configuration loading",
+        INSTALLED_VERIFIED if out["storage_config"]["ok"] else MISSING_BROKEN,
         "core.config loaded and resolved project paths" if out["storage_config"]["ok"] else out["storage_config"]["detail"],
         required=True,
     )
@@ -991,15 +1126,20 @@ def _deep_subsystems() -> dict[str, dict[str, Any]]:
 
         agent = HermusAgent(model=config.model, mode="chat", max_steps=1)
         out["agent_startup"] = _subsystem(
-            "Core agent", INSTALLED_VERIFIED,
+            "Core agent",
+            INSTALLED_VERIFIED,
             f"HermusAgent initialized through ModelGateway with {len(agent.tools)} registered tools",
             required=True,
             evidence={"model": str(config.model), "tool_count": len(agent.tools)},
         )
     except Exception as exc:  # noqa: BLE001
-        out["agent_startup"] = _subsystem("Core agent", MISSING_BROKEN,
-                                          f"HermusAgent startup failed: {type(exc).__name__}: {exc}", required=True,
-                                          hint="Repair model/tool imports; no model request was sent by setup")
+        out["agent_startup"] = _subsystem(
+            "Core agent",
+            MISSING_BROKEN,
+            f"HermusAgent startup failed: {type(exc).__name__}: {exc}",
+            required=True,
+            hint="Repair model/tool imports; no model request was sent by setup",
+        )
 
     return out
 
@@ -1026,13 +1166,19 @@ def print_diagnostics(report: dict[str, Any]) -> None:
                 print(f"        → {item['hint']}")
     o = report["overall"]
     print("=" * 60)
-    print(f"  Required: {'OK' if o['required'] else 'FAIL'}   "
-          f"Recommended: {'OK' if o['recommended'] else 'IMPROVE'}   "
-          f"({o['passed']}/{o['total']} checks pass)")
+    print(
+        f"  Required: {'OK' if o['required'] else 'FAIL'}   "
+        f"Recommended: {'OK' if o['recommended'] else 'IMPROVE'}   "
+        f"({o['passed']}/{o['total']} checks pass)"
+    )
     print("=" * 60)
 
 
 __all__ = [
-    "INSTALLED_VERIFIED", "INSTALLED_UNVERIFIED", "MISSING_BROKEN", "OPTIONAL_UNAVAILABLE",
-    "run_diagnostics", "print_diagnostics",
+    "INSTALLED_VERIFIED",
+    "INSTALLED_UNVERIFIED",
+    "MISSING_BROKEN",
+    "OPTIONAL_UNAVAILABLE",
+    "run_diagnostics",
+    "print_diagnostics",
 ]

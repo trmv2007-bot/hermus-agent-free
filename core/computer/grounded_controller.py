@@ -6,10 +6,11 @@ verifies the target is still at the expected screen location with high
 confidence before allowing the click.  This drastically reduces false
 clicks on stale, moved, or occluded targets.
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 from .controller import ComputerActionController
 from .events import publish
@@ -48,12 +49,12 @@ class GroundedActionController:
     def __init__(
         self,
         controller: ComputerActionController,
-        grounder: Optional[VisualGrounder] = None,
-        grounding_system: Optional[GroundingSystem] = None,
+        grounder: VisualGrounder | None = None,
+        grounding_system: GroundingSystem | None = None,
         min_confidence: float = 0.5,
         overlap_threshold: float = 0.5,
         verification_enabled: bool = True,
-        frame_provider: Optional[Callable[[], Any]] = None,
+        frame_provider: Callable[[], Any] | None = None,
     ):
         self.controller = controller
         self.verification_enabled = verification_enabled
@@ -109,7 +110,7 @@ class GroundedActionController:
         self,
         target: str,
         use_cache: bool = True,
-    ) -> tuple[bool, Optional[GroundedTarget], str]:
+    ) -> tuple[bool, GroundedTarget | None, str]:
         """Verify a target is still visible and at the expected location.
 
         Args:
@@ -169,13 +170,16 @@ class GroundedActionController:
         """Click a target with pre-click verification."""
         if self.verification_enabled:
             verified, current, reason = self._verify_target(target)
-            publish("pre_click_verification", {
-                "target": target,
-                "verified": verified,
-                "reason": reason,
-                "bbox": current.bbox.to_dict() if current else None,
-                "confidence": current.confidence if current else 0.0,
-            })
+            publish(
+                "pre_click_verification",
+                {
+                    "target": target,
+                    "verified": verified,
+                    "reason": reason,
+                    "bbox": current.bbox.to_dict() if current else None,
+                    "confidence": current.confidence if current else 0.0,
+                },
+            )
 
             if not verified:
                 return {
@@ -219,7 +223,7 @@ class GroundedActionController:
     def hotkey(self, *keys: str) -> dict[str, Any]:
         return self.controller.hotkey(*keys)
 
-    def scroll(self, amount: int, x: Optional[int] = None, y: Optional[int] = None) -> dict[str, Any]:
+    def scroll(self, amount: int, x: int | None = None, y: int | None = None) -> dict[str, Any]:
         return self.controller.scroll(amount, x, y)
 
     def open_application(self, name: str) -> dict[str, Any]:
@@ -291,7 +295,7 @@ class GroundedActionController:
 
 def wrap_with_grounding(
     controller: ComputerActionController,
-    vision_model: Optional[Callable[[Any, str], dict[str, Any]]] = None,
+    vision_model: Callable[[Any, str], dict[str, Any]] | None = None,
     **kwargs,
 ) -> GroundedActionController:
     """Wrap a ComputerActionController with pre-click visual verification.

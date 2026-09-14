@@ -10,15 +10,16 @@ verifies every action with a before/after observation (§8).
 The Live-provider decision-making layer (a real model) is a separate, "NOT VERIFIED"
 concern; this controller proves the *tool/control loop*.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
+from .permissions import OP_CLASSES, AndroidPermissionManager
 from .simulate import SimulatedAndroidDevice
 from .tool import AndroidTool
-from .permissions import AndroidPermissionManager, OP_CLASSES
 from .tools import register_android_tools
 
 #: ops that grant permission-class consent so the agent still must explicitly request it
@@ -48,11 +49,11 @@ class AgentResult:
 class AndroidAgentController:
     """Drives a high-level goal against an Android device through the ToolGateway."""
 
-    def __init__(self, *, device: Optional[SimulatedAndroidDevice] = None,
-                 consents: Optional[list[str]] = None, gateway=None):
+    def __init__(self, *, device: SimulatedAndroidDevice | None = None, consents: list[str] | None = None, gateway=None):
         self.device = device or SimulatedAndroidDevice()
         # Fresh, isolated permission state: never reuse a persisted global allowlist.
         import tempfile
+
         self._perm_path = tempfile.mkdtemp() + "/hermus_android_permissions.json"
         self.permissions = AndroidPermissionManager(path=self._perm_path)
         granted = _AUTO_CONSENTS if consents is None else consents
@@ -62,6 +63,7 @@ class AndroidAgentController:
         self.tool = AndroidTool(transport=self.device, permissions=self.permissions)
         from core.tool_registry import ToolRegistry
         from core.tools.gateway import ToolGateway
+
         self.registry = ToolRegistry()
         register_android_tools(self.registry, self.tool)
         # Avoid the full discovery reload (which would rebind android tools to the
@@ -83,7 +85,7 @@ class AndroidAgentController:
     def _buttons(self, obs: dict[str, Any]) -> list[dict[str, Any]]:
         return obs.get("buttons", [])
 
-    def _node(self, obs: dict[str, Any], node_id: str) -> Optional[dict]:
+    def _node(self, obs: dict[str, Any], node_id: str) -> dict | None:
         for e in obs.get("elements", []):
             if e.get("id") == node_id:
                 return e
@@ -100,14 +102,11 @@ class AndroidAgentController:
         result = AgentResult(goal=goal)
         match = re.search(r"add\s+['\"]?(.+?)['\"]?\s+to\s+tasks", goal, re.I)
         if not match:
-            result.reasoning.append(
-                f"goal '{goal}' is not a supported scripted directive "
-                "(supported: 'add <text> to tasks')")
+            result.reasoning.append(f"goal '{goal}' is not a supported scripted directive (supported: 'add <text> to tasks')")
             result.completed = False
             return result
         target = match.group(1).strip()
-        result.reasoning.append(
-            f"plan: ensure task '{target}' exists in the Tasks app")
+        result.reasoning.append(f"plan: ensure task '{target}' exists in the Tasks app")
 
         for _ in range(max_steps):
             obs = self._observe_step(result)
@@ -119,20 +118,17 @@ class AndroidAgentController:
 
             # Verify terminal: task row already visible.
             if any(target in t for t in obs.get("visible_text", [])):
-                result.reasoning.append(
-                    f"verify: task '{target}' is present — goal satisfied")
+                result.reasoning.append(f"verify: task '{target}' is present — goal satisfied")
                 result.completed = True
                 return result
 
             field = self._node(obs, "field")
             add_btn = self._node(obs, "add")
             if field is None or add_btn is None:
-                result.reasoning.append(
-                    f"observe: no field/add on screen (pkg={obs.get('package')}) — replan")
+                result.reasoning.append(f"observe: no field/add on screen (pkg={obs.get('package')}) — replan")
                 self._record(result, Step("observe", {}, "replan", False, False, False))
                 # App may not be foreground; try to launch it.
-                self._act(result, "android_launch_app", {"package": "com.example.tasks"},
-                          expect_ok=True)
+                self._act(result, "android_launch_app", {"package": "com.example.tasks"}, expect_ok=True)
                 continue
 
             # Has the target text landed in the input field? (reason from the field's value)
@@ -149,8 +145,7 @@ class AndroidAgentController:
             self._act(result, "android_tap", {"x": cx, "y": cy}, expect_ok=True)
             after = self._task_count()
             if after == before:
-                result.reasoning.append(
-                    f"verify: tap Add did not add a task (still {after}) — retrying")
+                result.reasoning.append(f"verify: tap Add did not add a task (still {after}) — retrying")
                 continue
 
         result.reasoning.append("max_steps reached without confirming goal")
@@ -160,10 +155,12 @@ class AndroidAgentController:
     # -- action + verification primitives ------------------------------------
     def _observe_step(self, result: AgentResult) -> dict[str, Any]:
         obs = self.observe()
-        self._record(result, Step(
-            op="android_observe", args={}, reason="observe",
-            ok=bool(obs.get("ok", True)), verified=True,
-            screen_changed=True))
+        self._record(
+            result,
+            Step(
+                op="android_observe", args={}, reason="observe", ok=bool(obs.get("ok", True)), verified=True, screen_changed=True
+            ),
+        )
         return obs
 
     def _task_count(self) -> int:
@@ -172,32 +169,30 @@ class AndroidAgentController:
     def _record(self, result: AgentResult, step: Step):
         result.steps.append(step)
 
-    def _act(self, result: AgentResult, tool_name: str, args: dict[str, Any], *,
-             expect_ok: bool) -> bool:
+    def _act(self, result: AgentResult, tool_name: str, args: dict[str, Any], *, expect_ok: bool) -> bool:
         before = self.observe()
         res = self.gateway.execute(tool_name, args)
         after = self.observe()
         ok = bool(res.ok)
         changed = self._hash(before) != self._hash(after)
-        self._record(result, Step(
-            op=tool_name, args=args, reason="", ok=ok, verified=ok,
-            screen_changed=changed))
+        self._record(result, Step(op=tool_name, args=args, reason="", ok=ok, verified=ok, screen_changed=changed))
         result.reasoning.append(
             f"act {tool_name}({args}) -> {'ok' if ok else 'error:' + (res.error_message or '')}"
-            f" {'' if changed else '(no state change)'}")
+            f" {'' if changed else '(no state change)'}"
+        )
         return ok
 
     @staticmethod
     def _node_has_text(obs: dict[str, Any], target: str) -> bool:
-        return any(target in (e.get("text") or e.get("label") or "")
-                   for e in obs.get("elements", []))
+        return any(target in (e.get("text") or e.get("label") or "") for e in obs.get("elements", []))
 
     @staticmethod
     def _hash(obs: dict[str, Any]) -> str:
-        import hashlib, json
+        import hashlib
+        import json
+
         if "elements" in obs:
-            return hashlib.sha256(json.dumps(
-                obs.get("visible_text", []), sort_keys=True).encode()).hexdigest()[:12]
+            return hashlib.sha256(json.dumps(obs.get("visible_text", []), sort_keys=True).encode()).hexdigest()[:12]
         return hashlib.sha256(json.dumps(obs, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
     # -- consent & security helpers ------------------------------------------

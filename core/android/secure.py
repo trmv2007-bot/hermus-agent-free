@@ -10,13 +10,13 @@ has no extra runtime dependency. Provides:
 * :func:`pairing_challenge` / :func:`pairing_response` — a simple challenge/response
   handshake so a device proves knowledge of the shared secret before it is trusted.
 """
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
 import secrets
-from typing import Optional
 
 
 def new_pairing_secret() -> bytes:
@@ -63,12 +63,13 @@ def verify_pairing(secret: bytes, nonce: bytes, response: str) -> bool:
     return verify(secret, nonce, response)
 
 
-def load_or_create_secret(path: Optional[str]) -> bytes:
+def load_or_create_secret(path: str | None) -> bytes:
     """Load the persistent pairing secret from ``path``, creating + storing a new
     one with 0600 perms if absent. Keeping the secret on disk (outside the repo)
     is what allows the bridge to re-pair across restarts."""
     import os
     from pathlib import Path
+
     if path:
         p = Path(path)
         if p.exists():

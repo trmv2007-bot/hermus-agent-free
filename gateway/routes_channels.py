@@ -1,5 +1,6 @@
 """Channel endpoints: Telegram webhook (queued or inline), channel status/start,
 and direct Telegram sends."""
+
 from __future__ import annotations
 
 import os
@@ -8,8 +9,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core.config import config
+from core.log import get_logger
 from gateway.context import AGENTS, _agent_factory
 from gateway.queue import job_queue as _job_queue
+
+logger = get_logger(__name__)
 
 try:
     from gateway.channels import (
@@ -68,8 +72,7 @@ async def telegram_webhook(request: Request):
     sync_mode = os.getenv("HERMUS_WEBHOOK_SYNC", "0") not in ("0", "false", "False")
     if not sync_mode and _job_queue.enabled and _job_queue._started:
         try:
-            msg = ((data or {}).get("message") or (data or {}).get("edited_message")
-                   or (data or {}).get("channel_post") or {})
+            msg = (data or {}).get("message") or (data or {}).get("edited_message") or (data or {}).get("channel_post") or {}
             chat = msg.get("chat") or {}
             chat_id = chat.get("id")
             text = ""
@@ -80,16 +83,21 @@ async def telegram_webhook(request: Request):
             if chat_id and str(text).strip():
                 job = _job_queue.submit(
                     "channel.reply",
-                    {"text": str(text), "platform": "telegram", "chat_id": chat_id,
-                     "user_id": str(chat.get("id") or msg.get("from", {}).get("id") or "tg")},
+                    {
+                        "text": str(text),
+                        "platform": "telegram",
+                        "chat_id": chat_id,
+                        "user_id": str(chat.get("id") or msg.get("from", {}).get("id") or "tg"),
+                    },
                     session_key=f"telegram:{chat_id}",
                     dedupe_key=str(msg.get("message_id")) and f"tg:{chat_id}:{msg.get('message_id')}",
                 )
-                return JSONResponse({"ok": True, "queued": True, "job_id": job.id,
-                                     "run_id": job.run_id, "events_url": f"/jobs/{job.id}/events"},
-                                    status_code=202)
+                return JSONResponse(
+                    {"ok": True, "queued": True, "job_id": job.id, "run_id": job.run_id, "events_url": f"/jobs/{job.id}/events"},
+                    status_code=202,
+                )
         except Exception as e:
-            print(f"[Gateway] telegram queueing failed ({e}) — running inline")
+            logger.error(f"[Gateway] telegram queueing failed ({e}) — running inline")
 
     try:
         # Full handler: chat + sendMessage (+ voice transcribe)
@@ -127,5 +135,3 @@ async def telegram_send(payload: dict):
     if not chat_id or not text:
         return JSONResponse({"ok": False, "error": "need chat_id and text"}, status_code=400)
     return telegram_send_message(chat_id, text)
-
-

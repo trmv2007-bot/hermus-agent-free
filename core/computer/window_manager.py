@@ -4,12 +4,13 @@ Opening, focusing and closing applications is delegated to platform tooling
 (``pygetwindow`` when available, otherwise ``open``/``xdg-open``/``start``),
 with a dry-run fallback for headless operation.
 """
+
 from __future__ import annotations
 
 import platform
 import subprocess
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 
 def _now() -> str:
@@ -44,7 +45,7 @@ class PyGetWindowBackend(WindowBackend):
 
     def __init__(self) -> None:
         self._gw = None
-        self._error: Optional[str] = None
+        self._error: str | None = None
         try:
             import pygetwindow  # type: ignore
 
@@ -100,8 +101,11 @@ def _platform_open(name: str) -> dict[str, Any]:
         elif system == "Windows":
             subprocess.Popen(["start", "", name], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            subprocess.Popen(["gtk-launch", name] if _has("gtk-launch") else ["xdg-open", name],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["gtk-launch", name] if _has("gtk-launch") else ["xdg-open", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         return {"ok": True, "name": name, "dry_run": False, "method": system.lower()}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc), "name": name, "dry_run": False}
@@ -124,13 +128,17 @@ class DryRunWindowBackend(WindowBackend):
 
     name = "dry_run"
 
-    def __init__(self, *, fallback_reason: Optional[str] = None) -> None:
+    def __init__(self, *, fallback_reason: str | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.fallback_reason = fallback_reason
 
     def available(self) -> dict[str, Any]:
-        return {"available": True, "error": None, "note": "dry-run backend; no real window control",
-                "fallback_reason": self.fallback_reason}
+        return {
+            "available": True,
+            "error": None,
+            "note": "dry-run backend; no real window control",
+            "fallback_reason": self.fallback_reason,
+        }
 
     def _record(self, action: str, **kwargs: Any) -> dict[str, Any]:
         record = {"action": action, "ts": _now(), "dry_run": True, **kwargs}

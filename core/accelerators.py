@@ -35,6 +35,7 @@ reports one of a fixed set of statuses (``ready`` / ``needs_model`` /
 All probes are cheap, cached, individually guarded, and injectable, so the
 routing table is testable on a machine with no accelerators at all.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,10 +43,10 @@ import platform
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 from .config import config
 
@@ -99,12 +100,12 @@ def _run(cmd: list[str], timeout: float = 4.0) -> str:
 class Device:
     """One detected accelerator."""
 
-    kind: str                      # "npu" | "gpu"
-    vendor: str                    # "intel" | "nvidia" | "amd" | "unknown"
+    kind: str  # "npu" | "gpu"
+    vendor: str  # "intel" | "nvidia" | "amd" | "unknown"
     name: str = ""
     detail: str = ""
-    memory_mb: Optional[int] = None
-    source: str = ""               # which probe found it
+    memory_mb: int | None = None
+    source: str = ""  # which probe found it
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -151,7 +152,7 @@ class HardwareSnapshot:
     def has_nonintel_gpu(self) -> bool:
         return any(g.vendor in ("nvidia", "amd") for g in self.gpus)
 
-    def primary_gpu(self) -> Optional[Device]:
+    def primary_gpu(self) -> Device | None:
         if not self.gpus:
             return None
         # Prefer a discrete NVIDIA/AMD card, then Intel, then anything.
@@ -269,14 +270,12 @@ def probe_windows_npu() -> tuple[list[Device], str]:
     names = [line.strip() for line in out.splitlines() if line.strip()]
     if not names:
         return [], "no NPU class device"
-    return [Device("npu", "intel", names[0], "Windows PnP device", source="pnp")] , f"{len(names)} device(s)"
+    return [Device("npu", "intel", names[0], "Windows PnP device", source="pnp")], f"{len(names)} device(s)"
 
 
 def probe_nvidia() -> tuple[list[Device], str]:
     """NVIDIA GPUs via nvidia-smi."""
-    out = _run(
-        ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]
-    )
+    out = _run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
     if not out.strip():
         return [], "nvidia-smi not present"
     devices: list[Device] = []
@@ -352,7 +351,7 @@ def _memory_mb() -> int:
         return 0
 
 
-def detect(probes: Optional[tuple[Callable[[], tuple[list[Device], str]], ...]] = None) -> HardwareSnapshot:
+def detect(probes: tuple[Callable[[], tuple[list[Device], str]], ...] | None = None) -> HardwareSnapshot:
     """Probe the machine once and return a :class:`HardwareSnapshot`."""
     probes = probes or DEFAULT_PROBES
     snapshot = HardwareSnapshot(cpu_count=os.cpu_count() or 1, ram_mb=_memory_mb())
@@ -401,7 +400,7 @@ def _role(
     model: str,
     reason: str,
     *,
-    tools: Optional[bool] = None,
+    tools: bool | None = None,
 ) -> dict[str, Any]:
     """Build one role assignment (always concrete — never 'processing')."""
     if engine == ENGINE_NOLLAMA:
@@ -426,7 +425,7 @@ def _role(
     }
 
 
-def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> dict[str, Any]:
+def plan(hw: HardwareSnapshot | None = None, mode: str | None = None) -> dict[str, Any]:
     """Decide which engine runs which role, and why.
 
     ``mode`` overrides the automatic choice (``auto`` / ``pipelined`` / ``npu``
@@ -449,8 +448,7 @@ def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> d
 
     if mode == "off":
         roles = {
-            role: _role(role, ENGINE_NONE, "none", "", "local engines disabled (HERMUS_LOCAL_ENGINE=off)")
-            for role in ALL_ROLES
+            role: _role(role, ENGINE_NONE, "none", "", "local engines disabled (HERMUS_LOCAL_ENGINE=off)") for role in ALL_ROLES
         }
         return {
             "mode": MODE_DISABLED,
@@ -481,30 +479,48 @@ def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> d
     if mode == MODE_PIPELINED:
         # NPU: long, cheap, always-on background work. GPU: heavy generation.
         roles[ROLE_BACKGROUND] = _role(
-            ROLE_BACKGROUND, ENGINE_NOLLAMA, "NPU", npu_model,
+            ROLE_BACKGROUND,
+            ENGINE_NOLLAMA,
+            "NPU",
+            npu_model,
             "NPU present — background roles (Whisper, indexing, summaries) run cool on it",
         )
         roles[ROLE_DOCTOR] = _role(
-            ROLE_DOCTOR, ENGINE_NOLLAMA, "NPU", doctor_model,
+            ROLE_DOCTOR,
+            ENGINE_NOLLAMA,
+            "NPU",
+            doctor_model,
             "self-repair triage is short and frequent — the NPU keeps it off the GPU",
         )
         gpu = hw.primary_gpu()
         if hw.has_nonintel_gpu():
             roles[ROLE_REASONING] = _role(
-                ROLE_REASONING, ENGINE_OLLAMA, "GPU", ollama_model,
+                ROLE_REASONING,
+                ENGINE_OLLAMA,
+                "GPU",
+                ollama_model,
                 f"{gpu.vendor if gpu else 'GPU'} GPU — Ollama's CUDA/ROCm path is the mature one",
             )
             roles[ROLE_VISION] = _role(
-                ROLE_VISION, ENGINE_OLLAMA, "GPU", ollama_vision,
+                ROLE_VISION,
+                ENGINE_OLLAMA,
+                "GPU",
+                ollama_vision,
                 "Ollama serves LLaVA on NVIDIA/AMD GPUs",
             )
         else:
             roles[ROLE_REASONING] = _role(
-                ROLE_REASONING, ENGINE_NOLLAMA, "GPU", gpu_model,
+                ROLE_REASONING,
+                ENGINE_NOLLAMA,
+                "GPU",
+                gpu_model,
                 "Intel iGPU/Arc — OpenVINO INT4 decodes faster than Ollama's Vulkan path",
             )
             roles[ROLE_VISION] = _role(
-                ROLE_VISION, ENGINE_NOLLAMA, "GPU", vision_model,
+                ROLE_VISION,
+                ENGINE_NOLLAMA,
+                "GPU",
+                vision_model,
                 "Ollama has no Intel path for local vision models",
             )
         notes.append(
@@ -527,34 +543,54 @@ def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> d
         intel_gpu = bool(gpu and gpu.vendor == "intel")
         if intel_gpu:
             roles[ROLE_REASONING] = _role(
-                ROLE_REASONING, ENGINE_NOLLAMA, "GPU", gpu_model,
+                ROLE_REASONING,
+                ENGINE_NOLLAMA,
+                "GPU",
+                gpu_model,
                 "Intel iGPU/Arc — NoLlama (OpenVINO) is faster than Ollama's Vulkan path",
             )
             roles[ROLE_VISION] = _role(
-                ROLE_VISION, ENGINE_NOLLAMA, "GPU", vision_model,
+                ROLE_VISION,
+                ENGINE_NOLLAMA,
+                "GPU",
+                vision_model,
                 "Only local vision path for Intel GPUs",
             )
             roles[ROLE_BACKGROUND] = _role(
-                ROLE_BACKGROUND, ENGINE_NOLLAMA, "GPU", npu_model,
+                ROLE_BACKGROUND,
+                ENGINE_NOLLAMA,
+                "GPU",
+                npu_model,
                 "No NPU — background work shares the Intel GPU",
             )
             roles[ROLE_DOCTOR] = _role(
-                ROLE_DOCTOR, ENGINE_NOLLAMA, "GPU", doctor_model,
+                ROLE_DOCTOR,
+                ENGINE_NOLLAMA,
+                "GPU",
+                doctor_model,
                 "No NPU — self-repair triage runs on the Intel GPU",
             )
         else:
             roles[ROLE_REASONING] = _role(
-                ROLE_REASONING, ENGINE_OLLAMA, "GPU", ollama_model,
+                ROLE_REASONING,
+                ENGINE_OLLAMA,
+                "GPU",
+                ollama_model,
                 f"{gpu.vendor if gpu else 'GPU'} GPU — Ollama's CUDA/ROCm backend",
             )
-            roles[ROLE_VISION] = _role(
-                ROLE_VISION, ENGINE_OLLAMA, "GPU", ollama_vision, "Ollama vision on NVIDIA/AMD")
+            roles[ROLE_VISION] = _role(ROLE_VISION, ENGINE_OLLAMA, "GPU", ollama_vision, "Ollama vision on NVIDIA/AMD")
             roles[ROLE_BACKGROUND] = _role(
-                ROLE_BACKGROUND, ENGINE_OLLAMA, "GPU", ollama_model,
+                ROLE_BACKGROUND,
+                ENGINE_OLLAMA,
+                "GPU",
+                ollama_model,
                 "No NPU — background work shares the GPU via Ollama",
             )
             roles[ROLE_DOCTOR] = _role(
-                ROLE_DOCTOR, ENGINE_OLLAMA, "GPU", ollama_model,
+                ROLE_DOCTOR,
+                ENGINE_OLLAMA,
+                "GPU",
+                ollama_model,
                 "No NPU — self-repair triage uses the Ollama model",
             )
         notes.append("No NPU detected, so background and generative work share one device.")
@@ -607,8 +643,7 @@ def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> d
                     reason = "No accelerator — Ollama's llama.cpp CPU backend is the mature path"
             roles[role] = _role(role, engine, "CPU", model, reason)
         notes.append(
-            "CPU-only: NoLlama is used when a downloaded OpenVINO model is present; "
-            "otherwise Ollama on CPU is the fallback."
+            "CPU-only: NoLlama is used when a downloaded OpenVINO model is present; otherwise Ollama on CPU is the fallback."
         )
 
     if has_npu:
@@ -624,7 +659,7 @@ def plan(hw: Optional[HardwareSnapshot] = None, mode: Optional[str] = None) -> d
     }
 
 
-def role_assignment(role: str, plan_dict: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def role_assignment(role: str, plan_dict: dict[str, Any] | None = None) -> dict[str, Any]:
     """One role's engine assignment, resolving through the cached plan."""
     plan_dict = plan_dict or cached_plan()
     roles = plan_dict.get("roles") or {}
@@ -634,7 +669,7 @@ def role_assignment(role: str, plan_dict: Optional[dict[str, Any]] = None) -> di
     return roles.get(ROLE_REASONING) or _role(role, ENGINE_NONE, "none", "", "no plan available")
 
 
-def model_ref_for(role: str, plan_dict: Optional[dict[str, Any]] = None) -> str:
+def model_ref_for(role: str, plan_dict: dict[str, Any] | None = None) -> str:
     """``provider/model`` string usable with :class:`core.llm.FreeLLM`."""
     assignment = role_assignment(role, plan_dict)
     provider = assignment.get("provider") or ""

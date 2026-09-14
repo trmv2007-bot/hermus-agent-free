@@ -9,16 +9,20 @@ versioned and rollback-able — the system literally upgrades itself, safely.
 Also feeds the existing self-improvement loop: reflection mistakes become
 amendment proposals so yesterday's errors shape tomorrow's council.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import uuid
 from datetime import datetime
-from typing import Optional
+
+from core.log import get_logger
 
 from ..config import config
 from .constitution import constitution
+
+logger = get_logger(__name__)
 
 _META_SYSTEM = """You are the Meta-Counsel of the Hermus Council. After a council session you review the transcript and outcome, then propose how the council should upgrade ITSELF.
 
@@ -74,7 +78,7 @@ class MetaCounsel:
         errors = session_summary.get("errors", [])
         failures = [r for r in session_summary.get("step_results", []) if r.get("status") == "failed"]
         transcript = "\n".join(
-            f"[{t.get('agent','?')} R{t.get('round',0)}]: {t.get('content','')[:200]}"
+            f"[{t.get('agent', '?')} R{t.get('round', 0)}]: {t.get('content', '')[:200]}"
             for t in self._load_transcript(session_summary.get("session_id", ""))[-8:]
         )
         votes_text = json.dumps(session_summary.get("votes", []))[:400]
@@ -92,10 +96,12 @@ class MetaCounsel:
         try:
             from ..models import get_model_gateway
 
-            resp = get_model_gateway().chat([{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}], model=config.model)
+            resp = get_model_gateway().chat(
+                [{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}], model=config.model
+            )
             proposed = self._parse_amendments(resp.content or "")
         except Exception as e:
-            print(f"[🕯️ Meta-Counsel] review LLM failed: {e}")
+            logger.error(f"[🕯️ Meta-Counsel] review LLM failed: {e}")
 
         results = []
         for a in proposed:
@@ -111,9 +117,11 @@ class MetaCounsel:
         }
         self._append_log(entry)
         if results:
-            print(f"[🕯️ Meta-Counsel] proposed {len(results)} amendment(s): "
-                  f"{sum(1 for r in results if r.get('auto_applied'))} auto-applied, "
-                  f"{sum(1 for r in results if r.get('status') == 'pending')} pending approval")
+            logger.info(
+                f"[🕯️ Meta-Counsel] proposed {len(results)} amendment(s): "
+                f"{sum(1 for r in results if r.get('auto_applied'))} auto-applied, "
+                f"{sum(1 for r in results if r.get('status') == 'pending')} pending approval"
+            )
         return {"proposed": len(results), "results": results, "entry": entry}
 
     def _load_transcript(self, session_id: str) -> list[dict]:
@@ -156,7 +164,7 @@ class MetaCounsel:
 
     # ------------------------------------------------------------ reflection hook
 
-    def propose_from_reflection(self, reflection: dict, improvements: Optional[dict] = None) -> dict:
+    def propose_from_reflection(self, reflection: dict, improvements: dict | None = None) -> dict:
         """Self-improvement loop -> amendment proposals (no extra LLM call).
 
         Converts detected mistakes into concrete, deduped amendment candidates:
@@ -170,38 +178,45 @@ class MetaCounsel:
         proposed = []
         text = " ".join(mistakes).lower()
         if any(k in text for k in ("correction", "wrong", "incorrect")):
-            proposed.append({
-                "target": "member_prompt",
-                "member": "critic",
-                "change": (
-                    "You are the Critic (devil's advocate) on the Hermus Council. You attack every "
-                    "proposal for holes: unverified claims, missing steps, edge cases, security, "
-                    "cost. You MUST state at least one concrete objection, or an explicit approval "
-                    "with a reason. When the user previously corrected the council, check the "
-                    "corrected area FIRST and require evidence for every claim you endorse."
-                ),
-                "reason": "User corrections detected in reflection; critic must verify corrected areas and demand evidence.",
-            })
+            proposed.append(
+                {
+                    "target": "member_prompt",
+                    "member": "critic",
+                    "change": (
+                        "You are the Critic (devil's advocate) on the Hermus Council. You attack every "
+                        "proposal for holes: unverified claims, missing steps, edge cases, security, "
+                        "cost. You MUST state at least one concrete objection, or an explicit approval "
+                        "with a reason. When the user previously corrected the council, check the "
+                        "corrected area FIRST and require evidence for every claim you endorse."
+                    ),
+                    "reason": "User corrections detected in reflection; critic must verify corrected areas and demand evidence.",
+                }
+            )
         if any(k in text for k in ("tool", "failed", "timeout", "error")):
-            proposed.append({
-                "target": "rule",
-                "rule_key": "reconvene_on_failures",
-                "change": "1",
-                "reason": "Tool failures detected in reflection; reconvene the council sooner after a failure.",
-            })
+            proposed.append(
+                {
+                    "target": "rule",
+                    "rule_key": "reconvene_on_failures",
+                    "change": "1",
+                    "reason": "Tool failures detected in reflection; reconvene the council sooner after a failure.",
+                }
+            )
         results = []
         for a in proposed:
             results.append(constitution.propose(a, source="reflection"))
         applied = [r for r in results if r.get("success")]
-        self._append_log({
-            "source": "reflection",
-            "proposed_count": len(results),
-            "applied": [r.get("version") for r in applied],
-            "timestamp": datetime.now().isoformat(),
-        })
+        self._append_log(
+            {
+                "source": "reflection",
+                "proposed_count": len(results),
+                "applied": [r.get("version") for r in applied],
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
         if applied:
-            print(f"[🕯️ Meta-Counsel] reflection -> {len(applied)} amendment(s) applied (version "
-                  f"{constitution.current_version()})")
+            logger.info(
+                f"[🕯️ Meta-Counsel] reflection -> {len(applied)} amendment(s) applied (version {constitution.current_version()})"
+            )
         return {"proposed": len(results), "applied": applied}
 
     # ------------------------------------------------------------ CLI support

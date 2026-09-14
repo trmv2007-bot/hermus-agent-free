@@ -3,6 +3,7 @@
 jcode fires `file_changed_under_you` so parallel agents do not silently
 overwrite each other. We track last-known mtime per (session, path).
 """
+
 from __future__ import annotations
 
 import json
@@ -93,10 +94,7 @@ def note_write(file_path: str, writer: str = "") -> list[dict[str, Any]]:
 def pending(session_id: str) -> list[dict[str, Any]]:
     with _LOCK:
         data = _load()
-        return [
-            e for e in data.get("events", [])
-            if e.get("session_id") == session_id and not e.get("ack")
-        ]
+        return [e for e in data.get("events", []) if e.get("session_id") == session_id and not e.get("ack")]
 
 
 def ack(session_id: str) -> int:

@@ -4,6 +4,7 @@ These wrap :mod:`core.avatar` so the agent can use a HeyGem-style local render
 pipeline through the canonical ToolGateway instead of calling service endpoints
 ad hoc.
 """
+
 from __future__ import annotations
 
 from core.avatar import get_avatar_service

@@ -16,11 +16,11 @@ Endpoint code moved verbatim; `from gateway.gateway import app|setup|start|
 get_agent_for_user` and `gateway.gateway.<attr>` monkeypatching keep working
 (the shared state is re-exported from gateway.context).
 """
+
 import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Direct execution (python gateway/gateway.py): put the repo root on sys.path
 # and drop the gateway/ directory itself, which otherwise shadows the stdlib
@@ -34,31 +34,32 @@ if __package__ in (None, ""):
     while _here in sys.path:
         sys.path.remove(_here)
 
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from core.config import config
+from core.log import get_logger, setup_logging
 from core.task_tracker import task_tracker
-
+from gateway import lifecycle as _lifecycle
 from gateway.channels import get_channel_status, set_agent_factory, start_all_channels
-
-from contextlib import asynccontextmanager
-from fastapi.middleware.cors import CORSMiddleware
 
 # Realtime layer: async job queue + SSE/WebSocket streaming (see gateway/realtime.py)
 try:
+    from core.run_events import run_bus as _run_bus
     from gateway import realtime as _realtime
     from gateway.queue import job_queue as _job_queue
-    from core.run_events import run_bus as _run_bus
 except ImportError:  # executed as a plain module (python gateway/gateway.py)
     import sys as _sys
 
     _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core.run_events import run_bus as _run_bus  # type: ignore
     from gateway import realtime as _realtime  # type: ignore
     from gateway.queue import job_queue as _job_queue  # type: ignore
-    from core.run_events import run_bus as _run_bus  # type: ignore
 
 # Store agents per user/platform for continuity
 
@@ -69,13 +70,16 @@ except ImportError:  # executed as a plain module (python gateway/gateway.py)
 from gateway.context import (  # noqa: F401
     AGENTS,
     _agent_chat,
+    _agent_factory,  # noqa: F401
     _check_gateway_auth,
     _token_matches,
     get_agent_for_user,
 )
-from gateway.context import _agent_factory  # noqa: F401
 
-def _queue_due_presence_checkin(snapshot: dict) -> Optional[dict]:
+logger = get_logger(__name__)
+
+
+def _queue_due_presence_checkin(snapshot: dict) -> dict | None:
     """Optionally turn one due goal into a normal, read-only chat job.
 
     This path is opt-in via ``HERMUS_PRESENCE_PROACTIVE_CHECKINS=1``. It uses
@@ -118,10 +122,17 @@ def _queue_due_presence_checkin(snapshot: dict) -> Optional[dict]:
         run_id = f"run_presence_{os.urandom(4).hex()}"
         job = job_queue.submit(
             "runtime.turn",
-            {"text": text, "platform": "presence", "user_id": "default",
-             # Chat mode exposes no system tools; read_only also strips custom
-             # APIs, so proactive presence stays read-only on the queue.
-             "mode": "chat", "prefer": "chat", "read_only": True, "stream": True},
+            {
+                "text": text,
+                "platform": "presence",
+                "user_id": "default",
+                # Chat mode exposes no system tools; read_only also strips custom
+                # APIs, so proactive presence stays read-only on the queue.
+                "mode": "chat",
+                "prefer": "chat",
+                "read_only": True,
+                "stream": True,
+            },
             session_key="presence:default",
             run_id=run_id,
         )
@@ -135,7 +146,7 @@ def _queue_due_presence_checkin(snapshot: dict) -> Optional[dict]:
         )
         return {"job_id": job.id, "run_id": job.run_id, "goal_id": goal_id}
     except Exception as exc:
-        print(f"[Presence] proactive check-in skipped: {type(exc).__name__}: {exc}")
+        logger.warning(f"[Presence] proactive check-in skipped: {type(exc).__name__}: {exc}")
         return None
 
 
@@ -155,15 +166,17 @@ async def _presence_heartbeat_loop():
             snapshot = await asyncio.to_thread(get_presence().heartbeat)
             due = snapshot.get("check_ins_due") or []
             if due:
-                print(f"[Presence] heartbeat={snapshot.get('presence', {}).get('heartbeat_count')} "
-                      f"state={snapshot.get('presence', {}).get('state')} check_ins_due={len(due)}")
+                logger.info(
+                    f"[Presence] heartbeat={snapshot.get('presence', {}).get('heartbeat_count')} "
+                    f"state={snapshot.get('presence', {}).get('state')} check_ins_due={len(due)}"
+                )
                 queued = await asyncio.to_thread(_queue_due_presence_checkin, snapshot)
                 if queued:
-                    print(f"[Presence] proactive check-in queued: {queued.get('job_id')}")
+                    logger.info(f"[Presence] proactive check-in queued: {queued.get('job_id')}")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[Presence] heartbeat error: {type(exc).__name__}: {exc}")
+            logger.error(f"[Presence] heartbeat error: {type(exc).__name__}: {exc}")
         await asyncio.sleep(interval)
 
 
@@ -175,9 +188,9 @@ async def _background_agent_watchdog():
         try:
             tick = agent_manager.watchdog_tick(restart=True)
             if tick.get("revived") or tick.get("errors"):
-                print(f"[Gateway] background agents tick: {tick}")
+                logger.info(f"[Gateway] background agents tick: {tick}")
         except Exception as e:
-            print(f"[Gateway] background agents tick error: {e}")
+            logger.error(f"[Gateway] background agents tick error: {e}")
         await asyncio.sleep(30)
 
 
@@ -199,9 +212,7 @@ async def _local_engine_watchdog():
     while True:
         try:
             plan = cached_plan()
-            wants_nollama = any(
-                role.get("engine") == ENGINE_NOLLAMA for role in (plan.get("roles") or {}).values()
-            )
+            wants_nollama = any(role.get("engine") == ENGINE_NOLLAMA for role in (plan.get("roles") or {}).values())
             if wants_nollama and nollama_manager.installed() and nollama_manager.installed_models():
                 if not nollama_manager.running():
                     device = ""
@@ -210,9 +221,9 @@ async def _local_engine_watchdog():
                             device = role.get("device") or ""
                             break
                     started = await asyncio.to_thread(nollama_manager.start, device=device)
-                    print(f"[Gateway] local engine auto-start: {started.get('success')} (device={device or 'AUTO'})")
+                    logger.info(f"[Gateway] local engine auto-start: {started.get('success')} (device={device or 'AUTO'})")
         except Exception as e:
-            print(f"[Gateway] local engine watchdog error: {e}")
+            logger.error(f"[Gateway] local engine watchdog error: {e}")
 
         if getattr(config, "doctor_enabled", True) and getattr(config, "doctor_auto", False):
             try:
@@ -220,13 +231,13 @@ async def _local_engine_watchdog():
 
                 report = await asyncio.to_thread(doctor.run, auto=True)
                 if report.get("status") not in (None, "skipped", "ok"):
-                    print(
+                    logger.info(
                         f"[Gateway] hermus-doctor: {report.get('status')} "
                         f"({report.get('finding_count', len(report.get('findings') or []))} findings) "
                         f"-> {report.get('path', 'no report path')}"
                     )
             except Exception as e:
-                print(f"[Gateway] hermus-doctor error: {e}")
+                logger.error(f"[Gateway] hermus-doctor error: {e}")
 
         await asyncio.sleep(120)
 
@@ -251,53 +262,58 @@ async def _memory_maintenance_loop():
         try:
             report = await asyncio.to_thread(_job_queue.submit, "memory.sweep", {})
             if report is not None:
-                print(f"[Gateway] memory sweep queued as {getattr(report, 'id', '?')}")
+                logger.info(f"[Gateway] memory sweep queued as {getattr(report, 'id', '?')}")
         except Exception as e:
-            print(f"[Gateway] memory sweep failed: {e}")
+            logger.error(f"[Gateway] memory sweep failed: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
+    setup_logging()
     set_agent_factory(_agent_factory)
+    _lifecycle.state.mark_started()
     if getattr(config, "auto_start_channels", True):
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
-        print(f"[Gateway] Channels started: {started}")
+        logger.info(f"[Gateway] Channels started: {started}")
     # Async worker model: intake never blocks on a tool loop.
-    queue_info = {}
     try:
-        queue_info = await _realtime.startup(app, agent_getter=get_agent_for_user)
+        await _realtime.startup(app, agent_getter=get_agent_for_user)
     except Exception as e:
-        print(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
+        logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
     presence_task = None
     if getattr(config, "presence_enabled", True):
         try:
             presence_task = asyncio.create_task(_presence_heartbeat_loop())
         except Exception as e:
-            print(f"[Gateway] presence heartbeat failed to start: {e}")
+            logger.error(f"[Gateway] presence heartbeat failed to start: {e}")
 
     maintenance_task = None
     if getattr(config, "memory_sweep_minutes", 60) > 0:
         try:
             maintenance_task = asyncio.create_task(_memory_maintenance_loop())
         except Exception as e:
-            print(f"[Gateway] memory maintenance failed to start: {e}")
+            logger.error(f"[Gateway] memory maintenance failed to start: {e}")
     watchdog_task = None
     if getattr(config, "background_agents_enabled", True):
         try:
             watchdog_task = asyncio.create_task(_background_agent_watchdog())
         except Exception as e:
-            print(f"[Gateway] background-agent watchdog failed to start: {e}")
+            logger.error(f"[Gateway] background-agent watchdog failed to start: {e}")
     engine_task = None
     if getattr(config, "nollama_autostart", False) or getattr(config, "doctor_auto", False):
         try:
             engine_task = asyncio.create_task(_local_engine_watchdog())
         except Exception as e:
-            print(f"[Gateway] local-engine watchdog failed to start: {e}")
+            logger.error(f"[Gateway] local-engine watchdog failed to start: {e}")
     try:
         yield
     finally:
+        # Graceful drain: stop advertising readiness first (so a supervisor can
+        # route new traffic elsewhere), then give in-flight jobs a bounded
+        # window to finish before the process tears itself down.
+        _lifecycle.state.begin_drain("shutdown")
         if presence_task and not presence_task.done():
             presence_task.cancel()
         if maintenance_task and not maintenance_task.done():
@@ -306,10 +322,33 @@ async def lifespan(app: FastAPI):
             watchdog_task.cancel()
         if engine_task and not engine_task.done():
             engine_task.cancel()
+        # Drain in-flight work with a hard bound so SIGTERM can never hang the
+        # process (previously the queue stopped with a fixed 5s and ignored
+        # whether jobs were actually mid-flight).
+        try:
+            from gateway.queue import job_queue as _drain_queue
+
+            if getattr(_drain_queue, "_started", False):
+                await asyncio.wait_for(
+                    _drain_queue.stop(drain_timeout=_lifecycle.drain_timeout_seconds()),
+                    timeout=max(1.0, _lifecycle.drain_timeout_seconds() * 2),
+                )
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning("[Gateway] drain window expired — stopping anyway")
+        except Exception as e:  # noqa: BLE001 - shutdown must not raise
+            logger.error(f"[Gateway] queue drain failed: {e}")
         try:
             await _realtime.shutdown()
         except Exception:
             pass
+        # Release the shared async HTTP pool (core.aio) so shutdown does not
+        # leave sockets in CLOSE_WAIT behind it.
+        try:
+            from core.aio import aclose_async_client as _aclose_http
+
+            await _aclose_http()
+        except Exception as e:  # noqa: BLE001 - shutdown must not raise
+            logger.debug(f"[Gateway] async http pool close skipped: {e}")
         # Release every SQLite handle Hermus still owns (memory, memory2,
         # hybrid index, web-read cache, engine state). Without this, Ctrl+C
         # ended with a screenful of "ResourceWarning: unclosed database".
@@ -318,12 +357,12 @@ async def lifespan(app: FastAPI):
 
             report = _close_dbs("gateway_shutdown")
             if report.get("closed") or report.get("errors"):
-                print(
+                logger.info(
                     f"[Gateway] sqlite handles closed: {report.get('closed', 0)}"
                     + (f" ({len(report['errors'])} errors)" if report.get("errors") else "")
                 )
         except Exception as e:
-            print(f"[Gateway] sqlite shutdown cleanup failed: {e}")
+            logger.error(f"[Gateway] sqlite shutdown cleanup failed: {e}")
         # Stop the local NoLlama engine we may have started, so the NPU/GPU
         # side is never left running without its parent gateway.
         try:
@@ -331,12 +370,46 @@ async def lifespan(app: FastAPI):
 
             stopped = nollama_manager.stop_if_managed()
             if stopped.get("stopped"):
-                print(f"[Gateway] local engine stopped: {stopped.get('pid')}")
+                logger.info(f"[Gateway] local engine stopped: {stopped.get('pid')}")
         except Exception as e:
-            print(f"[Gateway] local engine shutdown failed: {e}")
+            logger.error(f"[Gateway] local engine shutdown failed: {e}")
 
 
 app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized", lifespan=lifespan)
+
+
+def register_error_handlers(target: FastAPI) -> None:
+    """Render all failures with the canonical ``core.errors`` envelope.
+
+    ``HermusError`` subclasses map to their own status/code; anything else
+    becomes a 500 that never leaks internals (the traceback is logged
+    server-side). ``HTTPException``/validation errors keep Starlette's
+    default handlers — this only adds the domain + catch-all layers.
+    """
+    from core.errors import HermusError
+
+    async def _hermus_error_handler(request: Request, exc: HermusError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status, content={"success": False, **exc.to_dict()})
+
+    async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.error("unhandled gateway error: %r", exc, exc_info=(type(exc), exc, exc.__traceback__))
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "internal",
+                "message": "Internal server error",
+                "retryable": False,
+                "details": {},
+            },
+        )
+
+    target.exception_handler(HermusError)(_hermus_error_handler)
+    target.exception_handler(Exception)(_unhandled_error_handler)
+
+
+register_error_handlers(app)
+
 
 # --- CORS: secure-by-default, configurable -------------------------------------
 # The control room is served same-origin (relative URLs), so browser CORS is not
@@ -350,8 +423,10 @@ def _cors_origins() -> list[str]:
     if raw:
         return [o.strip() for o in raw.split(",") if o.strip()]
     return [
-        "http://localhost:8000", "http://127.0.0.1:8000",
-        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
 
 
@@ -363,6 +438,30 @@ def _cors_credentials() -> bool:
     return os.environ.get("HERMUS_CORS_CREDENTIALS", "0") not in ("0", "false", "False")
 
 
+# --- Cross-cutting HTTP middleware (see gateway/middleware.py) -----------------
+# Starlette footgun worth spelling out: ``add_middleware`` *inserts at index 0*
+# and ``build_middleware_stack`` then applies the stack in reverse, so the
+# **last** middleware registered is the **outermost**. The registrations below
+# are therefore written innermost-first, giving this effective order:
+#
+#   CORS             outermost - preflight short-circuits before any work
+#   RequestContext             - ids + timing for everything below, including
+#                                rate-limit rejections and unhandled 500s
+#   RateLimit                  - reject abuse before the app sees the request
+#   GZip                       - compresses what the app renders
+#   ErrorEnvelope    innermost - normalizes every 4xx/5xx JSON body it produces
+from gateway.middleware import (  # noqa: E402
+    ErrorEnvelopeMiddleware,
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+)
+
+# Every error response — including FastAPI's own {"detail": ...} — leaves with
+# the canonical envelope ({success, error, code, message, retryable, details}).
+app.add_middleware(ErrorEnvelopeMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -370,9 +469,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Add GZip compression for faster dashboard - optimized
-app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # The single production control room is served from /control (see control_room
 # below); it is a self-contained snapshot + replay projection with no external
@@ -385,21 +481,21 @@ _realtime.install(app)
 
 # Per-concern routers (extracted from this module; see gateway/routes_*.py).
 # Mounted after the realtime layer so its routes keep precedence.
-from gateway.routes_channels import router as _channels_router  # noqa: E402
+from gateway.routes_android import router as _android_router  # noqa: E402
+from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
-from gateway.routes_registry import router as _registry_router  # noqa: E402
-from gateway.routes_management import router as _management_router  # noqa: E402
-from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
+from gateway.routes_channels import router as _channels_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
+from gateway.routes_engine import router as _engine_router  # noqa: E402
+from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_management import router as _management_router  # noqa: E402
+from gateway.routes_presence import router as _presence_router  # noqa: E402
+from gateway.routes_registry import router as _registry_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
-from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
-from gateway.routes_engine import router as _engine_router  # noqa: E402
-from gateway.routes_canonical import router as _canonical_router  # noqa: E402
-from gateway.routes_android import router as _android_router  # noqa: E402
-from gateway.routes_presence import router as _presence_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -455,6 +551,7 @@ async def favicon():
 async def api_status():
     """Machine-readable gateway status previously served from the root path."""
     from core.cache import get_cache_stats
+
     # Local engine summary (NPU/GPU routing). Probe is off here: /api/status is
     # polled by the dashboard, and the reachable-check lives on /engine/status.
     try:
@@ -530,8 +627,9 @@ async def api_status():
             "hermus_doctor_self_repair",
             "sqlite_lifecycle_registry",
         ],
-        "version": "2.2-free-architecture"
+        "version": "2.2-free-architecture",
     }
+
 
 @app.get("/control", response_class=HTMLResponse)
 @app.get("/controlroom", response_class=HTMLResponse)
@@ -552,41 +650,63 @@ async def control_room():
     )
 
 
-@app.get("/static/control-client.js")
-async def control_client_js():
-    """Serve the browser client (SSE + voice-first flow).
+def _serve_control_asset(name: str, media_type: str) -> Response:
+    """Read one control-room asset from ``gateway/static``.
 
-    Served from a route rather than a StaticFiles mount: the control room is the
-    only UI surface and it is same-origin, so a single explicit file keeps the
-    gateway from exposing the whole directory.
+    Served from explicit routes rather than a ``StaticFiles`` mount: the control
+    room is the only UI surface and it is same-origin, so a fixed allow-list
+    keeps the gateway from exposing the whole directory (or anything else that
+    later lands in ``static/``).
     """
-    js_path = Path(__file__).parent / "static" / "control-client.js"
-    if not js_path.exists():
-        return Response("control-client.js not found", status_code=404,
-                        media_type="text/plain")
+    path = Path(__file__).parent / "static" / name
+    if not path.exists():
+        return Response(f"{name} not found", status_code=404, media_type="text/plain")
     return Response(
-        js_path.read_text(encoding="utf-8"),
-        media_type="application/javascript; charset=utf-8",
+        path.read_text(encoding="utf-8"),
+        media_type=media_type,
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+@app.get("/static/control-client.js")
+async def control_client_js():
+    """Browser client: typed SSE stream handling + the voice-first (Jarvis) flow."""
+    return _serve_control_asset("control-client.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-room.js")
+async def control_room_js():
+    """Control-room application script (markup lives in control.html)."""
+    return _serve_control_asset("control-room.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control.css")
+async def control_room_css():
+    """Control-room stylesheet."""
+    return _serve_control_asset("control.css", "text/css; charset=utf-8")
 
 
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache stats - for optimization dashboard"""
     from core.cache import get_cache_stats
+
     return get_cache_stats()
+
 
 @app.post("/cache/clear")
 async def cache_clear():
     """Clear all caches - for optimization"""
     from core.cache import clear_all_caches
+
     return clear_all_caches()
+
 
 @app.get("/agents/status")
 async def agents_status():
     """Slide panel data - what agents/models are running or doing the task - free"""
     return task_tracker.get_status()
+
 
 @app.post("/command")
 async def command_endpoint(request: Request):
@@ -614,11 +734,31 @@ async def command_endpoint(request: Request):
     if ctype.startswith("multipart/form-data"):
         form = await request.form()
         # Scalar fields (text, mode, model, ...) arrive as form strings.
-        for key in ("platform", "user_id", "text", "model", "mode", "api_key",
-                    "base_url", "provider", "key_name", "profile", "run_id",
-                    "autonomous", "async", "async_mode", "talking", "speak",
-                    "stream", "voice", "speech_rate", "timeout", "prefer",
-                    "preflight", "allow_preflight_planning"):
+        for key in (
+            "platform",
+            "user_id",
+            "text",
+            "model",
+            "mode",
+            "api_key",
+            "base_url",
+            "provider",
+            "key_name",
+            "profile",
+            "run_id",
+            "autonomous",
+            "async",
+            "async_mode",
+            "talking",
+            "speak",
+            "stream",
+            "voice",
+            "speech_rate",
+            "timeout",
+            "prefer",
+            "preflight",
+            "allow_preflight_planning",
+        ):
             val = form.get(key)
             if val is not None and val != "":
                 payload[key] = val
@@ -633,7 +773,8 @@ async def command_endpoint(request: Request):
             if not getattr(upload, "filename", None):
                 continue
             content = await upload.read()
-            doc = extract_document(
+            doc = await asyncio.to_thread(
+                extract_document,
                 upload.filename,
                 content,
                 upload.content_type or "",
@@ -651,7 +792,10 @@ async def command_endpoint(request: Request):
     if attachments:
         blocks = [attachment_prompt_block(doc) for doc in attachments]
         if blocks:
-            payload["text"] = f"{str(payload.get('text') or '').strip()}\n\nThe user attached {len(attachments)} file(s):\n" + "\n\n".join(blocks)
+            payload["text"] = (
+                f"{str(payload.get('text') or '').strip()}\n\nThe user attached {len(attachments)} file(s):\n"
+                + "\n\n".join(blocks)
+            )
         payload["attachments"] = [doc.to_dict() for doc in attachments]
 
     platform = payload.get("platform", "cli")
@@ -695,10 +839,19 @@ async def command_endpoint(request: Request):
         job = _job_queue.submit(
             "runtime.turn",
             {
-                "text": text, "platform": platform, "user_id": user_id, "model": model,
-                "mode": mode, "api_key": api_key, "base_url": base_url, "provider": provider,
-                "key_name": key_name, "profile": profile, "talking": talking,
-                "speech_rate": payload.get("speech_rate"), "voice": payload.get("voice"),
+                "text": text,
+                "platform": platform,
+                "user_id": user_id,
+                "model": model,
+                "mode": mode,
+                "api_key": api_key,
+                "base_url": base_url,
+                "provider": provider,
+                "key_name": key_name,
+                "profile": profile,
+                "talking": talking,
+                "speech_rate": payload.get("speech_rate"),
+                "voice": payload.get("voice"),
                 "stream": bool(payload.get("stream", True)),
                 "prefer": prefer,
                 "max_repairs": payload.get("max_repairs"),
@@ -711,15 +864,18 @@ async def command_endpoint(request: Request):
             run_id=run_id,
         )
         return {
-            "async": True, "job_id": job.id, "run_id": job.run_id, "status": job.status,
+            "async": True,
+            "job_id": job.id,
+            "run_id": job.run_id,
+            "status": job.status,
             "run_kind": "queued",
-            "status_url": f"/jobs/{job.id}", "result_url": f"/jobs/{job.id}/result",
-            "events_url": f"/jobs/{job.id}/events", "stream_url": f"/stream/run/{job.run_id}",
+            "status_url": f"/jobs/{job.id}",
+            "result_url": f"/jobs/{job.id}/result",
+            "events_url": f"/jobs/{job.id}/events",
+            "stream_url": f"/stream/run/{job.run_id}",
         }
 
-    agent = get_agent_for_user(
-        platform, user_id, model=model, mode=mode, api_key=api_key, base_url=base_url
-    )
+    agent = get_agent_for_user(platform, user_id, model=model, mode=mode, api_key=api_key, base_url=base_url)
     if profile:
         agent.profile = profile
 
@@ -727,17 +883,23 @@ async def command_endpoint(request: Request):
     # when the caller did not use the queue.
     _run_bus.start(run_id, label=f"command:{platform}:{user_id}")
 
-    def _bus_event(event_type: str, data: Optional[dict] = None) -> None:
+    def _bus_event(event_type: str, data: dict | None = None) -> None:
         try:
             _run_bus.publish(run_id, event_type, dict(data or {}))
         except Exception:
             pass
 
-    dashboard_event_bus.publish("session_started", {
-        "run_id": run_id, "text": text[:1000], "mode": mode,
-        "model": model or agent.model_name, "talking": talking,
-        "platform": platform,
-    })
+    dashboard_event_bus.publish(
+        "session_started",
+        {
+            "run_id": run_id,
+            "text": text[:1000],
+            "mode": mode,
+            "model": model or agent.model_name,
+            "talking": talking,
+            "platform": platform,
+        },
+    )
     try:
         stream_tokens = bool(
             getattr(config, "gateway_stream_enabled", True)
@@ -762,8 +924,7 @@ async def command_endpoint(request: Request):
                 max_repairs=int(payload.get("max_repairs") or 2),
                 preflight=payload.get("preflight"),
                 allow_preflight_planning=bool(
-                    str(payload.get("allow_preflight_planning", "false")).lower()
-                    in {"1", "true", "yes"}
+                    str(payload.get("allow_preflight_planning", "false")).lower() in {"1", "true", "yes"}
                 ),
             )
             if isinstance(out, dict):
@@ -817,14 +978,17 @@ async def command_endpoint(request: Request):
         pass
 
     answer = str(result.get("response") or "")
-    dashboard_event_bus.publish("agent_response", {
-        "run_id": run_id,
-        "text": answer[:12000],
-        "model": result.get("model"),
-        "mode": result.get("mode"),
-        "steps": result.get("steps"),
-        "tool_calls": list(result.get("tool_calls") or [])[:30],
-    })
+    dashboard_event_bus.publish(
+        "agent_response",
+        {
+            "run_id": run_id,
+            "text": answer[:12000],
+            "model": result.get("model"),
+            "mode": result.get("mode"),
+            "steps": result.get("steps"),
+            "tool_calls": list(result.get("tool_calls") or [])[:30],
+        },
+    )
 
     if talking and answer:
         from core.speech import speech_engine
@@ -838,31 +1002,47 @@ async def command_endpoint(request: Request):
         speech.pop("path", None)
         if speech.get("success"):
             speech["audio_url"] = f"/speech/audio/{speech['audio_id']}"
-            dashboard_event_bus.publish("speech_ready", {
-                "run_id": run_id,
-                "text": answer[:12000],
-                "audio_url": speech["audio_url"],
-                "audio_id": speech["audio_id"],
-                "backend": speech.get("backend"),
-                "estimated_duration": speech.get("estimated_duration"),
-            })
+            dashboard_event_bus.publish(
+                "speech_ready",
+                {
+                    "run_id": run_id,
+                    "text": answer[:12000],
+                    "audio_url": speech["audio_url"],
+                    "audio_id": speech["audio_id"],
+                    "backend": speech.get("backend"),
+                    "estimated_duration": speech.get("estimated_duration"),
+                },
+            )
         else:
-            dashboard_event_bus.publish("speech_unavailable", {
-                "run_id": run_id, "error": speech.get("error"), "text": answer[:12000],
-            })
+            dashboard_event_bus.publish(
+                "speech_unavailable",
+                {
+                    "run_id": run_id,
+                    "error": speech.get("error"),
+                    "text": answer[:12000],
+                },
+            )
         result["speech"] = speech
 
-    dashboard_event_bus.publish("session_finished", {
-        "run_id": run_id, "success": True, "talking": talking,
-        "model": result.get("model"), "steps": result.get("steps"),
-    })
+    dashboard_event_bus.publish(
+        "session_finished",
+        {
+            "run_id": run_id,
+            "success": True,
+            "talking": talking,
+            "model": result.get("model"),
+            "steps": result.get("steps"),
+        },
+    )
     try:
-        _run_bus.publish(run_id, "agent_response", {"text": str(result.get("response") or "")[:8000],
-                                                     "steps": result.get("steps")})
+        _run_bus.publish(
+            run_id, "agent_response", {"text": str(result.get("response") or "")[:8000], "steps": result.get("steps")}
+        )
         _run_bus.finish(run_id, "finished", result)
     except Exception:
         pass
     return result
+
 
 @app.post("/run/cancel/{run_id}")
 async def run_cancel(run_id: str):
@@ -874,10 +1054,8 @@ async def run_cancel(run_id: str):
             break
     cancelled = _run_bus.cancel(run_id)
     if not cancelled and not (job_result and job_result.get("cancelled")):
-        return JSONResponse({"cancelled": False, "run_id": run_id,
-                             "error": "active run not found"}, status_code=404)
-    return {"cancelled": True, "run_id": run_id, "job": job_result,
-            "stage": (job_result or {}).get("stage", "cooperative")}
+        return JSONResponse({"cancelled": False, "run_id": run_id, "error": "active run not found"}, status_code=404)
+    return {"cancelled": True, "run_id": run_id, "job": job_result, "stage": (job_result or {}).get("stage", "cooperative")}
 
 
 @app.post("/run/steer")
@@ -910,66 +1088,129 @@ async def run_steer(payload: dict = None):
     job_info = None
     try:
         from gateway.queue import job_queue
+
         for job in job_queue.list_jobs() if hasattr(job_queue, "list_jobs") else []:
             if run_id and getattr(job, "run_id", None) == run_id:
                 job_info = job.id
     except Exception:
         pass
 
-    return {"ok": True, "run_id": run_id, "applied_to_stream": delivered,
-            "queued_for_agent": queued,
-            "job_id": job_info,
-            "note": ("Steer queued for the active run: the agent applies it at its "
-                     "next step boundary and the event is on the run stream." if delivered
-                     else "No active run found for that run_id; the message was not applied.")}
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "applied_to_stream": delivered,
+        "queued_for_agent": queued,
+        "job_id": job_info,
+        "note": (
+            "Steer queued for the active run: the agent applies it at its next step boundary and the event is on the run stream."
+            if delivered
+            else "No active run found for that run_id; the message was not applied."
+        ),
+    }
 
 
 @app.get("/platforms")
 async def platforms():
-    return {"platforms": list(set([k.split(':')[0] for k in AGENTS.keys()])), "active_agents": len(AGENTS), "task_tracker": task_tracker.get_status()}
+    return {
+        "platforms": list(set([k.split(":")[0] for k in AGENTS.keys()])),
+        "active_agents": len(AGENTS),
+        "task_tracker": task_tracker.get_status(),
+    }
+
+
+# --- Health probes -------------------------------------------------------------
+# Distinct from /api/v1/system/health (which probes *capabilities* via the
+# doctor). These are the two answers a supervisor needs: is the process
+# serving, and may it be given traffic right now. They are deliberately
+# unauthenticated and uncached so a probe can never be blocked by a token
+# rotation, and they read real state (see gateway/lifecycle.py).
+@app.get("/healthz")
+@app.get("/livez")
+async def healthz():
+    """Liveness: the event loop is serving. Never gated, never cached."""
+    from gateway.envelope import ok
+
+    return ok(
+        {
+            "status": "ok",
+            "uptime": _lifecycle.uptime_seconds(),
+            "pid": os.getpid(),
+        }
+    )
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness: 200 when traffic may be routed here, 503 while draining."""
+    from gateway.envelope import error_body
+
+    ready, detail = _lifecycle.readiness()
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        **detail,
+    }
+    if ready:
+        return payload
+    return JSONResponse(
+        status_code=503,
+        content=error_body(
+            code="not_ready",
+            message="; ".join(detail.get("reasons") or ["not ready"]),
+            status=503,
+            retryable=True,
+            details=detail,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
 
 # CLI for gateway setup/start - free
 def setup(platform: str):
-    print(f"[Gateway] Setup for {platform} - Free")
+    logger.info(f"[Gateway] Setup for {platform} - Free")
     if platform == "telegram":
         token = os.getenv("TELEGRAM_BOT_TOKEN") or config.telegram_bot_token
         if not token:
-            print("Set TELEGRAM_BOT_TOKEN env: https://t.me/BotFather /newbot (free)")
-            print("Then: hermus gateway start  (auto long-poll) OR set webhook to /webhook/telegram")
+            logger.info("Set TELEGRAM_BOT_TOKEN env: https://t.me/BotFather /newbot (free)")
+            logger.info("Then: hermus gateway start  (auto long-poll) OR set webhook to /webhook/telegram")
         else:
-            print(f"Telegram token found: {token[:10]}... - Ready")
-            print("Modes:")
-            print("  1) Long-polling (default, no public URL): hermus gateway start")
-            print("  2) Webhook: export HERMUS_TELEGRAM_MODE=webhook")
-            print(f"     https://api.telegram.org/bot{token}/setWebhook?url=https://yourdomain.com/webhook/telegram")
-            print("Bot will REALLY sendMessage replies (not stub).")
+            logger.info(f"Telegram token found: {token[:10]}... - Ready")
+            logger.info("Modes:")
+            logger.warning("  1) Long-polling (default, no public URL): hermus gateway start")
+            logger.info("  2) Webhook: export HERMUS_TELEGRAM_MODE=webhook")
+            logger.info(f"     https://api.telegram.org/bot{token}/setWebhook?url=https://yourdomain.com/webhook/telegram")
+            logger.warning("Bot will REALLY sendMessage replies (not stub).")
     elif platform == "discord":
         token = os.getenv("DISCORD_BOT_TOKEN") or config.discord_bot_token
         if not token:
-            print("Set DISCORD_BOT_TOKEN env: https://discord.com/developers/applications (free)")
-            print("Enable Message Content Intent in the Discord developer portal.")
+            logger.info("Set DISCORD_BOT_TOKEN env: https://discord.com/developers/applications (free)")
+            logger.info("Enable Message Content Intent in the Discord developer portal.")
         else:
-            print(f"Discord token found - bot starts with gateway (mention or DM the bot)")
+            logger.info("Discord token found - bot starts with gateway (mention or DM the bot)")
     else:
-        print(f"Platform {platform} setup - just set env token")
+        logger.info(f"Platform {platform} setup - just set env token")
+
 
 def start(port: int = None):
     port = port or config.gateway_port
-    print(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
-    print(f"Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
-    print(f"Channels: /channels/status, /channels/start, /telegram/send")
-    print(f"Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
-    print(f"Docs: http://localhost:{port}/docs")
-    print(f"Control room: http://localhost:{port}/control")
-    print(f"Computer control (API): http://localhost:{port}/computer/status")
-    print(f"Remote control (API): http://localhost:{port}/remote/status")
-    print(f"Plugins: /plugins | Resources: /computer/resources | Delegation: /computer/delegate")
-    print(f"Telegram mode={getattr(config,'telegram_mode','auto')} | auto_channels={getattr(config,'auto_start_channels',True)}")
-    print(f"Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
+    logger.info(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
+    logger.info("Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
+    logger.info("Channels: /channels/status, /channels/start, /telegram/send")
+    logger.info("Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
+    logger.info(f"Docs: http://localhost:{port}/docs")
+    logger.info(f"Control room: http://localhost:{port}/control")
+    logger.info(f"Computer control (API): http://localhost:{port}/computer/status")
+    logger.info(f"Remote control (API): http://localhost:{port}/remote/status")
+    logger.info("Plugins: /plugins | Resources: /computer/resources | Delegation: /computer/delegate")
+    logger.info(
+        f"Telegram mode={getattr(config, 'telegram_mode', 'auto')} | auto_channels={getattr(config, 'auto_start_channels', True)}"
+    )
+    logger.info("Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Hermus Gateway Free")
     parser.add_argument("action", choices=["setup", "start"], help="setup or start")
     parser.add_argument("--platform", default="telegram", help="telegram, discord, etc.")

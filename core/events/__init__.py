@@ -8,7 +8,7 @@ this one bus so the canonical EventBus is the single authoritative, replayable
 event source; the dict APIs remain as projections for realtime/SSE consumers.
 """
 
-from .bus import EventBus, get_bus, publish, configure_bus
+from .bus import EventBus, configure_bus, get_bus, publish
 from .envelope import make_command_envelope
 
 __all__ = ["EventBus", "get_bus", "publish", "configure_bus", "make_command_envelope"]

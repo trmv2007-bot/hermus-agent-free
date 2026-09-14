@@ -5,6 +5,7 @@ controller launches one detached local process, persists only status/paths to a
 private state file, and lets later CLI invocations stop and save the session.
 The gateway continues to use its own in-process recorder.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,7 +20,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .event_detector import StreamingEventDetector
 from .permissions import RecordingPolicy, recording_policy
@@ -29,7 +30,7 @@ from .video_writer import VideoWriter
 
 
 class ScreenRecordingService:
-    def __init__(self, policy: Optional[RecordingPolicy] = None):
+    def __init__(self, policy: RecordingPolicy | None = None):
         self.policy = policy or recording_policy
         self.root = self.policy.root
         self.state_path = self.root / ".screen-recorder.json"
@@ -210,10 +211,26 @@ class ScreenRecordingService:
 
         try:
             task_id = self.policy.task_id(target)
-            timeline = json.loads((session_dir / "timeline.json").read_text(encoding="utf-8")) if (session_dir / "timeline.json").exists() else None
-            events = json.loads((session_dir / "events.json").read_text(encoding="utf-8")) if (session_dir / "events.json").exists() else []
-            actions = json.loads((session_dir / "actions.json").read_text(encoding="utf-8")) if (session_dir / "actions.json").exists() else []
-            result = json.loads((session_dir / "result.json").read_text(encoding="utf-8")) if (session_dir / "result.json").exists() else state
+            timeline = (
+                json.loads((session_dir / "timeline.json").read_text(encoding="utf-8"))
+                if (session_dir / "timeline.json").exists()
+                else None
+            )
+            events = (
+                json.loads((session_dir / "events.json").read_text(encoding="utf-8"))
+                if (session_dir / "events.json").exists()
+                else []
+            )
+            actions = (
+                json.loads((session_dir / "actions.json").read_text(encoding="utf-8"))
+                if (session_dir / "actions.json").exists()
+                else []
+            )
+            result = (
+                json.loads((session_dir / "result.json").read_text(encoding="utf-8"))
+                if (session_dir / "result.json").exists()
+                else state
+            )
             return TaskArtifacts(task_id, root=str(self.root)).write(
                 timeline=timeline,
                 events=events,
@@ -253,7 +270,9 @@ class ScreenRecordingService:
             if time.monotonic() >= next_status:
                 latest = recorder.status()
                 state.update(latest)
-                state.update({"success": True, "status": "recording", "running": True, "pid": os.getpid(), "session_id": session_id})
+                state.update(
+                    {"success": True, "status": "recording", "running": True, "pid": os.getpid(), "session_id": session_id}
+                )
                 self._write_state(state)
                 next_status = time.monotonic() + 0.5
 
@@ -261,7 +280,14 @@ class ScreenRecordingService:
         stopped = recorder.stop()
         recording_path = (stopped.get("video") or {}).get("path") or output
         timeline = Timeline("Screen recording", recording_path, started=state.get("started"))
-        timeline.add(0.0, "initial_state", "Recording started", 1.0, state.get("started"), {"recording": recording_path, "recording_at": 0.0})
+        timeline.add(
+            0.0,
+            "initial_state",
+            "Recording started",
+            1.0,
+            state.get("started"),
+            {"recording": recording_path, "recording_at": 0.0},
+        )
         detected = stream_events.events()
         for event in detected:
             timeline.add(
@@ -270,7 +296,12 @@ class ScreenRecordingService:
                 f"Screen changed (score {event.get('change_score', 0.0):.3f})",
                 0.0,
                 event.get("ts"),
-                {"recording": recording_path, "recording_at": event.get("offset"), "sequence": event.get("sequence"), "change_score": event.get("change_score")},
+                {
+                    "recording": recording_path,
+                    "recording_at": event.get("offset"),
+                    "sequence": event.get("sequence"),
+                    "change_score": event.get("change_score"),
+                },
             )
         analysis = {"timeline": timeline.to_dict(), "events": detected}
         session_dir = Path(state.get("session_dir") or Path(output).parent)
@@ -285,15 +316,17 @@ class ScreenRecordingService:
             path.write_text(json.dumps(value, indent=2, default=str), encoding="utf-8")
             self.policy.secure(path)
         state.update(stopped)
-        state.update({
-            "success": bool(stopped.get("success")),
-            "status": "stopped" if stopped.get("success") else "error",
-            "running": False,
-            "pid": os.getpid(),
-            "output_path": recording_path,
-            "timeline_path": str(session_dir / "timeline.json"),
-            "finished": datetime.now().astimezone().isoformat(),
-        })
+        state.update(
+            {
+                "success": bool(stopped.get("success")),
+                "status": "stopped" if stopped.get("success") else "error",
+                "running": False,
+                "pid": os.getpid(),
+                "output_path": recording_path,
+                "timeline_path": str(session_dir / "timeline.json"),
+                "finished": datetime.now().astimezone().isoformat(),
+            }
+        )
         self._write_state(state)
         return 0 if stopped.get("success") else 1
 

@@ -1,8 +1,9 @@
 """jcode-inspired harness primitives."""
+
 from __future__ import annotations
 
-from core.harness.compaction import compact_messages
 from core.harness import bus, files, sessions
+from core.harness.compaction import compact_messages
 from core.harness.swarm import spawn
 
 

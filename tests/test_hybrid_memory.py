@@ -7,6 +7,7 @@ must evict by value density instead of "take the top K".
 Offline: no model, no network. Run:
   python tests/test_hybrid_memory.py   (or pytest tests/test_hybrid_memory.py)
 """
+
 import os
 import sqlite3
 import sys
@@ -96,12 +97,11 @@ def test_locked_connection_serializes_threads():
 def test_rrf_fusion_prefers_consensus():
     from core.hybrid_search import HybridConfig, HybridRetriever
 
-    ret = HybridRetriever(sqlite3.connect(":memory:"), table="memories", manage_schema=False,
-                          config=HybridConfig(rrf_k=60, weight_prior=0.35))
-    lists = {"bm25": [("a", 10.0), ("b", 5.0), ("c", 1.0)],
-             "vector": [("b", 0.9), ("a", 0.8), ("d", 0.2)]}
-    docs = {k: {"content": f"doc {k}", "prior": p}
-            for k, p in (("a", 0.0), ("b", 0.9), ("c", 0.0), ("d", 0.0))}
+    ret = HybridRetriever(
+        sqlite3.connect(":memory:"), table="memories", manage_schema=False, config=HybridConfig(rrf_k=60, weight_prior=0.35)
+    )
+    lists = {"bm25": [("a", 10.0), ("b", 5.0), ("c", 1.0)], "vector": [("b", 0.9), ("a", 0.8), ("d", 0.2)]}
+    docs = {k: {"content": f"doc {k}", "prior": p} for k, p in (("a", 0.0), ("b", 0.9), ("c", 0.0), ("d", 0.0))}
     fused = {h.id: h for h in ret.fuse(lists, docs, limit=10)}
 
     # 'b' is top-2 in both lists with a strong prior → outranks 'a' (lexical only)
@@ -122,8 +122,9 @@ def test_sensitivity_of_rrf_k():
     docs = {"a": {"content": "a"}, "b": {"content": "b"}}
     scores = {}
     for k in (2, 60, 1000):
-        ret = HybridRetriever(sqlite3.connect(":memory:"), table="m", manage_schema=False,
-                              config=HybridConfig(rrf_k=k, weight_prior=0.0))
+        ret = HybridRetriever(
+            sqlite3.connect(":memory:"), table="m", manage_schema=False, config=HybridConfig(rrf_k=k, weight_prior=0.0)
+        )
         hits = {h.id: h.score for h in ret.fuse(lists, docs, limit=5)}
         scores[k] = (hits["a"], hits["b"])
         assert abs(hits["a"] - hits["b"]) < 1e-9 or k  # symmetric lists → near-tie
@@ -148,13 +149,12 @@ def test_recall_ranks_the_only_matching_memory_first():
         "semantic",
         "e2e check 2026-08-30: gateway live, SSE job_finished contract fixed, "
         "mission honest blocking verified, token deltas streamed end to end",
-        importance=5)
+        importance=5,
+    )
     # strongly-signalled decoys that do NOT match the query at all
     for i in range(6):
-        m.remember("procedural", f"Research run {i}: compare Postgres vs MySQL vs SQLite",
-                   importance=8, success=True)
-    m.remember("episodic", "User asked: Say one. Agent used 0 tool(s) and succeeded.",
-               importance=6, success=True)
+        m.remember("procedural", f"Research run {i}: compare Postgres vs MySQL vs SQLite", importance=8, success=True)
+    m.remember("episodic", "User asked: Say one. Agent used 0 tool(s) and succeeded.", importance=6, success=True)
 
     hits = m.recall("job_finished SSE contract", limit=10)
     assert hits, "recall returned nothing"
@@ -164,10 +164,8 @@ def test_recall_ranks_the_only_matching_memory_first():
 
 def test_hybrid_recall_survives_paraphrase_where_keywords_fail():
     m = _fresh("para")
-    m.remember("semantic", "PostgreSQL connection string is stored in the vault, never in .env",
-               importance=9)
-    m.remember("semantic", "Deploy pipeline: run alembic migrations, then restart the gunicorn workers",
-               importance=7)
+    m.remember("semantic", "PostgreSQL connection string is stored in the vault, never in .env", importance=9)
+    m.remember("semantic", "Deploy pipeline: run alembic migrations, then restart the gunicorn workers", importance=7)
     m.remember("episodic", "User asked about lunch options", importance=1)
 
     hits = m.hybrid_recall("where do we keep the database password", limit=5)
@@ -190,8 +188,7 @@ def test_hybrid_recall_survives_paraphrase_where_keywords_fail():
 def test_hybrid_row_carries_decay_signals_and_band():
     m = _fresh("decayband")
     m.remember("semantic", "Kafka topics are partitioned by key to preserve ordering", importance=8)
-    hit = next((h for h in m.hybrid_recall("Kafka partition ordering", limit=3)
-                if "Kafka" in h["content"]), None)
+    hit = next((h for h in m.hybrid_recall("Kafka partition ordering", limit=3) if "Kafka" in h["content"]), None)
     assert hit is not None
     assert 0.0 < hit["decay"] <= 1.0
     assert hit["signals"]["band"] in ("hot", "warm", "cold", "archived")
@@ -253,10 +250,22 @@ def test_decay_evaluate_bands_and_plan():
 
     dec = MemoryDecay(half_life_days=30.0, access_half_life_days=14.0, saturate_access=8.0)
     now = datetime.now()
-    fresh = {"ts": now.isoformat(timespec="seconds"), "access_count": 3, "importance": 5.0,
-             "kind": "semantic", "archived": 0, "pinned": 0}
-    stale = {"ts": (now - timedelta(days=400)).isoformat(timespec="seconds"), "access_count": 0,
-             "importance": 2.0, "kind": "episodic", "archived": 0, "pinned": 0}
+    fresh = {
+        "ts": now.isoformat(timespec="seconds"),
+        "access_count": 3,
+        "importance": 5.0,
+        "kind": "semantic",
+        "archived": 0,
+        "pinned": 0,
+    }
+    stale = {
+        "ts": (now - timedelta(days=400)).isoformat(timespec="seconds"),
+        "access_count": 0,
+        "importance": 2.0,
+        "kind": "episodic",
+        "archived": 0,
+        "pinned": 0,
+    }
 
     rep = dec.evaluate(fresh, now)
     assert rep.decay > 0.999 and rep.band == "hot" and rep.age_days < 1
@@ -271,8 +280,8 @@ def test_decay_evaluate_bands_and_plan():
 
     action, reasons = dec.plan(stale, now)
     assert action in ("keep", "decay", "archive", "purge", "promote") and reasons
-    assert dec.plan(dict(stale, importance=9.5), now)[0] == "keep"      # protected
-    assert dec.plan(dict(stale, kind="working"), now)[0] == "purge"     # working TTL
+    assert dec.plan(dict(stale, importance=9.5), now)[0] == "keep"  # protected
+    assert dec.plan(dict(stale, kind="working"), now)[0] == "purge"  # working TTL
     assert dec.plan(fresh, now)[0] in ("keep", "decay")
     assert dec.status()["half_life_days"] == 30.0
     assert dec.band(0.7) == "hot" and dec.band(0.05) != "hot"
@@ -311,10 +320,9 @@ def test_fit_to_budget_evicts_low_value_long_memories():
 def test_fit_to_budget_relaxes_kind_cap_when_window_is_free():
     from core.decay import fit_to_budget
 
-    items = [{"kind": "semantic", "content": f"fact {i}", "score": 9 - i, "pinned": 0}
-             for i in range(6)]
+    items = [{"kind": "semantic", "content": f"fact {i}", "score": 9 - i, "pinned": 0} for i in range(6)]
     capped = fit_to_budget(items, budget_tokens=600, per_kind_cap=2)
-    assert len(capped["kept"]) > 2 and not capped["evicted"]   # cap must not strand the window
+    assert len(capped["kept"]) > 2 and not capped["evicted"]  # cap must not strand the window
     tight = fit_to_budget(items, budget_tokens=12, per_kind_cap=2)
     assert tight["tokens"] <= 12
 
@@ -324,8 +332,7 @@ def test_fit_to_budget_reserves_pinned_first():
 
     items = [
         {"kind": "semantic", "content": "a" * 60, "score": 2.0, "pinned": 1},
-        {"kind": "semantic", "content": "high score but long and unpinned " + "b" * 300, "score": 9.9,
-         "pinned": 0},
+        {"kind": "semantic", "content": "high score but long and unpinned " + "b" * 300, "score": 9.9, "pinned": 0},
     ]
     out = fit_to_budget(items, budget_tokens=40, per_kind_cap=None)
     assert out["kept"] and out["kept"][0]["pinned"] == 1
@@ -338,8 +345,10 @@ def test_sweep_reports_lifecycle_decisions():
     m = _fresh("sweep")
     r = m.remember("working", "Temporary scratch note that will go stale", importance=3)
     conn = m.store.conn()
-    conn.execute("UPDATE memories SET ts = ?, access_count = 0 WHERE id = ?",
-                 ((datetime.now() - timedelta(days=90)).isoformat(timespec="seconds"), r["id"]))
+    conn.execute(
+        "UPDATE memories SET ts = ?, access_count = 0 WHERE id = ?",
+        ((datetime.now() - timedelta(days=90)).isoformat(timespec="seconds"), r["id"]),
+    )
     conn.commit()
 
     dry = m.sweep(dry_run=True)
@@ -360,8 +369,10 @@ def test_pinned_memory_survives_sweep_and_stays_recallable():
     m = _fresh("pinned")
     r = m.remember("semantic", "Production database host is db-01.internal", importance=10, pinned=True)
     conn = m.store.conn()
-    conn.execute("UPDATE memories SET ts = ?, access_count = 0, importance = 1 WHERE id = ?",
-                 ((datetime.now() - timedelta(days=500)).isoformat(timespec="seconds"), r["id"]))
+    conn.execute(
+        "UPDATE memories SET ts = ?, access_count = 0, importance = 1 WHERE id = ?",
+        ((datetime.now() - timedelta(days=500)).isoformat(timespec="seconds"), r["id"]),
+    )
     conn.commit()
     out = m.sweep(dry_run=False)
     assert r["id"] not in [x["id"] for x in out["purged"]] + [x["id"] for x in out["archived"]]
@@ -375,8 +386,7 @@ def test_forget_creates_tombstone():
     out = m.forget(r["id"], reason="test")
     assert out["success"] is True and out["forgotten"] == [r["id"]]
     assert r["id"] not in [h["id"] for h in m.recall("Acme Corp expired contract", limit=10)]
-    rows = m.store.conn().execute("SELECT reason FROM memory_tombstones WHERE memory_id = ?",
-                                  (r["id"],)).fetchall()
+    rows = m.store.conn().execute("SELECT reason FROM memory_tombstones WHERE memory_id = ?", (r["id"],)).fetchall()
     assert rows and rows[0][0] == "test"
 
     # by-query forgetting finds the row without knowing its id
@@ -392,8 +402,7 @@ def test_access_log_records_what_was_recalled():
     m.recall("exponential backoff retries", limit=5)
     log = m.store.access_log(r["id"], limit=5)
     assert log and log[0]["event"] == "recall" and "query" in log[0]
-    row = m.store.conn().execute("SELECT access_count FROM memories WHERE id = ?",
-                                 (r["id"],)).fetchone()
+    row = m.store.conn().execute("SELECT access_count FROM memories WHERE id = ?", (r["id"],)).fetchone()
     assert int(row[0]) >= 1
 
 
@@ -416,13 +425,13 @@ def test_compact_working_memory_prunes_expired_rows():
     m = _fresh("compact")
     r = m.remember("working", "Working note: check flaky test in gateway suite", importance=5)
     conn = m.store.conn()
-    conn.execute("UPDATE memories SET ts = ? WHERE id = ?",
-                 ((datetime.now() - timedelta(hours=30)).isoformat(timespec="seconds"), r["id"]))
+    conn.execute(
+        "UPDATE memories SET ts = ? WHERE id = ?", ((datetime.now() - timedelta(hours=30)).isoformat(timespec="seconds"), r["id"])
+    )
     conn.commit()
     out = m.compact_working_memory(max_age_hours=1)
     assert out["deleted_count"] >= 1
-    assert r["id"] not in [row[0] for row in
-                           conn.execute("SELECT id FROM memories WHERE kind='working'").fetchall()]
+    assert r["id"] not in [row[0] for row in conn.execute("SELECT id FROM memories WHERE kind='working'").fetchall()]
 
 
 def test_tool_registry_exposes_hybrid_search_and_sweep():
@@ -430,16 +439,18 @@ def test_tool_registry_exposes_hybrid_search_and_sweep():
 
     tool_registry.load(force=True)
     tools = tool_registry.list_tools()["tools"]
-    for name in ("memory_hybrid_search", "memory_sweep", "skill_harvest", "delegate_tasks",
-                 "sandbox_run", "skill_forge_stats"):
+    for name in ("memory_hybrid_search", "memory_sweep", "skill_harvest", "delegate_tasks", "sandbox_run", "skill_forge_stats"):
         assert name in tools, f"{name} not registered"
     # write through the tool, read back through the tool (global store, shared
     # with the agent loop) — one round trip proves both are wired
-    mem = tool_registry.execute("memory2_remember", {
-        "kind": "semantic",
-        "content": "Registry probe: the vault holds the database password for this test",
-        "importance": 9,
-    })
+    mem = tool_registry.execute(
+        "memory2_remember",
+        {
+            "kind": "semantic",
+            "content": "Registry probe: the vault holds the database password for this test",
+            "importance": 9,
+        },
+    )
     assert mem.get("success") or mem.get("id")
     out = tool_registry.execute("memory_hybrid_search", {"query": "vault database password", "limit": 5})
     assert out["mode"] == "hybrid" and out["count"] >= 1 and out["index"]["available"]

@@ -1,11 +1,11 @@
 """Integration Control Center: one place to operate Hermus connectors."""
+
 from __future__ import annotations
 
 import threading
-from typing import Any, Optional
+from typing import Any
 
 from .base import ConnectorContext
-from .filesystem import FilesystemConnector
 from .registry import ConnectorRegistry, register_builtin_connectors
 from .services import SERVICE_CONNECTORS
 
@@ -13,9 +13,9 @@ from .services import SERVICE_CONNECTORS
 class IntegrationControlCenter:
     """Lifecycle and periodic refresh manager for all configured integrations."""
 
-    def __init__(self, registry: Optional[ConnectorRegistry] = None, context: Optional[ConnectorContext] = None):
+    def __init__(self, registry: ConnectorRegistry | None = None, context: ConnectorContext | None = None):
         self.registry = registry or ConnectorRegistry(context)
-        self._timer: Optional[threading.Timer] = None
+        self._timer: threading.Timer | None = None
         self._interval = 0.0
 
     def install_defaults(self, workspace_root=None) -> ConnectorRegistry:
@@ -35,7 +35,7 @@ class IntegrationControlCenter:
             "capabilities": self.registry.capabilities(),
         }
 
-    def refresh(self, name: Optional[str] = None) -> list[dict[str, Any]]:
+    def refresh(self, name: str | None = None) -> list[dict[str, Any]]:
         return self.registry.refresh(name)
 
     def start_refresh_loop(self, interval_seconds: float = 60.0) -> None:

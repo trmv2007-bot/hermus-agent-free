@@ -1,8 +1,9 @@
 """Mission, SWE Mode, Verification, Artifact, and Rollback Tools for Hermus Agent."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from core.artifact_manager import artifact_manager
 from core.critic import critic_manager
@@ -14,9 +15,9 @@ from core.verifier_registry import verifier_registry
 
 def mission_start(
     goal: str,
-    requirements: Optional[list[str]] = None,
-    domain: Optional[str] = None,
-    subgoals: Optional[list[str]] = None,
+    requirements: list[str] | None = None,
+    domain: str | None = None,
+    subgoals: list[str] | None = None,
     budget_steps: int = 20,
 ) -> dict[str, Any]:
     """Start an objective-driven mission lifecycle with dynamic budgets and verification."""
@@ -46,7 +47,7 @@ def mission_status(mission_id: str) -> dict[str, Any]:
 
 def swe_develop(
     task: str,
-    workspace_dir: Optional[str] = None,
+    workspace_dir: str | None = None,
     max_repairs: int = 3,
 ) -> dict[str, Any]:
     """Execute dedicated Software Engineer mode: Inspect -> Plan -> Edit -> Build -> Test -> Repair -> Diff -> Package."""
@@ -57,10 +58,10 @@ def swe_develop(
 
 def domain_verify(
     domain: str = "auto",
-    target_path: Optional[str] = None,
-    task: Optional[str] = None,
-    output: Optional[str] = None,
-    port: Optional[int] = None,
+    target_path: str | None = None,
+    task: str | None = None,
+    output: str | None = None,
+    port: int | None = None,
 ) -> dict[str, Any]:
     """Run domain-specific verification for Python, Android, Web, Git, Linux, Research, or File tasks."""
     ctx: dict[str, Any] = {
@@ -75,8 +76,8 @@ def domain_verify(
 
 
 def artifact_list(
-    mission_id: Optional[str] = None,
-    artifact_type: Optional[str] = None,
+    mission_id: str | None = None,
+    artifact_type: str | None = None,
 ) -> dict[str, Any]:
     """List registered workspace artifacts (APKs, ZIPs, reports, diffs, builds)."""
     arts = artifact_manager.list_artifacts(mission_id=mission_id, artifact_type=artifact_type)
@@ -88,7 +89,7 @@ def artifact_list(
 
 def artifact_export(
     output_zip_path: str,
-    mission_id: Optional[str] = None,
+    mission_id: str | None = None,
 ) -> dict[str, Any]:
     """Bundle artifacts into a standalone ZIP archive."""
     try:
@@ -123,7 +124,7 @@ def rollback_diff(
 def critic_review(
     task: str,
     files: dict[str, str],
-    execution_log: Optional[str] = None,
+    execution_log: str | None = None,
 ) -> dict[str, Any]:
     """Run independent critic panel: Code Review + Security Audit + Outcome Verification."""
     return critic_manager.run_full_review(
@@ -144,7 +145,11 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "goal": {"type": "string", "description": "The mission objective."},
-                    "requirements": {"type": "array", "items": {"type": "string"}, "description": "Specific verifiable requirements."},
+                    "requirements": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific verifiable requirements.",
+                    },
                     "domain": {"type": "string", "description": "Domain (python, android, web, git, linux, research, file)."},
                     "budget_steps": {"type": "integer", "description": "Dynamic step budget limit."},
                 },
@@ -190,7 +195,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "domain": {"type": "string", "description": "Domain: python, android, web, git, linux, research, file, auto."},
+                    "domain": {
+                        "type": "string",
+                        "description": "Domain: python, android, web, git, linux, research, file, auto.",
+                    },
                     "target_path": {"type": "string", "description": "Target file or directory path."},
                     "task": {"type": "string", "description": "Original task description."},
                     "output": {"type": "string", "description": "Command or execution output."},

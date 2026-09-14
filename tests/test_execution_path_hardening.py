@@ -25,15 +25,15 @@ the "universal runtime" commit (b753d56):
 
 Offline: no model backend is contacted.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import pathlib
-import time
 from typing import Any
 
 import pytest
+from _control_room_source import control_room_source
 
 
 @pytest.fixture()
@@ -119,9 +119,12 @@ def test_lifecycle_crash_is_recorded_then_reported(monkeypatch, tmp_path):
     from core import mission as mission_mod
 
     monkeypatch.setattr(mission_mod.MissionEngine, "storage_dir", tmp_path, raising=False)
-    monkeypatch.setattr(mission_mod.MissionEngine, "_run_autonomous_loop",
-                        lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("loop died")),
-                        raising=True)
+    monkeypatch.setattr(
+        mission_mod.MissionEngine,
+        "_run_autonomous_loop",
+        lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("loop died")),
+        raising=True,
+    )
 
     agent = _RecordingAgent()
     out = runtime.execute("mission: build it", agent=agent, prefer="mission")
@@ -142,9 +145,12 @@ def test_mission_crash_fallback_is_opt_in_only(monkeypatch, tmp_path):
     from core.config import config
 
     monkeypatch.setattr(mission_mod.MissionEngine, "storage_dir", tmp_path, raising=False)
-    monkeypatch.setattr(mission_mod.MissionEngine, "start_mission",
-                        lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
-                        raising=True)
+    monkeypatch.setattr(
+        mission_mod.MissionEngine,
+        "start_mission",
+        lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+        raising=True,
+    )
 
     old = config.mission_fallback_to_chat
     config.mission_fallback_to_chat = True
@@ -167,8 +173,7 @@ def test_engine_records_crash_as_failed_report(tmp_path, monkeypatch):
         raise RuntimeError("verifier blew up")
 
     monkeypatch.setattr(mission_mod.verifier_registry, "verify", boom, raising=True)
-    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "worked"},
-                           storage_dir=tmp_path / "missions")
+    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "worked"}, storage_dir=tmp_path / "missions")
     report = engine.start_mission("build a thing", budget_steps=4)
 
     assert report.state == MissionState.FAILED.value
@@ -213,28 +218,34 @@ def test_failed_mission_result_carries_diagnostics(tmp_path):
 # ===========================================================================
 # 2. intent classification — questions are not missions
 # ===========================================================================
-@pytest.mark.parametrize("text", [
-    "Can you explain how to fix my app?",
-    "What is the best way to build an API?",
-    "explain how authentication works",
-    "how do I build a REST API?",
-    "what is the capital of France?",
-    "tell me about the difference between REST and GraphQL",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Can you explain how to fix my app?",
+        "What is the best way to build an API?",
+        "explain how authentication works",
+        "how do I build a REST API?",
+        "what is the capital of France?",
+        "tell me about the difference between REST and GraphQL",
+    ],
+)
 def test_questions_and_explanations_stay_chat(text):
     from core.runtime import classify_request
 
     assert classify_request(text) == "chat", text
 
 
-@pytest.mark.parametrize("text", [
-    "Build a web app with login and tests and keep going until it works",
-    "Write a script that scrapes prices daily and stores them in sqlite",
-    "fix the failing tests in the repo",
-    "mission: tidy up my notes",
-    "do this autonomously please",
-    "can you build me a website?",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Build a web app with login and tests and keep going until it works",
+        "Write a script that scrapes prices daily and stores them in sqlite",
+        "fix the failing tests in the repo",
+        "mission: tidy up my notes",
+        "do this autonomously please",
+        "can you build me a website?",
+    ],
+)
 def test_action_requests_become_missions(text):
     from core.runtime import classify_request
 
@@ -242,8 +253,7 @@ def test_action_requests_become_missions(text):
 
 
 def test_detect_intent_labels():
-    from core.runtime import (INTENT_ACTION, INTENT_ANALYSIS, INTENT_EXPLANATION,
-                              INTENT_QUESTION, detect_intent)
+    from core.runtime import INTENT_ACTION, INTENT_ANALYSIS, INTENT_EXPLANATION, INTENT_QUESTION, detect_intent
 
     assert detect_intent("What is the best way to build an API?") == INTENT_EXPLANATION
     assert detect_intent("Is the cache warm?") == INTENT_QUESTION
@@ -281,15 +291,18 @@ class _FakeAgent:
 
     def chat(self, prompt, **kwargs):
         self.prompts.append(prompt)
-        return {"response": self._response, "tool_calls": list(self._tool_calls),
-                "tool_results": [{"tool": t} for t in self._tool_calls], "steps": 1}
+        return {
+            "response": self._response,
+            "tool_calls": list(self._tool_calls),
+            "tool_results": [{"tool": t} for t in self._tool_calls],
+            "steps": 1,
+        }
 
 
 @pytest.fixture()
 def no_file_scan(monkeypatch):
     changed = {"files": []}
-    monkeypatch.setattr("core.mission._scan_changed_files",
-                        lambda since_ts, roots=None: changed["files"])
+    monkeypatch.setattr("core.mission._scan_changed_files", lambda since_ts, roots=None: changed["files"])
     return changed
 
 
@@ -315,8 +328,7 @@ def test_goal_tools_still_satisfy_a_change_stage(no_file_scan):
     from core.mission import make_agent_backed_executor
 
     agent = _FakeAgent(response="Wrote auth.py", tool_calls=["file_write", "sandbox_run"])
-    res = make_agent_backed_executor(agent=agent)(
-        _Node(role="coder", goal="Implement authentication"), {})
+    res = make_agent_backed_executor(agent=agent)(_Node(role="coder", goal="Implement authentication"), {})
     assert res["success"] is True
     assert res["evidence"][0]["performed_work"] is True
 
@@ -326,20 +338,20 @@ def test_verifier_reporting_failure_passes_without_file_changes(no_file_scan):
     from core.mission import make_agent_backed_executor
 
     agent = _FakeAgent(
-        response=("Verification result: 3 tests failed because the login handler "
-                  "returns 500 when the session cookie is missing. Traceback shows "
-                  "a KeyError in auth/session.py line 42. No files were changed by "
-                  "this verification pass."),
+        response=(
+            "Verification result: 3 tests failed because the login handler "
+            "returns 500 when the session cookie is missing. Traceback shows "
+            "a KeyError in auth/session.py line 42. No files were changed by "
+            "this verification pass."
+        ),
     )
-    res = make_agent_backed_executor(agent=agent)(
-        _Node(role="verifier", goal="Review the auth module and report defects"), {})
+    res = make_agent_backed_executor(agent=agent)(_Node(role="verifier", goal="Review the auth module and report defects"), {})
     assert res["success"] is True, res
     assert res["evidence"][0]["expected_output"] == "analysis"
 
 
 def test_expected_output_type_by_role_and_goal():
-    from core.mission import (EVIDENCE_ANALYSIS, EVIDENCE_CHANGE, EVIDENCE_EXECUTION,
-                              expected_output_type)
+    from core.mission import EVIDENCE_ANALYSIS, EVIDENCE_CHANGE, EVIDENCE_EXECUTION, expected_output_type
 
     assert expected_output_type(_Node("coder", "Implement the login form"))["primary"] == EVIDENCE_CHANGE
     assert expected_output_type(_Node("verifier", "Review the diff"))["primary"] == EVIDENCE_ANALYSIS
@@ -375,9 +387,15 @@ def test_classify_evidence_reports_supporting_separately():
 # ===========================================================================
 def test_mission_budget_is_a_hierarchy_and_beats_one_agent_turn():
     from core.config import config
-    from core.mission import (MISSION_PHASES, PHASE_EMERGENCY, PHASE_EXECUTION,
-                              PHASE_PLANNING, PHASE_REPAIR, PHASE_VERIFICATION,
-                              MissionBudget)
+    from core.mission import (
+        MISSION_PHASES,
+        PHASE_EMERGENCY,
+        PHASE_EXECUTION,
+        PHASE_PLANNING,
+        PHASE_REPAIR,
+        PHASE_VERIFICATION,
+        MissionBudget,
+    )
 
     b = MissionBudget()
     assert b.initial_steps >= int(config.max_tool_steps)
@@ -418,8 +436,7 @@ def test_mission_default_budget_uses_config(tmp_path):
     from core.config import config
     from core.mission import MissionEngine
 
-    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "ok"},
-                           storage_dir=tmp_path / "missions")
+    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "ok"}, storage_dir=tmp_path / "missions")
     report = engine.start_mission("do the thing")
     assert report.budget.initial_steps == int(config.mission_budget_steps)
     assert report.budget.phases
@@ -532,7 +549,7 @@ def test_atomic_write_is_all_or_nothing(tmp_path):
 
 def test_file_lock_is_acquired_and_released(tmp_path):
     """Advisory locks must not leak: acquire/release cycles stay usable."""
-    from core.atomic_io import file_lock, atomic_write_json, read_json
+    from core.atomic_io import atomic_write_json, file_lock, read_json
 
     path = tmp_path / "guarded.json"
     for value in (1, 2, 3):
@@ -546,8 +563,7 @@ def test_mission_state_survives_concurrent_saves(tmp_path):
     """Every save leaves a complete, parseable document behind."""
     from core.mission import MissionEngine
 
-    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "ok"},
-                           storage_dir=tmp_path / "missions")
+    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "ok"}, storage_dir=tmp_path / "missions")
     report = engine.start_mission("concurrent writes", budget_steps=3)
     path = tmp_path / "missions" / f"{report.mission_id}.json"
     for _ in range(5):
@@ -561,7 +577,7 @@ def test_mission_state_survives_concurrent_saves(tmp_path):
 # 8. resume semantics
 # ===========================================================================
 def _make_failed(tmp_path, **kw) -> Any:
-    from core.mission import MissionEngine, MissionState
+    from core.mission import MissionEngine
 
     def executor(node, ctx):
         return {"success": False, "output": "", "error": "still broken"}
@@ -616,8 +632,7 @@ def test_blocked_mission_resumes_without_flags(tmp_path):
 def test_completed_and_cancelled_are_terminal(tmp_path):
     from core.mission import MissionEngine, MissionState
 
-    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "done"},
-                           storage_dir=tmp_path / "missions")
+    engine = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "done"}, storage_dir=tmp_path / "missions")
     report = engine.start_mission("finish fast", budget_steps=4)
     if report.state == MissionState.COMPLETED.value:
         with pytest.raises(ValueError, match="completed"):
@@ -644,7 +659,6 @@ def test_extend_budget_works_on_failed_mission_and_docs_are_current(tmp_path):
 
 
 def test_extend_budget_emergency_slot(tmp_path):
-    from core.mission import MissionEngine
 
     engine, report = _make_failed(tmp_path)
     engine.extend_budget(report.mission_id, steps=5)
@@ -666,9 +680,10 @@ def test_single_control_room_is_queue_first_and_failure_aware():
     dashboard surface or shared JS runtime anymore.
     """
     from fastapi.testclient import TestClient
+
     from gateway.gateway import app
-    root = pathlib.Path(__file__).resolve().parent.parent / "gateway"
-    html = (root / "control.html").read_text(encoding="utf-8")
+
+    html = control_room_source()
     # queue-first / command submission
     assert "/api/v1/commands" in html
     assert "typed Command" in html
@@ -696,8 +711,7 @@ def test_ci_is_local_not_hosted():
     root = pathlib.Path(__file__).resolve().parent.parent
     workflows = root / ".github" / "workflows"
     assert not workflows.exists(), (
-        "GitHub Actions was intentionally removed; if you want hosted CI back, "
-        "re-add it deliberately and update this test"
+        "GitHub Actions was intentionally removed; if you want hosted CI back, re-add it deliberately and update this test"
     )
     readme = (root / "README.md").read_text(encoding="utf-8")
     assert "actions/workflows" not in readme, "README still references a CI badge"
@@ -768,10 +782,16 @@ def _wait_job(client, job_id, timeout=60.0):
 
 def test_queued_turn_is_pollable_end_to_end(client):
     """Queue-first: submit → job → poll status → fetch result (no SSE needed)."""
-    r = client.post("/command", json={
-        "text": "Can you explain how to fix my app?", "user_id": "q1",
-        "platform": "dashboard", "async": True, "stream": False,
-    })
+    r = client.post(
+        "/command",
+        json={
+            "text": "Can you explain how to fix my app?",
+            "user_id": "q1",
+            "platform": "dashboard",
+            "async": True,
+            "stream": False,
+        },
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["async"] is True and body["run_kind"] == "queued"
@@ -788,7 +808,7 @@ def test_queued_turn_is_pollable_end_to_end(client):
     assert got.json()["status"] == "succeeded"
 
     res = client.get(f"/jobs/{job_id}/result").json()["result"]
-    assert res["run_kind"] == "chat"          # a question is never promoted
+    assert res["run_kind"] == "chat"  # a question is never promoted
     assert res["response"]
 
     # unknown jobs are still 404
@@ -797,10 +817,17 @@ def test_queued_turn_is_pollable_end_to_end(client):
 
 def test_queued_mission_reports_failure_not_advice(client):
     """A mission on a backend that cannot do the work is reported, not faked."""
-    r = client.post("/command", json={
-        "text": "mission: build a tiny tool and verify it", "user_id": "q2",
-        "platform": "dashboard", "async": True, "stream": False, "autonomous": True,
-    })
+    r = client.post(
+        "/command",
+        json={
+            "text": "mission: build a tiny tool and verify it",
+            "user_id": "q2",
+            "platform": "dashboard",
+            "async": True,
+            "stream": False,
+            "autonomous": True,
+        },
+    )
     job_id = r.json()["job_id"]
     st = _wait_job(client, job_id)
     assert st["status"] in ("succeeded", "failed"), st
@@ -823,7 +850,9 @@ def test_long_running_mission_can_be_cancelled(tmp_path):
 
     engine = MissionEngine(executor=executor, storage_dir=tmp_path / "missions")
     report = engine.start_mission(
-        "long running job", budget_steps=40, max_repairs=5,
+        "long running job",
+        budget_steps=40,
+        max_repairs=5,
         should_cancel=lambda: rounds["n"] >= 2,
     )
     assert report.state == MissionState.CANCELLED.value

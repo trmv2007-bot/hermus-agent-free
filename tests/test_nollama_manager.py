@@ -8,6 +8,7 @@ Two invariants matter:
    ``cancelled``).  Nothing is allowed to sit in a "processing" state the UI
    would poll forever.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,6 @@ from core.nollama import (
     STATE_FAILED,
     STATE_QUEUED,
     STATE_READY,
-    TERMINAL_STATES,
     NollamaManager,
     model_dir_ready,
 )
@@ -39,7 +39,7 @@ def _write_ir(path, declared=1024, actual=2048):
     """Create a directory that looks like a complete OpenVINO IR export."""
     path.mkdir(parents=True, exist_ok=True)
     (path / "openvino_model.xml").write_text(
-        '<net><weights><blob offset="0" size="%d"/></weights></net>' % declared, encoding="utf-8"
+        f'<net><weights><blob offset="0" size="{declared}"/></weights></net>', encoding="utf-8"
     )
     (path / "openvino_model.bin").write_bytes(b"x" * actual)
     return path
@@ -260,8 +260,7 @@ def test_installed_models_are_detected(mgr):
 
 def test_recommended_model_disappears_once_installed(mgr):
     """The dashboard banner is driven by this: installed → nothing recommended."""
-    plan = {"roles": {"doctor": {"engine": "nollama", "device": "GPU"},
-                     "background": {"engine": "nollama", "device": "GPU"}}}
+    plan = {"roles": {"doctor": {"engine": "nollama", "device": "GPU"}, "background": {"engine": "nollama", "device": "GPU"}}}
     first = mgr.recommended_model(plan)
     assert first is not None and first["id"] == "minicpm"
     _write_ir(mgr.model_dir(mgr.get_spec("minicpm")))
@@ -419,8 +418,18 @@ def test_downloads_list_reports_every_job(mgr, monkeypatch):
 
 def test_status_shape_is_dashboard_ready(mgr):
     status = mgr.status(probe=False)
-    for key in ("installed", "running", "port", "base_url", "models", "catalog",
-                "downloads", "models_dir", "home", "model_count"):
+    for key in (
+        "installed",
+        "running",
+        "port",
+        "base_url",
+        "models",
+        "catalog",
+        "downloads",
+        "models_dir",
+        "home",
+        "model_count",
+    ):
         assert key in status
     assert status["installed"] is False
     assert status["model_count"] == 0

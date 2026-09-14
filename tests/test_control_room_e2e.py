@@ -8,15 +8,19 @@ fake counters, no browser-local-only state, no static "healthy" claims.
 These tests drive the canonical backend directly through the same endpoints
 /control uses, so they prove the click→command→owner→state→event→UI loop.
 """
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from _control_room_source import control_room_source
 
 
 def _client():
     from fastapi.testclient import TestClient
+
     from gateway.gateway import app
+
     return TestClient(app)
 
 
@@ -37,21 +41,35 @@ def test_control_room_serves_from_real_backend_seeds():
     r = c.get("/control")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    text = r.text
+    text = control_room_source()
     # snapshot + replay + command architecture, no UI-owned truth
     assert "Snapshot" in text and "Replay" in text
     assert "/api/v1/commands" in text
     assert "never simulates success" in text or "never owns truth" in text
     # every meaningful control maps to a real backend command
-    for api in ("/api/v1/system/health", "/api/v1/system/capabilities",
-                "/jobs", "/queue/status", "/events/recent", "/dashboard/events",
-                "/computer/status", "/computer/run", "/computer/control/emergency-stop",
-                "/remote/status", "/remote/approvals", "/remote/", "/remote/",
-                "/doctor/status", "/doctor/run", "/api/v1/runs/"):
+    for api in (
+        "/api/v1/system/health",
+        "/api/v1/system/capabilities",
+        "/jobs",
+        "/queue/status",
+        "/events/recent",
+        "/dashboard/events",
+        "/computer/status",
+        "/computer/run",
+        "/computer/control/emergency-stop",
+        "/remote/status",
+        "/remote/approvals",
+        "/remote/",
+        "/remote/",
+        "/doctor/status",
+        "/doctor/run",
+        "/api/v1/runs/",
+    ):
         assert api in text, f"control room must wire {api}"
     # approve/reject are built dynamically from a real /remote/{action} command
-    assert '"/remote/" + act' in text or "'/remote/' + act" in text \
-        or '"/remote/"' in text, "remote approve/reject must hit the real backend"
+    assert '"/remote/" + act' in text or "'/remote/' + act" in text or '"/remote/"' in text, (
+        "remote approve/reject must hit the real backend"
+    )
     # Authenticated deployments must be usable from the browser too: HTTP uses
     # the header and browser-only SSE/WS transports receive the query token.
     assert "X-Hermus-Token" in text
@@ -86,15 +104,21 @@ def test_capabilities_snapshot_is_backend_derived():
 # ---------------------------------------------------------------------------
 def test_command_endpoint_emits_typed_canonical_command():
     c = _client()
-    r = c.post("/api/v1/commands", json={
-        "command": "system.health", "args": {}, "source": "control",
-    })
+    r = c.post(
+        "/api/v1/commands",
+        json={
+            "command": "system.health",
+            "args": {},
+            "source": "control",
+        },
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
     assert body["trace_id"] and body["event_id"]
     # The command is on the canonical durable EventBus (replayable) with a trace.
     from core.events import get_bus
+
     snapshot = get_bus().snapshot()
     assert any(getattr(e, "command", None) == "system.health" for e in snapshot)
     assert any(getattr(e, "trace_id", None) == body["trace_id"] for e in snapshot)
@@ -103,10 +127,9 @@ def test_command_endpoint_emits_typed_canonical_command():
 def test_command_endpoint_reaches_canonical_bus_with_trace():
     """Click accounting lands on the one durable canonical EventBus."""
     from core.events import get_bus
+
     c = _client()
-    r = c.post("/api/v1/commands", json={"command": "computer.run",
-                                         "args": {"goal": "open browser"},
-                                         "source": "control"}).json()
+    r = c.post("/api/v1/commands", json={"command": "computer.run", "args": {"goal": "open browser"}, "source": "control"}).json()
     envs = [e for e in get_bus().snapshot() if getattr(e, "trace_id", None) == r["trace_id"]]
     assert envs and envs[0].command == "computer.run"
     assert envs[0].type == "command.requested"
@@ -126,7 +149,7 @@ def test_computer_controls_map_to_real_backend():
     # emergency stop is a real, guarded action; always release it afterwards so
     # the global brake does not bleed into every later test/run.
     assert c.post("/computer/control/emergency-stop", json={}).status_code in (200, 400, 503)
-    assert "/computer/control/emergency-stop" in _client().get("/control").text
+    assert "/computer/control/emergency-stop" in control_room_source()
     # release the brake so the global state does not leak into later tests/runs
     assert c.post("/computer/control/emergency-release", json={}).status_code in (200, 400, 503)
 
@@ -158,6 +181,7 @@ def test_doctor_control_is_real_diagnostics():
 def test_dashboard_event_stream_snapshot_then_replay():
     """The live WS sends a snapshot, then events; replay reconstructs state."""
     from core.dashboard_events import dashboard_event_bus
+
     c = _client()
     # event bus is bridged onto the canonical EventBus; the snapshot is real
     assert isinstance(dashboard_event_bus.recent(50), list)
@@ -169,6 +193,7 @@ def test_dashboard_event_stream_snapshot_then_replay():
 def test_replay_endpoint_timeline_is_backed_by_durable_log():
     c = _client()
     from core.events import get_bus
+
     envs = [e for e in get_bus().snapshot() if getattr(e, "trace_id", None) is not None]
     if envs:
         tid = envs[0].trace_id
@@ -191,9 +216,16 @@ def test_events_recent_is_backed_realtime_feed():
 # ---------------------------------------------------------------------------
 def test_no_legacy_dashboard_surface_remains():
     c = _client()
-    for path in ("/dashboard", "/dashboard/legacy", "/jarvis", "/dashboard/jarvis",
-                 "/computer/dashboard", "/remote", "/dashboard-assets/hermus-client.js",
-                 "/dashboard-assets/living-deck.js"):
+    for path in (
+        "/dashboard",
+        "/dashboard/legacy",
+        "/jarvis",
+        "/dashboard/jarvis",
+        "/computer/dashboard",
+        "/remote",
+        "/dashboard-assets/hermus-client.js",
+        "/dashboard-assets/living-deck.js",
+    ):
         assert c.get(path).status_code == 404, path
 
 
@@ -207,15 +239,24 @@ def test_no_production_reference_to_deleted_surfaces():
     """No code path (non-comment) may depend on the deleted dashboard surfaces."""
     import pathlib
     import token as tok_mod
+
     root = pathlib.Path(__file__).resolve().parents[1]
-    forbidden = ("dashboard.html", "jarvis_dashboard", "dashboard_computer.html",
-                 "remote.html", "living-deck", "hermus-client", "jarvis-control",
-                 "dashboard-assets")
-    targets = list((root / "gateway").rglob("*.py")) + [root / "hermus.py"]
+    forbidden = (
+        "dashboard.html",
+        "jarvis_dashboard",
+        "dashboard_computer.html",
+        "remote.html",
+        "living-deck",
+        "hermus-client",
+        "jarvis-control",
+        "dashboard-assets",
+    )
+    targets = list((root / "gateway").rglob("*.py")) + list((root / "hermus_cli").rglob("*.py")) + [root / "hermus.py"]
     for f in targets:
         src = f.read_text(encoding="utf-8")
         # strip comments (COMMENT tokens) so docstrings/comments don't false-positive
         import io
+
         code = ""
         try:
             for tok in tok_mod.generate_tokens(io.StringIO(src).readline):

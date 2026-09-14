@@ -6,8 +6,9 @@ Provides:
 - Per-task and aggregate scoring
 - Integration with the episode store for historical comparison
 """
-from .tasks import COMPUTER_TASKS, get_task, list_tasks, TaskSpec, get_categories
-from .runner import BenchmarkRunner, BenchmarkResult, run_benchmark
+
+from .runner import BenchmarkResult, BenchmarkRunner, run_benchmark
+from .tasks import COMPUTER_TASKS, TaskSpec, get_categories, get_task, list_tasks
 
 __all__ = [
     "COMPUTER_TASKS",

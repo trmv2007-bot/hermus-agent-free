@@ -18,6 +18,7 @@ Contract (enforced by tests/test_architecture_gates.py):
 Scrapling is an optional dependency: the package imports cleanly without it
 and every operation degrades to a typed, honest failure result.
 """
+
 from __future__ import annotations
 
 from .errors import (

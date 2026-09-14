@@ -11,9 +11,8 @@ The routing table is the contract:
 And every role must always resolve to a *concrete* engine — never a
 half-decided state that leaves the dashboard spinning on "processing".
 """
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from core import accelerators as acc
 from core.accelerators import (
@@ -283,10 +282,19 @@ def test_state_status_uses_the_fixed_vocabulary(monkeypatch):
     import core.nollama as nl
 
     monkeypatch.setattr(acc, "cached_plan", lambda refresh=False: plan(snapshot(npu=npu_intel())))
-    monkeypatch.setattr(nl.NollamaManager, "status", lambda self, probe=True: {
-        "installed": False, "running": False, "models": [], "model_count": 0,
-        "models_dir": "/tmp/models", "home": "/tmp/nollama", "port": 8010,
-    })
+    monkeypatch.setattr(
+        nl.NollamaManager,
+        "status",
+        lambda self, probe=True: {
+            "installed": False,
+            "running": False,
+            "models": [],
+            "model_count": 0,
+            "models_dir": "/tmp/models",
+            "home": "/tmp/nollama",
+            "port": 8010,
+        },
+    )
     monkeypatch.setattr(acc, "probe_endpoint", lambda base_url, timeout=2.0: {"reachable": False, "models": [], "detail": "no"})
 
     st = acc.state()
@@ -298,16 +306,27 @@ def test_state_status_uses_the_fixed_vocabulary(monkeypatch):
     assert "NPU" in st["recommended_model"]["devices"]
 
     # Installed + a model on disk but not answering → needs starting, not installing.
-    monkeypatch.setattr(nl.NollamaManager, "status", lambda self, probe=True: {
-        "installed": True, "running": False, "models": [{"name": "x"}], "model_count": 1,
-        "models_dir": "/tmp/models", "home": "/tmp/nollama", "port": 8010,
-    })
+    monkeypatch.setattr(
+        nl.NollamaManager,
+        "status",
+        lambda self, probe=True: {
+            "installed": True,
+            "running": False,
+            "models": [{"name": "x"}],
+            "model_count": 1,
+            "models_dir": "/tmp/models",
+            "home": "/tmp/nollama",
+            "port": 8010,
+        },
+    )
     st = acc.state()
     assert st["status"] in (STATUS_NEEDS_MODEL, "unavailable")
     assert st["action"] in ("download_model", "start")
 
     # Installed, model present, answering → ready, and no action is requested.
-    monkeypatch.setattr(acc, "probe_endpoint", lambda base_url, timeout=2.0: {"reachable": True, "models": ["m"], "detail": "200"})
+    monkeypatch.setattr(
+        acc, "probe_endpoint", lambda base_url, timeout=2.0: {"reachable": True, "models": ["m"], "detail": "200"}
+    )
     st = acc.state()
     assert st["status"] == STATUS_READY
     assert st["action"] == ""
@@ -319,10 +338,19 @@ def test_intel_gpu_box_is_offered_minicpm(monkeypatch):
     import core.nollama as nl
 
     monkeypatch.setattr(acc, "cached_plan", lambda refresh=False: plan(snapshot(gpus=gpu_intel())))
-    monkeypatch.setattr(nl.NollamaManager, "status", lambda self, probe=True: {
-        "installed": True, "running": False, "models": [], "model_count": 0,
-        "models_dir": "/tmp/models", "home": "/tmp/nollama", "port": 8010,
-    })
+    monkeypatch.setattr(
+        nl.NollamaManager,
+        "status",
+        lambda self, probe=True: {
+            "installed": True,
+            "running": False,
+            "models": [],
+            "model_count": 0,
+            "models_dir": "/tmp/models",
+            "home": "/tmp/nollama",
+            "port": 8010,
+        },
+    )
     monkeypatch.setattr(acc, "probe_endpoint", lambda base_url, timeout=2.0: {"reachable": True, "models": [], "detail": "200"})
 
     st = acc.state()

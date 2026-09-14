@@ -4,14 +4,13 @@ Extracted from the gateway monolith so the per-concern router modules can
 import agent-registry state without circular imports. ``gateway.gateway``
 re-exports everything here for backward compatibility.
 """
+
 from __future__ import annotations
 
 import hmac
 import os
-from typing import Optional
 
 from fastapi import Request
-
 
 from core.agent import HermusAgent
 from core.config import config
@@ -52,12 +51,12 @@ def _agent_factory(platform: str, user_id: str, model: str = None, mode: str = "
     return get_agent_for_user(platform, user_id, model=model, mode=mode)
 
 
-def _token_matches(provided: Optional[str], expected: str) -> bool:
+def _token_matches(provided: str | None, expected: str) -> bool:
     """Constant-time token comparison to avoid timing side channels."""
     return hmac.compare_digest(str(provided or ""), str(expected))
 
 
-def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) -> None:
+def _check_gateway_auth(request: Request, x_hermus_token: str | None = None) -> None:
     """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token.
 
     Used as a FastAPI dependency on the control-plane HTTP routers. When no token is
@@ -82,8 +81,26 @@ def _check_gateway_auth(request: Request, x_hermus_token: Optional[str] = None) 
     return None
 
 
-def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False,
-                steer_source=None) -> dict:
+def ws_token_ok(websocket) -> bool:
+    """Authenticate a WebSocket upgrade against the optional gateway token.
+
+    WS routes cannot use the ``_check_gateway_auth`` FastAPI dependency (a
+    WebSocket handler cannot inject ``Request``), so every WS endpoint calls
+    this instead. Single-sourcing it here means the policy — open when no
+    token is configured, constant-time match otherwise, token accepted from
+    ``?token=`` or ``X-Hermus-Token`` — has exactly one owner.
+
+    Returns ``True`` when no token is configured (local default) or the client
+    presented a matching one.
+    """
+    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    if not expected:
+        return True
+    provided = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
+    return _token_matches(provided, expected)
+
+
+def _agent_chat(agent, text: str, *, on_event=None, stream: bool = False, steer_source=None) -> dict:
     """Call ``agent.chat`` with only the keyword arguments it actually accepts.
 
     Agents are pluggable here — custom API profiles, older builds, test fakes —

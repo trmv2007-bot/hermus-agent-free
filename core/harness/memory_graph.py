@@ -3,6 +3,7 @@
 jcode queries a memory graph each turn and only spends embedding cost
 when lexical hits are weak. Results from turn N are ready at turn N+1.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,12 +31,14 @@ def cascade_recall(query: str, limit: int = 5, project: str = "") -> dict[str, A
 
             if embedding_store.available():
                 sem = embedding_store.search(query, limit=limit)
-                for row in (sem.get("results") or []):
-                    hits.append({
-                        "content": str(row.get("content") or "")[:400],
-                        "score": row.get("score", 0.0),
-                        "source": "embed",
-                    })
+                for row in sem.get("results") or []:
+                    hits.append(
+                        {
+                            "content": str(row.get("content") or "")[:400],
+                            "score": row.get("score", 0.0),
+                            "source": "embed",
+                        }
+                    )
                 source = "cascade" if hits else source
         except Exception:
             pass
@@ -46,11 +49,13 @@ def cascade_recall(query: str, limit: int = 5, project: str = "") -> dict[str, A
 
             extra = memory.recall(query, limit=limit, project=project or None)
             for row in extra or []:
-                hits.append({
-                    "content": str(row.get("content") or "")[:400],
-                    "score": row.get("score", 0.0),
-                    "source": f"memory2:{row.get('kind', '')}",
-                })
+                hits.append(
+                    {
+                        "content": str(row.get("content") or "")[:400],
+                        "score": row.get("score", 0.0),
+                        "source": f"memory2:{row.get('kind', '')}",
+                    }
+                )
             if extra:
                 source = "cascade"
         except Exception:

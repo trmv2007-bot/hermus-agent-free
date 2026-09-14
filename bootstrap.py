@@ -15,6 +15,7 @@ No model weights, credentials, databases, memory, projects or recordings are
 removed or overwritten here.  Optional model/provider services are reported,
 not fabricated.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,8 +29,9 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -40,21 +42,56 @@ if str(ROOT) not in sys.path:
 # kept as import-name -> capability checks because pip names and import names
 # differ (python-dotenv -> dotenv, Pillow -> PIL, PyYAML -> yaml).
 REQUIRED_IMPORTS = [
-    "pydantic", "dotenv", "requests", "tiktoken", "PIL",
-    "fastapi", "uvicorn", "multipart", "psutil", "httpx",
-    "ddgs", "playwright", "scrapling", "faster_whisper", "feedparser",
-    "pypdf", "yaml", "imageio_ffmpeg", "apscheduler", "prompt_toolkit", "rich",
+    "pydantic",
+    "dotenv",
+    "requests",
+    "tiktoken",
+    "PIL",
+    "fastapi",
+    "uvicorn",
+    "multipart",
+    "psutil",
+    "httpx",
+    "ddgs",
+    "playwright",
+    "scrapling",
+    "faster_whisper",
+    "feedparser",
+    "pypdf",
+    "yaml",
+    "imageio_ffmpeg",
+    "apscheduler",
+    "prompt_toolkit",
+    "rich",
     "websockets",
 ]
 
 # Kept for the public/bootstrap compatibility contract and for a useful repair
 # hint. Installation itself reads requirements.txt rather than this list.
 REQUIRED_PIP = [
-    "pydantic", "python-dotenv", "requests", "tiktoken", "Pillow",
-    "fastapi", "uvicorn", "python-multipart", "psutil", "httpx",
-    "ddgs", "playwright", "scrapling[fetchers]", "faster-whisper",
-    "imageio-ffmpeg", "feedparser", "pypdf", "PyYAML",
-    "APScheduler", "prompt_toolkit", "rich", "websockets", "pytest",
+    "pydantic",
+    "python-dotenv",
+    "requests",
+    "tiktoken",
+    "Pillow",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "psutil",
+    "httpx",
+    "ddgs",
+    "playwright",
+    "scrapling[fetchers]",
+    "faster-whisper",
+    "imageio-ffmpeg",
+    "feedparser",
+    "pypdf",
+    "PyYAML",
+    "APScheduler",
+    "prompt_toolkit",
+    "rich",
+    "websockets",
+    "pytest",
 ]
 
 # Optional imports are capability-labelled rather than treated as required core
@@ -83,11 +120,30 @@ OPTIONAL = [
 ]
 
 DATA_DIRS = [
-    "data", "data/sessions", "data/tmp", "data/skins", "data/counsel",
-    "data/plans", "data/recordings", "data/speech", "data/speech/prompts",
-    "data/avatar", "data/voice", "data/jobs", "data/jobs/results", "data/doctor",
-    "data/logs", "data/engine", "workspace", "artifacts", "skills", "migrations",
-    "logs", "missions", "checkpoints", "bin",
+    "data",
+    "data/sessions",
+    "data/tmp",
+    "data/skins",
+    "data/counsel",
+    "data/plans",
+    "data/recordings",
+    "data/speech",
+    "data/speech/prompts",
+    "data/avatar",
+    "data/voice",
+    "data/jobs",
+    "data/jobs/results",
+    "data/doctor",
+    "data/logs",
+    "data/engine",
+    "workspace",
+    "artifacts",
+    "skills",
+    "migrations",
+    "logs",
+    "missions",
+    "checkpoints",
+    "bin",
 ]
 
 REQUIRED_STATUS = "✅ INSTALLED + VERIFIED"
@@ -111,7 +167,7 @@ def _module_import_ok(name: str) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"[:300]
 
 
-def _python_path(vdir: Path = ROOT / ".venv") -> Optional[Path]:
+def _python_path(vdir: Path = ROOT / ".venv") -> Path | None:
     candidates = (
         vdir / "bin" / "python",
         vdir / "Scripts" / "python.exe",
@@ -129,10 +185,7 @@ def venv_ready() -> bool:
 def _running_in_project_venv() -> bool:
     """Use ``sys.prefix`` rather than symlink paths to identify the venv."""
     try:
-        return (
-            sys.prefix != sys.base_prefix
-            and Path(sys.prefix).resolve() == (ROOT / ".venv").resolve()
-        )
+        return sys.prefix != sys.base_prefix and Path(sys.prefix).resolve() == (ROOT / ".venv").resolve()
     except OSError:
         return False
 
@@ -157,8 +210,7 @@ def detect_platform() -> dict[str, Any]:
         family = "macos"
     else:
         family = system.lower() or "unknown"
-    managers = [name for name in ("apt-get", "dnf", "yum", "pacman", "apk", "brew", "pkg")
-                if shutil.which(name)]
+    managers = [name for name in ("apt-get", "dnf", "yum", "pacman", "apk", "brew", "pkg") if shutil.which(name)]
     return {
         "family": family,
         "system": system,
@@ -169,7 +221,7 @@ def detect_platform() -> dict[str, Any]:
     }
 
 
-def _run(cmd: list[str], *, cwd: Optional[Path] = None, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
+def _run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
     """Run a command without a shell and retain output for an honest report."""
     return subprocess.run(
         cmd,
@@ -188,7 +240,7 @@ def _tail(result: subprocess.CompletedProcess[str], limit: int = 900) -> str:
 
 def _base_python() -> Path:
     """Select a supported host interpreter for creating .venv."""
-    if sys.version_info >= (3, 10):
+    if sys.version_info >= (3, 10):  # noqa: UP036 - host interpreter may predate 3.10; selecting a suitable one is the point
         return Path(sys.executable)
     for name in ("python3.13", "python3.12", "python3.11", "python3.10", "python3"):
         candidate = shutil.which(name)
@@ -203,13 +255,16 @@ def _venv_interpreter_healthy(path: Path) -> tuple[bool, str]:
     if not path.is_file() or not os.access(path, os.X_OK):
         return False, "venv Python executable is missing or not executable"
     try:
-        result = _run([str(path), "-c", "import sys; print(sys.version); raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"], timeout=20)
+        result = _run(
+            [str(path), "-c", "import sys; print(sys.version); raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"],
+            timeout=20,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"venv Python could not start: {type(exc).__name__}: {exc}"
     return (True, _tail(result, 240)) if result.returncode == 0 else (False, _tail(result, 400))
 
 
-def _create_venv(vdir: Path, base_python: Optional[Path], *, upgrade: bool = False) -> tuple[bool, str]:
+def _create_venv(vdir: Path, base_python: Path | None, *, upgrade: bool = False) -> tuple[bool, str]:
     """Create/upgrade a venv with the explicitly selected host interpreter."""
     interpreter = base_python or Path(sys.executable)
     command = [str(interpreter), "-m", "venv"]
@@ -235,7 +290,7 @@ def _backup_broken_venv(vdir: Path) -> Path:
     return backup
 
 
-def ensure_venv(*, repair: bool = False, base_python: Optional[Path] = None) -> dict[str, Any]:
+def ensure_venv(*, repair: bool = False, base_python: Path | None = None) -> dict[str, Any]:
     """Create or repair ``.venv`` without deleting the old environment.
 
     A healthy environment is reused.  A partial/broken environment is first
@@ -249,15 +304,15 @@ def ensure_venv(*, repair: bool = False, base_python: Optional[Path] = None) -> 
         if healthy:
             # --repair repairs packages/layout below; a healthy venv itself is
             # never recreated, avoiding needless churn and preserving caches.
-            return {"created": False, "repaired": False, "path": str(vdir),
-                    "python": str(existing), "detail": detail}
+            return {"created": False, "repaired": False, "path": str(vdir), "python": str(existing), "detail": detail}
         repaired_ok, repair_detail = _create_venv(vdir, base_python, upgrade=True)
         if repaired_ok:
             repaired = _python_path(vdir)
-            healthy, after = _venv_interpreter_healthy(repaired) if repaired else (False, "venv Python still missing after repair")
+            healthy, after = (
+                _venv_interpreter_healthy(repaired) if repaired else (False, "venv Python still missing after repair")
+            )
             if healthy:
-                return {"created": False, "repaired": True, "path": str(vdir),
-                        "python": str(repaired), "detail": after}
+                return {"created": False, "repaired": True, "path": str(vdir), "python": str(repaired), "detail": after}
         detail = f"in-place venv repair failed: {repair_detail}"
     elif vdir.exists():
         detail = "venv directory exists but contains no usable Python"
@@ -268,22 +323,41 @@ def ensure_venv(*, repair: bool = False, base_python: Optional[Path] = None) -> 
         try:
             backup = _backup_broken_venv(vdir)
         except OSError as exc:
-            return {"created": False, "repaired": False, "path": str(vdir),
-                    "error": f"cannot preserve broken .venv before repair: {exc}"}
+            return {
+                "created": False,
+                "repaired": False,
+                "path": str(vdir),
+                "error": f"cannot preserve broken .venv before repair: {exc}",
+            }
     else:
         backup = None
     created_ok, create_detail = _create_venv(vdir, base_python)
     if not created_ok:
-        return {"created": False, "repaired": bool(backup), "path": str(vdir),
-                "error": f"venv creation failed: {create_detail}",
-                "backup": str(backup) if backup else None}
+        return {
+            "created": False,
+            "repaired": bool(backup),
+            "path": str(vdir),
+            "error": f"venv creation failed: {create_detail}",
+            "backup": str(backup) if backup else None,
+        }
     created = _python_path(vdir)
     healthy, after = _venv_interpreter_healthy(created) if created else (False, "new venv Python missing")
     if not healthy:
-        return {"created": False, "repaired": bool(backup), "path": str(vdir),
-                "error": f"new venv is not usable: {after}", "backup": str(backup) if backup else None}
-    return {"created": not bool(backup), "repaired": bool(backup), "path": str(vdir),
-            "python": str(created), "detail": after, "backup": str(backup) if backup else None}
+        return {
+            "created": False,
+            "repaired": bool(backup),
+            "path": str(vdir),
+            "error": f"new venv is not usable: {after}",
+            "backup": str(backup) if backup else None,
+        }
+    return {
+        "created": not bool(backup),
+        "repaired": bool(backup),
+        "path": str(vdir),
+        "python": str(created),
+        "detail": after,
+        "backup": str(backup) if backup else None,
+    }
 
 
 def _optional_specs(path: Path = ROOT / "requirements-optional.txt") -> Iterable[str]:
@@ -298,7 +372,7 @@ def _optional_specs(path: Path = ROOT / "requirements-optional.txt") -> Iterable
     return specs
 
 
-def install_required(interpreter: Optional[Path] = None, *, repair: bool = False) -> dict[str, Any]:
+def install_required(interpreter: Path | None = None, *, repair: bool = False) -> dict[str, Any]:
     """Install the canonical required dependency file in the selected venv."""
     py = interpreter or Path(sys.executable)
     req = ROOT / "requirements.txt"
@@ -312,11 +386,16 @@ def install_required(interpreter: Optional[Path] = None, *, repair: bool = False
         result = _run(args, timeout=1800)
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "returncode": 1, "detail": f"pip install failed to start: {type(exc).__name__}: {exc}"}
-    return {"ok": result.returncode == 0, "returncode": result.returncode,
-            "detail": _tail(result), "file": str(req), "interpreter": str(py)}
+    return {
+        "ok": result.returncode == 0,
+        "returncode": result.returncode,
+        "detail": _tail(result),
+        "file": str(req),
+        "interpreter": str(py),
+    }
 
 
-def install_optional(interpreter: Optional[Path] = None) -> dict[str, Any]:
+def install_optional(interpreter: Path | None = None) -> dict[str, Any]:
     """Install optional requirements independently and report every failure."""
     py = interpreter or Path(sys.executable)
     failures: list[dict[str, Any]] = []
@@ -334,11 +413,17 @@ def install_optional(interpreter: Optional[Path] = None) -> dict[str, Any]:
             installed.append(spec)
         else:
             failures.append({"requirement": spec, "detail": _tail(result)})
-    return {"ok": not failures, "installed": installed, "failed": failures, "skipped": skipped,
-            "file": str(ROOT / "requirements-optional.txt"), "interpreter": str(py)}
+    return {
+        "ok": not failures,
+        "installed": installed,
+        "failed": failures,
+        "skipped": skipped,
+        "file": str(ROOT / "requirements-optional.txt"),
+        "interpreter": str(py),
+    }
 
 
-def install_browser_runtime(interpreter: Optional[Path] = None, *, repair: bool = False) -> dict[str, Any]:
+def install_browser_runtime(interpreter: Path | None = None, *, repair: bool = False) -> dict[str, Any]:
     """Install the browser package's Chromium runtime, without model weights."""
     py = interpreter or Path(sys.executable)
     if detect_platform().get("termux"):
@@ -346,16 +431,26 @@ def install_browser_runtime(interpreter: Optional[Path] = None, *, repair: bool 
         # desktop Chromium shared-library layout is not a supported install
         # target here. Do not run a failing downloader or imply browser support.
         return {
-            "playwright": {"ok": False, "optional": True, "detail": "Chromium browser installation is optional/unavailable on Android/Termux"},
-            "scrapling": {"ok": True, "optional": True, "detail": "Scrapling HTTP fetcher retained; browser installer skipped on Android/Termux"},
+            "playwright": {
+                "ok": False,
+                "optional": True,
+                "detail": "Chromium browser installation is optional/unavailable on Android/Termux",
+            },
+            "scrapling": {
+                "ok": True,
+                "optional": True,
+                "detail": "Scrapling HTTP fetcher retained; browser installer skipped on Android/Termux",
+            },
             "ok": False,
         }
     result: dict[str, Any] = {"playwright": None, "scrapling": None}
     try:
         playwright_args = [str(py), "-m", "playwright", "install"]
-        use_with_deps = (
-            platform.system() == "Linux"
-            and os.environ.get("HERMUS_PLAYWRIGHT_WITH_DEPS", "") not in ("", "0", "false", "False")
+        use_with_deps = platform.system() == "Linux" and os.environ.get("HERMUS_PLAYWRIGHT_WITH_DEPS", "") not in (
+            "",
+            "0",
+            "false",
+            "False",
         )
         if use_with_deps:
             playwright_args.append("--with-deps")
@@ -534,7 +629,7 @@ def _report_order() -> list[tuple[str, str]]:
     ]
 
 
-def print_installation_report(report: dict[str, Any], *, optional_install: Optional[dict[str, Any]] = None) -> None:
+def print_installation_report(report: dict[str, Any], *, optional_install: dict[str, Any] | None = None) -> None:
     """Print the complete human-facing report and the only final readiness line."""
     print("=" * 78)
     print("HERMUS INSTALLATION / VERIFICATION SUMMARY")
@@ -574,8 +669,10 @@ def print_installation_report(report: dict[str, Any], *, optional_install: Optio
             print(f"{REQUIRED_STATUS} Optional packages: selected optional requirements installed or already satisfied")
     print("-" * 78)
     overall = report.get("overall") or {}
-    print(f"Doctor checks: {overall.get('passed', 0)}/{overall.get('total', 0)} passed; "
-          f"required={'OK' if overall.get('required') else 'FAIL'}")
+    print(
+        f"Doctor checks: {overall.get('passed', 0)}/{overall.get('total', 0)} passed; "
+        f"required={'OK' if overall.get('required') else 'FAIL'}"
+    )
     if overall.get("required"):
         print("HERMUS SETUP: READY")
     else:
@@ -599,7 +696,7 @@ def run(
     print(f"Host: {detect_platform()['family']} | launcher interpreter: {sys.executable}", flush=True)
 
     install_failures: list[dict[str, Any]] = []
-    optional_result: Optional[dict[str, Any]] = None
+    optional_result: dict[str, Any] | None = None
     env_result: dict[str, Any] = {"created": False, "path": str(ROOT / ".env"), "preserved": True}
 
     vdir_python = _python_path()
@@ -665,12 +762,16 @@ def run(
                 # Existing verified browser state is authoritative. A failed
                 # installer command is not itself fatal when live Doctor proves
                 # the browser already works.
-                print(f"Browser installer: Playwright={browser_result.get('playwright')} Scrapling={browser_result.get('scrapling')}")
+                print(
+                    f"Browser installer: Playwright={browser_result.get('playwright')} Scrapling={browser_result.get('scrapling')}"
+                )
         else:
             optional_result = {"ok": True, "installed": [], "failed": [], "skipped": ["no venv interpreter"]}
     else:
         if not vdir_python:
-            install_failures.append({"phase": "verify-only", "detail": "no existing .venv; verification-only mode does not create one"})
+            install_failures.append(
+                {"phase": "verify-only", "detail": "no existing .venv; verification-only mode does not create one"}
+            )
 
     # Re-check environment after package installation. This also means a direct
     # bootstrap invocation from a system Python cannot accidentally verify the
@@ -688,12 +789,14 @@ def run(
     return 0 if report.get("overall", {}).get("required") else 1
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Hermus canonical setup/repair/verification")
     parser.add_argument("command", nargs="?", choices=("bootstrap", "verify", "doctor"), default="bootstrap")
     parser.add_argument("--verify-only", action="store_true", help="do not install or create a venv; run live checks only")
     parser.add_argument("--repair", action="store_true", help="repair broken venv/dependencies and retry browser setup")
-    parser.add_argument("--skip-browser", action="store_true", help="do not download Chromium; verification still reports its state")
+    parser.add_argument(
+        "--skip-browser", action="store_true", help="do not download Chromium; verification still reports its state"
+    )
     parser.add_argument("--skip-optional", action="store_true", help="do not install optional requirements")
     parser.add_argument("--json", action="store_true", help="emit the deep installation report as JSON")
     args = parser.parse_args(argv)

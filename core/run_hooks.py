@@ -3,19 +3,20 @@
 The agent must never *depend* on a subscriber: emitting is best-effort, cheap and
 exception-proof, so an SSE/WebSocket client vanishing mid-run cannot break a task.
 """
+
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any
 
 
-def make_emitter(on_event: Optional[Callable[[str, dict[str, Any]], None]]) -> Callable[..., None]:
+def make_emitter(on_event: Callable[[str, dict[str, Any]], None] | None) -> Callable[..., None]:
     """Return ``emit(type, **data)``; a no-op when nobody is listening."""
     if on_event is None:
         return lambda *a, **k: None
 
-    def emit(event_type: str, data: Optional[dict[str, Any]] = None, **extra: Any) -> None:
+    def emit(event_type: str, data: dict[str, Any] | None = None, **extra: Any) -> None:
         payload = dict(data or {})
         payload.update(extra)
         payload.setdefault("ts", time.time())
@@ -30,7 +31,7 @@ def make_emitter(on_event: Optional[Callable[[str, dict[str, Any]], None]]) -> C
 class CancelToken:
     """Cooperative cancellation: long loops poll ``cancelled`` (cheap)."""
 
-    def __init__(self, check: Optional[Callable[[], bool]] = None, interval: float = 0.2):
+    def __init__(self, check: Callable[[], bool] | None = None, interval: float = 0.2):
         self._check = check
         self._flag = False
         self._interval = float(interval)
@@ -60,5 +61,5 @@ class CancelToken:
             raise CancelledRun("run cancelled")
 
 
-class CancelledRun(RuntimeError):
+class CancelledRun(RuntimeError):  # noqa: N818 - public exception name, kept for API stability
     """Raised inside the agent loop when cancellation is observed."""

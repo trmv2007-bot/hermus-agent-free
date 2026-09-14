@@ -21,40 +21,61 @@ real import / structural facts so they are reproducible and catch regressions:
 * no silent critical init failure-> agent registration failures are surfaced, not
                                     swallowed behind a fake 'ready'.
 """
+
 from __future__ import annotations
 
 import ast
 import os
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 
 # Direct provider SDK packages that application code must never import outside the
 # canonical model subsystem.
 _PROVIDER_SDK = {
-    "openai", "groq", "anthropic", "cohere", "ollama", "google.generativeai",
-    "huggingface_hub", "replicate", "together", "mistralai", "google-genai",
+    "openai",
+    "groq",
+    "anthropic",
+    "cohere",
+    "ollama",
+    "google.generativeai",
+    "huggingface_hub",
+    "replicate",
+    "together",
+    "mistralai",
+    "google-genai",
 }
 
 # Files that ARE the canonical model subsystem (they may reference provider SDKs).
 _MODEL_SUBSYSTEM = {
-    "core/llm.py", "core/providers.py", "core/multi_key.py",
-    "core/openai_compat.py", "core/custom_api.py", "core/provider_resolver.py",
-    "core/model_fleet.py", "core/router2.py", "core/model_capabilities.py",
-    "core/free_keys.py", "core/models/gateway.py", "core/models/__init__.py",
-    "core/nollama.py", "core/computer/llm/*.py",
+    "core/llm.py",
+    "core/providers.py",
+    "core/multi_key.py",
+    "core/openai_compat.py",
+    "core/custom_api.py",
+    "core/provider_resolver.py",
+    "core/model_fleet.py",
+    "core/router2.py",
+    "core/model_capabilities.py",
+    "core/free_keys.py",
+    "core/models/gateway.py",
+    "core/models/__init__.py",
+    "core/nollama.py",
+    "core/computer/llm/*.py",
 }
 
 # Modulus that OWN a legacy dict bus and therefore may instantiate it.
 _EVENT_OWNER_MODULES = {
-    "core/events/bus.py", "core/run_events.py", "core/dashboard_events.py",
+    "core/events/bus.py",
+    "core/run_events.py",
+    "core/dashboard_events.py",
     "core/computer/events.py",
 }
 
 _MEMORY_OWNER_MODULES = {
-    "core/memory/__init__.py", "core/memory/store.py", "core/memory/migration.py",
+    "core/memory/__init__.py",
+    "core/memory/store.py",
+    "core/memory/migration.py",
     "core/compat/legacy_memory.py",
 }
 
@@ -118,8 +139,9 @@ def _imports(p: Path) -> list[str]:
 def test_one_autonomy_engine():
     """MissionEngine is the single autonomy engine definition."""
     defs = [p for p in _prod_files() if "class MissionEngine" in p.read_text(encoding="utf-8")]
-    assert [str(_rel(x)) for x in defs] == ["core/mission.py"], \
+    assert [str(_rel(x)) for x in defs] == ["core/mission.py"], (
         "autonomy must be owned by exactly one implementation (core/mission.MissionEngine)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +172,7 @@ def test_one_event_authority_canonical_bus_is_authoritative_source():
     # dashboard + computer dict buses must bridge to the canonical bus.
     for rel in ("core/dashboard_events.py", "core/computer/events.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")
-        assert "get_bus().publish(" in src or "get_bus" in src, \
-            f"{rel} must mirror events onto the canonical EventBus"
+        assert "get_bus().publish(" in src or "get_bus" in src, f"{rel} must mirror events onto the canonical EventBus"
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +208,7 @@ def test_no_app_level_memory2_direct_access():
             if last == "memory2" and not rel.startswith("core/memory/"):
                 offenders.append((rel, mod))
     assert not offenders, (
-        "app-level code directly imports the typed memory backend (memory2); "
-        f"route through core.memory: {offenders}"
+        f"app-level code directly imports the typed memory backend (memory2); route through core.memory: {offenders}"
     )
 
 
@@ -206,8 +226,9 @@ def test_one_worldstate_owner():
     outside the owner constructs or rehydrates a world state directly.
     """
     defs = [p for p in _prod_files() if "class WorldStateFacade" in p.read_text(encoding="utf-8")]
-    assert [str(_rel(x)) for x in defs] == ["core/state/world.py"], \
+    assert [str(_rel(x)) for x in defs] == ["core/state/world.py"], (
         "world state must be owned by exactly one facade (core.state.WorldStateFacade)"
+    )
 
     owner = {"core/state/world.py", "core/computer/world_state.py"}
     banned = ("WorldState(", "WorldState.from_dict(", "WorldState.load(")
@@ -232,6 +253,7 @@ def test_worldstate_facade_is_reachable_from_production():
     Guards the inverse regression of the gate above: a facade that nothing can
     reach is documentation, not a boundary.
     """
+    import core.computer.computer_agent as agent_module
     from core.state import (  # noqa: F401
         WorldStateFacade,
         create_world_state,
@@ -239,11 +261,9 @@ def test_worldstate_facade_is_reachable_from_production():
         load_world_state,
         world_state_from_dict,
     )
-    import core.computer.computer_agent as agent_module
 
     source = Path(agent_module.__file__).read_text(encoding="utf-8")
-    assert "create_world_state" in source, \
-        "ComputerAgent must build its world state through core.state"
+    assert "create_world_state" in source, "ComputerAgent must build its world state through core.state"
     assert get_world_state().canonical == "v1"
 
 
@@ -320,21 +340,29 @@ def test_one_job_execution_owner():
 # ---------------------------------------------------------------------------
 def test_one_control_room_ui_only_control_html():
     html = list((ROOT / "gateway").glob("*.html"))
-    assert [p.name for p in html] == ["control.html"], \
-        "exactly one production UI surface is allowed (gateway/control.html)"
+    assert [p.name for p in html] == ["control.html"], "exactly one production UI surface is allowed (gateway/control.html)"
 
 
 def test_one_control_room_ui_root_redirects_to_control():
     from fastapi.testclient import TestClient
+
     from gateway.gateway import app
+
     with TestClient(app) as c:
         r = c.get("/", follow_redirects=False)
         assert r.status_code in (307, 302), "root must redirect to the single control room"
         assert r.headers.get("location") == "/control"
         assert c.get("/control").status_code == 200
         # Legacy UI surfaces are dead.
-        for path in ("/dashboard", "/dashboard/legacy", "/jarvis", "/dashboard/jarvis",
-                     "/computer/dashboard", "/remote", "/dashboard-assets/hermus-client.js"):
+        for path in (
+            "/dashboard",
+            "/dashboard/legacy",
+            "/jarvis",
+            "/dashboard/jarvis",
+            "/computer/dashboard",
+            "/remote",
+            "/dashboard-assets/hermus-client.js",
+        ):
             assert c.get(path).status_code == 404, path
 
 
@@ -347,7 +375,7 @@ def test_agent_registration_failure_is_surfaced_not_swallowed():
     # The swallow pattern (try register -> except Exception: pass -> success ready)
     # must be gone.
     assert "register_agent_handlers(self._queue())" in src
-    assert 'except Exception as exc' in src or "except Exception:" in src
+    assert "except Exception as exc" in src or "except Exception:" in src
     # It must report an explicit 'degraded' state on registration failure.
     assert '"degraded"' in src, "agent registration failure must be surfaced as degraded, not buried"
 
@@ -366,8 +394,9 @@ def test_no_bare_except_pass_in_agent_execution_core():
 def test_one_tool_gateway_agent_runtime_uses_it():
     """The agent's tool-execution path must go through the canonical ToolGateway."""
     src = (ROOT / "core/agent.py").read_text(encoding="utf-8")
-    assert "from .tools import get_tool_gateway" in src or "get_tool_gateway" in src, \
+    assert "from .tools import get_tool_gateway" in src or "get_tool_gateway" in src, (
         "the agent must route tool invocation through the canonical ToolGateway"
+    )
     assert ".execute(" in src, "agent must call the gateway's execute()"
 
 
@@ -385,8 +414,7 @@ def test_one_tool_gateway_no_duplicate_invoke_path():
     agent = (ROOT / "core/agent.py").read_text(encoding="utf-8")
     # Agent may still import the registry for discovery (list_tools/load) but must not
     # invoke toolregistry.execute directly anymore.
-    assert "tool_registry.execute(" not in agent, \
-        "core.agent must not bypass the ToolGateway by calling tool_registry.execute"
+    assert "tool_registry.execute(" not in agent, "core.agent must not bypass the ToolGateway by calling tool_registry.execute"
 
 
 def _tool_registry_aliases(p: Path) -> set[str]:
@@ -406,8 +434,7 @@ def _tool_registry_aliases(p: Path) -> set[str]:
             module = node.module or ""
             # Normalize to see if the source module is a tool_registry module.
             resolved = _resolve_relative(p, module)
-            if not (resolved.endswith(".tool_registry") or resolved == "tool_registry"
-                    or resolved == "core.tool_registry"):
+            if not (resolved.endswith(".tool_registry") or resolved == "tool_registry" or resolved == "core.tool_registry"):
                 continue
             for alias in node.names:
                 local = alias.asname or alias.name
@@ -451,8 +478,7 @@ def test_no_tool_gateway_bypass_in_production():
             if name in aliases:
                 offenders.append(f"{rel}:{getattr(node, 'lineno', '?')} {name}.execute(...)")
     assert not offenders, (
-        "production bypassing the ToolGateway via tool_registry.execute (route via "
-        f"get_tool_gateway().execute()): {offenders}"
+        f"production bypassing the ToolGateway via tool_registry.execute (route via get_tool_gateway().execute()): {offenders}"
     )
 
 
@@ -460,8 +486,7 @@ def test_android_tool_default_transport_is_factory_provisioned():
     """§31: the production Android singleton must not be left as AndroidTool(transport=None)
     when a transport can be built — it must provision via the canonical transport factory."""
     src = (ROOT / "core/android/tool.py").read_text(encoding="utf-8")
-    assert "build_default_transport" in src, \
-        "get_android_tool() must provision its transport via build_default_transport()"
+    assert "build_default_transport" in src, "get_android_tool() must provision its transport via build_default_transport()"
     assert "get_android_transport()" in src or "build_default_transport()" in src
     # The factory (in the transport module) supplies the configured ADB/bridge transport.
     transport_src = (ROOT / "core/android/transport.py").read_text(encoding="utf-8")
@@ -482,11 +507,11 @@ def test_autonomy_never_silently_falls_back_to_chat():
     """MissionEngine must surface explicit blocked/failed states, never a silent
     chat downgrade or a fabricated 'completed' on failure."""
     src = (ROOT / "core/mission.py").read_text(encoding="utf-8")
-    assert '"blocked"' in src or 'BLOCKED = "blocked"' in src, \
+    assert '"blocked"' in src or 'BLOCKED = "blocked"' in src, (
         "autonomy must report an explicit blocked state, not silently degrade"
+    )
     # node explicitly blocked on no usable model/key/backend
-    assert "blocked, not completed" in src, \
-        "a missing model/provider backend must block the node, not complete it"
+    assert "blocked, not completed" in src, "a missing model/provider backend must block the node, not complete it"
     # a crash is recorded as FAILED, never a silent downgrade
     assert "crash → recorded failure, never a silent downgrade" in src or "never a silent downgrade" in src
 
@@ -548,7 +573,13 @@ def test_handy_compatibility_single_owner():
     """Only tools.voice may own Handy-style local STT model discovery rules."""
     src = (ROOT / "tools/voice.py").read_text(encoding="utf-8")
     assert "discover_local_stt_models" in src and "com.pais.handy" in src
-    allowed = {"tools/voice.py", "core/config.py", "core/permissions.py", "gateway/routes_speech.py", "gateway/routes_canonical.py"}
+    allowed = {
+        "tools/voice.py",
+        "core/config.py",
+        "core/permissions.py",
+        "gateway/routes_speech.py",
+        "gateway/routes_canonical.py",
+    }
     offenders = []
     for p in _prod_files():
         rel = _rel(p)
@@ -575,13 +606,13 @@ def test_no_committed_secrets_in_production():
     import re
 
     patterns = [
-        r"\bghp_[A-Za-z0-9]{20,}\b",                 # GitHub PAT
-        r"\bghs_[A-Za-z0-9]{20,}\b",                 # GitHub fine-grained
+        r"\bghp_[A-Za-z0-9]{20,}\b",  # GitHub PAT
+        r"\bghs_[A-Za-z0-9]{20,}\b",  # GitHub fine-grained
         r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
-        r"\bsk-[A-Za-z0-9]{20,}\b",                  # OpenAI/Anthropic style
+        r"\bsk-[A-Za-z0-9]{20,}\b",  # OpenAI/Anthropic style
         r"\bgsk_[A-Za-z0-9]{20,}\b",
-        r"\bAKIA[0-9A-Z]{16}\b",                     # AWS access key
-        r"\bAIza[A-Za-z0-9_-]{20,}\b",               # Google API key
+        r"\bAKIA[0-9A-Z]{16}\b",  # AWS access key
+        r"\bAIza[A-Za-z0-9_-]{20,}\b",  # Google API key
     ]
     rex = [re.compile(p) for p in patterns]
     offenders = []
@@ -638,9 +669,6 @@ def test_bootstrap_probes_required_deps_honestly():
     assert "no ``|| true`` masking on required dependencies" in src
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # One delegation entry point — must go through the canonical JobQueue
 # ---------------------------------------------------------------------------
@@ -678,11 +706,11 @@ def test_subagents_facade_submits_through_queue_not_direct_engine():
     """subagents.subagent is a queue facade: it must submit jobs via
     submit_and_wait, not call the delegation engine directly."""
     src = (ROOT / "subagents/subagent.py").read_text(encoding="utf-8")
-    assert "submit_and_wait(" in src and "DELEGATE_JOB" in src, \
+    assert "submit_and_wait(" in src and "DELEGATE_JOB" in src, (
         "the subagent facade must enqueue delegation on the canonical JobQueue"
+    )
     # No direct engine fan-out/decompose calls in the facade.
-    for pat in ("_engine().fanout(", "_engine().decompose_and_run(", "engine.fanout(",
-                "engine.decompose_and_run("):
+    for pat in ("_engine().fanout(", "_engine().decompose_and_run(", "engine.fanout(", "engine.decompose_and_run("):
         assert pat not in src, f"subagent facade bypasses the queue via {pat}"
 
 
@@ -695,13 +723,15 @@ def test_subagent_worker_runs_through_canonical_boundaries():
     second provider, tool or event path."""
     dlg = (ROOT / "core/delegation.py").read_text(encoding="utf-8")
     # The single worker engine builds the real agent (which routes model/tools/memory).
-    assert ("HermusAgent(" in dlg) or ("from .agent import HermusAgent" in dlg), \
+    assert ("HermusAgent(" in dlg) or ("from .agent import HermusAgent" in dlg), (
         "the sub-agent worker must run through HermusAgent"
+    )
     # Worker must not construct a provider client directly.
     assert "FreeLLM(" not in dlg, "delegation worker must not build a provider client directly"
     # Synthesis/planning LLM calls route through the canonical ModelGateway.
-    assert "get_model_gateway().chat(" in dlg or "get_model_gateway()" in dlg, \
+    assert "get_model_gateway().chat(" in dlg or "get_model_gateway()" in dlg, (
         "delegation synthesis/planning must use the canonical ModelGateway"
+    )
     # Delegation lifecycle events mirror onto the canonical EventBus.
     assert "get_bus().publish(" in dlg, "delegation must emit events via the canonical EventBus"
 
@@ -744,10 +774,7 @@ def test_one_web_acquisition_boundary_no_scrapling_outside_core_web():
             last = mod.split(".")[-1]
             if last == "scrapling" and not rel.startswith("tools/"):
                 offenders.append((rel, mod))
-    assert not offenders, (
-        "scrapling imports outside core/web bypass the canonical WebGateway: "
-        f"{offenders}"
-    )
+    assert not offenders, f"scrapling imports outside core/web bypass the canonical WebGateway: {offenders}"
 
 
 def test_web_tools_route_through_web_gateway_not_scrapling():
@@ -767,8 +794,7 @@ def test_web_gateway_owns_security_routing_and_events():
     gw = (ROOT / "core/web/gateway.py").read_text(encoding="utf-8")
     assert "WebSecurityPolicy" in gw, "gateway must own the security policy"
     assert "StrategyRouter" in gw, "gateway must own strategy routing/escalation"
-    assert "get_bus" in gw or "EventEnvelope" in gw, \
-        "gateway must emit telemetry onto the canonical EventBus"
+    assert "get_bus" in gw or "EventEnvelope" in gw, "gateway must emit telemetry onto the canonical EventBus"
     assert "LRUCache" in gw, "gateway must reuse the canonical bounded cache"
     raw = (ROOT / "core/web/scrapling_backend.py").read_text(encoding="utf-8")
     assert "RawFetch" in raw, "backend must keep scrapling responses internal"

@@ -10,6 +10,7 @@ cache) were never closed, so CPython finalised them during GC and reported each
 one.  The registry closes them in the lifespan ``finally:`` block, and owners
 reopen on the next access instead of touching a closed database.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -18,7 +19,6 @@ import warnings
 
 import pytest
 
-from core import db_registry
 from core.db_registry import ConnectionRegistry, close_all, db_registry, open_db, using
 
 
@@ -176,7 +176,7 @@ def test_gateway_shutdown_closes_sqlite_handles():
 
     source = Path("gateway/gateway.py").read_text(encoding="utf-8")
     assert "from core.db_registry import close_all as _close_dbs" in source
-    assert "_close_dbs(\"gateway_shutdown\")" in source
+    assert '_close_dbs("gateway_shutdown")' in source
     # ...and must also stop a local engine it started.
     assert "nollama_manager.stop_if_managed()" in source
 

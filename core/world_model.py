@@ -6,6 +6,7 @@ asking each integration for an unrelated guess.  The model is intentionally
 boring and deterministic: LLMs may interpret facts, but they do not define or
 silently rewrite observation provenance.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,10 +16,11 @@ import shutil
 import threading
 import uuid
 from collections import deque
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any
 
 _SECRET_WORDS = ("password", "token", "secret", "private_key", "api_key", "credential")
 
@@ -47,8 +49,8 @@ class WorldFact:
     source: str
     confidence: float = 1.0
     observed_at: str = field(default_factory=_now)
-    expires_at: Optional[str] = None
-    permission_scope: Optional[str] = None
+    expires_at: str | None = None
+    permission_scope: str | None = None
     fact_id: str = field(default_factory=lambda: f"fact_{uuid.uuid4().hex[:12]}")
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,7 +72,7 @@ class WorldEvent:
 class WorldModel:
     """Thread-safe, provenance-aware store for current facts and recent events."""
 
-    def __init__(self, path: Optional[Path] = None, max_events: int = 500):
+    def __init__(self, path: Path | None = None, max_events: int = 500):
         self.path = Path(path) if path else None
         self._facts: dict[tuple[str, str], WorldFact] = {}
         self._events: deque[WorldEvent] = deque(maxlen=max(50, int(max_events)))
@@ -119,8 +121,8 @@ class WorldModel:
         *,
         source: str,
         confidence: float = 1.0,
-        permission_scope: Optional[str] = None,
-        expires_at: Optional[str] = None,
+        permission_scope: str | None = None,
+        expires_at: str | None = None,
     ) -> WorldFact:
         """Record or replace one fact, preserving source and permission metadata."""
         fact = WorldFact(
@@ -137,7 +139,7 @@ class WorldModel:
             self._append("fact", fact.to_dict())
         return fact
 
-    def emit(self, event_type: str, data: Optional[dict[str, Any]] = None, *, source: str = "system") -> WorldEvent:
+    def emit(self, event_type: str, data: dict[str, Any] | None = None, *, source: str = "system") -> WorldEvent:
         event = WorldEvent(str(event_type), str(source), _safe(data or {}))
         with self._lock:
             self._events.append(event)
@@ -158,21 +160,24 @@ class WorldModel:
             with self._lock:
                 if listener in self._listeners:
                     self._listeners.remove(listener)
+
         return unsubscribe
 
-    def get(self, subject: str, predicate: str) -> Optional[WorldFact]:
+    def get(self, subject: str, predicate: str) -> WorldFact | None:
         with self._lock:
             return self._facts.get((subject, predicate))
 
-    def query(self, subject: Optional[str] = None, predicate: Optional[str] = None) -> list[WorldFact]:
+    def query(self, subject: str | None = None, predicate: str | None = None) -> list[WorldFact]:
         with self._lock:
-            return [fact for fact in self._facts.values()
-                    if (subject is None or fact.subject == subject)
-                    and (predicate is None or fact.predicate == predicate)]
+            return [
+                fact
+                for fact in self._facts.values()
+                if (subject is None or fact.subject == subject) and (predicate is None or fact.predicate == predicate)
+            ]
 
     def recent_events(self, limit: int = 50) -> list[WorldEvent]:
         with self._lock:
-            return list(self._events)[-max(0, int(limit)):]
+            return list(self._events)[-max(0, int(limit)) :]
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -182,13 +187,16 @@ class WorldModel:
                 "recent_events": [event.to_dict() for event in self._events],
             }
 
-    def ingest(self, source: str, facts: Iterable[dict[str, Any]], *, permission_scope: Optional[str] = None) -> int:
+    def ingest(self, source: str, facts: Iterable[dict[str, Any]], *, permission_scope: str | None = None) -> int:
         count = 0
         for item in facts:
             if not item.get("subject") or not item.get("predicate"):
                 continue
             self.observe(
-                item["subject"], item["predicate"], item.get("value"), source=source,
+                item["subject"],
+                item["predicate"],
+                item.get("value"),
+                source=source,
                 confidence=item.get("confidence", 1.0),
                 permission_scope=item.get("permission_scope", permission_scope),
                 expires_at=item.get("expires_at"),
@@ -209,6 +217,7 @@ class WorldModel:
         }
         try:
             import psutil  # type: ignore
+
             memory = psutil.virtual_memory()
             profile["memory"] = {"total_bytes": memory.total, "available_bytes": memory.available}
             profile["cpu_percent"] = psutil.cpu_percent(interval=None)
@@ -217,7 +226,11 @@ class WorldModel:
             profile["memory"] = {"total_bytes": None, "available_bytes": None}
             profile["cpu_percent"] = None
             profile["battery"] = None
-        self.ingest(source, [{"subject": "runtime", "predicate": key, "value": value} for key, value in profile.items()], permission_scope=permission_scope)
+        self.ingest(
+            source,
+            [{"subject": "runtime", "predicate": key, "value": value} for key, value in profile.items()],
+            permission_scope=permission_scope,
+        )
         self.emit("runtime_refreshed", {"profile_keys": sorted(profile)}, source=source)
         return profile
 

@@ -6,16 +6,17 @@ the single place that executes and verifies actions.  Keeping that boundary
 means repair actions pass through the same permission, recording, and emergency
 stop gates as original task actions.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
-from collections.abc import Sequence
+from typing import Any
 
 from ..llm import FreeLLM
 from ..models import get_model_gateway
@@ -46,7 +47,7 @@ class FailureDiagnosis:
     retryable: bool = True
     suggested_strategy: str = ""
     source: str = "heuristic"
-    plan: Optional[list[dict[str, Any]]] = None
+    plan: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -124,7 +125,7 @@ class RepairEngine:
 
     def __init__(
         self,
-        llm: Optional[FreeLLM] = None,
+        llm: FreeLLM | None = None,
         max_steps: int = 3,
         use_llm: bool = True,
     ):
@@ -133,12 +134,12 @@ class RepairEngine:
         self.use_llm = bool(use_llm)
         self.known_repairs: list[dict[str, Any]] = []
 
-    def set_known_repairs(self, repairs: Optional[list[dict[str, Any]]]) -> None:
+    def set_known_repairs(self, repairs: list[dict[str, Any]] | None) -> None:
         """Attach evidence-backed repairs recalled with the active skill."""
         self.known_repairs = [item for item in (repairs or []) if isinstance(item, dict)][-50:]
 
     @staticmethod
-    def _context_parts(last_action: Optional[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def _context_parts(last_action: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         context = last_action if isinstance(last_action, dict) else {}
         spec = context.get("spec") if isinstance(context.get("spec"), dict) else {}
         result = context.get("result") if isinstance(context.get("result"), dict) else context
@@ -149,7 +150,7 @@ class RepairEngine:
         self,
         failure_detail: str,
         expected: str,
-        last_action: Optional[dict[str, Any]] = None,
+        last_action: dict[str, Any] | None = None,
     ) -> FailureDiagnosis:
         """Return a deterministic first-pass diagnosis from all failure signals."""
         spec, result, verification = self._context_parts(last_action)
@@ -162,7 +163,10 @@ class RepairEngine:
         text = " ".join((evidence, str(expected or ""))).lower()
 
         # Safety/policy failures cannot be fixed by inventing more UI actions.
-        if re.search(r"emergency stop|permission (?:policy )?denied|policy denied|not allowed|approval required|no controller|unknown action kind", text):
+        if re.search(
+            r"emergency stop|permission (?:policy )?denied|policy denied|not allowed|approval required|no controller|unknown action kind",
+            text,
+        ):
             return FailureDiagnosis(
                 kind=FailureKind.ACTION_REJECTED.value,
                 summary="The action was rejected by a safety, permission, or configuration gate.",
@@ -175,7 +179,11 @@ class RepairEngine:
         # Dialog detection intentionally precedes target-not-found: a dialog is
         # often the reason the requested target cannot be seen.
         if re.search(r"cookie|consent|banner", text):
-            step = {"name": "DISMISS_COOKIE_BANNER", "action": {"kind": "click_target", "target": "Accept all"}, "expected": "Cookie banner is dismissed"}
+            step = {
+                "name": "DISMISS_COOKIE_BANNER",
+                "action": {"kind": "click_target", "target": "Accept all"},
+                "expected": "Cookie banner is dismissed",
+            }
             return FailureDiagnosis(
                 kind=FailureKind.BLOCKING_DIALOG.value,
                 summary="A cookie consent banner is blocking the page.",
@@ -197,7 +205,9 @@ class RepairEngine:
                 suggested_strategy="Dismiss the obstruction, verify it disappeared, then retry the original action.",
             )
 
-        if re.search(r"wrong (?:application|app|window)|another (?:application|app|window)|inactive window|window is not active", text):
+        if re.search(
+            r"wrong (?:application|app|window)|another (?:application|app|window)|inactive window|window is not active", text
+        ):
             return FailureDiagnosis(
                 kind=FailureKind.WRONG_WINDOW.value,
                 summary="The original action ran against the wrong or inactive window.",
@@ -217,7 +227,10 @@ class RepairEngine:
                 suggested_strategy="Wait for a concrete visual condition, then retry if it appears.",
             )
 
-        if re.search(r"target not (?:found|visible)|could not (?:find|locate)|cannot (?:find|locate)|no matching target|element not (?:found|visible)", text):
+        if re.search(
+            r"target not (?:found|visible)|could not (?:find|locate)|cannot (?:find|locate)|no matching target|element not (?:found|visible)",
+            text,
+        ):
             return FailureDiagnosis(
                 kind=FailureKind.TARGET_NOT_FOUND.value,
                 summary="The requested visual target could not be located.",
@@ -304,12 +317,14 @@ class RepairEngine:
             condition += f", and the screen is ready for: {expected}"
         return RepairPlan(
             diagnosis=diagnosis,
-            steps=[RepairStep(
-                name=name,
-                action=action,
-                expected=condition,
-                rationale="Remove the diagnosed obstruction before replaying the original action.",
-            )],
+            steps=[
+                RepairStep(
+                    name=name,
+                    action=action,
+                    expected=condition,
+                    rationale="Remove the diagnosed obstruction before replaying the original action.",
+                )
+            ],
             retry_original=True,
             source="heuristic",
             reason="A blocking dialog has a safe bounded dismissal repair.",
@@ -328,7 +343,7 @@ class RepairEngine:
         self,
         diagnosis: FailureDiagnosis,
         expected: str,
-    ) -> Optional[RepairPlan]:
+    ) -> RepairPlan | None:
         """Reuse the best previously-verified repair for a recalled skill."""
         failure_words = set(re.findall(r"[a-z0-9]+", f"{diagnosis.kind} {diagnosis.summary} {diagnosis.evidence}".lower()))
         candidates = []
@@ -346,16 +361,20 @@ class RepairEngine:
                 for key in ("target", "key", "keys", "text", "amount", "name", "condition", "timeout"):
                     if key in raw_action:
                         action[key] = raw_action[key]
-                sanitized = self._sanitize_steps([{
-                    "name": str(repair.get("state") or "KNOWN_REPAIR"),
-                    "action": action,
-                    "expected": str(
-                        (repair.get("verification") or {}).get("expected_state")
-                        or expected
-                        or "The known obstruction is no longer visible"
-                    ),
-                    "rationale": "Previously verified repair recalled from skill evidence.",
-                }])
+                sanitized = self._sanitize_steps(
+                    [
+                        {
+                            "name": str(repair.get("state") or "KNOWN_REPAIR"),
+                            "action": action,
+                            "expected": str(
+                                (repair.get("verification") or {}).get("expected_state")
+                                or expected
+                                or "The known obstruction is no longer visible"
+                            ),
+                            "rationale": "Previously verified repair recalled from skill evidence.",
+                        }
+                    ]
+                )
                 if sanitized:
                     candidates.append((score, sanitized[0]))
         candidates.sort(key=lambda item: item[0], reverse=True)
@@ -373,8 +392,8 @@ class RepairEngine:
         self,
         diagnosis: FailureDiagnosis,
         expected: str,
-        last_action: Optional[dict[str, Any]],
-    ) -> Optional[RepairPlan]:
+        last_action: dict[str, Any] | None,
+    ) -> RepairPlan | None:
         spec, _, _ = self._context_parts(last_action)
         if diagnosis.kind == FailureKind.BLOCKING_DIALOG.value:
             return self._dialog_plan(diagnosis, expected)
@@ -383,12 +402,14 @@ class RepairEngine:
             if window:
                 return RepairPlan(
                     diagnosis=diagnosis,
-                    steps=[RepairStep(
-                        name="FOCUS_INTENDED_WINDOW",
-                        action={"kind": "focus_window", "name": window},
-                        expected=f"The {window} window is active and visible",
-                        rationale="Restore the original action's intended window context.",
-                    )],
+                    steps=[
+                        RepairStep(
+                            name="FOCUS_INTENDED_WINDOW",
+                            action={"kind": "focus_window", "name": window},
+                            expected=f"The {window} window is active and visible",
+                            rationale="Restore the original action's intended window context.",
+                        )
+                    ],
                     retry_original=True,
                     source="heuristic",
                     reason="The intended window can be recovered without guessing coordinates.",
@@ -471,19 +492,21 @@ class RepairEngine:
             expected = str(raw.get("expected") or "").strip()
             if not expected:
                 expected = "The obstruction is removed and the original action can be retried safely"
-            steps.append(RepairStep(
-                name=str(raw.get("name") or f"REPAIR_STEP_{index + 1}")[:80],
-                action=cleaned,
-                expected=expected[:500],
-                rationale=str(raw.get("rationale") or "")[:500],
-            ))
+            steps.append(
+                RepairStep(
+                    name=str(raw.get("name") or f"REPAIR_STEP_{index + 1}")[:80],
+                    action=cleaned,
+                    expected=expected[:500],
+                    rationale=str(raw.get("rationale") or "")[:500],
+                )
+            )
         return steps
 
     def _llm_plan(
         self,
         diagnosis: FailureDiagnosis,
         expected: str,
-        last_action: Optional[dict[str, Any]],
+        last_action: dict[str, Any] | None,
     ) -> RepairPlan:
         spec, result, verification = self._context_parts(last_action)
         prompt = f"""You are the Hermus desktop Repair Planner.
@@ -532,15 +555,18 @@ Generate at most {self.max_steps} steps. An empty steps list is better than an u
             steps=steps,
             retry_original=retry_original and diagnosis.retryable,
             source="llm" if steps else "none",
-            reason=("The repair planner returned a validated recovery sequence."
-                    if steps else "The repair planner found no safe, valid recovery sequence."),
+            reason=(
+                "The repair planner returned a validated recovery sequence."
+                if steps
+                else "The repair planner found no safe, valid recovery sequence."
+            ),
         )
 
     def create_plan(
         self,
         failure_detail: str,
         expected: str,
-        last_action: Optional[dict[str, Any]] = None,
+        last_action: dict[str, Any] | None = None,
     ) -> RepairPlan:
         """Diagnose a failure and return a bounded, validated repair plan."""
         diagnosis = self.diagnose(failure_detail, expected, last_action)
@@ -593,7 +619,7 @@ Generate at most {self.max_steps} steps. An empty steps list is better than an u
         self,
         failure_detail: str,
         expected: str,
-        last_action: Optional[dict[str, Any]] = None,
+        last_action: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Backward-compatible list API.
 

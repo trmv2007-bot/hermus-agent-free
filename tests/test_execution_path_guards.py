@@ -1,44 +1,53 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from _control_room_source import control_room_source
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _guard_call(src: str, tool: str) -> int:
+    """Count ``_permission_guard("<tool>", ...)`` calls, tolerating the
+    formatter splitting the call across lines."""
+    return len(re.findall(r'_permission_guard\(\s*"' + re.escape(tool) + r'"', src))
 
 
 def test_subsystem_routes_have_permission_guard_for_risky_screen_and_research_actions():
     src = (ROOT / "gateway/routes_subsystems.py").read_text(encoding="utf-8")
     assert "def _permission_guard" in src
-    for token in (
-        '_permission_guard("screen_record_start"',
-        '_permission_guard("screen_record_save"',
-        '_permission_guard("screen_watch"',
-        '_permission_guard("screen_action_before"',
-        '_permission_guard("screen_action_after"',
-        '_permission_guard("web_search"',
+    for tool in (
+        "screen_record_start",
+        "screen_record_save",
+        "screen_watch",
+        "screen_action_before",
+        "screen_action_after",
+        "web_search",
     ):
-        assert token in src, f"missing route-level permission guard: {token}"
+        assert _guard_call(src, tool) >= 1, f"missing route-level permission guard: {tool}"
 
 
 def test_computer_routes_have_permission_guard_for_task_delete_and_delegation_actions():
     src = (ROOT / "gateway/routes_computer.py").read_text(encoding="utf-8")
     assert "def _permission_guard" in src
-    for token in (
-        '_permission_guard("computer_task"',
-        '_permission_guard("delete_file"',
+    for tool in (
+        "computer_task",
+        "delete_file",
     ):
-        assert token in src, f"missing computer route-level permission guard: {token}"
-    assert src.count('_permission_guard("computer_task"') >= 4
+        assert _guard_call(src, tool) >= 1, f"missing computer route-level permission guard: {tool}"
+    assert _guard_call(src, "computer_task") >= 4
 
 
 def test_computer_and_remote_emergency_routes_mirror_global_red_line_brake():
     src = (ROOT / "gateway/routes_computer.py").read_text(encoding="utf-8")
     assert "get_emergency_stop().activate" in src
     assert "get_emergency_stop().clear" in src
-    assert "set_by=\"computer-route\"" in src
-    assert "set_by=\"remote-route\"" in src
+    assert 'set_by="computer-route"' in src
+    assert 'set_by="remote-route"' in src
 
 
 def test_control_room_computer_task_payload_matches_route_contract():
-    src = (ROOT / "gateway/control.html").read_text(encoding="utf-8")
-    assert 'body: JSON.stringify({ task: task })' in src
-    assert 'body: JSON.stringify({ objective: task })' not in src
+    src = control_room_source()
+    assert "body: JSON.stringify({ task: task })" in src
+    assert "body: JSON.stringify({ objective: task })" not in src

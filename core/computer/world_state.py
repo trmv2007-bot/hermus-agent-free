@@ -5,31 +5,32 @@ read and update this one model instead of independently guessing what is on the
 screen.  The model accepts structured vision output when available and keeps a
 small heuristic compatibility path for existing string-only verifiers.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import threading
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from collections.abc import Iterable
+from typing import Any
 
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _later(*candidates: Optional[str]) -> str:
+def _later(*candidates: str | None) -> str:
     """Newest of the given ISO timestamps (falls back to the last non-empty one).
 
     ``update`` accepts a caller-supplied timestamp, so without this a replayed or
     clock-skewed observation could move the snapshot's clock backwards and make
     the state look older than the observations it already contains.
     """
-    best: Optional[str] = None
-    best_dt: Optional[datetime] = None
+    best: str | None = None
+    best_dt: datetime | None = None
     for candidate in candidates:
         text = str(candidate or "").strip()
         if not text:
@@ -47,7 +48,7 @@ def _later(*candidates: Optional[str]) -> str:
     return best or _now()
 
 
-def _parse_ts(value: str) -> Optional[datetime]:
+def _parse_ts(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
@@ -66,12 +67,48 @@ def _positive_int(value: Any, default: int) -> int:
 # Tokens that carry no world-state meaning. Filtering them (instead of filtering
 # by length) keeps short-but-real labels such as "OK" or "No" matchable while
 # still ignoring prose like "click the OK button".
-_STOPWORDS = frozenset({
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "is", "are",
-    "it", "be", "for", "with", "that", "this", "then", "from", "into", "onto",
-    "click", "press", "tap", "type", "enter", "select", "choose", "scroll",
-    "drag", "wait", "ensure", "verify", "check", "make", "sure", "open",
-})
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "is",
+        "are",
+        "it",
+        "be",
+        "for",
+        "with",
+        "that",
+        "this",
+        "then",
+        "from",
+        "into",
+        "onto",
+        "click",
+        "press",
+        "tap",
+        "type",
+        "enter",
+        "select",
+        "choose",
+        "scroll",
+        "drag",
+        "wait",
+        "ensure",
+        "verify",
+        "check",
+        "make",
+        "sure",
+        "open",
+    }
+)
 
 
 def _unique(values: Iterable[Any], limit: int = 50) -> list[str]:
@@ -92,12 +129,12 @@ class WorldObservation:
     detail: str = ""
     confidence: float = 0.0
     timestamp: str = field(default_factory=_now)
-    application: Optional[str] = None
-    window: Optional[str] = None
+    application: str | None = None
+    window: str | None = None
     visible_targets: list[str] = field(default_factory=list)
     dialogs: list[str] = field(default_factory=list)
-    task_state: Optional[str] = None
-    verification_ok: Optional[bool] = None
+    task_state: str | None = None
+    verification_ok: bool | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -108,17 +145,17 @@ class WorldObservation:
 class WorldState:
     """Canonical desktop state shared by all computer-agent components."""
 
-    active_application: Optional[str] = None
-    active_window: Optional[str] = None
+    active_application: str | None = None
+    active_window: str | None = None
     visible_targets: list[str] = field(default_factory=list)
     dialogs: list[str] = field(default_factory=list)
-    task: Optional[str] = None
+    task: str | None = None
     task_state: str = "UNKNOWN"
     confidence: float = 0.0
     timestamp: str = field(default_factory=_now)
     revision: int = 0
-    last_action: Optional[dict[str, Any]] = None
-    last_verification: Optional[dict[str, Any]] = None
+    last_action: dict[str, Any] | None = None
+    last_verification: dict[str, Any] | None = None
     completed_states: list[str] = field(default_factory=list)
     failed_states: list[str] = field(default_factory=list)
     observations: list[dict[str, Any]] = field(default_factory=list)
@@ -153,19 +190,19 @@ class WorldState:
     # that, a checkpoint could move between states with no revision bump and any
     # consumer using ``revision`` as a change counter would miss the transition.
     @property
-    def application(self) -> Optional[str]:
+    def application(self) -> str | None:
         return self.active_application
 
     @application.setter
-    def application(self, value: Optional[str]) -> None:
+    def application(self, value: str | None) -> None:
         self._set("active_application", str(value).strip() if value else None)
 
     @property
-    def window(self) -> Optional[str]:
+    def window(self) -> str | None:
         return self.active_window
 
     @window.setter
-    def window(self, value: Optional[str]) -> None:
+    def window(self, value: str | None) -> None:
         self._set("active_window", str(value).strip() if value else None)
 
     @property
@@ -178,11 +215,11 @@ class WorldState:
         self._set("visible_targets", _unique(value or []))
 
     @property
-    def modal(self) -> Optional[str]:
+    def modal(self) -> str | None:
         return self.dialogs[-1] if self.dialogs else None
 
     @modal.setter
-    def modal(self, value: Optional[str]) -> None:
+    def modal(self, value: str | None) -> None:
         # Push onto the dialog stack instead of replacing it: the previous dialogs
         # are still part of what is on screen and dropping them loses evidence.
         text = str(value).strip() if value else ""
@@ -200,11 +237,12 @@ class WorldState:
         return self.task_state
 
     @current_state.setter
-    def current_state(self, value: Optional[str]) -> None:
+    def current_state(self, value: str | None) -> None:
         self._set("task_state", str(value).strip() if value else "UNKNOWN")
 
     def _set(self, name: str, value: Any, *, _locked: bool = False) -> None:
         """Assign a field and bump the revision counter iff the value changed."""
+
         def apply() -> None:
             if getattr(self, name) == value:
                 return
@@ -271,7 +309,7 @@ class WorldState:
             result["clear_dialogs"] = True
         return result
 
-    def reset(self, task: Optional[str] = None) -> None:
+    def reset(self, task: str | None = None) -> None:
         with self._rl:
             self.active_application = None
             self.active_window = None
@@ -293,10 +331,7 @@ class WorldState:
         if not isinstance(observation, dict):
             observation = {"detail": str(observation)}
         detail = str(
-            observation.get("detail")
-            or observation.get("description")
-            or observation.get("visual_result")
-            or ""
+            observation.get("detail") or observation.get("description") or observation.get("visual_result") or ""
         ).strip()
         heuristic = self._heuristics(detail)
 
@@ -307,18 +342,13 @@ class WorldState:
             or heuristic.get("application")
         )
         window = (
-            observation.get("active_window")
-            or observation.get("window")
-            or observation.get("title")
-            or heuristic.get("window")
+            observation.get("active_window") or observation.get("window") or observation.get("title") or heuristic.get("window")
         )
         targets = self._as_list(
             observation.get("visible_targets", observation.get("targets", observation.get("elements")))
         ) or heuristic.get("visible_targets", [])
         dialogs_supplied = any(key in observation for key in ("dialogs", "dialog", "modal"))
-        dialogs = self._as_list(
-            observation.get("dialogs", observation.get("dialog", observation.get("modal")))
-        )
+        dialogs = self._as_list(observation.get("dialogs", observation.get("dialog", observation.get("modal"))))
         if not dialogs_supplied:
             dialogs = heuristic.get("dialogs", [])
         clear_dialogs = bool(observation.get("clear_dialogs") or heuristic.get("clear_dialogs"))
@@ -353,9 +383,7 @@ class WorldState:
             # Read the fallback under the lock so a concurrent writer cannot be
             # interleaved between the read and the write.
             self.confidence = self._confidence(raw_confidence, self.confidence)
-            self.timestamp = _later(
-                observation.get("timestamp"), observation.get("ts"), self.timestamp, _now()
-            )
+            self.timestamp = _later(observation.get("timestamp"), observation.get("ts"), self.timestamp, _now())
             self.revision += 1
             if is_verification:
                 self.last_verification = dict(observation)
@@ -373,7 +401,7 @@ class WorldState:
                 evidence=dict(observation.get("evidence") or {}),
             ).to_dict()
             self.observations.append(record)
-            self.observations = self.observations[-_positive_int(self.max_observations, 100):]
+            self.observations = self.observations[-_positive_int(self.max_observations, 100) :]
             return self.to_dict()
 
     def begin_task(self, task: str, state: str = "PLANNING") -> None:
@@ -402,17 +430,19 @@ class WorldState:
             self.timestamp = _now()
             self.revision += 1
             if detail:
-                self.observations.append(WorldObservation(
-                    source="state_machine",
-                    detail=detail,
-                    confidence=self.confidence,
-                    timestamp=self.timestamp,
-                    application=self.active_application,
-                    window=self.active_window,
-                    task_state=self.task_state,
-                    verification_ok=success,
-                ).to_dict())
-                self.observations = self.observations[-_positive_int(self.max_observations, 100):]
+                self.observations.append(
+                    WorldObservation(
+                        source="state_machine",
+                        detail=detail,
+                        confidence=self.confidence,
+                        timestamp=self.timestamp,
+                        application=self.active_application,
+                        window=self.active_window,
+                        task_state=self.task_state,
+                        verification_ok=success,
+                    ).to_dict()
+                )
+                self.observations = self.observations[-_positive_int(self.max_observations, 100) :]
 
     def finish_task(self, success: bool) -> None:
         with self._rl:
@@ -435,19 +465,19 @@ class WorldState:
             return {"matched": True, "confidence": 1.0, "detail": "empty condition"}
         with self._rl:
             haystack = " ".join(
-                filter(None, [
-                    self.active_application,
-                    self.active_window,
-                    *self.visible_targets,
-                    *self.dialogs,
-                    self.task_state,
-                ])
+                filter(
+                    None,
+                    [
+                        self.active_application,
+                        self.active_window,
+                        *self.visible_targets,
+                        *self.dialogs,
+                        self.task_state,
+                    ],
+                )
             ).casefold()
             confidence = self.confidence
-        tokens = [
-            token for token in re.findall(r"[a-z0-9]+", wanted)
-            if token not in _STOPWORDS
-        ]
+        tokens = [token for token in re.findall(r"[a-z0-9]+", wanted) if token not in _STOPWORDS]
         if not tokens:
             return {
                 "matched": True,
@@ -491,7 +521,7 @@ class WorldState:
             return data
 
     @classmethod
-    def from_dict(cls, data: Optional[dict[str, Any]]) -> "WorldState":
+    def from_dict(cls, data: dict[str, Any] | None) -> WorldState:
         data = data if isinstance(data, dict) else {}
         return cls(
             active_application=data.get("active_application", data.get("application")),
@@ -521,7 +551,7 @@ class WorldState:
         return str(target)
 
     @classmethod
-    def load(cls, path: str, *, strict: bool = False) -> "WorldState":
+    def load(cls, path: str, *, strict: bool = False) -> WorldState:
         """Load a snapshot.
 
         ``strict=False`` (the default) keeps the original forgiving behaviour: a

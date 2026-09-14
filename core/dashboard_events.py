@@ -17,13 +17,13 @@ from __future__ import annotations
 import threading
 import uuid
 from collections import deque
-from datetime import datetime
-from typing import Any, Optional
 from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 
 def _canonicalize(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
-    from .contracts import EventEnvelope, EventType, CommandStatus
+    from .contracts import CommandStatus, EventEnvelope, EventType
     from .events import get_bus
 
     # Map the free-form dashboard event_type into the canonical envelope while
@@ -52,7 +52,7 @@ class DashboardEventBus:
         self._subscribers: list[Callable[[dict[str, Any]], None]] = []
         self._lock = threading.RLock()
 
-    def publish(self, event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def publish(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         event = {
             "id": uuid.uuid4().hex,
             "type": str(event_type or "event"),
@@ -97,5 +97,5 @@ class DashboardEventBus:
 dashboard_event_bus = DashboardEventBus()
 
 
-def publish(event_type: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def publish(event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
     return dashboard_event_bus.publish(event_type, data)

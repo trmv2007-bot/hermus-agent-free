@@ -1,4 +1,5 @@
 """Skill Manager - Autonomous skill creation + self-improvement, agentskills.io compatible, free - Optimized with caching"""
+
 import ast
 import json
 import re
@@ -6,7 +7,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .cache import skill_cache
 from .config import config
@@ -16,7 +17,7 @@ from .permissions import Capability
 class SkillManager:
     """Free skill system: creates reusable skills from trajectories, self-improves on use, regression-tested."""
 
-    def __init__(self, skills_dir: Optional[str] = None):
+    def __init__(self, skills_dir: str | None = None):
         self.skills_dir = Path(skills_dir or config.resolve_path(config.skills_dir))
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
@@ -36,13 +37,15 @@ class SkillManager:
                     try:
                         content = md_path.read_text(encoding="utf-8")
                         caps = self.get_skill_capabilities(skill_dir.name)
-                        skills.append({
-                            "name": skill_dir.name,
-                            "path": str(skill_dir),
-                            "description": content[:200],
-                            "has_code": py_path.exists(),
-                            "capabilities": caps,
-                        })
+                        skills.append(
+                            {
+                                "name": skill_dir.name,
+                                "path": str(skill_dir),
+                                "description": content[:200],
+                                "has_code": py_path.exists(),
+                                "capabilities": caps,
+                            }
+                        )
                     except Exception:
                         pass
         skill_cache.set(cache_key, skills)
@@ -116,20 +119,29 @@ class SkillManager:
         if not self.should_create_skill(trajectory):
             return {"created": False, "reason": f"Only {len(trajectory)} tool calls, need >= {config.auto_skill_threshold}"}
 
-        traj_text = "\n".join([
-            f"{turn.get('role')}: {turn.get('content','')[:300]} | Tools: {turn.get('tool_calls')}"
-            for turn in trajectory[-10:]
-        ])
+        traj_text = "\n".join(
+            [
+                f"{turn.get('role')}: {turn.get('content', '')[:300]} | Tools: {turn.get('tool_calls')}"
+                for turn in trajectory[-10:]
+            ]
+        )
 
         try:
             from .models import get_model_gateway
+
             messages = [
-                {"role": "system", "content": "You are a skill creator. Given a successful trajectory of tool calls, create a reusable Python skill. Output JSON with name, description, capabilities list, and python code."},
-                {"role": "user", "content": f"Trajectory:\n{traj_text}\n\nCreate a skill. Return JSON: {{\"name\": \"skill_name_snake_case\", \"description\": \"...\", \"capabilities\": [\"read\"], \"code\": \"def ...\"}}"}
+                {
+                    "role": "system",
+                    "content": "You are a skill creator. Given a successful trajectory of tool calls, create a reusable Python skill. Output JSON with name, description, capabilities list, and python code.",
+                },
+                {
+                    "role": "user",
+                    "content": f'Trajectory:\n{traj_text}\n\nCreate a skill. Return JSON: {{"name": "skill_name_snake_case", "description": "...", "capabilities": ["read"], "code": "def ..."}}',
+                },
             ]
             resp = get_model_gateway().chat(messages)
             content = resp.content
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 try:
                     skill_data = json.loads(json_match.group(0))
@@ -138,24 +150,24 @@ class SkillManager:
                         "name": f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                         "description": f"Auto-created from session {session_id}: {traj_text[:200]}",
                         "capabilities": ["read", "write_workspace"],
-                        "code": f"# Auto skill from {session_id}\n# Trajectory: {traj_text[:500]}\n\nCAPABILITIES = ['read', 'write_workspace']\n\ndef run(task: str = '', query: str = '', **context):\n    '''Reusable skill - task/query/context passed by skill_use'''\n    print('Auto skill - implement based on trajectory')\n    return {{'task': task or query, 'note': 'stub auto skill'}}\n"
+                        "code": f"# Auto skill from {session_id}\n# Trajectory: {traj_text[:500]}\n\nCAPABILITIES = ['read', 'write_workspace']\n\ndef run(task: str = '', query: str = '', **context):\n    '''Reusable skill - task/query/context passed by skill_use'''\n    print('Auto skill - implement based on trajectory')\n    return {{'task': task or query, 'note': 'stub auto skill'}}\n",
                     }
             else:
                 skill_data = {
                     "name": f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     "description": content[:500],
                     "capabilities": ["read"],
-                    "code": "# Failed to parse, manual implementation needed\n"
+                    "code": "# Failed to parse, manual implementation needed\n",
                 }
         except Exception as e:
             skill_data = {
                 "name": f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                 "description": f"Auto skill from {session_id} (LLM failed: {e})",
                 "capabilities": ["read"],
-                "code": f"# Fallback skill\n# Original trajectory: {traj_text[:500]}\n\nCAPABILITIES = ['read']\n\ndef run(task: str = '', query: str = '', **context):\n    return {{'task': task or query, 'trajectory_hint': '''{traj_text[:200]}'''}}\n"
+                "code": f"# Fallback skill\n# Original trajectory: {traj_text[:500]}\n\nCAPABILITIES = ['read']\n\ndef run(task: str = '', query: str = '', **context):\n    return {{'task': task or query, 'trajectory_hint': '''{traj_text[:200]}'''}}\n",
             }
 
-        name = re.sub(r'[^a-zA-Z0-9_]', '_', skill_data.get("name", "auto_skill")).lower()
+        name = re.sub(r"[^a-zA-Z0-9_]", "_", skill_data.get("name", "auto_skill")).lower()
         if not name:
             name = f"auto_skill_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -164,13 +176,13 @@ class SkillManager:
 
         md_content = f"""# {name}
 
-{skill_data.get('description','Auto-created skill')}
+{skill_data.get("description", "Auto-created skill")}
 
 ## Source
 - Session: {session_id}
 - Created: {datetime.now().isoformat()}
 - Trajectory length: {len(trajectory)} turns
-- Capabilities: {', '.join(skill_data.get('capabilities', ['read']))}
+- Capabilities: {", ".join(skill_data.get("capabilities", ["read"]))}
 
 ## Usage
 ```python
@@ -218,21 +230,21 @@ def test_{name}_entrypoint():
         # Clear cache after creation
         skill_cache.clear()
 
-        return {"created": True, "name": name, "path": str(skill_dir), "description": skill_data.get("description","")}
+        return {"created": True, "name": name, "path": str(skill_dir), "description": skill_data.get("description", "")}
 
     def log_skill_usage(
         self,
         skill_name: str,
         success: bool,
         feedback: str = "",
-        duration_ms: Optional[float] = None,
-        failure_category: Optional[str] = None,
-        verification_score: Optional[float] = None,
+        duration_ms: float | None = None,
+        failure_category: str | None = None,
+        verification_score: float | None = None,
     ) -> None:
         """Log usage metrics and reliability evidence for self-improvement."""
         try:
-            from .memory import memory
             from .db_registry import using
+            from .memory import memory
 
             db_path = memory.db_path
             with using(db_path, owner="skill_usage") as conn:
@@ -249,15 +261,26 @@ def test_{name}_entrypoint():
                         verification_score REAL
                     )
                 """)
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO skill_usage (skill_name, timestamp, success, feedback, duration_ms, failure_category, verification_score)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (skill_name, datetime.now().isoformat(), 1 if success else 0, feedback, duration_ms, failure_category, verification_score))
+                """,
+                    (
+                        skill_name,
+                        datetime.now().isoformat(),
+                        1 if success else 0,
+                        feedback,
+                        duration_ms,
+                        failure_category,
+                        verification_score,
+                    ),
+                )
                 conn.commit()
         except Exception:
             pass
 
-    def run_regression_tests(self, skill_name: Optional[str] = None) -> dict[str, Any]:
+    def run_regression_tests(self, skill_name: str | None = None) -> dict[str, Any]:
         """Execute regression tests for skills to detect degradation."""
         skills_to_test = [skill_name] if skill_name else [s["name"] for s in self.list_skills()]
         results: dict[str, Any] = {}
@@ -300,15 +323,25 @@ def test_{name}_entrypoint():
     def get_skill_health(self, skill_name: str) -> dict[str, Any]:
         """Compute usage health and reliability score for a skill."""
         try:
-            from .memory import memory
             from .db_registry import using
+            from .memory import memory
 
             with using(memory.db_path, owner="skill_usage") as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT success, verification_score FROM skill_usage WHERE skill_name=? ORDER BY id DESC LIMIT 20", (skill_name,))
+                cur.execute(
+                    "SELECT success, verification_score FROM skill_usage WHERE skill_name=? ORDER BY id DESC LIMIT 20",
+                    (skill_name,),
+                )
                 rows = cur.fetchall()
             if not rows:
-                return {"total": 0, "successes": 0, "success_rate": 1.0, "reliability_score": 1.0, "consecutive_failures": 0, "healthy": True}
+                return {
+                    "total": 0,
+                    "successes": 0,
+                    "success_rate": 1.0,
+                    "reliability_score": 1.0,
+                    "consecutive_failures": 0,
+                    "healthy": True,
+                }
             successes = sum(1 for r in rows if r[0])
             total = len(rows)
             consec_fail = 0
@@ -328,7 +361,14 @@ def test_{name}_entrypoint():
                 "healthy": healthy,
             }
         except Exception:
-            return {"total": 0, "successes": 0, "success_rate": 1.0, "reliability_score": 1.0, "consecutive_failures": 0, "healthy": True}
+            return {
+                "total": 0,
+                "successes": 0,
+                "success_rate": 1.0,
+                "reliability_score": 1.0,
+                "consecutive_failures": 0,
+                "healthy": True,
+            }
 
 
 skill_manager = SkillManager()

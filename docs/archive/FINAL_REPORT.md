@@ -1,3 +1,9 @@
+> **Archived — historical document.**
+> This is a point-in-time branch-reconciliation record, kept for provenance. It is **not** the current
+> reference: see [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+> Moved here by the documentation consolidation; the content below is
+> preserved verbatim.
+>
 # Final Report — Branch Reconciliation (main + clean-slate/final-consolidation)
 
 This repository file records the two consolidated workstreams that were merged on

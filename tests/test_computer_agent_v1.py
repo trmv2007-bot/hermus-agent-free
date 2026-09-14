@@ -1,4 +1,5 @@
 """Hermus Computer Agent v1: recording, understanding and verification."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,6 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from core.computer.service import ScreenRecordingService
 from core.computer import (
     ActionVerificationManager,
     CallableSource,
@@ -23,6 +23,7 @@ from core.computer import (
     VideoWriter,
     encode_image,
 )
+from core.computer.service import ScreenRecordingService
 
 
 def _record(color: str, sequence: int, offset: float):
@@ -71,11 +72,13 @@ def test_event_detector_and_semantic_timeline():
     events = detector.detect(frames)
     assert len(events) == 2
 
-    replies = iter([
-        "Desktop is visible",
-        "A terminal opened",
-        "An error dialog appeared",
-    ])
+    replies = iter(
+        [
+            "Desktop is visible",
+            "A terminal opened",
+            "An error dialog appeared",
+        ]
+    )
     analyzer = VideoAnalyzer(
         vision_model=lambda _image, _prompt: {
             "description": next(replies),
@@ -119,9 +122,7 @@ def test_real_mp4_roundtrip(tmp_path):
 
     # User-facing video analysis streams the source and keeps only selected
     # transition pairs, rather than loading the full video into RAM.
-    analyzed = VideoAnalyzer().analyze_video(
-        str(output), sample_fps=2, max_seconds=5, max_events=1
-    )
+    analyzed = VideoAnalyzer().analyze_video(str(output), sample_fps=2, max_seconds=5, max_events=1)
     assert analyzed["success"]
     assert analyzed["frames_analyzed"] <= 2
     assert analyzed["frames_total"] >= analyzed["frames_analyzed"]
@@ -212,9 +213,7 @@ def test_screen_watcher_checks_only_new_changed_frames():
             "detail": "download complete",
         },
     )
-    result = watcher.watch(
-        "download completes", timeout=1, poll_interval=0.01, stable_matches=2
-    )
+    result = watcher.watch("download completes", timeout=1, poll_interval=0.01, stable_matches=2)
     assert result["success"] and result["matched"]
     assert result["evidence"]["sequence"] == 3
 
@@ -251,13 +250,15 @@ def test_detached_service_save_supports_video_and_task_bundle(tmp_path):
         "result.json": {"success": True},
     }.items():
         (session / name).write_text(json.dumps(value), encoding="utf-8")
-    service._write_state({
-        "success": True,
-        "status": "stopped",
-        "running": False,
-        "session_dir": str(session),
-        "output_path": str(recording),
-    })
+    service._write_state(
+        {
+            "success": True,
+            "status": "stopped",
+            "running": False,
+            "session_dir": str(session),
+            "output_path": str(recording),
+        }
+    )
 
     video = service.save("final.mp4")
     assert video["success"]

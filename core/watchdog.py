@@ -9,25 +9,25 @@ for an LLM-generated patch.
 
 Useful for an agent that modifies its own skills and needs to repair breakage.
 """
+
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Any, Optional
 from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 
 class Watchdog:
     def __init__(self):
         self._fixes: list[tuple[re.Pattern, Callable[[str], dict[str, Any]], str]] = []
-        self.diagnoser: Optional[Callable[[str], str]] = None
-        self.tester: Optional[Callable[[], bool]] = None
-        self.rollbacker: Optional[Callable[[], None]] = None
+        self.diagnoser: Callable[[str], str] | None = None
+        self.tester: Callable[[], bool] | None = None
+        self.rollbacker: Callable[[], None] | None = None
         self.history: list[dict[str, Any]] = []
         self._register_defaults()
 
-    def register_fix(self, pattern: str, fix_fn: Callable[[str], dict[str, Any]],
-                     description: str = "") -> None:
+    def register_fix(self, pattern: str, fix_fn: Callable[[str], dict[str, Any]], description: str = "") -> None:
         self._fixes.append((re.compile(pattern, re.I), fix_fn, description))
 
     def _register_defaults(self) -> None:
@@ -52,8 +52,7 @@ class Watchdog:
         return {"known": False, "category": "unknown"}
 
     def handle(self, error_text: str, context: str = "") -> dict[str, Any]:
-        record = {"error": error_text[:500], "context": context,
-                  "ts": datetime.now().isoformat()}
+        record = {"error": error_text[:500], "context": context, "ts": datetime.now().isoformat()}
         classification = self.classify(error_text)
         record.update(classification)
 

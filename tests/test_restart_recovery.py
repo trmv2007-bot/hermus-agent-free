@@ -5,9 +5,8 @@ These exercise the real durability contract: start a mission, persist it, kill t
 engine, continue, and verify. They also check that duplicate execution is
 prevented and that cancel state survives. No mocks of the persistence layer.
 """
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
@@ -30,7 +29,11 @@ def test_mission_restart_continue_after_engine_recreated(tmp_path):
     def executor(node, ctx):
         if not phase["restarted"]:
             return {"success": False, "blocked": True, "blocker_reason": "simulated worker kill"}
-        return {"success": True, "output": f"node={getattr(node, 'role', '?')} done", "evidence": [{"check": "ok", "status": "passed"}]}
+        return {
+            "success": True,
+            "output": f"node={getattr(node, 'role', '?')} done",
+            "evidence": [{"check": "ok", "status": "passed"}],
+        }
 
     # --- worker #1: start + persist, then "die" (engine dropped) -------------
     eng1 = MissionEngine(executor=executor, storage_dir=store)
@@ -68,8 +71,7 @@ def test_restart_duplicate_execution_prevented(tmp_path):
     from core.mission import MissionEngine, MissionState
 
     store = tmp_path / "missions"
-    eng = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "ok"},
-                        storage_dir=store)
+    eng = MissionEngine(executor=lambda node, ctx: {"success": True, "output": "ok"}, storage_dir=store)
     r = eng.start_mission("idempotent", budget_steps=3)
     if r.state == MissionState.COMPLETED.value:
         with pytest.raises(ValueError, match="completed"):
@@ -81,6 +83,7 @@ def test_restart_duplicate_execution_prevented(tmp_path):
 def test_restart_cancel_state_survives(tmp_path):
     """A cancelled mission is a terminal state that persists and never auto-resumes."""
     import json
+
     from core.mission import MissionEngine, MissionState
 
     store = tmp_path / "missions"
@@ -92,8 +95,7 @@ def test_restart_cancel_state_survives(tmp_path):
 
     # Cooperative cancellation stops the loop and persists the CANCELLED state.
     eng1 = MissionEngine(executor=executor, storage_dir=store)
-    r1 = eng1.start_mission("cancel me", budget_steps=40, max_repairs=5,
-                            should_cancel=lambda: rounds["n"] >= 2)
+    r1 = eng1.start_mission("cancel me", budget_steps=40, max_repairs=5, should_cancel=lambda: rounds["n"] >= 2)
     assert r1.state == MissionState.CANCELLED.value
     persisted = store / f"{r1.mission_id}.json"
     assert json.loads(persisted.read_text())["state"] == "cancelled"

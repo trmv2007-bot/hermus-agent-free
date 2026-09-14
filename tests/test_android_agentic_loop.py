@@ -8,12 +8,13 @@ the semantic (not raw-coordinate) observation surface.
 They are NOT live-model or physical-device tests. The live-model layer and a physical
 device/emulator are separately marked NOT VERIFIED.
 """
+
 from __future__ import annotations
 
 import pytest
 
 from core.android.agent import AndroidAgentController
-from core.android.simulate import SimulatedAndroidDevice, APP_TASKS
+from core.android.simulate import APP_TASKS, SimulatedAndroidDevice
 
 
 def _g(consents=None, **devkw) -> AndroidAgentController:
@@ -77,9 +78,9 @@ def test_consent_can_be_granted_then_enforces_revoke():
 def test_verification_detects_noop_tap():
     """Tapping a non-actionable element yields no state change; verify reports it."""
     ctl = _g(tasks=[])
-    obs = ctl.observe()
+    _obs = ctl.observe()
     # Tap in the title area (not a button) -> device raises noop/absent element.
-    res = ctl.gateway.execute("android_tap", {"x": 5, "y": 5})
+    _res = ctl.gateway.execute("android_tap", {"x": 5, "y": 5})
     # The tap target at that spot is not clickable, so it must not silently 'succeed'
     # in changing state. Either it errors, or it reports ok with no change — we assert
     # the device task list is unchanged either way.
@@ -92,9 +93,9 @@ def test_semantic_observation_exposes_labels_and_bounds():
     obs = ctl.observe()
     assert obs["ok"] is True
     assert obs["package"] == APP_TASKS
-    assert {"label": "Add", "role": "button"} in [
-        {"label": b["label"], "role": "button"} for b in obs["buttons"]] or \
-        any(b["label"] == "Add" for b in obs["buttons"])
+    assert {"label": "Add", "role": "button"} in [{"label": b["label"], "role": "button"} for b in obs["buttons"]] or any(
+        b["label"] == "Add" for b in obs["buttons"]
+    )
     field = next(f for f in obs["fields"] if f["id"] == "field")
     assert field["focused"] is True and field["bounds"]["x"] >= 0
     # Every element has a label + bounds so the model never needs raw coordinates alone.
@@ -114,8 +115,7 @@ def test_simulated_device_reports_unknown_ops_honestly():
 def test_registered_android_tools_pass_through_gateway_available():
     ctl = _g()
     tools = ctl.available_tools()
-    for t in ("android_observe", "android_type", "android_tap",
-              "android_launch_app", "android_current_app"):
+    for t in ("android_observe", "android_type", "android_tap", "android_launch_app", "android_current_app"):
         assert t in tools, f"missing {t} in {tools}"
 
 
@@ -127,8 +127,7 @@ def test_android_verifier_before_action_after_verify():
     verifier = AndroidVerifier(ctl.tool)
 
     # Launch an app -> verify it is foreground in a post-observation.
-    r = verifier.run_verified("launch_app", {"package": "com.example.tasks"},
-                              expect=app_launched("com.example.tasks"))
+    r = verifier.run_verified("launch_app", {"package": "com.example.tasks"}, expect=app_launched("com.example.tasks"))
     assert r["ok"] is True and r["expected_state"] is True
 
     # Type text, then verify the field/text is observable in the post-observation.

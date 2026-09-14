@@ -1,4 +1,5 @@
 """Tests for the durable identity/presence continuity layer."""
+
 from __future__ import annotations
 
 import json
@@ -10,11 +11,15 @@ from core.presence import PresenceManager
 
 def test_corrupt_shape_is_ignored_without_breaking_boot(tmp_path):
     path = tmp_path / "presence.json"
-    path.write_text(json.dumps({
-        "goals": ["not-a-goal", {"title": "token=old-secret", "priority": "bad", "checkin_count": "bad"}],
-        "moments": [None, {"summary": "api_key=old-secret"}],
-        "presence": {"heartbeat_count": "bad"},
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "goals": ["not-a-goal", {"title": "token=old-secret", "priority": "bad", "checkin_count": "bad"}],
+                "moments": [None, {"summary": "api_key=old-secret"}],
+                "presence": {"heartbeat_count": "bad"},
+            }
+        )
+    )
     manager = PresenceManager(path)
     snapshot = manager.snapshot()
     assert len(snapshot["goals"]) == 1
@@ -129,9 +134,7 @@ def test_scoped_continuity_does_not_cross_users(tmp_path):
     assert alice_live["presence"]["active_goal"] == "Alice's private request"
     assert bob_live["presence"]["active_goal"] is None
     assert "Alice's private request" not in str(bob_live["presence"])
-    manager.finish_turn(
-        goal="Alice's private request", response="private answer", session_id="alice-session", user_id="alice"
-    )
+    manager.finish_turn(goal="Alice's private request", response="private answer", session_id="alice-session", user_id="alice")
 
     alice = manager.snapshot(user_id="alice")
     bob_prompt = manager.prompt_block(user_id="bob")
@@ -139,17 +142,21 @@ def test_scoped_continuity_does_not_cross_users(tmp_path):
     assert all(g["title"] != "Bob's private goal" for g in alice["goals"])
     assert "Bob's private continuity" in bob_prompt
     assert "Alice's private continuity" not in bob_prompt
-    assert manager.complete_goal(
-        next(g["id"] for g in manager.list_goals() if g["user_id"] == "bob"),
-        user_id="alice",
-    )["success"] is False
+    assert (
+        manager.complete_goal(
+            next(g["id"] for g in manager.list_goals() if g["user_id"] == "bob"),
+            user_id="alice",
+        )["success"]
+        is False
+    )
 
 
 def test_nested_moment_metadata_is_redacted_before_persistence(tmp_path):
     path = tmp_path / "presence.json"
     manager = PresenceManager(path)
     manager.record_moment(
-        "note", "safe summary",
+        "note",
+        "safe summary",
         metadata={"nested": {"password": "super-secret", "items": ["sk-12345678901234567890"]}},
     )
     stored = json.loads(path.read_text())

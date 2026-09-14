@@ -3,6 +3,7 @@
 This router deliberately aggregates existing runtime registries rather than
 inventing dashboard state.  No secret values are returned.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,12 +28,12 @@ async def jarvis_status():
     """One factual snapshot used by the JARVIS status/telemetry panels."""
     from core.agent_manager import agent_manager
     from core.artifact_manager import artifact_manager
+    from core.computer.resources import get_resource_monitor
     from core.config import config
     from core.model_capabilities import mission_capability_gate
     from core.providers import list_providers
     from core.run_events import run_bus
     from core.tool_registry import tool_registry
-    from core.computer.resources import get_resource_monitor
     from gateway.channels import get_channel_status, get_discord_token, get_telegram_token
     from gateway.queue import job_queue
 
@@ -102,7 +103,9 @@ async def navigator_fetch(payload: dict | None = None):
         return JSONResponse(result, status_code=503)
     extracted = await asyncio.to_thread(browser_extract, "body")
     if not extracted.get("success"):
-        return JSONResponse({**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502)
+        return JSONResponse(
+            {**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502
+        )
     return {
         "success": True,
         "url": result.get("url", url),

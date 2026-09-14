@@ -1,17 +1,22 @@
 """Tests for the newly built recommendations across Council, Security, Skills, Memory, and Tools."""
-import pytest
+
 from pathlib import Path
+
+import pytest
+
 
 def test_scope_checker_whitelisting(tmp_path):
     from pentest.scope import ScopeChecker
 
     config_path = tmp_path / "scope.json"
     checker = ScopeChecker(str(config_path))
-    checker.save({
-        "enabled": True,
-        "allowed_domains": ["localhost", "127.0.0.1", "*.mycorp.internal"],
-        "disallowed_domains": ["bank.com", "pentest-blocked.org"]
-    })
+    checker.save(
+        {
+            "enabled": True,
+            "allowed_domains": ["localhost", "127.0.0.1", "*.mycorp.internal"],
+            "disallowed_domains": ["bank.com", "pentest-blocked.org"],
+        }
+    )
 
     assert checker.is_in_scope("http://localhost:8080") is True
     assert checker.is_in_scope("https://api.mycorp.internal/v1") is True
@@ -24,7 +29,7 @@ def test_scope_checker_whitelisting(tmp_path):
 
 
 def test_pentest_recon_scope_enforcement(tmp_path, monkeypatch):
-    from pentest.recon import subdomain_enum, fingerprinting, attack_surface_mapping
+    from pentest.recon import attack_surface_mapping, fingerprinting, subdomain_enum
     from pentest.scope import scope_checker
 
     monkeypatch.setattr(scope_checker, "is_in_scope", lambda target: "allowed" in str(target))
@@ -43,12 +48,9 @@ def test_constitution_amendment_diff():
     from core.counsel.constitution import ConstitutionManager
 
     mgr = ConstitutionManager()
-    prop = mgr.propose({
-        "target": "budget",
-        "budget_key": "max_rounds",
-        "change": "5",
-        "reason": "Expand deliberation rounds"
-    }, source="test")
+    prop = mgr.propose(
+        {"target": "budget", "budget_key": "max_rounds", "change": "5", "reason": "Expand deliberation rounds"}, source="test"
+    )
     assert prop.get("status") == "pending"
     amendment_id = prop["amendment"]["id"]
 
@@ -121,9 +123,16 @@ def test_web_read_caching(tmp_path, monkeypatch):
 
         def fetch_text(self, url, max_chars=15000):
             FakeGateway.calls += 1
-            return {"ok": True, "url": url, "title": "Cached", "strategy": "static",
-                    "content": "# Cached Page Content\nThis is mock content",
-                    "content_length": 41, "truncated": False, "warnings": []}
+            return {
+                "ok": True,
+                "url": url,
+                "title": "Cached",
+                "strategy": "static",
+                "content": "# Cached Page Content\nThis is mock content",
+                "content_length": 41,
+                "truncated": False,
+                "warnings": [],
+            }
 
     import core.web
 

@@ -2,14 +2,15 @@
 Free Key & Model Auto-Provisioner — expands model fleet with free, community, and local tiers.
 Enables Hermus to autonomously acquire, test, and register free model endpoints.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
+
 import httpx
 
 from .multi_key import multi_key_manager
-from .providers import get_provider
 
 logger = logging.getLogger("hermus.free_keys")
 
@@ -70,14 +71,13 @@ def discover_and_provision_free_models(auto_register: bool = True) -> dict[str, 
             models_data = resp.json().get("models", [])
             ollama_models = [m.get("name") for m in models_data if m.get("name")]
             if ollama_models:
-                discovered.append({
-                    "provider": "ollama",
-                    "status": "online",
-                    "models": ollama_models,
-                    "name": "Local Ollama Instance"
-                })
+                discovered.append(
+                    {"provider": "ollama", "status": "online", "models": ollama_models, "name": "Local Ollama Instance"}
+                )
                 if auto_register:
-                    res = multi_key_manager.add_key("ollama", "ollama-local", name="Local Ollama Node", base_url="http://localhost:11434/v1")
+                    res = multi_key_manager.add_key(
+                        "ollama", "ollama-local", name="Local Ollama Node", base_url="http://localhost:11434/v1"
+                    )
                     if res.get("success"):
                         registered.append("ollama")
     except Exception:
@@ -85,31 +85,37 @@ def discover_and_provision_free_models(auto_register: bool = True) -> dict[str, 
         pass
 
     # 2. Add OpenRouter Free Community Tier Preset
-    discovered.append({
-        "provider": "openrouter",
-        "status": "available",
-        "models": [
-            "meta-llama/llama-3.3-70b-instruct:free",
-            "deepseek/deepseek-r1:free",
-            "google/gemini-2.0-flash-exp:free",
-            "qwen/qwen-2.5-coder-32b-instruct:free"
-        ],
-        "name": "OpenRouter Free Tier"
-    })
+    discovered.append(
+        {
+            "provider": "openrouter",
+            "status": "available",
+            "models": [
+                "meta-llama/llama-3.3-70b-instruct:free",
+                "deepseek/deepseek-r1:free",
+                "google/gemini-2.0-flash-exp:free",
+                "qwen/qwen-2.5-coder-32b-instruct:free",
+            ],
+            "name": "OpenRouter Free Tier",
+        }
+    )
 
     # 3. Add Devstral & Groq presets
-    discovered.append({
-        "provider": "mistral",
-        "status": "free_tier_available",
-        "models": ["devstral-latest", "codestral-latest", "mistral-small-latest"],
-        "name": "Mistral Devstral Free Developer Tier"
-    })
-    discovered.append({
-        "provider": "groq",
-        "status": "free_tier_available",
-        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-        "name": "Groq Fast Tier"
-    })
+    discovered.append(
+        {
+            "provider": "mistral",
+            "status": "free_tier_available",
+            "models": ["devstral-latest", "codestral-latest", "mistral-small-latest"],
+            "name": "Mistral Devstral Free Developer Tier",
+        }
+    )
+    discovered.append(
+        {
+            "provider": "groq",
+            "status": "free_tier_available",
+            "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+            "name": "Groq Fast Tier",
+        }
+    )
 
     return {
         "success": True,

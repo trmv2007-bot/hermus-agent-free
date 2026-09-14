@@ -29,6 +29,7 @@ top-K" approach:
 
 Pure stdlib; ``sqlite-vec`` is an optional accelerator discovered at runtime.
 """
+
 from __future__ import annotations
 
 import math
@@ -36,9 +37,9 @@ import re
 import sqlite3
 import struct
 import threading
-from dataclasses import dataclass, field
-from typing import Any, Optional
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
 __all__ = [
     "HybridConfig",
@@ -56,11 +57,60 @@ __all__ = [
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _STOPWORDS = {
-    "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "when", "like",
-    "it", "its", "with", "that", "this", "these", "those", "are", "was", "were",
-    "be", "been", "being", "as", "by", "from", "has", "have", "had", "is", "do",
-    "does", "did", "how", "what", "why", "which", "who", "can", "could", "i",
-    "you", "me", "my", "we", "our", "not", "no", "but", "than", "then", "please",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "for",
+    "to",
+    "of",
+    "in",
+    "on",
+    "when",
+    "like",
+    "it",
+    "its",
+    "with",
+    "that",
+    "this",
+    "these",
+    "those",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "as",
+    "by",
+    "from",
+    "has",
+    "have",
+    "had",
+    "is",
+    "do",
+    "does",
+    "did",
+    "how",
+    "what",
+    "why",
+    "which",
+    "who",
+    "can",
+    "could",
+    "i",
+    "you",
+    "me",
+    "my",
+    "we",
+    "our",
+    "not",
+    "no",
+    "but",
+    "than",
+    "then",
+    "please",
 }
 _FTS_JUNK_RE = re.compile(r"[^\w\s]+")
 
@@ -123,7 +173,7 @@ class LockedConnection:
     otherwise interleave commits.
     """
 
-    def __init__(self, conn: sqlite3.Connection, lock: Optional[threading.RLock] = None):
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock | None = None):
         self._conn = conn
         self._lock = lock or threading.RLock()
 
@@ -226,9 +276,9 @@ class HybridHit:
     id: Any
     content: str = ""
     score: float = 0.0
-    bm25_rank: Optional[int] = None
-    vector_rank: Optional[int] = None
-    vector_similarity: Optional[float] = None
+    bm25_rank: int | None = None
+    vector_rank: int | None = None
+    vector_similarity: float | None = None
     prior: float = 0.0
     contributions: dict[str, float] = field(default_factory=dict)
 
@@ -272,10 +322,10 @@ class HybridRetriever:
         table: str,
         content_col: str = "content",
         id_col: str = "id",
-        fts_table: Optional[str] = None,
+        fts_table: str | None = None,
         vector_table: str = "hybrid_vectors",
-        embedder: Optional[Callable[[str], list[float]]] = None,
-        config: Optional[HybridConfig] = None,
+        embedder: Callable[[str], list[float]] | None = None,
+        config: HybridConfig | None = None,
         vectorizer: str = "",
         manage_schema: bool = True,
     ):
@@ -288,9 +338,9 @@ class HybridRetriever:
         self.embedder = embedder
         self.vectorizer = vectorizer or ("embedder" if embedder else "none")
         self.config = config or HybridConfig()
-        self._fts_ok: Optional[bool] = None
-        self._vec_dim: Optional[int] = None
-        self._knn_table: Optional[str] = None      # "" = probed, unavailable
+        self._fts_ok: bool | None = None
+        self._vec_dim: int | None = None
+        self._knn_table: str | None = None  # "" = probed, unavailable
         self._knn_probed = False
         if manage_schema:
             self.ensure_schema()
@@ -372,7 +422,7 @@ class HybridRetriever:
         return bool(self._fts_ok)
 
     # -------------------------------------------------------------- vector side
-    def dim(self) -> Optional[int]:
+    def dim(self) -> int | None:
         if self._vec_dim is not None:
             return self._vec_dim or None
         try:
@@ -387,7 +437,7 @@ class HybridRetriever:
         self._knn_table = None
         self._knn_probed = False
 
-    def _ensure_knn(self) -> Optional[str]:
+    def _ensure_knn(self) -> str | None:
         """Materialise the sqlite-vec index over stored vectors (once)."""
         if self._knn_probed:
             return self._knn_table or None
@@ -399,10 +449,7 @@ class HybridRetriever:
         name = f"{self.vector_table}_vec0"
         try:
             self._ex(f"DROP TABLE IF EXISTS {name}")
-            self._ex(
-                f"CREATE VIRTUAL TABLE {name} USING vec0("
-                f"doc_id INTEGER PRIMARY KEY, embedding float[{int(dim)}])"
-            )
+            self._ex(f"CREATE VIRTUAL TABLE {name} USING vec0(doc_id INTEGER PRIMARY KEY, embedding float[{int(dim)}])")
             self._ex(
                 f"INSERT INTO {name}(doc_id, embedding) SELECT doc_id, vec FROM {self.vector_table} WHERE dim = ?",
                 (dim,),
@@ -497,8 +544,7 @@ class HybridRetriever:
             pass
         self.invalidate_index()
         rows = self._ex(
-            f"SELECT {self.id_col}, {self.content_col} FROM {self.table} "
-            f"WHERE length({self.content_col}) > 0 LIMIT ?",
+            f"SELECT {self.id_col}, {self.content_col} FROM {self.table} WHERE length({self.content_col}) > 0 LIMIT ?",
             (int(max_rows),),
         ).fetchall()
         done = 0
@@ -549,7 +595,7 @@ class HybridRetriever:
         k: int,
         where: str = "",
         params: Sequence[Any] = (),
-        restrict_ids: Optional[Sequence[Any]] = None,
+        restrict_ids: Sequence[Any] | None = None,
     ) -> list[tuple[Any, float]]:
         """Dense retrieval → ``[(id, cosine_similarity)]`` sorted desc."""
         if k <= 0:
@@ -565,8 +611,7 @@ class HybridRetriever:
         if knn and restrict_ids is None:
             try:
                 rows = self._ex(
-                    f"SELECT doc_id, distance FROM {knn} WHERE embedding MATCH ? AND k = ? "
-                    f"ORDER BY distance ASC",
+                    f"SELECT doc_id, distance FROM {knn} WHERE embedding MATCH ? AND k = ? ORDER BY distance ASC",
                     (pack_vector(qvec), int(k * 2)),
                 ).fetchall()
                 # sqlite-vec returns cosine distance for float[] (1 - cos)
@@ -598,9 +643,7 @@ class HybridRetriever:
             results = self._apply_filter(results, where, params)
         return results[: int(k)]
 
-    def _apply_filter(
-        self, pairs: list[tuple[Any, float]], where: str, params: Sequence[Any]
-    ) -> list[tuple[Any, float]]:
+    def _apply_filter(self, pairs: list[tuple[Any, float]], where: str, params: Sequence[Any]) -> list[tuple[Any, float]]:
         """Drop vector hits that fail the base-table filter (project/kind/…)."""
         if not pairs:
             return []
@@ -646,7 +689,7 @@ class HybridRetriever:
         docs: dict[Any, dict[str, Any]],
         *,
         limit: int = 10,
-        weights: Optional[dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
     ) -> list[HybridHit]:
         """Reciprocal Rank Fusion over arbitrary ranked lists.
 
@@ -676,7 +719,7 @@ class HybridRetriever:
                 continue
             total = 0.0
             contrib: dict[str, float] = {}
-            ranks_out: dict[str, Optional[int]] = {}
+            ranks_out: dict[str, int | None] = {}
             for name in lists:
                 r = ranks[name].get(did)
                 ranks_out[name] = r

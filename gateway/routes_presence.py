@@ -6,6 +6,7 @@ execution path: an explicit check-in is submitted as the normal ``runtime.turn``
 queue job and remains subject to the same model, permission and cancellation
 rules as every other turn.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -153,16 +154,22 @@ async def presence_check_in(payload: dict[str, Any] | None = None):
         }
 
     title = str((selected or {}).get("title") or "your ongoing work")
-    text = str(payload.get("text") or (
-        f"Check in on the ongoing goal: {title}. Give me a concise status update based on "
-        "what you actually know. Do not take external or destructive action; ask me first "
-        "if anything needs approval."
-    ))
+    text = str(
+        payload.get("text")
+        or (
+            f"Check in on the ongoing goal: {title}. Give me a concise status update based on "
+            "what you actually know. Do not take external or destructive action; ask me first "
+            "if anything needs approval."
+        )
+    )
     if not getattr(job_queue, "enabled", False) or not getattr(job_queue, "_started", False):
-        return JSONResponse({
-            "queued": False,
-            "error": "job queue is not running; start the gateway queue before requesting a check-in",
-        }, status_code=503)
+        return JSONResponse(
+            {
+                "queued": False,
+                "error": "job queue is not running; start the gateway queue before requesting a check-in",
+            },
+            status_code=503,
+        )
 
     platform = str(payload.get("platform") or "dashboard")
     run_id = str(payload.get("run_id") or f"run_presence_{uuid.uuid4().hex[:8]}")
@@ -186,10 +193,13 @@ async def presence_check_in(payload: dict[str, Any] | None = None):
             run_id=run_id,
         )
     except Exception as exc:
-        return JSONResponse({
-            "queued": False,
-            "error": f"check-in could not be queued: {type(exc).__name__}: {exc}"[:400],
-        }, status_code=503)
+        return JSONResponse(
+            {
+                "queued": False,
+                "error": f"check-in could not be queued: {type(exc).__name__}: {exc}"[:400],
+            },
+            status_code=503,
+        )
     if selected:
         manager.mark_checkin(str(selected.get("id")), user_id=user_id)
         manager.record_moment(

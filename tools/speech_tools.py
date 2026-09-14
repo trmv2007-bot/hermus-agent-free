@@ -4,6 +4,7 @@ The actual TTS/clone/design logic lives in :mod:`core.speech`. This module only
 surfaces it through the ToolRegistry so agent turns and missions can use the same
 capability through the ToolGateway.
 """
+
 from __future__ import annotations
 
 from core.speech import speech_engine
@@ -87,11 +88,17 @@ TOOLS = [
                     "language": {"type": "string", "description": "Target language/code for OmniVoice"},
                     "ref_audio": {"type": "string", "description": "Reference audio for voice cloning"},
                     "ref_text": {"type": "string", "description": "Transcript for the reference audio"},
-                    "instruct": {"type": "string", "description": "OmniVoice voice-design instruction such as 'female, low pitch, british accent'"},
+                    "instruct": {
+                        "type": "string",
+                        "description": "OmniVoice voice-design instruction such as 'female, low pitch, british accent'",
+                    },
                     "duration": {"type": "number"},
                     "speed": {"type": "number"},
                     "prompt_id": {"type": "string", "description": "Cached OmniVoice clone prompt id"},
-                    "create_prompt_id": {"type": "string", "description": "Persist a new OmniVoice clone prompt before synthesis"},
+                    "create_prompt_id": {
+                        "type": "string",
+                        "description": "Persist a new OmniVoice clone prompt before synthesis",
+                    },
                     "normalize_text": {"type": "boolean", "default": False},
                 },
                 "required": ["text"],

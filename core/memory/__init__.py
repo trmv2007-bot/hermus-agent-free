@@ -13,9 +13,9 @@ legacy ``Memory`` class is still exported for tests that exercise the session/
 curated backend directly and is the implementation the facade owns.
 """
 
-from .store import MemoryFacade, get_memory, KINDS
-from .migration import (MigrationReader, migrate_legacy, detect_legacy,
-                        verify_migration)
+from ..compat.legacy_memory import Memory
+from .migration import MigrationReader, detect_legacy, migrate_legacy, verify_migration
+from .store import KINDS, MemoryFacade, get_memory
 
 # The public singleton is the canonical facade (single writable path).
 memory = get_memory()
@@ -23,16 +23,15 @@ memory = get_memory()
 # The legacy session/curated/user-model/token backend class. It is the
 # implementation the facade owns; the raw process-level singleton is no longer a
 # public writer (use ``get_memory()`` / ``memory``).
-from ..compat.legacy_memory import Memory  # noqa: F401  (backend class)
 
 __all__ = [
     "MemoryFacade",
     "get_memory",
-    "KINDS",     # canonical typed-memory kinds
+    "KINDS",  # canonical typed-memory kinds
     "MigrationReader",
     "migrate_legacy",
     "detect_legacy",
     "verify_migration",
-    "Memory",   # legacy session/curated backend class (owned by the facade)
-    "memory",   # canonical facade singleton
+    "Memory",  # legacy session/curated backend class (owned by the facade)
+    "memory",  # canonical facade singleton
 ]

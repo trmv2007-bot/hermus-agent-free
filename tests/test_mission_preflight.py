@@ -1,14 +1,21 @@
 from pathlib import Path
 
+from _cli_source import cli_source
+from _control_room_source import control_room_source
+
 
 def test_mission_report_serializes_preflight_metadata_statically():
     src = Path("core/mission.py").read_text(encoding="utf-8")
-    assert "preflight: Optional[dict[str, Any]] = None" in src
-    assert "create_prompts_action: Optional[dict[str, Any]] = None" in src
+    # Accept both the legacy Optional[...] spelling and the modern X | None
+    # spelling (pyupgrade rewrites the former into the latter).
+    assert ("preflight: Optional[dict[str, Any]] = None" in src) or ("preflight: dict[str, Any] | None = None" in src)
+    assert ("create_prompts_action: Optional[dict[str, Any]] = None" in src) or (
+        "create_prompts_action: dict[str, Any] | None = None" in src
+    )
     assert '"preflight": self.preflight' in src
     assert '"create_prompts_action": self.create_prompts_action' in src
-    assert "preflight=data.get(\"preflight\")" in src
-    assert "create_prompts_action=data.get(\"create_prompts_action\")" in src
+    assert 'preflight=data.get("preflight")' in src
+    assert 'create_prompts_action=data.get("create_prompts_action")' in src
     assert src.count('"preflight": self.preflight') >= 2
 
 
@@ -27,21 +34,21 @@ def test_mission_engine_start_has_preflight_gate():
 
 def test_gateway_mission_start_accepts_preflight_controls():
     src = Path("gateway/realtime.py").read_text(encoding="utf-8")
-    assert "preflight=str(payload.get(\"preflight\", True)).lower()" in src
-    assert "allow_preflight_planning=str(payload.get(\"allow_preflight_planning\", False)).lower()" in src
+    assert 'preflight=str(payload.get("preflight", True)).lower()' in src
+    assert 'allow_preflight_planning=str(payload.get("allow_preflight_planning", False)).lower()' in src
     assert '@router.post("/missions/{mission_id}/preflight/approvals")' in src
     assert "create_preflight_approval_requests" in src
 
 
 def test_cli_mission_start_exposes_preflight_controls():
-    src = Path("hermus.py").read_text(encoding="utf-8")
+    src = cli_source()
     assert "--skip-preflight" in src
     assert "--allow-planning-blocked" in src
     assert "preflight=not args.skip_preflight" in src
 
 
 def test_control_room_mission_launcher_uses_preflight():
-    src = Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "Pre-flight mission" in src
     assert "Start mission if ready" in src
     assert "Record planning-mode blocker" in src

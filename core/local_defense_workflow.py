@@ -4,12 +4,12 @@ This gives Hermus one practical Jarvis-like mission path that does not require a
 LLM to operate safely: pre-flight, approval bundle, approved read-only scan,
 Markdown report artifact, and mission evidence.
 """
+
 from __future__ import annotations
 
 import os
 import time
 from datetime import datetime
-from typing import Any
 
 from .autonomy_preflight import preflight_goal
 from .local_defense_scanner import scan_folder
@@ -40,7 +40,15 @@ def start_local_scan_mission(path: str, *, purpose: str = "malware", max_files: 
             "Create/approve the suggested approval bundle, then run "
             f"POST /local-defense/missions/{mid}/run or `hermus safety scan-mission-run {mid}`."
         ),
-        evidence=[{"stage": "local_defense_preflight", "status": preflight.get("status"), "path": path, "purpose": purpose, "max_files": max_files}],
+        evidence=[
+            {
+                "stage": "local_defense_preflight",
+                "status": preflight.get("status"),
+                "path": path,
+                "purpose": purpose,
+                "max_files": max_files,
+            }
+        ],
         final_proof="MISSION BLOCKED: scoped local-folder scan approval required",
         recoverable=True,
     )
@@ -71,7 +79,9 @@ def run_local_scan_mission(mission_id: str) -> MissionReport:
         if check.get("decision") != Decision.ALLOW.value:
             report.state = MissionState.BLOCKED.value
             report.blocker_reason = "Local scan mission still needs scoped approval"
-            report.blocker_instructions = "Approve the pending local_folder_defensive_scan request/bundle, then run the scan mission again."
+            report.blocker_instructions = (
+                "Approve the pending local_folder_defensive_scan request/bundle, then run the scan mission again."
+            )
             report.approval_request = check.get("approval_request")
             report.evidence.append({"stage": "local_defense_permission", "status": "blocked", "permission": check})
             mission_engine._save_mission(report)
@@ -98,14 +108,16 @@ def run_local_scan_mission(mission_id: str) -> MissionReport:
         art_id = art.get("id") or result.get("report_path")
         if art_id and art_id not in report.artifacts:
             report.artifacts.append(art_id)
-        report.evidence.append({
-            "stage": "local_defense_scan",
-            "status": "completed",
-            "root": result.get("root"),
-            "scanned_files": result.get("scanned_files"),
-            "finding_count": result.get("finding_count"),
-            "artifact": art_id,
-        })
+        report.evidence.append(
+            {
+                "stage": "local_defense_scan",
+                "status": "completed",
+                "root": result.get("root"),
+                "scanned_files": result.get("scanned_files"),
+                "finding_count": result.get("finding_count"),
+                "artifact": art_id,
+            }
+        )
         report.final_proof = (
             f"LOCAL DEFENSE SCAN COMPLETE: scanned {result.get('scanned_files')} files, "
             f"found {result.get('finding_count')} suspicious indicators. Report: {result.get('report_path') or art_id}"

@@ -10,17 +10,21 @@ Design note: small free models (llama3.1:8b) reason better against an explicit
 written plan than with an invisible chain-of-thought — the plan is scaffolded
 OUTSIDE the model, not trusted to it.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
+from core.log import get_logger
 
 from ..config import config
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -35,7 +39,7 @@ class PlanStep:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "PlanStep":
+    def from_dict(cls, d: dict) -> PlanStep:
         return cls(
             goal=str(d.get("goal", "")),
             action=str(d.get("action", "investigate")),
@@ -67,7 +71,7 @@ class Plan:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Plan":
+    def from_dict(cls, d: dict) -> Plan:
         return cls(
             goal=str(d.get("goal", "")),
             steps=[PlanStep.from_dict(s) for s in d.get("steps") or []],
@@ -87,14 +91,14 @@ class Plan:
                 lines.append(f"     verify: {s.verify}")
         return "\n".join(lines)
 
-    def save(self, path: Optional[str] = None) -> Path:
+    def save(self, path: str | None = None) -> Path:
         p = Path(path) if path else config.resolve_path(f"data/plans/plan_{self.session_id or uuid.uuid4().hex[:8]}.json")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(self.to_dict(), indent=2))
         return p
 
     @classmethod
-    def load(cls, path: str) -> Optional["Plan"]:
+    def load(cls, path: str) -> Plan | None:
         p = Path(path)
         if not p.exists():
             return None
@@ -119,7 +123,7 @@ Rules:
 class PlanBuilder:
     """Build a structured Plan from a goal — one free LLM call, safe fallback."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self, model: str | None = None):
         self.model = model or config.model
 
     def build_plan(self, goal: str, session_id: str = "", difficulty: int = 3) -> Plan:
@@ -140,7 +144,7 @@ class PlanBuilder:
                 plan.status = "drafted"
                 return plan
         except Exception as e:
-            print(f"[PlanBuilder] LLM plan failed ({e}) - heuristic fallback")
+            logger.error(f"[PlanBuilder] LLM plan failed ({e}) - heuristic fallback")
 
         # Deterministic fallback: bullets / sentences -> steps
         plan.steps = self._heuristic_steps(goal)
@@ -148,7 +152,7 @@ class PlanBuilder:
         return plan
 
     @staticmethod
-    def _parse_steps(content: str) -> Optional[list[PlanStep]]:
+    def _parse_steps(content: str) -> list[PlanStep] | None:
         text = content.strip()
         # Strip code fences if present
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -183,16 +187,9 @@ class PlanBuilder:
     @staticmethod
     def _heuristic_steps(goal: str) -> list[PlanStep]:
         lines = [ln.strip(" -*\t") for ln in goal.splitlines() if ln.strip()]
-        bullets = [
-            re.sub(r"^(\d+[\.\):])\s+", "", ln).strip()
-            for ln in lines
-            if re.match(r"^\s*(\d+[\.\):]|[-*])\s+", ln)
-        ]
+        bullets = [re.sub(r"^(\d+[\.\):])\s+", "", ln).strip() for ln in lines if re.match(r"^\s*(\d+[\.\):]|[-*])\s+", ln)]
         if len(bullets) >= 2:
-            return [
-                PlanStep(goal=b[:200], action="investigate", verify="")
-                for b in bullets[:6]
-            ]
+            return [PlanStep(goal=b[:200], action="investigate", verify="") for b in bullets[:6]]
         parts = re.split(r"(?<=[.!?])\s+|\band then\b|\bthen\b|;", goal)
         parts = [p.strip() for p in parts if p and len(p.strip()) > 15]
         if len(parts) >= 2:
@@ -200,7 +197,11 @@ class PlanBuilder:
         return [
             PlanStep(goal=f"Research and gather facts about: {goal[:150]}", action="web_search"),
             PlanStep(goal="Analyze findings and outline the answer", action="analyze"),
-            PlanStep(goal="Deliver the final answer with verification", action="synthesize", verify="check claims against gathered evidence"),
+            PlanStep(
+                goal="Deliver the final answer with verification",
+                action="synthesize",
+                verify="check claims against gathered evidence",
+            ),
         ]
 
 
@@ -237,14 +238,14 @@ def list_plans(limit: int = 10) -> list[dict]:
     return out
 
 
-def show_plan(session_id: str) -> Optional[Plan]:
+def show_plan(session_id: str) -> Plan | None:
     p = config.resolve_path(f"data/plans/plan_{session_id}.json")
     if not p.exists():
         return None
     return Plan.load(str(p))
 
 
-def resume_plan(session_id: str, model: Optional[str] = None) -> dict:
+def resume_plan(session_id: str, model: str | None = None) -> dict:
     """Resume a saved plan: mark failed steps pending, run remaining steps with the agent."""
     plan = show_plan(session_id)
     if not plan:
@@ -264,7 +265,7 @@ def resume_plan(session_id: str, model: Optional[str] = None) -> dict:
     agent.plan_override = plan
     instruction = (
         "Resume this plan and complete the remaining steps:\n"
-        + "\n".join(f"{i+1}. {s.goal} (action: {s.action})" for i, s in enumerate(plan.steps) if s.status != "done")
+        + "\n".join(f"{i + 1}. {s.goal} (action: {s.action})" for i, s in enumerate(plan.steps) if s.status != "done")
         + "\nExecute the remaining steps and give the final result."
     )
     result = agent.chat(instruction)

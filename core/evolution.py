@@ -8,23 +8,24 @@ The policy is deliberately deterministic and has no LLM in the decision path.
 It is safe to use before a GitHub PR, CI job, canary deployment, or local
 checkout.  It does not push, merge, or deploy anything itself.
 """
+
 from __future__ import annotations
 
 import fnmatch
 import json
 import re
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Optional
 
 
 class ChangeDecision(str, Enum):
-    ALLOW = "allow"       # safe to develop/test automatically
-    REVIEW = "review"     # proposal is valid, but needs independent approval
-    DENY = "deny"         # cannot be changed by an autonomous run
+    ALLOW = "allow"  # safe to develop/test automatically
+    REVIEW = "review"  # proposal is valid, but needs independent approval
+    DENY = "deny"  # cannot be changed by an autonomous run
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class ChangeProposal:
     files: list[str]
     tests: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
-    branch: Optional[str] = None
+    branch: str | None = None
     proposal_id: str = field(default_factory=lambda: f"evo_{uuid.uuid4().hex[:12]}")
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

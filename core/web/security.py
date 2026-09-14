@@ -17,12 +17,13 @@ The private-address refusal can be relaxed ONLY by an explicit config flag
 (``HERMUS_WEB_ALLOW_PRIVATE_ADDRESSES=1``) — used by tests and air-gapped
 self-hosted intranets, never by default.
 """
+
 from __future__ import annotations
 
 import ipaddress
 import socket
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from .errors import SecurityBlockedError
@@ -77,7 +78,7 @@ class WebSecurityPolicy:
     extra_blocked_hosts: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_config(cls, config: Any) -> "WebSecurityPolicy":
+    def from_config(cls, config: Any) -> WebSecurityPolicy:
         return cls(
             allowed_domains=tuple(getattr(config, "web_allowed_domains", ()) or ()),
             blocked_domains=tuple(getattr(config, "web_blocked_domains", ()) or ()),
@@ -105,8 +106,7 @@ class WebSecurityPolicy:
 
         if parsed.scheme.lower() not in self.allowed_schemes:
             raise SecurityBlockedError(
-                f"{purpose}: scheme '{parsed.scheme or 'none'}' not allowed "
-                f"(allowed: {', '.join(self.allowed_schemes)})"
+                f"{purpose}: scheme '{parsed.scheme or 'none'}' not allowed (allowed: {', '.join(self.allowed_schemes)})"
             )
         # A scheme-relative or missing-host URL is not fetchable.
         if not parsed.hostname:
@@ -116,8 +116,7 @@ class WebSecurityPolicy:
             raise SecurityBlockedError(f"{purpose}: embedded credentials in URL are not allowed")
 
         host = parsed.hostname.lower().strip(".")
-        if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".local") \
-                or host.endswith(".internal"):
+        if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".local") or host.endswith(".internal"):
             raise SecurityBlockedError(f"{purpose}: internal host '{host}' is blocked")
 
         try:
@@ -137,15 +136,12 @@ class WebSecurityPolicy:
                 raise SecurityBlockedError(f"{purpose}: domain '{host}' is blocked by Hermus policy")
         if self.allowed_domains:
             if not any(host_matches_pattern(host, p) for p in self.allowed_domains):
-                raise SecurityBlockedError(
-                    f"{purpose}: domain '{host}' is not in the configured allow list"
-                )
+                raise SecurityBlockedError(f"{purpose}: domain '{host}' is not in the configured allow list")
 
         self._check_host_addresses(host, purpose)
         return raw
 
-    def check_final_url(self, url: str, *, requested_url: str = "",
-                        purpose: str = "redirect") -> str:
+    def check_final_url(self, url: str, *, requested_url: str = "", purpose: str = "redirect") -> str:
         """Re-validate the URL a server actually redirected us to (post-redirect
         SSRF guard). This is the *suspenders* to Scrapling's ``follow_redirects``
         belt: a page can redirect ``https://public.example`` →
@@ -175,8 +171,8 @@ class WebSecurityPolicy:
                 socket.getaddrinfo(host, None)
             except socket.gaierror as exc:
                 raise SecurityBlockedError(
-                    f"{purpose}: redirect target '{host}' could not be resolved for "
-                    "re-validation") from exc
+                    f"{purpose}: redirect target '{host}' could not be resolved for re-validation"
+                ) from exc
         return self.check(final, purpose=purpose)
 
     def check_response(self, size_bytes: int, *, content_type: str = "") -> None:
@@ -194,8 +190,7 @@ class WebSecurityPolicy:
             from .errors import ResponseTooLargeError
 
             raise ResponseTooLargeError(
-                f"response of {size_bytes} bytes exceeds the configured limit "
-                f"({self.max_response_bytes} bytes)"
+                f"response of {size_bytes} bytes exceeds the configured limit ({self.max_response_bytes} bytes)"
             )
 
     # --------------------------------------------------------------- internals
@@ -204,7 +199,7 @@ class WebSecurityPolicy:
             return
         try:
             infos = socket.getaddrinfo(host, None)
-        except socket.gaierror as exc:
+        except socket.gaierror:
             # Unresolvable at gate time: let the fetch attempt surface a DNS
             # failure classification instead of a security block.
             return
@@ -215,8 +210,7 @@ class WebSecurityPolicy:
                 continue
             if self._is_forbidden_ip(ip):
                 raise SecurityBlockedError(
-                    f"{purpose}: '{host}' resolves to a private/reserved address ({ip}) — "
-                    "blocked to prevent SSRF"
+                    f"{purpose}: '{host}' resolves to a private/reserved address ({ip}) — blocked to prevent SSRF"
                 )
 
     @staticmethod
@@ -228,10 +222,7 @@ class WebSecurityPolicy:
             elif ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_private:
                 return True
             return False
-        return (
-            ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
-            or ip.is_multicast or ip.is_unspecified
-        )
+        return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
 
 
 def test_policy(allow_private: bool = True) -> WebSecurityPolicy:

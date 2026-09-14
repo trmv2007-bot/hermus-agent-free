@@ -4,6 +4,7 @@ loop, tool registry, and gateway.
 Offline: uses mock/mock and an isolated HERMUS_HOME. Run:
   python tests/test_integration.py   (or pytest tests/test_integration.py)
 """
+
 import os
 import sys
 import tempfile
@@ -29,8 +30,8 @@ config.embeddings_db_path = str(Path(_TMP) / "embeddings.db")
 # Tool registry: permission enforcement + new tools
 # --------------------------------------------------------------------------
 def test_permission_enforcement_in_registry():
-    from core.tool_registry import tool_registry
     from core.permissions import permission_manager
+    from core.tool_registry import tool_registry
 
     # ASK tool runs (audited) under default ask_policy=allow
     r = tool_registry.execute("shell_execute", {"command": "echo hermus_ok", "timeout": 5})
@@ -50,11 +51,21 @@ def test_architecture_tools_registered():
 
     tool_registry.load(force=True)
     names = tool_registry.list_tools()["tools"]
-    for expected in ("research_deep", "memory2_recall", "memory2_remember",
-                     "router_choose", "workspace_list_projects",
-                     "screen_record_start", "screen_record_status", "screen_record_save",
-                     "screen_analyze", "screen_verify", "screen_action_before",
-                     "screen_action_after", "screen_watch"):
+    for expected in (
+        "research_deep",
+        "memory2_recall",
+        "memory2_remember",
+        "router_choose",
+        "workspace_list_projects",
+        "screen_record_start",
+        "screen_record_status",
+        "screen_record_save",
+        "screen_analyze",
+        "screen_verify",
+        "screen_action_before",
+        "screen_action_after",
+        "screen_watch",
+    ):
         assert expected in names, f"{expected} not registered"
 
     # screen status works headless
@@ -128,9 +139,9 @@ def test_agent_autonomous_loop():
 def test_gateway_endpoints(tmp_path):
     from fastapi.testclient import TestClient
 
-    from gateway.gateway import app
-    from core.workspace import workspace
     from core.profiles import profile_manager
+    from core.workspace import workspace
+    from gateway.gateway import app
 
     # Redirect the global workspace to a temp root so /workspace/* and /agents/*
     # never write to the real ~/.hermus (and the singletons are restored after),
@@ -232,8 +243,7 @@ def test_computer_dashboard_endpoints():
     assert r.status_code == 200 and r.json().get("halted") is False
 
     # unknown resources return 404 JSON, not server errors
-    for path in ("/computer/task/nope", "/computer/plan/nope",
-                 "/computer/repairs/nope", "/computer/recording/nope"):
+    for path in ("/computer/task/nope", "/computer/plan/nope", "/computer/repairs/nope", "/computer/recording/nope"):
         assert client.get(path).status_code == 404
     assert client.get("/computer/recording/nope/video").status_code == 404
 

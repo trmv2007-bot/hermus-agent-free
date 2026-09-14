@@ -1,7 +1,7 @@
 # HERMUS Architecture — Post-Consolidation Reference
 
 This is the **canonical** architecture reference (replaces the historical
-`ARCHITECTURE_UPGRADES.md` narrative). It describes ownership after the
+`ARCHITECTURE_UPGRADES.md` narrative, now in `docs/archive/`). It describes ownership after the
 consolidation: one public facade, one state model, one persistence owner and one
 execution path per subsystem. It also explicitly lists the legacy components that
 were moved to a compat/migration path so future work does not reintroduce
@@ -65,7 +65,12 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Red-line policy / approvals** | `RED_LINES.md` + `core.safety_policy` + `core.approval` | `policies/red_lines.json` + capability ledger + scoped approval grants | deterministic green/yellow/red classification plus scoped grants for yellow actions |
 | **Bootstrap** | `bootstrap.py` | venv + data layout | one command, idempotent |
-| **Gateway** | `gateway/gateway.py` | — | transport only |
+| **Config** | `core/config.py` | typed settings (`BaseSettings`) | one settings object, env-var validated |
+| **Logging** | `core/log.py` | `HERMUS_LOG_LEVEL` / `HERMUS_LOG_FORMAT` | `get_logger()` everywhere; `print` is for program output only |
+| **Errors** | `core.errors.HermusError` | — | one typed taxonomy (`code`/`status`/`retryable`) |
+| **Async runtime** | `core/aio.py` | shared `httpx.AsyncClient` | `run_sync` / `gather_limit`; blocking core calls are wrapped in `asyncio.to_thread` at the gateway edge |
+| **CLI** | `hermus_cli/` (dispatch) + `hermus.py` (shim) | — | one module per command group; no command logic in the shim |
+| **Gateway** | `gateway/gateway.py` + `gateway/{envelope,middleware,lifecycle}.py` | — | transport + the cross-cutting HTTP contract (see §2.1) |
 
 Speech/media integration follows the same one-owner rule:
 
@@ -101,6 +106,84 @@ Speech/media integration follows the same one-owner rule:
   live queue's `gateway/queue.py::Job` is a subtype of it, so the §14 lease/heartbeat/
   idempotency/attempt fields are the shared contract and the queue adds only runtime
   operational fields.
+- **HTTP envelope** — the one response contract for the gateway
+  (`gateway/envelope.py`). Success bodies keep the handler payload untouched;
+  every failure carries `{success: false, error, code, message, retryable,
+  details}`. `ErrorEnvelopeMiddleware` applies it to *all* 4xx/5xx JSON
+  responses — including FastAPI's own `{"detail": ...}` — additively, so
+  existing keys are preserved. A client can therefore branch on `code` and
+  retry on `retryable` without per-route special cases.
+
+### 2.1 Gateway HTTP layer (cross-cutting)
+
+The gateway is transport, but "transport" now includes one consistent HTTP
+contract applied by middleware rather than by each route:
+
+```
+request ─► CORS ─► RequestContext ─► RateLimit ─► GZip ─► ErrorEnvelope ─► router
+              │            │              │                     │
+              │            │              │                     └─ rewrites 4xx/5xx
+              │            │              └─ 429 + Retry-After (opt-in)       into the
+              │            └─ X-Request-ID, timing, access log               canonical
+              └─ preflight short-circuit                                     envelope
+```
+
+- **Correlation** — `RequestContextMiddleware` assigns (or sanitizes an
+  inbound) `X-Request-ID`, binds it to every log record emitted while the
+  request is handled, and echoes it plus `X-Response-Time` back. A dashboard
+  500 is traceable to the exact log lines that produced it.
+- **Rate limiting** — `RateLimitMiddleware` is a per-client sliding window,
+  off unless `HERMUS_RATE_LIMIT_PER_MINUTE` is set. Authenticated callers get
+  a bucket keyed by a hash of their token; probe paths
+  (`/healthz`, `/readyz`, `/api/status`) are always exempt.
+- **Envelope** — `ErrorEnvelopeMiddleware` is innermost so it normalizes the
+  raw JSON the app renders, before compression.
+- **Lifecycle** — `gateway/lifecycle.py` separates liveness (`/healthz`,
+  `/livez`: the loop is serving) from readiness (`/readyz`: may it take
+  traffic?). Readiness is derived from real state and goes 503 while
+  draining; `JobQueue` refuses new work with a retryable `UnavailableError`
+  once `stop()` has been called, so a drain never starts jobs it is about to
+  cancel.
+
+Registration order is the reverse of the on-the-wire order: Starlette's
+`add_middleware` inserts at index 0, so the **last** middleware registered is
+the **outermost**.
+
+### 2.2 Control room assets
+
+`/control` is the single production UI and is a projection — it owns no truth.
+It is served as markup plus assets rather than one inline monolith:
+
+| File | Contents |
+|---|---|
+| `gateway/control.html` | structure + the token bootstrap (must be inline: it captures `?token=` / `localStorage` before any script loads) |
+| `gateway/static/control.css` | stylesheet |
+| `gateway/static/control-room.js` | application script |
+| `gateway/static/control-client.js` | SSE + voice-first browser client |
+
+Assets are served from an explicit allow-list (`_serve_control_asset`), not a
+`StaticFiles` mount, so the gateway does not expose the directory. Tests that
+pin control-room wording search `tests/_control_room_source.py`, which
+concatenates all four files.
+
+The UI consumes the same contracts as every other client:
+
+- **`requestJSON()`** reads the canonical envelope, so a failure yields
+  `code` / `message` / `retryable` / `requestId` instead of a bare status.
+  Panels offer Retry only when `retryable` is true, and show the
+  `X-Request-ID` so a UI error correlates with the gateway log line.
+- **Panel states** (`stateHtml` / `stateRowHtml`) render loading / empty /
+  error uniformly — an unconfigured backend never looks like a working one
+  that happens to be blank.
+- **The connection pill** reports `/readyz`, so it shows "not ready" (with the
+  server's reason) while the gateway is draining rather than a fabricated
+  "live". Liveness (`/healthz`) is separate.
+- **Tabs are a real ARIA tablist** with roving tabindex and arrow/Home/End
+  navigation, and toasts live in an `aria-live` region.
+
+Browser code is exercised by `tests/test_control_room_ux.py`, which evaluates
+the real script in Node against a minimal DOM stub — behaviour, not just
+syntax.
 
 ### 3.1 Delegation execution path (canonical)
 
@@ -169,7 +252,7 @@ The final tree must not contain two competing implementations.
 4. ~~**Models**~~ ✅ **static boundary gate** — `tests/test_architecture_gates.py::test_one_model_boundary_no_direct_provider_sdk` rejects any direct provider SDK import outside the canonical model subsystem; `ModelGateway` is the public selection facade and `routes_canonical` uses it. (Enforced by gate.)
 5. ~~**Setup**~~ ✅ **done** — one idempotent `bootstrap`/`start`/`doctor`. `bootstrap.py` distinguishes required vs optional deps and fails truthfully on missing required modules; `setup.sh` handles OS packages then delegates to the bootstrap; `activate.sh`/launchers are thin (no business logic, no `|| true` masking of required deps). Setup-contract gates added.
 6. ~~**Android control subsystem (Spec §16–19) backend**~~ ✅ **built** — `core.android` is the single Android boundary: `AndroidTool` (facade) reached via `ToolGateway` → `android_*` tools and `/android/*` API. Real `AdbAndroidTransport` (screencap/uiautomator/tap/text/keyevent/am start) + signed companion-bridge transport; explicit consent (denied by default) + configurable allowed-ops allowlist; HMAC-SHA256 secure pairing/sign/verify; append-only audit log + EventBus mirror; honest `android_control_unavailable` reporting. ⚠️ **Device/emulator E2E remains UNTESTED** — it requires a live device + the Android Agent Companion app and is never marked WORKING on mocks.
-7. ~~**Android Agent Companion (on-device half) + end-to-end control**~~ ✅ **reference built + agentic loop proven** — `android_companion/` (native Kotlin/Gradle: signed bridge server on loopback `127.0.0.1:8080`, accessibility `DeviceController`, `MediaProjection` `ScreenCapture`, consent `PairingActivity`) uses only documented permission-gated APIs (no security bypass). The backend Android path was fixed in the integration pass: ADB transport now reads binary screenshots safely (§8), retrieves the real UI tree by dumping then cat-ing the XML and parsing it (§9), resolves the launcher activity for app launch (§10), the singleton provisions a real transport via `build_default_transport()` (§7), and the bridge transport enforces loopback/HTTPS in code (§13). `core/android/simulate.py` implements the real `AndroidTransport` interface on a deterministic "device" so the full observe → reason → act → verify → continue loop is exercised through the real `ToolGateway`; `core/android/observe.py` (semantic observation — reason over labels/buttons/fields, not raw coords); `core/android/verify.py` (before/action/after). `tests/test_android_agentic_loop.py` proves the loop; `tests/test_android_subsystem.py` (20) covers the fixed ADB/UI/launch/factory/bridge paths. ⚠️ **Physical device/emulator + live-model E2E remain NOT VERIFIED** (no SDK/device/keys here); exact steps in `FINAL_REPORT.md` §52.
+7. ~~**Android Agent Companion (on-device half) + end-to-end control**~~ ✅ **reference built + agentic loop proven** — `android_companion/` (native Kotlin/Gradle: signed bridge server on loopback `127.0.0.1:8080`, accessibility `DeviceController`, `MediaProjection` `ScreenCapture`, consent `PairingActivity`) uses only documented permission-gated APIs (no security bypass). The backend Android path was fixed in the integration pass: ADB transport now reads binary screenshots safely (§8), retrieves the real UI tree by dumping then cat-ing the XML and parsing it (§9), resolves the launcher activity for app launch (§10), the singleton provisions a real transport via `build_default_transport()` (§7), and the bridge transport enforces loopback/HTTPS in code (§13). `core/android/simulate.py` implements the real `AndroidTransport` interface on a deterministic "device" so the full observe → reason → act → verify → continue loop is exercised through the real `ToolGateway`; `core/android/observe.py` (semantic observation — reason over labels/buttons/fields, not raw coords); `core/android/verify.py` (before/action/after). `tests/test_android_agentic_loop.py` proves the loop; `tests/test_android_subsystem.py` (20) covers the fixed ADB/UI/launch/factory/bridge paths. ⚠️ **Physical device/emulator + live-model E2E remain NOT VERIFIED** (no SDK/device/keys here); exact steps in `docs/archive/FINAL_REPORT.md` §52.
 7. ~~**Restart/resume (Spec §13)**~~ ✅ **done** — `MissionEngine.load_mission()`; restart tests (kill worker → fresh engine loads → resumes → completes; duplicate-execution prevented; cancel state survives). **Host-level computer E2E remains UNTESTED** (guarded test skips without pyautogui + a real display); computer *capability* is reported honestly (`computer_control_unavailable` when real control is unavailable). Provider-E2E on a real API key remains UNTESTED (no keys in this environment).
 
 ---

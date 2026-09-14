@@ -1,3 +1,10 @@
+[project]
+name = "hermus-agent-free"
+version = "0.1.0"
+description = "A free, open-source, self-hosted AI agent for coding, research, automation and multi-agent work."
+requires-python = ">=3.10"
+readme = "README.md"
+
 [tool.ruff]
 # Hermus requires Python 3.10+ (see README); declaring it lets ruff apply
 # PEP 585 (dict[str, x]) / PEP 604 (x | None) rewrites safely.
@@ -6,11 +13,32 @@ line-length = 130
 extend-exclude = ["data", "skills"]
 
 [tool.ruff.lint]
-# Error-class rules only — style-only findings do not gate merges (same
-# selection the CI lint job enforces).
-select = ["E9", "F63", "F7", "F82", "B", "PLE"]
+# Full hygiene gate: errors, pyflakes, bugbear, import order, pyupgrade,
+# naming, whitespace. E501 is excluded — the formatter owns code layout and
+# long string literals / URLs / comments are not worth churning over.
+select = ["E", "F", "B", "I", "UP", "N", "W"]
+ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests legitimately use loop counters for clarity and blind-ish assertions
 # in a few places; keep the gate strict for production code only.
 "tests/*" = ["B011", "B017"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
+# Lenient baseline: the tree is only partially typed. New foundation modules
+# (core/log.py, core/errors.py, ...) are held to the strict override below and
+# `make typecheck` gates on those; the rest of the tree ratchets up module by
+# module in later phases instead of blocking all progress on legacy code.
+exclude = ["skills/", "android_companion/"]
+
+[[tool.mypy.overrides]]
+module = ["core.log", "core.errors"]
+disallow_untyped_defs = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true

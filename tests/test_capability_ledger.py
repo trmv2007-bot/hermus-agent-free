@@ -1,18 +1,27 @@
 from __future__ import annotations
 
-from core.capability_ledger import CapabilityEntry, CapabilityLedger, capability_entry_from_blocked_action, capability_setup_proposal
+from _control_room_source import control_room_source
+
+from core.capability_ledger import (
+    CapabilityEntry,
+    CapabilityLedger,
+    capability_entry_from_blocked_action,
+    capability_setup_proposal,
+)
 
 
 def test_capability_ledger_adds_discovered_power_to_markdown(tmp_path):
     path = tmp_path / "CAPABILITY_LEDGER.md"
     ledger = CapabilityLedger(path)
-    result = ledger.add_discovered(CapabilityEntry.create(
-        power="Gmail delegated send",
-        use="reply to approved emails",
-        risk="privacy and reputation",
-        needed_approval_setup="Gmail connector plus send policy",
-        status="not_granted",
-    ))
+    result = ledger.add_discovered(
+        CapabilityEntry.create(
+            power="Gmail delegated send",
+            use="reply to approved emails",
+            risk="privacy and reputation",
+            needed_approval_setup="Gmail connector plus send policy",
+            status="not_granted",
+        )
+    )
     assert result["success"] is True
     text = path.read_text(encoding="utf-8")
     assert "Gmail delegated send" in text
@@ -30,7 +39,7 @@ def test_capability_ledger_deduplicates_by_power_name(tmp_path):
 
 
 def test_control_room_can_record_discovered_power():
-    src = __import__("pathlib").Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "/capabilities/ledger/discover" in src
     assert "Record power" in src
     assert "function addPower" in src
@@ -77,7 +86,7 @@ def test_permission_manager_records_capability_need_when_yellow_has_no_grant():
 def test_tool_gateway_records_missing_tool_capability():
     src = __import__("pathlib").Path("core/tools/gateway.py").read_text(encoding="utf-8")
     assert "Tool capability:" in src
-    assert "source=\"tool_gateway\"" in src
+    assert 'source="tool_gateway"' in src
 
 
 def test_capability_setup_proposal_is_category_aware():
@@ -101,7 +110,7 @@ def test_capability_ledger_can_write_setup_proposal(tmp_path):
 
 
 def test_control_room_can_generate_setup_proposal():
-    src = __import__("pathlib").Path("gateway/control.html").read_text(encoding="utf-8")
+    src = control_room_source()
     assert "/capabilities/ledger/propose" in src
     assert "Propose setup" in src
     assert "function proposePower" in src

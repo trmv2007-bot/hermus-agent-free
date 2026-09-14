@@ -4,15 +4,16 @@ Orchestrates multi-agent teams via a structured Directed Acyclic Graph (DAG) wit
 dependency resolution, parallel stage execution, artifact passing, retry tracking,
 and cycle prevention.
 """
+
 from __future__ import annotations
 
 import collections
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
-from collections.abc import Callable
+from typing import Any
 
 
 class DAGNodeStatus(str, Enum):
@@ -25,7 +26,7 @@ class DAGNodeStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-def _safe_serialize(obj: Any, seen: Optional[set[int]] = None) -> Any:
+def _safe_serialize(obj: Any, seen: set[int] | None = None) -> Any:
     if seen is None:
         seen = set()
     obj_id = id(obj)
@@ -64,13 +65,13 @@ class DAGNode:
     inputs: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
     artifacts: list[str] = field(default_factory=list)
-    assigned_model: Optional[str] = None
+    assigned_model: str | None = None
     retries: int = 0
     max_retries: int = 2
     execution_time_sec: float = 0.0
-    error: Optional[str] = None
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    error: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,9 +126,9 @@ class AgentDAG:
         node_id: str,
         role: str,
         goal: str,
-        dependencies: Optional[list[str]] = None,
-        inputs: Optional[dict[str, Any]] = None,
-        assigned_model: Optional[str] = None,
+        dependencies: list[str] | None = None,
+        inputs: dict[str, Any] | None = None,
+        assigned_model: str | None = None,
         max_retries: int = 2,
     ) -> DAGNode:
         deps = dependencies or []
@@ -190,10 +191,7 @@ class AgentDAG:
         ready: list[DAGNode] = []
         for node in self.nodes.values():
             if node.status in (DAGNodeStatus.PENDING.value, DAGNodeStatus.READY.value):
-                deps_satisfied = all(
-                    self.nodes[dep].status == DAGNodeStatus.COMPLETED.value
-                    for dep in node.dependencies
-                )
+                deps_satisfied = all(self.nodes[dep].status == DAGNodeStatus.COMPLETED.value for dep in node.dependencies)
                 deps_failed = any(
                     self.nodes[dep].status in (DAGNodeStatus.FAILED.value, DAGNodeStatus.BLOCKED.value)
                     for dep in node.dependencies
@@ -302,9 +300,20 @@ def create_standard_mission_dag(task: str) -> AgentDAG:
     dag = AgentDAG(name=f"SWE Mission: {task[:40]}")
     dag.add_node("research", "researcher", f"Research requirements and background for: {task}")
     dag.add_node("architecture", "architect", f"Design architecture and file structure for: {task}", dependencies=["research"])
-    dag.add_node("implementation", "coder", f"Implement code, tests, and configurations for: {task}", dependencies=["architecture"])
-    dag.add_node("code_review", "code_reviewer", "Review code changes for correctness and maintainability", dependencies=["implementation"])
-    dag.add_node("security_audit", "security_auditor", "Audit code and configuration for security vulnerabilities", dependencies=["implementation"])
+    dag.add_node(
+        "implementation", "coder", f"Implement code, tests, and configurations for: {task}", dependencies=["architecture"]
+    )
+    dag.add_node(
+        "code_review", "code_reviewer", "Review code changes for correctness and maintainability", dependencies=["implementation"]
+    )
+    dag.add_node(
+        "security_audit",
+        "security_auditor",
+        "Audit code and configuration for security vulnerabilities",
+        dependencies=["implementation"],
+    )
     dag.add_node("integration", "integrator", "Build and integrate components", dependencies=["code_review", "security_audit"])
-    dag.add_node("verification", "verifier", f"Run domain verifiers and test suite for final proof: {task}", dependencies=["integration"])
+    dag.add_node(
+        "verification", "verifier", f"Run domain verifiers and test suite for final proof: {task}", dependencies=["integration"]
+    )
     return dag

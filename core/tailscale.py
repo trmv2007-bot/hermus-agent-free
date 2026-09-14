@@ -3,6 +3,7 @@ Tailscale & Remote Pairing Detection — automatically discovers Tailscale mesh 
 IPs, MagicDNS hostnames, and local LAN addresses for zero-friction mobile pairing.
 Includes zero-dependency QR code SVG generation.
 """
+
 from __future__ import annotations
 
 import json
@@ -68,8 +69,8 @@ def _make_qr_svg(data: str, size: int = 200) -> str:
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
         f'style="background:#070b14; border-radius:12px; padding:10px; border:1px solid rgba(0,242,254,0.3);">'
-        f'{rects_str}'
-        f'</svg>'
+        f"{rects_str}"
+        f"</svg>"
     )
 
 

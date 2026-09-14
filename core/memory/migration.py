@@ -9,9 +9,8 @@ counts, and marks the migration complete.
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 V1_MARKER = "migration.v1_done"
 
@@ -31,6 +30,7 @@ class MigrationReader:
 
     def __init__(self, db_path: str):
         from ..memory import Memory  # type: ignore
+
         self._v1 = Memory(db_path=db_path)
         self.db_path = str(db_path)
 
@@ -47,8 +47,9 @@ class MigrationReader:
             pass
 
 
-def migrate_legacy(legacy_path: str, *, facade: Any = None, dry_run: bool = False,
-                   project: str = "default", marker_path: Optional[str] = None) -> dict[str, Any]:
+def migrate_legacy(
+    legacy_path: str, *, facade: Any = None, dry_run: bool = False, project: str = "default", marker_path: str | None = None
+) -> dict[str, Any]:
     """Copy v1 memory rows into the canonical schema once.
 
     Idempotent: re-running is a no-op after the marker is written. Verifies row
@@ -84,8 +85,13 @@ def migrate_legacy(legacy_path: str, *, facade: Any = None, dry_run: bool = Fals
                 key = row.get("key") or ""
                 value = row.get("value") or ""
                 importance = float(row.get("importance") or 5)
-                res = canonical.remember("semantic", f"{key}: {value}", importance=importance,
-                                         project=project, metadata={"source": "legacy.v1.curated"})
+                res = canonical.remember(
+                    "semantic",
+                    f"{key}: {value}",
+                    importance=importance,
+                    project=project,
+                    metadata={"source": "legacy.v1.curated"},
+                )
                 if res.get("success"):
                     migrated["curated"] += 1
                 else:
@@ -107,14 +113,18 @@ def verify_migration(legacy_path: str, *, facade: Any = None, project: str = "de
     try:
         from ..memory import Memory  # type: ignore
         from ..memory2 import Memory2  # type: ignore
+
         legacy_db = Path(legacy_path)
         canonical = Memory2(db_path=str(legacy_db.with_suffix(".v2.db"))) if facade is None else facade.store
         v1 = Memory(db_path=str(legacy_db))
         v1_count = len(v1.get_curated_memory(limit=100000))
         canon_cnt = len(canonical.store.all(kind="semantic", project=project, limit=100000))
-        out = {"verified": v1_count == 0 or canon_cnt >= 1,
-               "legacy_curated": v1_count, "canonical_semantic": canon_cnt,
-               "match": v1_count <= canon_cnt}
+        out = {
+            "verified": v1_count == 0 or canon_cnt >= 1,
+            "legacy_curated": v1_count,
+            "canonical_semantic": canon_cnt,
+            "match": v1_count <= canon_cnt,
+        }
         v1.close()
     except Exception as exc:
         out["error"] = str(exc)

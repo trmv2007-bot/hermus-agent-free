@@ -1,4 +1,5 @@
 """Tests for multi-step loop, tool registry, MCP, embeddings, channels helpers."""
+
 import os
 import sys
 import tempfile
@@ -84,8 +85,8 @@ def test_embeddings_ingest_directory():
 
 
 def test_mcp_echo_server_end_to_end():
-    from core.mcp_client import MCPManager
     from core.config import config
+    from core.mcp_client import MCPManager
 
     echo_path = str(config.base_dir / "tools" / "mcp_echo_server.py")
     with tempfile.TemporaryDirectory() as td:
@@ -123,8 +124,8 @@ def test_mcp_echo_server_end_to_end():
 
 
 def test_skill_use_passes_task_context():
-    from core.tool_registry import tool_registry
     from core.skill_manager import skill_manager
+    from core.tool_registry import tool_registry
 
     # Use existing web research skill which accepts query=
     tool_registry.load(force=True)

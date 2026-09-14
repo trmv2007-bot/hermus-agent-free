@@ -11,6 +11,7 @@ Two tiers, never conflated:
 
 Nothing in this file is mocked. If a test is skipped, the skip reason says why.
 """
+
 from __future__ import annotations
 
 import socket
@@ -24,7 +25,7 @@ from core.web.gateway import WebGateway
 class LiveConfig:
     web_enabled = True
     web_default_strategy = "static"
-    web_dynamic_enabled = False          # browsers unavailable in CI sandboxes
+    web_dynamic_enabled = False  # browsers unavailable in CI sandboxes
     web_stealth_enabled = False
     web_termux_restrict = True
     web_request_timeout = 15.0
@@ -54,8 +55,7 @@ def _pypi_reachable() -> bool:
         return False
 
 
-LIVE = pytest.mark.skipif(not _pypi_reachable(), reason="no network egress to pypi.org "
-                                                           "from this environment")
+LIVE = pytest.mark.skipif(not _pypi_reachable(), reason="no network egress to pypi.org from this environment")
 
 
 @pytest.fixture()
@@ -84,14 +84,15 @@ class TestRealLiveInternetFetch:
         assert "scrapling" in result.title.lower()
         assert result.sha256 and result.size_bytes > 0
         assert result.links, "real page must yield absolute links"
-        assert all(l.url.startswith("http") for l in result.links)
+        assert all(link.url.startswith("http") for link in result.links)
         # capability must now be VERIFIED (a real fetch succeeded in-process)
         assert capabilities.probe(force=True)["static"]["status"] == capabilities.AVAILABLE
 
     def test_real_live_extraction(self, live_gateway):
         """REAL LIVE TEST: targeted extraction over a real page."""
-        out = live_gateway.extract("https://pypi.org/simple/scrapling/", selector="a",
-                                   method="css", attribute="href", max_values=5)
+        out = live_gateway.extract(
+            "https://pypi.org/simple/scrapling/", selector="a", method="css", attribute="href", max_values=5
+        )
         assert out["ok"] is True
         assert out["count"] >= 1
         assert all(v for v in out["values"])
@@ -113,15 +114,15 @@ class TestRealLocalFetch:
 
         pages = {
             "/": "<html><head><title>Index</title></head><body><p>Intro page with plenty "
-                 "of text for the sufficiency heuristic.</p>"
-                 "<a href='/doc'>doc</a><a href='/prices'>prices</a></body></html>",
+            "of text for the sufficiency heuristic.</p>"
+            "<a href='/doc'>doc</a><a href='/prices'>prices</a></body></html>",
             "/doc": "<html><head><title>Docs</title></head><body><p>Documentation page "
-                    "with enough meaningful text to pass sufficiency checks.</p></body></html>",
+            "with enough meaningful text to pass sufficiency checks.</p></body></html>",
             "/prices": "<html><head><title>Prices</title></head><body>"
-                       "<ul class='prices'><li class='price'>19.99</li>"
-                       "<li class='price'>29.99</li></ul>"
-                       "<p>Price list page with enough supporting text as well.</p>"
-                       "</body></html>",
+            "<ul class='prices'><li class='price'>19.99</li>"
+            "<li class='price'>29.99</li></ul>"
+            "<p>Price list page with enough supporting text as well.</p>"
+            "</body></html>",
         }
 
         class Handler(BaseHTTPRequestHandler):

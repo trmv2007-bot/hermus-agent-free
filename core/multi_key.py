@@ -4,6 +4,7 @@ Multi-API Keys — any AI API key works.
 - Per-key: base_url, health, models, rate limits, RPM/TPM budgets
 - Round-robin + cooldown + parallel task dispatch across keys/models
 """
+
 from __future__ import annotations
 
 import json
@@ -12,14 +13,17 @@ import shutil
 import threading
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
-from collections.abc import Callable
+
+from core.log import get_logger
 
 from .config import config
 from .providers import get_provider, list_providers
+
+logger = get_logger(__name__)
 
 
 class MultiKeyManager:
@@ -60,9 +64,7 @@ class MultiKeyManager:
             # Corrupt/unreadable store: preserve the bad file for manual
             # recovery instead of letting the next _save() overwrite it.
             try:
-                backup = self.db_path.with_name(
-                    self.db_path.name + f".corrupt-{int(time.time())}"
-                )
+                backup = self.db_path.with_name(self.db_path.name + f".corrupt-{int(time.time())}")
                 if self.db_path.exists() and not backup.exists():
                     shutil.copy2(self.db_path, backup)
             except Exception:
@@ -97,7 +99,7 @@ class MultiKeyManager:
             preset = get_provider(provider)
             return {
                 "key": entry,
-                "name": f"{provider}_key_{idx+1}",
+                "name": f"{provider}_key_{idx + 1}",
                 "provider": provider,
                 "base_url": preset.get("base_url") or "",
                 "added": datetime.now().isoformat(),
@@ -162,9 +164,7 @@ class MultiKeyManager:
             for k in keys:
                 e = self._normalize_entry(k, p)
                 key_val = e.get("key") or ""
-                preview = (
-                    f"{key_val[:6]}...{key_val[-4:]}" if len(key_val) > 10 else ("(no-key)" if not key_val else "****")
-                )
+                preview = f"{key_val[:6]}...{key_val[-4:]}" if len(key_val) > 10 else ("(no-key)" if not key_val else "****")
                 out[p].append(
                     {
                         "name": e.get("name"),
@@ -204,11 +204,7 @@ class MultiKeyManager:
             if provider not in data:
                 data[provider] = []
 
-            max_keys = (
-                self.MAX_KEYS_PER_CUSTOM_API
-                if provider.startswith("custom")
-                else self.MAX_KEYS_PER_PROVIDER
-            )
+            max_keys = self.MAX_KEYS_PER_CUSTOM_API if provider.startswith("custom") else self.MAX_KEYS_PER_PROVIDER
             if len(data[provider]) >= max_keys:
                 return {
                     "success": False,
@@ -222,7 +218,7 @@ class MultiKeyManager:
             preset = get_provider(provider)
             key_entry = {
                 "key": api_key or "",
-                "name": name or f"{provider}_key_{len(data[provider])+1}",
+                "name": name or f"{provider}_key_{len(data[provider]) + 1}",
                 "provider": provider,
                 "base_url": base_url or preset.get("base_url") or "",
                 "default_model": default_model or preset.get("default_model"),
@@ -235,9 +231,7 @@ class MultiKeyManager:
                 # Records where the budget came from so provider-reported
                 # limits can later refine a preset default without clobbering
                 # a number the user chose deliberately.
-                "rate_limit_source": (
-                    "manual" if (rpm_limit is not None or tpm_limit is not None) else "preset"
-                ),
+                "rate_limit_source": ("manual" if (rpm_limit is not None or tpm_limit is not None) else "preset"),
             }
             if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
                 # custom without base_url is ok if they set later — warn
@@ -284,8 +278,7 @@ class MultiKeyManager:
             data[provider] = [
                 k
                 for k in data[provider]
-                if self._entry_key(k) != key_or_name
-                and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
+                if self._entry_key(k) != key_or_name and (k if isinstance(k, dict) else {}).get("name", "") != key_or_name
             ]
             if len(data[provider]) == original_len:
                 return {"success": False, "error": f"Key {key_or_name} not found for {provider}"}
@@ -293,7 +286,7 @@ class MultiKeyManager:
         self._load_queues()
         return {"success": True, "provider": provider, "remaining": len(data[provider])}
 
-    def get_entry(self, provider: str, api_key: str = None) -> Optional[dict]:
+    def get_entry(self, provider: str, api_key: str = None) -> dict | None:
         data = self._load()
         keys = data.get(provider, [])
         if api_key:
@@ -334,9 +327,7 @@ class MultiKeyManager:
         self._rpm_hits[provider][key].append(now)
         if tokens:
             self._tpm_hits[provider][key].append((now, tokens))
-            self._tpm_hits[provider][key][:] = [
-                (t, n) for t, n in self._tpm_hits[provider][key] if now - t < 60.0
-            ]
+            self._tpm_hits[provider][key][:] = [(t, n) for t, n in self._tpm_hits[provider][key] if now - t < 60.0]
 
     def _tpm_used(self, provider: str, key: str) -> int:
         now = time.time()
@@ -344,7 +335,7 @@ class MultiKeyManager:
         hits[:] = [(t, n) for t, n in hits if now - t < 60.0]
         return sum(n for _, n in hits)
 
-    def get_key(self, provider: str = "groq") -> Optional[str]:
+    def get_key(self, provider: str = "groq") -> str | None:
         """Next available key via round-robin, skip failed / rate-limited."""
         provider = (provider or "groq").lower()
         # env fallbacks
@@ -397,11 +388,9 @@ class MultiKeyManager:
                     return ""
                 return key
 
-        return queue[0] if queue and not str(queue[0]).startswith("noauth:") else (
-            "" if queue else None
-        )
+        return queue[0] if queue and not str(queue[0]).startswith("noauth:") else ("" if queue else None)
 
-    def get_key_bundle(self, provider: str) -> Optional[dict]:
+    def get_key_bundle(self, provider: str) -> dict | None:
         """Return key + base_url + default_model for LLM calls."""
         key = self.get_key(provider)
         if key is None and not get_provider(provider).get("no_auth"):
@@ -438,9 +427,9 @@ class MultiKeyManager:
 
     def first_available_bundle(
         self,
-        prefer: Optional[list[str]] = None,
+        prefer: list[str] | None = None,
         require_tools: bool = False,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
         First usable key bundle across all configured providers (used as a
         fallback when the requested provider has no key, e.g. Ollama not
@@ -471,9 +460,7 @@ class MultiKeyManager:
             prefer = [p.lower() for p in (prefer or ["custom"])]
 
             def rank(p: str) -> tuple:
-                base_set = any(
-                    (isinstance(k, dict) and k.get("base_url")) for k in data.get(p, [])
-                )
+                base_set = any((isinstance(k, dict) and k.get("base_url")) for k in data.get(p, []))
                 pref = prefer.index(p) if p in prefer else len(prefer) + 1
                 return (pref, 0 if base_set else 1)
 
@@ -569,9 +556,8 @@ class MultiKeyManager:
             return
         if provider in self.key_failures:
             self.key_failures[provider][key] = self.key_failures[provider].get(key, 0) + 1
-        print(
-            f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), "
-            f"failures: {self.key_failures[provider].get(key, 0)}"
+        logger.error(
+            f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), failures: {self.key_failures[provider].get(key, 0)}"
         )
 
         def _mutate(data: dict) -> None:
@@ -706,9 +692,7 @@ class MultiKeyManager:
                 model=e.get("default_model"),
             )
             r["key_name"] = e.get("name")
-            r["key_preview"] = (
-                f"{e['key'][:6]}...{e['key'][-4:]}" if e.get("key") and len(e["key"]) > 10 else "****"
-            )
+            r["key_preview"] = f"{e['key'][:6]}...{e['key'][-4:]}" if e.get("key") and len(e["key"]) > 10 else "****"
             results.append(r)
         return results
 
@@ -719,9 +703,7 @@ class MultiKeyManager:
         for e in entries:
             p = e.get("provider")
             key = e.get("key") or ""
-            rpm_used = len(
-                [t for t in self._rpm_hits[p][key] if time.time() - t < 60]
-            ) if key else 0
+            rpm_used = len([t for t in self._rpm_hits[p][key] if time.time() - t < 60]) if key else 0
             tpm_used = self._tpm_used(p, key) if key else 0
             out.append(
                 {
@@ -754,9 +736,7 @@ class MultiKeyManager:
                 return [{"success": False, "error": f"No keys for {provider}"}]
             entries = [bundle]
 
-        print(
-            f"[MultiKey] Parallel execution with {len(entries)} keys for {len(tasks)} tasks"
-        )
+        logger.info(f"[MultiKey] Parallel execution with {len(entries)} keys for {len(tasks)} tasks")
 
         def run_one(task_id: int, task_data: dict, entry: dict) -> dict:
             try:
@@ -802,6 +782,63 @@ class MultiKeyManager:
                 futs.append(ex.submit(run_one, idx, task, entry))
             for fut in as_completed(futs):
                 results.append(fut.result())
+        results.sort(key=lambda x: x.get("task_id", 0))
+        return results
+
+    async def aexecute_parallel_with_keys(self, provider: str, tasks: list[dict], client=None) -> list[dict]:
+        """Async mirror of :meth:`execute_parallel_with_keys` (no threads).
+
+        Same task/entry rotation and result shape; concurrency comes from
+        ``asyncio`` + pooled HTTP instead of a thread pool. ``client`` is an
+        optional ``httpx.AsyncClient`` (tests inject ``MockTransport``).
+        """
+        from .aio import gather_limit
+        from .llm import FreeLLM
+
+        entries = self.get_all_entries(provider)
+        if not entries:
+            bundle = self.get_key_bundle(provider)
+            if not bundle:
+                return [{"success": False, "error": f"No keys for {provider}"}]
+            entries = [bundle]
+
+        logger.info(f"[MultiKey] Async parallel execution with {len(entries)} keys for {len(tasks)} tasks")
+
+        async def run_one(task_id: int, task_data: dict, entry: dict) -> dict:
+            try:
+                model = task_data.get("model") or entry.get("default_model") or get_provider(provider).get("default_model")
+                llm = FreeLLM(
+                    f"{provider}/{model}",
+                    api_key=entry.get("key"),
+                    base_url=entry.get("base_url"),
+                )
+                messages = task_data.get(
+                    "messages",
+                    [{"role": "user", "content": task_data.get("prompt", "")}],
+                )
+                resp = await llm.achat(messages, tools=task_data.get("tools"), client=client)
+                return {
+                    "task_id": task_id,
+                    "task": task_data.get("prompt") or task_data.get("messages", [{}])[-1].get("content", "")[:80],
+                    "api_key": (entry.get("key") or "")[:10] + "...",
+                    "key_name": entry.get("name"),
+                    "model": f"{provider}/{model}",
+                    "response": resp.content,
+                    "tool_calls": resp.tool_calls,
+                    "usage": getattr(resp, "usage", {}),
+                    "success": True,
+                }
+            except Exception as e:
+                return {
+                    "task_id": task_id,
+                    "success": False,
+                    "error": str(e),
+                    "api_key": (entry.get("key") or "")[:10] + "...",
+                    "key_name": entry.get("name"),
+                }
+
+        coros = [run_one(idx, task, entries[idx % len(entries)]) for idx, task in enumerate(tasks)]
+        results = await gather_limit(min(8, max(1, len(tasks))), *coros)
         results.sort(key=lambda x: x.get("task_id", 0))
         return results
 

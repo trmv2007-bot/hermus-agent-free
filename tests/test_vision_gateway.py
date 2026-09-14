@@ -4,6 +4,7 @@ These assert the vision tool's *contract* is preserved while its traffic is
 routed through the canonical ModelGateway (image -> text), and that a model call
 never fabricates a description on failure.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -36,7 +37,8 @@ def test_vision_analyze_success_contract(monkeypatch):
 
     image = _fake_image()
     monkeypatch.setattr(
-        v, "get_model_gateway",
+        v,
+        "get_model_gateway",
         lambda: _FakeGW(content="A cat sits on a rug."),
     )
     try:
@@ -54,9 +56,9 @@ def test_vision_analyze_model_not_found(monkeypatch):
 
     image = _fake_image()
     monkeypatch.setattr(
-        v, "get_model_gateway",
-        lambda: _FakeGW(err="Model llava:7b not found.",
-                        fc=FailureClass.MODEL_UNAVAILABLE.value),
+        v,
+        "get_model_gateway",
+        lambda: _FakeGW(err="Model llava:7b not found.", fc=FailureClass.MODEL_UNAVAILABLE.value),
     )
     try:
         out = v.vision_analyze(image, model="llava:7b")
@@ -71,7 +73,8 @@ def test_vision_analyze_network_error(monkeypatch):
 
     image = _fake_image()
     monkeypatch.setattr(
-        v, "get_model_gateway",
+        v,
+        "get_model_gateway",
         lambda: _FakeGW(err="refused", fc=FailureClass.NETWORK.value),
     )
     try:
@@ -86,7 +89,8 @@ def test_vision_available_models_contract(monkeypatch):
     import tools.vision as v
 
     monkeypatch.setattr(
-        v, "get_model_gateway",
+        v,
+        "get_model_gateway",
         lambda: _FakeGW(models=["llava:7b", "llama3.1:8b", "bakllava:7b"]),
     )
     out = v.vision_available_models()
@@ -96,18 +100,17 @@ def test_vision_available_models_contract(monkeypatch):
 
 
 class _FakeGW:
-    def __init__(self, content: "str | None" = None, err: "str | None" = None,
-                 fc: "str | None" = None, models: "list[str] | None" = None):
+    def __init__(
+        self, content: str | None = None, err: str | None = None, fc: str | None = None, models: list[str] | None = None
+    ):
         self.content = content
         self.err = err
         self.fc = fc
         self.models = models or []
 
-    def vision_complete(self, image_base64, prompt, *, model="llava:7b",
-                        provider="ollama", **kw):
+    def vision_complete(self, image_base64, prompt, *, model="llava:7b", provider="ollama", **kw):
         if self.err:
-            raise ModelGatewayError(self.err, failure_class=self.fc,
-                                    provider="ollama", model=model)
+            raise ModelGatewayError(self.err, failure_class=self.fc, provider="ollama", model=model)
         return self.content
 
     def vision_models(self, base_url=None):

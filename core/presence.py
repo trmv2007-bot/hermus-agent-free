@@ -13,6 +13,7 @@ check-in suggestions, but it never starts model calls or performs actions on its
 own. Any proactive work must still go through the normal queue, permissions and
 emergency-stop paths.
 """
+
 from __future__ import annotations
 
 import copy
@@ -23,10 +24,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import config
-
 
 PRESENCE_STATES = (
     "offline",
@@ -60,8 +60,7 @@ def _safe_text(value: Any, limit: int = 400) -> str:
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
-def _safe_int(value: Any, default: int = 0, *, minimum: Optional[int] = None,
-              maximum: Optional[int] = None) -> int:
+def _safe_int(value: Any, default: int = 0, *, minimum: int | None = None, maximum: int | None = None) -> int:
     try:
         result = int(value)
     except (TypeError, ValueError):
@@ -98,7 +97,7 @@ def _redact_value(value: Any, *, limit: int = 500) -> Any:
     return _clone(value)
 
 
-def _visible_to_user(item: dict[str, Any], user_id: Optional[str]) -> bool:
+def _visible_to_user(item: dict[str, Any], user_id: str | None) -> bool:
     """Global continuity is visible to everyone; scoped continuity is private."""
     if user_id is None:
         return True
@@ -114,7 +113,7 @@ def _id(prefix: str) -> str:
 class PresenceManager:
     """Thread-safe, atomically persisted identity/presence/goal state."""
 
-    def __init__(self, state_path: Optional[str | os.PathLike[str]] = None):
+    def __init__(self, state_path: str | os.PathLike[str] | None = None):
         raw = state_path or getattr(config, "presence_state_path", "data/presence.json")
         path = Path(os.path.expanduser(str(raw)))
         if not path.is_absolute():
@@ -190,10 +189,10 @@ class PresenceManager:
                 presence_state["state"] = loaded_state if loaded_state in PRESENCE_STATES else "idle"
                 for key in ("detail", "active_goal", "last_goal", "last_result", "last_error", "user_id"):
                     if presence_state.get(key) is not None:
-                        presence_state[key] = _safe_text(presence_state[key], 500 if key in {"last_result", "last_error"} else 240)
-                presence_state["heartbeat_count"] = _safe_int(
-                    presence_state.get("heartbeat_count"), minimum=0
-                )
+                        presence_state[key] = _safe_text(
+                            presence_state[key], 500 if key in {"last_result", "last_error"} else 240
+                        )
+                presence_state["heartbeat_count"] = _safe_int(presence_state.get("heartbeat_count"), minimum=0)
                 now = _now()
                 normalized_goals = []
                 for raw_goal in self._data["goals"]:
@@ -230,16 +229,18 @@ class PresenceManager:
                 # A process cannot still be thinking after a restart. Preserve
                 # the fact that it resumed, but never display stale active work.
                 if self._data["presence"].get("state") in _ACTIVE_STATES:
-                    self._data["presence"].update({
-                        "state": "idle",
-                        "detail": "resumed after restart",
-                        "session_id": None,
-                        "run_id": None,
-                        "user_id": None,
-                        "active_goal": None,
-                        "changed_at": _now(),
-                        "last_seen": _now(),
-                    })
+                    self._data["presence"].update(
+                        {
+                            "state": "idle",
+                            "detail": "resumed after restart",
+                            "session_id": None,
+                            "run_id": None,
+                            "user_id": None,
+                            "active_goal": None,
+                            "changed_at": _now(),
+                            "last_seen": _now(),
+                        }
+                    )
         except (OSError, ValueError, TypeError):
             # Presence is helpful state, never a reason for Hermus not to boot.
             return
@@ -254,7 +255,7 @@ class PresenceManager:
         except OSError:
             # The runtime can keep an in-memory presence if the disk is read-only.
             try:
-                if 'tmp' in locals() and tmp.exists():
+                if "tmp" in locals() and tmp.exists():
                     tmp.unlink()
             except OSError:
                 pass
@@ -287,7 +288,7 @@ class PresenceManager:
             pass
 
     # ------------------------------------------------------------------ snapshots
-    def snapshot(self, *, user_id: Optional[str] = None) -> dict[str, Any]:
+    def snapshot(self, *, user_id: str | None = None) -> dict[str, Any]:
         """Return a copy of presence, optionally scoped to one continuity owner."""
         with self._lock:
             data = _clone(self._data)
@@ -309,9 +310,7 @@ class PresenceManager:
             data["check_ins_due"] = due
             data["heartbeat"] = {
                 "enabled": bool(getattr(config, "presence_enabled", True)),
-                "interval_seconds": _safe_int(
-                    getattr(config, "presence_heartbeat_seconds", 30), 30, minimum=1
-                ),
+                "interval_seconds": _safe_int(getattr(config, "presence_heartbeat_seconds", 30), 30, minimum=1),
                 "last_at": data["presence"].get("last_heartbeat"),
                 "count": _safe_int(data["presence"].get("heartbeat_count"), minimum=0),
             }
@@ -343,11 +342,11 @@ class PresenceManager:
     def update_identity(
         self,
         *,
-        name: Optional[str] = None,
-        role: Optional[str] = None,
-        tone: Optional[str] = None,
-        values: Optional[list[str]] = None,
-        greeting: Optional[str] = None,
+        name: str | None = None,
+        role: str | None = None,
+        tone: str | None = None,
+        values: list[str] | None = None,
+        greeting: str | None = None,
     ) -> dict[str, Any]:
         """Update only user-editable identity fields; returns the new identity."""
         with self._lock:
@@ -374,12 +373,12 @@ class PresenceManager:
         state: str,
         *,
         detail: str = "",
-        session_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        goal: Optional[str] = None,
-        last_result: Optional[str] = None,
-        last_error: Optional[str] = None,
+        session_id: str | None = None,
+        run_id: str | None = None,
+        user_id: str | None = None,
+        goal: str | None = None,
+        last_result: str | None = None,
+        last_error: str | None = None,
         force_event: bool = False,
     ) -> dict[str, Any]:
         state = str(state or "idle").strip().lower()
@@ -415,7 +414,7 @@ class PresenceManager:
             self._emit("changed", result)
         return result
 
-    def touch(self, *, detail: Optional[str] = None, user_id: Optional[str] = None) -> dict[str, Any]:
+    def touch(self, *, detail: str | None = None, user_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             state = self._data["presence"]
             if user_id is not None:
@@ -429,13 +428,19 @@ class PresenceManager:
     def begin_turn(self, goal: str, *, session_id: str = "", run_id: str = "", user_id: str = "") -> dict[str, Any]:
         detail = "listening" if not goal else f"focusing on {_safe_text(goal, 150)}"
         state = self.set_state(
-            "thinking", detail=detail, session_id=session_id, run_id=run_id,
-            user_id=user_id, goal=goal,
+            "thinking",
+            detail=detail,
+            session_id=session_id,
+            run_id=run_id,
+            user_id=user_id,
+            goal=goal,
         )
         self.record_moment(
             "focus_started",
             f"Started working on {_safe_text(goal, 220) or 'a new request'}",
-            session_id=session_id, run_id=run_id, user_id=user_id,
+            session_id=session_id,
+            run_id=run_id,
+            user_id=user_id,
             metadata={"user_id": _safe_text(user_id, 80)} if user_id else None,
             emit=False,
         )
@@ -474,15 +479,24 @@ class PresenceManager:
     ) -> dict[str, Any]:
         if waiting_for_approval:
             state = self.set_state(
-                "waiting_approval", detail="waiting for your approval", session_id=session_id or None,
-                run_id=run_id or None, user_id=user_id or None, goal=goal,
+                "waiting_approval",
+                detail="waiting for your approval",
+                session_id=session_id or None,
+                run_id=run_id or None,
+                user_id=user_id or None,
+                goal=goal,
             )
             kind = "approval_waiting"
         else:
             detail = "ready" if success else "ready · last run failed"
             state = self.set_state(
-                "idle", detail=detail, session_id=session_id or None,
-                run_id=None, user_id=user_id or None, goal=None, last_result=response,
+                "idle",
+                detail=detail,
+                session_id=session_id or None,
+                run_id=None,
+                user_id=user_id or None,
+                goal=None,
+                last_result=response,
                 last_error=error if not success else None,
             )
             kind = "turn_completed" if success else "turn_failed"
@@ -490,7 +504,10 @@ class PresenceManager:
         self.record_moment(
             kind,
             f"{_safe_text(goal, 180)} — {summary}",
-            session_id=session_id, run_id=run_id, user_id=user_id, emit=False,
+            session_id=session_id,
+            run_id=run_id,
+            user_id=user_id,
+            emit=False,
         )
         return state
 
@@ -503,7 +520,7 @@ class PresenceManager:
         session_id: str = "",
         run_id: str = "",
         user_id: str = "",
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         emit: bool = True,
     ) -> dict[str, Any]:
         moment = {
@@ -530,7 +547,7 @@ class PresenceManager:
         title: str,
         *,
         priority: int = 3,
-        due_at: Optional[str] = None,
+        due_at: str | None = None,
         source: str = "user",
         notes: str = "",
         user_id: str = "",
@@ -566,7 +583,7 @@ class PresenceManager:
         self._emit("goal_added", goal, actor="user")
         return {"success": True, "goal": _clone(goal)}
 
-    def list_goals(self, status: Optional[str] = None, user_id: Optional[str] = None) -> list[dict[str, Any]]:
+    def list_goals(self, status: str | None = None, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             goals = [g for g in _clone(self._data["goals"]) if isinstance(g, dict)]
         if status:
@@ -580,7 +597,7 @@ class PresenceManager:
         goal_id: str,
         *,
         note: str = "",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             found = None
@@ -597,13 +614,15 @@ class PresenceManager:
                 return {"success": False, "error": f"goal '{goal_id}' not found"}
             self._save_locked()
         self.record_moment(
-            "goal_completed", f"Completed goal: {found['title']}",
-            user_id=str(found.get("user_id") or ""), emit=False,
+            "goal_completed",
+            f"Completed goal: {found['title']}",
+            user_id=str(found.get("user_id") or ""),
+            emit=False,
         )
         self._emit("goal_completed", found, actor="user")
         return {"success": True, "goal": found}
 
-    def touch_goal(self, goal_id: str, *, user_id: Optional[str] = None) -> dict[str, Any]:
+    def touch_goal(self, goal_id: str, *, user_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             for goal in self._data["goals"]:
                 if goal.get("id") == str(goal_id) and _visible_to_user(goal, user_id):
@@ -613,7 +632,7 @@ class PresenceManager:
                     return {"success": True, "goal": _clone(goal)}
         return {"success": False, "error": f"goal '{goal_id}' not found"}
 
-    def mark_checkin(self, goal_id: str, *, user_id: Optional[str] = None) -> dict[str, Any]:
+    def mark_checkin(self, goal_id: str, *, user_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             for goal in self._data["goals"]:
                 if goal.get("id") == str(goal_id) and _visible_to_user(goal, user_id):
@@ -629,7 +648,7 @@ class PresenceManager:
         self._emit("goal_checkin", result)
         return {"success": True, "goal": result}
 
-    def _check_ins_due_locked(self, *, user_id: Optional[str] = None) -> list[dict[str, Any]]:
+    def _check_ins_due_locked(self, *, user_id: str | None = None) -> list[dict[str, Any]]:
         try:
             after_minutes = max(1, int(getattr(config, "presence_checkin_after_minutes", 240)))
         except (TypeError, ValueError):
@@ -667,13 +686,16 @@ class PresenceManager:
             except (TypeError, ValueError):
                 pass
             if explicit_due or (not valid_due_at and age >= after_minutes):
-                due.append({
-                    "id": goal.get("id"),
-                    "title": goal.get("title"),
-                    "priority": goal.get("priority", 3),
-                    "age_minutes": round(age, 1),
-                    "due_at": due_at_text,
-                })
+                due.append(
+                    {
+                        "id": goal.get("id"),
+                        "title": goal.get("title"),
+                        "priority": goal.get("priority", 3),
+                        "age_minutes": round(age, 1),
+                        "due_at": due_at_text,
+                    }
+                )
+
         def sort_key(item: dict[str, Any]) -> tuple[int, float]:
             try:
                 priority = int(item.get("priority") or 0)
@@ -687,7 +709,7 @@ class PresenceManager:
 
         return sorted(due, key=sort_key)
 
-    def check_ins_due(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
+    def check_ins_due(self, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             return self._check_ins_due_locked(user_id=user_id)
 
@@ -744,14 +766,16 @@ class PresenceManager:
         if moments:
             lines.append("- Recent continuity moments:")
             lines.extend(f"  - {m.get('summary')}" for m in moments)
-        lines.extend([
-            "- Speak warmly and naturally, referring back to relevant continuity when useful.",
-            "- Operational state is not proof of consciousness: never claim feelings, sentience or actions you did not actually perform.",
-        ])
+        lines.extend(
+            [
+                "- Speak warmly and naturally, referring back to relevant continuity when useful.",
+                "- Operational state is not proof of consciousness: never claim feelings, sentience or actions you did not actually perform.",
+            ]
+        )
         return "\n".join(lines)
 
 
-_manager: Optional[PresenceManager] = None
+_manager: PresenceManager | None = None
 _manager_lock = threading.Lock()
 
 

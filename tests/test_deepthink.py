@@ -4,6 +4,7 @@ Offline: uses ONLY the free mock model (mock/mock); verification searches are
 tolerated even if the network is unavailable (any failure falls back gracefully).
 Run:  python tests/test_deepthink.py
 """
+
 import sys
 from pathlib import Path
 
@@ -86,18 +87,27 @@ def test_governor_strategy_and_budget():
 
     # strategy mapping
     assert governor.strategy_for("hi there", mode="agent") == "none"
-    assert governor.strategy_for(
-        "Explain in detail why python async is faster for io bound tasks with examples.",
-        mode="agent",
-    ) == "reflexion"
-    assert governor.strategy_for(
-        "Research and compare three free vector databases, verify pricing claims, and give a detailed recommendation.",
-        mode="agent",
-    ) == "verify"
-    assert governor.strategy_for(
-        "Design a complete architecture for a self-hosted AI assistant with browser automation, custom API integrations, secure auth, deployment strategy, cost analysis and a 12-month roadmap.",
-        mode="agent",
-    ) == "self_consistency"
+    assert (
+        governor.strategy_for(
+            "Explain in detail why python async is faster for io bound tasks with examples.",
+            mode="agent",
+        )
+        == "reflexion"
+    )
+    assert (
+        governor.strategy_for(
+            "Research and compare three free vector databases, verify pricing claims, and give a detailed recommendation.",
+            mode="agent",
+        )
+        == "verify"
+    )
+    assert (
+        governor.strategy_for(
+            "Design a complete architecture for a self-hosted AI assistant with browser automation, custom API integrations, secure auth, deployment strategy, cost analysis and a 12-month roadmap.",
+            mode="agent",
+        )
+        == "self_consistency"
+    )
     # override honored
     config.think_strategy = "none"
     assert governor.strategy_for("Explain in detail why python async is faster.", mode="agent") == "none"
@@ -227,8 +237,8 @@ def test_strategy_unknown_degrades():
 
 
 def test_agent_lessons_in_prompt_and_chat():
-    from core.reasoning.lessons import LessonsStore
     from core.agent import HermusAgent
+    from core.reasoning.lessons import LessonsStore
 
     store = LessonsStore()
     with store._conn() as conn:
@@ -248,9 +258,7 @@ def test_agent_lessons_in_prompt_and_chat():
 
     # a chat turn still works end to end with strategy machinery active
     # (difficulty 3 -> reflexion; difficulty 4+ would convene the council instead)
-    result = agent.chat(
-        "Explain in detail why python async is faster for io bound tasks with examples."
-    )
+    result = agent.chat("Explain in detail why python async is faster for io bound tasks with examples.")
     assert result.get("response")
     assert "strategy" in result
     assert result["strategy"] in ("reflexion", "none")

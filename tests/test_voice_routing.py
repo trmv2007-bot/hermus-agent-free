@@ -8,6 +8,7 @@ The routing invariant these tests pin:
   without an audio route — falls back to faster-whisper and *says why*, so the
   user is never left with a dead microphone button.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,7 +29,7 @@ def mgr(tmp_path):
 def _write_ir(path, declared=1024, actual=4096):
     path.mkdir(parents=True, exist_ok=True)
     (path / "openvino_model.xml").write_text(
-        '<net><weights><blob offset="0" size="%d"/></weights></net>' % declared, encoding="utf-8"
+        f'<net><weights><blob offset="0" size="{declared}"/></weights></net>', encoding="utf-8"
     )
     (path / "openvino_model.bin").write_bytes(b"x" * actual)
     return path
@@ -201,9 +202,7 @@ def test_voice_uses_the_local_engine_when_it_owns_the_role(monkeypatch, audio):
 
 def test_voice_falls_back_to_the_cpu_and_says_why(monkeypatch, audio):
     monkeypatch.setattr(accel, "cached_plan", lambda refresh=False: _plan_with_background("nollama"))
-    monkeypatch.setattr(
-        nl, "nollama_manager", _FakeManager({"success": False, "error": "NoLlama is not running"})
-    )
+    monkeypatch.setattr(nl, "nollama_manager", _FakeManager({"success": False, "error": "NoLlama is not running"}))
     monkeypatch.setattr(voice, "FASTER_WHISPER_AVAILABLE", False)
     monkeypatch.delenv("HERMUS_STT_BACKEND", raising=False)
 
@@ -215,9 +214,7 @@ def test_voice_falls_back_to_the_cpu_and_says_why(monkeypatch, audio):
 
 def test_pinning_the_engine_never_touches_the_cpu_path(monkeypatch, audio):
     monkeypatch.setattr(accel, "cached_plan", lambda refresh=False: _plan_with_background("nollama"))
-    monkeypatch.setattr(
-        nl, "nollama_manager", _FakeManager({"success": False, "error": "engine has no transcription route"})
-    )
+    monkeypatch.setattr(nl, "nollama_manager", _FakeManager({"success": False, "error": "engine has no transcription route"}))
     monkeypatch.setenv("HERMUS_STT_BACKEND", "nollama")
 
     def no_cpu(*a, **k):  # pragma: no cover - must not be reached

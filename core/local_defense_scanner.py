@@ -5,6 +5,7 @@ approved local folder, inspects metadata and a tiny prefix of text-like files,
 and returns indicators/summaries only. It never uploads files, executes files,
 quarantines files, deletes files, or returns file contents.
 """
+
 from __future__ import annotations
 
 import math
@@ -20,8 +21,23 @@ from .contracts import CommandStatus, EventEnvelope, EventType
 ROOT = Path(__file__).resolve().parents[1]
 
 SUSPICIOUS_EXTENSIONS = {
-    ".exe", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse", ".wsf",
-    ".jar", ".apk", ".appimage", ".dmg", ".pkg", ".deb", ".rpm", ".msi",
+    ".exe",
+    ".scr",
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".vbs",
+    ".js",
+    ".jse",
+    ".wsf",
+    ".jar",
+    ".apk",
+    ".appimage",
+    ".dmg",
+    ".pkg",
+    ".deb",
+    ".rpm",
+    ".msi",
 }
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso"}
 TEXT_EXTENSIONS = {".txt", ".md", ".log", ".csv", ".json", ".xml", ".html", ".js", ".ps1", ".bat", ".cmd"}
@@ -82,8 +98,16 @@ class LocalFolderScanReport:
         else:
             lines += ["| severity | path | reason | evidence |", "| --- | --- | --- | --- |"]
             for finding in self.findings:
-                lines.append(f"| {finding.severity} | `{_cell(finding.path)}` | {_cell(finding.reason)} | {_cell(finding.evidence)} |")
-        lines += ["", "## Privacy", "", "This scan is read-only and reports indicators only; it does not return file contents, upload files, delete files, or execute files.", ""]
+                lines.append(
+                    f"| {finding.severity} | `{_cell(finding.path)}` | {_cell(finding.reason)} | {_cell(finding.evidence)} |"
+                )
+        lines += [
+            "",
+            "## Privacy",
+            "",
+            "This scan is read-only and reports indicators only; it does not return file contents, upload files, delete files, or execute files.",
+            "",
+        ]
         return "\n".join(lines)
 
 
@@ -143,14 +167,18 @@ def reports_dir() -> Path:
 def list_scan_reports(limit: int = 50) -> list[dict[str, Any]]:
     root = reports_dir()
     rows = []
-    for path in sorted(root.glob("local-defense-scan-*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:max(1, min(int(limit or 50), 200))]:
-        rows.append({
-            "name": path.name,
-            "path": str(path),
-            "size_bytes": path.stat().st_size,
-            "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
-            "url": f"/local-defense/reports/{path.name}",
-        })
+    for path in sorted(root.glob("local-defense-scan-*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[
+        : max(1, min(int(limit or 50), 200))
+    ]:
+        rows.append(
+            {
+                "name": path.name,
+                "path": str(path),
+                "size_bytes": path.stat().st_size,
+                "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+                "url": f"/local-defense/reports/{path.name}",
+            }
+        )
     return rows
 
 
@@ -205,14 +233,16 @@ def _attach_scan_to_mission(mission_id: str, result: dict[str, Any]) -> None:
         artifact_id = (result.get("report_artifact") or {}).get("id") or result.get("report_path")
         if artifact_id and artifact_id not in report.artifacts:
             report.artifacts.append(artifact_id)
-        report.evidence.append({
-            "stage": "local_defense_scan",
-            "status": "completed",
-            "root": result.get("root"),
-            "scanned_files": result.get("scanned_files"),
-            "finding_count": result.get("finding_count"),
-            "artifact": artifact_id,
-        })
+        report.evidence.append(
+            {
+                "stage": "local_defense_scan",
+                "status": "completed",
+                "root": result.get("root"),
+                "scanned_files": result.get("scanned_files"),
+                "finding_count": result.get("finding_count"),
+                "artifact": artifact_id,
+            }
+        )
         mission_engine._save_mission(report)
     except Exception:
         pass
@@ -248,14 +278,18 @@ def _scan_file(root: Path, fpath: Path, report: LocalFolderScanReport, sample_by
     if fpath.name.startswith(".") and suffix in SUSPICIOUS_EXTENSIONS:
         report.findings.append(ScanFinding(rel, "medium", "hidden executable/script file", suffix))
     if stat.st_mode & 0o111 and suffix not in {"", ".sh", ".py"}:
-        report.findings.append(ScanFinding(rel, "low", "file has executable bit with unusual extension", suffix or "no extension"))
+        report.findings.append(
+            ScanFinding(rel, "low", "file has executable bit with unusual extension", suffix or "no extension")
+        )
     if suffix in TEXT_EXTENSIONS and stat.st_size <= 2 * 1024 * 1024:
         sample = _read_sample(fpath, sample_bytes)
         for label, pattern in INDICATOR_PATTERNS:
             if pattern.search(sample):
                 report.findings.append(ScanFinding(rel, "high", "suspicious text indicator", label))
         if _high_entropy_line(sample):
-            report.findings.append(ScanFinding(rel, "low", "contains a long high-entropy line; review locally if unexpected", "content not shown"))
+            report.findings.append(
+                ScanFinding(rel, "low", "contains a long high-entropy line; review locally if unexpected", "content not shown")
+            )
 
 
 def _read_sample(path: Path, n: int) -> str:
@@ -304,12 +338,18 @@ def _publish_scan(data: dict[str, Any]) -> None:
     try:
         from .events import get_bus
 
-        get_bus().publish(EventEnvelope(
-            type=EventType.STATE_CHANGED.value,
-            command="local_defense.scan.completed",
-            args_redacted={"root": data.get("root"), "scanned_files": data.get("scanned_files"), "finding_count": data.get("finding_count")},
-            status=CommandStatus.SUCCEEDED.value,
-        ))
+        get_bus().publish(
+            EventEnvelope(
+                type=EventType.STATE_CHANGED.value,
+                command="local_defense.scan.completed",
+                args_redacted={
+                    "root": data.get("root"),
+                    "scanned_files": data.get("scanned_files"),
+                    "finding_count": data.get("finding_count"),
+                },
+                status=CommandStatus.SUCCEEDED.value,
+            )
+        )
     except Exception:
         pass
 

@@ -6,6 +6,7 @@ actually routed through them. This is deliberately NOT a structural "does the
 module exist" check: if someone plugs in a bypass that constructs a provider or
 invokes the registry directly, these fail.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -16,6 +17,7 @@ def _agent_env(monkeypatch):
     """Set up an offline, deterministic agent environment."""
     # Force the free/mock stack so no network or API key is needed.
     from core.config import config
+
     old_model = getattr(config, "model", None)
     old_mode = getattr(config, "agent_mode", None)
     monkeypatch.setattr(config, "model", "mock/mock", raising=False)
@@ -43,6 +45,7 @@ def test_model_gateway_is_used_by_a_real_agent_turn():
     gw = get_model_gateway()
     with mock.patch.object(type(gw), "llm", tracking_llm):
         from core.agent import HermusAgent
+
         agent = HermusAgent(model="mock/mock", max_steps=2)
         out = agent.chat("hello world", stream=False)
         assert out and out.get("response"), "agent turn should produce a response"
@@ -68,9 +71,12 @@ def test_memory_facade_is_used_by_a_real_agent_turn():
         calls["remember"] += 1
         return real_remember(self, *a, **kw)
 
-    with mock.patch.object(MemoryFacade, "recall_context", tracking_recall), \
-         mock.patch.object(MemoryFacade, "remember", tracking_remember):
+    with (
+        mock.patch.object(MemoryFacade, "recall_context", tracking_recall),
+        mock.patch.object(MemoryFacade, "remember", tracking_remember),
+    ):
         from core.agent import HermusAgent
+
         agent = HermusAgent(model="mock/mock", max_steps=2)
         out = agent.chat("remember that I prefer clean code", stream=False)
         assert out and out.get("response")
@@ -98,6 +104,7 @@ def test_tool_gateway_is_used_by_a_real_agent_turn():
     # "search", so the agent loop invokes _execute_tool -> ToolGateway.execute.
     with mock.patch.object(type(tg), "execute", tracking_execute):
         from core.agent import HermusAgent
+
         agent = HermusAgent(model="mock/mock", max_steps=4)
         out = agent.chat("search the web for clustering", stream=False)
         assert out and out.get("response")

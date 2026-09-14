@@ -4,6 +4,7 @@ These adapters deliberately do not pretend to be connected. They provide the
 capability contract and world-model status immediately; provider-specific OAuth
 or API clients can be attached without changing the registry or planner.
 """
+
 from __future__ import annotations
 
 import os
@@ -28,13 +29,15 @@ class ServiceConnector(Connector):
 
     def observe(self) -> list[dict[str, Any]]:
         status = self.health()
-        return [{
-            "subject": self.name,
-            "predicate": "connection",
-            "value": {"state": status.state, "provider": self.provider, "message": status.message},
-            "permission_scope": f"{self.name}.read",
-            "confidence": 1.0,
-        }]
+        return [
+            {
+                "subject": self.name,
+                "predicate": "connection",
+                "value": {"state": status.state, "provider": self.provider, "message": status.message},
+                "permission_scope": f"{self.name}.read",
+                "confidence": 1.0,
+            }
+        ]
 
 
 class CalendarConnector(ServiceConnector):

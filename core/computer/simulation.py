@@ -9,15 +9,16 @@ The simulation provides:
 This lets us run the full plan->act->verify->repair chain in a deterministic
 environment and test recovery flows safely.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 from .grounding import BoundingBox, GroundedTarget, VisualGrounder
-from .mouse import MouseBackend
 from .keyboard import KeyboardBackend
+from .mouse import MouseBackend
 from .window_manager import WindowBackend
 
 
@@ -64,12 +65,12 @@ class SimulatedScreen:
         self.height = height
         self.windows: dict[str, SimulatedWindow] = {}
         self.popups: list[SimulatedWindow] = []
-        self.active_popup: Optional[SimulatedWindow] = None
+        self.active_popup: SimulatedWindow | None = None
         self._mouse_pos: tuple[int, int] = (0, 0)
         self._click_history: list[dict[str, Any]] = []
         self._fail_next_click: bool = False
-        self._fail_next_target: Optional[str] = None
-        self._inject_popup_at: Optional[int] = None
+        self._fail_next_target: str | None = None
+        self._inject_popup_at: int | None = None
         self._state_change_callbacks: list[Callable] = []
         self._current_time: float = 0.0
         self._planned_errors: list[dict[str, Any]] = []
@@ -82,7 +83,7 @@ class SimulatedScreen:
         """Remove a window from the desktop."""
         return self.windows.pop(title, None) is not None
 
-    def get_active_window(self) -> Optional[SimulatedWindow]:
+    def get_active_window(self) -> SimulatedWindow | None:
         """Get the currently focused window."""
         for win in self.windows.values():
             if win.focused:
@@ -129,7 +130,7 @@ class SimulatedScreen:
             return True
         return False
 
-    def get_element(self, name: str) -> Optional[SimulatedElement]:
+    def get_element(self, name: str) -> SimulatedElement | None:
         """Find an element by name across all visible windows."""
         # Check active popup first
         if self.active_popup:
@@ -163,15 +164,16 @@ class SimulatedScreen:
                     elements.append(elem)
         return elements
 
-    def schedule_error(self, error_type: str, target: Optional[str] = None,
-                       at_step: int = 0) -> None:
+    def schedule_error(self, error_type: str, target: str | None = None, at_step: int = 0) -> None:
         """Schedule a deliberate error at a specific step."""
-        self._planned_errors.append({
-            "type": error_type,
-            "target": target,
-            "at_step": at_step,
-            "triggered": False,
-        })
+        self._planned_errors.append(
+            {
+                "type": error_type,
+                "target": target,
+                "at_step": at_step,
+                "triggered": False,
+            }
+        )
 
     def simulate_click(self, x: int, y: int) -> dict[str, Any]:
         """Simulate a click on the virtual screen.
@@ -185,11 +187,15 @@ class SimulatedScreen:
         for error in self._planned_errors:
             if not error["triggered"] and error["type"] == "click_fails":
                 error["triggered"] = True
-                self._click_history.append({
-                    "x": x, "y": y, "success": False,
-                    "reason": "simulated click failure",
-                    "time": self._current_time,
-                })
+                self._click_history.append(
+                    {
+                        "x": x,
+                        "y": y,
+                        "success": False,
+                        "reason": "simulated click failure",
+                        "time": self._current_time,
+                    }
+                )
                 return {"ok": False, "x": x, "y": y, "error": "simulated click failure"}
 
         # Find what was clicked
@@ -227,23 +233,35 @@ class SimulatedScreen:
             if clicked_element.state == "enabled":
                 clicked_element.state = "clicked"
 
-        self._click_history.append({
-            "x": x, "y": y, "success": success,
-            "element": clicked_element.name if clicked_element else None,
-            "window": clicked_window.title if clicked_window else None,
-            "time": self._current_time,
-        })
+        self._click_history.append(
+            {
+                "x": x,
+                "y": y,
+                "success": success,
+                "element": clicked_element.name if clicked_element else None,
+                "window": clicked_window.title if clicked_window else None,
+                "time": self._current_time,
+            }
+        )
 
         for cb in self._state_change_callbacks:
             try:
-                cb({"type": "click", "x": x, "y": y, "success": success,
-                    "element": clicked_element.name if clicked_element else None})
+                cb(
+                    {
+                        "type": "click",
+                        "x": x,
+                        "y": y,
+                        "success": success,
+                        "element": clicked_element.name if clicked_element else None,
+                    }
+                )
             except Exception:
                 pass
 
         return {
             "ok": success,
-            "x": x, "y": y,
+            "x": x,
+            "y": y,
             "clicked": clicked_element.name if clicked_element else None,
             "window": clicked_window.title if clicked_window else None,
         }
@@ -384,8 +402,7 @@ class SimulatedWindowManager(WindowBackend):
 
     def list_windows(self) -> list[dict[str, Any]]:
         return [
-            {"title": win.title, "application": win.application,
-             "minimized": win.minimized, "focused": win.focused}
+            {"title": win.title, "application": win.application, "minimized": win.minimized, "focused": win.focused}
             for win in self.screen.windows.values()
         ]
 
@@ -414,7 +431,7 @@ class SimulatedGrounder(VisualGrounder):
         frame: Any,
         description: str,
         screen_size: tuple[int, int] = (1920, 1080),
-    ) -> Optional[GroundedTarget]:
+    ) -> GroundedTarget | None:
         """Find a target on the simulated screen by name."""
         element = self.screen.get_element(description)
         if element is None:
@@ -449,78 +466,93 @@ class SimulatedGrounder(VisualGrounder):
 def calculator_scenario() -> SimulatedScreen:
     """Create a SimulatedScreen showing a Calculator window."""
     screen = SimulatedScreen()
-    screen.add_window(SimulatedWindow(
-        title="Calculator",
-        application="Calculator",
-        x=100, y=100, width=400, height=500,
-        focused=True,
-        elements=[
-            SimulatedElement("Display", BoundingBox(120, 120, 460, 170), "display",
-                            text="0"),
-            SimulatedElement("1", BoundingBox(120, 190, 200, 260), "button", text="1"),
-            SimulatedElement("2", BoundingBox(210, 190, 290, 260), "button", text="2"),
-            SimulatedElement("3", BoundingBox(300, 190, 380, 260), "button", text="3"),
-            SimulatedElement("+", BoundingBox(390, 190, 470, 260), "button", text="+"),
-            SimulatedElement("=", BoundingBox(390, 270, 470, 340), "button", text="="),
-            SimulatedElement("Clear", BoundingBox(120, 270, 200, 340), "button", text="C"),
-        ],
-    ))
+    screen.add_window(
+        SimulatedWindow(
+            title="Calculator",
+            application="Calculator",
+            x=100,
+            y=100,
+            width=400,
+            height=500,
+            focused=True,
+            elements=[
+                SimulatedElement("Display", BoundingBox(120, 120, 460, 170), "display", text="0"),
+                SimulatedElement("1", BoundingBox(120, 190, 200, 260), "button", text="1"),
+                SimulatedElement("2", BoundingBox(210, 190, 290, 260), "button", text="2"),
+                SimulatedElement("3", BoundingBox(300, 190, 380, 260), "button", text="3"),
+                SimulatedElement("+", BoundingBox(390, 190, 470, 260), "button", text="+"),
+                SimulatedElement("=", BoundingBox(390, 270, 470, 340), "button", text="="),
+                SimulatedElement("Clear", BoundingBox(120, 270, 200, 340), "button", text="C"),
+            ],
+        )
+    )
     return screen
 
 
 def notepad_scenario() -> SimulatedScreen:
     """Create a SimulatedScreen showing a Notepad window."""
     screen = SimulatedScreen()
-    screen.add_window(SimulatedWindow(
-        title="Untitled - Notepad",
-        application="Notepad",
-        x=200, y=100, width=800, height=600,
-        focused=True,
-        elements=[
-            SimulatedElement("Text Area", BoundingBox(10, 50, 790, 590), "text_area",
-                            text="", clickable=True),
-            SimulatedElement("File Menu", BoundingBox(10, 10, 80, 30), "menu", text="File"),
-            SimulatedElement("Edit Menu", BoundingBox(90, 10, 160, 30), "menu", text="Edit"),
-            SimulatedElement("Close", BoundingBox(770, 10, 790, 30), "close", text="X"),
-        ],
-    ))
+    screen.add_window(
+        SimulatedWindow(
+            title="Untitled - Notepad",
+            application="Notepad",
+            x=200,
+            y=100,
+            width=800,
+            height=600,
+            focused=True,
+            elements=[
+                SimulatedElement("Text Area", BoundingBox(10, 50, 790, 590), "text_area", text="", clickable=True),
+                SimulatedElement("File Menu", BoundingBox(10, 10, 80, 30), "menu", text="File"),
+                SimulatedElement("Edit Menu", BoundingBox(90, 10, 160, 30), "menu", text="Edit"),
+                SimulatedElement("Close", BoundingBox(770, 10, 790, 30), "close", text="X"),
+            ],
+        )
+    )
     return screen
 
 
 def browser_scenario(url: str = "example.com") -> SimulatedScreen:
     """Create a SimulatedScreen showing a browser window."""
     screen = SimulatedScreen()
-    screen.add_window(SimulatedWindow(
-        title=f"{url} - Browser",
-        application="Firefox",
-        x=50, y=50, width=1200, height=800,
-        focused=True,
-        elements=[
-            SimulatedElement("Address Bar", BoundingBox(50, 60, 700, 85), "input", text=url),
-            SimulatedElement("Reload", BoundingBox(720, 60, 760, 85), "button", text="⟳"),
-            SimulatedElement("Content Area", BoundingBox(50, 90, 1150, 750), "content",
-                            text=f"Welcome to {url}"),
-            SimulatedElement("Close", BoundingBox(1170, 50, 1190, 70), "close", text="X"),
-        ],
-    ))
+    screen.add_window(
+        SimulatedWindow(
+            title=f"{url} - Browser",
+            application="Firefox",
+            x=50,
+            y=50,
+            width=1200,
+            height=800,
+            focused=True,
+            elements=[
+                SimulatedElement("Address Bar", BoundingBox(50, 60, 700, 85), "input", text=url),
+                SimulatedElement("Reload", BoundingBox(720, 60, 760, 85), "button", text="⟳"),
+                SimulatedElement("Content Area", BoundingBox(50, 90, 1150, 750), "content", text=f"Welcome to {url}"),
+                SimulatedElement("Close", BoundingBox(1170, 50, 1190, 70), "close", text="X"),
+            ],
+        )
+    )
     return screen
 
 
 def popup_scenario() -> SimulatedScreen:
     """Create a screen with a blocking popup."""
     screen = browser_scenario()
-    screen.add_popup(SimulatedWindow(
-        title="Permission Required",
-        application="System",
-        x=300, y=200, width=500, height=300,
-        elements=[
-            SimulatedElement("Allow", BoundingBox(320, 440, 420, 480), "button",
-                            text="Allow", clickable=True),
-            SimulatedElement("Block", BoundingBox(440, 440, 540, 480), "button",
-                            text="Block", clickable=True),
-            SimulatedElement("Close", BoundingBox(770, 200, 790, 220), "close", text="X"),
-        ],
-    ))
+    screen.add_popup(
+        SimulatedWindow(
+            title="Permission Required",
+            application="System",
+            x=300,
+            y=200,
+            width=500,
+            height=300,
+            elements=[
+                SimulatedElement("Allow", BoundingBox(320, 440, 420, 480), "button", text="Allow", clickable=True),
+                SimulatedElement("Block", BoundingBox(440, 440, 540, 480), "button", text="Block", clickable=True),
+                SimulatedElement("Close", BoundingBox(770, 200, 790, 220), "close", text="X"),
+            ],
+        )
+    )
     screen.active_popup = screen.popups[0] if screen.popups else None
     return screen
 
@@ -528,22 +560,25 @@ def popup_scenario() -> SimulatedScreen:
 def installer_scenario() -> SimulatedScreen:
     """Create an installer scenario with unexpected UI."""
     screen = SimulatedScreen()
-    screen.add_window(SimulatedWindow(
-        title="Install Wizard",
-        application="Installer",
-        x=150, y=150, width=600, height=450,
-        focused=True,
-        elements=[
-            SimulatedElement("Next", BoundingBox(400, 520, 500, 550), "button",
-                            text="Next >", clickable=True),
-            SimulatedElement("Cancel", BoundingBox(300, 520, 390, 550), "button",
-                            text="Cancel", clickable=True),
-            SimulatedElement("License Agreement", BoundingBox(160, 180, 740, 350),
-                            "text_area", text="License terms..."),
-            SimulatedElement("I Agree", BoundingBox(400, 370, 500, 400), "checkbox",
-                            text="I agree to the terms", clickable=True),
-        ],
-    ))
+    screen.add_window(
+        SimulatedWindow(
+            title="Install Wizard",
+            application="Installer",
+            x=150,
+            y=150,
+            width=600,
+            height=450,
+            focused=True,
+            elements=[
+                SimulatedElement("Next", BoundingBox(400, 520, 500, 550), "button", text="Next >", clickable=True),
+                SimulatedElement("Cancel", BoundingBox(300, 520, 390, 550), "button", text="Cancel", clickable=True),
+                SimulatedElement("License Agreement", BoundingBox(160, 180, 740, 350), "text_area", text="License terms..."),
+                SimulatedElement(
+                    "I Agree", BoundingBox(400, 370, 500, 400), "checkbox", text="I agree to the terms", clickable=True
+                ),
+            ],
+        )
+    )
     return screen
 
 
@@ -551,17 +586,20 @@ def download_error_scenario() -> SimulatedScreen:
     """Create a scenario where download fails with an error dialog."""
     screen = browser_scenario("download.com/file")
     # Add an error popup
-    screen.add_popup(SimulatedWindow(
-        title="Download Error",
-        application="Browser",
-        x=350, y=250, width=500, height=200,
-        elements=[
-            SimulatedElement("Retry", BoundingBox(370, 400, 470, 435), "button",
-                            text="Retry", clickable=True),
-            SimulatedElement("Cancel", BoundingBox(490, 400, 590, 435), "button",
-                            text="Cancel", clickable=True),
-            SimulatedElement("Close", BoundingBox(820, 250, 840, 270), "close", text="X"),
-        ],
-    ))
+    screen.add_popup(
+        SimulatedWindow(
+            title="Download Error",
+            application="Browser",
+            x=350,
+            y=250,
+            width=500,
+            height=200,
+            elements=[
+                SimulatedElement("Retry", BoundingBox(370, 400, 470, 435), "button", text="Retry", clickable=True),
+                SimulatedElement("Cancel", BoundingBox(490, 400, 590, 435), "button", text="Cancel", clickable=True),
+                SimulatedElement("Close", BoundingBox(820, 250, 840, 270), "close", text="X"),
+            ],
+        )
+    )
     screen.active_popup = screen.popups[0] if screen.popups else None
     return screen

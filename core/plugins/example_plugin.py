@@ -4,6 +4,7 @@ Demonstrates the Phase D plugin API: it registers a tool (callable through the
 gateway's ``/plugins/invoke`` endpoint) and subscribes to computer-agent events
 so a plugin can react to the live action feed.
 """
+
 from __future__ import annotations
 
 PLUGIN = {

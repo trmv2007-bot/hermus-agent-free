@@ -1,4 +1,5 @@
 """Offline tests for public-apis catalog discovery."""
+
 import json
 import sys
 import tempfile
@@ -11,7 +12,6 @@ from tools.public_apis import (
     build_catalog_payload,
     parse_public_apis_markdown,
 )
-
 
 SAMPLE_MARKDOWN = """
 ### Security

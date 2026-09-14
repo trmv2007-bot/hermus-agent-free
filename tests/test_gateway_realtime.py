@@ -7,6 +7,7 @@ that run live (SSE token/step events, replay after a reconnect) and stop it.
 Offline: mock model, isolated HERMUS_HOME, no network. Run:
   python tests/test_gateway_realtime.py  (or pytest tests/test_gateway_realtime.py)
 """
+
 import asyncio
 import json
 import os
@@ -50,7 +51,7 @@ from core.run_events import RunBus, sse_format  # noqa: E402
 # --------------------------------------------------------------------------
 def test_run_bus_replay_and_ids():
     bus = RunBus(max_events=50)
-    run = bus.start("r1", label="test")           # run_started consumes id 1
+    run = bus.start("r1", label="test")  # run_started consumes id 1
     for i in range(60):
         bus.publish("r1", "llm_delta", {"i": i})
     assert run.seq == 61
@@ -68,14 +69,14 @@ def test_run_bus_replay_and_ids():
 
     snap = bus.snapshot("r1")
     assert snap["status"] == "running" and snap["label"] == "test"
-    assert snap["events"] == run.seq >= len(all_hist)      # total published vs retained
+    assert snap["events"] == run.seq >= len(all_hist)  # total published vs retained
     bus.finish("r1", "finished", {"answer": 42})
     snap2 = bus.snapshot("r1")
     assert snap2["status"] == "finished"
     assert snap2["result"] == {"answer": 42}
     assert snap2.get("error", "") == ""
     assert bus.snapshot("nope")["exists"] is False
-    assert "id" not in json.dumps({"x": 1})            # sanity: json is json
+    assert "id" not in json.dumps({"x": 1})  # sanity: json is json
     frame = sse_format({"id": 3, "type": "step_started", "data": {"step": 1}, "ts": "t"})
     assert frame.startswith("id: 3\nevent: step_started\ndata: ")
     assert frame.endswith("\n\n")
@@ -108,11 +109,11 @@ def test_run_bus_cancel_is_visible_from_other_threads():
 def test_subscriber_receives_events_from_another_thread():
     bus = RunBus()
     bus.start("r3")
+
     async def main():
         loop = asyncio.get_running_loop()
         aq, unsub = bus.subscribe("r3", loop=loop)
-        threading.Thread(target=lambda: [bus.publish("r3", "tick", {"i": i}) for i in range(5)],
-                         daemon=True).start()
+        threading.Thread(target=lambda: [bus.publish("r3", "tick", {"i": i}) for i in range(5)], daemon=True).start()
         got = []
         for _ in range(50):
             ev = await asyncio.wait_for(aq.get(), timeout=5)
@@ -145,8 +146,8 @@ def test_subscribe_never_loses_events_published_during_replay():
     import core.run_events as re_mod
 
     bus = RunBus()
-    bus.start("atomic")                      # run_started → id 1
-    for i in range(5):                       # ticks → ids 2..6
+    bus.start("atomic")  # run_started → id 1
+    for i in range(5):  # ticks → ids 2..6
         bus.publish("atomic", "tick", {"i": i})
 
     orig_put = re_mod._put_nowait
@@ -163,7 +164,7 @@ def test_subscribe_never_loses_events_published_during_replay():
         t = threading.Thread(target=try_take)
         t.start()
         t.join()
-        return not got                        # nobody else could take it
+        return not got  # nobody else could take it
 
     def hooked(aq, event):
         if probe["held"] is None and event.get("type") == "tick":
@@ -185,7 +186,7 @@ def test_subscribe_never_loses_events_published_during_replay():
             await asyncio.sleep(0)
             await asyncio.sleep(0)
             unsub()
-            await asyncio.sleep(0)            # let any in-flight offers land
+            await asyncio.sleep(0)  # let any in-flight offers land
             drained = []
             while not aq.empty():
                 drained.append(aq.get_nowait())
@@ -198,8 +199,7 @@ def test_subscribe_never_loses_events_published_during_replay():
     # The fix's contract: replay runs while holding the bus lock, so no
     # publish can squeeze between the snapshot and the registration.
     assert probe["held"] is True, (
-        "subscribe() replayed history without holding the bus lock — events "
-        "published during replay can be lost"
+        "subscribe() replayed history without holding the bus lock — events published during replay can be lost"
     )
     ids = [ev["id"] for ev in drained]
     types = [ev["type"] for ev in drained]
@@ -225,8 +225,7 @@ def _queue(workers=3, default_timeout=10, log=None, maxsize=20):
     if log is None:
         _LOG_SEQ[0] += 1
         log = f"jobs-{_LOG_SEQ[0]}.jsonl"
-    q = JobQueue(workers=workers, maxsize=maxsize, default_timeout=default_timeout,
-                 persist=str(Path(_TMP) / "jobs" / log))
+    q = JobQueue(workers=workers, maxsize=maxsize, default_timeout=default_timeout, persist=str(Path(_TMP) / "jobs" / log))
     q.retry_backoff = 0.05
     return q
 
@@ -246,7 +245,7 @@ def test_lane_serialises_one_session_and_parallelises_others():
         with lock:
             windows.append(rec)
         time.sleep(0.08)
-        rec["end"] = time.time()          # update *this* run's record, not windows[-1]
+        rec["end"] = time.time()  # update *this* run's record, not windows[-1]
         return {"ok": True}
 
     q.register("t.win", handler)
@@ -272,8 +271,7 @@ def test_lane_serialises_one_session_and_parallelises_others():
     for prev, nxt in zip(a, a[1:], strict=False):
         assert nxt["start"] >= prev["end"] - 0.005, (prev, nxt)
     b = [w for w in windows if w["session"] == "other"]
-    assert any(o["start"] < x["end"] and x["start"] < o["end"]
-               for o in b for x in a), "different lanes must run concurrently"
+    assert any(o["start"] < x["end"] and x["start"] < o["end"] for o in b for x in a), "different lanes must run concurrently"
     assert all(q.result(j.id) for j in jobs)
 
 
@@ -307,10 +305,10 @@ def test_retry_then_success_and_final_failure():
         return q.status(ok.id), q.status(bad.id)
 
     good, badst = _drive(main())
-    assert good["status"] == "succeeded" and good["attempts"] == 3   # 2 failures + the winner
+    assert good["status"] == "succeeded" and good["attempts"] == 3  # 2 failures + the winner
     assert badst["status"] == "failed" and "permanent" in badst["error"]
-    assert badst["attempts"] == 2      # max_attempts honoured, then given up
-    assert q.status()["stats"]["retried"] == 3   # flaky retried twice, doomed once
+    assert badst["attempts"] == 2  # max_attempts honoured, then given up
+    assert q.status()["stats"]["retried"] == 3  # flaky retried twice, doomed once
     retry_events = [e["type"] for e in q.events(q.list_jobs(limit=20)[1]["id"])]
     assert "job_retry" in retry_events or "job_finished" in retry_events
 
@@ -448,9 +446,20 @@ def test_interrupted_jobs_are_not_lost_silently():
     """A gateway crash mid-job must surface as `interrupted`, never as 'still running'."""
     log = Path(_TMP) / "jobs" / "orphan.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text(json.dumps({"job_id": "job_orphan", "event": "started", "kind": "agent.chat",
-                              "session_key": "web:u", "run_id": "run_orphan", "status": "running",
-                              "created": "2026-01-01T00:00:00"}) + "\n")
+    log.write_text(
+        json.dumps(
+            {
+                "job_id": "job_orphan",
+                "event": "started",
+                "kind": "agent.chat",
+                "session_key": "web:u",
+                "run_id": "run_orphan",
+                "status": "running",
+                "created": "2026-01-01T00:00:00",
+            }
+        )
+        + "\n"
+    )
     q = _queue(log="orphan.jsonl")
 
     async def main():
@@ -492,8 +501,7 @@ def test_handler_shapes_all_supported():
 
     async def main():
         await q.start()
-        ids = [q.submit(k, {"v": i}, session_key=f"H{i}").id for i, k in
-               enumerate(("h.ctx", "h.payload", "h.emit", "h.async"))]
+        ids = [q.submit(k, {"v": i}, session_key=f"H{i}").id for i, k in enumerate(("h.ctx", "h.payload", "h.emit", "h.async"))]
         deadline = time.time() + 10
         while time.time() < deadline:
             if len([i for i in ids if q.status(i)["status"] == "succeeded"]) == 4:
@@ -559,12 +567,10 @@ def test_gateway_endpoints_and_async_command():
     with _client() as c:
         assert c.get("/queue/status").status_code == 200
         kinds = c.get("/queue/status").json()["queue"]["registered_kinds"]
-        for k in ("agent.chat", "agent.autonomous", "research.deep", "subagent.delegate",
-                  "memory.sweep", "channel.reply"):
+        for k in ("agent.chat", "agent.autonomous", "research.deep", "subagent.delegate", "memory.sweep", "channel.reply"):
             assert k in kinds, (k, kinds)
 
-        r = c.post("/command", json={"text": "hello queued world", "user_id": "q1",
-                                     "platform": "web", "async": True})
+        r = c.post("/command", json={"text": "hello queued world", "user_id": "q1", "platform": "web", "async": True})
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["async"] is True and body["job_id"].startswith("job_")
@@ -594,14 +600,17 @@ def test_gateway_endpoints_and_async_command():
         assert listing["jobs"] and listing["queue"]["stats"]["succeeded"] >= 1
         assert c.get("/jobs/does_not_exist").status_code == 404
         assert c.post("/jobs", json={"kind": "not.a.kind", "payload": {}}).status_code == 400
-        assert c.post("/jobs", json={"kind": "agent.chat", "payload": {"text": "queued via jobs endpoint",
-                                                                       "user_id": "q2"}}).status_code == 200
+        assert (
+            c.post(
+                "/jobs", json={"kind": "agent.chat", "payload": {"text": "queued via jobs endpoint", "user_id": "q2"}}
+            ).status_code
+            == 200
+        )
 
 
 def test_sse_stream_delivers_tokens_and_replays():
     with _client() as c:
-        j = c.post("/jobs", json={"kind": "agent.chat",
-                                 "payload": {"text": "stream me please", "user_id": "sse"}}).json()
+        j = c.post("/jobs", json={"kind": "agent.chat", "payload": {"text": "stream me please", "user_id": "sse"}}).json()
         rid = j["run_id"]
         frames = []
 
@@ -635,13 +644,13 @@ def test_sse_stream_delivers_tokens_and_replays():
 
         # late joiner replays from Last-Event-ID semantics (?after=)
         tail = c.get(f"/stream/run/{rid}").raise_for_status()
-        late_ids = [json.loads(l[6:])["id"] for l in tail.text.splitlines() if l.startswith("data: ")]
+        late_ids = [json.loads(line[6:])["id"] for line in tail.text.splitlines() if line.startswith("data: ")]
         assert late_ids and min(late_ids) >= 1
 
 
 def test_websocket_duplex_chat_cancel_and_tool():
     with _client() as c:
-        with c.websocket_connect(f"/ws/agent?token=test-token") as ws:
+        with c.websocket_connect("/ws/agent?token=test-token") as ws:
             hello = ws.receive_json()
             assert hello["type"] == "hello" and hello["protocol"] == "hermus.agent.v1"
             assert "agent.chat" in hello["kinds"]
@@ -651,8 +660,7 @@ def test_websocket_duplex_chat_cancel_and_tool():
             ws.send_json({"action": "ping"})
             assert ws.receive_json()["type"] == "pong"
 
-            ws.send_json({"action": "chat", "text": "hello over the socket", "user_id": "ws1",
-                          "platform": "ws", "stream": True})
+            ws.send_json({"action": "chat", "text": "hello over the socket", "user_id": "ws1", "platform": "ws", "stream": True})
             ack = ws.receive_json()
             assert ack["type"] == "ack" and ack["kind"] == "agent.chat" and ack["job_id"]
 
@@ -667,8 +675,7 @@ def test_websocket_duplex_chat_cancel_and_tool():
             assert "turn_started" in seen and deltas > 0, seen[:15]
 
             # direct tool call over the same socket, still permission-gated + sandboxed
-            ws.send_json({"action": "tool", "name": "sandbox_run",
-                          "args": {"command": "echo over_socket"}})
+            ws.send_json({"action": "tool", "name": "sandbox_run", "args": {"command": "echo over_socket"}})
             for _ in range(40):
                 msg = ws.receive_json()
                 if msg.get("type") == "tool_result":
@@ -726,20 +733,24 @@ def test_websocket_requires_token_when_configured():
     closed2, code2 = attempt("/ws/agent?token=nope")
     assert closed2 and code2 == 1008, (closed2, code2)
     closed3, code3 = attempt("/ws/agent?token=test-token")
-    assert not closed3, (closed3, code3)          # the right token still works
-    del os.environ["HERMUS_GATEWAY_TOKEN"]        # leave the process clean
+    assert not closed3, (closed3, code3)  # the right token still works
+    del os.environ["HERMUS_GATEWAY_TOKEN"]  # leave the process clean
 
 
 def test_subsystem_http_endpoints():
     with _client() as c:
-        assert c.post("/memory/remember", json={"kind": "semantic",
-                                                "content": "Gateway test fact: shards rebalance at night",
-                                                "importance": 8}).status_code == 200
+        assert (
+            c.post(
+                "/memory/remember",
+                json={"kind": "semantic", "content": "Gateway test fact: shards rebalance at night", "importance": 8},
+            ).status_code
+            == 200
+        )
         out = c.post("/memory/hybrid", json={"query": "when do shards rebalance", "limit": 3}).json()
         assert out["mode"] == "hybrid" and out["index"]["available"] is True
         assert out["results"] and "retrieval" in out["results"][0]
         assert c.post("/memory/hybrid", json={"query": ""}).status_code == 400
-        assert c.post("/memory/sweep", json={}).status_code == 400          # needs confirm=true
+        assert c.post("/memory/sweep", json={}).status_code == 400  # needs confirm=true
         swept = c.post("/memory/sweep", json={"confirm": True, "dry_run": True}).json()
         assert "checked" in swept
         assert c.get("/memory/stats").json()["total"] >= 1
@@ -755,23 +766,35 @@ def test_subsystem_http_endpoints():
 
         assert c.get("/skills/forge/stats").json()["stats"]["registered_skills"] >= 0
         assert c.post("/skills/forge/harvest", json={"goal": "x"}).status_code == 400
-        skill_out = c.post("/skills/forge/harvest", json={
-            "goal": "Summarize nginx error log and file a report from the gateway",
-            "dry_run": True,
-            "trajectory": [
-                {"role": "user", "content": "Summarize nginx error log and file a report from the gateway"},
-                {"role": "assistant", "content": "reading",
-                 "tool_calls": [{"name": "shell_execute", "arguments": {"command": "grep -c . log"}, "id": "1"},
-                                {"name": "shell_execute", "arguments": {"command": "sort log | uniq -c"}, "id": "2"},
-                                {"name": "write_file", "arguments": {"path": "r.md", "content": "x"}, "id": "3"}]},
-                {"role": "assistant", "content": "Report filed with counts of each error class and a "
-                                                 "recommended timeout change."},
-            ],
-            "tool_results": [{"tool": "shell_execute", "result": {"stdout": "12", "returncode": 0}},
-                             {"tool": "shell_execute", "result": {"stdout": "3 x", "returncode": 0}},
-                             {"tool": "write_file", "result": {"success": True}}],
-            "verification": {"verified": True},
-        }).json()
+        skill_out = c.post(
+            "/skills/forge/harvest",
+            json={
+                "goal": "Summarize nginx error log and file a report from the gateway",
+                "dry_run": True,
+                "trajectory": [
+                    {"role": "user", "content": "Summarize nginx error log and file a report from the gateway"},
+                    {
+                        "role": "assistant",
+                        "content": "reading",
+                        "tool_calls": [
+                            {"name": "shell_execute", "arguments": {"command": "grep -c . log"}, "id": "1"},
+                            {"name": "shell_execute", "arguments": {"command": "sort log | uniq -c"}, "id": "2"},
+                            {"name": "write_file", "arguments": {"path": "r.md", "content": "x"}, "id": "3"},
+                        ],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "Report filed with counts of each error class and a recommended timeout change.",
+                    },
+                ],
+                "tool_results": [
+                    {"tool": "shell_execute", "result": {"stdout": "12", "returncode": 0}},
+                    {"tool": "shell_execute", "result": {"stdout": "3 x", "returncode": 0}},
+                    {"tool": "write_file", "result": {"success": True}},
+                ],
+                "verification": {"verified": True},
+            },
+        ).json()
         assert skill_out["created"] is False and skill_out["stage"] == "dry_run", skill_out
 
         assert c.get("/delegation/status").json()["can_delegate"] is True
@@ -786,8 +809,7 @@ def test_subsystem_http_endpoints():
 
 def test_delegation_endpoint_async_and_sync():
     with _client() as c:
-        j = c.post("/delegate", json={"goal": "two quick looks", "tasks": ["Say one", "Say two"],
-                                      "async": True}).json()
+        j = c.post("/delegate", json={"goal": "two quick looks", "tasks": ["Say one", "Say two"], "async": True}).json()
         assert j["job_id"].startswith("job_")
         deadline = time.time() + 60
         st = {}
@@ -799,8 +821,7 @@ def test_delegation_endpoint_async_and_sync():
         assert st.get("status") == "succeeded", st
         assert c.get(f"/jobs/{j['job_id']}/result").json()["result"]["succeeded"] == 2
 
-        sync = c.post("/delegate", json={"goal": "single task", "tasks": ["Report the repo name"],
-                                         "aggregate": "best"}).json()
+        sync = c.post("/delegate", json={"goal": "single task", "tasks": ["Report the repo name"], "aggregate": "best"}).json()
         assert sync["ok"] is True and sync["children"] == 1
         assert c.post("/delegate", json={}).status_code == 400
 
@@ -813,8 +834,7 @@ def test_sync_command_still_streams_to_the_bus():
         body = r.json()
         assert body["response"] and body["run_id"]
         assert body["run_id"].startswith("run_") or len(body["run_id"]) > 4
-        ev = c.get(f"/stream/run/{body['run_id']}").json() if False else None
-        hist = c.get(f"/jobs?limit=1").json()           # queue untouched by an inline call
+        hist = c.get("/jobs?limit=1").json()  # queue untouched by an inline call
         assert hist["queue"]["stats"]["submitted"] >= 0
         # events were mirrored onto the bus even for the synchronous path
         snap = c.get(f"/runs/{body['run_id']}").json()
@@ -832,8 +852,7 @@ def test_queue_disabled_falls_back_to_inline():
     try:
         with _client() as c:
             assert not job_queue._started, "start() must respect gateway_queue_enabled=0"
-            r = c.post("/command", json={"text": "no queue here", "user_id": "off1",
-                                        "platform": "web", "async": True})
+            r = c.post("/command", json={"text": "no queue here", "user_id": "off1", "platform": "web", "async": True})
             assert r.status_code == 200, r.text
             assert "response" in r.json() and "job_id" not in r.json()
     finally:
@@ -845,8 +864,7 @@ def test_every_registered_kind_runs_end_to_end():
     """A handler that crashes on import-time assumptions must be caught here, not in production."""
     from gateway.queue import JobQueue
 
-    q = JobQueue(workers=4, maxsize=20, default_timeout=60,
-                 persist=str(Path(_TMP) / "jobs" / "kinds.jsonl"))
+    q = JobQueue(workers=4, maxsize=20, default_timeout=60, persist=str(Path(_TMP) / "jobs" / "kinds.jsonl"))
     getter_calls = []
 
     def agent_getter(platform, user_id, **kw):
@@ -858,8 +876,7 @@ def test_every_registered_kind_runs_end_to_end():
     from gateway.handlers import register_handlers
 
     kinds = register_handlers(q, agent_getter)
-    assert set(kinds) >= {"agent.chat", "agent.autonomous", "research.deep",
-                          "subagent.delegate", "memory.sweep", "channel.reply"}
+    assert set(kinds) >= {"agent.chat", "agent.autonomous", "research.deep", "subagent.delegate", "memory.sweep", "channel.reply"}
     submissions = {
         "agent.chat": {"text": "kind check chat", "user_id": "k1", "platform": "web", "talking": True},
         "agent.autonomous": {"text": "kind check autonomous", "user_id": "k2"},
@@ -894,7 +911,7 @@ def test_every_registered_kind_runs_end_to_end():
     assert report["subagent.delegate"][1].get("children") == 1
     reply = report["channel.reply"][1]
     assert reply["answer"], reply
-    assert reply["delivery"]["delivered"] is False          # no bot token in CI
+    assert reply["delivery"]["delivered"] is False  # no bot token in CI
     assert "TELEGRAM_BOT_TOKEN" in json.dumps(reply["delivery"])
     assert reply["delivered"] is False
     assert "delivered" in reply["delivery"] or "error" in reply["delivery"]
@@ -914,7 +931,7 @@ def test_redis_backend_is_optional_and_degrades():
     consumer = RedisStreamsConsumer(q)
 
     async def main():
-        info = await q.start()          # start() must survive a missing redis
+        info = await q.start()  # start() must survive a missing redis
         await asyncio.sleep(0.2)
         await q.stop()
         return info
@@ -945,8 +962,9 @@ def test_stream_command_single_call():
         frames = []
 
         def reader():
-            with c.stream("POST", "/stream/command",
-                          json={"text": "one call stream", "user_id": "sc1", "platform": "web"}) as resp:
+            with c.stream(
+                "POST", "/stream/command", json={"text": "one call stream", "user_id": "sc1", "platform": "web"}
+            ) as resp:
                 assert resp.status_code == 200
                 for line in resp.iter_lines():
                     if line.startswith("data: "):
@@ -1006,8 +1024,7 @@ def test_http_routes_enforce_gateway_token_when_configured():
             # Channel *control* actions are control-plane: gated like everything else.
             assert c.get("/channels/status").status_code == 401
             assert c.post("/telegram/send", json={}).status_code == 401
-            assert c.get("/channels/status",
-                         headers={"X-Hermus-Token": "unit-token"}).status_code != 401
+            assert c.get("/channels/status", headers={"X-Hermus-Token": "unit-token"}).status_code != 401
     finally:
         del os.environ["HERMUS_GATEWAY_TOKEN"]
 
@@ -1024,11 +1041,9 @@ def test_telegram_webhook_optional_secret():
         with TestClient(g.app) as c:
             # Missing / wrong secret -> rejected before the handler runs.
             assert c.post("/webhook/telegram", json={}).status_code == 401
-            assert c.post("/webhook/telegram", json={},
-                          headers={"X-Telegram-Bot-Api-Secret-Token": "nope"}).status_code == 401
+            assert c.post("/webhook/telegram", json={}, headers={"X-Telegram-Bot-Api-Secret-Token": "nope"}).status_code == 401
             # Correct secret -> passes the gate (no message => skipped/no-op).
-            assert c.post("/webhook/telegram", json={},
-                          headers={"X-Telegram-Bot-Api-Secret-Token": "wh-1"}).status_code != 401
+            assert c.post("/webhook/telegram", json={}, headers={"X-Telegram-Bot-Api-Secret-Token": "wh-1"}).status_code != 401
     finally:
         del os.environ["HERMUS_TELEGRAM_WEBHOOK_SECRET"]
 

@@ -8,6 +8,7 @@ repeating its own past mistakes at the moment it is reasoning.
 Storage: `lessons` table in the existing data/memory.db (SQLite, free, WAL).
 Relevance: keyword-overlap scoring (zero tokens), recency tie-break.
 """
+
 from __future__ import annotations
 
 import re
@@ -15,30 +16,93 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import config
 from ..db_registry import using
 
 _CORRECTION_WORDS = (
-    "wrong", "incorrect", "that's not", "thats not", "that is not", "not what i",
-    "no,", "not that", "fix it", "fix this", "stop", "don't do that", "dont do that",
-    "actually", "you missed", "you forgot", "i meant", "never mind that",
+    "wrong",
+    "incorrect",
+    "that's not",
+    "thats not",
+    "that is not",
+    "not what i",
+    "no,",
+    "not that",
+    "fix it",
+    "fix this",
+    "stop",
+    "don't do that",
+    "dont do that",
+    "actually",
+    "you missed",
+    "you forgot",
+    "i meant",
+    "never mind that",
 )
 
 _STOPWORDS = {
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is",
-    "are", "was", "were", "be", "been", "it", "this", "that", "i", "you", "we",
-    "they", "he", "she", "not", "no", "but", "do", "does", "did", "have", "has",
-    "will", "would", "should", "can", "could", "from", "at", "by", "as", "your",
-    "my", "our", "their", "please", "about", "what", "when", "where", "how",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "to",
+    "in",
+    "on",
+    "for",
+    "with",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "it",
+    "this",
+    "that",
+    "i",
+    "you",
+    "we",
+    "they",
+    "he",
+    "she",
+    "not",
+    "no",
+    "but",
+    "do",
+    "does",
+    "did",
+    "have",
+    "has",
+    "will",
+    "would",
+    "should",
+    "can",
+    "could",
+    "from",
+    "at",
+    "by",
+    "as",
+    "your",
+    "my",
+    "our",
+    "their",
+    "please",
+    "about",
+    "what",
+    "when",
+    "where",
+    "how",
 }
 
 
 class LessonsStore:
     """SQLite-backed store of distilled lessons + relevance retrieval."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = Path(db_path or config.resolve_path(config.memory_db_path))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -91,9 +155,7 @@ class LessonsStore:
                 )
                 """
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_lessons_category ON lessons(category);"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_lessons_category ON lessons(category);")
 
     # ---------------------------------------------------------------- write
 
@@ -147,7 +209,7 @@ class LessonsStore:
 
     # ---------------------------------------------------------------- read
 
-    def relevant(self, text: str, limit: Optional[int] = None) -> list[dict[str, Any]]:
+    def relevant(self, text: str, limit: int | None = None) -> list[dict[str, Any]]:
         """Top lessons for the current task: keyword-overlap score + recency."""
         limit = limit or getattr(config, "lessons_in_prompt", 8)
         tokens = set(self._tokens(text))
@@ -224,12 +286,8 @@ class LessonsStore:
         try:
             with self._db() as conn:
                 total = conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0]
-                by_cat = conn.execute(
-                    "SELECT category, COUNT(*) FROM lessons GROUP BY category"
-                ).fetchall()
-                applied = conn.execute(
-                    "SELECT COALESCE(SUM(times_applied),0) FROM lessons"
-                ).fetchone()[0]
+                by_cat = conn.execute("SELECT category, COUNT(*) FROM lessons GROUP BY category").fetchall()
+                applied = conn.execute("SELECT COALESCE(SUM(times_applied),0) FROM lessons").fetchone()[0]
             return {
                 "total": total,
                 "by_category": {c: n for c, n in by_cat},
@@ -240,7 +298,7 @@ class LessonsStore:
 
     # ---------------------------------------------------------------- distillers
 
-    def distill_user_correction(self, user_message: str) -> Optional[dict[str, Any]]:
+    def distill_user_correction(self, user_message: str) -> dict[str, Any] | None:
         """User pushed back on the previous answer -> lesson."""
         low = (user_message or "").lower()
         if not any(w in low for w in _CORRECTION_WORDS):
@@ -256,14 +314,13 @@ class LessonsStore:
             source="agent_chat",
         )
 
-    def distill_tool_failure(self, tool_name: str, error_text: str) -> Optional[dict[str, Any]]:
+    def distill_tool_failure(self, tool_name: str, error_text: str) -> dict[str, Any] | None:
         if not error_text:
             return None
         err = error_text.strip()[:140]
         return self.add(
             lesson=(
-                f"Tool {tool_name} failed: {err}. Prefer a fallback path "
-                "(web_read / browser_navigate / retry with simpler args)."
+                f"Tool {tool_name} failed: {err}. Prefer a fallback path (web_read / browser_navigate / retry with simpler args)."
             ),
             category="tool_failure",
             keywords=f"{tool_name} failed error fallback retry",
@@ -283,7 +340,7 @@ class LessonsStore:
                 out.append(res)
         return out
 
-    def distill_skill_failure(self, skill_name: str, feedback: str) -> Optional[dict[str, Any]]:
+    def distill_skill_failure(self, skill_name: str, feedback: str) -> dict[str, Any] | None:
         if not feedback:
             return None
         return self.add(
@@ -298,10 +355,10 @@ class LessonsStore:
         lessons = self.relevant(text)
         if not lessons:
             return ""
-        for l in lessons:
-            self.mark_applied(l["id"])
+        for lesson in lessons:
+            self.mark_applied(lesson["id"])
         return "Lessons learned (from past sessions):\n" + "\n".join(
-            f"- [{l['category']}] {l['lesson'][:220]}" for l in lessons
+            f"- [{lesson['category']}] {lesson['lesson'][:220]}" for lesson in lessons
         )
 
 

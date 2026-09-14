@@ -16,20 +16,24 @@ monolith out of this concern:
 Auth follows the existing gateway convention (``HERMUS_GATEWAY_TOKEN``); SSE/WS
 accept it as ``?token=`` too, since browsers cannot set headers on EventSource.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-from datetime import datetime
-from typing import Any, Optional
 from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.config import config
+from core.log import get_logger
 from core.run_events import RunBus, run_bus, sse_format
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -39,10 +43,10 @@ router = APIRouter()
 # router dependency on a WebSocket closes it with the wrong code).
 ws_router = APIRouter()
 
-_agent_getter: Optional[Callable[..., Any]] = None
+_agent_getter: Callable[..., Any] | None = None
 
 
-def _auth_ok(token: Optional[str], header_token: Optional[str]) -> bool:
+def _auth_ok(token: str | None, header_token: str | None) -> bool:
     import hmac
 
     expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
@@ -59,7 +63,7 @@ async def _stream_run(
     after: int = 0,
     keepalive: float = 15.0,
     max_seconds: float = 1800.0,
-    request: Optional[Request] = None,
+    request: Request | None = None,
     stop_on: str = "run_finished",
 ) -> Any:
     """Generator yielding SSE frames for a run, live until it finishes (or the
@@ -73,8 +77,9 @@ async def _stream_run(
             if request is not None and await request.is_disconnected():
                 break
             if loop.time() - started > max_seconds:
-                yield sse_format({"id": 0, "run_id": run_id, "type": "stream_timeout",
-                                  "ts": _ts(), "data": {"max_seconds": max_seconds}})
+                yield sse_format(
+                    {"id": 0, "run_id": run_id, "type": "stream_timeout", "ts": _ts(), "data": {"max_seconds": max_seconds}}
+                )
                 break
             try:
                 event = await asyncio.wait_for(aq.get(), timeout=keepalive)
@@ -83,9 +88,15 @@ async def _stream_run(
                 continue
             etype = event.get("type")
             if etype == "__closed__":
-                yield sse_format({"id": int(event.get("id") or 0), "run_id": run_id,
-                                  "type": "stream_end", "ts": _ts(),
-                                  "data": {"status": event.get("status")}})
+                yield sse_format(
+                    {
+                        "id": int(event.get("id") or 0),
+                        "run_id": run_id,
+                        "type": "stream_end",
+                        "ts": _ts(),
+                        "data": {"status": event.get("status")},
+                    }
+                )
                 break
             yield sse_format(event)
             if stop_on and etype == stop_on:
@@ -111,8 +122,7 @@ async def submit_job(payload: dict[str, Any] = None):
     body = dict(payload.get("payload") or {})
     if not body.get("text") and payload.get("text"):
         body["text"] = payload["text"]
-    session_key = str(payload.get("session_key") or
-                      f"{body.get('platform', 'api')}:{body.get('user_id', 'anonymous')}")
+    session_key = str(payload.get("session_key") or f"{body.get('platform', 'api')}:{body.get('user_id', 'anonymous')}")
     try:
         job = job_queue.submit(
             kind,
@@ -173,10 +183,8 @@ async def job_result(job_id: str):
     if res is None:
         st = job_queue.status(job_id)
         if st.get("found") is False:
-            return JSONResponse({"error": st.get("error") or "unknown job",
-                                 "status": st.get("status")}, status_code=404)
-        return JSONResponse({"error": "result not ready", "status": st.get("status")},
-                            status_code=409)
+            return JSONResponse({"error": st.get("error") or "unknown job", "status": st.get("status")}, status_code=404)
+        return JSONResponse({"error": "result not ready", "status": st.get("status")}, status_code=409)
     return {"job_id": job_id, "result": res}
 
 
@@ -201,8 +209,7 @@ async def job_events(job_id: str, request: Request, follow: bool = True, after: 
     return StreamingResponse(
         _stream_run(run_bus, run_id, after=after, request=request),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
-                 "X-Accel-Buffering": "no", "X-Hermus-Run": str(run_id)},
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no", "X-Hermus-Run": str(run_id)},
     )
 
 
@@ -212,8 +219,7 @@ async def stream_run(run_id: str, request: Request, after: int = 0):
     return StreamingResponse(
         _stream_run(run_bus, run_id, after=after, request=request),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
-                 "X-Accel-Buffering": "no", "X-Hermus-Run": run_id},
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no", "X-Hermus-Run": run_id},
     )
 
 
@@ -244,8 +250,13 @@ async def stream_command(payload: dict[str, Any] = None, request: Request = None
     return StreamingResponse(
         _stream_run(run_bus, job.run_id, request=request),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
-                 "X-Accel-Buffering": "no", "X-Hermus-Job": job.id, "X-Hermus-Run": job.run_id},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Hermus-Job": job.id,
+            "X-Hermus-Run": job.run_id,
+        },
     )
 
 
@@ -287,16 +298,18 @@ async def ws_agent(websocket: WebSocket):
             except Exception:
                 pass
 
-    await send({
-        "type": "hello",
-        "protocol": "hermus.agent.v1",
-        "actions": ["chat", "autonomous", "cancel", "subscribe", "tool", "ping"],
-        "kinds": sorted(job_queue.handlers),
-        "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled},
-        "sandbox": _safe(lambda: __import__("core.sandbox", fromlist=["sandbox"]).sandbox.status()["backend"]),
-        "memory_index": _safe(lambda: _memory_index_stats()),
-        "ts": _ts(),
-    })
+    await send(
+        {
+            "type": "hello",
+            "protocol": "hermus.agent.v1",
+            "actions": ["chat", "autonomous", "cancel", "subscribe", "tool", "ping"],
+            "kinds": sorted(job_queue.handlers),
+            "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled},
+            "sandbox": _safe(lambda: __import__("core.sandbox", fromlist=["sandbox"]).sandbox.status()["backend"]),
+            "memory_index": _safe(lambda: _memory_index_stats()),
+            "ts": _ts(),
+        }
+    )
 
     streams: dict[str, asyncio.Task] = {}
 
@@ -335,14 +348,14 @@ async def ws_agent(websocket: WebSocket):
             action = str(msg.get("action") or msg.get("type") or "").lower()
 
             if action in ("chat", "autonomous", "delegate"):
-                kind = {"chat": "agent.chat", "autonomous": "agent.autonomous",
-                        "delegate": "subagent.delegate"}[action]
+                kind = {"chat": "agent.chat", "autonomous": "agent.autonomous", "delegate": "subagent.delegate"}[action]
                 body = {k: v for k, v in msg.items() if k not in ("action", "type")}
                 if action == "delegate" and not body.get("goal") and body.get("text"):
                     body["goal"] = body["text"]
                 try:
                     job = job_queue.submit(
-                        kind, body,
+                        kind,
+                        body,
                         session_key=f"ws:{body.get('user_id') or msg.get('user_id') or 'guest'}",
                         timeout=body.get("timeout"),
                     )
@@ -358,8 +371,13 @@ async def ws_agent(websocket: WebSocket):
                 if not run_id:
                     await send({"type": "error", "error": "run_id required"})
                     continue
-                await send({"type": "subscribe_ok", "run_id": run_id,
-                             "replayed": len(run_bus.history(run_id, after=int(msg.get("after") or 0)))})
+                await send(
+                    {
+                        "type": "subscribe_ok",
+                        "run_id": run_id,
+                        "replayed": len(run_bus.history(run_id, after=int(msg.get("after") or 0))),
+                    }
+                )
                 streams[run_id] = asyncio.create_task(pump_events(run_id, source="subscribe"))
                 continue
 
@@ -376,13 +394,12 @@ async def ws_agent(websocket: WebSocket):
                 args = msg.get("args") or msg.get("arguments") or {}
                 try:
                     # §5 canonical path: gateway tool calls go through ToolGateway.
-                    from core.tools import get_tool_gateway, gateway_result_dict
+                    from core.tools import gateway_result_dict, get_tool_gateway
 
                     def _run(name=name, args=args):
-                        r = get_tool_gateway().execute(name,
-                                                       args if isinstance(args, dict) else {},
-                                                       actor="realtime")
+                        r = get_tool_gateway().execute(name, args if isinstance(args, dict) else {}, actor="realtime")
                         return gateway_result_dict(r)
+
                     result = await asyncio.to_thread(_run)
                     await send({"type": "tool_result", "tool": name, "result": result})
                 except Exception as e:
@@ -398,21 +415,37 @@ async def ws_agent(websocket: WebSocket):
                         str(msg.get("query") or ""),
                         limit=int(msg.get("limit") or 6),
                     )
-                    await send({"type": "memory_result", "query": msg.get("query"),
-                                "hits": [{"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
-                                          "rrf": h.get("rrf_score"), "text": (h.get("content") or "")[:300]}
-                                         for h in out]})
+                    await send(
+                        {
+                            "type": "memory_result",
+                            "query": msg.get("query"),
+                            "hits": [
+                                {
+                                    "id": h.get("id"),
+                                    "kind": h.get("kind"),
+                                    "score": h.get("score"),
+                                    "rrf": h.get("rrf_score"),
+                                    "text": (h.get("content") or "")[:300],
+                                }
+                                for h in out
+                            ],
+                        }
+                    )
                 except Exception as e:
                     await send({"type": "error", "error": str(e)[:300]})
                 continue
 
             if action in ("ping", ""):
-                await send({"type": "pong", "ts": _ts(),
-                            "queue": _safe(lambda: dict(job_queue.status()["by_status"]))})
+                await send({"type": "pong", "ts": _ts(), "queue": _safe(lambda: dict(job_queue.status()["by_status"]))})
                 continue
 
-            await send({"type": "error", "error": f"unknown action '{action}'",
-                        "actions": ["chat", "autonomous", "delegate", "subscribe", "cancel", "tool", "memory", "ping"]})
+            await send(
+                {
+                    "type": "error",
+                    "error": f"unknown action '{action}'",
+                    "actions": ["chat", "autonomous", "delegate", "subscribe", "cancel", "tool", "memory", "ping"],
+                }
+            )
     except Exception:
         pass
     finally:
@@ -422,16 +455,15 @@ async def ws_agent(websocket: WebSocket):
 
 def _hello(job_queue) -> dict[str, Any]:
     """Capabilities frame sent right after a WS handshake."""
-    from core.sandbox import sandbox as jail
     from core.memory import memory
+    from core.sandbox import sandbox as jail
 
     return {
         "type": "hello",
         "protocol": "hermus.agent.v1",
         "actions": ["chat", "autonomous", "delegate", "subscribe", "cancel", "tool", "memory", "ping"],
         "kinds": sorted(job_queue.handlers),
-        "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled,
-                  "backend": job_queue.backend},
+        "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled, "backend": job_queue.backend},
         "sandbox": _safe(lambda: jail.status()["backend"]),
         "memory_index": _safe(lambda: memory.index_stats()),
         "ts": _ts(),
@@ -441,6 +473,7 @@ def _hello(job_queue) -> dict[str, Any]:
 def _memory_index_stats() -> dict[str, Any]:
     try:
         from core.memory import memory
+
         return memory.index_stats()
     except Exception:
         return {}
@@ -470,13 +503,21 @@ async def memory_hybrid(payload: dict[str, Any] = None):
         return await asyncio.to_thread(memory.explain, query, limit, project=project, kinds=kinds)
     hits = await asyncio.to_thread(memory.hybrid_recall, query, project=project, kinds=kinds, limit=limit)
     return {
-        "query": query, "mode": "hybrid", "count": len(hits),
+        "query": query,
+        "mode": "hybrid",
+        "count": len(hits),
         "index": memory.index_stats(),
         "results": [
-            {"id": h.get("id"), "kind": h.get("kind"), "score": h.get("score"),
-             "rrf_score": h.get("rrf_score"), "decay": h.get("decay"),
-             "retrieval": h.get("retrieval"), "signals": h.get("signals"),
-             "content": (h.get("content") or "")[:700]}
+            {
+                "id": h.get("id"),
+                "kind": h.get("kind"),
+                "score": h.get("score"),
+                "rrf_score": h.get("rrf_score"),
+                "decay": h.get("decay"),
+                "retrieval": h.get("retrieval"),
+                "signals": h.get("signals"),
+                "content": (h.get("content") or "")[:700],
+            }
             for h in hits
         ],
     }
@@ -488,10 +529,15 @@ async def memory_remember(payload: dict[str, Any] = None):
 
     payload = payload or {}
     res = await asyncio.to_thread(
-        memory.remember, str(payload.get("kind") or "semantic"), str(payload.get("content") or ""),
-        project=payload.get("project"), importance=float(payload.get("importance", 5.0)),
-        success=payload.get("success"), ttl_hours=payload.get("ttl_hours"),
-        pinned=bool(payload.get("pinned")), metadata=payload.get("metadata") or None,
+        memory.remember,
+        str(payload.get("kind") or "semantic"),
+        str(payload.get("content") or ""),
+        project=payload.get("project"),
+        importance=float(payload.get("importance", 5.0)),
+        success=payload.get("success"),
+        ttl_hours=payload.get("ttl_hours"),
+        pinned=bool(payload.get("pinned")),
+        metadata=payload.get("metadata") or None,
     )
     return res
 
@@ -504,7 +550,8 @@ async def memory_sweep(payload: dict[str, Any] = None):
     from core.memory import memory
 
     return await asyncio.to_thread(
-        memory.sweep, project=payload.get("project") or None,
+        memory.sweep,
+        project=payload.get("project") or None,
         dry_run=bool(payload.get("dry_run", False)),
     )
 
@@ -540,8 +587,7 @@ async def skill_forge_harvest(payload: dict[str, Any] = None):
 
     traj = payload.get("trajectory")
     if not traj:
-        return JSONResponse({"error": "trajectory required (list of turns with tool_calls)"},
-                            status_code=400)
+        return JSONResponse({"error": "trajectory required (list of turns with tool_calls)"}, status_code=400)
     return await asyncio.to_thread(
         skill_forge.harvest,
         str(payload.get("goal") or payload.get("text") or ""),
@@ -558,8 +604,7 @@ async def skill_forge_stats():
     from core.skill_forge import skill_forge
 
     reg = skill_forge.index()
-    return {"stats": skill_forge.stats(),
-            "skills": {k: v for k, v in list(reg["skills"].items())[-40:]}}
+    return {"stats": skill_forge.stats(), "skills": {k: v for k, v in list(reg["skills"].items())[-40:]}}
 
 
 @router.post("/skills/forge/run")
@@ -571,7 +616,8 @@ async def skill_forge_run(payload: dict[str, Any] = None):
     from core.skill_forge import skill_forge
 
     return await asyncio.to_thread(
-        skill_forge.run, name,
+        skill_forge.run,
+        name,
         **{k: v for k, v in payload.items() if k != "name"},
     )
 
@@ -606,9 +652,11 @@ async def sandbox_run(payload: dict[str, Any] = None):
     from core.sandbox import sandbox
 
     res = await asyncio.to_thread(
-        sandbox.run, command,
+        sandbox.run,
+        command,
         timeout=int(payload.get("timeout") or 0) or None,
-        cwd=payload.get("cwd"), network=payload.get("network"),
+        cwd=payload.get("cwd"),
+        network=payload.get("network"),
         policy=payload.get("policy") or None,
         allow_dangerous=bool(payload.get("allow_dangerous")),
         purpose="api:/sandbox/run",
@@ -646,8 +694,7 @@ async def delegate(payload: dict[str, Any] = None):
         from gateway.queue import job_queue
 
         job = job_queue.submit("subagent.delegate", payload, session_key=f"delegate:{goal[:40]}")
-        return {"job_id": job.id, "run_id": job.run_id, "status": job.status,
-                "events_url": f"/jobs/{job.id}/events"}
+        return {"job_id": job.id, "run_id": job.run_id, "status": job.status, "events_url": f"/jobs/{job.id}/events"}
     if not (tasks or goal):
         return JSONResponse({"error": "goal or tasks required"}, status_code=400)
     # Canonical path: even the synchronous form of the /delegate endpoint runs the
@@ -659,13 +706,14 @@ async def delegate(payload: dict[str, Any] = None):
     # Run the blocking submit+wait off the event loop so a live gateway (whose
     # queue owns a running loop) can drive the job without deadlocking.
     st = await asyncio.to_thread(
-        submit_and_wait, DELEGATE_JOB, payload,
+        submit_and_wait,
+        DELEGATE_JOB,
+        payload,
         session_key=f"delegate:{str(goal)[:40]}",
         timeout=float(payload.get("timeout") or 300.0),
     )
     if st.get("status") == "failed":
-        return {"ok": False, "error": st.get("error") or "delegate job failed",
-                "job_id": st.get("job_id")}
+        return {"ok": False, "error": st.get("error") or "delegate job failed", "job_id": st.get("job_id")}
     res = st.get("result") or {"ok": False, "error": "no result"}
     res["job_id"] = st.get("job_id") or res.get("job_id")
     return res
@@ -709,8 +757,6 @@ async def get_run(run_id: str, limit: int = 200):
     return snap
 
 
-
-
 # ---- missions & DAG -----------------------------------------------------------
 @router.post("/missions")
 async def mission_start_api(payload: dict[str, Any] = None):
@@ -719,37 +765,43 @@ async def mission_start_api(payload: dict[str, Any] = None):
     if not goal:
         return JSONResponse({"error": "goal is required"}, status_code=400)
     from core.mission import mission_engine
+
     report = await asyncio.to_thread(
         mission_engine.start_mission,
         goal=goal,
         requirements=payload.get("requirements"),
         domain=payload.get("domain"),
         subgoals=payload.get("subgoals"),
-        budget_steps=(int(payload["budget_steps"]) if payload.get("budget_steps")
-                      not in (None, "") else None),
+        budget_steps=(int(payload["budget_steps"]) if payload.get("budget_steps") not in (None, "") else None),
         preflight=str(payload.get("preflight", True)).lower() not in {"0", "false", "no"},
         allow_preflight_planning=str(payload.get("allow_preflight_planning", False)).lower() in {"1", "true", "yes"},
     )
     return report.to_dict()
 
+
 @router.get("/missions")
 async def mission_list_api():
     from core.mission import mission_engine
+
     missions = await asyncio.to_thread(mission_engine.list_missions)
     return {"missions": [m.to_dict() for m in missions]}
+
 
 @router.get("/missions/{mission_id}")
 async def mission_get_api(mission_id: str):
     from core.mission import mission_engine
+
     report = await asyncio.to_thread(mission_engine.get_mission, mission_id)
     if not report:
         return JSONResponse({"error": f"Mission {mission_id} not found"}, status_code=404)
     return report.to_dict()
 
+
 @router.post("/missions/{mission_id}/preflight/approvals")
 async def mission_preflight_approvals_api(mission_id: str):
     from core.autonomy_preflight import create_preflight_approval_requests
     from core.mission import mission_engine
+
     report = await asyncio.to_thread(mission_engine.get_mission, mission_id)
     if not report:
         return JSONResponse({"error": f"Mission {mission_id} not found"}, status_code=404)
@@ -757,11 +809,12 @@ async def mission_preflight_approvals_api(mission_id: str):
     result["mission_id"] = mission_id
     return result
 
+
 @router.post("/missions/{mission_id}/resume")
 async def mission_resume_api(
     mission_id: str,
     restart_failed: bool = False,
-    extra_steps: Optional[int] = None,
+    extra_steps: int | None = None,
     payload: dict[str, Any] = None,
 ):
     """Resume a blocked/interrupted mission — or restart a failed one.
@@ -773,9 +826,11 @@ async def mission_resume_api(
     restart = bool(restart_failed or payload.get("restart_failed"))
     steps = extra_steps if extra_steps is not None else payload.get("extra_steps")
     from core.mission import mission_engine
+
     try:
         report = await asyncio.to_thread(
-            mission_engine.resume_mission, mission_id,
+            mission_engine.resume_mission,
+            mission_id,
             restart_failed=restart,
             extra_steps=int(steps) if steps not in (None, "") else None,
         )
@@ -785,8 +840,7 @@ async def mission_resume_api(
         from core.mission import mission_engine as _me
 
         current = await asyncio.to_thread(_me.get_mission, mission_id)
-        body: dict[str, Any] = {"error": str(e), "mission_id": mission_id,
-                                "restart_failed": restart}
+        body: dict[str, Any] = {"error": str(e), "mission_id": mission_id, "restart_failed": restart}
         if current is not None:
             body["state"] = current.state
             body["failure"] = current.failure_summary()
@@ -809,7 +863,9 @@ async def mission_extend_api(
     n = int(payload.get("steps", steps) or steps)
     try:
         report = await asyncio.to_thread(
-            mission_engine.extend_budget, mission_id, n,
+            mission_engine.extend_budget,
+            mission_id,
+            n,
             emergency=bool(emergency or payload.get("emergency")),
         )
         return report.to_dict()
@@ -818,8 +874,7 @@ async def mission_extend_api(
 
 
 @router.get("/models/capabilities")
-async def models_capabilities_api(model: Optional[str] = None, needs_vision: bool = False,
-                                  needs_computer: bool = False):
+async def models_capabilities_api(model: str | None = None, needs_vision: bool = False, needs_computer: bool = False):
     """Pre-flight capability negotiation for the current (or a given) model.
 
     Answers, before a run starts: tools? vision? long context? structured
@@ -831,30 +886,38 @@ async def models_capabilities_api(model: Optional[str] = None, needs_vision: boo
 
     ref = model or str(getattr(config, "model", "") or "")
     return await asyncio.to_thread(
-        mission_capability_gate, ref,
-        needs_vision=needs_vision, needs_computer=needs_computer,
+        mission_capability_gate,
+        ref,
+        needs_vision=needs_vision,
+        needs_computer=needs_computer,
     )
+
 
 # ---- artifacts ----------------------------------------------------------------
 @router.get("/artifacts")
-async def artifacts_list_api(mission_id: Optional[str] = None, artifact_type: Optional[str] = None):
+async def artifacts_list_api(mission_id: str | None = None, artifact_type: str | None = None):
     from core.artifact_manager import artifact_manager
+
     arts = await asyncio.to_thread(artifact_manager.list_artifacts, mission_id=mission_id, artifact_type=artifact_type)
     return {"count": len(arts), "artifacts": [a.to_dict() for a in arts]}
+
 
 @router.get("/artifacts/{artifact_id}")
 async def artifact_get_api(artifact_id: str):
     from core.artifact_manager import artifact_manager
+
     art = await asyncio.to_thread(artifact_manager.get_artifact, artifact_id)
     if not art:
         return JSONResponse({"error": f"Artifact {artifact_id} not found"}, status_code=404)
     return art.to_dict()
+
 
 @router.post("/artifacts/export")
 async def artifact_export_api(payload: dict[str, Any] = None):
     payload = payload or {}
     output_path = payload.get("output_path", "artifacts_bundle.zip")
     from core.artifact_manager import artifact_manager
+
     try:
         p = await asyncio.to_thread(
             artifact_manager.export_bundle,
@@ -866,22 +929,27 @@ async def artifact_export_api(payload: dict[str, Any] = None):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 # ---- verifiers & SWE ----------------------------------------------------------
 @router.get("/verifiers/domains")
 async def verifiers_list_domains():
     from core.verifier_registry import verifier_registry
+
     return {"domains": verifier_registry.list_domains()}
+
 
 @router.post("/verifiers/verify")
 async def verifiers_verify_api(payload: dict[str, Any] = None):
     payload = payload or {}
     from core.verifier_registry import verifier_registry
+
     res = await asyncio.to_thread(
         verifier_registry.verify,
         domain_or_auto=payload.get("domain", "auto"),
         context=payload.get("context", payload),
     )
     return res.to_dict()
+
 
 @router.post("/swe/run")
 async def swe_run_api(payload: dict[str, Any] = None):
@@ -900,9 +968,12 @@ async def swe_run_api(payload: dict[str, Any] = None):
     if _agent_getter is not None and not payload.get("no_agent"):
         try:
             agent = _agent_getter(
-                payload.get("platform", "api"), payload.get("user_id", "swe"),
-                model=payload.get("model"), mode="agent",
-                api_key=payload.get("api_key"), base_url=payload.get("base_url"),
+                payload.get("platform", "api"),
+                payload.get("user_id", "swe"),
+                model=payload.get("model"),
+                mode="agent",
+                api_key=payload.get("api_key"),
+                base_url=payload.get("base_url"),
             )
         except Exception:
             agent = None
@@ -928,20 +999,25 @@ async def runtime_issues(limit: int = 100):
     issues = recent_issues(limit=limit)
     return {"count": len(issues), "issues": issues}
 
+
 # ---- rollback & checkpoints ---------------------------------------------------
 @router.get("/rollback/checkpoints")
 async def rollback_list_api():
     from core.rollback import rollback_manager
+
     cps = await asyncio.to_thread(rollback_manager.list_checkpoints)
     return {"count": len(cps), "checkpoints": [c.to_dict() for c in cps]}
+
 
 @router.post("/rollback/checkpoint")
 async def rollback_create_api(payload: dict[str, Any] = None):
     payload = payload or {}
     label = str(payload.get("label") or "manual_checkpoint")
     from core.rollback import rollback_manager
+
     cp = await asyncio.to_thread(rollback_manager.checkpoint, label=label, metadata=payload.get("metadata"))
     return {"success": True, "checkpoint": cp.to_dict()}
+
 
 @router.post("/rollback/restore")
 async def rollback_restore_api(payload: dict[str, Any] = None):
@@ -950,12 +1026,13 @@ async def rollback_restore_api(payload: dict[str, Any] = None):
     if not cid:
         return JSONResponse({"error": "checkpoint_id is required"}, status_code=400)
     from core.rollback import rollback_manager
+
     res = await asyncio.to_thread(rollback_manager.restore, checkpoint_id=cid)
     return res
 
 
 # ------------------------------------------------------------------ lifespan glue
-async def startup(app=None, *, agent_getter: Optional[Callable[..., Any]] = None) -> dict[str, Any]:
+async def startup(app=None, *, agent_getter: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Start the queue workers + register handlers + schedule maintenance."""
     global _agent_getter
     if agent_getter is not None:
@@ -966,15 +1043,14 @@ async def startup(app=None, *, agent_getter: Optional[Callable[..., Any]] = None
     try:
         from gateway.handlers import register_handlers
 
-        kinds = register_handlers(job_queue, getter)
+        register_handlers(job_queue, getter)
     except Exception as e:
-        print(f"[Realtime] handler registration failed: {e}")
-        kinds = {}
+        logger.error(f"[Realtime] handler registration failed: {e}")
     info = {}
     try:
         info = await job_queue.start()
     except Exception as e:
-        print(f"[Realtime] queue start failed ({e}) — /command stays synchronous")
+        logger.error(f"[Realtime] queue start failed ({e}) — /command stays synchronous")
     info["kinds"] = sorted(job_queue.handlers)
     return info
 
@@ -985,10 +1061,10 @@ async def shutdown() -> None:
     try:
         await job_queue.stop()
     except Exception as e:
-        print(f"[Realtime] queue stop failed: {e}")
+        logger.error(f"[Realtime] queue stop failed: {e}")
 
 
-def install(app, *, agent_getter: Optional[Callable[..., Any]] = None) -> dict[str, str]:
+def install(app, *, agent_getter: Callable[..., Any] | None = None) -> dict[str, str]:
     """Mount the realtime router on the app and wire queue ⇄ app lifecycle.
 
     The control-plane HTTP/SSE router is gated by the optional gateway token
