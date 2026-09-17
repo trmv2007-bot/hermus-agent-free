@@ -465,6 +465,14 @@ The dashboard can expose:
 - connected system modules
 - live agent events
 
+The **Systems** tab is generated from the backend capability manifest
+(`core/console.py`, served by `gateway/routes_console.py`): every registered
+subsystem — engine, queue, missions, agents, memory, models, tools, safety,
+workspace, and the rest — is declared once, probed live, and rendered from that
+one declaration. A capability that exists in the backend appears in the
+dashboard automatically; a capability that is genuinely unavailable reports that
+honestly instead of showing an empty card.
+
 Start the gateway and open:
 
 ```text
@@ -632,7 +640,7 @@ bootstrap.)*
 *(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
 
 Open in your browser:
-* **🎛️ Control Room (single production UI):** [`http://localhost:8000/control`](http://localhost:8000/control) — root `/` redirects here. The legacy `/dashboard`, `/jarvis`, `/computer/dashboard`, `/remote` surfaces were folded into it.
+* **🎛️ Control Room (single production UI):** [`http://localhost:8000/control`](http://localhost:8000/control) — root `/` redirects here. The legacy `/dashboard`, `/jarvis`, `/computer/dashboard`, `/remote` surfaces were folded into it. Its **Systems** tab is manifest-driven: every registered subsystem is probed and rendered from `GET /api/v1/console/manifest`, so new capabilities show up without new UI code.
 
 ### 3. Interactive Terminal Agent
 

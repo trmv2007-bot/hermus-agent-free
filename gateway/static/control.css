@@ -130,3 +130,41 @@
     outline:2px solid var(--acc); outline-offset:2px; }
   .visually-hidden { position:absolute; width:1px; height:1px; margin:-1px;
     padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+  /* ---- Systems console (generated from core/console.py) ----
+     Generic card markup: console.js renders every subsystem with the same
+     four primitives, so there is no per-panel styling to keep in sync. */
+  .console-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+    gap:14px; margin-top:14px; }
+  .console-card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:14px; min-width:0; display:flex; flex-direction:column; gap:8px; }
+  .console-card.ok { border-color:#1f5f45; }
+  .console-card.bad { border-color:#6b2b2b; }
+  .console-card .card-head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .console-card .card-title { font-size:14px; font-weight:600; color:var(--fg); }
+  .console-card .card-sub { font-size:11px; color:var(--muted); margin-top:2px; font-family:ui-monospace,monospace; }
+  .console-card .card-sum { font-size:12px; color:var(--muted); }
+  .console-card .cells { display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:8px; }
+  .console-card .kpi { padding:8px; }
+  .console-card .kpi .v { font-size:15px; overflow-wrap:anywhere; }
+  .console-card .kpi .l { font-size:10px; }
+  .chip-row { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .chip-label { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); }
+  .tag.ep { font-family:ui-monospace,monospace; font-size:10.5px; }
+  .tag.ep[data-ep-get] { cursor:pointer; }
+  .tag.ep[data-ep-get]:hover { border-color:var(--acc); color:var(--acc); }
+  .tag.ep.dead { color:var(--err); border-color:var(--err); cursor:help; }
+  .console-card table.mini { width:100%; border-collapse:collapse; font-size:11px; }
+  .console-card table.mini th { text-align:left; color:var(--muted); font-weight:600;
+    border-bottom:1px solid var(--line); padding:3px 4px; }
+  .console-card table.mini td { padding:3px 4px; border-bottom:1px solid var(--line);
+    overflow-wrap:anywhere; }
+  .console-card .owner { font-size:11px; color:var(--muted); }
+  .console-card details.raw summary { cursor:pointer; font-size:11px; color:var(--muted); }
+  .console-card details.raw pre, .console-card .act-out pre { max-height:220px; overflow:auto;
+    background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:8px;
+    font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .console-card .acts { display:flex; flex-direction:column; gap:6px; }
+  .console-card .act { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .console-card .act .act-in { max-width:150px; font-size:12px; padding:4px 8px; }
+  #consoleFilter { min-width:240px; }

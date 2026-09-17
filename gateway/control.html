@@ -31,7 +31,7 @@
   <button data-tab="computer" role="tab" id="tabbtn-computer" aria-controls="tab-computer" aria-selected="false" tabindex="-1">Computer</button>
   <button data-tab="remote" role="tab" id="tabbtn-remote" aria-controls="tab-remote" aria-selected="false" tabindex="-1">Remote</button>
   <button data-tab="safety" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1">Safety</button>
-  <button data-tab="doctor" role="tab" id="tabbtn-doctor" aria-controls="tab-doctor" aria-selected="false" tabindex="-1">Doctor</button>
+  <button data-tab="systems" role="tab" id="tabbtn-systems" aria-controls="tab-systems" aria-selected="false" tabindex="-1">Systems</button>
 </nav>
 
 <main>
@@ -330,14 +330,30 @@
     </div>
   </div>
 
-  <!-- ============ DOCTOR ============ -->
-  <div class="tab" id="tab-doctor" role="tabpanel" aria-labelledby="tabbtn-doctor">
-    <section>
-      <h2>Doctor · real diagnostics</h2>
-      <div class="cells" id="doctor"></div>
-      <div class="bar"><button id="docRun">POST /doctor/run</button></div>
-      <div class="feed" id="docOut" style="height:180px"><div class="note">Doctor probes real dependencies and reports exact unavailable capabilities.</div></div>
+  <!-- ============ SYSTEMS ============ -->
+  <!-- Generated, not hand-written: this tab renders core/console.py, which
+       declares every subsystem with the owner it reads, the endpoints that
+       serve it and the actions a human may trigger. Adding a capability is one
+       row there; no markup changes here. The Doctor card that used to be its own
+       tab is panel #doctor, with /doctor/status and /doctor/run intact. -->
+  <div class="tab" id="tab-systems" role="tabpanel" aria-labelledby="tabbtn-systems">
+    <section class="full">
+      <h2>Systems · generated from core/console.py</h2>
+      <div class="cells" id="consoleSummary"></div>
+      <div class="bar">
+        <input id="consoleFilter" placeholder="filter panels (name, owner, group)…" />
+        <select id="consoleGroup"><option value="all">all groups</option></select>
+        <button id="consoleRefresh" class="ghost">Refresh panels</button>
+        <button id="consoleProbeAll" class="ghost">Live-probe every panel</button>
+      </div>
+      <div class="hint">
+        Every card is read from its canonical owner at request time. A card that
+        cannot be read says so and shows the real error; nothing here is
+        substituted to look complete. Actions post to the endpoint named on the
+        card — the console adds no privileged path of its own.
+      </div>
     </section>
+    <div class="console-grid" id="consolePanels"><div class="note">loading manifest…</div></div>
   </div>
 </main>
 
@@ -383,5 +399,6 @@ if (gatewayToken && window.fetch) {
 }
 </script>
 <script src="/static/control-room.js" defer></script>
+<script src="/static/console.js" defer></script>
 </body>
 </html>

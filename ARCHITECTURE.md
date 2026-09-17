@@ -160,11 +160,23 @@ It is served as markup plus assets rather than one inline monolith:
 | `gateway/static/control.css` | stylesheet |
 | `gateway/static/control-room.js` | application script |
 | `gateway/static/control-client.js` | SSE + voice-first browser client |
+| `gateway/static/console.js` | Systems-tab renderer driven by the capability manifest |
 
 Assets are served from an explicit allow-list (`_serve_control_asset`), not a
 `StaticFiles` mount, so the gateway does not expose the directory. Tests that
 pin control-room wording search `tests/_control_room_source.py`, which
-concatenates all four files.
+concatenates all five files.
+
+The **Systems** tab is manifest-driven rather than hand-built. `core/console.py`
+declares every subsystem panel (id, group, read-only probe, HTTP endpoint,
+actions, confirmation level) and `gateway/routes_console.py` serves that
+manifest at `/api/v1/console/manifest`, probing owners for live data at
+`/api/v1/console/panels`. `gateway/static/console.js` renders whatever the
+manifest contains, so a new subsystem appears by adding one manifest row —
+there is no per-panel UI code to write. `tests/test_console_manifest.py` pins
+every probe, endpoint and action against the live route table, so a panel that
+points at a route that does not exist fails the suite rather than showing a
+dead tab.
 
 The UI consumes the same contracts as every other client:
 

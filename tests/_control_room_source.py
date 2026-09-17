@@ -23,6 +23,7 @@ _ASSETS = (
     "gateway/static/control.css",
     "gateway/static/control-client.js",
     "gateway/static/control-room.js",
+    "gateway/static/console.js",
 )
 
 

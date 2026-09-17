@@ -80,9 +80,19 @@ panel but may not enter native fullscreen.
 
 ## Connected modules
 
-The left rail opens live data modules for Missions, Computer, Agent Crew,
-Memory, Models, Connections, and Settings. The Computer module links to the
-existing detailed computer-agent dashboard rather than replacing it.
+The control room is organised as ten tabs (Overview, Missions, Computer, Jobs,
+Telemetry, Safety, Remote, Presence, Voice, Systems). The **Systems** tab is not
+a fixed set of cards: it renders `GET /api/v1/console/manifest` — the capability
+manifest declared in `core/console.py` — and probes every panel through
+`GET /api/v1/console/panels`. Registered subsystems therefore show up
+automatically (Runtime, Agents & devices, Memory & learning, Models & keys,
+Capabilities, Safety & recovery, Workspace); a new subsystem appears by adding a
+manifest row, and a panel whose owner is unavailable says so honestly instead of
+rendering as ready.
+
+The other tabs link to the live data modules they have always driven (Missions,
+Computer, Agent Crew, Memory, Models, Connections, Settings) through the same
+backend APIs.
 
 ## Local speech
 
@@ -132,6 +142,10 @@ transcription.
 | `/presence/check-in` | POST | Queue an explicit, read-only continuity check-in |
 | `/api/v1/system/health` | GET | Live system health probe |
 | `/api/v1/system/capabilities` | GET | Providers + tools + circuit status |
+| `/api/v1/console/manifest` | GET | Capability manifest (panels, groups, actions, endpoints, verification) |
+| `/api/v1/console/panels` | GET | Live probe of panels (`?ids=` narrows) |
+| `/api/v1/console/projection/{panel_id}` | GET | One panel as a read-only projection |
+| `/api/v1/console/action/{panel_id}/{action}` | POST | Server-side panel action (declared actions only; confirmation-gated) |
 | `/android/*` | — | Android control API (consent-gated, audited) |
 
 `POST /command` accepts additive `talking: true` or `speak: true` fields and can

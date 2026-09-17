@@ -1,4 +1,12 @@
-"""Hermus CLI — one module per command group (see ``hermus_cli/<command>.py``)."""
+"""Hermus CLI — grouped command modules behind one dispatch table.
+
+The CLI used to be one module per command (43 files, each with its own docstring,
+import shim and ``TYPE_CHECKING`` block). Commands now live in
+``hermus_cli/g_<group>.py`` — one module per capability group, the same groups
+the control room console uses (``core/console.py``) — and declare themselves as
+:class:`hermus_cli._spec.Command` objects. ``build_parser()`` and ``main()`` read
+that one list, so the parser can no longer disagree with the dispatcher.
+"""
 
 from __future__ import annotations
 
@@ -7,97 +15,27 @@ import argparse
 from core.config import config
 from core.log import setup_logging
 
-from . import agent as agent_cmd
-from . import api as api_cmd
-from . import artifacts as artifacts_cmd
-from . import bootstrap as bootstrap_cmd
-from . import computer as computer_cmd
-from . import counsel as counsel_cmd
-from . import cron as cron_cmd
-from . import delegate as delegate_cmd
-from . import doctor as doctor_cmd
-from . import embed as embed_cmd
-from . import emergency as emergency_cmd
-from . import engine as engine_cmd
-from . import eval as eval_cmd
-from . import fleet as fleet_cmd
-from . import forge as forge_cmd
-from . import gateway as gateway_cmd
-from . import harness as harness_cmd
-from . import jobs as jobs_cmd
-from . import mcp as mcp_cmd
-from . import mem2 as mem2_cmd
-from . import mission as mission_cmd
-from . import multiai as multiai_cmd
-from . import multikey as multikey_cmd
-from . import perms as perms_cmd
-from . import plan as plan_cmd
-from . import powers as powers_cmd
-from . import presence as presence_cmd
-from . import profile as profile_cmd
+from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_workspace
 from . import repl as repl_cmd
-from . import research as research_cmd
-from . import rollback as rollback_cmd
-from . import router as router_cmd
-from . import run as run_cmd
-from . import safety as safety_cmd
-from . import sandbox as sandbox_cmd
-from . import screen as screen_cmd
-from . import skill as skill_cmd
-from . import subagent as subagent_cmd
-from . import swe as swe_cmd
-from . import tools as tools_cmd
-from . import update as update_cmd
-from . import verify as verify_cmd
-from . import watchdog as watchdog_cmd
-from . import workspace as workspace_cmd
 from ._common import CLIContext
+from ._spec import Command, CommandModule
 
-COMMANDS = {
-    "gateway": gateway_cmd,
-    "bootstrap": bootstrap_cmd,
-    "doctor": doctor_cmd,
-    "engine": engine_cmd,
-    "cron": cron_cmd,
-    "subagent": subagent_cmd,
-    "skill": skill_cmd,
-    "multikey": multikey_cmd,
-    "fleet": fleet_cmd,
-    "multiai": multiai_cmd,
-    "counsel": counsel_cmd,
-    "eval": eval_cmd,
-    "plan": plan_cmd,
-    "api": api_cmd,
-    "update": update_cmd,
-    "mcp": mcp_cmd,
-    "embed": embed_cmd,
-    "tools": tools_cmd,
-    "workspace": workspace_cmd,
-    "mem2": mem2_cmd,
-    "forge": forge_cmd,
-    "sandbox": sandbox_cmd,
-    "delegate": delegate_cmd,
-    "jobs": jobs_cmd,
-    "router": router_cmd,
-    "run": run_cmd,
-    "agent": agent_cmd,
-    "perms": perms_cmd,
-    "powers": powers_cmd,
-    "safety": safety_cmd,
-    "emergency": emergency_cmd,
-    "research": research_cmd,
-    "screen": screen_cmd,
-    "computer": computer_cmd,
-    "harness": harness_cmd,
-    "watchdog": watchdog_cmd,
-    "profile": profile_cmd,
-    "presence": presence_cmd,
-    "mission": mission_cmd,
-    "swe": swe_cmd,
-    "verify": verify_cmd,
-    "artifacts": artifacts_cmd,
-    "rollback": rollback_cmd,
+#: Ordered group modules. Order only affects ``--help`` listing.
+_GROUPS = (g_runtime, g_agents, g_memory, g_models, g_safety, g_workspace)
+
+SPECS: tuple[Command, ...] = tuple(command for group in _GROUPS for command in group.COMMANDS)
+
+#: ``command name -> CommandModule``. Kept as the historical dict of module-like
+#: objects so every existing caller (`main`, scripts, tests) keeps working.
+COMMANDS: dict[str, CommandModule] = {
+    spec.name: CommandModule(spec, group.__name__) for group in _GROUPS for spec in group.COMMANDS
 }
+
+# A duplicate name would make one command silently shadow another; a shared
+# handler would make two commands behave identically by accident. Both are
+# cheap to check at import time, so they fail here rather than at a terminal.
+assert len(SPECS) == len(COMMANDS), "duplicate command name in the group modules"
+assert len({spec.run for spec in SPECS}) == len(SPECS), "two commands share one handler"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -123,8 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Persona profile (hermus profile list) - gives the agent an independent memory + system prompt",
     )
 
-    for _name, _mod in COMMANDS.items():
-        _mod.register(subparsers)
+    for spec in SPECS:
+        spec.configure(subparsers)
     return parser
 
 
@@ -139,4 +77,4 @@ def main() -> None:
     COMMANDS[args.command].run(args, ctx)
 
 
-__all__ = ["COMMANDS", "build_parser", "main"]
+__all__ = ["COMMANDS", "SPECS", "build_parser", "main"]

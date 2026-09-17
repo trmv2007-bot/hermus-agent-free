@@ -156,6 +156,41 @@ not duplicate implementations.
 
 ## Verified progress (this consolidation pass)
 
+### Capability manifest + manifest-driven Systems tab
+- `core/console.py` is the single declaration table for the control room's
+  Systems tab: 58 panels / 54 actions / 7 groups, each panel naming its owner
+  probe, HTTP endpoint, actions and confirmation level. All 58 probes return
+  live data (unavailable owners report an explicit `unavailable` + error, never
+  a fabricated ready state).
+- `gateway/routes_console.py` serves it at `/api/v1/console/{manifest,panels,
+  projection/{panel_id},action/{panel_id}/{action}}`; the manifest annotates
+  every declared endpoint against the app's live route table (265 routes, 58/58
+  verified) and panels are probed through a bounded thread fan-out.
+- `gateway/static/console.js` renders whatever the manifest contains, so a new
+  subsystem needs one manifest row and no new UI code; `/control` remains the
+  only production UI. `tests/test_console_manifest.py` (78 tests) pins probes,
+  endpoints and actions to the live route table.
+
+### CLI — 46 command modules → 10 files
+- `hermus_cli/` is now group modules (`g_runtime`, `g_agents`, `g_memory`,
+  `g_models`, `g_safety`, `g_workspace`) plus `_spec.py` (the `Command` spec and
+  the `CommandModule` adapter that preserves the per-command `register()` /
+  `run()` interface), `_common.py` and `repl.py`: 3,212 lines, the same 43
+  commands with byte-identical help text. `tests/test_cli_dispatch.py` and
+  `tests/test_perf_budgets.py` pass unchanged (110 tests).
+
+### Skills — 21 identical copies → one runner + 21 declarations
+- `skills/_free_clone.py` holds the free-clone procedure once (search + local
+  free LLM + honest fallback); every `skills/NN_*/skill.py` is a 26-line
+  declaration of its identity. 1,365 → 927 lines.
+- Each skill now declares `CAPABILITIES = ["read", "network"]` explicitly
+  instead of the loader inferring them from the URL text, so capability
+  reporting is exact.
+
+Suite after this pass: **1354 passed / 0 failed / 2 skipped** (86s); the two
+baseline failures were fixed (missing `pytest-asyncio`; `powers registry`
+printed nothing when empty).
+
 ### Tool boundary — agent now routes through the canonical ToolGateway
 - `core/agent._execute_tool` now delegates every tool invocation to
   `get_tool_gateway().execute()` (descriptor resolution, policy gating, typed

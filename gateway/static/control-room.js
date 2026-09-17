@@ -293,7 +293,7 @@ function refreshTab(name){
   else if (name === "computer") refreshComputer();
   else if (name === "remote") refreshRemote();
   else if (name === "safety") refreshSafety();
-  else if (name === "doctor") refreshDoctor();
+  else if (name === "systems") { if (window.HermusConsole) window.HermusConsole.refresh(); }
   else if (name === "presence") refreshPresence();
 }
 
@@ -920,27 +920,17 @@ function resolvePending(id, decision){
     .catch((e)=>{ $("#grantOut").innerHTML = '<div class="note">resolve failed: ' + esc(e.message) + '</div>'; });
 }
 
-// ---------- DOCTOR ----------
-async function refreshDoctor(){
-  try {
-    const { j: d } = await getJSON("/doctor/status");
-    $("#doctor").innerHTML = kpi(esc(String(d.engine_status || d.status || "-")), "engine")
-      + kpi(esc(String(d.worst_severity || "-")), "worst") + kpi(String(d.finding_count ?? d.counts?.total ?? 0), "findings")
-      + kpi(String(d.stuck?.length ?? 0), "stuck");
-  } catch(e){
-    $("#doctor").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
-      { label: "doctor", onRetryId: "doctor" });
-  }
+// ---------- DOCTOR (generated panel) ----------
+/* Doctor is no longer its own tab: it is the `doctor` panel of the generated
+ * Systems console (core/console.py declares /doctor/status and /doctor/run).
+ * console.js registers one retry action per panel, including this one — the
+ * fallback below keeps the contract when that script has not loaded yet. */
+function refreshDoctor(){
+  if (window.HermusConsole) { window.HermusConsole.refreshPanel("doctor"); return; }
+  const host = $("#consolePanels");
+  if (host) host.innerHTML = '<div class="note">open the Systems tab to read the doctor panel.</div>';
 }
 RETRY_ACTIONS.doctor = refreshDoctor;
-function docRun(){
-  const out = $("#docOut");
-  out.innerHTML = '<div class="note">running doctor…</div>';
-  fetch("/doctor/run", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ use_llm:false, ask_internet:false }) })
-    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>status: <span class="e">' + esc(d.status) + '</span> findings: <span class="e">' + esc(d.findings?.length ?? 0) + '</span></div>'; refreshDoctor(); })
-    .catch((e)=>{ out.innerHTML = '<div class="note">doctor failed: ' + esc(e.message) + '</div>'; });
-}
-
 // ---------- wiring ----------
 $("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
 $("#cmdBtn").addEventListener("click", postCommand);
@@ -964,7 +954,6 @@ $("#powerPropose").addEventListener("click", proposePower);
 $("#capRegistryRefresh").addEventListener("click", refreshCapabilityRegistry);
 $("#capSetup").addEventListener("click", setupCapability);
 $("#capActivationRequest").addEventListener("click", requestCapabilityActivation);
-$("#docRun").addEventListener("click", docRun);
 $("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
 $("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
 $("#preflightRun").addEventListener("click", runPreflight);
