@@ -393,7 +393,7 @@ _TABLE = (
         "Self improvement",
         "capabilities",
         "core/self_improvement.py",
-        "core.self_improvement:self_improvement.get_for_panel",
+        "@self_improvement",
         "Idle reflection and how-to-improve research",
     ),
     (
@@ -1092,6 +1092,42 @@ def _p_critic() -> dict[str, Any]:
     return {"officers": officers, "count": len(officers)}
 
 
+def _p_self_improvement() -> dict[str, Any]:
+    """``get_status()`` is the structured owner API; ``get_for_panel()`` is text."""
+    from core.self_improvement import self_improvement
+
+    status = _safe(lambda: self_improvement.get_status()) or {}
+    current = status.get("current_reflection") or {}
+    last = status.get("last_reflection") or {}
+    last_reflection = (last or {}).get("reflection") or {}
+    rows = []
+    for entry in _as_list(status.get("history")):
+        if not isinstance(entry, dict):
+            continue
+        reflection = entry.get("reflection") or {}
+        rows.append(
+            {
+                "when": str(entry.get("timestamp") or "")[:19],
+                "mistakes": reflection.get("mistakes_count", 0),
+                "tool_failures": reflection.get("tool_failures_count", 0),
+                "fixes": len(_as_list(entry.get("fixes"))),
+                "message": str(entry.get("message") or "")[:90],
+            }
+        )
+    return {
+        "reflecting": bool(status.get("is_reflecting")),
+        "checker": "running" if status.get("background_checker_running") else "stopped",
+        "interval_s": status.get("idle_check_interval"),
+        "history_count": status.get("history_count", len(rows)),
+        "stage": str(current.get("stage") or "idle"),
+        "message": str(current.get("message") or status.get("message") or "idle")[:120],
+        "last_at": str((last or {}).get("timestamp") or "")[:19],
+        "last_mistakes": last_reflection.get("mistakes_count", 0),
+        "last_fixes": len(_as_list((last or {}).get("fixes"))),
+        "history": rows,
+    }
+
+
 def _p_safety() -> dict[str, Any]:
     from core.safety_policy import load_safety_policy
 
@@ -1240,6 +1276,8 @@ def _p_swe() -> dict[str, Any]:
 def _tool_names(tool_registry: Any) -> list[str]:
     """``list_tools()`` returns definitions on some builds and names on others."""
     raw = tool_registry.list_tools() or []
+    if isinstance(raw, dict):
+        raw = raw.get("tools") or []
     names: list[str] = []
     for item in raw:
         if isinstance(item, str):
@@ -1279,6 +1317,7 @@ _SHAPED: dict[str, Callable[[], Any]] = {
     "research": _p_research,
     "speech": _p_speech,
     "critic": _p_critic,
+    "self_improvement": _p_self_improvement,
     "safety": _p_safety,
     "red_lines": _p_red_lines,
     "permissions": _p_permissions,

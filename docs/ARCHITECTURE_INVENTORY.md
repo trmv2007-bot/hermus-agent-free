@@ -175,7 +175,7 @@ not duplicate implementations.
 - `hermus_cli/` is now group modules (`g_runtime`, `g_agents`, `g_memory`,
   `g_models`, `g_safety`, `g_workspace`) plus `_spec.py` (the `Command` spec and
   the `CommandModule` adapter that preserves the per-command `register()` /
-  `run()` interface), `_common.py` and `repl.py`: 3,217 lines, the same 43
+  `run()` interface), `_common.py` and `repl.py`: 3,212 lines, the same 43
   commands with byte-identical help text. `tests/test_cli_dispatch.py` and
   `tests/test_perf_budgets.py` pass unchanged (110 tests).
 
