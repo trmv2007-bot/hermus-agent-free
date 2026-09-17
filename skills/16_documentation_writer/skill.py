@@ -1,65 +1,26 @@
-"""
-documentation-writer-agent - Free Clone Skill for Hermus Agent Free
+"""16-documentation-writer - free clone of the original langchain agent.
+
 Original: https://github.com/ashishpatel26/500-AI-Agents-Projects/tree/main/16-documentation-writer
 Framework: langchain - Industry: software-development
-Free implementation using Ollama local + DuckDuckGo + SQLite FTS5
+Free implementation (search + local LLM + honest fallback) lives in
+``skills/_free_clone.py``; this module declares which clone it is.
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
 
-def run(query: str = "default query", **kwargs) -> Dict[str, Any]:
-    """
-    Free clone of 16-documentation-writer from 500-AI-Agents-Projects
-    Original: Generates README and docstrings for Python modules
-    Framework: langchain
-    
-    This is simplified free version using Hermus tools:
-    - web_search (DuckDuckGo free, no API key)
-    - file_write (write report)
-    - Uses Ollama local free LLM via core/llm.py if available
-    """
-    try:
-        # Try to use Hermus free tools if available
-        from tools.web_search import web_search
-        from core.llm import free_llm
-        
-        # Search web for query
-        search_results = web_search(query, max_results=3)
-        
-        # Synthesize via free LLM
-        prompt = f"Task: Generates README and docstrings for Python modules\nQuery: {query}\nSearch results: {str(search_results)[:1000]}\n\nProvide structured report like original 16-documentation-writer would."
-        
-        messages = [
-            {"role": "system", "content": "You are 16_documentation_writer - Generates README and docstrings for Python modules. Provide structured report."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        resp = free_llm.chat(messages)
-        
-        return {
-            "skill": "16_documentation_writer",
-            "original": "https://github.com/ashishpatel26/500-AI-Agents-Projects/tree/main/16-documentation-writer",
-            "framework": "langchain",
-            "industry": "software-development",
-            "query": query,
-            "search_results": search_results[:2],
-            "report": resp.content[:2000],
-            "method": "free_clone_using_ollama_duckduckgo_sqlite",
-            "note": "Free clone - original uses langchain + GPT-4o-mini + Tavily paid, this uses Ollama local free + DuckDuckGo free + SQLite FTS5 free"
-        }
-        
-    except Exception as e:
-        # Fallback mock if tools not available
-        return {
-            "skill": "16_documentation_writer",
-            "original": "https://github.com/ashishpatel26/500-AI-Agents-Projects/tree/main/16-documentation-writer",
-            "framework": "langchain",
-            "query": query,
-            "report": f"Mock report for {query} - Generates README and docstrings for Python modules. This is free clone of 16-documentation-writer from 500-AI-Agents-Projects (36k stars). Original uses langchain. Free version uses Ollama local + DuckDuckGo free.",
-            "error_fallback": str(e)[:200],
-            "method": "mock_free_fallback"
-        }
+from skills._free_clone import CLONES, run_free_clone
+
+SPEC = CLONES["16_documentation_writer"]
+
+# Declared rather than inferred: the shared runner searches the web (network)
+# and reads the query (read). Pinned here so capability reporting stays exact.
+CAPABILITIES = ["read", "network"]
+
+
+def run(query: str = "default query", **kwargs: Any) -> Dict[str, Any]:
+    """Run this free clone for ``query``."""
+    return run_free_clone(SPEC, query, **kwargs)
+
 
 if __name__ == "__main__":
-    result = run("test query for 16-documentation-writer")
-    print(result["report"][:500])
+    print(run("test query for 16-documentation-writer")["report"][:500])

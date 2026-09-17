@@ -487,6 +487,7 @@ from gateway.routes_channels import control_router as _channels_control_router  
 from gateway.routes_channels import router as _channels_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
+from gateway.routes_console import router as _console_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
@@ -508,6 +509,7 @@ app.include_router(_channels_control_router, dependencies=_gate_control)
 app.include_router(_registry_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
+app.include_router(_console_router, dependencies=_gate_control)
 app.include_router(_computer_router, dependencies=_gate_control)
 app.include_router(_computer_ws_router)
 app.include_router(_speech_router, dependencies=_gate_control)
@@ -684,6 +686,12 @@ async def control_room_js():
 async def control_room_css():
     """Control-room stylesheet."""
     return _serve_control_asset("control.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/console.js")
+async def control_console_js():
+    """Generated Systems console: renders ``core/console.py`` (see routes_console)."""
+    return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/cache/stats")

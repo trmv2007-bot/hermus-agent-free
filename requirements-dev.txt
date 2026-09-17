@@ -5,4 +5,6 @@
 ruff>=0.14.0
 mypy>=1.0.0
 pytest-cov>=5.0.0
+# test_perf_budgets/test_async_core mark coroutine tests with @pytest.mark.asyncio
+pytest-asyncio>=0.23.0
 pre-commit>=3.0.0
