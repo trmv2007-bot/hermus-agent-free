@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#58a6ff"/>
+      <stop offset="100%" style="stop-color:#79c0ff"/>
+    </linearGradient>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3fb950"/>
+      <stop offset="100%" style="stop-color:#58a6ff"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="50%" cy="50%" r="50%" fx="30%" fy="30%">
+      <stop offset="0%" style="stop-color:#234f72"/>
+      <stop offset="100%" style="stop-color:#0e1420"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Orb Background -->
+  <circle cx="40" cy="30" r="25" fill="url(#orb)" stroke="#58a6ff" stroke-width="2"/>
+
+  <!-- Animated Ring -->
+  <circle cx="40" cy="30" r="20" fill="none" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round">
+    <animateTransform attributeName="transform" type="rotate" from="0 40 30" to="360 40 30" dur="4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Main Text -->
+  <text x="60" y="22" font-family="Arial, sans-serif" font-size="20" fill="#58a6ff" font-weight="bold" letter-spacing="2">HERMUS</text>
+
+  <!-- Subtext -->
+  <text x="60" y="40" font-family="Arial, sans-serif" font-size="10" fill="#8b98a9" font-weight="normal" letter-spacing="1">AGENT</text>
+
+  <!-- Lightning Bolt -->
+  <path d="M5 5 L15 30 L5 35 Z" fill="#58a6ff" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" repeatCount="indefinite"/>
+  </path>
+</svg>
