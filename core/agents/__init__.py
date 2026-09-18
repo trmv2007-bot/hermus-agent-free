@@ -20,7 +20,7 @@ from .collaboration import create_mission, get_mission, get_all_missions, start_
 
 __all__ = [
     "Agent",
-    "AgentState", 
+    "AgentState",
     "AgentConfig",
     "AgentPool",
     "get_pool",

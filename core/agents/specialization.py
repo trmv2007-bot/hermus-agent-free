@@ -45,7 +45,6 @@ Previous findings: {context}
 Provide detailed, well-researched responses with proper citations.
 """,
     },
-    
     AgentRole.CODER: {
         "name": "Coder",
         "description": "Specialized in software development, coding, and debugging",
@@ -71,7 +70,6 @@ Code context: {context}
 Provide code solutions with explanations and best practices.
 """,
     },
-    
     AgentRole.VERIFIER: {
         "name": "Verifier",
         "description": "Specialized in verification, validation, and quality assurance",
@@ -96,7 +94,6 @@ Verification criteria: {criteria}
 Be thorough and precise in your verification.
 """,
     },
-    
     AgentRole.CHAIR: {
         "name": "Chair",
         "description": "Orchestrates multi-agent collaboration and decision making",
@@ -121,7 +118,6 @@ Available agents: {agents}
 Provide clear direction and coordination.
 """,
     },
-    
     AgentRole.CRITIC: {
         "name": "Critic",
         "description": "Provides critical analysis and constructive feedback",
@@ -146,7 +142,6 @@ Evaluation criteria: {criteria}
 Be thorough but constructive in your criticism.
 """,
     },
-    
     AgentRole.SYNTHESIZER: {
         "name": "Synthesizer",
         "description": "Combines and synthesizes information from multiple sources",
@@ -171,7 +166,6 @@ Sources: {sources}
 Provide clear, comprehensive syntheses.
 """,
     },
-    
     AgentRole.TOOL_RUNNER: {
         "name": "Tool Runner",
         "description": "Executes tools and commands on behalf of other agents",
@@ -203,36 +197,36 @@ class SpecializedAgent(Agent):
     """
     Base class for specialized agents with role-specific behavior.
     """
-    
+
     def __init__(self, role: AgentRole, **kwargs):
         # Set role-specific defaults
         role_def = ROLE_DEFINITIONS.get(role, {})
-        
+
         # Create config with role defaults
         config_kwargs = {
             "role": role,
             "name": kwargs.get("name") or f"{role_def.get('name', 'Agent')}-{kwargs.get('model', 'default')[:4]}",
         }
         config_kwargs.update(kwargs)
-        
+
         super().__init__(config=AgentConfig(**config_kwargs))
-        
+
         self.role_definition = role_def
         self.capabilities = role_def.get("capabilities", [])
-    
+
     def get_prompt(self, task: str, context: str = "") -> str:
         """Get the role-specific prompt for a task."""
         template = self.role_definition.get("prompt_template", "")
         return template.format(task=task, context=context)
-    
+
     async def execute_specialized_task(self, task: str, context: dict = None) -> str:
         """
         Execute a task using role-specific logic.
-        
+
         Args:
             task: The task to execute
             context: Additional context
-        
+
         Returns:
             Result of the task
         """
@@ -244,32 +238,32 @@ class Researcher(SpecializedAgent):
     """
     Researcher Agent - Specialized in information gathering and analysis.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.RESEARCHER, **kwargs)
-    
+
     async def research(self, topic: str, depth: str = "comprehensive") -> str:
         """
         Perform research on a topic.
-        
+
         Args:
             topic: Topic to research
             depth: Depth of research (quick, standard, comprehensive)
-        
+
         Returns:
             Research results
         """
         prompt = self.get_prompt(f"Research: {topic}", f"Depth: {depth}")
         return await self.run_task(prompt)
-    
+
     async def analyze(self, data: Any, analysis_type: str = "general") -> str:
         """
         Analyze data.
-        
+
         Args:
             data: Data to analyze
             analysis_type: Type of analysis
-        
+
         Returns:
             Analysis results
         """
@@ -281,46 +275,46 @@ class Coder(SpecializedAgent):
     """
     Coder Agent - Specialized in software development.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.CODER, **kwargs)
-    
+
     async def write_code(self, requirements: str, language: str = "python") -> str:
         """
         Write code based on requirements.
-        
+
         Args:
             requirements: What the code should do
             language: Programming language
-        
+
         Returns:
             Generated code
         """
         prompt = self.get_prompt(f"Write {language} code for: {requirements}")
         return await self.run_task(prompt)
-    
+
     async def debug(self, code: str, error: str = None) -> str:
         """
         Debug code.
-        
+
         Args:
             code: Code to debug
             error: Error message if any
-        
+
         Returns:
             Debug analysis and fixes
         """
         prompt = self.get_prompt(f"Debug code:\n{code}\nError: {error}")
         return await self.run_task(prompt)
-    
+
     async def refactor(self, code: str, goals: list[str] = None) -> str:
         """
         Refactor code.
-        
+
         Args:
             code: Code to refactor
             goals: Refactoring goals
-        
+
         Returns:
             Refactored code
         """
@@ -333,38 +327,35 @@ class Verifier(SpecializedAgent):
     """
     Verifier Agent - Specialized in verification and validation.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.VERIFIER, **kwargs)
-    
+
     async def verify_code(self, code: str, requirements: str) -> str:
         """
         Verify code meets requirements.
-        
+
         Args:
             code: Code to verify
             requirements: Requirements to check against
-        
+
         Returns:
             Verification results
         """
-        prompt = self.get_prompt(
-            f"Verify code:\n{code}\n\nRequirements:\n{requirements}",
-            "Verify that all requirements are met"
-        )
+        prompt = self.get_prompt(f"Verify code:\n{code}\n\nRequirements:\n{requirements}", "Verify that all requirements are met")
         return await self.run_task(prompt)
-    
+
     async def verify_facts(self, claims: list[str]) -> str:
         """
         Verify factual claims.
-        
+
         Args:
             claims: List of claims to verify
-        
+
         Returns:
             Verification results for each claim
         """
-        claims_str = "\n".join([f"{i+1}. {c}" for i, c in enumerate(claims)])
+        claims_str = "\n".join([f"{i + 1}. {c}" for i, c in enumerate(claims)])
         prompt = self.get_prompt(f"Verify these facts:\n{claims_str}")
         return await self.run_task(prompt)
 
@@ -373,33 +364,33 @@ class Chair(SpecializedAgent):
     """
     Chair Agent - Orchestrates multi-agent collaboration.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.CHAIR, **kwargs)
-    
+
     async def coordinate(self, task: str, agents: list[Agent]) -> str:
         """
         Coordinate multiple agents to complete a task.
-        
+
         Args:
             task: The task to complete
             agents: List of agents to coordinate
-        
+
         Returns:
             Coordination plan and results
         """
         agents_str = ", ".join([a.config.name for a in agents])
         prompt = self.get_prompt(task, f"Available agents: {agents_str}")
         return await self.run_task(prompt)
-    
+
     async def build_consensus(self, topic: str, agents: list[Agent]) -> str:
         """
         Build consensus among agents on a topic.
-        
+
         Args:
             topic: Topic to discuss
             agents: Agents to include in discussion
-        
+
         Returns:
             Consensus result
         """
@@ -411,18 +402,18 @@ class Critic(SpecializedAgent):
     """
     Critic Agent - Provides critical analysis.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.CRITIC, **kwargs)
-    
+
     async def critique(self, work: str, criteria: list[str] = None) -> str:
         """
         Critique work based on criteria.
-        
+
         Args:
             work: Work to critique
             criteria: Criteria to evaluate against
-        
+
         Returns:
             Critique and improvement suggestions
         """
@@ -435,22 +426,22 @@ class Synthesizer(SpecializedAgent):
     """
     Synthesizer Agent - Combines information from multiple sources.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.SYNTHESIZER, **kwargs)
-    
+
     async def synthesize(self, sources: list[str], topic: str = None) -> str:
         """
         Synthesize information from multiple sources.
-        
+
         Args:
             sources: List of information sources
             topic: Optional topic for context
-        
+
         Returns:
             Synthesized result
         """
-        sources_str = "\n\n".join([f"Source {i+1}:\n{s}" for i, s in enumerate(sources)])
+        sources_str = "\n\n".join([f"Source {i + 1}:\n{s}" for i, s in enumerate(sources)])
         prompt = self.get_prompt(f"Synthesize:\n{sources_str}", f"Topic: {topic}")
         return await self.run_task(prompt)
 
@@ -459,33 +450,33 @@ class ToolRunner(SpecializedAgent):
     """
     Tool Runner Agent - Executes tools and commands.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(role=AgentRole.TOOL_RUNNER, **kwargs)
         self._allowed_tools = set()
-    
+
     def add_tool(self, tool_name: str) -> None:
         """Add an allowed tool."""
         self._allowed_tools.add(tool_name)
-    
+
     def remove_tool(self, tool_name: str) -> None:
         """Remove an allowed tool."""
         self._allowed_tools.discard(tool_name)
-    
+
     async def execute_tool(self, tool_name: str, args: dict = None) -> str:
         """
         Execute a tool.
-        
+
         Args:
             tool_name: Name of the tool to execute
             args: Arguments for the tool
-        
+
         Returns:
             Tool execution result
         """
         if tool_name not in self._allowed_tools:
             return f"Error: Tool {tool_name} not allowed"
-        
+
         # TODO: Actually execute the tool
         prompt = f"Execute tool: {tool_name}\nArgs: {json.dumps(args or {}, indent=2)}"
         return await self.run_task(prompt)
@@ -542,12 +533,12 @@ ROLE_TO_CLASS = {
 async def create_by_role(role: AgentRole, name: str = None, **kwargs) -> SpecializedAgent:
     """
     Create an agent by its role.
-    
+
     Args:
         role: The agent's role
         name: Optional name
         **kwargs: Additional configuration
-    
+
     Returns:
         A specialized agent instance
     """

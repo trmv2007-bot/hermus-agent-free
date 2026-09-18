@@ -13,7 +13,7 @@
     background-attachment: fixed;
     overflow-x: hidden;
   }
-  
+
   /* Floating Particles for Spacegrid */
   .particle-container {
     position: fixed;
@@ -25,7 +25,7 @@
     z-index: -1;
     overflow: hidden;
   }
-  
+
   .particle {
     position: absolute;
     width: 2px;
@@ -35,14 +35,14 @@
     opacity: 0.6;
     animation: float-particle 15s infinite linear;
   }
-  
+
   @keyframes float-particle {
     0% { transform: translateY(0) translateX(0); opacity: 0; }
     10% { opacity: 0.6; }
     90% { opacity: 0.6; }
     100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
   }
-  
+
   /* JARVIS Orb Container */
   .jarvis-orb-container {
     position: fixed;
@@ -51,7 +51,7 @@
     z-index: 10;
     pointer-events: none;
   }
-  
+
   .jarvis-orb {
     width: 120px;
     height: 120px;
@@ -59,7 +59,7 @@
     position: relative;
     background: radial-gradient(circle at 30% 30%, #234f72 0%, #102238 34%, #0e1420 72%);
     border: 2px solid #58a6ff;
-    box-shadow: 
+    box-shadow:
       0 0 30px rgba(88, 166, 255, 0.3),
       inset 0 0 25px rgba(88, 166, 255, 0.15),
       0 0 40px rgba(88, 166, 255, 0.1);
@@ -71,25 +71,25 @@
     color: #58a6ff;
     cursor: pointer;
   }
-  
+
   .jarvis-orb:hover {
     transform: scale(1.1);
-    box-shadow: 
+    box-shadow:
       0 0 40px rgba(88, 166, 255, 0.5),
       inset 0 0 30px rgba(88, 166, 255, 0.2),
       0 0 50px rgba(88, 166, 255, 0.2);
   }
-  
+
   @keyframes jarvis-pulse {
     0%, 100% { transform: scale(1); opacity: 0.9; }
     50% { transform: scale(1.05); opacity: 1; }
   }
-  
+
   @keyframes jarvis-rotate {
     from { transform: rotate(0deg) scale(1); }
     to { transform: rotate(360deg) scale(1); }
   }
-  
+
   .jarvis-orb::before {
     content: '';
     position: absolute;
@@ -99,37 +99,37 @@
     border-radius: 50%;
     animation: jarvis-ring 3s ease-in-out infinite;
   }
-  
+
   @keyframes jarvis-ring {
     0%, 100% { transform: scale(1); opacity: 0.3; }
     50% { transform: scale(1.2); opacity: 0.6; }
   }
-  
+
   .jarvis-orb.working {
     border-color: #3fb950;
     color: #3fb950;
-    box-shadow: 
+    box-shadow:
       0 0 30px rgba(63, 185, 80, 0.4),
       inset 0 0 25px rgba(63, 185, 80, 0.2),
       0 0 40px rgba(63, 185, 80, 0.2);
     animation: jarvis-pulse 2s ease-in-out infinite;
   }
-  
+
   .jarvis-orb.error {
     border-color: #f85149;
     color: #f85149;
-    box-shadow: 
+    box-shadow:
       0 0 30px rgba(248, 81, 73, 0.4),
       inset 0 0 25px rgba(248, 81, 73, 0.2),
       0 0 40px rgba(248, 81, 73, 0.2);
     animation: jarvis-pulse 1s ease-in-out infinite, error-pulse 1s ease-in-out infinite;
   }
-  
+
   @keyframes error-pulse {
     0%, 100% { box-shadow: 0 0 30px rgba(248, 81, 73, 0.4); }
     50% { box-shadow: 0 0 50px rgba(248, 81, 73, 0.6); }
   }
-  
+
   /* Agent Cards Floating */
   .agent-card-floating {
     position: fixed;
@@ -143,12 +143,12 @@
     max-width: 200px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   }
-  
+
   @keyframes float-agent {
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-10px); }
   }
-  
+
   /* Agent Visualization Panel */
   .agents-visualization {
     position: relative;
@@ -158,7 +158,7 @@
     border-radius: 12px;
     overflow: hidden;
   }
-  
+
   .agent-node {
     position: absolute;
     width: 40px;
@@ -176,33 +176,33 @@
     transition: all 0.3s ease;
     z-index: 1;
   }
-  
+
   .agent-node:hover {
     transform: scale(1.2);
     box-shadow: 0 4px 20px rgba(88, 166, 255, 0.5);
   }
-  
+
   .agent-node.working {
     background: linear-gradient(135deg, #3fb950, #4ae27a);
     box-shadow: 0 2px 10px rgba(63, 185, 80, 0.4);
     animation: node-pulse 2s ease-in-out infinite;
   }
-  
+
   .agent-node.idle {
     background: linear-gradient(135deg, #8b98a9, #a8b5c8);
     box-shadow: 0 2px 10px rgba(139, 152, 169, 0.3);
   }
-  
+
   .agent-node.error {
     background: linear-gradient(135deg, #f85149, #ff6b6b);
     box-shadow: 0 2px 10px rgba(248, 81, 73, 0.4);
   }
-  
+
   @keyframes node-pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.1); }
   }
-  
+
   .agent-connection {
     position: absolute;
     height: 2px;
@@ -211,13 +211,13 @@
     z-index: 0;
     animation: connection-flow 2s linear infinite;
   }
-  
+
   @keyframes connection-flow {
     0% { opacity: 0.3; }
     50% { opacity: 0.8; }
     100% { opacity: 0.3; }
   }
-  
+
   /* Quick Action Buttons */
   .quick-actions {
     display: flex;
@@ -225,7 +225,7 @@
     flex-wrap: wrap;
     margin: 10px 0;
   }
-  
+
   .quick-action-btn {
     background: linear-gradient(135deg, rgba(88, 166, 255, 0.2), rgba(88, 166, 255, 0.4));
     border: 1px solid rgba(88, 166, 255, 0.3);
@@ -240,18 +240,18 @@
     align-items: center;
     gap: 6px;
   }
-  
+
   .quick-action-btn:hover {
     background: linear-gradient(135deg, rgba(88, 166, 255, 0.4), rgba(88, 166, 255, 0.6));
     border-color: #58a6ff;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(88, 166, 255, 0.2);
   }
-  
+
   .quick-action-btn:active {
     transform: translateY(0);
   }
-  
+
   /* VRAM Monitor */
   .vram-monitor {
     background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(20, 25, 36, 0.5));
@@ -260,7 +260,7 @@
     padding: 16px;
     margin: 10px 0;
   }
-  
+
   .vram-bar {
     height: 20px;
     background: rgba(20, 25, 36, 0.8);
@@ -269,7 +269,7 @@
     margin: 10px 0;
     position: relative;
   }
-  
+
   .vram-fill {
     height: 100%;
     background: linear-gradient(90deg, #3fb950, #58a6ff, #f85149);
@@ -277,7 +277,7 @@
     transition: width 0.5s ease;
     position: relative;
   }
-  
+
   .vram-fill::after {
     content: '';
     position: absolute;
@@ -287,7 +287,7 @@
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
   }
-  
+
   .vram-text {
     display: flex;
     justify-content: space-between;
@@ -299,7 +299,7 @@
 <body>
   <!-- Spacegrid Background Particles -->
   <div class="particle-container" id="particleContainer"></div>
-  
+
   <!-- JARVIS Orb -->
   <div class="jarvis-orb-container" id="jarvisOrbContainer">
     <div class="jarvis-orb" id="jarvisOrb" onclick="toggleJarvisView()">
@@ -368,7 +368,7 @@
           </div>
           <div class="hint">Optimized for RTX 3050 with 8GB VRAM - Safe limit: 7GB</div>
         </div>
-        
+
         <div class="quick-actions">
           <button class="quick-action-btn" onclick="createAgent()">&#43; Create Agent</button>
           <button class="quick-action-btn" onclick="startAllAgents()">&#9654; Start All</button>
@@ -376,23 +376,23 @@
           <button class="quick-action-btn" onclick="showSpacegrid()">&#128287; Spacegrid View</button>
           <button class="quick-action-btn" onclick="toggleJarvis()">&#128065; Toggle JARVIS</button>
         </div>
-        
+
         <h3 style="margin: 20px 0 10px 0;">Agent Pool Status</h3>
         <div class="cells" id="agentPoolStatus"></div>
       </section>
-      
+
       <section>
         <h2>Snapshot &#8226; System health</h2>
         <div class="cells" id="health"></div>
         <div class="hint">Snapshot = `GET /api/v1/system/health` &#8214; every value from a live probe.</div>
       </section>
-      
+
       <section>
         <h2>Snapshot &#8226; Capabilities</h2>
         <div class="cells" id="caps"></div>
         <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
       </section>
-      
+
       <section class="full">
         <h2>Agent Visualization</h2>
         <div class="agents-visualization" id="agentsVisualization">
@@ -400,7 +400,7 @@
         </div>
         <div class="hint">Live visualization of active agents and their connections</div>
       </section>
-      
+
       <section class="full">
         <h2>Replay &#8226; Canonical event log</h2>
         <div class="bar">
@@ -410,7 +410,7 @@
         <div class="feed" id="log"><div class="note">No run selected &#8214; reconstructs state from the durable EventBus.</div></div>
         <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` re-reads the durable event log.</div>
       </section>
-      
+
       <section class="full">
         <h2>Command &#8226; typed backend command</h2>
         <div class="bar">
@@ -437,11 +437,11 @@
           <button class="quick-action-btn" onclick="createSpecializedAgent('verifier')">&#9989; Verifier</button>
           <button class="quick-action-btn" onclick="createSpecializedAgent('chair')">&#128081; Chair</button>
         </div>
-        
+
         <h3 style="margin: 15px 0 10px 0;">Active Agents</h3>
         <div class="cells" id="activeAgents"></div>
       </section>
-      
+
       <section class="full">
         <h2>Agent Configuration</h2>
         <div class="bar">
@@ -469,7 +469,7 @@
           <input id="agentTimeoutInput" placeholder="Idle timeout (seconds)" value="900" />
           <button class="quick-action-btn" onclick="createCustomAgent()">Create Custom Agent</button>
         </div>
-        
+
         <h3 style="margin: 15px 0 10px 0;">API Key Management</h3>
         <div class="bar">
           <select id="apiKeyProvider">
@@ -487,7 +487,7 @@
         <div class="feed" id="apiKeysList" style="height: 120px;"></div>
         <div class="hint">Max 10 keys per provider. Keys are stored locally and never transmitted.</div>
       </section>
-      
+
       <section class="full">
         <h2>Agent Communication</h2>
         <div class="bar">
@@ -845,7 +845,7 @@ let agentSystem = {
 function initParticles() {
   const container = document.getElementById('particleContainer');
   if (!container) return;
-  
+
   const particleCount = 50;
   for (let i = 0; i < particleCount; i++) {
     const particle = document.createElement('div');
@@ -862,7 +862,7 @@ function initParticles() {
 function toggleJarvis() {
   const orb = document.getElementById('jarvisOrb');
   const status = document.getElementById('jarvisStatus');
-  
+
   if (orb.classList.contains('working')) {
     orb.classList.remove('working');
     orb.classList.add('error');
@@ -881,7 +881,7 @@ function toggleJarvisView() {
   // Toggle between overview and agents tab
   const overviewTab = document.getElementById('tabbtn-overview');
   const agentsTab = document.getElementById('tabbtn-agents');
-  
+
   if (agentsTab.classList.contains('on')) {
     overviewTab.click();
   } else {
@@ -895,7 +895,7 @@ function createAgent() {
   const model = document.getElementById('agentModelSelect').value;
   const name = document.getElementById('agentNameInput').value || `Agent-${Date.now()}`;
   const role = document.getElementById('agentRoleSelect').value;
-  
+
   fetch('/api/v1/agents/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -913,7 +913,7 @@ function createSpecializedAgent(role) {
   fetch('/api/v1/agents/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
+    body: JSON.stringify({
       role: role,
       name: `Agent-${role}-${Date.now()}`,
       provider: 'ollama',
@@ -936,12 +936,12 @@ function createCustomAgent() {
 function addApiKey() {
   const provider = document.getElementById('apiKeyProvider').value;
   const key = document.getElementById('apiKeyInput').value;
-  
+
   if (!key) {
     showToast('Please enter an API key', 'error');
     return;
   }
-  
+
   fetch('/api/v1/agents/api-keys/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -960,12 +960,12 @@ function sendAgentMessage() {
   const senderId = document.getElementById('messageSender').value;
   const targetId = document.getElementById('messageTarget').value;
   const content = document.getElementById('messageContent').value;
-  
+
   if (!senderId || !targetId || !content) {
     showToast('Please select sender, target, and enter message', 'error');
     return;
   }
-  
+
   fetch('/api/v1/agents/message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -983,7 +983,7 @@ function sendAgentMessage() {
 function broadcastToAll() {
   const content = prompt('Enter message to broadcast:');
   if (!content) return;
-  
+
   fetch('/api/v1/agents/broadcast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1022,7 +1022,7 @@ function startAllAgents() {
 // Stop All Agents
 function stopAllAgents() {
   if (!confirm('Stop all agents?')) return;
-  
+
   fetch('/api/v1/agents/stop-all', {
     method: 'POST'
   }).then(r => r.json()).then(data => {
@@ -1075,9 +1075,9 @@ function refreshAgentMessages() {
 function updateAgentUI() {
   const container = document.getElementById('activeAgents');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   agentSystem.agents.forEach(agent => {
     const card = document.createElement('div');
     card.className = 'kpi';
@@ -1089,7 +1089,7 @@ function updateAgentUI() {
     `;
     container.appendChild(card);
   });
-  
+
   // Update agent count
   const countEl = document.getElementById('agentCount');
   if (countEl) {
@@ -1101,9 +1101,9 @@ function updateAgentUI() {
 function updateAgentVisualization() {
   const container = document.getElementById('agentsVisualization');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   // Create connections first
   for (let i = 0; i < agentSystem.agents.length; i++) {
     for (let j = i + 1; j < agentSystem.agents.length; j++) {
@@ -1116,14 +1116,14 @@ function updateAgentVisualization() {
       container.appendChild(connection);
     }
   }
-  
+
   // Create agent nodes
   const positions = [
     { x: 20, y: 30 }, { x: 80, y: 30 }, { x: 50, y: 70 },
     { x: 15, y: 80 }, { x: 85, y: 80 }, { x: 30, y: 50 },
     { x: 70, y: 50 }, { x: 40, y: 20 }, { x: 60, y: 20 }
   ];
-  
+
   agentSystem.agents.forEach((agent, index) => {
     const node = document.createElement('div');
     node.className = `agent-node ${agent.state || 'idle'}`;
@@ -1143,18 +1143,18 @@ State: ${agent.state || 'unknown'}`;
 function updateAgentDropdowns() {
   const senderSelect = document.getElementById('messageSender');
   const targetSelect = document.getElementById('messageTarget');
-  
+
   if (!senderSelect || !targetSelect) return;
-  
+
   senderSelect.innerHTML = '<option value="">Select Agent</option>';
   targetSelect.innerHTML = '<option value="">Select Target</option>';
-  
+
   agentSystem.agents.forEach(agent => {
     const option1 = document.createElement('option');
     option1.value = agent.agent_id;
     option1.textContent = `${agent.name || agent.agent_id.substring(0, 8)} (${agent.role || 'general'})`;
     senderSelect.appendChild(option1);
-    
+
     const option2 = document.createElement('option');
     option2.value = agent.agent_id;
     option2.textContent = `${agent.name || agent.agent_id.substring(0, 8)} (${agent.role || 'general'})`;
@@ -1166,9 +1166,9 @@ function updateAgentDropdowns() {
 function updateApiKeysUI() {
   const container = document.getElementById('apiKeysList');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   for (const [provider, keys] of Object.entries(agentSystem.apiKeys)) {
     const div = document.createElement('div');
     div.style.margin = '5px 0';
@@ -1181,14 +1181,14 @@ function updateApiKeysUI() {
 function updateMessagesUI() {
   const container = document.getElementById('agentMessages');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   if (agentSystem.messages.length === 0) {
     container.innerHTML = '<div class="note">No agent messages yet</div>';
     return;
   }
-  
+
   agentSystem.messages.slice().reverse().forEach(msg => {
     const div = document.createElement('div');
     div.style.padding = '5px 0';
@@ -1206,22 +1206,22 @@ function updateVRAMMonitor() {
   const percent = document.getElementById('vramPercent');
   const used = document.getElementById('vramUsed');
   const vramPill = document.getElementById('vramUsage');
-  
+
   if (!fill || !percent || !used) return;
-  
+
   // Simulate VRAM usage (in real implementation, this would come from GPU monitoring)
   const vramUsed = Math.min(7, Math.random() * 4 + 1); // 1-5GB (safe limit: 7GB)
   const vramPercent = Math.round((vramUsed / 8) * 100);
-  
+
   fill.style.width = vramPercent + '%';
   percent.textContent = vramPercent + '%';
   used.textContent = vramUsed.toFixed(1) + 'GB';
-  
+
   if (vramPill) {
     vramPill.textContent = `VRAM: ${vramUsed.toFixed(1)}GB/${vramPercent}%`;
     vramPill.className = 'pill ' + (vramPercent > 80 ? 'err' : vramPercent > 60 ? 'warn' : 'ok');
   }
-  
+
   // Update JARVIS orb based on VRAM
   const orb = document.getElementById('jarvisOrb');
   if (orb) {
@@ -1241,7 +1241,7 @@ function updateVRAMMonitor() {
 function showToast(message, type = 'info') {
   const container = document.getElementById('toasts');
   if (!container) return;
-  
+
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.innerHTML = `
@@ -1249,7 +1249,7 @@ function showToast(message, type = 'info') {
     <button class="toast-close" onclick="this.parentElement.remove()">&#10005;</button>
   `;
   container.appendChild(toast);
-  
+
   setTimeout(() => {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 300);
@@ -1259,19 +1259,19 @@ function showToast(message, type = 'info') {
 // Initialize on load
 window.addEventListener('load', () => {
   initParticles();
-  
+
   // Start periodic updates
   setInterval(refreshAgents, 5000);
   setInterval(refreshApiKeys, 10000);
   setInterval(refreshAgentMessages, 5000);
   setInterval(updateVRAMMonitor, 2000);
-  
+
   // Initial updates
   refreshAgents();
   refreshApiKeys();
   refreshAgentMessages();
   updateVRAMMonitor();
-  
+
   showToast('HERMUS JARVIS Control Room loaded!', 'ok');
 });
 

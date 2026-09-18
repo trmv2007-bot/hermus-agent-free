@@ -43,17 +43,18 @@ router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 # AGENT POOL ENDPOINTS
 # ============================================================================
 
+
 @router.get("/pool/status")
 async def get_pool_status(request: Request) -> dict:
     """Get the current status of the agent pool."""
     try:
         pool = get_pool()
         stats = pool.get_stats()
-        
+
         # Add VRAM info for RTX 3050
         lfp = get_local_first()
         gpu_info = lfp.detect_gpu()
-        
+
         return {
             "status": "ok",
             "pool": stats,
@@ -131,7 +132,7 @@ async def update_pool_config(request: Request, config: dict) -> dict:
     """Update pool configuration."""
     try:
         pool = get_pool()
-        
+
         if "max_agents" in config:
             pool.config.max_agents = config["max_agents"]
         if "max_concurrent" in config:
@@ -140,7 +141,7 @@ async def update_pool_config(request: Request, config: dict) -> dict:
             pool.config.idle_timeout = config["idle_timeout"]
         if "cleanup_interval" in config:
             pool.config.cleanup_interval = config["cleanup_interval"]
-        
+
         return {"status": "ok", "message": "Configuration updated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -150,11 +151,12 @@ async def update_pool_config(request: Request, config: dict) -> dict:
 # AGENT ENDPOINTS
 # ============================================================================
 
+
 @router.post("/create")
 async def create_agent(request: Request, config: dict) -> dict:
     """
     Create a new agent.
-    
+
     Request body:
     {
         "name": "Agent name",
@@ -171,7 +173,7 @@ async def create_agent(request: Request, config: dict) -> dict:
     """
     try:
         pool = get_pool()
-        
+
         # Convert role string to enum
         role = AgentRole.GENERAL
         if "role" in config:
@@ -179,7 +181,7 @@ async def create_agent(request: Request, config: dict) -> dict:
                 role = AgentRole(config["role"])
             except ValueError:
                 logger.warning(f"Unknown role: {config['role']}, using general")
-        
+
         # Create agent
         agent = await pool.create_agent(
             name=config.get("name"),
@@ -193,7 +195,7 @@ async def create_agent(request: Request, config: dict) -> dict:
             timeout=config.get("timeout", 120),
             retry_attempts=config.get("retry_attempts", 3),
         )
-        
+
         return {
             "status": "ok",
             "agent": agent.to_dict(),
@@ -209,7 +211,7 @@ async def list_agents(request: Request) -> dict:
     try:
         pool = get_pool()
         agents = pool.get_all_agents()
-        
+
         return {
             "status": "ok",
             "agents": [agent.to_dict() for agent in agents],
@@ -226,10 +228,10 @@ async def get_agent(request: Request, agent_id: str) -> dict:
     try:
         pool = get_pool()
         agent = pool.get_agent(agent_id)
-        
+
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
+
         return {"status": "ok", "agent": agent.to_dict()}
     except HTTPException:
         raise
@@ -242,7 +244,7 @@ async def get_agent(request: Request, agent_id: str) -> dict:
 async def run_agent_task(request: Request, agent_id: str, task: dict) -> dict:
     """
     Run a task on a specific agent.
-    
+
     Request body:
     {
         "task": "Task description",
@@ -252,15 +254,15 @@ async def run_agent_task(request: Request, agent_id: str, task: dict) -> dict:
     try:
         pool = get_pool()
         agent = pool.get_agent(agent_id)
-        
+
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
+
         result = await agent.run_task(
             task.get("task", ""),
             task.get("task_id"),
         )
-        
+
         return {
             "status": "ok",
             "agent_id": agent_id,
@@ -280,10 +282,10 @@ async def stop_agent(request: Request, agent_id: str) -> dict:
     try:
         pool = get_pool()
         success = await pool.destroy_agent(agent_id)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
+
         return {"status": "ok", "message": f"Agent {agent_id} stopped"}
     except HTTPException:
         raise
@@ -298,13 +300,13 @@ async def start_all_agents(request: Request) -> dict:
     try:
         pool = get_pool()
         agents = pool.get_all_agents()
-        
+
         count = 0
         for agent in agents:
             if agent.state == AgentState.SLEEPING:
                 await agent.wake()
                 count += 1
-        
+
         return {
             "status": "ok",
             "message": f"Started {count} sleeping agents",
@@ -321,7 +323,7 @@ async def stop_all_agents(request: Request) -> dict:
     try:
         pool = get_pool()
         count = await pool.destroy_all()
-        
+
         return {
             "status": "ok",
             "message": f"Stopped {count} agents",
@@ -338,7 +340,7 @@ async def ping_all_agents(request: Request) -> dict:
     try:
         pool = get_pool()
         agents = pool.get_all_agents()
-        
+
         results = {}
         for agent in agents:
             results[agent.agent_id] = {
@@ -347,7 +349,7 @@ async def ping_all_agents(request: Request) -> dict:
                 "last_activity": agent.last_activity,
                 "is_responsive": True,
             }
-        
+
         return {
             "status": "ok",
             "count": len(agents),
@@ -362,11 +364,12 @@ async def ping_all_agents(request: Request) -> dict:
 # AGENT MESSAGING ENDPOINTS
 # ============================================================================
 
+
 @router.post("/message")
 async def send_message(request: Request, message: dict) -> dict:
     """
     Send a message from one agent to another.
-    
+
     Request body:
     {
         "sender_id": "Sending agent ID",
@@ -378,15 +381,15 @@ async def send_message(request: Request, message: dict) -> dict:
     try:
         pool = get_pool()
         bus = get_bus()
-        
+
         sender = pool.get_agent(message.get("sender_id"))
         if not sender:
             raise HTTPException(status_code=404, detail="Sender agent not found")
-        
+
         target = pool.get_agent(message.get("target_id"))
         if not target:
             raise HTTPException(status_code=404, detail="Target agent not found")
-        
+
         # Convert message type
         msg_type = MessageType.TEXT
         if "type" in message:
@@ -394,17 +397,17 @@ async def send_message(request: Request, message: dict) -> dict:
                 msg_type = MessageType(message["type"])
             except ValueError:
                 logger.warning(f"Unknown message type: {message['type']}")
-        
+
         # Send the message
         success = await sender.send(
             message["target_id"],
             message["content"],
             msg_type.value,
         )
-        
+
         if not success:
             raise HTTPException(status_code=400, detail="Failed to send message")
-        
+
         # Also record in message bus
         await bus.send(
             sender_id=message["sender_id"],
@@ -412,7 +415,7 @@ async def send_message(request: Request, message: dict) -> dict:
             content=message["content"],
             message_type=msg_type,
         )
-        
+
         return {
             "status": "ok",
             "message_id": str(time.time()),
@@ -430,7 +433,7 @@ async def send_message(request: Request, message: dict) -> dict:
 async def broadcast_message(request: Request, message: dict) -> dict:
     """
     Broadcast a message to all agents.
-    
+
     Request body:
     {
         "sender_id": "Sending agent ID (optional)",
@@ -441,9 +444,9 @@ async def broadcast_message(request: Request, message: dict) -> dict:
     try:
         pool = get_pool()
         bus = get_bus()
-        
+
         sender_id = message.get("sender_id")
-        
+
         # Convert message type
         msg_type = MessageType.BROADCAST
         if "type" in message:
@@ -451,17 +454,17 @@ async def broadcast_message(request: Request, message: dict) -> dict:
                 msg_type = MessageType(message["type"])
             except ValueError:
                 logger.warning(f"Unknown message type: {message['type']}")
-        
+
         # Broadcast via message bus
         msg = await bus.broadcast(
             sender_id=sender_id or "system",
             content=message["content"],
             message_type=msg_type,
         )
-        
+
         # Count recipients
         count = len(pool.get_all_agents())
-        
+
         return {
             "status": "ok",
             "message_id": msg.message_id,
@@ -478,7 +481,7 @@ async def get_messages(request: Request, limit: int = 100) -> dict:
     try:
         bus = get_bus()
         messages = bus.get_history(limit=limit)
-        
+
         return {
             "status": "ok",
             "messages": [msg.to_dict() for msg in messages],
@@ -495,7 +498,7 @@ async def get_agent_messages(request: Request, agent_id: str, limit: int = 100) 
     try:
         bus = get_bus()
         messages = bus.get_history(limit=limit, agent_id=agent_id)
-        
+
         return {
             "status": "ok",
             "messages": [msg.to_dict() for msg in messages],
@@ -510,44 +513,42 @@ async def get_agent_messages(request: Request, agent_id: str, limit: int = 100) 
 # API KEY MANAGEMENT ENDPOINTS
 # ============================================================================
 
+
 @router.post("/api-keys/add")
 async def add_api_key(request: Request, key_data: dict) -> dict:
     """
     Add an API key for a provider.
-    
+
     Request body:
     {
         "provider": "groq|mistral|openrouter|together|fireworks|deepseek|nvidia",
         "key": "API key"
     }
-    
+
     Note: Max 10 keys per provider.
     """
     try:
         pool = get_pool()
-        
+
         provider = key_data.get("provider")
         key = key_data.get("key")
-        
+
         if not provider:
             raise HTTPException(status_code=400, detail="Provider required")
         if not key:
             raise HTTPException(status_code=400, detail="Key required")
-        
+
         # Check limit
         current_keys = pool.get_available_keys(provider)
         if len(current_keys) >= 10:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Maximum 10 keys per provider reached for {provider}"
-            )
-        
+            raise HTTPException(status_code=400, detail=f"Maximum 10 keys per provider reached for {provider}")
+
         # Add the key
         success = pool.add_api_key(provider, key)
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="Failed to add key")
-        
+
         return {
             "status": "ok",
             "message": f"API key added for {provider}",
@@ -567,7 +568,7 @@ async def list_api_keys(request: Request) -> dict:
     try:
         pool = get_pool()
         keys = pool.list_api_keys()
-        
+
         return {
             "status": "ok",
             "keys": keys,
@@ -581,7 +582,7 @@ async def list_api_keys(request: Request) -> dict:
 async def remove_api_key(request: Request, key_data: dict) -> dict:
     """
     Remove an API key.
-    
+
     Request body:
     {
         "provider": "groq|mistral|...",
@@ -590,20 +591,20 @@ async def remove_api_key(request: Request, key_data: dict) -> dict:
     """
     try:
         pool = get_pool()
-        
+
         provider = key_data.get("provider")
         key = key_data.get("key")
-        
+
         if not provider:
             raise HTTPException(status_code=400, detail="Provider required")
         if not key:
             raise HTTPException(status_code=400, detail="Key required")
-        
+
         success = pool.remove_api_key(provider, key)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Key not found")
-        
+
         return {
             "status": "ok",
             "message": f"API key removed for {provider}",
@@ -620,19 +621,21 @@ async def get_api_providers(request: Request) -> dict:
     """Get list of supported API providers."""
     try:
         from core.local_first import FREE_API_PROVIDERS
-        
+
         providers = []
         for provider_id, info in FREE_API_PROVIDERS.items():
-            providers.append({
-                "id": provider_id,
-                "name": info["name"],
-                "default_model": info.get("default_model", ""),
-                "rate_limit": info.get("rate_limit", ""),
-                "env_key": info.get("env_key", ""),
-                "description": info.get("description", ""),
-                "free_tier": info.get("free_tier", False),
-            })
-        
+            providers.append(
+                {
+                    "id": provider_id,
+                    "name": info["name"],
+                    "default_model": info.get("default_model", ""),
+                    "rate_limit": info.get("rate_limit", ""),
+                    "env_key": info.get("env_key", ""),
+                    "description": info.get("description", ""),
+                    "free_tier": info.get("free_tier", False),
+                }
+            )
+
         return {
             "status": "ok",
             "providers": providers,
@@ -646,13 +649,14 @@ async def get_api_providers(request: Request) -> dict:
 # LOCAL PROVIDER ENDPOINTS
 # ============================================================================
 
+
 @router.get("/providers/local")
 async def get_local_providers(request: Request) -> dict:
     """Get status of local providers (Ollama, NoLlama, etc.)."""
     try:
         lfp = get_local_first()
         local = lfp.detect_local_providers()
-        
+
         return {
             "status": "ok",
             "local_providers": local,
@@ -668,7 +672,7 @@ async def get_free_providers(request: Request) -> dict:
     try:
         lfp = get_local_first()
         free = lfp.detect_free_api_keys()
-        
+
         return {
             "status": "ok",
             "free_api_providers": free,
@@ -684,7 +688,7 @@ async def get_provider_priority(request: Request) -> dict:
     try:
         lfp = get_local_first()
         priority = lfp.get_provider_priority_list()
-        
+
         return {
             "status": "ok",
             "priority_list": priority,
@@ -700,7 +704,7 @@ async def start_ollama(request: Request) -> dict:
     try:
         lfp = get_local_first()
         started = await lfp.auto_start_ollama()
-        
+
         if started:
             return {"status": "ok", "message": "Ollama started successfully"}
         else:
@@ -729,15 +733,16 @@ async def get_recommended_provider(request: Request) -> dict:
 # RTX 3050 OPTIMIZATION ENDPOINTS
 # ============================================================================
 
+
 @router.get("/rtx3050/status")
 async def get_rtx3050_status(request: Request) -> dict:
     """Get RTX 3050 optimization status and configuration."""
     try:
         from core.local_first import RTX3050_CONFIG, get_rtx3050_config
-        
+
         lfp = get_local_first()
         gpu_info = lfp.detect_gpu()
-        
+
         return {
             "status": "ok",
             "is_rtx3050": gpu_info.get("is_rtx3050", False),
@@ -760,31 +765,32 @@ async def monitor_vram(request: Request) -> dict:
     try:
         lfp = get_local_first()
         gpu_info = lfp.detect_gpu()
-        
+
         # Try to get real VRAM usage
         vram_used = None
         vram_total = gpu_info.get("vram", 8)  # Default to 8GB for RTX 3050
-        
+
         try:
             import torch
+
             if torch.cuda.is_available():
-                vram_used = torch.cuda.memory_allocated(0) / (1024 ** 3)  # GB
-                vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                vram_used = torch.cuda.memory_allocated(0) / (1024**3)  # GB
+                vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         except Exception:
             pass
-        
+
         if vram_used is None:
             # Simulate VRAM usage
             pool = get_pool()
             agents = pool.get_all_agents()
             agent_count = len(agents)
-            
+
             # Estimate VRAM based on agent count (rough estimate)
             # Each agent with a model loaded uses ~3-4GB
             vram_used = min(7, agent_count * 3.5)  # Cap at 7GB safe limit
-        
+
         vram_percent = (vram_used / vram_total) * 100 if vram_total > 0 else 0
-        
+
         return {
             "status": "ok",
             "vram_used_gb": round(vram_used, 2) if vram_used else 0,
@@ -803,40 +809,43 @@ async def monitor_vram(request: Request) -> dict:
 # WEB SOCKET FOR REAL-TIME AGENT UPDATES
 # ============================================================================
 
+
 class AgentWebSocket:
     """WebSocket connection for real-time agent updates."""
-    
+
     def __init__(self):
         self.connections: list[WebSocket] = []
         self._lock = asyncio.Lock()
-    
+
     async def connect(self, websocket: WebSocket):
         """Accept a new WebSocket connection."""
         await websocket.accept()
         async with self._lock:
             self.connections.append(websocket)
-        
+
         logger.info(f"WebSocket connected: {id(websocket)}")
-        
+
         # Send initial state
         try:
             pool = get_pool()
             agents = pool.get_all_agents()
-            await websocket.send_json({
-                "type": "initial",
-                "agents": [agent.to_dict() for agent in agents],
-            })
+            await websocket.send_json(
+                {
+                    "type": "initial",
+                    "agents": [agent.to_dict() for agent in agents],
+                }
+            )
         except Exception as e:
             logger.error(f"Error sending initial state: {e}")
-    
+
     async def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""
         async with self._lock:
             if websocket in self.connections:
                 self.connections.remove(websocket)
-        
+
         logger.info(f"WebSocket disconnected: {id(websocket)}")
-    
+
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected WebSockets."""
         async with self._lock:
@@ -847,7 +856,7 @@ class AgentWebSocket:
                 except Exception as e:
                     logger.error(f"WebSocket send error: {e}")
                     disconnected.append(connection)
-            
+
             # Remove disconnected clients
             for connection in disconnected:
                 self.connections.remove(connection)
@@ -861,7 +870,7 @@ agent_ws = AgentWebSocket()
 async def agent_websocket(websocket: WebSocket):
     """WebSocket endpoint for real-time agent updates."""
     await agent_ws.connect(websocket)
-    
+
     try:
         while True:
             # Just keep the connection open
@@ -879,16 +888,17 @@ async def agent_websocket(websocket: WebSocket):
 # UTILITY ENDPOINTS
 # ============================================================================
 
+
 @router.get("/stats")
 async def get_agent_stats(request: Request) -> dict:
     """Get comprehensive agent system statistics."""
     try:
         pool = get_pool()
         bus = get_bus()
-        
+
         pool_stats = pool.get_stats()
         bus_stats = bus.get_stats()
-        
+
         return {
             "status": "ok",
             "pool": pool_stats,
@@ -906,7 +916,7 @@ async def agent_health_check(request: Request) -> dict:
     try:
         pool = get_pool()
         agents = pool.get_all_agents()
-        
+
         return {
             "status": "ok",
             "agent_count": len(agents),
@@ -923,11 +933,12 @@ async def agent_health_check(request: Request) -> dict:
 # SPECIALIZED AGENT ENDPOINTS
 # ============================================================================
 
+
 @router.post("/specialized/create")
 async def create_specialized_agent(request: Request, config: dict) -> dict:
     """
     Create a specialized agent by role.
-    
+
     Request body:
     {
         "role": "researcher|coder|verifier|chair|critic|synthesizer|tool_runner",
@@ -938,26 +949,26 @@ async def create_specialized_agent(request: Request, config: dict) -> dict:
     """
     try:
         from core.agents.specialization import create_by_role
-        
+
         role = config.get("role", "general")
-        
+
         # Convert role string to enum
         try:
             role_enum = AgentRole(role)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Unknown role: {role}")
-        
+
         agent = await create_by_role(
             role=role_enum,
             name=config.get("name"),
             provider=config.get("provider", "ollama"),
             model=config.get("model", "mistral:7b"),
         )
-        
+
         # Add to pool
         pool = get_pool()
         pool._agents[agent.agent_id] = agent
-        
+
         return {
             "status": "ok",
             "agent": agent.to_dict(),
@@ -975,11 +986,13 @@ async def get_agent_roles(request: Request) -> dict:
     try:
         roles = []
         for role in AgentRole:
-            roles.append({
-                "value": role.value,
-                "name": role.name,
-            })
-        
+            roles.append(
+                {
+                    "value": role.value,
+                    "name": role.name,
+                }
+            )
+
         return {
             "status": "ok",
             "roles": roles,
@@ -995,6 +1008,7 @@ async def get_agent_roles(request: Request) -> dict:
 
 # Start the pool when this module is imported
 import asyncio
+
 
 async def _init_agent_system():
     """Initialize the agent system."""

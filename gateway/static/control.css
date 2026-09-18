@@ -11,13 +11,13 @@
   --panel3: rgba(15, 20, 30, 0.8);
   --line: rgba(88, 166, 255, 0.15);
   --line2: rgba(88, 166, 255, 0.25);
-  
+
   /* Text Colors */
   --fg: #e6edf3;
   --fg-secondary: #cdd6e4;
   --muted: #8b98a9;
   --muted2: #6b7a8f;
-  
+
   /* Status Colors */
   --ok: #3fb950;
   --ok2: #4ae27a;
@@ -25,38 +25,38 @@
   --warn2: #f0883e;
   --err: #f85149;
   --err2: #ff6b6b;
-  
+
   /* Accent Colors */
   --acc: #58a6ff;
   --acc2: #79c0ff;
   --acc3: #0f4275;
   --acc4: #2563eb;
-  
+
   /* Gradients */
   --gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --gradient2: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
   --gradient-acc: linear-gradient(135deg, var(--acc), var(--acc2));
   --gradient-glass: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(121, 192, 255, 0.05));
-  
+
   /* Shadows */
   --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
   --shadow-glow: 0 0 20px rgba(88, 166, 255, 0.2);
   --shadow-glow-lg: 0 0 40px rgba(88, 166, 255, 0.3);
   --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
-  
+
   /* Border Radius */
   --radius: 16px;
   --radius-sm: 10px;
   --radius-lg: 20px;
   --radius-xl: 24px;
   --radius-full: 9999px;
-  
+
   /* Transitions */
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-  
+
   /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -64,7 +64,7 @@
   --spacing-lg: 16px;
   --spacing-xl: 20px;
   --spacing-2xl: 24px;
-  
+
   /* Typography */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -851,7 +851,7 @@ tr:hover {
   color: var(--acc);
   border: 2px solid var(--acc);
   background: radial-gradient(circle at 35% 30%, #234f72 0%, #102238 34%, #0e1420 72%);
-  box-shadow: 
+  box-shadow:
     0 0 24px rgba(88, 166, 255, 0.25),
     inset 0 0 22px rgba(88, 166, 255, 0.12),
     0 0 30px rgba(88, 166, 255, 0.1);
@@ -883,7 +883,7 @@ tr:hover {
 .presence-orb.working {
   border-color: var(--ok);
   color: var(--ok);
-  box-shadow: 
+  box-shadow:
     0 0 28px rgba(63, 185, 80, 0.3),
     inset 0 0 22px rgba(63, 185, 80, 0.12),
     0 0 30px rgba(63, 185, 80, 0.1);
@@ -894,7 +894,7 @@ tr:hover {
 .presence-orb.verifying {
   border-color: var(--warn);
   color: var(--warn);
-  box-shadow: 
+  box-shadow:
     0 0 28px rgba(210, 153, 34, 0.3),
     inset 0 0 22px rgba(210, 153, 34, 0.12),
     0 0 30px rgba(210, 153, 34, 0.1);
@@ -903,7 +903,7 @@ tr:hover {
 .presence-orb.error {
   border-color: var(--err);
   color: var(--err);
-  box-shadow: 
+  box-shadow:
     0 0 28px rgba(248, 81, 73, 0.3),
     inset 0 0 22px rgba(248, 81, 73, 0.12),
     0 0 30px rgba(248, 81, 73, 0.1);
@@ -1855,7 +1855,7 @@ progress::-moz-progress-bar {
   position: relative;
   background: radial-gradient(circle at 30% 30%, #234f72 0%, #102238 34%, #0e1420 72%);
   border: 2px solid var(--acc);
-  box-shadow: 
+  box-shadow:
     0 0 30px rgba(88, 166, 255, 0.3),
     inset 0 0 25px rgba(88, 166, 255, 0.15),
     0 0 40px rgba(88, 166, 255, 0.1);
@@ -1871,7 +1871,7 @@ progress::-moz-progress-bar {
 
 .jarvis-orb:hover {
   transform: scale(1.1);
-  box-shadow: 
+  box-shadow:
     0 0 40px rgba(88, 166, 255, 0.5),
     inset 0 0 30px rgba(88, 166, 255, 0.2),
     0 0 50px rgba(88, 166, 255, 0.2);
@@ -1921,7 +1921,7 @@ progress::-moz-progress-bar {
 .jarvis-orb.working {
   border-color: var(--ok);
   color: var(--ok);
-  box-shadow: 
+  box-shadow:
     0 0 30px rgba(63, 185, 80, 0.4),
     inset 0 0 25px rgba(63, 185, 80, 0.2),
     0 0 40px rgba(63, 185, 80, 0.2);
@@ -1931,7 +1931,7 @@ progress::-moz-progress-bar {
 .jarvis-orb.error {
   border-color: var(--err);
   color: var(--err);
-  box-shadow: 
+  box-shadow:
     0 0 30px rgba(248, 81, 73, 0.4),
     inset 0 0 25px rgba(248, 81, 73, 0.2),
     0 0 40px rgba(248, 81, 73, 0.2);
