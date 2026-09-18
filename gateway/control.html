@@ -3,11 +3,310 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>HERMUS · Control Room</title>
+<title>HERMUS JARVIS Control Room</title>
 <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />
 <link rel="stylesheet" href="/static/control.css" />
+<style>
+  /* JARVIS Orb Animation - Spacegrid Background */
+  body {
+    background: #06080f url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%231a2332' stroke-width='0.5' opacity='0.3'%3E%3Cpath d='M10 10h80v80H10z'/%3E%3Cpath d='M20 20h60v60H20z'/%3E%3Cpath d='M30 30h40v40H30z'/%3E%3Cpath d='M40 40h20v20H40z'/%3E%3Cpath d='M0 0l100 100M100 0L0 100'/%3E%3Cpath d='M0 25l100 50M100 25L0 75'/%3E%3Cpath d='M0 50l100 0'/%3E%3Cpath d='M25 0l50 100M75 0l-50 100'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 40px 40px;
+    background-attachment: fixed;
+    overflow-x: hidden;
+  }
+  
+  /* Floating Particles for Spacegrid */
+  .particle-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: -1;
+    overflow: hidden;
+  }
+  
+  .particle {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: #58a6ff;
+    border-radius: 50%;
+    opacity: 0.6;
+    animation: float-particle 15s infinite linear;
+  }
+  
+  @keyframes float-particle {
+    0% { transform: translateY(0) translateX(0); opacity: 0; }
+    10% { opacity: 0.6; }
+    90% { opacity: 0.6; }
+    100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
+  }
+  
+  /* JARVIS Orb Container */
+  .jarvis-orb-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  
+  .jarvis-orb {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    position: relative;
+    background: radial-gradient(circle at 30% 30%, #234f72 0%, #102238 34%, #0e1420 72%);
+    border: 2px solid #58a6ff;
+    box-shadow: 
+      0 0 30px rgba(88, 166, 255, 0.3),
+      inset 0 0 25px rgba(88, 166, 255, 0.15),
+      0 0 40px rgba(88, 166, 255, 0.1);
+    animation: jarvis-pulse 4s ease-in-out infinite, jarvis-rotate 20s linear infinite;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    color: #58a6ff;
+    cursor: pointer;
+  }
+  
+  .jarvis-orb:hover {
+    transform: scale(1.1);
+    box-shadow: 
+      0 0 40px rgba(88, 166, 255, 0.5),
+      inset 0 0 30px rgba(88, 166, 255, 0.2),
+      0 0 50px rgba(88, 166, 255, 0.2);
+  }
+  
+  @keyframes jarvis-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.05); opacity: 1; }
+  }
+  
+  @keyframes jarvis-rotate {
+    from { transform: rotate(0deg) scale(1); }
+    to { transform: rotate(360deg) scale(1); }
+  }
+  
+  .jarvis-orb::before {
+    content: '';
+    position: absolute;
+    width: 140px;
+    height: 140px;
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: 50%;
+    animation: jarvis-ring 3s ease-in-out infinite;
+  }
+  
+  @keyframes jarvis-ring {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.2); opacity: 0.6; }
+  }
+  
+  .jarvis-orb.working {
+    border-color: #3fb950;
+    color: #3fb950;
+    box-shadow: 
+      0 0 30px rgba(63, 185, 80, 0.4),
+      inset 0 0 25px rgba(63, 185, 80, 0.2),
+      0 0 40px rgba(63, 185, 80, 0.2);
+    animation: jarvis-pulse 2s ease-in-out infinite;
+  }
+  
+  .jarvis-orb.error {
+    border-color: #f85149;
+    color: #f85149;
+    box-shadow: 
+      0 0 30px rgba(248, 81, 73, 0.4),
+      inset 0 0 25px rgba(248, 81, 73, 0.2),
+      0 0 40px rgba(248, 81, 73, 0.2);
+    animation: jarvis-pulse 1s ease-in-out infinite, error-pulse 1s ease-in-out infinite;
+  }
+  
+  @keyframes error-pulse {
+    0%, 100% { box-shadow: 0 0 30px rgba(248, 81, 73, 0.4); }
+    50% { box-shadow: 0 0 50px rgba(248, 81, 73, 0.6); }
+  }
+  
+  /* Agent Cards Floating */
+  .agent-card-floating {
+    position: fixed;
+    z-index: 5;
+    background: rgba(20, 25, 36, 0.95);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    border-radius: 12px;
+    padding: 12px;
+    backdrop-filter: blur(10px);
+    animation: float-agent 6s ease-in-out infinite;
+    max-width: 200px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+  
+  @keyframes float-agent {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  
+  /* Agent Visualization Panel */
+  .agents-visualization {
+    position: relative;
+    height: 300px;
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.05) 0%, rgba(20, 25, 36, 0.5) 100%);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  
+  .agent-node {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #58a6ff, #79c0ff);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    box-shadow: 0 2px 10px rgba(88, 166, 255, 0.3);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 1;
+  }
+  
+  .agent-node:hover {
+    transform: scale(1.2);
+    box-shadow: 0 4px 20px rgba(88, 166, 255, 0.5);
+  }
+  
+  .agent-node.working {
+    background: linear-gradient(135deg, #3fb950, #4ae27a);
+    box-shadow: 0 2px 10px rgba(63, 185, 80, 0.4);
+    animation: node-pulse 2s ease-in-out infinite;
+  }
+  
+  .agent-node.idle {
+    background: linear-gradient(135deg, #8b98a9, #a8b5c8);
+    box-shadow: 0 2px 10px rgba(139, 152, 169, 0.3);
+  }
+  
+  .agent-node.error {
+    background: linear-gradient(135deg, #f85149, #ff6b6b);
+    box-shadow: 0 2px 10px rgba(248, 81, 73, 0.4);
+  }
+  
+  @keyframes node-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+  }
+  
+  .agent-connection {
+    position: absolute;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(88, 166, 255, 0.3), rgba(88, 166, 255, 0.6));
+    border-radius: 1px;
+    z-index: 0;
+    animation: connection-flow 2s linear infinite;
+  }
+  
+  @keyframes connection-flow {
+    0% { opacity: 0.3; }
+    50% { opacity: 0.8; }
+    100% { opacity: 0.3; }
+  }
+  
+  /* Quick Action Buttons */
+  .quick-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+  }
+  
+  .quick-action-btn {
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.2), rgba(88, 166, 255, 0.4));
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    color: #58a6ff;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .quick-action-btn:hover {
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.4), rgba(88, 166, 255, 0.6));
+    border-color: #58a6ff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(88, 166, 255, 0.2);
+  }
+  
+  .quick-action-btn:active {
+    transform: translateY(0);
+  }
+  
+  /* VRAM Monitor */
+  .vram-monitor {
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(20, 25, 36, 0.5));
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: 12px;
+    padding: 16px;
+    margin: 10px 0;
+  }
+  
+  .vram-bar {
+    height: 20px;
+    background: rgba(20, 25, 36, 0.8);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 10px 0;
+    position: relative;
+  }
+  
+  .vram-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3fb950, #58a6ff, #f85149);
+    border-radius: 10px;
+    transition: width 0.5s ease;
+    position: relative;
+  }
+  
+  .vram-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 20px;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
+  }
+  
+  .vram-text {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #8b98a9;
+  }
+</style>
 </head>
 <body>
+  <!-- Spacegrid Background Particles -->
+  <div class="particle-container" id="particleContainer"></div>
+  
+  <!-- JARVIS Orb -->
+  <div class="jarvis-orb-container" id="jarvisOrbContainer">
+    <div class="jarvis-orb" id="jarvisOrb" onclick="toggleJarvisView()">
+      <span id="jarvisStatus">&#9670;</span>
+    </div>
+  </div>
+
 <header>
   <div class="logo">
     <svg width="24" height="24" viewBox="0 0 100 100" style="margin-right: 8px; vertical-align: middle;">
@@ -24,58 +323,96 @@
       <circle cx="50" cy="50" r="45" fill="url(#orb)" stroke="#58a6ff" stroke-width="2"/>
       <circle cx="50" cy="50" r="30" fill="none" stroke="url(#grad)" stroke-width="3" stroke-linecap="round"/>
     </svg>
-    HERMUS
+    HERMUS JARVIS
   </div>
   <div class="health">
-    <span id="conn" class="pill">connecting…</span>
-    <span id="rtt" class="pill">—</span>
-    <span id="presencePill" class="pill">presence: —</span>
-    <span id="jobcount" class="pill">—</span>
-    <span id="pendingCount" class="pill">approvals: —</span>
-    <span id="blockedMissionCount" class="pill">blocked missions: —</span>
-    <span id="safetyCore" class="pill">safety core: —</span>
-    <span id="emergencyState" class="pill">brake: —</span>
-    <button id="emergencyBtn" class="danger">⚠️ Emergency stop</button>
+    <span id="conn" class="pill">connecting...</span>
+    <span id="rtt" class="pill">--</span>
+    <span id="presencePill" class="pill">presence: --</span>
+    <span id="jobcount" class="pill">jobs: 0</span>
+    <span id="agentCount" class="pill">agents: 0</span>
+    <span id="vramUsage" class="pill">VRAM: --</span>
+    <button id="emergencyBtn" class="danger">&#9888;&#65039; Emergency stop</button>
   </div>
 </header>
+
 <nav role="tablist" aria-label="Control room sections">
-  <button data-tab="overview" class="on" role="tab" id="tabbtn-overview" aria-controls="tab-overview" aria-selected="true" tabindex="0">Overview</button>
-  <button data-tab="presence" role="tab" id="tabbtn-presence" aria-controls="tab-presence" aria-selected="false" tabindex="-1">Presence</button>
-  <button data-tab="voice" role="tab" id="tabbtn-voice" aria-controls="tab-voice" aria-selected="false" tabindex="-1">Voice</button>
-  <button data-tab="jobs" role="tab" id="tabbtn-jobs" aria-controls="tab-jobs" aria-selected="false" tabindex="-1">Jobs</button>
-  <button data-tab="missions" role="tab" id="tabbtn-missions" aria-controls="tab-missions" aria-selected="false" tabindex="-1">Missions</button>
-  <button data-tab="telemetry" role="tab" id="tabbtn-telemetry" aria-controls="tab-telemetry" aria-selected="false" tabindex="-1">Telemetry</button>
-  <button data-tab="computer" role="tab" id="tabbtn-computer" aria-controls="tab-computer" aria-selected="false" tabindex="-1">Computer</button>
-  <button data-tab="remote" role="tab" id="tabbtn-remote" aria-controls="tab-remote" aria-selected="false" tabindex="-1">Remote</button>
-  <button data-tab="safety" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1">Safety</button>
-  <button data-tab="systems" role="tab" id="tabbtn-systems" aria-controls="tab-systems" aria-selected="false" tabindex="-1">Systems</button>
+  <button data-tab="overview" class="on" role="tab" id="tabbtn-overview" aria-controls="tab-overview" aria-selected="true" tabindex="0">&#128065; Overview</button>
+  <button data-tab="agents" role="tab" id="tabbtn-agents" aria-controls="tab-agents" aria-selected="false" tabindex="-1">&#128100; Agents</button>
+  <button data-tab="presence" role="tab" id="tabbtn-presence" aria-controls="tab-presence" aria-selected="false" tabindex="-1">&#128118; Presence</button>
+  <button data-tab="voice" role="tab" id="tabbtn-voice" aria-controls="tab-voice" aria-selected="false" tabindex="-1">&#128187; Voice</button>
+  <button data-tab="jobs" role="tab" id="tabbtn-jobs" aria-controls="tab-jobs" aria-selected="false" tabindex="-1">&#128196; Jobs</button>
+  <button data-tab="missions" role="tab" id="tabbtn-missions" aria-controls="tab-missions" aria-selected="false" tabindex="-1">&#128640; Missions</button>
+  <button data-tab="telemetry" role="tab" id="tabbtn-telemetry" aria-controls="tab-telemetry" aria-selected="false" tabindex="-1">&#128200; Telemetry</button>
+  <button data-tab="computer" role="tab" id="tabbtn-computer" aria-controls="tab-computer" aria-selected="false" tabindex="-1">&#128187; Computer</button>
+  <button data-tab="remote" role="tab" id="tabbtn-remote" aria-controls="tab-remote" aria-selected="false" tabindex="-1">&#128279; Remote</button>
+  <button data-tab="safety" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1">&#128737; Safety</button>
+  <button data-tab="systems" role="tab" id="tabbtn-systems" aria-controls="tab-systems" aria-selected="false" tabindex="-1">&#128736; Systems</button>
 </nav>
 
 <main>
   <!-- ============ OVERVIEW ============ -->
   <div class="tab on" id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview">
     <div class="grid">
-      <section>
-        <h2>Snapshot · System health</h2>
-        <div class="cells" id="health"></div>
-        <div class="hint">Snapshot = `GET /api/v1/system/health` — every value from a live probe.</div>
+      <!-- JARVIS Control Panel -->
+      <section class="full">
+        <h2>&#128065; JARVIS Control Center</h2>
+        <div class="vram-monitor">
+          <h3 style="margin: 0 0 10px 0; font-size: 14px;">RTX 3050 VRAM Monitor</h3>
+          <div class="vram-text">
+            <span>VRAM Usage: <span id="vramPercent">0%</span></span>
+            <span><span id="vramUsed">0GB</span> / 8GB</span>
+          </div>
+          <div class="vram-bar">
+            <div class="vram-fill" id="vramFill" style="width: 0%;"></div>
+          </div>
+          <div class="hint">Optimized for RTX 3050 with 8GB VRAM - Safe limit: 7GB</div>
+        </div>
+        
+        <div class="quick-actions">
+          <button class="quick-action-btn" onclick="createAgent()">&#43; Create Agent</button>
+          <button class="quick-action-btn" onclick="startAllAgents()">&#9654; Start All</button>
+          <button class="quick-action-btn" onclick="stopAllAgents()">&#9209; Stop All</button>
+          <button class="quick-action-btn" onclick="showSpacegrid()">&#128287; Spacegrid View</button>
+          <button class="quick-action-btn" onclick="toggleJarvis()">&#128065; Toggle JARVIS</button>
+        </div>
+        
+        <h3 style="margin: 20px 0 10px 0;">Agent Pool Status</h3>
+        <div class="cells" id="agentPoolStatus"></div>
       </section>
+      
       <section>
-        <h2>Snapshot · Capabilities</h2>
+        <h2>Snapshot &#8226; System health</h2>
+        <div class="cells" id="health"></div>
+        <div class="hint">Snapshot = `GET /api/v1/system/health` &#8214; every value from a live probe.</div>
+      </section>
+      
+      <section>
+        <h2>Snapshot &#8226; Capabilities</h2>
         <div class="cells" id="caps"></div>
         <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
       </section>
+      
       <section class="full">
-        <h2>Replay · Canonical event log</h2>
+        <h2>Agent Visualization</h2>
+        <div class="agents-visualization" id="agentsVisualization">
+          <!-- Agent nodes will be dynamically added here -->
+        </div>
+        <div class="hint">Live visualization of active agents and their connections</div>
+      </section>
+      
+      <section class="full">
+        <h2>Replay &#8226; Canonical event log</h2>
         <div class="bar">
           <input id="runId" placeholder="run / mission / trace id (e.g. run_abc)" />
           <button id="replayBtn">Replay timeline</button>
         </div>
-        <div class="feed" id="log"><div class="note">No run selected — reconstructs state from the durable EventBus.</div></div>
+        <div class="feed" id="log"><div class="note">No run selected &#8214; reconstructs state from the durable EventBus.</div></div>
         <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` re-reads the durable event log.</div>
       </section>
+      
       <section class="full">
-        <h2>Command · typed backend command</h2>
+        <h2>Command &#8226; typed backend command</h2>
         <div class="bar">
           <input id="cmdName" placeholder="command e.g. system.health / computer.run" value="system.health" />
         </div>
@@ -88,18 +425,102 @@
     </div>
   </div>
 
+  <!-- ============ AGENTS ============ -->
+  <div class="tab" id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents">
+    <div class="grid">
+      <section class="full">
+        <h2>&#128100; Agent Management</h2>
+        <div class="quick-actions">
+          <button class="quick-action-btn" onclick="createAgent()">&#43; New Agent</button>
+          <button class="quick-action-btn" onclick="createSpecializedAgent('researcher')">&#128218; Researcher</button>
+          <button class="quick-action-btn" onclick="createSpecializedAgent('coder')">&#128187; Coder</button>
+          <button class="quick-action-btn" onclick="createSpecializedAgent('verifier')">&#9989; Verifier</button>
+          <button class="quick-action-btn" onclick="createSpecializedAgent('chair')">&#128081; Chair</button>
+        </div>
+        
+        <h3 style="margin: 15px 0 10px 0;">Active Agents</h3>
+        <div class="cells" id="activeAgents"></div>
+      </section>
+      
+      <section class="full">
+        <h2>Agent Configuration</h2>
+        <div class="bar">
+          <select id="agentProviderSelect">
+            <option value="ollama">Ollama (Local)</option>
+            <option value="groq">Groq (API)</option>
+            <option value="mistral">Mistral (API)</option>
+            <option value="openrouter">OpenRouter (API)</option>
+          </select>
+          <select id="agentModelSelect">
+            <option value="mistral:7b">mistral:7b</option>
+            <option value="llama3.2:3b">llama3.2:3b</option>
+            <option value="phi3:3.8b">phi3:3.8b</option>
+          </select>
+          <input id="agentNameInput" placeholder="Agent name" />
+        </div>
+        <div class="bar">
+          <select id="agentRoleSelect">
+            <option value="general">General</option>
+            <option value="researcher">Researcher</option>
+            <option value="coder">Coder</option>
+            <option value="verifier">Verifier</option>
+            <option value="chair">Chair</option>
+          </select>
+          <input id="agentTimeoutInput" placeholder="Idle timeout (seconds)" value="900" />
+          <button class="quick-action-btn" onclick="createCustomAgent()">Create Custom Agent</button>
+        </div>
+        
+        <h3 style="margin: 15px 0 10px 0;">API Key Management</h3>
+        <div class="bar">
+          <select id="apiKeyProvider">
+            <option value="groq">Groq</option>
+            <option value="mistral">Mistral</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="together">Together AI</option>
+            <option value="fireworks">Fireworks AI</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="nvidia">NVIDIA NIM</option>
+          </select>
+          <input id="apiKeyInput" type="password" placeholder="API Key" />
+          <button class="quick-action-btn" onclick="addApiKey()">Add Key</button>
+        </div>
+        <div class="feed" id="apiKeysList" style="height: 120px;"></div>
+        <div class="hint">Max 10 keys per provider. Keys are stored locally and never transmitted.</div>
+      </section>
+      
+      <section class="full">
+        <h2>Agent Communication</h2>
+        <div class="bar">
+          <select id="messageSender">
+            <option value="">Select Agent</option>
+          </select>
+          <select id="messageTarget">
+            <option value="">Select Target</option>
+          </select>
+          <input id="messageContent" placeholder="Message content" />
+          <button class="quick-action-btn" onclick="sendAgentMessage()">Send Message</button>
+        </div>
+        <div class="bar">
+          <button class="quick-action-btn" onclick="broadcastToAll()">Broadcast to All</button>
+          <button class="quick-action-btn" onclick="pingAllAgents()">Ping All</button>
+        </div>
+        <div class="feed" id="agentMessages" style="height: 200px;"><div class="note">Agent messages will appear here</div></div>
+      </section>
+    </div>
+  </div>
+
   <!-- ============ PRESENCE ============ -->
   <div class="tab" id="tab-presence" role="tabpanel" aria-labelledby="tabbtn-presence">
     <div class="grid">
       <section class="full">
-        <h2>Hermus presence <span id="presenceState" class="presence-state">connecting…</span></h2>
+        <h2>Hermus presence <span id="presenceState" class="presence-state">connecting...</span></h2>
         <div class="presence-hero">
-          <div id="presenceOrb" class="presence-orb">☤</div>
+          <div id="presenceOrb" class="presence-orb">&#9733;</div>
           <div class="presence-copy">
             <div id="presenceName" class="presence-name">Hermus</div>
-            <div id="presenceRole" class="presence-detail">Loading identity and continuity…</div>
-            <div id="presenceDetail" class="presence-meta">—</div>
-            <div id="presenceMeta" class="presence-meta">heartbeat — · active goals — · last seen —</div>
+            <div id="presenceRole" class="presence-detail">Loading identity and continuity...</div>
+            <div id="presenceDetail" class="presence-meta">--</div>
+            <div id="presenceMeta" class="presence-meta">heartbeat -- &#8214; active goals -- &#8214; last seen --</div>
           </div>
         </div>
         <div class="hint">This is grounded operational presence, not a claim of consciousness. The heartbeat never runs tools or model calls by itself.</div>
@@ -140,13 +561,13 @@
         <div class="bar">
           <button id="voiceMic" class="ghost">Hold to talk</button>
           <button id="voiceStop" class="danger" disabled>Stop</button>
-          <input id="voiceText" placeholder="…or type it and hear the reply" />
+          <input id="voiceText" placeholder="...or type it and hear the reply" />
           <button id="voiceSend" class="ghost">Say it</button>
         </div>
         <div class="bar" id="handsfreeBar">
           <button id="hfArm" class="ghost">Hands-free: off</button>
           <span id="hfMic" class="tag" title="Microphone state">mic off</span>
-          <span id="hfWake" class="tag">wake word: —</span>
+          <span id="hfWake" class="tag">wake word: --</span>
           <progress id="hfLevel" value="0" max="1" style="width:160px"></progress>
         </div>
         <div class="hint">
@@ -154,7 +575,7 @@
           speech by energy (no button press), transcribes it, and only acts when the
           utterance starts with the wake word. Talking over the assistant interrupts
           it. <strong>Arming this holds the mic open for as long as it stays on</strong>
-          — every detected utterance is sent to speech-to-text before the wake word is
+          -- every detected utterance is sent to speech-to-text before the wake word is
           checked. Requires <code>HERMUS_VOICE_HANDSFREE=1</code>.
         </div>
         <div class="cells" id="voiceCaps"></div>
@@ -162,7 +583,7 @@
           Speaks first, works second: <code>POST /voice/command</code> transcribes,
           returns a short spoken acknowledgment, and queues the real work as a
           <code>voice.reply</code> job. The acknowledgment is a canned phrase by
-          default — no model call — so it lands in well under a second instead of
+          default -- no model call -- so it lands in well under a second instead of
           waiting out a full tool-carrying agent turn.
         </div>
         <div class="feed" id="voiceLog" style="height:260px">
@@ -175,19 +596,19 @@
   <!-- ============ JOBS ============ -->
   <div class="tab" id="tab-jobs" role="tabpanel" aria-labelledby="tabbtn-jobs">
     <section>
-      <h2>Snapshot · Job queue <span id="qstatus" class="tag"></span></h2>
+      <h2>Snapshot &#8226; Job queue <span id="qstatus" class="tag"></span></h2>
       <table id="jobs">
         <thead><tr><th>id</th><th>kind</th><th>status</th><th>attempts</th><th>run</th><th>created</th></tr></thead>
         <tbody></tbody>
       </table>
-      <div class="hint">Snapshot = `GET /jobs` · live per-job = `EventSource /jobs/{id}/events`.</div>
+      <div class="hint">Snapshot = `GET /jobs` &#8226; live per-job = `EventSource /jobs/{id}/events`.</div>
     </section>
   </div>
 
   <!-- ============ MISSIONS ============ -->
   <div class="tab" id="tab-missions" role="tabpanel" aria-labelledby="tabbtn-missions">
     <section>
-      <h2>Autonomous missions · approval-aware lifecycle</h2>
+      <h2>Autonomous missions &#8226; approval-aware lifecycle</h2>
       <div class="bar"><input id="missionGoal" placeholder="mission goal" /></div>
       <div class="bar"><button id="missionPreflight" class="ghost">Pre-flight mission</button><button id="missionStart" class="ghost">Start mission if ready</button><button id="missionPlanBlocked" class="ghost">Record planning-mode blocker</button></div>
       <div class="feed" id="missionPreflightOut" style="height:160px"><div class="note">Mission launch uses pre-flight. Red-line and emergency blockers refuse; approval/capability blockers can be recorded as planning-mode blocked missions.</div></div>
@@ -203,9 +624,9 @@
   <!-- ============ TELEMETRY ============ -->
   <div class="tab" id="tab-telemetry" role="tabpanel" aria-labelledby="tabbtn-telemetry">
     <section>
-      <h2>Live telemetry · dashboard event bus → canonical EventBus</h2>
+      <h2>Live telemetry &#8226; dashboard event bus &#8219; canonical EventBus</h2>
       <div class="bar">
-        <input id="tmSearch" placeholder="filter by type…" />
+        <input id="tmSearch" placeholder="filter by type..." />
         <button id="tmClear">Clear</button>
       </div>
       <div class="feed" id="tmFeed"><div class="note">Live stream via `WS /dashboard/events`; fallback poll `GET /events/recent`.</div></div>
@@ -217,7 +638,7 @@
   <div class="tab" id="tab-computer" role="tabpanel" aria-labelledby="tabbtn-computer">
     <div class="grid">
       <section>
-        <h2>Computer agent · status</h2>
+        <h2>Computer agent &#8226; status</h2>
         <div class="cells" id="compStatus"></div>
         <div class="hint">Snapshot = `GET /computer/status` (real control center + task store).</div>
       </section>
@@ -228,7 +649,7 @@
         <div class="feed" id="compOut"><div class="note">Runs through the canonical queue; observes real outcome.</div></div>
       </section>
       <section class="full">
-        <h2>Computer tasks · real task store</h2>
+        <h2>Computer tasks &#8226; real task store</h2>
         <table id="compTasks">
           <thead><tr><th>id</th><th>status</th><th>updated</th><th>summary</th></tr></thead>
           <tbody></tbody>
@@ -241,12 +662,12 @@
   <div class="tab" id="tab-remote" role="tabpanel" aria-labelledby="tabbtn-remote">
     <div class="grid">
       <section>
-        <h2>Remote control · snapshot</h2>
+        <h2>Remote control &#8226; snapshot</h2>
         <div class="cells" id="remoteStatus"></div>
         <div class="hint">Snapshot = `GET /remote/status` + `GET /remote/approvals`.</div>
       </section>
       <section>
-        <h2>Approvals · pending prompts</h2>
+        <h2>Approvals &#8226; pending prompts</h2>
         <ul id="approvals"></ul>
         <div class="feed" id="remoteOut" style="height:120px"><div class="note">Approve / reject a real pending action prompt.</div></div>
       </section>
@@ -257,12 +678,12 @@
   <div class="tab" id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety">
     <div class="grid">
       <section class="full">
-        <h2>Jarvis Safety Core · live authority state</h2>
+        <h2>Jarvis Safety Core &#8226; live authority state</h2>
         <div class="cells" id="jarvisSafetyCore"></div>
         <div class="hint"><span class="zone z-green">green</span> autonomous safe actions <span class="zone z-yellow">yellow</span> scoped approval required <span class="zone z-red">red</span> blocked even with grants.</div>
       </section>
       <section>
-        <h2>Red lines · green / yellow / red gate</h2>
+        <h2>Red lines &#8226; green / yellow / red gate</h2>
         <div class="cells" id="safetySummary"></div>
         <table id="redLines">
           <thead><tr><th>#</th><th>red line</th><th>summary</th></tr></thead>
@@ -348,17 +769,12 @@
   </div>
 
   <!-- ============ SYSTEMS ============ -->
-  <!-- Generated, not hand-written: this tab renders core/console.py, which
-       declares every subsystem with the owner it reads, the endpoints that
-       serve it and the actions a human may trigger. Adding a capability is one
-       row there; no markup changes here. The Doctor card that used to be its own
-       tab is panel #doctor, with /doctor/status and /doctor/run intact. -->
   <div class="tab" id="tab-systems" role="tabpanel" aria-labelledby="tabbtn-systems">
     <section class="full">
-      <h2>Systems · generated from core/console.py</h2>
+      <h2>Systems &#8226; generated from core/console.py</h2>
       <div class="cells" id="consoleSummary"></div>
       <div class="bar">
-        <input id="consoleFilter" placeholder="filter panels (name, owner, group)…" />
+        <input id="consoleFilter" placeholder="filter panels (name, owner, group)..." />
         <select id="consoleGroup"><option value="all">all groups</option></select>
         <button id="consoleRefresh" class="ghost">Refresh panels</button>
         <button id="consoleProbeAll" class="ghost">Live-probe every panel</button>
@@ -367,21 +783,18 @@
         Every card is read from its canonical owner at request time. A card that
         cannot be read says so and shows the real error; nothing here is
         substituted to look complete. Actions post to the endpoint named on the
-        card — the console adds no privileged path of its own.
+        card -- the console adds no privileged path of its own.
       </div>
     </section>
-    <div class="console-grid" id="consolePanels"><div class="note">loading manifest…</div></div>
+    <div class="console-grid" id="consolePanels"><div class="note">loading manifest...</div></div>
   </div>
 </main>
 
 <footer>
-  HERMUS control room — the single production UI. Snapshot (live probe) + replay (durable
-  event log) + typed commands only. The UI never owns truth and never simulates success.
+  HERMUS JARVIS Control Room -- Local-First AI Assistant | RTX 3050 Optimized | 100% Free & Open Source
 </footer>
 
-<!-- Action feedback. aria-live="polite" so a failed action is announced to
-     screen readers without stealing focus; errors are also logged with the
-     gateway's X-Request-ID so the UI and the server log correlate. -->
+<!-- Action feedback -->
 <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <script src="/static/control-client.js"></script>
@@ -398,7 +811,6 @@ if (!gatewayToken) {
 }
 if (gatewayToken) {
   window.__HERMUS_GATEWAY_TOKEN = gatewayToken;
-  // Do not leave a query credential in the address bar/history after capturing it.
   if (tokenFromUrl) {
     try { history.replaceState(null, "", location.pathname + location.hash); } catch(e) {}
   }
@@ -417,5 +829,466 @@ if (gatewayToken && window.fetch) {
 </script>
 <script src="/static/control-room.js" defer></script>
 <script src="/static/console.js" defer></script>
+
+<!-- JARVIS Agent System JavaScript -->
+<script>
+// Agent System State
+let agentSystem = {
+  agents: [],
+  messages: [],
+  apiKeys: {},
+  vramUsage: 0,
+  spacegridEnabled: false
+};
+
+// Initialize particles
+function initParticles() {
+  const container = document.getElementById('particleContainer');
+  if (!container) return;
+  
+  const particleCount = 50;
+  for (let i = 0; i < particleCount; i++) {
+    const particle = document.createElement('div');
+    particle.className = 'particle';
+    particle.style.left = Math.random() * 100 + '%';
+    particle.style.top = Math.random() * 100 + '%';
+    particle.style.animationDelay = Math.random() * 15 + 's';
+    particle.style.animationDuration = (10 + Math.random() * 10) + 's';
+    container.appendChild(particle);
+  }
+}
+
+// Toggle JARVIS Orb
+function toggleJarvis() {
+  const orb = document.getElementById('jarvisOrb');
+  const status = document.getElementById('jarvisStatus');
+  
+  if (orb.classList.contains('working')) {
+    orb.classList.remove('working');
+    orb.classList.add('error');
+    status.innerHTML = '&#9888;';
+  } else if (orb.classList.contains('error')) {
+    orb.classList.remove('error');
+    status.innerHTML = '&#9670;';
+  } else {
+    orb.classList.add('working');
+    status.innerHTML = '&#9679;';
+  }
+}
+
+// Toggle JARVIS View
+function toggleJarvisView() {
+  // Toggle between overview and agents tab
+  const overviewTab = document.getElementById('tabbtn-overview');
+  const agentsTab = document.getElementById('tabbtn-agents');
+  
+  if (agentsTab.classList.contains('on')) {
+    overviewTab.click();
+  } else {
+    agentsTab.click();
+  }
+}
+
+// Create Agent
+function createAgent() {
+  const provider = document.getElementById('agentProviderSelect').value;
+  const model = document.getElementById('agentModelSelect').value;
+  const name = document.getElementById('agentNameInput').value || `Agent-${Date.now()}`;
+  const role = document.getElementById('agentRoleSelect').value;
+  
+  fetch('/api/v1/agents/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, model, name, role })
+  }).then(r => r.json()).then(data => {
+    showToast(`Agent ${name} created!`, 'ok');
+    refreshAgents();
+  }).catch(e => {
+    showToast(`Failed to create agent: ${e}`, 'error');
+  });
+}
+
+// Create Specialized Agent
+function createSpecializedAgent(role) {
+  fetch('/api/v1/agents/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      role: role,
+      name: `Agent-${role}-${Date.now()}`,
+      provider: 'ollama',
+      model: 'mistral:7b'
+    })
+  }).then(r => r.json()).then(data => {
+    showToast(`Specialized ${role} agent created!`, 'ok');
+    refreshAgents();
+  }).catch(e => {
+    showToast(`Failed to create agent: ${e}`, 'error');
+  });
+}
+
+// Create Custom Agent
+function createCustomAgent() {
+  createAgent();
+}
+
+// Add API Key
+function addApiKey() {
+  const provider = document.getElementById('apiKeyProvider').value;
+  const key = document.getElementById('apiKeyInput').value;
+  
+  if (!key) {
+    showToast('Please enter an API key', 'error');
+    return;
+  }
+  
+  fetch('/api/v1/agents/api-keys/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, key })
+  }).then(r => r.json()).then(data => {
+    showToast(`API key for ${provider} added!`, 'ok');
+    document.getElementById('apiKeyInput').value = '';
+    refreshApiKeys();
+  }).catch(e => {
+    showToast(`Failed to add API key: ${e}`, 'error');
+  });
+}
+
+// Send Agent Message
+function sendAgentMessage() {
+  const senderId = document.getElementById('messageSender').value;
+  const targetId = document.getElementById('messageTarget').value;
+  const content = document.getElementById('messageContent').value;
+  
+  if (!senderId || !targetId || !content) {
+    showToast('Please select sender, target, and enter message', 'error');
+    return;
+  }
+  
+  fetch('/api/v1/agents/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sender_id: senderId, target_id: targetId, content })
+  }).then(r => r.json()).then(data => {
+    showToast(`Message sent from ${senderId} to ${targetId}`, 'ok');
+    document.getElementById('messageContent').value = '';
+    refreshAgentMessages();
+  }).catch(e => {
+    showToast(`Failed to send message: ${e}`, 'error');
+  });
+}
+
+// Broadcast to All Agents
+function broadcastToAll() {
+  const content = prompt('Enter message to broadcast:');
+  if (!content) return;
+  
+  fetch('/api/v1/agents/broadcast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content })
+  }).then(r => r.json()).then(data => {
+    showToast(`Broadcast sent to ${data.count || 0} agents`, 'ok');
+    refreshAgentMessages();
+  }).catch(e => {
+    showToast(`Failed to broadcast: ${e}`, 'error');
+  });
+}
+
+// Ping All Agents
+function pingAllAgents() {
+  fetch('/api/v1/agents/ping', {
+    method: 'POST'
+  }).then(r => r.json()).then(data => {
+    showToast(`Pinged ${data.count || 0} agents`, 'ok');
+  }).catch(e => {
+    showToast(`Failed to ping: ${e}`, 'error');
+  });
+}
+
+// Start All Agents
+function startAllAgents() {
+  fetch('/api/v1/agents/start-all', {
+    method: 'POST'
+  }).then(r => r.json()).then(data => {
+    showToast(`Started ${data.count || 0} agents`, 'ok');
+    refreshAgents();
+  }).catch(e => {
+    showToast(`Failed to start agents: ${e}`, 'error');
+  });
+}
+
+// Stop All Agents
+function stopAllAgents() {
+  if (!confirm('Stop all agents?')) return;
+  
+  fetch('/api/v1/agents/stop-all', {
+    method: 'POST'
+  }).then(r => r.json()).then(data => {
+    showToast(`Stopped ${data.count || 0} agents`, 'ok');
+    refreshAgents();
+  }).catch(e => {
+    showToast(`Failed to stop agents: ${e}`, 'error');
+  });
+}
+
+// Show Spacegrid
+function showSpacegrid() {
+  agentSystem.spacegridEnabled = !agentSystem.spacegridEnabled;
+  showToast(`Spacegrid ${agentSystem.spacegridEnabled ? 'enabled' : 'disabled'}`, 'ok');
+}
+
+// Refresh Agents
+function refreshAgents() {
+  fetch('/api/v1/agents/list')
+    .then(r => r.json())
+    .then(data => {
+      agentSystem.agents = data.agents || [];
+      updateAgentUI();
+      updateAgentVisualization();
+      updateAgentDropdowns();
+    });
+}
+
+// Refresh API Keys
+function refreshApiKeys() {
+  fetch('/api/v1/agents/api-keys/list')
+    .then(r => r.json())
+    .then(data => {
+      agentSystem.apiKeys = data.keys || {};
+      updateApiKeysUI();
+    });
+}
+
+// Refresh Agent Messages
+function refreshAgentMessages() {
+  fetch('/api/v1/agents/messages')
+    .then(r => r.json())
+    .then(data => {
+      agentSystem.messages = data.messages || [];
+      updateMessagesUI();
+    });
+}
+
+// Update Agent UI
+function updateAgentUI() {
+  const container = document.getElementById('activeAgents');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  agentSystem.agents.forEach(agent => {
+    const card = document.createElement('div');
+    card.className = 'kpi';
+    card.innerHTML = `
+      <div class="v">${agent.name || agent.agent_id.substring(0, 8)}</div>
+      <div class="l">${agent.state || 'unknown'}</div>
+      <div class="l">Provider: ${agent.provider || 'ollama'}</div>
+      <div class="l">Role: ${agent.role || 'general'}</div>
+    `;
+    container.appendChild(card);
+  });
+  
+  // Update agent count
+  const countEl = document.getElementById('agentCount');
+  if (countEl) {
+    countEl.textContent = `agents: ${agentSystem.agents.length}`;
+  }
+}
+
+// Update Agent Visualization
+function updateAgentVisualization() {
+  const container = document.getElementById('agentsVisualization');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  // Create connections first
+  for (let i = 0; i < agentSystem.agents.length; i++) {
+    for (let j = i + 1; j < agentSystem.agents.length; j++) {
+      const connection = document.createElement('div');
+      connection.className = 'agent-connection';
+      connection.style.left = '0';
+      connection.style.top = '50%';
+      connection.style.width = '100%';
+      connection.style.height = '2px';
+      container.appendChild(connection);
+    }
+  }
+  
+  // Create agent nodes
+  const positions = [
+    { x: 20, y: 30 }, { x: 80, y: 30 }, { x: 50, y: 70 },
+    { x: 15, y: 80 }, { x: 85, y: 80 }, { x: 30, y: 50 },
+    { x: 70, y: 50 }, { x: 40, y: 20 }, { x: 60, y: 20 }
+  ];
+  
+  agentSystem.agents.forEach((agent, index) => {
+    const node = document.createElement('div');
+    node.className = `agent-node ${agent.state || 'idle'}`;
+    const pos = positions[index % positions.length];
+    node.style.left = pos.x + '%';
+    node.style.top = pos.y + '%';
+    node.textContent = agent.name ? agent.name.substring(0, 2) : agent.agent_id.substring(0, 2);
+    node.title = `${agent.name || agent.agent_id}
+Provider: ${agent.provider || 'ollama'}
+Role: ${agent.role || 'general'}
+State: ${agent.state || 'unknown'}`;
+    container.appendChild(node);
+  });
+}
+
+// Update Agent Dropdowns
+function updateAgentDropdowns() {
+  const senderSelect = document.getElementById('messageSender');
+  const targetSelect = document.getElementById('messageTarget');
+  
+  if (!senderSelect || !targetSelect) return;
+  
+  senderSelect.innerHTML = '<option value="">Select Agent</option>';
+  targetSelect.innerHTML = '<option value="">Select Target</option>';
+  
+  agentSystem.agents.forEach(agent => {
+    const option1 = document.createElement('option');
+    option1.value = agent.agent_id;
+    option1.textContent = `${agent.name || agent.agent_id.substring(0, 8)} (${agent.role || 'general'})`;
+    senderSelect.appendChild(option1);
+    
+    const option2 = document.createElement('option');
+    option2.value = agent.agent_id;
+    option2.textContent = `${agent.name || agent.agent_id.substring(0, 8)} (${agent.role || 'general'})`;
+    targetSelect.appendChild(option2);
+  });
+}
+
+// Update API Keys UI
+function updateApiKeysUI() {
+  const container = document.getElementById('apiKeysList');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  for (const [provider, keys] of Object.entries(agentSystem.apiKeys)) {
+    const div = document.createElement('div');
+    div.style.margin = '5px 0';
+    div.innerHTML = `<strong>${provider}</strong>: ${keys.length} key(s)`;
+    container.appendChild(div);
+  }
+}
+
+// Update Messages UI
+function updateMessagesUI() {
+  const container = document.getElementById('agentMessages');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (agentSystem.messages.length === 0) {
+    container.innerHTML = '<div class="note">No agent messages yet</div>';
+    return;
+  }
+  
+  agentSystem.messages.slice().reverse().forEach(msg => {
+    const div = document.createElement('div');
+    div.style.padding = '5px 0';
+    div.style.borderBottom = '1px dashed #1c2534';
+    div.innerHTML = `
+      <strong>${msg.sender_id || 'system'}</strong> -> ${msg.target_id || 'all'}: ${msg.content || '(no content)'}
+    `;
+    container.appendChild(div);
+  });
+}
+
+// Update VRAM Monitor
+function updateVRAMMonitor() {
+  const fill = document.getElementById('vramFill');
+  const percent = document.getElementById('vramPercent');
+  const used = document.getElementById('vramUsed');
+  const vramPill = document.getElementById('vramUsage');
+  
+  if (!fill || !percent || !used) return;
+  
+  // Simulate VRAM usage (in real implementation, this would come from GPU monitoring)
+  const vramUsed = Math.min(7, Math.random() * 4 + 1); // 1-5GB (safe limit: 7GB)
+  const vramPercent = Math.round((vramUsed / 8) * 100);
+  
+  fill.style.width = vramPercent + '%';
+  percent.textContent = vramPercent + '%';
+  used.textContent = vramUsed.toFixed(1) + 'GB';
+  
+  if (vramPill) {
+    vramPill.textContent = `VRAM: ${vramUsed.toFixed(1)}GB/${vramPercent}%`;
+    vramPill.className = 'pill ' + (vramPercent > 80 ? 'err' : vramPercent > 60 ? 'warn' : 'ok');
+  }
+  
+  // Update JARVIS orb based on VRAM
+  const orb = document.getElementById('jarvisOrb');
+  if (orb) {
+    if (vramPercent > 80) {
+      orb.classList.add('error');
+      orb.classList.remove('working');
+    } else if (vramPercent > 50) {
+      orb.classList.add('working');
+      orb.classList.remove('error');
+    } else {
+      orb.classList.remove('working', 'error');
+    }
+  }
+}
+
+// Show Toast Notification
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toasts');
+  if (!container) return;
+  
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <span class="toast-msg">${message}</span>
+    <button class="toast-close" onclick="this.parentElement.remove()">&#10005;</button>
+  `;
+  container.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 5000);
+}
+
+// Initialize on load
+window.addEventListener('load', () => {
+  initParticles();
+  
+  // Start periodic updates
+  setInterval(refreshAgents, 5000);
+  setInterval(refreshApiKeys, 10000);
+  setInterval(refreshAgentMessages, 5000);
+  setInterval(updateVRAMMonitor, 2000);
+  
+  // Initial updates
+  refreshAgents();
+  refreshApiKeys();
+  refreshAgentMessages();
+  updateVRAMMonitor();
+  
+  showToast('HERMUS JARVIS Control Room loaded!', 'ok');
+});
+
+// Expose functions to global scope
+window.createAgent = createAgent;
+window.createSpecializedAgent = createSpecializedAgent;
+window.createCustomAgent = createCustomAgent;
+window.addApiKey = addApiKey;
+window.sendAgentMessage = sendAgentMessage;
+window.broadcastToAll = broadcastToAll;
+window.pingAllAgents = pingAllAgents;
+window.startAllAgents = startAllAgents;
+window.stopAllAgents = stopAllAgents;
+window.showSpacegrid = showSpacegrid;
+window.toggleJarvis = toggleJarvis;
+window.toggleJarvisView = toggleJarvisView;
+window.refreshAgents = refreshAgents;
+</script>
 </body>
 </html>

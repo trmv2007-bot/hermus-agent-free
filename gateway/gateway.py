@@ -482,6 +482,7 @@ _realtime.install(app)
 # Per-concern routers (extracted from this module; see gateway/routes_*.py).
 # Mounted after the realtime layer so its routes keep precedence.
 from gateway.routes_android import router as _android_router  # noqa: E402
+from gateway.routes_agents import router as _agents_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
 from gateway.routes_channels import router as _channels_router  # noqa: E402
@@ -520,6 +521,7 @@ app.include_router(_engine_router, dependencies=_gate_control)
 app.include_router(_canonical_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
 app.include_router(_presence_router, dependencies=_gate_control)
+app.include_router(_agents_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
