@@ -273,6 +273,14 @@ async def lifespan(app: FastAPI):
     setup_logging()
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
+    agent_pool_started = False
+    try:
+        from core.agents import init_pool
+
+        await init_pool()
+        agent_pool_started = True
+    except Exception as e:
+        logger.warning(f"[Gateway] persistent agent pool unavailable: {e}")
     if getattr(config, "auto_start_channels", True):
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
@@ -341,6 +349,13 @@ async def lifespan(app: FastAPI):
             await _realtime.shutdown()
         except Exception:
             pass
+        if agent_pool_started:
+            try:
+                from core.agents import shutdown_pool
+
+                await shutdown_pool()
+            except Exception as e:
+                logger.warning(f"[Gateway] agent pool shutdown failed: {e}")
         # Release the shared async HTTP pool (core.aio) so shutdown does not
         # leave sockets in CLOSE_WAIT behind it.
         try:
@@ -489,6 +504,7 @@ from gateway.routes_channels import router as _channels_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
 from gateway.routes_console import router as _console_router  # noqa: E402
+from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
@@ -511,6 +527,7 @@ app.include_router(_registry_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
 app.include_router(_console_router, dependencies=_gate_control)
+app.include_router(_dashboard_router, dependencies=_gate_control)
 app.include_router(_computer_router, dependencies=_gate_control)
 app.include_router(_computer_ws_router)
 app.include_router(_speech_router, dependencies=_gate_control)

@@ -282,6 +282,55 @@ class LocalFirstProvider:
 
         return gpu_info
 
+    def get_vram_usage(self) -> dict[str, Any]:
+        """Return live VRAM usage when a supported GPU monitor is available."""
+        gpu = self.detect_gpu()
+        total_gb = float(gpu.get("vram") or 0)
+        used_gb = None
+
+        try:
+            from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlInit
+
+            nvmlInit()
+            info = nvmlDeviceGetMemoryInfo(nvmlDeviceGetHandleByIndex(0))
+            total_gb = info.total / (1024**3)
+            used_gb = info.used / (1024**3)
+        except Exception:
+            pass
+
+        if used_gb is None:
+            try:
+                import GPUtil
+
+                devices = GPUtil.getGPUs()
+                if devices:
+                    used_gb = float(devices[0].memoryUsed) / 1024
+                    total_gb = float(devices[0].memoryTotal) / 1024
+            except Exception:
+                pass
+
+        if used_gb is None:
+            return {"available": False, "used": 0, "free": total_gb, "total": total_gb, "percent": 0}
+
+        free_gb = max(0.0, total_gb - used_gb)
+        return {
+            "available": True,
+            "used": used_gb,
+            "free": free_gb,
+            "total": total_gb,
+            "percent": (used_gb / total_gb * 100) if total_gb else 0,
+        }
+
+    def get_vram_monitor_data(self) -> dict[str, Any]:
+        """Return the dashboard's stable VRAM monitor shape."""
+        usage = self.get_vram_usage()
+        return {
+            "gpu": self.detect_gpu(),
+            "vram": usage,
+            "vram_used": usage.get("used", 0),
+            "vram_percent": usage.get("percent", 0),
+        }
+
     async def auto_start_ollama(self) -> bool:
         """Automatically start Ollama if installed but not running."""
         # Check if Ollama is installed

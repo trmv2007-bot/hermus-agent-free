@@ -63,11 +63,14 @@ class AgentConfig:
     model: str = "mistral:7b"
     role: AgentRole = AgentRole.GENERAL
     api_key: str = None
+    key_name: str = None
     base_url: str = None
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout: int = 120
     retry_attempts: int = 3
+    idle_timeout: float = 900
+    max_concurrent: int = 1
 
     def to_dict(self) -> dict:
         return {
@@ -75,12 +78,15 @@ class AgentConfig:
             "provider": self.provider,
             "model": self.model,
             "role": self.role.value,
-            "api_key": self.api_key,
+            "api_key": "***REDACTED***" if self.api_key else None,
+            "key_name": self.key_name,
             "base_url": self.base_url,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "timeout": self.timeout,
             "retry_attempts": self.retry_attempts,
+            "idle_timeout": self.idle_timeout,
+            "max_concurrent": self.max_concurrent,
         }
 
     @classmethod
@@ -90,12 +96,15 @@ class AgentConfig:
             provider=data.get("provider", "ollama"),
             model=data.get("model", "mistral:7b"),
             role=AgentRole(data.get("role", "general")),
-            api_key=data.get("api_key"),
+            api_key=None if data.get("api_key") == "***REDACTED***" else data.get("api_key"),
+            key_name=data.get("key_name"),
             base_url=data.get("base_url"),
             max_tokens=data.get("max_tokens", 4096),
             temperature=data.get("temperature", 0.7),
             timeout=data.get("timeout", 120),
             retry_attempts=data.get("retry_attempts", 3),
+            idle_timeout=data.get("idle_timeout", 900),
+            max_concurrent=data.get("max_concurrent", 1),
         )
 
 
@@ -202,6 +211,7 @@ class Agent:
         self._message_queue: asyncio.Queue = asyncio.Queue()
         self._running: bool = True
         self._listener_task: asyncio.Task = None
+        self._runtime_agent = None
 
         # Register this agent
         Agent._registry[self.agent_id] = self
@@ -227,6 +237,30 @@ class Agent:
                     logger.error(f"Agent {self.agent_id} message listener error: {e}")
 
         self._listener_task = asyncio.create_task(listener())
+
+    @property
+    def name(self) -> str:
+        return self.config.name
+
+    @property
+    def provider(self) -> str:
+        return self.config.provider
+
+    @property
+    def model(self) -> str:
+        return self.config.model
+
+    @property
+    def created_at(self) -> datetime:
+        return self.stats.created_at
+
+    @property
+    def last_used(self) -> datetime:
+        return self.stats.last_used
+
+    @property
+    def message_history(self) -> list[dict]:
+        return self.memory.conversation
 
     async def _process_message(self, message: dict) -> None:
         """Process an incoming message."""
@@ -375,18 +409,46 @@ class Agent:
         self.memory.add_message(role="user", content=task)
 
         try:
-            # TODO: Actually run the task through LLM
-            # For now, simulate processing
-            await asyncio.sleep(0.5)
+            # Keep the pool agent persistent while delegating the actual turn to
+            # HermusAgent. Its fixed session id gives the specialist durable
+            # memory instead of a fresh simulated response on every task.
+            if self._runtime_agent is None:
+                from core.agent import HermusAgent
 
-            result = f"Completed: {task}"
+                model = self.config.model or "mistral:7b"
+                model_ref = model if "/" in model else f"{self.config.provider}/{model}"
+                self._runtime_agent = HermusAgent(
+                    model=model_ref,
+                    session_id=f"persistent_agent_{self.agent_id}",
+                    mode="agent",
+                    api_key=self.config.api_key,
+                    base_url=self.config.base_url,
+                )
+
+            role = self.role.value if hasattr(self.role, "value") else str(self.role)
+            prompt = (
+                f"You are the persistent {role} specialist in a Hermus team.\n"
+                "Work on the task below using the tools and evidence available to you.\n"
+                "Return concrete findings, actions taken, and anything another agent must know.\n\n"
+                f"Task:\n{task}"
+            )
+            result_data = await asyncio.to_thread(self._runtime_agent.chat, prompt)
+            result = str((result_data or {}).get("response") or "")
+            if not result:
+                raise RuntimeError("agent produced no response")
             self.memory.add_message(role="assistant", content=result)
             self.stats.tasks_completed += 1
+            self.stats.api_calls += 1
+            self.stats.tokens_used += len(result) // 4
+            self.stats.last_used = datetime.now()
+            self.last_activity = time.time()
 
             return result
 
         except Exception as e:
             self.stats.tasks_failed += 1
+            self.stats.last_used = datetime.now()
+            self.last_activity = time.time()
             error_msg = f"Error: {str(e)}"
             self.memory.add_message(role="assistant", content=error_msg)
             return error_msg
@@ -426,6 +488,7 @@ class Agent:
             del Agent._message_queues[self.agent_id]
 
         self.state = AgentState.DESTROYED
+        self._runtime_agent = None
         self.stats.uptime = time.time() - self.stats.created_at.timestamp()
 
         logger.info(f"💀 Agent {self.config.name} ({self.agent_id[:8]}) destroyed")

@@ -158,6 +158,155 @@ def register_architecture_tools(registry) -> None:
         source="core.integrations",
     )
 
+    # ---- Shared dashboard ---------------------------------------------------
+    def dashboard_get_state() -> dict[str, Any]:
+        """Read the exact dashboard layout visible to the user."""
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.snapshot()
+
+    def dashboard_add_panel(
+        title: str,
+        content: str = "",
+        kind: str = "text",
+        order: int = -1,
+        width: int = 6,
+    ) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.add_panel(
+            title=title,
+            content=content,
+            kind=kind,
+            order=None if order < 0 else order,
+            width=width,
+            source="agent",
+        )
+
+    def dashboard_update_panel(
+        panel_id: str,
+        title: str = "",
+        content: str = "",
+        kind: str = "",
+        order: int = -1,
+        width: int = -1,
+        visible: str = "unchanged",
+    ) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        changes: dict[str, Any] = {}
+        if title:
+            changes["title"] = title
+        if content:
+            changes["content"] = content
+        if kind:
+            changes["kind"] = kind
+        if order >= 0:
+            changes["order"] = order
+        if width >= 0:
+            changes["width"] = width
+        if visible != "unchanged":
+            changes["visible"] = str(visible).lower() == "true"
+        return dashboard_state.update_panel(panel_id, **changes)
+
+    def dashboard_move_panel(panel_id: str, order: int, width: int = -1) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.move_panel(panel_id, order=order, width=None if width < 0 else width)
+
+    def dashboard_remove_panel(panel_id: str) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.remove_panel(panel_id)
+
+    def dashboard_update_tab(tab_id: str, label: str = "", visible: str = "unchanged", order: int = -1) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.update_tab(
+            tab_id,
+            label=label or None,
+            visible=None if visible == "unchanged" else str(visible).lower() == "true",
+            order=None if order < 0 else order,
+        )
+
+    dashboard_defs = [
+        (
+            "dashboard_get_state",
+            dashboard_get_state,
+            "Read the current shared dashboard: tabs, AI-managed panels, and the canonical systems inventory.",
+            {},
+            [],
+        ),
+        (
+            "dashboard_add_panel",
+            dashboard_add_panel,
+            "Add a safe persistent dashboard panel. Use text, kpi, feed, or link; never emit arbitrary HTML or JavaScript.",
+            {
+                "title": {"type": "string"},
+                "content": {"type": "string", "default": ""},
+                "kind": {"type": "string", "enum": ["text", "kpi", "feed", "link"], "default": "text"},
+                "order": {"type": "integer", "default": -1},
+                "width": {"type": "integer", "minimum": 3, "maximum": 12, "default": 6},
+            },
+            ["title"],
+        ),
+        (
+            "dashboard_update_panel",
+            dashboard_update_panel,
+            "Update an existing AI-managed dashboard panel's title, content, kind, visibility, width, or order.",
+            {
+                "panel_id": {"type": "string"},
+                "title": {"type": "string", "default": ""},
+                "content": {"type": "string", "default": ""},
+                "kind": {"type": "string", "default": ""},
+                "order": {"type": "integer", "default": -1},
+                "width": {"type": "integer", "default": -1},
+                "visible": {"type": "string", "enum": ["true", "false", "unchanged"], "default": "unchanged"},
+            },
+            ["panel_id"],
+        ),
+        (
+            "dashboard_move_panel",
+            dashboard_move_panel,
+            "Move an AI-managed panel in the shared dashboard layout.",
+            {"panel_id": {"type": "string"}, "order": {"type": "integer"}, "width": {"type": "integer", "default": -1}},
+            ["panel_id", "order"],
+        ),
+        (
+            "dashboard_remove_panel",
+            dashboard_remove_panel,
+            "Remove an AI-managed dashboard panel by id. Built-in tabs and systems panels cannot be removed this way.",
+            {"panel_id": {"type": "string"}},
+            ["panel_id"],
+        ),
+        (
+            "dashboard_update_tab",
+            dashboard_update_tab,
+            "Rename, show, hide, or reorder a built-in control-room tab.",
+            {
+                "tab_id": {"type": "string"},
+                "label": {"type": "string", "default": ""},
+                "visible": {"type": "string", "enum": ["true", "false", "unchanged"], "default": "unchanged"},
+                "order": {"type": "integer", "default": -1},
+            },
+            ["tab_id"],
+        ),
+    ]
+    for name, fn, description, properties, required in dashboard_defs:
+        registry.register(
+            name,
+            fn,
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {"type": "object", "properties": properties, "required": required},
+                },
+            },
+            source="core.integrations",
+        )
+
     # ---- Computer control (screen) ----------------------------------------
     def screen_record_start(
         max_seconds: float = 30.0,

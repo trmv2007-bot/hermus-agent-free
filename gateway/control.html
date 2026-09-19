@@ -252,6 +252,51 @@
     transform: translateY(0);
   }
 
+  .dashboard-workspace-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .dashboard-panel {
+    grid-column: span var(--panel-width, 6);
+    min-height: 120px;
+    background: rgba(20, 25, 36, 0.72);
+    border: 1px solid rgba(88, 166, 255, 0.24);
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .dashboard-panel h3 {
+    margin: 0 0 8px;
+    color: #79c0ff;
+  }
+
+  .dashboard-panel-content {
+    white-space: pre-wrap;
+    color: #c7d1df;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-panel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 14px;
+  }
+
+  .dashboard-panel-actions button {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  @media (max-width: 760px) {
+    .dashboard-workspace-grid { grid-template-columns: 1fr; }
+    .dashboard-panel { grid-column: span 1; }
+  }
+
   /* VRAM Monitor */
   .vram-monitor {
     background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(20, 25, 36, 0.5));
@@ -358,15 +403,15 @@
       <section class="full">
         <h2>&#128065; JARVIS Control Center</h2>
         <div class="vram-monitor">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px;">RTX 3050 VRAM Monitor</h3>
+          <h3 style="margin: 0 0 10px 0; font-size: 14px;">GPU VRAM Monitor</h3>
           <div class="vram-text">
             <span>VRAM Usage: <span id="vramPercent">0%</span></span>
-            <span><span id="vramUsed">0GB</span> / 8GB</span>
+            <span><span id="vramUsed">—</span></span>
           </div>
           <div class="vram-bar">
             <div class="vram-fill" id="vramFill" style="width: 0%;"></div>
           </div>
-          <div class="hint">Optimized for RTX 3050 with 8GB VRAM - Safe limit: 7GB</div>
+          <div class="hint">Live hardware reading when a supported GPU monitor is available. No reading is shown as unavailable.</div>
         </div>
 
         <div class="quick-actions">
@@ -384,7 +429,7 @@
       <section>
         <h2>Snapshot &#8226; System health</h2>
         <div class="cells" id="health"></div>
-        <div class="hint">Snapshot = `GET /api/v1/system/health` &#8214; every value from a live probe.</div>
+        <div class="hint">Snapshot = `GET /api/v1/system/health` &#8214; every value from a live probe. The control room never owns truth and never simulates success.</div>
       </section>
 
       <section>
@@ -399,6 +444,18 @@
           <!-- Agent nodes will be dynamically added here -->
         </div>
         <div class="hint">Live visualization of active agents and their connections</div>
+      </section>
+
+      <section class="full" id="dashboardWorkspaceSection">
+        <h2>AI Dashboard Workspace</h2>
+        <div class="bar">
+          <button id="dashboardRefresh" class="ghost">Refresh layout</button>
+          <button id="dashboardAddPanel" class="ghost">Add panel</button>
+          <button id="dashboardReset" class="ghost">Reset layout</button>
+          <span id="dashboardRevision" class="pill">layout: --</span>
+        </div>
+        <div class="hint">This workspace is shared with Hermus. Panel changes are persisted and appear in the agent's dashboard context.</div>
+        <div class="dashboard-workspace-grid" id="dashboardWorkspace"><div class="note">Loading shared dashboard layout...</div></div>
       </section>
 
       <section class="full">
@@ -505,6 +562,16 @@
           <button class="quick-action-btn" onclick="pingAllAgents()">Ping All</button>
         </div>
         <div class="feed" id="agentMessages" style="height: 200px;"><div class="note">Agent messages will appear here</div></div>
+      </section>
+
+      <section class="full">
+        <h2>Team Orchestration</h2>
+        <div class="bar">
+          <input id="orchestrationGoal" placeholder="Describe a goal for the persistent agent team" />
+          <button class="quick-action-btn" onclick="startOrchestration()">Run Team</button>
+        </div>
+        <div class="feed" id="orchestrationRuns" style="height: 180px;"><div class="note">No team runs yet</div></div>
+        <div class="hint">Specialists work in parallel, handoffs are recorded, and the final synthesis remains visible after completion.</div>
       </section>
     </div>
   </div>
@@ -791,42 +858,13 @@
 </main>
 
 <footer>
-  HERMUS JARVIS Control Room -- Local-First AI Assistant | RTX 3050 Optimized | 100% Free & Open Source
+  HERMUS JARVIS Control Room -- Local-First AI Assistant | Shared dashboard state | Open Source
 </footer>
 
 <!-- Action feedback -->
 <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <script src="/static/control-client.js"></script>
-<script>
-// When gateway auth is enabled, open /control?token=... once (or store it as
-// hermus_gateway_token). Browser fetch cannot read the server-side environment,
-// so attach that token to every API request without putting it into ordinary
-// fetch URLs. SSE/WS helpers add it separately because those browser APIs do
-// not support custom headers.
-const tokenFromUrl = new URLSearchParams(location.search).get("token") || "";
-let gatewayToken = tokenFromUrl;
-if (!gatewayToken) {
-  try { gatewayToken = localStorage.getItem("hermus_gateway_token") || ""; } catch(e) {};
-}
-if (gatewayToken) {
-  window.__HERMUS_GATEWAY_TOKEN = gatewayToken;
-  if (tokenFromUrl) {
-    try { history.replaceState(null, "", location.pathname + location.hash); } catch(e) {}
-  }
-}
-if (gatewayToken && window.fetch) {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    const opts = Object.assign({}, init || {});
-    const headers = new Headers(input && input.headers ? input.headers : undefined);
-    new Headers(opts.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-Hermus-Token", gatewayToken);
-    opts.headers = headers;
-    return nativeFetch(input, opts);
-  };
-}
-</script>
 <script src="/static/control-room.js" defer></script>
 <script src="/static/console.js" defer></script>
 
@@ -837,9 +875,149 @@ let agentSystem = {
   agents: [],
   messages: [],
   apiKeys: {},
+  keyUsage: {},
   vramUsage: 0,
   spacegridEnabled: false
 };
+
+let dashboardLayout = null;
+
+async function dashboardRequest(path, options) {
+  const response = await fetch(path, options || {});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || data.message || `Dashboard request failed (${response.status})`);
+  return data;
+}
+
+function dashboardPanelBody(panel) {
+  const content = esc(panel.content || 'No content yet.');
+  if (panel.kind === 'link' && /^https?:\/\//i.test(String(panel.content || ''))) {
+    return `<a href="${content}" target="_blank" rel="noopener noreferrer">${content}</a>`;
+  }
+  if (panel.kind === 'kpi') return `<div class="kpi"><div class="v">${content}</div><div class="l">AI-managed value</div></div>`;
+  return content;
+}
+
+function renderDashboardLayout(data) {
+  dashboardLayout = data.dashboard || data;
+  applyDashboardTabs();
+  const host = document.getElementById('dashboardWorkspace');
+  if (!host) return;
+  const panels = (dashboardLayout.panels || []).filter(panel => panel.visible !== false);
+  const revision = document.getElementById('dashboardRevision');
+  if (revision) revision.textContent = `layout: r${dashboardLayout.revision || 0}`;
+  host.innerHTML = panels.length ? panels.map(panel => `
+    <article class="dashboard-panel" style="--panel-width:${Math.max(3, Math.min(12, Number(panel.width) || 6))}" data-dashboard-panel="${esc(panel.id)}">
+      <h3>${esc(panel.title)}</h3>
+      <div class="dashboard-panel-content">${dashboardPanelBody(panel)}</div>
+      <div class="dashboard-panel-actions">
+        <button class="ghost" data-dashboard-action="up" data-panel-id="${esc(panel.id)}">Move up</button>
+        <button class="ghost" data-dashboard-action="down" data-panel-id="${esc(panel.id)}">Move down</button>
+        <button class="ghost" data-dashboard-action="edit" data-panel-id="${esc(panel.id)}">Edit</button>
+        <button class="ghost" data-dashboard-action="remove" data-panel-id="${esc(panel.id)}">Remove</button>
+      </div>
+    </article>`).join('') : '<div class="note">No AI-managed panels yet. Ask Hermus to add one or use Add panel.</div>';
+}
+
+function applyDashboardTabs() {
+  const tabs = (dashboardLayout?.tabs || []).slice().sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  const nav = document.querySelector('nav[role="tablist"]');
+  const main = document.querySelector('main');
+  if (!nav || !main || !tabs.length) return;
+  tabs.forEach(tab => {
+    const button = nav.querySelector('[data-tab="' + CSS.escape(tab.id) + '"]');
+    const panel = document.getElementById('tab-' + tab.id);
+    if (!button || !panel) return;
+    button.textContent = tab.label || tab.id;
+    button.style.display = tab.visible === false ? 'none' : '';
+    main.appendChild(panel);
+    nav.appendChild(button);
+  });
+  const active = nav.querySelector('[role=tab].on');
+  if (active && active.style.display === 'none') nav.querySelector('[data-tab="overview"]')?.click();
+}
+
+async function refreshDashboardLayout() {
+  try {
+    renderDashboardLayout(await dashboardRequest('/api/v1/dashboard/state'));
+  } catch (error) {
+    const host = document.getElementById('dashboardWorkspace');
+    if (host) host.innerHTML = `<div class="panel-state error">${esc(error.message)}</div>`;
+  }
+}
+
+async function addDashboardPanel() {
+  const title = window.prompt('Panel title:');
+  if (!title) return;
+  const content = window.prompt('Panel content:') || '';
+  const kind = (window.prompt('Panel kind: text, kpi, feed, or link', 'text') || 'text').toLowerCase();
+  try {
+    await dashboardRequest('/api/v1/dashboard/panels', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content, kind })
+    });
+    await refreshDashboardLayout();
+    showToast('Dashboard panel added', 'ok');
+  } catch (error) { showToast(`Could not add panel: ${error.message}`, 'error'); }
+}
+
+async function editDashboardPanel(panelId) {
+  const panel = (dashboardLayout?.panels || []).find(item => item.id === panelId);
+  if (!panel) return;
+  const title = window.prompt('Panel title:', panel.title);
+  if (title === null) return;
+  const content = window.prompt('Panel content:', panel.content || '');
+  if (content === null) return;
+  try {
+    await dashboardRequest('/api/v1/dashboard/panels/' + encodeURIComponent(panelId), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content })
+    });
+    await refreshDashboardLayout();
+    showToast('Dashboard panel updated', 'ok');
+  } catch (error) { showToast(`Could not update panel: ${error.message}`, 'error'); }
+}
+
+async function moveDashboardPanel(panelId, delta) {
+  const panel = (dashboardLayout?.panels || []).find(item => item.id === panelId);
+  if (!panel) return;
+  try {
+    await dashboardRequest('/api/v1/dashboard/panels/' + encodeURIComponent(panelId) + '/move', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: Number(panel.order || 0) + delta })
+    });
+    await refreshDashboardLayout();
+  } catch (error) { showToast(`Could not move panel: ${error.message}`, 'error'); }
+}
+
+async function removeDashboardPanel(panelId) {
+  if (!window.confirm('Remove this dashboard panel?')) return;
+  try {
+    await dashboardRequest('/api/v1/dashboard/panels/' + encodeURIComponent(panelId), { method: 'DELETE' });
+    await refreshDashboardLayout();
+    showToast('Dashboard panel removed', 'ok');
+  } catch (error) { showToast(`Could not remove panel: ${error.message}`, 'error'); }
+}
+
+async function resetDashboardLayout() {
+  if (!window.confirm('Reset the shared dashboard layout?')) return;
+  try {
+    await dashboardRequest('/api/v1/dashboard/reset', { method: 'POST' });
+    await refreshDashboardLayout();
+    showToast('Dashboard layout reset', 'ok');
+  } catch (error) { showToast(`Could not reset layout: ${error.message}`, 'error'); }
+}
+
+document.addEventListener('click', event => {
+  const button = event.target && event.target.closest ? event.target.closest('[data-dashboard-action]') : null;
+  if (!button) return;
+  const action = button.getAttribute('data-dashboard-action');
+  const panelId = button.getAttribute('data-panel-id');
+  if (action === 'up') moveDashboardPanel(panelId, -1);
+  else if (action === 'down') moveDashboardPanel(panelId, 1);
+  else if (action === 'edit') editDashboardPanel(panelId);
+  else if (action === 'remove') removeDashboardPanel(panelId);
+});
 
 // Initialize particles
 function initParticles() {
@@ -900,11 +1078,13 @@ function createAgent() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider, model, name, role })
-  }).then(r => r.json()).then(data => {
+  }).then(r => r.json().then(data => ({ ok: r.ok, data }))).then(result => {
+    if (!result.ok) throw new Error(result.data.detail || result.data.message || 'agent capacity reached');
     showToast(`Agent ${name} created!`, 'ok');
     refreshAgents();
+    refreshApiKeys();
   }).catch(e => {
-    showToast(`Failed to create agent: ${e}`, 'error');
+    showToast(`Failed to create agent: ${e.message || e}`, 'error');
   });
 }
 
@@ -1057,6 +1237,7 @@ function refreshApiKeys() {
     .then(r => r.json())
     .then(data => {
       agentSystem.apiKeys = data.keys || {};
+      agentSystem.keyUsage = data.key_usage || {};
       updateApiKeysUI();
     });
 }
@@ -1069,6 +1250,42 @@ function refreshAgentMessages() {
       agentSystem.messages = data.messages || [];
       updateMessagesUI();
     });
+}
+
+function startOrchestration() {
+  const input = document.getElementById('orchestrationGoal');
+  const goal = input && input.value.trim();
+  if (!goal) {
+    showToast('Enter a team goal first', 'error');
+    return;
+  }
+  fetch('/api/v1/agents/orchestrate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal, max_agents: 4 })
+  }).then(r => r.json().then(data => ({ ok: r.ok, data }))).then(result => {
+    if (!result.ok) throw new Error(result.data.detail || result.data.message || 'orchestration failed');
+    input.value = '';
+    showToast('Team run started', 'ok');
+    refreshOrchestrations();
+  }).catch(e => showToast(`Failed to start team: ${e.message}`, 'error'));
+}
+
+function refreshOrchestrations() {
+  fetch('/api/v1/agents/orchestrations')
+    .then(r => r.json())
+    .then(data => {
+      const container = document.getElementById('orchestrationRuns');
+      if (!container) return;
+      const runs = data.orchestrations || [];
+      container.innerHTML = runs.length ? runs.map(run => `
+        <div style="padding:6px 0;border-bottom:1px dashed #1c2534">
+          <strong>${esc(run.status)}</strong> · ${esc(run.goal)}
+          ${run.final ? `<div class="note">${esc(run.final).slice(0, 500)}</div>` : ''}
+          ${run.error ? `<div class="note">${esc(run.error)}</div>` : ''}
+        </div>`).join('') : '<div class="note">No team runs yet</div>';
+    })
+    .catch(() => {});
 }
 
 // Update Agent UI
@@ -1172,7 +1389,9 @@ function updateApiKeysUI() {
   for (const [provider, keys] of Object.entries(agentSystem.apiKeys)) {
     const div = document.createElement('div');
     div.style.margin = '5px 0';
-    div.innerHTML = `<strong>${provider}</strong>: ${keys.length} key(s)`;
+     const usage = agentSystem.keyUsage[provider] || [];
+     const details = usage.map(item => `${item.name}: ${item.assigned_agents}/${item.capacity}`).join(', ');
+     div.innerHTML = `<strong>${provider}</strong>: ${keys.length} key(s)${details ? ` <span class="note">(${esc(details)})</span>` : ''}`;
     container.appendChild(div);
   }
 }
@@ -1209,32 +1428,28 @@ function updateVRAMMonitor() {
 
   if (!fill || !percent || !used) return;
 
-  // Simulate VRAM usage (in real implementation, this would come from GPU monitoring)
-  const vramUsed = Math.min(7, Math.random() * 4 + 1); // 1-5GB (safe limit: 7GB)
-  const vramPercent = Math.round((vramUsed / 8) * 100);
+  fetch('/api/v1/agents/vram/status')
+    .then(r => r.json())
+    .then(data => {
+      const vram = data.vram || {};
+      const vramUsed = Number(vram.used ?? vram.used_gb ?? 0);
+      const vramTotal = Number(vram.total ?? vram.total_gb ?? data.gpu?.vram ?? 0);
+      const vramPercent = Number(vram.percent ?? (vramTotal ? (vramUsed / vramTotal) * 100 : 0));
+      const available = data.status !== 'unavailable' && (data.gpu?.detected || vramTotal > 0);
 
-  fill.style.width = vramPercent + '%';
-  percent.textContent = vramPercent + '%';
-  used.textContent = vramUsed.toFixed(1) + 'GB';
-
-  if (vramPill) {
-    vramPill.textContent = `VRAM: ${vramUsed.toFixed(1)}GB/${vramPercent}%`;
-    vramPill.className = 'pill ' + (vramPercent > 80 ? 'err' : vramPercent > 60 ? 'warn' : 'ok');
-  }
-
-  // Update JARVIS orb based on VRAM
-  const orb = document.getElementById('jarvisOrb');
-  if (orb) {
-    if (vramPercent > 80) {
-      orb.classList.add('error');
-      orb.classList.remove('working');
-    } else if (vramPercent > 50) {
-      orb.classList.add('working');
-      orb.classList.remove('error');
-    } else {
-      orb.classList.remove('working', 'error');
-    }
-  }
+      fill.style.width = Math.min(100, Math.max(0, vramPercent)) + '%';
+      percent.textContent = available ? Math.round(vramPercent) + '%' : 'unavailable';
+      used.textContent = available ? vramUsed.toFixed(1) + 'GB / ' + vramTotal.toFixed(1) + 'GB' : '—';
+      if (vramPill) {
+        vramPill.textContent = available ? `VRAM: ${vramUsed.toFixed(1)}GB/${Math.round(vramPercent)}%` : 'VRAM: unavailable';
+        vramPill.className = 'pill ' + (!available ? 'warn' : (vramPercent > 80 ? 'err' : vramPercent > 60 ? 'warn' : 'ok'));
+      }
+    })
+    .catch(() => {
+      percent.textContent = 'unavailable';
+      used.textContent = '—';
+      if (vramPill) { vramPill.textContent = 'VRAM: unavailable'; vramPill.className = 'pill warn'; }
+    });
 }
 
 // Show Toast Notification
@@ -1264,13 +1479,21 @@ window.addEventListener('load', () => {
   setInterval(refreshAgents, 5000);
   setInterval(refreshApiKeys, 10000);
   setInterval(refreshAgentMessages, 5000);
+  setInterval(refreshOrchestrations, 5000);
+  setInterval(refreshDashboardLayout, 5000);
   setInterval(updateVRAMMonitor, 2000);
 
   // Initial updates
   refreshAgents();
   refreshApiKeys();
   refreshAgentMessages();
+  refreshOrchestrations();
+  refreshDashboardLayout();
   updateVRAMMonitor();
+
+  document.getElementById('dashboardRefresh')?.addEventListener('click', refreshDashboardLayout);
+  document.getElementById('dashboardAddPanel')?.addEventListener('click', addDashboardPanel);
+  document.getElementById('dashboardReset')?.addEventListener('click', resetDashboardLayout);
 
   showToast('HERMUS JARVIS Control Room loaded!', 'ok');
 });
@@ -1289,6 +1512,9 @@ window.showSpacegrid = showSpacegrid;
 window.toggleJarvis = toggleJarvis;
 window.toggleJarvisView = toggleJarvisView;
 window.refreshAgents = refreshAgents;
+window.startOrchestration = startOrchestration;
+window.refreshDashboardLayout = refreshDashboardLayout;
+window.addDashboardPanel = addDashboardPanel;
 </script>
 </body>
 </html>

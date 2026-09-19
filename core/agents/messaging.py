@@ -335,6 +335,10 @@ class MessageBus:
 
         return messages
 
+    def get_recent_messages(self, limit: int = 100) -> list[AgentMessage]:
+        """Compatibility alias for dashboard consumers."""
+        return self.get_history(limit=limit)
+
     async def get_stats(self) -> dict:
         """Get message bus statistics."""
         async with self._lock:
