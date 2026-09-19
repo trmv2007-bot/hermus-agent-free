@@ -191,6 +191,8 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [RED_LINES.md](RED_LINES.md) | Safety boundaries and red-line policy |
 | [AUTONOMY_BOUNDARIES.md](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
 | [CAPABILITY_LEDGER.md](CAPABILITY_LEDGER.md) | Visible ledger of powers and capabilities |
+| [SPEC_PERSISTENT_FLEET.md](SPEC_PERSISTENT_FLEET.md) | Persistent Fleet master spec (v2) + roadmap |
+| [docs/design/](docs/design/README.md) | Fleet v2 design docs: gap registers, Vault accounts, dashboard UX |
 
 ---
 
