@@ -31,9 +31,23 @@ def _configure_multikey(subparsers) -> None:
     multikey_add.add_argument("--model", help="Default model id for this key")
     multikey_add.add_argument("--rpm", type=int, help="Requests-per-minute budget")
     multikey_add.add_argument("--tpm", type=int, help="Tokens-per-minute budget")
+    multikey_add.add_argument(
+        "--account",
+        help="Account id this key belongs to (keys on one account share rate limits)",
+    )
+    multikey_add.add_argument("--rpd", type=int, help="Requests-per-day budget (account-shared, UTC reset)")
     multikey_add.add_argument("--no-probe", action="store_true", help="Skip auto health/model probe")
     multikey_list = multikey_sub.add_parser("list", help="List keys per provider (redacted + health)")
     multikey_list.add_argument("--provider", help="Provider filter")
+    multikey_accounts = multikey_sub.add_parser("accounts", help="Accounts: grouped keys + effective account-level RPM/RPD")
+    multikey_accounts.add_argument("--provider", help="Provider filter")
+    multikey_reenable = multikey_sub.add_parser(
+        "reenable",
+        help="Manually restore an auth-failed key, or lift a whole account quarantine",
+    )
+    multikey_reenable.add_argument("--provider", required=True)
+    multikey_reenable.add_argument("--key", help="Key value or key name to re-enable")
+    multikey_reenable.add_argument("--account", help="Account id — lifts the quarantine for all its keys")
     multikey_remove = multikey_sub.add_parser("remove", help="Remove key")
     multikey_remove.add_argument("--provider", required=True)
     multikey_remove.add_argument("--key", required=True, help="Key or name to remove")
@@ -64,6 +78,8 @@ def _run_multikey(args, ctx: CLIContext) -> None:
             default_model=getattr(args, "model", None),
             rpm_limit=getattr(args, "rpm", None),
             tpm_limit=getattr(args, "tpm", None),
+            rpd_limit=getattr(args, "rpd", None),
+            account_id=getattr(args, "account", None),
             auto_discover=not getattr(args, "no_probe", False),
         )
         if result.get("success"):
@@ -95,10 +111,49 @@ def _run_multikey(args, ctx: CLIContext) -> None:
                     f"   - {k.get('name')}: {k.get('preview')} | model={k.get('default_model')} "
                     f"| healthy={k.get('healthy')} status={k.get('health_status')} "
                     f"| models={k.get('models_count')} rpm={k.get('rpm_limit')} "
+                    f"| account={k.get('account_id') or '(default)'} "
+                    f"rpd={k.get('rpd_used', 0)}/{k.get('rpd_limit') or '∞'} "
                     f"| avg_rt={k.get('avg_response_time')} usage={k.get('usage_count')}"
                 )
                 if k.get("models_sample"):
                     print(f"     models: {', '.join(k['models_sample'][:6])}")
+    elif args.multikey_action == "accounts":
+        overview = multi_key_manager.list_accounts(args.provider)
+        print(f"\nAccounts ({overview.get('count', 0)}) — effective account-level budgets:")
+        for a in overview.get("accounts") or []:
+            state = "QUARANTINED" if a.get("quarantined") else "active"
+            print(
+                f" {a.get('account_id')} [{state}] | keys={a.get('key_count')} "
+                f"| RPM {a.get('rpm_used', 0)}/{a.get('rpm_limit_effective') or '∞'} "
+                f"| RPD {a.get('rpd_used', 0)}/{a.get('rpd_limit') or '∞'} "
+                f"| auth_failed={len(a.get('auth_failed') or [])}"
+            )
+        # Keys without an explicit account_id are shown as a conservative
+        # same-base_url + key-prefix proposal, for operator confirmation.
+        proposals = multi_key_manager.propose_account_groups(args.provider)
+        ungrouped = {
+            p: {acct: keys for acct, keys in groups.items() if not any(k.get("explicit") for k in keys)}
+            for p, groups in proposals.items()
+        }
+        if any(ungrouped.values()):
+            print("\nProposed groupings for ungrouped keys (confirm with `multikey add --account <id>`):")
+            for groups in ungrouped.values():
+                for acct, keys in groups.items():
+                    names = ", ".join(k.get("name") or "?" for k in keys)
+                    print(f"   {acct}: {names}")
+    elif args.multikey_action == "reenable":
+        if not (getattr(args, "key", None) or getattr(args, "account", None)):
+            print("❌ Pass --key <key-or-name> or --account <account-id>")
+            return
+        result = multi_key_manager.re_enable_key(
+            args.provider,
+            args.account or args.key,
+            account=bool(getattr(args, "account", None)),
+        )
+        if result.get("success"):
+            print(f"✅ Re-enabled {result.get('reenabled')} key(s) for {args.provider}")
+        else:
+            print(f"❌ {result.get('error')}")
     elif args.multikey_action == "remove":
         result = multi_key_manager.remove_key(args.provider, args.key)
         print(f"Remove result: {result}")

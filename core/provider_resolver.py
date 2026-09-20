@@ -171,6 +171,10 @@ def discover_runtime_bundles(include_local: bool = True) -> list[dict[str, Any]]
         entries = []
 
     for e in entries:
+        # Terminal key states never dispatch (VAULT_ACCOUNTS §3): a dead or
+        # quarantined credential must not be offered as a fallback bundle.
+        if e.get("auth_failed_at") or e.get("quarantined"):
+            continue
         provider = (e.get("provider") or "custom").lower()
         preset = get_provider(provider)
         key = e.get("key") or ""

@@ -15,7 +15,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.log import get_logger
@@ -26,11 +26,54 @@ from .providers import get_provider, list_providers
 logger = get_logger(__name__)
 
 
+def _today_utc() -> str:
+    """UTC date (``YYYY-MM-DD``) the persisted daily request counter belongs to."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _iso_epoch(value) -> float:
+    """Epoch seconds for an ISO timestamp; 0.0 when missing or unparseable."""
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _key_preview(key_val: str) -> str:
+    """Redacted key preview shared by the list/overview surfaces."""
+    if not key_val:
+        return "(no-key)"
+    if len(key_val) > 10:
+        return f"{key_val[:6]}...{key_val[-4:]}"
+    return "****"
+
+
+def _guess_account_id(provider: str, entry: dict) -> str:
+    """Conservative same-account heuristic used by :meth:`propose_account_groups`.
+
+    Most providers mint keys with a per-account or per-project prefix
+    (``sk-proj-...``, ``gsk_...``, ``hf_...``). Two keys sharing a base_url
+    AND the first 8 characters of the key are treated as one account;
+    otherwise each key is its own account — never over-merge (spec §6).
+    """
+    key = entry.get("key") or entry.get("token") or ""
+    base = (entry.get("base_url") or get_provider(provider).get("base_url") or "").rstrip("/")
+    prefix = key[:8] if len(key) >= 8 else key
+    return f"{provider}:{base}#{prefix}" if key else f"{provider}:default"
+
+
 class MultiKeyManager:
     """Manage many API keys across any providers — load balance, health, limits."""
 
     MAX_KEYS_PER_PROVIDER = 50
     MAX_KEYS_PER_CUSTOM_API = 10
+
+    #: Distinct keys of one account that may sit at ``auth_failed`` before the
+    #: whole account is presumed banned/dead and parked (spec §3). The account
+    #: stays quarantined until an operator calls :meth:`re_enable_key`.
+    ACCOUNT_QUARANTINE_THRESHOLD = 3
 
     def __init__(self, db_path: str = None):
         self.db_path = Path(db_path or config.resolve_path("data/api_keys.json"))
@@ -44,6 +87,11 @@ class MultiKeyManager:
         # Live rate windows: provider -> key -> list of timestamps
         self._rpm_hits: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         self._tpm_hits: dict[str, dict[str, list[tuple]]] = defaultdict(lambda: defaultdict(list))
+        # Account-grouped windows (spec §2): provider -> account_id -> timestamps.
+        # Provider quotas are per account/org, so a set of keys sharing one
+        # account must not each spend the full budget independently (OG-1).
+        self._account_rpm_hits: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        self._account_tpm_hits: dict[str, dict[str, list[tuple]]] = defaultdict(lambda: defaultdict(list))
         self._lock = threading.Lock()
         # Serializes load→mutate→save cycles over the JSON key store. Fleet
         # workers report success/failure from several threads at once; without
@@ -110,6 +158,12 @@ class MultiKeyManager:
                 "rpm_limit": preset.get("default_rpm"),
                 "tpm_limit": preset.get("default_tpm"),
                 "rate_limit_source": "preset",
+                "account_id": None,
+                "rpd_limit": preset.get("default_rpd"),
+                "auth_failed_at": None,
+                "quarantined": False,
+                "rpd_day": None,
+                "rpd_used": 0,
             }
         e = dict(entry)
         e.setdefault("provider", provider)
@@ -132,6 +186,19 @@ class MultiKeyManager:
         if e.get("tpm_limit") is None and preset.get("default_tpm") is not None:
             e["tpm_limit"] = preset["default_tpm"]
             e.setdefault("rate_limit_source", "preset")
+        # Vault economics (spec §1): account grouping + persisted daily budget.
+        # account_id stays None for legacy keys on purpose — the grouping
+        # heuristic is a *proposal* (propose_account_groups), because merging
+        # distinct accounts under-shoots (safe) while splitting one account
+        # re-creates OG-1 (dangerous). None means "one shared default account".
+        e.setdefault("account_id", None)
+        if e.get("rpd_limit") is None:
+            e["rpd_limit"] = preset.get("default_rpd")
+        e.setdefault("auth_failed_at", None)
+        e.setdefault("quarantined", False)
+        # Persisted UTC-day counter (account-shared; see _record_use / _under_rpd).
+        e.setdefault("rpd_day", None)
+        e.setdefault("rpd_used", 0)
         return e
 
     def _load_queues(self):
@@ -164,11 +231,10 @@ class MultiKeyManager:
             for k in keys:
                 e = self._normalize_entry(k, p)
                 key_val = e.get("key") or ""
-                preview = f"{key_val[:6]}...{key_val[-4:]}" if len(key_val) > 10 else ("(no-key)" if not key_val else "****")
                 out[p].append(
                     {
                         "name": e.get("name"),
-                        "preview": preview,
+                        "preview": _key_preview(key_val),
                         "base_url": e.get("base_url"),
                         "default_model": e.get("default_model"),
                         "healthy": e.get("healthy"),
@@ -182,9 +248,107 @@ class MultiKeyManager:
                         "tpm_limit": e.get("tpm_limit"),
                         "rate_limit": e.get("last_rate_limit"),
                         "added": e.get("added"),
+                        # Vault economics (spec §1/§2): account grouping + daily
+                        # budget state, so the dashboard/CLI never has to guess.
+                        "account_id": e.get("account_id"),
+                        "rpd_limit": e.get("rpd_limit"),
+                        "rpd_used": (e.get("rpd_used") or 0) if e.get("rpd_day") == _today_utc() else 0,
+                        "auth_failed_at": e.get("auth_failed_at"),
+                        "quarantined": bool(e.get("quarantined")),
                     }
                 )
         return out
+
+    def propose_account_groups(self, provider: str = None) -> dict:
+        """Propose conservative account groupings for keys lacking ``account_id``.
+
+        Keys added before this change (or bulk-imported from ``.env``) carry no
+        grouping. Guessing wrong in *either* direction is costly: merging
+        distinct accounts under-shoots (safe), splitting one account re-creates
+        OG-1 (dangerous). So this is a **proposal for operator confirmation**
+        (spec §6) — it is never applied silently. Keys with an explicit
+        ``account_id`` are listed under it with ``"explicit": True``.
+
+        Returns ``{provider: {proposed_account_id: [{name, preview, explicit}]}}``.
+        """
+        data = self._load()
+        providers = [provider] if provider else list(data.keys())
+        out: dict[str, dict[str, list[dict]]] = {}
+        for p in providers:
+            groups: dict[str, list[dict]] = defaultdict(list)
+            for i, k in enumerate(data.get(p, [])):
+                e = self._normalize_entry(k, p, i)
+                key_val = e.get("key") or ""
+                if not key_val:
+                    continue
+                acct = e.get("account_id") or _guess_account_id(p, e)
+                groups[acct].append(
+                    {
+                        "name": e.get("name"),
+                        "preview": _key_preview(key_val),
+                        "explicit": bool(e.get("account_id")),
+                    }
+                )
+            out[p] = dict(groups)
+        return out
+
+    def list_accounts(self, provider: str = None) -> dict:
+        """Account-grouped overview: member keys + effective account-level budgets.
+
+        The dashboard shows *effective account-level RPM, not raw key count*
+        (spec §4): the account budget is the tightest member-key budget,
+        falling back to the preset default. ``rpd_used`` is the persisted
+        UTC-day counter shared by all keys of the account.
+        """
+        today = _today_utc()
+        now = time.time()
+        accounts: dict[str, dict] = {}
+        for e in self.get_all_entries(provider):
+            p = e.get("provider")
+            acct = self._account_id(p, e)
+            acc = accounts.setdefault(
+                acct,
+                {
+                    "account_id": acct,
+                    "provider": p,
+                    "keys": [],
+                    "key_count": 0,
+                    "quarantined": False,
+                    "auth_failed": [],
+                    "rpd_limit": None,
+                    "rpd_used": 0,
+                    "rpd_day": today,
+                },
+            )
+            acc["keys"].append(
+                {
+                    "name": e.get("name"),
+                    "preview": _key_preview(e.get("key") or ""),
+                    "healthy": e.get("healthy"),
+                    "health_status": e.get("health_status"),
+                    "auth_failed_at": e.get("auth_failed_at"),
+                    "quarantined": bool(e.get("quarantined")),
+                    "rpm_limit": e.get("rpm_limit"),
+                    "tpm_limit": e.get("tpm_limit"),
+                    "rpd_limit": e.get("rpd_limit"),
+                }
+            )
+            acc["key_count"] += 1
+            acc["quarantined"] = acc["quarantined"] or bool(e.get("quarantined"))
+            if e.get("auth_failed_at"):
+                acc["auth_failed"].append(e.get("name"))
+            if e.get("rpd_limit"):
+                acc["rpd_limit"] = e["rpd_limit"] if acc["rpd_limit"] is None else min(acc["rpd_limit"], e["rpd_limit"])
+            if e.get("rpd_day") == today:
+                acc["rpd_used"] = max(acc["rpd_used"], int(e.get("rpd_used") or 0))
+        for acct, acc in accounts.items():
+            rpm, tpm = self._account_budget(acc["provider"], {"account_id": acct})
+            acc["rpm_limit_effective"] = rpm
+            acc["tpm_limit_effective"] = tpm
+            hits = self._account_rpm_hits[acc["provider"]][acct]
+            hits[:] = [t for t in hits if now - t < 60.0]
+            acc["rpm_used"] = len(hits)
+        return {"accounts": list(accounts.values()), "count": len(accounts)}
 
     def add_key(
         self,
@@ -195,9 +359,17 @@ class MultiKeyManager:
         default_model: str = None,
         rpm_limit: int = None,
         tpm_limit: int = None,
+        rpd_limit: int = None,
+        account_id: str = None,
         auto_discover: bool = True,
     ) -> dict:
-        """Add any API key. Works with openai/groq/openrouter/custom/etc."""
+        """Add any API key. Works with openai/groq/openrouter/custom/etc.
+
+        ``account_id`` groups keys that share one provider account/org so the
+        rate budgets apply to the account, not each key (spec §1). When
+        omitted the key joins the conservative ``<provider>:default`` pool —
+        use :meth:`propose_account_groups` before splitting it out.
+        """
         provider = (provider or "custom").lower().strip()
         with self._persist_lock:
             data = self._load()
@@ -231,7 +403,16 @@ class MultiKeyManager:
                 # Records where the budget came from so provider-reported
                 # limits can later refine a preset default without clobbering
                 # a number the user chose deliberately.
-                "rate_limit_source": ("manual" if (rpm_limit is not None or tpm_limit is not None) else "preset"),
+                "rate_limit_source": (
+                    "manual" if (rpm_limit is not None or tpm_limit is not None or rpd_limit is not None) else "preset"
+                ),
+                # Vault economics (spec §1): account grouping + UTC-day budget.
+                "account_id": account_id or None,
+                "rpd_limit": rpd_limit if rpd_limit is not None else preset.get("default_rpd"),
+                "auth_failed_at": None,
+                "quarantined": False,
+                "rpd_day": None,
+                "rpd_used": 0,
             }
             if not key_entry["base_url"] and provider not in ("ollama", "lmstudio"):
                 # custom without base_url is ok if they set later — warn
@@ -286,6 +467,43 @@ class MultiKeyManager:
         self._load_queues()
         return {"success": True, "provider": provider, "remaining": len(data[provider])}
 
+    def re_enable_key(self, provider: str, key_or_name: str, account: bool = False) -> dict:
+        """Clear terminal ``auth_failed`` state and/or an account quarantine.
+
+        Deliberately manual: the operator confirms the credential was fixed
+        (rotated, re-billed) before it re-enters rotation, because a 401/403
+        key auto-retrying every 5 minutes is the ban-risk pattern from OG-2
+        (spec §3). Pass ``account=True`` with the account id to lift a whole
+        quarantine in one call.
+        """
+        matched: list[str] = []
+
+        def _mutate(data: dict) -> None:
+            for k in data.get(provider, []):
+                if not isinstance(k, dict):
+                    continue
+                is_key = self._entry_key(k) == key_or_name or k.get("name") == key_or_name
+                is_account = bool(account) and (k.get("account_id") or f"{provider}:default") == key_or_name
+                if not (is_key or is_account):
+                    continue
+                k.pop("auth_failed_at", None)
+                k["quarantined"] = False
+                k["healthy"] = None
+                k["health_status"] = "reenabled"
+                matched.append(self._entry_key(k))
+
+        self._update(_mutate)
+        if not matched:
+            return {"success": False, "error": f"No key or account '{key_or_name}' found for {provider}"}
+        self._load_queues()
+        for key in matched:
+            self.key_failures[provider].pop(key, None)
+        return {"success": True, "provider": provider, "reenabled": len(matched)}
+
+    def reenable_key(self, provider: str, key_or_name: str, account: bool = False) -> dict:
+        """Alias for :meth:`re_enable_key` (the spelling used in the design note)."""
+        return self.re_enable_key(provider, key_or_name, account=account)
+
     def get_entry(self, provider: str, api_key: str = None) -> dict | None:
         data = self._load()
         keys = data.get(provider, [])
@@ -313,6 +531,62 @@ class MultiKeyManager:
 
     # ---------- selection / rate limits ----------
 
+    def _account_id(self, provider: str, entry: dict | None = None) -> str:
+        """Account an entry belongs to; ``<provider>:default`` when ungrouped.
+
+        Legacy keys without ``account_id`` deliberately share one conservative
+        default account rather than each getting a full budget (spec §6).
+        """
+        return (entry or {}).get("account_id") or f"{provider}:default"
+
+    def _grouped_entries(self, provider: str, entries: list[dict] | None = None) -> dict[str, list[dict]]:
+        """``account_id -> member entries`` for one provider."""
+        grouped: dict[str, list[dict]] = defaultdict(list)
+        for e in entries if entries is not None else self.get_all_entries(provider):
+            grouped[self._account_id(provider, e)].append(e)
+        return dict(grouped)
+
+    def _budget_from_members(self, provider: str, members: list[dict]) -> tuple[int | None, int | None, int | None]:
+        """(rpm, tpm, rpd) budget shared by every key on one account (spec §2).
+
+        Provider quotas are per account/org, so the account budget is the
+        tightest member-key budget, falling back to the preset default.
+        """
+        rpms = [e["rpm_limit"] for e in members if e.get("rpm_limit")]
+        tpms = [e["tpm_limit"] for e in members if e.get("tpm_limit")]
+        rpds = [e["rpd_limit"] for e in members if e.get("rpd_limit")]
+        preset = get_provider(provider)
+        rpm = min(rpms) if rpms else preset.get("default_rpm")
+        tpm = min(tpms) if tpms else preset.get("default_tpm")
+        rpd = min(rpds) if rpds else None
+        return rpm, tpm, rpd
+
+    def _account_budget(self, provider: str, entry: dict) -> tuple[int | None, int | None]:
+        """(rpm, tpm) budget shared by every key on ``entry['account_id']``."""
+        acct = self._account_id(provider, entry)
+        members = self._grouped_entries(provider).get(acct, [])
+        rpm, tpm, _ = self._budget_from_members(provider, members)
+        return rpm, tpm
+
+    @staticmethod
+    def _freshest_remaining_requests(members: list[dict]) -> float | None:
+        """Newest ``x-ratelimit-remaining-requests`` any member key reported.
+
+        The header is account-scoped on every provider that sends it, so one
+        key's response protects its siblings; the freshest report wins, which
+        lets a later success on another key un-skip the account naturally
+        (spec §4).
+        """
+        best_ts, best_rem = -1.0, None
+        for e in members:
+            rem = (e.get("last_rate_limit") or {}).get("remaining_requests")
+            if not isinstance(rem, (int, float)) or isinstance(rem, bool):
+                continue
+            ts = _iso_epoch(e.get("last_rate_limit_at"))
+            if ts >= best_ts:
+                best_ts, best_rem = ts, float(rem)
+        return best_rem
+
     def _under_rpm(self, provider: str, key: str, rpm_limit: int = None) -> bool:
         if not rpm_limit:
             return True
@@ -322,18 +596,113 @@ class MultiKeyManager:
         hits[:] = [t for t in hits if now - t < 60.0]
         return len(hits) < rpm_limit
 
-    def _record_use(self, provider: str, key: str, tokens: int = 0):
+    def _account_under_rpm(self, provider: str, account_id: str, rpm_limit: int = None, now: float = None) -> bool:
+        """Same 60s sliding window as :meth:`_under_rpm`, scoped to an account."""
+        if not rpm_limit:
+            return True
+        now = now if now is not None else time.time()
+        hits = self._account_rpm_hits[provider][account_id]
+        hits[:] = [t for t in hits if now - t < 60.0]
+        return len(hits) < rpm_limit
+
+    def _under_rpd(self, entry: dict, limit: int | None = None) -> bool:
+        """Daily cap check with lazy UTC-midnight rollover (spec §2).
+
+        ``limit`` overrides the entry's own ``rpd_limit``; callers pass the
+        account's tightest member limit so a shared counter cannot overshoot
+        through a sibling with a higher per-entry value.
+        """
+        if limit is None:
+            limit = entry.get("rpd_limit")
+        if not limit:
+            return True
+        if entry.get("rpd_day") != _today_utc():
+            return True  # new UTC day; counter resets on next _record_use
+        return (entry.get("rpd_used") or 0) < limit
+
+    def _record_use(self, provider: str, key: str, tokens: int = 0, account_id: str = None):
         now = time.time()
-        self._rpm_hits[provider][key].append(now)
+        hits = self._rpm_hits[provider][key]
+        hits.append(now)
+        hits[:] = [t for t in hits if now - t < 60.0]
         if tokens:
             self._tpm_hits[provider][key].append((now, tokens))
             self._tpm_hits[provider][key][:] = [(t, n) for t, n in self._tpm_hits[provider][key] if now - t < 60.0]
+        if account_id:
+            acct_hits = self._account_rpm_hits[provider][account_id]
+            acct_hits.append(now)
+            acct_hits[:] = [t for t in acct_hits if now - t < 60.0]
+            if tokens:
+                acct_tpm = self._account_tpm_hits[provider][account_id]
+                acct_tpm.append((now, tokens))
+                acct_tpm[:] = [(t, n) for t, n in acct_tpm if now - t < 60.0]
+
+    def _account_tpm_used(self, provider: str, account_id: str, now: float = None) -> int:
+        now = now if now is not None else time.time()
+        hits = self._account_tpm_hits[provider][account_id]
+        hits[:] = [(t, n) for t, n in hits if now - t < 60.0]
+        return sum(n for _, n in hits)
 
     def _tpm_used(self, provider: str, key: str) -> int:
         now = time.time()
         hits = self._tpm_hits[provider][key]
         hits[:] = [(t, n) for t, n in hits if now - t < 60.0]
         return sum(n for _, n in hits)
+
+    def _can_dispatch(
+        self,
+        provider: str,
+        entry: dict,
+        acct_rpm: int | None = None,
+        acct_tpm: int | None = None,
+        acct_rpd: int | None = None,
+        header_remaining: float | None = None,
+        now: float = None,
+    ) -> bool:
+        """Single selection gate shared by every dispatch path (spec §3/§4).
+
+        Enforces min(per-key-remaining, per-account-remaining, daily-remaining)
+        plus terminal states, and prefers adopted ``x-ratelimit-remaining``
+        header data when deciding.
+        """
+        if entry.get("auth_failed_at") or entry.get("quarantined"):
+            return False
+        now = now if now is not None else time.time()
+        acct = self._account_id(provider, entry)
+        if acct_rpm and not self._account_under_rpm(provider, acct, acct_rpm, now):
+            return False
+        if acct_tpm and self._account_tpm_used(provider, acct, now) >= acct_tpm:
+            return False
+        if not self._under_rpd(entry, acct_rpd):
+            return False
+        if header_remaining is not None and header_remaining <= 1:
+            return False  # provider says this account is done for the window
+        key = entry.get("key") or ""
+        if key and not self._under_rpm(provider, key, entry.get("rpm_limit")):
+            return False
+        if key and entry.get("tpm_limit") and self._tpm_used(provider, key) >= entry["tpm_limit"]:
+            return False
+        return True
+
+    def get_dispatchable_entries(self, provider: str) -> list[dict]:
+        """Entries eligible to dispatch right now.
+
+        Parallel executors bypass :meth:`get_key`, so they must apply the same
+        gates: no terminal auth failure, no account quarantine, and none of the
+        per-key / per-account / daily / header-reported budgets exhausted.
+        """
+        entries = self.get_all_entries(provider)
+        groups = self._grouped_entries(provider, entries)
+        budgets = {acct: self._budget_from_members(provider, members) for acct, members in groups.items()}
+        header_rem = {acct: self._freshest_remaining_requests(members) for acct, members in groups.items()}
+        now = time.time()
+        out = []
+        for e in entries:
+            acct = self._account_id(provider, e)
+            acct_rpm, acct_tpm, acct_rpd = budgets.get(acct, (None, None, None))
+            if self._can_dispatch(provider, e, acct_rpm, acct_tpm, acct_rpd, header_rem.get(acct), now):
+                out.append(e)
+        return out
 
     def get_key(self, provider: str = "groq") -> str | None:
         """Next available key via round-robin, skip failed / rate-limited."""
@@ -357,28 +726,45 @@ class MultiKeyManager:
 
         queue = self.key_queues[provider]
         attempts = len(queue)
-        entry_meta = {self._entry_key(e): e for e in self.get_all_entries(provider)}
+        entries = self.get_all_entries(provider)
+        entry_meta = {self._entry_key(e): e for e in entries}
+        groups = self._grouped_entries(provider, entries)
+        budgets = {acct: self._budget_from_members(provider, members) for acct, members in groups.items()}
+        header_rem = {acct: self._freshest_remaining_requests(members) for acct, members in groups.items()}
+        now = time.time()
 
         with self._lock:
             for _ in range(max(attempts, 1)):
                 if not queue:
                     break
                 key = queue[0]
+                meta = entry_meta.get(key) or {}
+                # Terminal states — auth_failed / account quarantine. No
+                # 5-minute resurrection: only re_enable_key() brings these back
+                # (spec §3), so a deleted/banned credential stops being probed.
+                if meta.get("auth_failed_at") or meta.get("quarantined"):
+                    queue.rotate(-1)
+                    continue
                 fails = self.key_failures[provider].get(key, 0)
                 if fails >= 3:
                     last_used = self.key_last_used[provider].get(key, datetime.min)
                     if datetime.now() - last_used < timedelta(minutes=5):
                         queue.rotate(-1)
                         continue
+                    # Transient failures keep the existing 5-minute reset.
                     self.key_failures[provider][key] = 0
 
-                meta = entry_meta.get(key) or {}
-                rpm = meta.get("rpm_limit")
-                if not self._under_rpm(provider, key, rpm):
-                    queue.rotate(-1)
-                    continue
-                tpm_limit = meta.get("tpm_limit")
-                if tpm_limit and self._tpm_used(provider, key) >= tpm_limit:
+                acct = self._account_id(provider, meta)
+                acct_rpm, acct_tpm, acct_rpd = budgets.get(acct, (None, None, None))
+                if not self._can_dispatch(
+                    provider,
+                    meta,
+                    acct_rpm,
+                    acct_tpm,
+                    acct_rpd,
+                    header_rem.get(acct),
+                    now,
+                ):
                     queue.rotate(-1)
                     continue
 
@@ -388,7 +774,10 @@ class MultiKeyManager:
                     return ""
                 return key
 
-        return queue[0] if queue and not str(queue[0]).startswith("noauth:") else ("" if queue else None)
+        # Nothing may dispatch: every candidate is terminal, quarantined or
+        # budget-exhausted. Callers fall back to another provider instead of
+        # hammering an account that has no quota left.
+        return None
 
     def get_key_bundle(self, provider: str) -> dict | None:
         """Return key + base_url + default_model for LLM calls."""
@@ -507,9 +896,18 @@ class MultiKeyManager:
             return
 
         adopted = False
-        if requests_header_window(provider) == "minute" and rate_limit.get("limit_requests"):
+        window = requests_header_window(provider)
+        if window == "minute" and rate_limit.get("limit_requests"):
             try:
                 entry["rpm_limit"] = int(rate_limit["limit_requests"])
+                adopted = True
+            except (TypeError, ValueError):
+                pass
+        elif window == "day" and rate_limit.get("limit_requests"):
+            # Groq reuses the header name for a *daily* quota (spec §4.1): the
+            # number is exactly the RPD cap modelled here, never an RPM budget.
+            try:
+                entry["rpd_limit"] = int(rate_limit["limit_requests"])
                 adopted = True
             except (TypeError, ValueError):
                 pass
@@ -527,15 +925,22 @@ class MultiKeyManager:
             return
         if provider in self.key_failures and key in self.key_failures[provider]:
             self.key_failures[provider][key] = max(0, self.key_failures[provider][key] - 1)
-        self._record_use(provider, key, tokens=tokens or 0)
+        known = self.get_entry(provider, key)
+        account_id = self._account_id(provider, known)
+        self._record_use(provider, key, tokens=tokens or 0, account_id=account_id)
 
         def _mutate(data: dict) -> None:
+            today = _today_utc()
+            acct = account_id
+            found = False
             for k in data.get(provider, []):
                 if isinstance(k, dict) and k.get("key") == key:
+                    found = True
                     k["usage_count"] = k.get("usage_count", 0) + 1
                     k["last_used"] = datetime.now().isoformat()
                     k["healthy"] = True
                     k["health_status"] = "ok"
+                    acct = k.get("account_id") or f"{provider}:default"
                     if latency_ms is not None:
                         times = k.get("response_times") or []
                         times.append(latency_ms / 1000.0)
@@ -544,7 +949,23 @@ class MultiKeyManager:
                         k["last_response_time"] = latency_ms / 1000.0
                     if rate_limit:
                         k["last_rate_limit"] = rate_limit
+                        # Timestamp lets dispatch treat the freshest account-wide
+                        # header report as authoritative (spec §4).
+                        k["last_rate_limit_at"] = datetime.now().isoformat()
                         self._adopt_reported_limits(provider, k, rate_limit)
+            # Account-shared daily counter (spec §2): increment *every* entry of
+            # the account inside this one transaction so siblings read the same
+            # rpd_used and the atomic save covers the whole rollover.
+            if found:
+                for k in data.get(provider, []):
+                    if not isinstance(k, dict):
+                        continue
+                    if (k.get("account_id") or f"{provider}:default") != acct:
+                        continue
+                    if k.get("rpd_day") != today:
+                        k["rpd_day"] = today
+                        k["rpd_used"] = 0
+                    k["rpd_used"] = int(k.get("rpd_used") or 0) + 1
 
         try:
             self._update(_mutate)
@@ -559,6 +980,7 @@ class MultiKeyManager:
         logger.error(
             f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), failures: {self.key_failures[provider].get(key, 0)}"
         )
+        quarantined: list[str] = []
 
         def _mutate(data: dict) -> None:
             for k in data.get(provider, []):
@@ -567,17 +989,48 @@ class MultiKeyManager:
                     k["last_failed"] = datetime.now().isoformat()
                     if rate_limit:
                         k["last_rate_limit"] = rate_limit
+                        k["last_rate_limit_at"] = datetime.now().isoformat()
                     err_l = (error or "").lower()
                     if "429" in err_l or "rate" in err_l:
                         k["health_status"] = "rate_limited"
                     elif "401" in err_l or "403" in err_l or "auth" in err_l:
                         k["healthy"] = False
                         k["health_status"] = "auth_failed"
+                        # Terminal: never auto-returns to rotation, because
+                        # re-probing a dead credential from every worker is the
+                        # ban-risk pattern from OG-2 (spec §3).
+                        k["auth_failed_at"] = k.get("auth_failed_at") or datetime.now().isoformat()
+                        acct = k.get("account_id") or f"{provider}:default"
+                        failed = {
+                            e.get("key") or e.get("token") or ""
+                            for e in data.get(provider, [])
+                            if isinstance(e, dict)
+                            and e.get("auth_failed_at")
+                            and (e.get("account_id") or f"{provider}:default") == acct
+                        }
+                        if len(failed) >= self.ACCOUNT_QUARANTINE_THRESHOLD:
+                            # The account is presumed banned/dead: parking one
+                            # key while its siblings hammer the same account is
+                            # exactly the pattern we must stop. (Bus `alert`
+                            # event lands with roadmap step 0b; log until then.)
+                            for e in data.get(provider, []):
+                                if not isinstance(e, dict):
+                                    continue
+                                if (e.get("account_id") or f"{provider}:default") == acct:
+                                    e["quarantined"] = True
+                            if acct not in quarantined:
+                                quarantined.append(acct)
 
         try:
             self._update(_mutate)
         except Exception:
             pass
+        for acct in quarantined:
+            logger.error(
+                f"[MultiKey] Account {acct} quarantined: "
+                f"{self.ACCOUNT_QUARANTINE_THRESHOLD}+ keys terminally auth-failed — "
+                f"all its keys parked until re_enable_key() clears it"
+            )
 
     # ---------- health + models ----------
 
@@ -603,6 +1056,7 @@ class MultiKeyManager:
                             k["default_model"] = ids[0]
                         if result.get("rate_limit"):
                             k["last_rate_limit"] = result["rate_limit"]
+                            k["last_rate_limit_at"] = datetime.now().isoformat()
 
             try:
                 self._update(_mutate)
@@ -646,6 +1100,7 @@ class MultiKeyManager:
                     k["last_error"] = str(result["error"])[:300]
                 if result.get("rate_limit"):
                     k["last_rate_limit"] = result["rate_limit"]
+                    k["last_rate_limit_at"] = datetime.now().isoformat()
                 sample = (result.get("models_probe") or {}).get("sample") or []
                 if sample:
                     # merge into models list
@@ -697,8 +1152,9 @@ class MultiKeyManager:
         return results
 
     def rate_status(self, provider: str = None) -> dict:
-        """Snapshot of RPM/TPM usage vs limits for all keys."""
+        """Snapshot of RPM/TPM/RPD usage vs limits, per key and per account."""
         entries = self.get_all_entries(provider)
+        today = _today_utc()
         out = []
         for e in entries:
             p = e.get("provider")
@@ -709,7 +1165,7 @@ class MultiKeyManager:
                 {
                     "provider": p,
                     "name": e.get("name"),
-                    "preview": f"{key[:6]}...{key[-4:]}" if len(key) > 10 else "****",
+                    "preview": _key_preview(key),
                     "rpm_used": rpm_used,
                     "rpm_limit": e.get("rpm_limit"),
                     "tpm_used": tpm_used,
@@ -721,15 +1177,26 @@ class MultiKeyManager:
                     "models_count": len(e.get("models") or []),
                     "default_model": e.get("default_model"),
                     "failures": self.key_failures.get(p, {}).get(key, 0),
+                    # Vault economics (spec §1/§2)
+                    "account_id": e.get("account_id"),
+                    "rpd_limit": e.get("rpd_limit"),
+                    "rpd_used": int(e.get("rpd_used") or 0) if e.get("rpd_day") == today else 0,
+                    "auth_failed_at": e.get("auth_failed_at"),
+                    "quarantined": bool(e.get("quarantined")),
                 }
             )
-        return {"keys": out, "count": len(out), "providers_known": [p["id"] for p in list_providers()]}
+        return {
+            "keys": out,
+            "count": len(out),
+            "accounts": self.list_accounts(provider)["accounts"],
+            "providers_known": [p["id"] for p in list_providers()],
+        }
 
     # ---------- parallel execution ----------
 
     def execute_parallel_with_keys(self, provider: str, tasks: list[dict]) -> list[dict]:
         """Execute tasks in parallel using different API keys (thread pool)."""
-        entries = self.get_all_entries(provider)
+        entries = self.get_dispatchable_entries(provider)
         if not entries:
             bundle = self.get_key_bundle(provider)
             if not bundle:
@@ -795,7 +1262,7 @@ class MultiKeyManager:
         from .aio import gather_limit
         from .llm import FreeLLM
 
-        entries = self.get_all_entries(provider)
+        entries = self.get_dispatchable_entries(provider)
         if not entries:
             bundle = self.get_key_bundle(provider)
             if not bundle:

@@ -25,8 +25,10 @@ runtimes) intentionally leave these unset, which means "unmetered" to
 ``MultiKeyManager`` — inventing a number there would throttle for no reason.
 
 Anything here is only a default. Precedence is:
-``explicit --rpm/--tpm`` > ``limits reported in provider response headers`` >
-``these presets``.
+``explicit --rpm/--tpm/--rpd`` > ``limits reported in provider response
+headers`` > ``these presets``. ``default_rpd`` seeds the **account-shared**
+requests-per-day budget enforced by ``MultiKeyManager`` (persisted, UTC-day
+anchored); providers that publish no daily cap leave it unset.
 """
 
 from __future__ import annotations
@@ -113,11 +115,13 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
             "X-Title": "Hermus Agent Free",
         },
         "notes": "Hundreds of models; ':free' variants capped at 20 RPM (50/day, 1000/day after $10 topped up)",
-        # OpenRouter caps :free model variants at 20 RPM. The tighter limit is
-        # the daily one (50 RPD, or 1000 RPD once $10 has ever been purchased),
-        # which is not a per-minute budget and so cannot be modelled here.
+        # OpenRouter caps :free model variants at 20 RPM and 50 RPD (1000 RPD
+        # once $10 has ever been purchased). The RPD floor is seeded here so a
+        # :free key cannot burn its whole day in the first minute; a reported
+        # header or an explicit --rpd lifts it (spec VAULT_ACCOUNTS §1).
         # Paid models have no platform-level RPM cap.
         "default_rpm": 20,
+        "default_rpd": 50,
     },
     "together": {
         "name": "Together AI",
@@ -197,8 +201,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "env_key": "CODESTRAL_API_KEY",
         "notes": "Free Codestral endpoint: 30 RPM / 2000 requests per day",
         # The codestral.mistral.ai endpoint has its own quota, distinct from
-        # api.mistral.ai: 30 RPM and 2000 RPD. No TPM is published.
+        # api.mistral.ai: 30 RPM and 2000 RPD. No TPM is published. The RPD cap
+        # is enforced by MultiKeyManager's persisted UTC-day counter (it is an
+        # account quota, so every key on the account shares it).
         "default_rpm": 30,
+        "default_rpd": 2000,
     },
     "gemini": {
         "name": "Google Gemini (OpenAI-compatible)",
@@ -413,6 +420,7 @@ def list_providers() -> list[dict[str, Any]]:
                 # get before it is added. None means "unmetered by default".
                 "default_rpm": p.get("default_rpm"),
                 "default_tpm": p.get("default_tpm"),
+                "default_rpd": p.get("default_rpd"),
                 "retired": p.get("retired", False),
             }
         )
