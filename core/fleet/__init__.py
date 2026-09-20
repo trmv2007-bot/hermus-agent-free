@@ -11,9 +11,13 @@ Canonical owners, one per concern (consolidation rule, spec §2):
   validated state machine, claim leases, stall→replan, verify-before-review,
   conflict-surfacing synthesis, chatter budgets with hard stops, HITL gates,
   rebuild-from-bus (a dead coordinator never orphans a mission).
-* ``core.fleet.registry`` (roadmap step 1) — the **Fleet Registry** (§5):
-  durable spawn/list/update/dismiss/checkpoint, boot = snapshot + replay.
-* ``core.fleet.migrate`` (roadmap step 7) — explicit N→N+1 migrations (§13).
+* :mod:`core.fleet.registry` — the **Fleet Registry** (§3/§5, roadmap step 1):
+  the one durable roster of :class:`LiveAgent` — validated state machine,
+  WAL-first spawn, boot = snapshot + replay, real ``FreeLLM`` task path,
+  sleep-as-teardown, LRU cap, compaction. The legacy registries
+  (``core/agent_manager.py``, ``core/agents/*``) route onto it via
+  :mod:`core.fleet.facade` and are retired in cleanup (step 7).
+* :mod:`core.fleet.migrate` (roadmap step 7) — explicit N→N+1 migrations (§13).
 
 Import from this package rather than the module paths so future moves stay
 internal, e.g. ``from core.fleet import FleetBus, STATE_CHANGED``.
@@ -79,6 +83,30 @@ from .missions import (
     MissionManager,
     Subtask,
 )
+from .registry import (
+    AGENT_STATES,
+    AGENT_TRANSITIONS,
+    AgentStats,
+    BLOCKED,
+    COMPACT_KEEP_TURNS,
+    DESTROYED,
+    ERROR,
+    IDLE,
+    IllegalTransition,
+    KIND_AGENT_SPAWNED,
+    KIND_AGENT_TASK_CANCELLED,
+    KIND_AGENT_UPDATED,
+    LiveAgent,
+    PAUSED,
+    RegistryError,
+    SLEEPING,
+    SPAWNING,
+    THINKING,
+    WORKING as AGENT_WORKING,
+    FleetRegistry,
+    chat_via_freellm,
+)
+from .facade import AgentManagerFacade, fleet_facade
 
 __all__ = [
     "ALERT",
@@ -135,4 +163,32 @@ __all__ = [
     "MissionError",
     "MissionManager",
     "Subtask",
+    "AGENT_STATES",
+    "AGENT_TRANSITIONS",
+    "AgentStats",
+    "BLOCKED",
+    "COMPACT_KEEP_TURNS",
+    "DESTROYED",
+    "ERROR",
+    "IDLE",
+    "IllegalTransition",
+    "KIND_AGENT_SPAWNED",
+    "KIND_AGENT_TASK_CANCELLED",
+    "KIND_AGENT_UPDATED",
+    "LiveAgent",
+    "PAUSED",
+    "RegistryError",
+    "SLEEPING",
+    "SPAWNING",
+    "THINKING",
+    "FleetRegistry",
+    "chat_via_freellm",
+    "AgentStats",
+    "COMPACT_KEEP_TURNS",
+    "KIND_AGENT_SPAWNED",
+    "KIND_AGENT_TASK_CANCELLED",
+    "KIND_AGENT_UPDATED",
+    "AGENT_WORKING",
+    "AgentManagerFacade",
+    "fleet_facade",
 ]
