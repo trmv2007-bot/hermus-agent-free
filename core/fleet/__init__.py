@@ -7,6 +7,10 @@ Canonical owners, one per concern (consolidation rule, spec §2):
   rotation/retention. The legacy ``core/harness/bus.py`` and
   ``core/agents/messaging.py`` are merged onto this contract in roadmap step 3
   (§10) — never re-implemented next to it.
+* :mod:`core.fleet.missions` — the durable **Mission object** (§7, step 0c):
+  validated state machine, claim leases, stall→replan, verify-before-review,
+  conflict-surfacing synthesis, chatter budgets with hard stops, HITL gates,
+  rebuild-from-bus (a dead coordinator never orphans a mission).
 * ``core.fleet.registry`` (roadmap step 1) — the **Fleet Registry** (§5):
   durable spawn/list/update/dismiss/checkpoint, boot = snapshot + replay.
 * ``core.fleet.migrate`` (roadmap step 7) — explicit N→N+1 migrations (§13).
@@ -52,6 +56,29 @@ from .bus import (
     is_addressed_to,
     reset_bus,
 )
+from .missions import (
+    BUDGET_WARN_RATIO,
+    CLAIM_TIMEOUT_S,
+    DONE,
+    FAILED,
+    HITL_GATES,
+    LEASE_SECONDS,
+    MAX_REPLANS,
+    MAX_REVIEW_RETRIES,
+    PER_AGENT_BUDGET_SHARE,
+    PROPOSED,
+    REVIEWING,
+    STALL_LIMIT,
+    STATES,
+    SUSPENDED,
+    SYNTHESIZING,
+    TRANSITIONS,
+    WORKING,
+    Mission,
+    MissionError,
+    MissionManager,
+    Subtask,
+)
 
 __all__ = [
     "ALERT",
@@ -87,4 +114,25 @@ __all__ = [
     "get_bus",
     "is_addressed_to",
     "reset_bus",
+    "BUDGET_WARN_RATIO",
+    "CLAIM_TIMEOUT_S",
+    "DONE",
+    "FAILED",
+    "HITL_GATES",
+    "LEASE_SECONDS",
+    "MAX_REPLANS",
+    "MAX_REVIEW_RETRIES",
+    "PER_AGENT_BUDGET_SHARE",
+    "PROPOSED",
+    "REVIEWING",
+    "STALL_LIMIT",
+    "STATES",
+    "SUSPENDED",
+    "SYNTHESIZING",
+    "TRANSITIONS",
+    "WORKING",
+    "Mission",
+    "MissionError",
+    "MissionManager",
+    "Subtask",
 ]
