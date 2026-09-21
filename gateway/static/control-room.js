@@ -295,6 +295,7 @@ function refreshTab(name){
   else if (name === "safety") refreshSafety();
   else if (name === "systems") { if (window.HermusConsole) window.HermusConsole.refresh(); }
   else if (name === "presence") refreshPresence();
+  else if (name === "agents") refreshAgents();
 }
 
 // ---------- PRESENCE / CONTINUITY ----------
@@ -1162,6 +1163,202 @@ function initVoice(){
   if (arm) arm.addEventListener("click", armHandsFree);
   refreshVoiceStatus();
 }
+
+// ---------- FLEET ROSTER ----------
+async function refreshAgents() {
+  try {
+    const { j } = await getJSON("/api/fleet/agents");
+    const agents = j.agents || [];
+    const totalAgents = agents.length;
+    const live = agents.filter((a) => ["idle", "working", "thinking", "blocked", "paused"].includes(a.state));
+    const done = agents.reduce((s, a) => s + ((a.stats && a.stats.tasks_done) || 0), 0);
+    const toks = agents.reduce((s, a) => s + ((a.stats && a.stats.tokens) || 0), 0);
+    const strip = $("#fleetSummary");
+    if (strip) {
+      strip.innerHTML = kpi(live.length, "live agents") + kpi(totalAgents, "total agents") + kpi(done, "tasks done") + kpi(toks, "tokens");
+    }
+    const grid = $("#agentRosterGrid");
+    if (!grid) return;
+    if (!agents.length) {
+      grid.innerHTML = "";
+      const empty = $("#rosterEmpty");
+      if (empty) empty.hidden = false;
+      return;
+    }
+    const empty = $("#rosterEmpty");
+    if (empty) empty.hidden = true;
+    const search = ($("#rosterSearch") && $("#rosterSearch").value || "").toLowerCase();
+    const stateF = ($("#rosterStateFilter") && $("#rosterStateFilter").value) || "";
+    const rows = agents.filter((a) => {
+      if (search && (a.name || "").toLowerCase().indexOf(search) < 0) return false;
+      if (stateF && a.state !== stateF) return false;
+      return true;
+    });
+    const cls = { idle: "ok", working: "working", thinking: "thinking", blocked: "blocked", paused: "paused", sleeping: "sleeping", error: "err", destroyed: "err" };
+    grid.innerHTML = rows.map((a) => {
+      const st = a.stats || {};
+      const last = a.last_activity ? new Date(a.last_activity).toLocaleString() : "\u2014";
+      return "<article class=\"agent-card glass\" data-agent-id=\"" + esc(a.id || a.agent_id) + "\" role=\"listitem\">"
+        + "<header class=\"agent-header\"><span class=\"agent-name\">" + esc(a.name)
+        + "</span><span class=\"state-pill " + (cls[a.state] || "") + "\">" + esc(_fleetState(a.state)) + "</span></header>"
+        + "<div class=\"agent-meta\">"
+        + "<div class=\"agent-meta-row\"><span class=\"label\">Model</span><span class=\"value\">" + esc(a.provider) + " / " + esc(a.model) + "</span></div>"
+        + "<div class=\"agent-meta-row\"><span class=\"label\">Key</span><span class=\"value\">" + esc(a.key_name || "auto") + "</span></div>"
+        + "<div class=\"agent-meta-row\"><span class=\"label\">Skills</span><span class=\"value\">" + esc((a.skills || []).join(", ")) + "</span></div>"
+        + "<div class=\"agent-meta-row\"><span class=\"label\">Last Active</span><span class=\"value\">" + esc(last) + "</span></div>"
+        + "</div>"
+        + "<div class=\"agent-stats\">"
+        + "<span class=\"stat\"><span class=\"v\">" + (st.tasks_done || 0) + "</span><span class=\"l\">done</span></span>"
+        + "<span class=\"stat\"><span class=\"v\">" + (st.tasks_failed || 0) + "</span><span class=\"l\">failed</span></span>"
+        + "<span class=\"stat\"><span class=\"v\">" + (st.tokens || 0) + "</span><span class=\"l\">tokens</span></span>"
+        + "</div>"
+        + fleetAgentActions(a) + "</article>";
+    }).join("");
+    grid.querySelectorAll("button[data-run-agent]").forEach((b) => b.addEventListener("click", () => runAgentTask(b.dataset.runAgent)));
+    grid.querySelectorAll("button[data-pause-agent]").forEach((b) => b.addEventListener("click", () => pauseAgent(b.dataset.pauseAgent)));
+    grid.querySelectorAll("button[data-resume-agent]").forEach((b) => b.addEventListener("click", () => resumeAgent(b.dataset.resumeAgent)));
+    grid.querySelectorAll("button[data-cancel-agent]").forEach((b) => b.addEventListener("click", () => cancelAgentTask(b.dataset.cancelAgent)));
+    grid.querySelectorAll("button[data-dismiss-agent]").forEach((b) => b.addEventListener("click", () => dismissAgent(b.dataset.dismissAgent)));
+  } catch (e) {
+    const grid = $("#agentRosterGrid");
+    if (grid) grid.innerHTML = stateHtml({ error: (e.envelope || { message: e.message }) }, { label: "agents", onRetryId: "agents" });
+  }
+}
+function _fleetState(s) {
+  const labels = { idle: "idle", working: "working", thinking: "thinking", blocked: "blocked", paused: "paused", sleeping: "sleeping", error: "error", destroyed: "destroyed", spawning: "spawning" };
+  return labels[s] || (s || "?");
+}
+function fleetAgentActions(a) {
+  const id = esc(a.id || a.agent_id);
+  let btns = "";
+  if (a.state === "working" || a.state === "thinking") {
+    btns = "<button class=\"btn ghost\" data-pause-agent=\"" + id + "\" title=\"Pause\">&#9208;</button>"
+      + "<button class=\"btn ghost\" data-cancel-agent=\"" + id + "\" title=\"Cancel Task\">&#9209;</button>";
+  } else if (a.state === "paused") {
+    btns = "<button class=\"btn primary\" data-resume-agent=\"" + id + "\" title=\"Resume\">&#9654; Resume</button>";
+  } else if (a.state !== "destroyed") {
+    btns = "<button class=\"btn primary\" data-run-agent=\"" + id + "\" title=\"Run Task\">&#9654; Task</button>"
+      + "<button class=\"btn ghost\" data-pause-agent=\"" + id + "\" title=\"Pause\">&#9208;</button>";
+  }
+  if (a.state !== "destroyed") {
+    btns += "<button class=\"btn ghost danger\" data-dismiss-agent=\"" + id + "\" title=\"Dismiss\">&#128465;</button>";
+  }
+  return "<div class=\"agent-actions\">" + btns + "</div>";
+}
+RETRY_ACTIONS.agents = refreshAgents;
+
+// ---------- AGENT ACTIONS ----------
+async function runAgentTask(agentId) {
+  const task = prompt("Enter task for agent:");
+  if (!task) return;
+  try {
+    await fetch(`/api/fleet/agents/${agentId}/task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task })
+    }).then(r => r.json()).then(d => {
+      toast(`Task assigned to agent ${d.agent_id}: ${d.state}`, d.ok ? "success" : "error");
+      refreshAgents();
+    });
+  } catch(e) {
+    toast("Failed to run task: " + e.message, "error");
+  }
+}
+
+async function pauseAgent(agentId) {
+  try {
+    await fetch(`/api/fleet/agents/${agentId}/pause`, { method: "POST" })
+      .then(r => r.json()).then(d => {
+        toast(`Agent ${agentId} paused`, d.ok ? "success" : "error");
+        refreshAgents();
+      });
+  } catch(e) {
+    toast("Failed to pause agent: " + e.message, "error");
+  }
+}
+
+async function resumeAgent(agentId) {
+  try {
+    await fetch(`/api/fleet/agents/${agentId}/resume`, { method: "POST" })
+      .then(r => r.json()).then(d => {
+        toast(`Agent ${agentId} resumed`, d.ok ? "success" : "error");
+        refreshAgents();
+      });
+  } catch(e) {
+    toast("Failed to resume agent: " + e.message, "error");
+  }
+}
+
+async function cancelAgentTask(agentId) {
+  try {
+    await fetch(`/api/fleet/agents/${agentId}/task`, { method: "DELETE" })
+      .then(r => r.json()).then(d => {
+        toast(`Task cancelled for agent ${agentId}`, d.ok ? "success" : "error");
+        refreshAgents();
+      });
+  } catch(e) {
+    toast("Failed to cancel task: " + e.message, "error");
+  }
+}
+
+async function dismissAgent(agentId) {
+  const confirmed = confirm("Dismiss agent? This will permanently delete the agent and its memory.");
+  if (!confirmed) return;
+  try {
+    await fetch(`/api/fleet/agents/${agentId}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) })
+      .then(r => r.json()).then(d => {
+        toast(`Agent dismissed`, d.ok ? "success" : "error");
+        refreshAgents();
+      });
+  } catch(e) {
+    toast("Failed to dismiss agent: " + e.message, "error");
+  }
+}
+
+// Broadcast to all agents
+async function broadcastToAgents() {
+  const message = prompt("Broadcast message to all agents:");
+  if (!message) return;
+  try {
+    await fetch("/api/fleet/broadcast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: message })
+    }).then(r => r.json()).then(d => {
+      toast("Broadcast sent to all agents", "success");
+    });
+  } catch(e) {
+    toast("Failed to broadcast: " + e.message, "error");
+  }
+}
+
+// Orchestrate a multi-agent goal
+async function orchestrateAgents() {
+  const goal = prompt("Enter goal for multi-agent orchestration:");
+  if (!goal) return;
+  try {
+    await fetch("/api/fleet/orchestrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal })
+    }).then(r => r.json()).then(d => {
+      toast("Orchestration started", "success");
+      refreshAgents();
+    });
+  } catch(e) {
+    toast("Failed to orchestrate: " + e.message, "error");
+  }
+}
+
+// Broadcast button handler
+function broadcastToAll() {
+  broadcastToAgents();
+}
+
+// Orchestrate button handler
+function orchestrate() {
+  orchestrateAgents();
+}
 initVoice();
 
 async function boot(){
@@ -1169,9 +1366,11 @@ async function boot(){
   await refreshPresence();
   await refreshJobs();
   try { await refreshMissions(); } catch(e){}
+  await refreshAgents();
   refreshTelemetry(true);
   openTmStream();
 }
 boot();
-setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
+setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshAgents(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
 RETRY_ACTIONS.overview = refreshOverview;
+RETRY_ACTIONS.agents = refreshAgents;

@@ -260,14 +260,42 @@ class LiveAgent:
 # --------------------------------------------------------------------------- #
 
 
-def chat_via_freellm(agent: LiveAgent, task: str, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def chat_via_freellm(
+    agent: LiveAgent,
+    task: str,
+    messages: list[dict[str, Any]] | None = None,
+    *,
+    chat_fn: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Default ``assign`` work path: ``core.llm.FreeLLM`` with a Vault-resolved key.
 
     The registry is constructed with ``chat_fn=None`` and falls back to this.
     Imports are lazy so importing this module never touches provider config.
+
+    Signature (expanded for roadmap step 2 — vault wiring):
+
+        chat_fn(messages) -> {"content": str, "tokens": int,
+                              "tool_calls"?: list[dict], "error"?: str}
+
+    On success the return carries ``content`` + ``tokens`` (real TPM from the
+    provider usage response when available, else an estimate). When the provider
+    signals it cannot honor a tool-capable request (e.g. ``supports_tools: False``
+    preset), the function returns ``{"error": str, "content": fallback}`` so the
+    caller can surface the limitation rather than silently dropping tools.
+
+    Key handling (roadmap step 2 — never store raw keys beyond the call):
+
+    * :meth:`MultiKeyManager.get_key_bundle(provider)` resolves
+      ``{key, base_url, model}`` from the Vault.
+    * The resolved key preview (first 6 chars) is logged at INFO for
+      observability — the full key is never logged, never persisted in the bus,
+      and never returned to callers.
+    * If the bundle is missing the function falls back to FreeLLM auto-detection
+      (it will raise if no provider is usable — no silent mock).
     """
     from core.llm import FreeLLM
     from core.multi_key import multi_key_manager
+    from core.providers import get_provider
 
     if messages is None:
         messages = [
@@ -275,22 +303,93 @@ def chat_via_freellm(agent: LiveAgent, task: str, messages: list[dict[str, Any]]
             {"role": "user", "content": task},
         ]
     wire = [{"role": turn.get("role") or "user", "content": turn.get("content") or ""} for turn in messages]
+
+    # Resolve a key bundle from the Vault for this agent's provider.
+    provider = (agent.provider or "").lower() or "groq"
+    bundle: dict[str, Any] = {}
+    key_preview = "(no-key)"
     try:
-        bundle = multi_key_manager.get_key_bundle(agent.provider) or {}
-    except Exception as exc:  # Vault down / no keys — fail loudly, no silent mock
-        raise RegistryError(f"no usable key for provider {agent.provider!r}: {exc}") from exc
+        bundle = multi_key_manager.get_key_bundle(provider) or {}
+    except Exception as exc:
+        # Vault down / no keys — fail loudly, no silent mock. Let the caller
+        # (assign) turn this into a RegistryError.
+        raise RegistryError(f"no usable key for provider {provider!r}: {exc}") from exc
+
+    if bundle.get("key"):
+        key_preview = _key_preview(bundle["key"])
+    logger.info("[FleetRegistry] chat_via_freellm: provider=%s key=%s model=%s",
+                provider, key_preview, bundle.get("model") or agent.model or "(agent model)")
+
+    # If we have a bundle use it directly; otherwise let FreeLLM auto-detect
+    # (it reads .env / stored keys itself and raises when nothing is usable).
+    api_key = bundle.get("key") or None
+    base_url = bundle.get("base_url") or None
+    model = bundle.get("model") or agent.model or None
+
+    # Check whether the resolved provider can accept tool calls. When the preset
+    # says supports_tools is False we return an error envelope early so the agent
+    # can tell the user rather than silently dropping tools.
+    tools_requested = any(turn.get("tool_calls") for turn in messages if isinstance(turn.get("tool_calls"), list))
+    if tools_requested and api_key:
+        try:
+            preset = get_provider(provider)
+            if preset.get("supports_tools") is False:
+                fallback = (agent.persona or "I am a helpful fleet agent.") + \
+                    f" (note: provider {provider!r} does not support tool calls — requested tools were ignored)"
+                return {
+                    "content": fallback,
+                    "tokens": 0,
+                    "error": f"provider {provider!r} does not support tool calls",
+                }
+        except Exception:
+            pass  # cannot resolve preset — proceed and let the provider reject
+
     llm = FreeLLM(
-        model=agent.model or None,
-        api_key=bundle.get("key") or None,
-        base_url=bundle.get("base_url") or None,
-        provider=(agent.provider or "").lower() or None,
+        model=model or None,
+        api_key=api_key or None,
+        base_url=base_url or None,
+        provider=provider or None,
     )
     response = llm.chat(wire)
     usage = getattr(response, "usage", None) or {}
-    return {
+
+    # Tokens: prefer real TPM from the provider usage response; fall back to an
+    # estimate when the provider does not report usage (some free tiers do not).
+    tpm = int(usage.get("total_tokens") or 0)
+    if tpm == 0:
+        from core.token_counter import token_counter
+        tpm = token_counter.count_messages(wire)
+
+    result: dict[str, Any] = {
         "content": getattr(response, "content", "") or "",
-        "tokens": int(usage.get("total_tokens") or 0),
+        "tokens": tpm,
     }
+
+    # Tool calls: surface them when the provider emitted any.
+    tool_calls = getattr(response, "tool_calls", None)
+    if tool_calls:
+        result["tool_calls"] = list(tool_calls)
+
+    # Provider-level error signalling (e.g. auth failure, rate limit) — FreeLLM
+    # already puts error text into content in many cases; when it also sets an
+    # explicit error attribute we propagate it.
+    if getattr(response, "error", None):
+        result["error"] = str(response.error)
+
+    return result
+
+
+DEFAULT_CHAT_FN = chat_via_freellm
+
+
+def _key_preview(key_val: str) -> str:
+    """Redacted key preview for logs only — never the full key.
+
+    Mirrors :func:`core.multi_key._key_preview` so log output is consistent
+    across the Vault and the fleet surfaces.
+    """
+    from core.multi_key import _key_preview as _real_preview
+    return _real_preview(key_val)
 
 
 # --------------------------------------------------------------------------- #
@@ -318,14 +417,29 @@ class FleetRegistry:
         ``chat_fn(messages) -> {"content": str, "tokens": int}`` — injected work
         callable. ``None`` (production) uses :func:`chat_via_freellm`. Tests must
         inject a stub.
+
+        The default at module level is :const:`DEFAULT_CHAT_FN` (a reference to
+        :func:`chat_via_freellm` wired through the Vault). When ``chat_fn=None``
+        here we store that default so the registry can reach real providers.
+
+        Boot warm-up (roadmap step 2): on first registry access the registry
+        lazily runs :func:`core.free_keys.discover_and_provision_free_models` to
+        expand the free-tier pool. This is gated by ``_free_warmup_done`` so it
+        runs once per registry instance.
         """
         self.bus = bus
-        self._chat_fn = chat_fn
+        # Default chat adapter: use the Vault-wired FreeLLM path unless the
+        # caller supplies their own (tests, stubs, alternative backends).
+        self._chat_fn = chat_fn or chat_via_freellm
         self.max_live = max(1, int(max_live))
         self.roster_dir = Path(roster_dir) if roster_dir is not None else Path(bus.base_dir) / "agents"
         self._agents: dict[str, LiveAgent] = {}
         self._lock = threading.RLock()
         self._booted = False
+        # Boot warm-up flag: discover_and_provision_free_models() runs once at
+        # first registry access (lazy, not during __init__ so construction stays
+        # cheap and offline-friendly).
+        self._free_warmup_done: bool = False
         # state_provider hookup (§6 "full registry+agent state"): the bus carries
         # the roster inside every snapshot it writes.
         bus._state_provider = self._snapshot_state
@@ -471,8 +585,13 @@ class FleetRegistry:
         except OSError as exc:  # cache write must never fail the WAL append
             logger.warning("[FleetRegistry] roster cache write failed for %s: %s", agent.agent_id, exc)
 
-    def _unique_name(self, name: str, *, exclude_agent_id: str | None = None) -> str:
-        """Case-insensitive uniqueness; a collision auto-suffixes ``Friday-2`` (§5)."""
+    def _unique_name(self, name: str, *, exclude_agent_id: str | None = None, allow_suffix: bool = False) -> str:
+        """Case-insensitive uniqueness; a collision raises RegistryError (§5/§9).
+
+        When ``allow_suffix=True`` (internal use only), a collision auto-suffixes
+        ``Friday-2``. The default is to reject with RegistryError so the API
+        surface can return 409 for name collisions.
+        """
         base = str(name or "").strip()
         if not base:
             raise RegistryError("agent name must be a non-empty string")
@@ -483,17 +602,19 @@ class FleetRegistry:
         }
         if base.casefold() not in taken:
             return base
-        canonical = next(
-            other.name for other in self._agents.values()
-            if other.agent_id != exclude_agent_id and other.state != DESTROYED
-            and other.name.casefold() == base.casefold()
-        )
-        counter = 2
-        while f"{canonical}-{counter}".casefold() in taken:
-            counter += 1
-        suffixed = f"{canonical}-{counter}"
-        logger.warning("[FleetRegistry] name %r already in roster — using %r", name, suffixed)
-        return suffixed
+        if allow_suffix:
+            canonical = next(
+                other.name for other in self._agents.values()
+                if other.agent_id != exclude_agent_id and other.state != DESTROYED
+                and other.name.casefold() == base.casefold()
+            )
+            counter = 2
+            while f"{canonical}-{counter}".casefold() in taken:
+                counter += 1
+            suffixed = f"{canonical}-{counter}"
+            logger.warning("[FleetRegistry] name %r already in roster — using %r", name, suffixed)
+            return suffixed
+        raise RegistryError(f"agent name {base!r} already exists (case-insensitive)")
 
     def _transition(self, agent: LiveAgent, target: str) -> None:
         """Validate against §3, mutate, and emit the ``state_changed`` bus event."""
@@ -520,10 +641,23 @@ class FleetRegistry:
         ``agent.spawned`` append (the event carries the final §3 state) so crash
         recovery replays exactly one event per spawn — the WAL-first rule.
         Name collisions auto-suffix (``Friday-2``, case-insensitive).
+
+        Boot warm-up (roadmap step 2 — vault wiring): after the agent is
+        registered, if the agent's ``provider`` is a known provider with stored
+        keys, a light Vault health probe checks that at least one healthy binding
+        exists. When no healthy binding is reachable the agent is still spawned
+        (the registry never refuses a spawn due to provider health) but
+        ``agent._warmup_status`` is set to ``'no_healthy_bindings'`` and a
+        warning is logged so the dashboard can surface the degraded state.
+
+        This is a Vault-side health check (:meth:`MultiKeyManager.get_dispatchable_entries`
+        + :meth:`MultiKeyManager.check_key_health`), **not** a real LLM ping —
+        the agent's first ``assign`` will discover a missing provider when it
+        actually tries to call the model.
         """
         spec = dict(spec or {})
         with self._lock:
-            name = self._unique_name(spec.get("name"))
+            name = self._unique_name(spec.get("name"), allow_suffix=True)
             now = _utc_now()
             agent = LiveAgent(
                 agent_id=str(spec.get("agent_id") or uuid.uuid4()).strip() or str(uuid.uuid4()),
@@ -546,7 +680,80 @@ class FleetRegistry:
             )
             self._persist(agent)
             self._enforce_live_cap()
+            # --- boot warm-up (roadmap step 2) ---
+            self._ensure_free_tier()
+            self._warmup_agent(agent)
             return agent
+
+    def _ensure_free_tier(self) -> None:
+        """Run the free-tier provisioner once per registry instance (roadmap step 2).
+
+        Delegates to :func:`core.free_keys.discover_and_provision_free_models`
+        which auto-registers Ollama, OpenRouter free pool, Mistral free tier,
+        Groq free tier, etc. into the Vault so agents can discover them.
+        """
+        if self._free_warmup_done:
+            return
+        try:
+            from core.free_keys import discover_and_provision_free_models
+        except Exception:
+            # Module may not be available in minimal test environments.
+            return
+        try:
+            result = discover_and_provision_free_models(auto_register=True)
+            logger.info(
+                "[FleetRegistry] free-tier warm-up: %s provider(s) discovered",
+                len(result.get("discovered", [])),
+            )
+        except Exception as exc:
+            logger.debug("[FleetRegistry] free-tier warm-up skipped: %s", exc)
+        finally:
+            self._free_warmup_done = True
+
+    def _warmup_agent(self, agent: LiveAgent) -> None:
+        """Light Vault health probe for a newly spawned agent (roadmap step 2).
+
+        Checks whether the agent's provider has at least one healthy, dispatchable
+        key binding. When it does not, sets ``agent._warmup_status`` and logs a
+        warning. Never raises — a missing provider is a degraded state, not a
+        spawn failure.
+        """
+        provider = (agent.provider or "").lower().strip()
+        if not provider or provider == "groq":
+            # Default provider — still probe if keys exist; skip if no stored keys
+            # at all (nothing to warm up).
+            pass
+        # Check the Vault for dispatchable entries (healthy + within budget).
+        try:
+            from core.multi_key import multi_key_manager
+
+            dispatchable = multi_key_manager.get_dispatchable_entries(provider)
+            if not dispatchable:
+                # No keys at all for this provider, or all exhausted/quarantined.
+                healthy = False
+            else:
+                # Light probe: ask the Vault whether any binding is currently healthy.
+                healthy = any(
+                    multi_key_manager.check_key_health(provider, e.get("key"))
+                    for e in dispatchable
+                    if e.get("key")
+                )
+        except Exception as exc:
+            # Vault may not be initialised (tests, fresh installs). Treat as
+            # "no healthy bindings" so the dashboard can warn, but do not break
+            # the spawn path.
+            healthy = False
+            logger.debug("[FleetRegistry] warm-up Vault probe skipped for %s: %s", provider, exc)
+
+        if not healthy:
+            agent._warmup_status = "no_healthy_bindings"
+            logger.warning(
+                "[FleetRegistry] %s cannot reach provider %s — no healthy keys",
+                agent.name,
+                provider,
+            )
+        else:
+            agent._warmup_status = "ok"
 
     def update(self, agent_id: str, patch: dict[str, Any]) -> LiveAgent:
         """Update name/persona/model/key_name/skills; name uniqueness re-checked."""
@@ -560,7 +767,7 @@ class FleetRegistry:
             if agent.state == DESTROYED:
                 raise RegistryError(f"agent {agent_id!r} is destroyed")
             if "name" in patch:
-                agent.name = self._unique_name(patch["name"], exclude_agent_id=agent.agent_id)
+                agent.name = self._unique_name(patch["name"], exclude_agent_id=agent.agent_id, allow_suffix=True)
             if "persona" in patch:
                 agent.persona = str(patch["persona"] or "")
             if "model" in patch:

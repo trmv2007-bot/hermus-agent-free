@@ -427,86 +427,183 @@
 
   <!-- ============ AGENTS ============ -->
   <div class="tab" id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents">
-    <div class="grid">
-      <section class="full">
-        <h2>&#128100; Agent Management</h2>
-        <div class="quick-actions">
-          <button class="quick-action-btn" onclick="createAgent()">&#43; New Agent</button>
-          <button class="quick-action-btn" onclick="createSpecializedAgent('researcher')">&#128218; Researcher</button>
-          <button class="quick-action-btn" onclick="createSpecializedAgent('coder')">&#128187; Coder</button>
-          <button class="quick-action-btn" onclick="createSpecializedAgent('verifier')">&#9989; Verifier</button>
-          <button class="quick-action-btn" onclick="createSpecializedAgent('chair')">&#128081; Chair</button>
+    <!-- Fleet Summary Strip -->
+    <section class="fleet-summary glass" aria-label="Fleet summary">
+      <div class="summary-row">
+        <div class="kpi">
+          <div class="v" id="fleetAgentCount">0</div>
+          <div class="l">Agents</div>
         </div>
+        <div class="kpi">
+          <div class="v" id="fleetEffRPM">0</div>
+          <div class="l">Eff. RPM</div>
+        </div>
+        <div class="kpi">
+          <div class="v" id="fleetTodaySpend">$0.00</div>
+          <div class="l">Today's Spend</div>
+        </div>
+        <div class="kpi">
+          <div class="v" id="fleetBudgetBurn">0%</div>
+          <div class="l">Budget Burn</div>
+        </div>
+        <div class="kpi">
+          <div class="v" id="fleetApprovalCount">0</div>
+          <div class="l">Pending Approvals</div>
+        </div>
+      </div>
+    </section>
 
-        <h3 style="margin: 15px 0 10px 0;">Active Agents</h3>
-        <div class="cells" id="activeAgents"></div>
-      </section>
+    <!-- Spawn Widget -->
+    <section class="spawn-widget glass" aria-label="Spawn new agent">
+      <h3><span class="section-icon">&#128161;</span> Spawn Agent</h3>
+      <div class="spawn-form">
+        <div class="spawn-row">
+          <div class="spawn-field">
+            <label for="spawnProvider">Provider</label>
+            <select id="spawnProvider" aria-required="true"></select>
+          </div>
+          <div class="spawn-field">
+            <label for="spawnModel">Model</label>
+            <select id="spawnModel" aria-required="true" disabled></select>
+          </div>
+          <div class="spawn-field">
+            <label for="spawnKeyName">API Key</label>
+            <select id="spawnKeyName"><option value="">(default)</option></select>
+          </div>
+        </div>
+        <div class="spawn-row">
+          <div class="spawn-field">
+            <label for="spawnName">Name</label>
+            <input type="text" id="spawnName" placeholder="Auto-generated if empty" />
+          </div>
+          <div class="spawn-field">
+            <label for="spawnPersona">Persona Preset</label>
+            <select id="spawnPersona">
+              <option value="">General</option>
+              <option value="researcher">Researcher</option>
+              <option value="coder">Coder</option>
+              <option value="verifier">Verifier</option>
+              <option value="chair">Chair</option>
+              <option value="planner">Planner</option>
+              <option value="critic">Critic</option>
+            </select>
+          </div>
+          <div class="spawn-field">
+            <label for="spawnSkills">Skills</label>
+            <div id="spawnSkillsChips" class="skills-chips" role="group" aria-label="Available skills"></div>
+            <input type="text" id="spawnSkillInput" placeholder="Add skill (Enter)" aria-label="Add custom skill" />
+          </div>
+        </div>
+        <div class="spawn-actions">
+          <button class="btn primary" id="btnSpawnAgent" disabled>
+            <span class="btn-text">Spawn Agent</span>
+            <span class="btn-loader" hidden></span>
+          </button>
+          <button class="btn ghost" id="btnSpawnDemoTeam" onclick="spawnDemoTeam()">Spawn Demo Team</button>
+        </div>
+      </div>
+    </section>
 
-      <section class="full">
-        <h2>Agent Configuration</h2>
-        <div class="bar">
-          <select id="agentProviderSelect">
-            <option value="ollama">Ollama (Local)</option>
-            <option value="groq">Groq (API)</option>
-            <option value="mistral">Mistral (API)</option>
-            <option value="openrouter">OpenRouter (API)</option>
-          </select>
-          <select id="agentModelSelect">
-            <option value="mistral:7b">mistral:7b</option>
-            <option value="llama3.2:3b">llama3.2:3b</option>
-            <option value="phi3:3.8b">phi3:3.8b</option>
-          </select>
-          <input id="agentNameInput" placeholder="Agent name" />
-        </div>
-        <div class="bar">
-          <select id="agentRoleSelect">
-            <option value="general">General</option>
-            <option value="researcher">Researcher</option>
-            <option value="coder">Coder</option>
-            <option value="verifier">Verifier</option>
-            <option value="chair">Chair</option>
-          </select>
-          <input id="agentTimeoutInput" placeholder="Idle timeout (seconds)" value="900" />
-          <button class="quick-action-btn" onclick="createCustomAgent()">Create Custom Agent</button>
-        </div>
+  <!-- Fleet Summary Strip -->
+    <section class="fleet-summary glass" aria-label="Fleet summary">
+      <div class="cells" id="fleetSummary"></div>
+    </section>
 
-        <h3 style="margin: 15px 0 10px 0;">API Key Management</h3>
-        <div class="bar">
-          <select id="apiKeyProvider">
-            <option value="groq">Groq</option>
-            <option value="mistral">Mistral</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="together">Together AI</option>
-            <option value="fireworks">Fireworks AI</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="nvidia">NVIDIA NIM</option>
-          </select>
-          <input id="apiKeyInput" type="password" placeholder="API Key" />
-          <button class="quick-action-btn" onclick="addApiKey()">Add Key</button>
+  <!-- Agent Roster Grid -->
+    <section class="agent-roster glass" aria-label="Agent roster">
+      <div class="roster-header">
+        <h3><span class="section-icon">&#128100;</span> Fleet Roster</h3>
+        <div class="roster-actions">
+          <button class="btn ghost" onclick="broadcastToAll()" title="Broadcast message to all agents">&#128227; Broadcast</button>
+          <button class="btn primary" onclick="orchestrate()" title="Multi-agent orchestration">&#128640; Orchestrate</button>
         </div>
-        <div class="feed" id="apiKeysList" style="height: 120px;"></div>
-        <div class="hint">Max 10 keys per provider. Keys are stored locally and never transmitted.</div>
-      </section>
+      </div>
+      <div class="roster-filters">
+          <input type="search" id="rosterSearch" placeholder="Filter agents..." aria-label="Search agents" />
+          <select id="rosterStateFilter" aria-label="Filter by state">
+            <option value="">All States</option>
+            <option value="idle">Idle</option>
+            <option value="working">Working</option>
+            <option value="thinking">Thinking</option>
+            <option value="blocked">Blocked</option>
+            <option value="paused">Paused</option>
+            <option value="sleeping">Sleeping</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+      </div>
+      <div class="roster-grid" id="agentRosterGrid" role="list" aria-label="Agent cards">
+      </div>
+      <div class="empty-state" id="rosterEmpty" hidden>
+        <div class="empty-state-icon">&#128100;</div>
+        <div class="empty-state-title">No agents in fleet</div>
+        <div class="empty-state-description">Spawn your first agent or run the onboarding wizard to create a demo team.</div>
+        <button class="btn primary" onclick="startOnboarding()">Run Onboarding Wizard</button>
+      </div>
+    </section>
 
-      <section class="full">
-        <h2>Agent Communication</h2>
-        <div class="bar">
-          <select id="messageSender">
-            <option value="">Select Agent</option>
-          </select>
-          <select id="messageTarget">
-            <option value="">Select Target</option>
-          </select>
-          <input id="messageContent" placeholder="Message content" />
-          <button class="quick-action-btn" onclick="sendAgentMessage()">Send Message</button>
+    <!-- Approval Attention Panel -->
+    <section class="approval-attention glass" id="approvalAttention" hidden aria-label="Pending approvals">
+      <div class="approval-header">
+        <h3><span class="section-icon warning">&#9888;</span> Approvals Requiring Attention</h3>
+        <span class="badge" id="approvalBadge">0</span>
+      </div>
+      <div class="approval-list" id="approvalList" role="list"></div>
+    </section>
+
+    <!-- Live Bus Feed -->
+    <section class="bus-feed glass" aria-label="Live event bus">
+      <div class="feed-header">
+        <h3><span class="section-icon">&#128279;</span> Live Bus Feed</h3>
+        <div class="feed-controls">
+          <select id="feedFilterAgent" aria-label="Filter by agent"><option value="">All Agents</option></select>
+          <select id="feedFilterKind" aria-label="Filter by event kind"><option value="">All Events</option></select>
+          <select id="feedVerbosity" aria-label="Verbosity"><option value="compact">Compact</option><option value="standard" selected>Standard</option><option value="verbose">Verbose</option></select>
+          <button class="btn ghost" id="btnFeedPause" title="Pause feed">&#9208;</button>
+          <button class="btn ghost" id="btnFeedClear" title="Clear feed">&#128465;</button>
         </div>
-        <div class="bar">
-          <button class="quick-action-btn" onclick="broadcastToAll()">Broadcast to All</button>
-          <button class="quick-action-btn" onclick="pingAllAgents()">Ping All</button>
+      </div>
+      <div class="feed" id="busFeed" role="log" aria-live="polite" aria-atomic="false"></div>
+    </section>
+
+    <!-- Live Screen Panel -->
+    <section class="screen-panel glass" id="screenPanel" aria-label="Live screen mirror">
+      <div class="screen-header">
+        <h3><span class="section-icon">&#128187;</span> Live Screen</h3>
+        <div class="screen-controls">
+          <select id="screenAgentSelect" aria-label="Select agent to mirror"><option value="">Select agent...</option></select>
+          <label class="toggle" title="Privacy mask"><input type="checkbox" id="screenPrivacyMask" /><span class="toggle-slider"></span><span class="toggle-label">Privacy Mask</span></label>
+          <span class="screen-status" id="screenStatus">Disconnected</span>
         </div>
-        <div class="feed" id="agentMessages" style="height: 200px;"><div class="note">Agent messages will appear here</div></div>
-      </section>
-    </div>
+      </div>
+      <div class="screen-container" id="screenContainer">
+        <canvas id="screenCanvas"></canvas>
+        <div class="screen-overlay" id="screenOverlay" role="application" aria-label="Grounding boxes"></div>
+        <div class="screen-placeholder" id="screenPlaceholder">
+          <div class="placeholder-icon">&#128187;</div>
+          <p>Select an agent to view live screen mirror</p>
+          <p class="hint">Grounding boxes will appear over click targets requiring approval</p>
+        </div>
+      </div>
+      <div class="approval-queue" id="clickApprovalQueue" hidden aria-label="Pending click approvals">
+        <h4>Pending Click Approvals</h4>
+        <div class="approval-queue-list" id="clickApprovalList"></div>
+      </div>
+    </section>
+
+    <!-- Onboarding Wizard (First-run) -->
+    <section class="onboarding-wizard glass" id="onboardingWizard" hidden aria-label="Onboarding wizard">
+      <div class="wizard-header">
+        <h3><span class="section-icon">&#127891;</span> Welcome to HERMUS Fleet</h3>
+        <span class="wizard-step" id="wizardStep">Step 1 of 4</span>
+      </div>
+      <div class="wizard-content" id="wizardContent"></div>
+      <div class="wizard-footer">
+        <button class="btn ghost" id="wizardPrev" disabled>Previous</button>
+        <button class="btn primary" id="wizardNext">Next</button>
+        <button class="btn danger" id="wizardSkip" onclick="closeOnboarding()">Skip</button>
+      </div>
+    </section>
   </div>
 
   <!-- ============ PRESENCE ============ -->

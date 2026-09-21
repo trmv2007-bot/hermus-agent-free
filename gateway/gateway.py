@@ -282,6 +282,27 @@ async def lifespan(app: FastAPI):
         await _realtime.startup(app, agent_getter=get_agent_for_user)
     except Exception as e:
         logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
+    
+    # Initialize Fleet Orchestrator (roadmap step 4)
+    orchestrator = None
+    try:
+        from core.fleet.orchestrator import Orchestrator
+        from core.fleet.registry import FleetRegistry, chat_via_freellm
+        from core.fleet.bus import FleetBus
+        
+        # Get or create the fleet registry
+        reg = getattr(app.state, "fleet_registry", None)
+        if reg is None:
+            bus = FleetBus()
+            reg = FleetRegistry(bus, chat_fn=chat_via_freellm)
+            app.state.fleet_registry = reg
+        
+        orchestrator = Orchestrator(reg, reg.bus)
+        app.state.fleet_orchestrator = orchestrator
+        logger.info("[Gateway] Fleet Orchestrator initialized")
+    except Exception as e:
+        logger.warning(f"[Gateway] Fleet Orchestrator unavailable: {e}")
+
     presence_task = None
     if getattr(config, "presence_enabled", True):
         try:
@@ -322,6 +343,13 @@ async def lifespan(app: FastAPI):
             watchdog_task.cancel()
         if engine_task and not engine_task.done():
             engine_task.cancel()
+        # Shutdown Fleet Orchestrator
+        if orchestrator is not None:
+            try:
+                orchestrator.close()
+                logger.info("[Gateway] Fleet Orchestrator closed")
+            except Exception as e:
+                logger.error(f"[Gateway] Fleet Orchestrator shutdown failed: {e}")
         # Drain in-flight work with a hard bound so SIGTERM can never hang the
         # process (previously the queue stopped with a fixed 5s and ignored
         # whether jobs were actually mid-flight).
@@ -498,6 +526,7 @@ from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
+from gateway.routes_fleet import router as _fleet_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -522,6 +551,7 @@ app.include_router(_canonical_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
 app.include_router(_presence_router, dependencies=_gate_control)
 app.include_router(_agents_router, dependencies=_gate_control)
+app.include_router(_fleet_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -694,6 +724,18 @@ async def control_room_css():
 async def control_console_js():
     """Generated Systems console: renders ``core/console.py`` (see routes_console)."""
     return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/fonts/InterVariable.woff2")
+async def font_inter():
+    """Inter variable font (OFL)."""
+    return _serve_control_asset("fonts/InterVariable.woff2", "font/woff2")
+
+
+@app.get("/static/fonts/JetBrainsMono-Regular.woff2")
+async def font_jetbrains_mono():
+    """JetBrains Mono font (OFL)."""
+    return _serve_control_asset("fonts/JetBrainsMono-Regular.woff2", "font/woff2")
 
 
 @app.get("/cache/stats")

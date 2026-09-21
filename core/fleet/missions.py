@@ -950,4 +950,13 @@ class MissionManager:
         self._missions.update(rebuilt)
         return len(rebuilt)
 
-        return list(mission.subtasks)
+    def close(self, mission_id: str | None = None, reason: str = "", synthesis: dict | None = None) -> None:
+        """Close the MissionManager or a specific mission."""
+        if mission_id is not None:
+            if mission_id in self._missions:
+                mission = self._missions[mission_id]
+                mission.synthesis = synthesis
+                mission.terminate_reason = reason
+                mission.state = DONE if reason == "complete" else FAILED
+        else:
+            self._missions.clear()
