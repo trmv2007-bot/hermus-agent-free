@@ -111,7 +111,7 @@ ROSTER_SUFFIX = ".json"
 CHECKPOINT_SUFFIX = ".checkpoint.json"
 
 
-class IllegalTransition(ValueError):
+class IllegalTransition(ValueError):  # noqa: N818 — named for the domain event; 26 references across 5 modules
     """Raised when an agent state transition is not in the §3 state machine."""
 
 
