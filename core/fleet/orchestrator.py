@@ -8,43 +8,29 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
-from core.fleet.bus import FleetBus, FleetEvent
+from core.fleet.bus import FleetBus
 from core.fleet.missions import (
     ALERT,
     BUDGET_WARN_RATIO,
     BUDGET_WARNING,
     CLAIM,
-    CLAIM_TIMEOUT_S,
     CLAIMING,
-    DONE,
     FAILED,
-    GATE_AFTER_DECOMPOSE,
-    GATE_AFTER_REVIEW,
     GATE_ON_BUDGET_WARNING,
-    GATE_ON_CONFLICT,
     GATE_ON_STALL_REPLAN,
     GATE_PENDING,
     GATE_RESOLVED,
-    LEASE_SECONDS,
     MAX_REPLANS,
     MAX_REVIEW_RETRIES,
-    MISSION_OPENED,
-    MISSION_TERMINATED,
     PER_AGENT_BUDGET_SHARE,
-    POLICY_ASK_USER,
-    POLICY_FIRST_RESULT,
     POLICY_HIGHEST_RELIABILITY,
     POLICY_JUDGE_MODEL,
-    PROPOSE,
-    PROPOSED,
     RESULT,
     REVIEW,
     REVIEWING,
     STALL_LIMIT,
-    STATE_CHANGED,
-    SUBTASK,
     SUSPENDED,
     SYNTHESIS,
     SYNTHESIZING,
@@ -54,7 +40,7 @@ from core.fleet.missions import (
     MissionManager,
     Subtask,
 )
-from core.fleet.registry import FleetRegistry, LiveAgent
+from core.fleet.registry import FleetRegistry
 from core.log import get_logger
 
 logger = get_logger(__name__)
@@ -102,7 +88,6 @@ class Orchestrator:
         self.judge = judge
         self.lease_seconds = lease_seconds
         self.claim_timeout_s = claim_timeout_s
-        from core.fleet.missions import MissionManager
         self.missions = MissionManager(bus, lease_seconds=300.0, claim_timeout_s=120.0)
         self._active_orchestrations: dict[str, dict[str, Any]] = {}
 
@@ -123,7 +108,7 @@ class Orchestrator:
                     "name": "DefaultWorker",
                     "provider": "groq",
                     "persona": "You are a helpful assistant that completes subtasks efficiently.",
-                })
+                }, allow_suffix=True)
                 # Wait for agent to become IDLE - poll registry for state change
                 for _ in range(50):
                     await asyncio.sleep(0.1)

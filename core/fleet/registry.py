@@ -47,10 +47,11 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.atomic_io import atomic_write_json, read_json
 from core.log import get_logger
@@ -153,7 +154,7 @@ class AgentStats:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "AgentStats":
+    def from_dict(cls, data: dict[str, Any] | None) -> AgentStats:
         data = data if isinstance(data, dict) else {}
         try:
             return cls(
@@ -218,7 +219,7 @@ class LiveAgent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LiveAgent":
+    def from_dict(cls, data: dict[str, Any]) -> LiveAgent:
         if not isinstance(data, dict):
             raise RegistryError("agent record must be a JSON object")
         agent_id = str(data.get("agent_id") or "").strip()
@@ -473,7 +474,7 @@ class FleetRegistry:
 
     # ---------- boot: snapshot → replay → (cache fallback) ----------
 
-    def boot(self) -> "FleetRegistry":
+    def boot(self) -> FleetRegistry:
         """Rebuild the roster from the bus: snapshot payload + tail replay.
 
         The roster cache under ``data/fleet/agents`` is consulted when the
@@ -639,13 +640,17 @@ class FleetRegistry:
 
     # ---------- lifecycle ops (SPEC §5) ----------
 
-    def spawn(self, spec: dict[str, Any]) -> LiveAgent:
+    def spawn(self, spec: dict[str, Any], *, allow_suffix: bool = False) -> LiveAgent:
         """Create one agent: ONE WAL append (``agent.spawned``, fsynced) + cache.
 
         The ``SPAWNING → IDLE`` transition is folded into the single
         ``agent.spawned`` append (the event carries the final §3 state) so crash
         recovery replays exactly one event per spawn — the WAL-first rule.
-        Name collisions auto-suffix (``Friday-2``, case-insensitive).
+
+        A case-insensitive name collision raises :class:`RegistryError` unless
+        ``allow_suffix=True``: callers that only exist to auto-provision a worker
+        may rename themselves, but an explicit "spawn this agent" request never
+        silently hands back an agent under a different name.
 
         Boot warm-up (roadmap step 2 — vault wiring): after the agent is
         registered, if the agent's ``provider`` is a known provider with stored
@@ -662,7 +667,7 @@ class FleetRegistry:
         """
         spec = dict(spec or {})
         with self._lock:
-            name = self._unique_name(spec.get("name"), allow_suffix=True)
+            name = self._unique_name(spec.get("name"), allow_suffix=allow_suffix)
             now = _utc_now()
             agent = LiveAgent(
                 agent_id=str(spec.get("agent_id") or uuid.uuid4()).strip() or str(uuid.uuid4()),
@@ -1096,7 +1101,7 @@ class FleetRegistry:
             if state != SLEEPING:
                 logger.warning("[FleetRegistry] import of %r coerced to SLEEPING (requested %r)", name, state)
             provider = model.split("/", 1)[0] if "/" in str(model or "") else "groq"
-            agent = self.spawn({"name": name, "persona": persona, "model": model, "provider": provider})
+            agent = self.spawn({"name": name, "persona": persona, "model": model, "provider": provider}, allow_suffix=True)
             self._transition(agent, SLEEPING)  # IDLE → SLEEPING: imported agents stay cold
             checkpoint = {
                 "agent_id": agent.agent_id,

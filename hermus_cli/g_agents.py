@@ -10,12 +10,11 @@ gone.
 from __future__ import annotations
 
 import sys
-import uuid
 from pathlib import Path
 
 from core.config import config
 from core.fleet.bus import FleetBus
-from core.fleet.registry import FleetRegistry, chat_via_freellm
+from core.fleet.registry import FleetRegistry, RegistryError, chat_via_freellm
 
 from ._common import CLIContext, add_computer_task_args, add_screen_start_args
 from ._spec import Command, no_action
@@ -96,7 +95,11 @@ def _run_agent(args, ctx: CLIContext) -> None:
             "model": args.model or "",
             "provider": "groq",  # default provider
         }
-        agent = reg.spawn(spec)
+        try:
+            agent = reg.spawn(spec)
+        except RegistryError as exc:
+            print(f"[ERROR] {exc}")
+            return
         print(f"[OK] {agent.name} (id={agent.agent_id}) spawned with role={args.role}")
     elif args.agent_action == "start":
         # In FleetRegistry, agents are spawned in IDLE state - no separate "start" needed

@@ -4,7 +4,8 @@ Pins the lifecycle and durability contract:
 
 * illegal §3 transitions are rejected (``IllegalTransition``), legal ones emit
   ``state_changed`` bus events;
-* name uniqueness is case-insensitive with auto-suffix (``Friday-2``);
+* name uniqueness is case-insensitive; an explicit spawn rejects a taken name
+  and auto-suffix (``Friday-2``) is opt-in for internal auto-provisioning;
 * WAL-first spawn + boot rebuild: a fresh registry instance on the same bus
   directory restores the roster by snapshot + tail replay (roster cache is
   never authoritative) and a corrupt roster cache never breaks boot;
@@ -105,14 +106,28 @@ def test_illegal_transition_rejected(tmp_path):
     assert transitions == [("IDLE", "SLEEPING")]
 
 
-def test_name_collision_auto_suffix_case_insensitive(tmp_path):
+def test_name_collision_rejects_unless_suffixing_is_requested(tmp_path):
+    """An explicit spawn never hands back an agent under a different name.
+
+    Auto-suffixing used to be the default, so asking for "Friday" silently
+    produced "Friday-2" and the caller's claim about the roster stopped matching
+    reality. Suffixing is now opt-in for internal auto-provisioning only.
+    """
     reg = make_registry(tmp_path)
     first = spawn(reg, "Friday")
-    second = spawn(reg, "Friday")
-    third = spawn(reg, "FRIDAY")
-    assert (first.name, second.name, third.name) == ("Friday", "Friday-2", "Friday-3")
+    assert first.name == "Friday"
 
-    # update() re-checks uniqueness the same way (rename onto a taken name).
+    for taken in ("Friday", "FRIDAY", " friday "):
+        with pytest.raises(RegistryError) as exc:
+            spawn(reg, taken)
+        assert "already exists" in str(exc.value)
+
+    # Internal auto-provisioning still renames, case-folded against the roster.
+    second = reg.spawn({"name": "Friday"}, allow_suffix=True)
+    third = reg.spawn({"name": "FRIDAY"}, allow_suffix=True)
+    assert (second.name, third.name) == ("Friday-2", "Friday-3")
+
+    # update() re-checks uniqueness (rename onto a taken name still suffixes).
     reg.update(first.agent_id, {"name": "winston"})
     renamed = reg.update(second.agent_id, {"name": "WINSTON"})
     assert renamed.name == "winston-2"

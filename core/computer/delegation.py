@@ -15,13 +15,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from gateway.queue import job_queue
+
+from ..agent_handlers import register_agent_handlers
 from ..fleet.bus import FleetBus
 from ..fleet.registry import FleetRegistry, chat_via_freellm
 from ..llm import FreeLLM
 from ..models import get_model_gateway
-from ..agent_handlers import register_agent_handlers
 from .planner import TaskGraph
-from gateway.queue import job_queue
 
 
 @dataclass
@@ -183,7 +184,7 @@ class MultiAgentDelegator:
                 "model": "",
                 "provider": "groq",
             }
-            agent = self.registry.spawn(spec)
+            agent = self.registry.spawn(spec, allow_suffix=True)
         # FleetRegistry agents are spawned in IDLE state - no separate "start" needed
         return agent.agent_id
 
@@ -239,7 +240,7 @@ class MultiAgentDelegator:
                     return {"success": False, "plan": plan.to_dict(), "jobs": jobs, "error": str(exc)}
                 except Exception as exc:
                     return {"success": False, "plan": plan.to_dict(), "jobs": jobs, "error": f"canonical queue unavailable: {exc}"}
-                
+
                 record = {"success": True, "name": agent_id, "job_id": queued.id, "queued": True, "status": queued.status,
                           "unit_id": unit.unit_id, "role": unit.role, "agent": agent_id}
                 jobs.append(record)
