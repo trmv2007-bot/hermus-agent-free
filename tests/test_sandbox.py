@@ -93,9 +93,14 @@ def test_blocked_command_is_refused_not_executed():
 
 
 def test_explicit_override_runs_and_is_audited():
-    marker = Path(_TMP) / "override_marker.txt"
+    # as_posix() because the command is interpreted by a shell: a Windows path
+    # with backslashes arrives there as an escaped mess and the "temp" file is
+    # quietly created in the current directory instead.
+    marker = Path(_TMP, "override_marker.txt").as_posix()
     res = sandbox.run(f"echo x > {marker} && cat {marker}", allow_dangerous=True, purpose="test:allow")
-    assert res["returncode"] == 0 and "x" in res["stdout"]
+    assert res["returncode"] == 0, res
+    assert "x" in res["stdout"]
+    assert Path(_TMP, "override_marker.txt").exists(), "the override ran, but not where it said it did"
     log = Path(sandbox.status()["audit_log"])
     assert log.exists(), log
     entries = [json.loads(x) for x in log.read_text().strip().splitlines() if x.strip()]
