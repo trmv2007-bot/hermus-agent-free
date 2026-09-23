@@ -64,3 +64,14 @@ missions/
 .hermus/
 
 skills/success_ledger.json
+
+# Test scratch + runtime droppings (never commit)
+.pytest_tmp*/
+.freebuff/
+*.log.err
+scratch/
+test_out.txt
+test_output.txt
+migration-report.json
+outputs/
+logs/

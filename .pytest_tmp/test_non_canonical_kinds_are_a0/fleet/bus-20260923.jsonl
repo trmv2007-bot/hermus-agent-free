@@ -1,1 +1,0 @@
-{"seq": 1, "id": "294746b6-452c-41f4-b96f-c2e66abc8de8", "ts": "2026-09-23T20:32:04.310218+05:30", "sender": "registry", "target": null, "kind": "agent.spawned", "priority": 2, "content": {"agent_id": "a1"}, "reply_to": null, "mission_id": null, "trace_id": null, "est_tokens": 0}
