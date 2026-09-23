@@ -42,7 +42,6 @@ config.user_model_path = str(Path(_TMP) / "user_model.json")
 config.embeddings_db_path = str(Path(_TMP) / "embeddings.db")
 
 import gateway.gateway as gw  # noqa: E402
-import gateway.realtime as rt  # noqa: E402
 from core.artifact_manager import ArtifactManager, _detect_extension  # noqa: E402
 from core.memory import Memory  # noqa: E402
 from core.mission import MissionEngine, MissionState  # noqa: E402
@@ -59,16 +58,32 @@ def test_gateway_token_comparison_is_constant_time():
     assert gw._token_matches("short", "a-much-longer-expected-token") is False
 
 
+class _FakeWS:
+    """Minimal stand-in for a WebSocket upgrade: query params + headers."""
+
+    def __init__(self, token=None, header=None):
+        self.query_params = {"token": token} if token is not None else {}
+        self.headers = {"X-Hermus-Token": header} if header is not None else {}
+
+
 def test_realtime_auth_ok(monkeypatch):
+    """Token policy has one owner now: gateway.context.ws_token_ok.
+
+    This used to target realtime._auth_ok, one of two duplicate checks that was
+    removed when the WS routes were made to self-authenticate.
+    """
+    from gateway.context import ws_token_ok
+
     monkeypatch.delenv("HERMUS_GATEWAY_TOKEN", raising=False)
+    monkeypatch.setattr("gateway.context.config.gateway_api_token", None, raising=False)
     # No expected token configured → open gateway
-    assert rt._auth_ok("anything", None) is True
+    assert ws_token_ok(_FakeWS(token="anything")) is True
 
     monkeypatch.setenv("HERMUS_GATEWAY_TOKEN", "sekret")
-    assert rt._auth_ok("sekret", None) is True
-    assert rt._auth_ok(None, "sekret") is True
-    assert rt._auth_ok("wrong", None) is False
-    assert rt._auth_ok(None, None) is False
+    assert ws_token_ok(_FakeWS(token="sekret")) is True
+    assert ws_token_ok(_FakeWS(header="sekret")) is True
+    assert ws_token_ok(_FakeWS(token="wrong")) is False
+    assert ws_token_ok(_FakeWS()) is False
 
 
 # ----------------------------------------------------------------------- memory
