@@ -83,7 +83,7 @@ class ContextPlan:
                 for b in self.blocks
             ],
             "omitted": [{"kind": k, "reason": r, "chars": c} for k, r, c in self.omitted],
-            "on_demand": ["architecture", "endpoints", "tools", "memory", "docs"],
+            "on_demand": ["architecture", "endpoints", "tools", "memory", "docs", "evidence"],
         }
 
 

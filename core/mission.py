@@ -316,6 +316,10 @@ class MissionReport:
     #: confirmed for itself. Read this, not ``final_proof``, to know whether the
     #: requested thing actually happened.
     outcome_state: str = "unknown"
+    #: References into the mission's evidence log (core.evidence). The payload
+    #: stays there — the report carries pointers, and a reader opens a reference
+    #: to see what was actually observed.
+    evidence_refs: list[str] = field(default_factory=list)
 
     # -- state helpers ------------------------------------------------------
     TERMINAL_STATES = (MissionState.COMPLETED.value, MissionState.CANCELLED.value)
@@ -403,6 +407,7 @@ class MissionReport:
             "verified_result": self.verified_result,
             "disagreements": self.disagreements,
             "outcome_state": self.outcome_state,
+            "evidence_refs": self.evidence_refs,
             "resumable": self.is_resumable(),
             # diagnostics for every non-completed mission (stage/reason/resume)
             "failure": (self.failure_summary() if self.state != MissionState.COMPLETED.value else None),
@@ -450,6 +455,7 @@ class MissionReport:
             verified_result=data.get("verified_result") or {},
             disagreements=list(data.get("disagreements") or []),
             outcome_state=str(data.get("outcome_state") or "unknown"),
+            evidence_refs=list(data.get("evidence_refs") or []),
         )
 
 
@@ -1204,6 +1210,14 @@ def make_agent_backed_executor(
     return executor
 
 
+def _evidence_store_for(storage_dir):
+    """One evidence log directory per engine, so a test engine cannot write
+    into the real workspace."""
+    from .evidence import EvidenceStore
+
+    return EvidenceStore(base_dir=Path(storage_dir) / "evidence")
+
+
 def derive_outcome_state(
     *,
     claim_complete: bool,
@@ -1373,6 +1387,12 @@ class MissionEngine:
         self._real_executor: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        # Evidence lives beside the mission document, not inside it: the report
+        # is rewritten on every state change, and an append-only log is what
+        # lets a reference survive a repair round and be looked at again later.
+        # Scoping it to storage_dir keeps a test engine's evidence out of the
+        # real workspace.
+        self.evidence = _evidence_store_for(self.storage_dir)
         # per-run overrides (bound agent / events / control hooks). Missions run
         # to completion inside one thread, so thread-local state is safe even
         # though the engine singleton is shared across queue workers.
@@ -2051,6 +2071,22 @@ class MissionEngine:
                 _emit(
                     "mission_claim_disagreement",
                     {"disagreements": [d["kind"] for d in disagreements], "severity": disagreements[0]["severity"]},
+                )
+            try:
+                # File the whole accumulated set, not just the verifier's slice:
+                # the references a reader gets should cover everything the report
+                # claims as evidence, node stages included.
+                for entry in self.evidence.record_many(report.mission_id, report.evidence, stage=PHASE_VERIFICATION):
+                    if entry.id not in report.evidence_refs:
+                        report.evidence_refs.append(entry.id)
+            except Exception as exc:
+                record_issue(
+                    "mission",
+                    "evidence_log",
+                    exc,
+                    mission_id=report.mission_id,
+                    retryable=True,
+                    fallback="verdict stands on its own; the evidence was simply not filed",
                 )
             if all_dag_completed and v_res.verified and critic_res.get("approved"):
                 for req in report.requirements:

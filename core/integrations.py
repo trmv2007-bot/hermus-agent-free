@@ -451,7 +451,10 @@ def register_architecture_tools(registry) -> None:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "topic": {"type": "string", "enum": ["list", "architecture", "endpoints", "tools", "memory", "docs"]},
+                        "topic": {
+                            "type": "string",
+                            "enum": ["list", "architecture", "endpoints", "tools", "memory", "docs", "evidence"],
+                        },
                         "query": {"type": "string", "description": "What to look for within the topic"},
                         "limit": {"type": "integer", "default": 12},
                     },

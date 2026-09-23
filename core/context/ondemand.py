@@ -19,7 +19,7 @@ DOC_ALLOWLIST = ("ARCHITECTURE.md", "AUTONOMY_BOUNDARIES.md", "RED_LINES.md", "C
 
 MAX_CHARS = 8000
 
-TOPICS = ("architecture", "endpoints", "tools", "memory", "docs")
+TOPICS = ("architecture", "endpoints", "tools", "memory", "docs", "evidence")
 
 
 def read_context(
@@ -162,10 +162,37 @@ def _match_sections(sections: dict[str, str], query: str, limit: int) -> list[tu
     return [(title, body) for _score, title, body in scored[:limit]]
 
 
+def _read_evidence(query: str, limit: int) -> dict[str, Any]:
+    """Open evidence the prompt only references.
+
+    A record id returns the stored payload plus a fresh look at the artifact, so
+    a claim can be re-checked rather than re-read; anything else is treated as a
+    mission id and returns the digest.
+    """
+    from core.evidence import evidence_store
+
+    needle = str(query or "").strip()
+    if needle.startswith("ev_"):
+        entry = evidence_store.get(needle)
+        if entry is None:
+            return {"text": "", "error": f"no evidence record {needle!r}"}
+        return {
+            "text": f"{entry.id} [{entry.source}{'/' + entry.kind if entry.kind else ''}] {entry.check}: {entry.summary}",
+            "record": entry.to_dict(),
+            "recheck": evidence_store.recheck(needle),
+        }
+    digest = evidence_store.digest(needle, limit=limit) if needle else ""
+    if not digest:
+        missions = [path.stem for path in evidence_store._all_paths()[:limit]]
+        return {"text": "", "note": "no evidence for that mission", "missions_with_evidence": missions}
+    return {"text": digest}
+
+
 _READERS = {
     "architecture": _read_architecture,
     "endpoints": _read_endpoints,
     "tools": _read_tools,
     "memory": _read_memory,
     "docs": _read_docs,
+    "evidence": _read_evidence,
 }
