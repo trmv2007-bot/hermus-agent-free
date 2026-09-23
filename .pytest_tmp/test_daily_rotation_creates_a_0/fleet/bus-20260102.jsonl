@@ -1,0 +1,2 @@
+{"seq": 2, "id": "cbab18fa-7aa3-4e1d-9528-7980800f97b9", "ts": "2026-01-02T00:01:00+00:00", "sender": "coord", "target": null, "kind": "system", "priority": 2, "content": "day-2a", "reply_to": null, "mission_id": null, "trace_id": null, "est_tokens": 0}
+{"seq": 3, "id": "f1db19ac-ed65-4115-a99a-499a9e3059fc", "ts": "2026-01-02T00:01:00+00:00", "sender": "coord", "target": null, "kind": "system", "priority": 2, "content": "day-2b", "reply_to": null, "mission_id": null, "trace_id": null, "est_tokens": 0}

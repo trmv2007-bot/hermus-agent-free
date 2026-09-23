@@ -484,7 +484,25 @@ class JobQueue:
             lane.pending.append(job)
         if not lane.running and self._started and self._loop is not None:
             lane.running = True
-            lane.task = self._loop.create_task(self._drain_lane(lane))
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+            if running_loop is self._loop:
+                # On-loop submit (the normal gateway path): schedule directly.
+                lane.task = self._loop.create_task(self._drain_lane(lane))
+            else:
+                # Cross-thread submit (sync callers such as MultiAgentDelegator.
+                # execute(), which runs time.sleep polling in a worker thread):
+                # create_task from a foreign thread would silently never run —
+                # the loop must be woken explicitly.
+                self._loop.call_soon_threadsafe(self._spawn_lane_task, lane)
+
+    def _spawn_lane_task(self, lane: "Lane") -> None:
+        """Loop-side companion to the cross-thread branch of :meth:`_kick`."""
+        if not lane.running or lane.task is not None or self._stopped:
+            return
+        lane.task = self._loop.create_task(self._drain_lane(lane))
 
     def _lane_ready(self) -> bool:
         return self._started and self._loop is not None and not self._stopped

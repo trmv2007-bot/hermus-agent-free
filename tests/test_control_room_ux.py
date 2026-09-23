@@ -25,8 +25,10 @@ these skip when Node is absent rather than failing an unrelated environment.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 import textwrap
 from pathlib import Path
 
@@ -97,7 +99,13 @@ global.speechSynthesis = { speak: () => {}, cancel: () => {} };
 
 
 def run_in_node(body: str) -> dict:
-    """Boot control-room.js in Node with the DOM stub, then run `body`."""
+    """Boot control-room.js in Node with the DOM stub, then run `body`.
+
+    The harness is written to a temp file and passed as a path instead of
+    ``node -e``: the concatenated stub + control-room.js + body exceeds
+    Windows' ~32k command-line limit once control-room.js grew past ~30KB,
+    which made every harness test fail with EINVAL regardless of content.
+    """
     harness = (
         DOM_STUB
         + "\n"
@@ -115,13 +123,26 @@ def run_in_node(body: str) -> dict:
         + "\n"
         + body
     )
-    proc = subprocess.run(
-        ["node", "-e", harness],
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT),
-        timeout=60,
-    )
+    harness_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".js", encoding="utf-8", delete=False, dir=str(ROOT)
+        ) as fh:
+            fh.write(harness)
+            harness_path = fh.name
+        proc = subprocess.run(
+            ["node", harness_path],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+            timeout=60,
+        )
+    finally:
+        if harness_path:
+            try:
+                os.unlink(harness_path)
+            except OSError:
+                pass
     if proc.returncode != 0:
         raise AssertionError(f"node failed ({proc.returncode}):\n{proc.stderr}")
     # The last line is the JSON result; anything before it is script output.
@@ -258,7 +279,7 @@ def test_retry_button_only_when_the_envelope_says_retryable(node_available):
 
 def test_every_panel_retry_target_is_registered(node_available):
     out = run_in_node("console.log(JSON.stringify(Object.keys(RETRY_ACTIONS).sort()));")
-    for expected in ("jobs", "missions", "computer", "remote", "doctor", "telemetry", "overview"):
+    for expected in ("jobs", "missions", "computer", "remote", "doctor", "telemetry", "chat"):
         assert expected in out, f"{expected} panel offers Retry but has no action registered"
 
 
@@ -336,8 +357,11 @@ def test_markup_is_a_real_tablist():
     assert html.count('role="tabpanel"') == 10
     assert html.count('aria-selected="true"') == 1  # exactly one selected
     assert html.count('tabindex="0"') == 1  # roving tabindex: one tabbable
-    assert 'aria-controls="tab-overview"' in html
-    assert 'aria-labelledby="tabbtn-overview"' in html
+    assert 'aria-controls="tab-chat"' in html
+    assert 'aria-labelledby="tabbtn-chat"' in html
+    # The chat face replaced both of them; neither may come back as a tab.
+    assert 'data-tab="overview"' not in html
+    assert 'data-tab="telemetry"' not in html
 
 
 def test_select_tab_maintains_aria_state(node_available):

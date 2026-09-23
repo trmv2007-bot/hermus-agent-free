@@ -259,12 +259,8 @@ class Agent:
         self.current_task = message.get("task_id")
 
         try:
-            # TODO: Actually process the task
-            # For now, just simulate work
-            await asyncio.sleep(0.5)
-
+            response = await asyncio.to_thread(self._model_reply, str(message.get("content") or ""))
             self.stats.tasks_completed += 1
-            response = f"Task completed: {message.get('content', 'unknown')}"
 
             if message.get("sender_id"):
                 await self.reply(message["sender_id"], response)
@@ -272,6 +268,8 @@ class Agent:
         except Exception as e:
             self.stats.tasks_failed += 1
             logger.error(f"Agent {self.agent_id} task failed: {e}")
+            if message.get("sender_id"):
+                await self.reply(message["sender_id"], f"Task failed: {e}")
 
         finally:
             self.state = AgentState.IDLE
@@ -281,10 +279,10 @@ class Agent:
         """Handle a collaboration request."""
         self.state = AgentState.THINKING
 
-        # TODO: Implement actual collaboration logic
-        await asyncio.sleep(0.3)
-
-        response = f"Collaborating on: {message.get('content', 'unknown')}"
+        # No collaboration engine exists in this build. Saying so is the honest
+        # answer; "Collaborating on: …" acknowledged work that never happened.
+        response = f"Collaboration is not implemented: no work was done on {str(message.get('content', 'unknown'))[:100]!r}."
+        logger.warning(f"Agent {self.agent_id} declined a collaboration request (unimplemented)")
         if message.get("sender_id"):
             await self.reply(message["sender_id"], response)
 
@@ -356,6 +354,34 @@ class Agent:
             del other.connections[self.agent_id]
         logger.info(f"🔓 Agent {self.config.name} disconnected from {other.config.name}")
 
+    def _model_reply(self, prompt: str, *, system: str | None = None) -> str:
+        """One real model turn through the only legal client path.
+
+        Raises when no model answers: this class used to return a fabricated
+        ``"Completed: <task>"`` after a sleep, which reported success for work
+        that never happened. core.llm's local mock fallback is rejected for the
+        same reason.
+        """
+        from core.fleet.orchestrator import is_mock_fallback
+        from core.models import get_model_gateway
+
+        llm = get_model_gateway().llm(
+            model=self.config.model or None,
+            provider=self.config.provider or None,
+            api_key=self.config.api_key or None,
+            base_url=self.config.base_url or None,
+        )
+        wire = [
+            {"role": "system", "content": system or f"You are {self.config.name}, an autonomous {self.role.value} agent."},
+            {"role": "user", "content": prompt},
+        ]
+        content = str(getattr(llm.chat(wire), "content", "") or "")
+        if is_mock_fallback(content):
+            raise RuntimeError("no model reachable: the provider returned the local mock fallback")
+        if not content.strip():
+            raise RuntimeError("the model returned no content")
+        return content
+
     async def run_task(self, task: str, task_id: str = None) -> str:
         """
         Run a task.
@@ -375,11 +401,7 @@ class Agent:
         self.memory.add_message(role="user", content=task)
 
         try:
-            # TODO: Actually run the task through LLM
-            # For now, simulate processing
-            await asyncio.sleep(0.5)
-
-            result = f"Completed: {task}"
+            result = await asyncio.to_thread(self._model_reply, task)
             self.memory.add_message(role="assistant", content=result)
             self.stats.tasks_completed += 1
 
@@ -387,7 +409,7 @@ class Agent:
 
         except Exception as e:
             self.stats.tasks_failed += 1
-            error_msg = f"Error: {str(e)}"
+            error_msg = f"Task failed: {e}"
             self.memory.add_message(role="assistant", content=error_msg)
             return error_msg
 

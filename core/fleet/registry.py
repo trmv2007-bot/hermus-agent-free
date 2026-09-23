@@ -32,8 +32,8 @@ Durability model — **WAL-first, cache-never-authoritative** (§3/§5):
 * a corrupt roster-cache file never breaks boot (skipped with a warning).
 
 Real work path: the registry takes ``chat_fn=None`` at construction and the
-default adapter :func:`chat_via_freellm` runs ``core.llm.FreeLLM`` with a
-Vault-resolved key (:meth:`MultiKeyManager.get_key_bundle`). Tests always
+default adapter :func:`chat_via_freellm` obtains its client through
+``ModelGateway.llm()`` with a Vault-resolved key (:meth:`MultiKeyManager.get_key_bundle`). Tests always
 inject a stub ``chat_fn(messages) -> {"content": str, "tokens": int}`` —
 this module never calls the network itself.
 
@@ -267,7 +267,7 @@ def chat_via_freellm(
     *,
     chat_fn: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Default ``assign`` work path: ``core.llm.FreeLLM`` with a Vault-resolved key.
+    """Default ``assign`` work path: ModelGateway-issued client with a Vault-resolved key.
 
     The registry is constructed with ``chat_fn=None`` and falls back to this.
     Imports are lazy so importing this module never touches provider config.
@@ -293,7 +293,7 @@ def chat_via_freellm(
     * If the bundle is missing the function falls back to FreeLLM auto-detection
       (it will raise if no provider is usable — no silent mock).
     """
-    from core.llm import FreeLLM
+    from core.models import get_model_gateway
     from core.multi_key import multi_key_manager
     from core.providers import get_provider
 
@@ -344,11 +344,13 @@ def chat_via_freellm(
         except Exception:
             pass  # cannot resolve preset — proceed and let the provider reject
 
-    llm = FreeLLM(
+    # The ONE legal model-client path: ModelGateway.llm() (architecture gate:
+    # application code never constructs FreeLLM or picks a provider itself).
+    llm = get_model_gateway().llm(
         model=model or None,
+        provider=provider or None,
         api_key=api_key or None,
         base_url=base_url or None,
-        provider=provider or None,
     )
     response = llm.chat(wire)
     usage = getattr(response, "usage", None) or {}
@@ -474,9 +476,10 @@ class FleetRegistry:
     def boot(self) -> "FleetRegistry":
         """Rebuild the roster from the bus: snapshot payload + tail replay.
 
-        The roster cache under ``data/fleet/agents`` is consulted only when the
-        bus has no events at all (fresh log). Corrupt cache files are skipped,
-        never fatal. Idempotent — safe to call again after a checkpoint.
+        The roster cache under ``data/fleet/agents`` is consulted when the
+        snapshot has no agents (either no snapshot yet, or snapshot predates
+        the current roster). Corrupt cache files are skipped, never fatal.
+        Idempotent — safe to call again after a checkpoint.
         """
         with self._lock:
             snapshot, tail = self.bus.load()
@@ -488,7 +491,9 @@ class FleetRegistry:
                         self._agents[str(aid)] = LiveAgent.from_dict(data)
                     except Exception:
                         logger.warning("[FleetRegistry] skipping corrupt snapshot agent %r", aid)
-            elif self.bus.last_seq == 0:
+            else:
+                # No agents in snapshot — load from roster cache as the base state.
+                # The tail replay will then apply any live updates since the cache was written.
                 self._load_roster_cache()
             replayed = 0
             for event in tail:
@@ -667,12 +672,13 @@ class FleetRegistry:
                 model=str(spec.get("model") or ""),
                 key_name=spec.get("key_name"),
                 skills=[str(skill) for skill in (spec.get("skills") or [])],
-                state=SPAWNING,
+                state=IDLE,  # Final state directly; no separate SPAWNING->IDLE transition event
                 created_at=now,
                 last_activity=now,
             )
-            self._transition(agent, IDLE)  # validated SPAWNING → IDLE
+            # Register agent FIRST so it exists for any subsequent events
             self._agents[agent.agent_id] = agent
+            # Emit the single agent.spawned event carrying the final state
             self.bus.append(
                 sender=SENDER_FLEET_REGISTRY,
                 kind=KIND_AGENT_SPAWNED,

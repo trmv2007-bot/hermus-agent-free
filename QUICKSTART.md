@@ -39,9 +39,9 @@ Recommended commands:
 ```bash
 ./hermus bootstrap            # one-command setup + health
 ./hermus doctor               # health/diagnostics report
-./hermus start                # dashboard + gateway
-./hermus mission "goal"       # autonomous mission
-./hermus status --live        # live capability state
+./hermus gateway start        # dashboard + gateway
+./hermus mission start "goal" # autonomous mission
+./hermus fleet run "goal"     # distribute a goal across the model fleet
 ```
 
 ---
@@ -59,7 +59,7 @@ Open in your browser:
 
 ## 🧙‍♂️ 4-Step Interactive Onboarding Wizard
 
-When you open the dashboard for the first time, the interactive wizard walks you through:
+Open the Control Room (`http://localhost:8000/control`) and the interactive wizard walks you through:
 
 1. **AI Brain & Key Connection:**
    * Select **⚡ Groq (Free Tier)**, **🌪️ Mistral (`devstral-latest` Free Tier)**, **🧠 OpenAI**, or **💻 Local Ollama (100% Offline)**.
@@ -115,7 +115,6 @@ room during a mission recovers state from the backend (there is no client-owned 
 state). Battery — the control room is a *client* of backend state, never the owner of the
 autonomy loop, tool execution or device state.
 
-
 ---
 
 ## 🎛️ The Control Room (single production UI)
@@ -127,8 +126,6 @@ fleet, key vault, semantic RAG memory, tools registry, channel webhooks, compute
 autonomy and remote-pocket control, reconstructed from durable backend state. The
 older `/dashboard`, `/jarvis`, `/computer/dashboard` and `/remote` surfaces and their
 assets were removed and folded into `/control`.
-
----
 
 ---
 
@@ -148,8 +145,6 @@ assets were removed and folded into `/control`.
 
 ### 📡 Remote Mesh Access via Tailscale
 * Pair your phone and PC over an encrypted WireGuard mesh without opening router ports or exposing your IP to the public internet.
-
----
 
 ---
 
@@ -174,3 +169,6 @@ assets were removed and folded into `/control`.
 # Run autonomous mission
 ./hermus mission start "Build a Python CLI for file search"
 ```
+
+The full command list is always available via `./hermus --help` and
+`./hermus <command> --help`.

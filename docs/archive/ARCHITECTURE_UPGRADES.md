@@ -558,7 +558,7 @@ Consolidated architecture upgrades transforming Hermus into an objective-driven,
 # Part IV — Execution-path hardening (mission failure contract, evidence, budgets, isolation)
 
 A review-driven pass over the universal runtime. Full details and rationale:
-**[`docs/EXECUTION_PATH_HARDENING.md`](docs/EXECUTION_PATH_HARDENING.md)**.
+**[`docs/EXECUTION_PATH_HARDENING.md`](../../docs/EXECUTION_PATH_HARDENING.md)**.
 
 | # | Area | Change |
 |---|---|---|

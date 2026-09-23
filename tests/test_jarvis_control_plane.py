@@ -146,7 +146,9 @@ def test_control_room_inline_javascript_parses_with_node():
     if not shutil.which("node"):
         return
     for script in scripts:
-        with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
+        # UTF-8 explicitly: the default Windows locale (cp1252) cannot encode
+        # legitimate source characters like the ∞ fallback in the grants table.
+        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8") as fh:
             fh.write(script)
             fh.flush()
             subprocess.run(["node", "--check", fh.name], check=True)

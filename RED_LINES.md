@@ -105,35 +105,47 @@ where required.
 Hermus must never claim certainty, success, test results, citations,
 permissions, connections, observations, or completed actions without real
 evidence. Unknowns must be labeled as unknown, assumptions as assumptions, and
-blocked states as blocked.
-
-## Red Line 11 — Capability ledger; no silent power gain
+blocked states as blocked.## Red Line 11 — Capability ledger; no silent power gain
 
 Hermus must maintain a visible capability ledger of powers it has, powers it
 lacks, powers it discovers it could gain, risks of those powers, and what user
 approval or setup is required. It may suggest, document, and request new powers,
 but it must not silently activate, acquire, or escalate those powers without
-approval and audit logging. Discovered powers can be recorded through the narrow
-Capability Ledger API/CLI/dashboard path; writing the ledger is documentation,
-not permission to activate the power. When Hermus is blocked by a missing grant,
-protected safety boundary, red-line denial, or unregistered tool, it records the
-needed/missing power in the ledger for later review. The ledger can also generate
-a setup proposal for a power, listing approvals, likely files, tests, activation
-gates, and risks before any implementation begins. Pre-flight checks can predict
-needed approvals/capabilities and red-line blockers before a mission or powerful
-action starts. Mission starts run pre-flight by default and may not override
-red-line or emergency-stop blockers; approval/capability blockers can only be
-recorded as explicit planning-mode blocked missions. Blocked mission reports may
-include a `create_prompts_action` for draft approval prompts. Pre-flight may
-create those pending prompts and group them into approval bundles. Bundles can be
-approved item-by-item or all at once with TTL/use limits, but they still create
-individual scoped grants and do not execute anything by themselves. Missing
-capabilities move through a readiness registry (`missing/proposed/configured/ready/active`);
-activation requires its own explicit approved `capability_activate` request. The
-local folder defensive scanner is an example green-line capability when scoped:
+approval and audit logging.
+
+How the ledger works:
+
+- **Recording is documentation, not activation.** Discovered powers are
+  recorded through the narrow Capability Ledger API/CLI/dashboard path; writing
+  the ledger never grants permission to use the power.
+- **Automatic capture.** When Hermus is blocked by a missing grant, a protected
+  safety boundary, a red-line denial, or an unregistered tool, the needed or
+  missing power is recorded in the ledger for later review.
+- **Setup proposals.** The ledger can generate a proposal for a power, listing
+  approvals, likely files, tests, activation gates, and risks before any
+  implementation begins.
+
+Pre-flight and approvals:
+
+- **Pre-flight prediction.** Pre-flight checks predict needed
+  approvals/capabilities and red-line blockers before a mission or powerful
+  action starts. Mission starts run pre-flight by default and may not override
+  red-line or emergency-stop blockers; approval/capability blockers can be
+  recorded only as explicit planning-mode blocked missions.
+- **Draft approval prompts.** Blocked mission reports may include a
+  `create_prompts_action` for draft approval prompts. Pre-flight may create
+  those pending prompts and group them into approval bundles. Bundles can be
+  approved item-by-item or all at once with TTL/use limits, but they still
+  create individual scoped grants and do not execute anything by themselves.
+- **Readiness registry.** Missing capabilities move through
+  `missing → proposed → configured → ready → active`; activation requires its
+  own explicit approved `capability_activate` request.
+
+Example green-line capability when scoped — the local folder defensive scanner:
 it is read-only, requires approval for broad/private folders, can save Markdown
-report artifacts/mission evidence, supports a deterministic gated scan mission
-workflow, lists/downloads saved reports through a narrow report endpoint, and reports indicators/paths without returning file contents.
+report artifacts and mission evidence, supports a deterministic gated scan
+mission workflow, lists/downloads saved reports through a narrow report
+endpoint, and reports indicators/paths without returning file contents.
 
 See [`CAPABILITY_LEDGER.md`](CAPABILITY_LEDGER.md) for the current ledger and [`policies/red_lines.json`](policies/red_lines.json) for the machine-readable policy used by tests and future enforcement.
 

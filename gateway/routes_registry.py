@@ -178,11 +178,22 @@ async def keys_models(provider: str, key: str = None, base_url: str = None):
 @router.post("/embeddings/ingest")
 async def embeddings_ingest(payload: dict):
     from core.embeddings import embedding_store
+    from gateway.context import readable_path_roots, resolve_readable_path
 
     path = payload.get("path")
     if not path:
         return JSONResponse({"error": "path required"}, status_code=400)
-    return embedding_store.ingest_path(path, source=payload.get("source"))
+    contained = resolve_readable_path(path)
+    if contained is None:
+        return JSONResponse(
+            {
+                "error": "path_outside_workspace",
+                "message": "path must live under one of: " + ", ".join(str(r) for r in readable_path_roots()),
+                "code": "path_outside_workspace",
+            },
+            status_code=400,
+        )
+    return embedding_store.ingest_path(str(contained), source=payload.get("source"))
 
 
 @router.post("/embeddings/search")

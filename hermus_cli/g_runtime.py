@@ -83,9 +83,21 @@ def _configure_doctor(subparsers) -> None:
     doctor_parser.add_argument("--no-internet", action="store_true", help="Do not look unknown failures up online")
     doctor_parser.add_argument("--no-llm", action="store_true", help="Deterministic triage only (no model call)")
     doctor_parser.add_argument("--reap", action="store_true", help="Close out runs/jobs stuck in a non-terminal state")
+    doctor_parser.add_argument(
+        "--skip-validation", action="store_true", help="Skip critical config validation (for CI)"
+    )
 
 
 def _run_doctor(args, ctx: CLIContext) -> None:
+    # Critical config validation runs first (fail fast with actionable errors);
+    # skippable for CI via --skip-validation or HERMUS_SKIP_VALIDATION=1.
+    if not getattr(args, "skip_validation", False):
+        import os
+
+        if os.getenv("HERMUS_SKIP_VALIDATION", "").strip().lower() not in ("1", "true", "yes"):
+            from bootstrap import validate_critical_config
+
+            validate_critical_config(skip_validation=False)
     if getattr(args, "self_repair", False):
         # The Hermus doctor's patient is Hermus itself: runtime errors,
         # stuck runs/jobs, engine health — explained with a management plan.

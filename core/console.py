@@ -120,7 +120,7 @@ _TABLE = (
         "agents",
         "Agent registry",
         "agents",
-        "core/agent_manager.py",
+        "core/fleet/facade.py",
         "@agents",
         "Registered agents and their live status",
     ),
@@ -857,7 +857,7 @@ def _p_missions() -> dict[str, Any]:
 
 
 def _p_agents() -> dict[str, Any]:
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
 
     rows = _jsonable(_as_list(_safe(agent_manager.list)))
     return {"total": len(rows), "agents": rows[:20]}

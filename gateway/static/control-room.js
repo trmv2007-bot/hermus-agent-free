@@ -1,32 +1,9 @@
 const $ = (s) => document.querySelector(s);
-// When gateway auth is enabled, open /control?token=... once (or store it as
-// hermus_gateway_token). Browser fetch cannot read the server-side environment,
-// so attach that token to every API request without putting it into ordinary
-// fetch URLs. SSE/WS helpers add it separately because those browser APIs do
-// not support custom headers.
-const tokenFromUrl = new URLSearchParams(location.search).get("token") || "";
-let gatewayToken = tokenFromUrl;
-if (!gatewayToken) {
-  try { gatewayToken = localStorage.getItem("hermus_gateway_token") || ""; } catch(e) {};
-}
-if (gatewayToken) {
-  window.__HERMUS_GATEWAY_TOKEN = gatewayToken;
-  // Do not leave a query credential in the address bar/history after capturing it.
-  if (tokenFromUrl) {
-    try { history.replaceState(null, "", location.pathname + location.hash); } catch(e) {}
-  }
-}
-if (gatewayToken && window.fetch) {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    const opts = Object.assign({}, init || {});
-    const headers = new Headers(input && input.headers ? input.headers : undefined);
-    new Headers(opts.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-Hermus-Token", gatewayToken);
-    opts.headers = headers;
-    return nativeFetch(input, opts);
-  };
-}
+// NOTE: the gateway token bootstrap lives ONLY in the inline <script> in
+// control.html (it must run before this deferred file so the fetch wrapper is
+// installed before any API call). It declares `gatewayToken`/`tokenFromUrl` at
+// top level; redeclaring them here would throw SyntaxError and abort the whole
+// script chain (requestJSON/toast/console boot would never be defined).
 const conn = $("#conn");
 const rtt = $("#rtt");
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -108,6 +85,9 @@ function requestJSON(url, opts) {
   }));
 }
 
+function postJSON(url, body) {
+  return requestJSON(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
 /* getJSON keeps its historical {j, ms} shape so the ~15 existing call sites
  * keep working, but the error it throws now carries the parsed envelope. */
 function getJSON(url){
@@ -284,12 +264,11 @@ document.querySelectorAll("nav [role=tab]").forEach((b) => {
 // Mark the initially hidden panels without triggering a refresh on load.
 (function initTabs(){
   const active = document.querySelector("nav [role=tab].on");
-  selectTab(active ? active.dataset.tab : "overview", { noRefresh: true });
+  selectTab(active ? active.dataset.tab : "chat", { noRefresh: true });
 })();
 function refreshTab(name){
   if (name === "jobs") refreshJobs();
   else if (name === "missions") refreshMissions();
-  else if (name === "telemetry") refreshTelemetry(true);
   else if (name === "computer") refreshComputer();
   else if (name === "remote") refreshRemote();
   else if (name === "safety") refreshSafety();
@@ -415,7 +394,7 @@ function renderCaps(c){
 async function refreshOverview(){
   try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; }
   catch(e){ $("#health").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
-    { label: "system health", onRetryId: "overview" }); }
+    { label: "system health", onRetryId: "chat" }); }
   try { await refreshReadiness(); } catch(e){}
   try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); } catch(e){}
   try { await refreshEmergency(); } catch(e){}
@@ -604,6 +583,170 @@ function openTmStream(){
   // poll fallback in case the WS is unavailable (e.g. static preview / no token)
   setInterval(() => { try { refreshTelemetry(false); } catch(e){} }, 5000);
 }
+
+// ---------- CHAT (the face) ----------
+/* One honest path: the composer drives POST /stream/command, which submits the
+ * canonical `runtime.turn` job and streams its run events back as SSE.
+ * `llm_delta` paints the bubble live and `agent_response` is the authoritative
+ * final text. If no stream can be opened, the turn falls back to one
+ * synchronous /command call through the same runtime. A turn that fails is
+ * rendered as a failure — the thread never receives an invented reply. */
+const CHAT = { busy: false, ctrl: null };
+
+function chatScroll(){
+  const t = $("#chatThread");
+  if (t) t.scrollTop = t.scrollHeight;
+}
+
+function chatRow(kind, label, text){
+  const thread = $("#chatThread");
+  if (!thread) return null;
+  const seed = thread.querySelector(".chat-seed");
+  if (seed) seed.remove();
+  const row = document.createElement("div");
+  row.className = "chat-row chat-" + kind;
+  const who = document.createElement("span");
+  who.className = "chat-who";
+  who.textContent = label;
+  const body = document.createElement("div");
+  body.className = "chat-body";
+  body.textContent = text || "";
+  row.appendChild(who);
+  row.appendChild(body);
+  thread.appendChild(row);
+  chatScroll();
+  return body;
+}
+
+function chatStatus(text, cls){
+  const el = $("#chatStatus");
+  if (el) { el.textContent = text; el.className = "pill " + (cls || "muted"); }
+}
+
+function chatBusy(on){
+  CHAT.busy = on;
+  const send = $("#chatSend"), stop = $("#chatStop");
+  if (send) send.disabled = on;
+  if (stop) stop.hidden = !on;
+}
+
+/* An SSE frame is `id:` / `event:` / `data:` lines terminated by a blank line;
+ * the data payload carries the whole run event, so only it is parsed. */
+function sseFrames(buf, emit){
+  let i;
+  while ((i = buf.indexOf("\n\n")) >= 0) {
+    const frame = buf.slice(0, i);
+    buf = buf.slice(i + 2);
+    let data = null;
+    frame.split("\n").forEach((line) => {
+      if (!line.startsWith("data:")) return;
+      const raw = line.slice(5).trim();
+      if (raw) { try { data = JSON.parse(raw); } catch(e) { data = null; } }
+    });
+    if (data && data.type) emit(data);
+  }
+  return buf;
+}
+
+async function chatStream(text, body){
+  const ctrl = new AbortController();
+  CHAT.ctrl = ctrl;
+  const res = await fetch("/stream/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+    body: JSON.stringify({ text: text, platform: "dashboard", user_id: "control-room", stream: true }),
+    signal: ctrl.signal,
+  });
+  if (!res.ok || !res.body) {
+    const detail = await res.text().catch(() => "");
+    throw new Error("stream " + res.status + (detail ? ": " + detail.slice(0, 180) : ""));
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "", painted = "", finalText = "";
+  const emit = (ev) => {
+    const d = ev.data || {};
+    if (ev.type === "llm_delta") {
+      painted += String(d.text || d.delta || "");
+      body.textContent = painted;
+      chatScroll();
+    } else if (ev.type === "agent_response") {
+      finalText = String(d.text || "");
+      if (finalText) { body.textContent = finalText; chatScroll(); }
+    } else if (ev.type === "tool_call") {
+      chatRow("sys", "tool", String(d.name || d.tool || "call"));
+    } else if (ev.type === "run_error" || ev.type === "agent_failed" || ev.type === "stream_timeout") {
+      throw new Error(String(d.message || d.error || d.status || ev.type));
+    }
+  };
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buf = sseFrames(buf + dec.decode(chunk.value, { stream: true }), emit);
+  }
+  const answer = finalText || painted;
+  if (answer) return answer;
+  throw new Error("the run closed without an agent_response");
+}
+
+function chatFail(body, msg){
+  const row = body && body.parentElement;
+  if (row) {
+    row.classList.add("is-error");
+    body.classList.remove("pending");
+    body.textContent = "turn failed: " + msg + " — nothing invented.";
+  }
+  chatStatus("failed", "err");
+}
+
+async function sendChat(){
+  const input = $("#chatInput");
+  const text = ((input && input.value) || "").trim();
+  if (!text || CHAT.busy) return;
+  chatBusy(true);
+  chatRow("you", "you", text);
+  const body = chatRow("hermus", "hermus", "");
+  if (body) body.classList.add("pending");
+  if (input) input.value = "";
+  chatStatus("thinking", "warn");
+  try {
+    await chatStream(text, body || {});
+    chatStatus("reply", "ok");
+  } catch (e) {
+    if (e && e.name === "AbortError") {
+      if (body) { body.classList.remove("pending"); if (!body.textContent) body.textContent = "(stopped)"; }
+      chatStatus("stopped", "muted");
+    } else if (typeof sendCommand === "function") {
+      chatStatus("stream down, inline retry", "warn");
+      try {
+        const r = await sendCommand({ text: text });
+        if (r && r.ok) {
+          if (body) { body.classList.remove("pending"); body.textContent = r.response || "(empty reply)"; }
+          chatStatus("reply", "ok");
+        } else {
+          chatFail(body, (r && r.error) || "no reply from /command");
+        }
+      } catch (e2) {
+        chatFail(body, e2.message || String(e2));
+      }
+    } else {
+      chatFail(body, (e && e.message) || String(e));
+    }
+  } finally {
+    if (body) body.classList.remove("pending");
+    CHAT.ctrl = null;
+    chatBusy(false);
+  }
+}
+
+const chatForm = $("#chatForm");
+if (chatForm) chatForm.addEventListener("submit", (ev) => { ev.preventDefault(); sendChat(); });
+const chatInput = $("#chatInput");
+if (chatInput) chatInput.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); sendChat(); }
+});
+const chatStopBtn = $("#chatStop");
+if (chatStopBtn) chatStopBtn.addEventListener("click", () => { if (CHAT.ctrl) CHAT.ctrl.abort(); });
 
 // ---------- COMPUTER ----------
 async function refreshComputer(){
@@ -1361,6 +1504,519 @@ function orchestrate() {
 }
 initVoice();
 
+// ---------- FLEET WS LIVE FEED ----------
+let fleetWs = null;
+let fleetWsReconnectTimer = null;
+function fleetWsUrl() {
+  const t = gatewayToken ? "?token=" + encodeURIComponent(gatewayToken) : "";
+  return ((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/fleet/ws/fleet") + t;
+}
+
+function initFleetWs() {
+  if (fleetWs) { try { fleetWs.close(); } catch(e){} fleetWs = null; }
+  try {
+    fleetWs = new WebSocket(fleetWsUrl());
+    fleetWs.onopen = () => { if ($("#fleetWsStatus")) $("#fleetWsStatus").textContent = "live"; };
+    fleetWs.onclose = () => {
+      fleetWs = null;
+      if ($("#fleetWsStatus")) $("#fleetWsStatus").textContent = "disconnected";
+      if (!fleetWsReconnectTimer) fleetWsReconnectTimer = setTimeout(initFleetWs, 5000);
+    };
+    fleetWs.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (!msg || !msg.type) return;
+        // Let HUD listeners (and other surfaces) react without polling.
+        try { document.dispatchEvent(new CustomEvent("hermes:fleet-event", { detail: msg })); } catch(e) {}
+        if (msg.type === "snapshot") { applyFleetSnapshot(msg.data); return; }
+        if (msg.type === "fleet.state_changed") handleFleetStateChange(msg);
+        else if (msg.type === "fleet.broadcast") handleFleetBroadcast(msg);
+        else if (msg.type === "fleet.result") handleFleetResult(msg);
+        else if (msg.type === "fleet.agent_updated") handleFleetAgentUpdated(msg);
+        else if (msg.type === "fleet.mission_opened") handleFleetMissionOpened(msg);
+        else if (msg.type === "fleet.mission_terminated") handleFleetMissionTerminated(msg);
+      } catch(e) {}
+    };
+  } catch(e) {}
+}
+
+function applyFleetSnapshot(data) {
+  if (data && data.agents) {
+    const agents = data.agents;
+    const totalAgents = agents.length;
+    const live = agents.filter(a => ["idle","working","thinking","blocked","paused"].includes(a.state));
+    const done = agents.reduce((s, a) => s + ((a.stats && a.stats.tasks_done) || 0), 0);
+    const toks = agents.reduce((s, a) => s + ((a.stats && a.stats.tokens) || 0), 0);
+    const strip = $("#fleetSummary");
+    if (strip) strip.innerHTML = kpi(live.length, "live agents") + kpi(totalAgents, "total agents")
+      + kpi(done, "tasks done") + kpi(toks, "tokens");
+    const ac = $("#agentCount");
+    if (ac) ac.textContent = "agents: " + totalAgents;
+  }
+}
+
+function handleFleetStateChange(msg) {
+  const grid = $("#agentRosterGrid");
+  if (!grid) return;
+  const card = grid.querySelector('[data-agent-id="' + esc(msg.agent_id || "") + '"]');
+  if (card) {
+    const pill = card.querySelector(".state-pill");
+    if (pill) {
+      const st = msg.new_state || msg.state;
+      pill.textContent = _fleetState(st);
+      pill.className = "state-pill " + ({"idle":"ok","working":"working","thinking":"thinking","blocked":"blocked","paused":"paused","sleeping":"sleeping","error":"err","destroyed":"err"}[st] || "");
+    }
+    const nameEl = card.querySelector(".agent-name");
+    if (nameEl && msg.agent_name) nameEl.textContent = esc(msg.agent_name);
+  }
+}
+
+function handleFleetBroadcast(msg) {
+  const feed = $("#busFeed");
+  if (!feed) return;
+  const row = document.createElement("div");
+  row.className = "bus-row";
+  row.innerHTML = '<span class="bus-ts">' + esc(msg.ts || "") + '</span>'
+    + '<span class="bus-kind">broadcast</span>'
+    + '<span class="bus-content">' + esc(msg.content || "") + '</span>';
+  feed.appendChild(row);
+  feed.scrollTop = feed.scrollHeight;
+  while (feed.children.length > 200) feed.removeChild(feed.firstChild);
+}
+
+function handleFleetResult(msg) {
+  if (msg.needs_approval) {
+    const grid = $("#agentRosterGrid");
+    if (grid) {
+      const card = grid.querySelector('[data-agent-id="' + esc(msg.agent_id || "") + '"]');
+      if (card) { card.classList.add("approval-pending"); setTimeout(() => card.classList.remove("approval-pending"), 8000); }
+    }
+  }
+  const feed = $("#busFeed");
+  if (feed) {
+    const row = document.createElement("div");
+    row.className = "bus-row";
+    row.innerHTML = '<span class="bus-ts">' + esc(msg.ts || "") + '</span>'
+      + '<span class="bus-kind">result</span>'
+      + '<span class="bus-content">task ' + esc(msg.task_id || "") + " → " + (msg.executed ? "done" : "blocked") + '</span>';
+    feed.appendChild(row);
+    feed.scrollTop = feed.scrollHeight;
+    while (feed.children.length > 200) feed.removeChild(feed.firstChild);
+  }
+}
+
+function handleFleetAgentUpdated(msg) {
+  try { refreshAgents(); } catch(e) {}
+}
+
+function handleFleetMissionOpened(msg) {
+  const feed = $("#busFeed");
+  if (feed) {
+    const row = document.createElement("div");
+    row.className = "bus-row";
+    row.innerHTML = '<span class="bus-ts">' + esc(msg.ts || "") + '</span>'
+      + '<span class="bus-kind">mission</span>'
+      + '<span class="bus-content">opened: ' + esc(msg.goal || msg.mission_id || "") + '</span>';
+    feed.appendChild(row);
+    feed.scrollTop = feed.scrollHeight;
+    while (feed.children.length > 200) feed.removeChild(feed.firstChild);
+  }
+  try { refreshMissions(); } catch(e) {}
+}
+
+function handleFleetMissionTerminated(msg) {
+  const feed = $("#busFeed");
+  if (feed) {
+    const row = document.createElement("div");
+    row.className = "bus-row";
+    row.innerHTML = '<span class="bus-ts">' + esc(msg.ts || "") + '</span>'
+      + '<span class="bus-kind">mission</span>'
+      + '<span class="bus-content">terminated: ' + esc(msg.mission_id || "") + ' (' + esc(msg.state || "") + ')</span>';
+    feed.appendChild(row);
+    feed.scrollTop = feed.scrollHeight;
+    while (feed.children.length > 200) feed.removeChild(feed.firstChild);
+  }
+  try { refreshMissions(); } catch(e) {}
+}
+
+
+// ---------- SCREEN PANEL ----------
+function screenWsUrl() {
+  const t = gatewayToken ? "?token=" + encodeURIComponent(gatewayToken) : "";
+  return ((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/fleet/ws/fleet/screen") + t;
+}
+
+function initScreenPanel() {
+  const sel = $("#screenAgentSelect");
+  if (sel && $("#agentRosterGrid")) {
+    const cards = $("#agentRosterGrid").querySelectorAll("[data-agent-id]");
+    const agents = [];
+    cards.forEach(c => {
+      const id = c.getAttribute("data-agent-id");
+      const name = (c.querySelector(".agent-name") || c).textContent.trim();
+      if (id && name) agents.push({ id, name });
+    });
+    if (agents.length) {
+      sel.innerHTML = '<option value="">Select agent...</option>' + agents.map(a =>
+        '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>').join("");
+    }
+  }
+  const statusEl = $("#screenStatus");
+  const placeholder = $("#screenPlaceholder");
+  const canvas = $("#screenCanvas");
+  const overlay = $("#screenOverlay");
+
+  function connectScreen() {
+    if (screenWs) { try { screenWs.close(); } catch(e){} screenWs = null; }
+    const agentId = sel && sel.value || "";
+    try {
+      screenWs = new WebSocket(screenWsUrl());
+      screenWs.onopen = () => {
+        if (statusEl) { statusEl.textContent = "connecting..."; statusEl.className = "screen-status"; }
+      };
+      screenWs.onclose = () => {
+        screenWs = null;
+        if (statusEl) { statusEl.textContent = "disconnected"; statusEl.className = "screen-status"; }
+        if (!screenWsReconnectTimer && agentId) screenWsReconnectTimer = setTimeout(connectScreen, 10000);
+      };
+      screenWs.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (!msg || !msg.type) return;
+          if (msg.type === "frame") {
+            if (msg.data) {
+              if (canvas) {
+                const img = new Image();
+                img.onload = () => { canvas.width = img.width; canvas.height = img.height; canvas.getContext("2d").drawImage(img, 0, 0); };
+                img.src = "data:image/jpeg;base64," + msg.data;
+              }
+              if (placeholder) placeholder.style.display = "none";
+              if (statusEl) { statusEl.textContent = "live"; statusEl.className = "screen-status ok"; }
+              if (overlay) overlay.style.display = "";
+            } else {
+              if (placeholder) { placeholder.style.display = ""; placeholder.querySelector("p").textContent = msg.message || "Screen capture not yet available"; }
+              if (statusEl) { statusEl.textContent = "unavailable"; statusEl.className = "screen-status warn"; }
+              if (canvas) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+              if (overlay) overlay.style.display = "none";
+            }
+          }
+        } catch(e) {}
+      };
+    } catch(e) {}
+  }
+  if (sel) sel.onchange = connectScreen;
+  if (sel && sel.value) connectScreen();
+}
+
+
+// ---------- APPROVAL ATTENTION PANEL ----------
+async function refreshApprovalsPanel() {
+  const list = $("#approvalList");
+  const badge = $("#approvalBadge");
+  const panel = $("#approvalAttention");
+  if (!list) return;
+  try {
+    const { j } = await getJSON("/permissions/pending");
+    const pending = (j && j.pending) ? j.pending : [];
+    const active = pending.filter(a => a.status === "pending" || a.status === "asked");
+    if (badge) { badge.textContent = String(active.length); badge.className = "badge " + (active.length ? "warning" : ""); }
+    if (panel) panel.hidden = active.length === 0;
+    if (!active.length) { list.innerHTML = '<div class="approval-empty">No pending approvals — all clear.</div>'; return; }
+    list.innerHTML = active.map(a => {
+      const created = a.created_at ? new Date(a.created_at).toLocaleString() : "";
+      return '<div class="approval-item glass">'
+        + '<div class="approval-item-header">'
+        + '<span class="approval-item-title">' + esc(a.title || "Approval required") + '</span>'
+        + '<span class="approval-item-id">' + esc(a.id) + '</span>'
+        + '<span class="approval-item-age">' + esc(created) + '</span>'
+        + '</div>'
+        + '<div class="approval-item-body">'
+        + '<div class="approval-item-tool">Tool: ' + esc(a.tool || "") + '</div>'
+        + (a.suggested_purpose ? '<div class="approval-item-purpose">Purpose: ' + esc(a.suggested_purpose) + '</div>' : "")
+        + (a.suggested_resources && a.suggested_resources.length ? '<div class="approval-item-resources">Resources: ' + esc(a.suggested_resources.join(", ")) + '</div>' : "")
+        + '</div>'
+        + '<div class="approval-item-actions">'
+        + '<button class="btn primary" data-approve-approval="' + esc(a.id) + '">Approve</button>'
+        + '<button class="btn ghost" data-deny-approval="' + esc(a.id) + '">Deny</button>'
+        + '</div>'
+        + '</div>';
+    }).join("");
+    list.querySelectorAll("[data-approve-approval]").forEach(b => b.addEventListener("click", () => resolveApproval(b.getAttribute("data-approve-approval"), "approve")));
+    list.querySelectorAll("[data-deny-approval]").forEach(b => b.addEventListener("click", () => resolveApproval(b.getAttribute("data-deny-approval"), "deny")));
+  } catch(e) { list.innerHTML = '<div class="approval-empty">Unable to load pending approvals.</div>'; }
+}
+
+function resolveApproval(id, decision) {
+  const list = $("#approvalList");
+  if (list) list.innerHTML = '<div class="approval-empty">Resolving...</div>';
+  try {
+    const { j } = postJSON("/permissions/pending/resolve", { id, decision, ttl_minutes: 30 });
+    if (j && j.success) {
+      toast("Approval " + decision + ": " + esc(id), "success");
+      refreshApprovalsPanel();
+      try { refreshMissions(); } catch(e) {}
+    } else {
+      toast("Failed to " + decision + " approval: " + esc(j.message || j.error || ""), "error");
+      refreshApprovalsPanel();
+    }
+  } catch(e) { toast("Error resolving approval: " + e.message, "error"); refreshApprovalsPanel(); }
+}
+
+
+// ---------- ONBOARDING WIZARD (skeleton) ----------
+const ONBOARDING_STEPS = [
+  {
+    title: "Welcome to HERMUS Fleet",
+    render: () => '<div class="wizard-step-text">'
+      + '<p class="wizard-intro">Set up your first agent fleet in a few steps. You can skip any step — nothing here writes secrets.</p>'
+      + '<div class="wizard-features">'
+      + '<div class="wizard-feature"><span class="wizard-feature-icon">&#9889;</span><div><strong>Agent Pool</strong><br>Spawn persistent agents with provider/model presets.</div></div>'
+      + '<div class="wizard-feature"><span class="wizard-feature-icon">&#128222;</span><div><strong>API Keys</strong><br>Add keys via the dashboard or CLI — never stored in the browser.</div></div>'
+      + '<div class="wizard-feature"><span class="wizard-feature-icon">&#128279;</span><div><strong>Live Feed</strong><br>Watch fleet state changes in real time via WebSocket.</div></div>'
+      + '</div>'
+      + '<p class="wizard-note">This wizard does not write any secrets. API keys are added separately via POST /api/fleet/keys or the CLI.</p>'
+      + '</div>'
+  },
+  {
+    title: "Choose a Provider & Model",
+    render: () => '<div class="wizard-field"><label>Provider</label><select id="onbProvider"><option value="">Loading...</option></select></div>'
+      + '<div class="wizard-field" id="onbModelGroup" style="display:none"><label>Model</label><select id="onbModel"><option>Loading...</option></select></div>'
+      + '<div class="wizard-note">Add API keys separately — this step does not touch your keys.</div>',
+    afterRender: async () => {
+      try {
+        const { j } = await getJSON("/api/fleet/providers");
+        const sel = document.getElementById("onbProvider");
+        if (sel) sel.innerHTML = '<option value="">Select provider...</option>' + j.providers.map(p => '<option value="' + esc(p) + '">' + esc(p) + '</option>').join("");
+      } catch(e) { const sel = document.getElementById("onbProvider"); if (sel) sel.innerHTML = '<option value="">— unavailable —</option>'; }
+      document.getElementById("onbProvider").onchange = onbProviderChange;
+    }
+  },
+  {
+    title: "API Key (optional)",
+    render: () => '<div class="wizard-field">'
+      + '<p class="wizard-note">Add an API key for your provider. Optional — add keys later via POST /api/fleet/keys or the CLI.</p>'
+      + '<div class="wizard-key-form">'
+      + '<input type="text" id="onbKeyName" placeholder="Key name (e.g. groq-prod)" />'
+      + '<input type="text" id="onbKeyProvider" placeholder="Provider (e.g. groq)" />'
+      + '<input type="password" id="onbKeyValue" placeholder="API key — sent to server, never stored in browser" />'
+      + '</div>'
+      + '<p class="wizard-note">The key is sent to the gateway vault and is not persisted in the browser.</p>'
+      + '</div>'
+  },
+  {
+    title: "Ready to go",
+    render: () => '<div class="wizard-step-text">'
+      + '<p>Your fleet is ready. You can now:</p>'
+      + '<ul class="wizard-ready-list">'
+      + '<li>Spawn an agent from the <strong>Agents</strong> tab or <strong>+ Create Agent</strong>.</li>'
+      + '<li>Watch live state changes in the <strong>Live Bus Feed</strong> panel.</li>'
+      + '<li>Approve or deny pending actions from the <strong>Approvals</strong> panel.</li>'
+      + '<li>Add more API keys anytime from <strong>Fleet &rarr; Keys</strong>.</li>'
+      + '</ul>'
+      + '<p class="wizard-note">Tip: run <strong>Spawn Demo Team</strong> to create a pre-configured team.</p>'
+      + '<div class="wizard-actions">'
+      + '<button class="btn primary" id="onbSpawnDemo">&#9889; Spawn Demo Team</button>'
+      + '<button class="btn ghost" id="onbSkipDemo">Skip</button>'
+      + '</div>'
+      + '</div>',
+    afterRender: () => {
+      const spawnBtn = document.getElementById("onbSpawnDemo");
+      if (spawnBtn) spawnBtn.onclick = spawnDemoTeam;
+      const skipBtn = document.getElementById("onbSkipDemo");
+      if (skipBtn) skipBtn.onclick = () => { closeOnboarding(); toast("Onboarding complete — your fleet is ready", "success"); };
+    }
+  }
+];
+
+let onbStep = 0;
+
+function startOnboarding() {
+  onbStep = 0;
+  const wizard = $("#onboardingWizard");
+  if (!wizard) return;
+  wizard.hidden = false;
+  renderOnboardingStep();
+}
+
+function closeOnboarding() {
+  const wizard = $("#onboardingWizard");
+  if (wizard) wizard.hidden = true;
+  onbStep = 0;
+}
+
+function renderOnboardingStep() {
+  const wizard = $("#onboardingWizard");
+  if (!wizard || onbStep < 0 || onbStep >= ONBOARDING_STEPS.length) { closeOnboarding(); return; }
+  const step = ONBOARDING_STEPS[onbStep];
+  $("#wizardStep").textContent = "Step " + (onbStep + 1) + " of " + ONBOARDING_STEPS.length;
+  $("#wizardContent").innerHTML = step.render();
+  $("#wizardPrev").disabled = onbStep === 0;
+  $("#wizardNext").textContent = onbStep === ONBOARDING_STEPS.length - 1 ? "Done" : "Next";
+  if (step.afterRender) step.afterRender();
+}
+
+function onbProviderChange() {
+  const sel = document.getElementById("onbProvider");
+  const prov = sel && sel.value || "";
+  const modelGroup = document.getElementById("onbModelGroup");
+  const modelSel = document.getElementById("onbModel");
+  if (!modelGroup || !modelSel) return;
+  if (!prov) { modelGroup.style.display = "none"; return; }
+  modelGroup.style.display = "";
+  modelSel.innerHTML = '<option value="">Loading...</option>';
+  fetch("/api/fleet/models?provider=" + encodeURIComponent(prov))
+    .then(r => r.json())
+    .then(d => { modelSel.innerHTML = '<option value="">Select model...</option>' + (d.models || []).map(m => '<option value="' + esc(m) + '">' + esc(m) + '</option>').join(""); })
+    .catch(() => { modelSel.innerHTML = '<option value="">— unavailable —</option>'; });
+}
+
+function onbNext() {
+  if (onbStep < ONBOARDING_STEPS.length - 1) { onbStep++; renderOnboardingStep(); }
+  else { closeOnboarding(); toast("Onboarding complete — your fleet is ready", "success"); }
+}
+
+function onbPrev() { if (onbStep > 0) { onbStep--; renderOnboardingStep(); } }
+
+function onbAddKey() {
+  const name = (document.getElementById("onbKeyName") || {}).value.trim() || "";
+  const provider = (document.getElementById("onbKeyProvider") || {}).value.trim() || "";
+  const key = (document.getElementById("onbKeyValue") || {}).value || "";
+  if (!name || !provider || !key) { toast("Key name, provider, and key are required", "error"); return; }
+  postJSON("/api/fleet/keys", { name, provider, key })
+    .then(d => { if (d.ok) { toast("Key '" + esc(name) + "' added to vault", "success"); closeOnboarding(); }
+      else toast("Failed to add key: " + esc(d.message || d.error || ""), "error"); })
+    .catch(e => toast("Error adding key: " + e.message, "error"));
+}
+
+async function spawnDemoTeam() {
+  const btn = document.getElementById("onbSpawnDemo");
+  if (btn) { btn.disabled = true; btn.textContent = "Spawning..."; }
+  try {
+    // Spawn a few demo agents with different personas
+    const agents = [
+      { name: "Researcher", persona: "You are a research specialist. Provide thorough, well-cited answers.", provider: "groq", model: "llama-3.3-70b" },
+      { name: "Coder", persona: "You are a software engineer. Write clean, tested code with clear explanations.", provider: "groq", model: "llama-3.3-70b" },
+      { name: "Planner", persona: "You are a strategic planner. Break down goals into actionable steps with clear priorities.", provider: "groq", model: "llama-3.3-70b" },
+    ];
+    for (const agent of agents) {
+      await postJSON("/api/fleet/agents", agent);
+    }
+    toast("Demo team spawned — 3 agents created", "success");
+    closeOnboarding();
+    refreshAgents();
+  } catch(e) {
+    toast("Failed to spawn demo team: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "&#9889; Spawn Demo Team"; }
+  }
+}
+
+function wireOnboardingButtons() {
+  const prev = $("#wizardPrev");
+  const next = $("#wizardNext");
+  if (prev) prev.onclick = onbPrev;
+  if (next) next.onclick = onbNext;
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "onbAddKey") onbAddKey();
+  });
+}
+
+
+// VRAM gauge — reads the real /api/v1/agents/vram/monitor probe. The UI never
+// simulates success: when the host has no measurable VRAM (no torch/CUDA) the
+// gauge says "n/a" instead of inventing a number.
+function updateVRAMMonitor(){
+  const fill = $("#vramFill");
+  const percent = $("#vramPercent");
+  const used = $("#vramUsed");
+  const pill = $("#vramUsage");
+  if (!fill || !percent || !used) return;
+  requestJSON("/api/v1/agents/vram/monitor").then((res) => {
+    const data = res.ok ? res.data : null;
+    if (!data || data.available !== true || data.vram_percent == null) {
+      const reason = (data && (data.reason || data.recommendation)) || (res.ok ? "unavailable" : "probe failed");
+      fill.style.width = "0%";
+      percent.textContent = "n/a";
+      used.textContent = reason;
+      setPill("#vramUsage", "VRAM: n/a", "muted");
+      return;
+    }
+    const pct = data.vram_percent;
+    fill.style.width = Math.min(100, pct) + "%";
+    percent.textContent = pct + "%";
+    used.textContent = (data.vram_used_gb != null ? data.vram_used_gb.toFixed(1) : "--") + "GB"
+      + (data.vram_total_gb != null ? " / " + data.vram_total_gb.toFixed(0) + "GB" : "");
+    const usedTxt = data.vram_used_gb != null ? data.vram_used_gb.toFixed(1) : "--";
+    setPill("#vramUsage", "VRAM: " + usedTxt + "GB/" + pct + "%", pct > 80 ? "err" : pct > 60 ? "warn" : "ok");
+  }).catch(() => {
+    percent.textContent = "n/a";
+    used.textContent = "probe failed";
+    setPill("#vramUsage", "VRAM: offline", "err");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sentinel: the dashboard watches itself so a human only looks when needed.
+// Link health with honest backoff messaging, attention routing to the tabs
+// that hold pending work, and a live readout of the fleet watchdog.
+// ---------------------------------------------------------------------------
+const SENTINEL = { linkFails: 0, attn: {} };
+
+function setAttn(tab, on) {
+  const btn = document.querySelector('nav [role=tab][data-tab="' + tab + '"]');
+  if (!btn) return;
+  btn.classList.toggle("attn", !!on);
+  if (on && !SENTINEL.attn[tab]) toast("Attention needed in " + tab, "warn");
+  if (!on && SENTINEL.attn[tab]) toast(tab + " attention cleared", "success");
+  SENTINEL.attn[tab] = !!on;
+}
+
+function renderWatchdogPill(j) {
+  const pill = $("#watchdogPill");
+  if (!pill) return;
+  if (!j || j.ok === false) {
+    pill.textContent = "watchdog: " + ((j && j.reason) || "n/a");
+    pill.className = "pill muted";
+    return;
+  }
+  const acts = j.counters ? (j.counters.recovered || 0) + (j.counters.driven || 0) : 0;
+  pill.textContent = "watchdog: " + (j.enabled ? "on" : "off") + " · " + acts + " acts";
+  pill.className = "pill " + (j.enabled ? "ok" : "muted");
+}
+
+async function sentinelTick() {
+  try {
+    await getJSON("/api/v1/system/health");
+    if (SENTINEL.linkFails >= 2) toast("link restored", "success");
+    SENTINEL.linkFails = 0;
+  } catch (e) {
+    SENTINEL.linkFails++;
+    if (SENTINEL.linkFails === 2) toast("link degraded — sentinel retrying with backoff", "error");
+  }
+  try {
+    const { j } = await getJSON("/permissions/pending");
+    const list = Array.isArray(j) ? j : (j && (j.pending || j.approvals)) || [];
+    setAttn("safety", list.length > 0);
+  } catch (e) {}
+  try {
+    const { j } = await getJSON("/missions");
+    const ms = (j && j.missions) || (Array.isArray(j) ? j : []);
+    setAttn("missions", ms.some((m) => m.state === "blocked" || m.state === "suspended"));
+  } catch (e) {}
+  try {
+    const { j } = await getJSON("/api/fleet/watchdog");
+    renderWatchdogPill(j);
+  } catch (e) { renderWatchdogPill(null); }
+}
+
+function wireStatusTray() {
+  const tray = $("#statusTray");
+  if (!tray) return;
+  document.addEventListener("click", (e) => {
+    if (tray.open && !tray.contains(e.target)) tray.open = false;
+  });
+}
+
 async function boot(){
   await refreshOverview();
   await refreshPresence();
@@ -1369,8 +2025,21 @@ async function boot(){
   await refreshAgents();
   refreshTelemetry(true);
   openTmStream();
+  initFleetWs();
+  initScreenPanel();
+  refreshApprovalsPanel();
+  wireOnboardingButtons();
+  wireStatusTray();
+  sentinelTick();
+  setInterval(sentinelTick, 8000);
+  updateVRAMMonitor();
+  setInterval(updateVRAMMonitor, 4000);
+  try {
+    const { j } = await getJSON("/api/fleet/agents");
+    if (j && (!j.agents || !j.agents.length)) startOnboarding();
+  } catch(e) {}
 }
 boot();
-setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshAgents(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
-RETRY_ACTIONS.overview = refreshOverview;
+setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshAgents(); } catch(e){} try { refreshTelemetry(false); } catch(e){} refreshApprovalsPanel(); }, 8000);
+RETRY_ACTIONS.chat = refreshOverview;
 RETRY_ACTIONS.agents = refreshAgents;

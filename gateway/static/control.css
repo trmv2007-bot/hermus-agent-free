@@ -1,55 +1,77 @@
 /* ===================================================================
-   HERMUS JARVIS Control Room - Modern Glass-Morphism Design
+   HERMUS JARVIS Control Room — "Mission Control" theme
+   Deep-ink surface, sky/teal accent, Inter UI + JetBrains Mono data.
    =================================================================== */
 
+/* Bundled variable fonts (gateway/static/fonts) — no network fetch. */
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/InterVariable.woff2') format('woff2-variations'),
+       url('fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  /* Primary Colors */
-  --bg: #06080f;
-  --bg-secondary: #0b0e14;
-  --panel: rgba(20, 25, 36, 0.95);
-  --panel2: rgba(26, 34, 49, 0.9);
-  --panel3: rgba(15, 20, 30, 0.8);
-  --line: rgba(88, 166, 255, 0.15);
-  --line2: rgba(88, 166, 255, 0.25);
+  /* Surfaces */
+  --bg: #070b14;
+  --bg-secondary: #0b111d;
+  --panel: rgba(15, 21, 34, 0.72);
+  --panel2: rgba(23, 31, 48, 0.7);
+  --panel3: rgba(11, 16, 27, 0.66);
+  --line: rgba(125, 211, 252, 0.14);
+  --line2: rgba(125, 211, 252, 0.28);
 
   /* Text Colors */
-  --fg: #e6edf3;
-  --fg-secondary: #cdd6e4;
-  --muted: #8b98a9;
-  --muted2: #6b7a8f;
+  --fg: #e8eef7;
+  --fg-secondary: #c3cfe0;
+  --muted: #8494ab;
+  --muted2: #64748b;
 
   /* Status Colors */
-  --ok: #3fb950;
-  --ok2: #4ae27a;
-  --warn: #d29922;
-  --warn2: #f0883e;
-  --err: #f85149;
-  --err2: #ff6b6b;
+  --ok: #34d399;
+  --ok2: #6ee7b7;
+  --warn: #fbbf24;
+  --warn2: #fcd34d;
+  --err: #fb7185;
+  --err2: #fda4af;
+
+  /* Hermetic gold - the HERMUS face accent (hood keeps the JARVIS cyan) */
+  --herm: #e8c15a;
+  --herm2: #f5d98a;
 
   /* Accent Colors */
-  --acc: #58a6ff;
-  --acc2: #79c0ff;
-  --acc3: #0f4275;
-  --acc4: #2563eb;
+  --acc: #38bdf8;
+  --acc2: #7dd3fc;
+  --acc3: #0c4a6e;
+  --acc4: #0ea5e9;
 
   /* Gradients */
-  --gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --gradient2: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --gradient: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+  --gradient2: linear-gradient(135deg, #f472b6 0%, #fb7185 100%);
   --gradient-acc: linear-gradient(135deg, var(--acc), var(--acc2));
-  --gradient-glass: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(121, 192, 255, 0.05));
+  --gradient-glass: linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(125, 211, 252, 0.04));
 
   /* Shadows */
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
-  --shadow-glow: 0 0 20px rgba(88, 166, 255, 0.2);
-  --shadow-glow-lg: 0 0 40px rgba(88, 166, 255, 0.3);
-  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 20px rgba(56, 189, 248, 0.22);
+  --shadow-glow-lg: 0 0 40px rgba(56, 189, 248, 0.3);
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
 
   /* Border Radius */
-  --radius: 16px;
-  --radius-sm: 10px;
-  --radius-lg: 20px;
-  --radius-xl: 24px;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
   --radius-full: 9999px;
 
   /* Transitions */
@@ -65,9 +87,12 @@
   --spacing-xl: 20px;
   --spacing-2xl: 24px;
 
+  /* Layout */
+  --sidebar-w: 250px;
+
   /* Typography */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* ===================================================================
@@ -86,11 +111,97 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
   color: var(--fg);
-  font: 14px/1.6 var(--font-mono);
+  font: 14px/1.6 var(--font-sans);
+  letter-spacing: 0.005em;
   min-height: 100vh;
   overflow-x: hidden;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 620px at 78% -12%, rgba(56, 189, 248, 0.12), transparent 60%),
+    radial-gradient(900px 560px at 4% 108%, rgba(99, 102, 241, 0.1), transparent 62%);
+  background-attachment: fixed;
+}
+
+/* Data-dense surfaces read best in the mono face; prose stays in Inter. */
+.feed, table, code, pre, .kpi .v, .pill, .hint code, .vram-text {
+  font-family: var(--font-mono);
+}
+
+/* ===================================================================
+   APP SHELL — persistent sidebar + scrolling main column
+   =================================================================== */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg) var(--spacing-md);
+  border-right: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(13, 19, 32, 0.9) 0%, rgba(8, 12, 21, 0.9) 100%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px var(--spacing-lg);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand-mark { flex: none; filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.35)); }
+
+.brand-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+
+.brand-name {
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  font-size: 16px;
+  background: var(--gradient-acc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.brand-sub {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-foot-line { font-size: 11px; color: var(--muted); }
+.sidebar-foot-line.muted { color: var(--muted2); }
+
+.main-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 /* ===================================================================
@@ -129,43 +240,18 @@ body {
    =================================================================== */
 
 header {
-  padding: var(--spacing-md) var(--spacing-xl);
+  padding: 10px var(--spacing-xl);
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
   flex-wrap: wrap;
-  background: linear-gradient(180deg, rgba(20, 25, 36, 0.98) 0%, rgba(15, 20, 30, 0.98) 100%);
+  background: rgba(7, 11, 20, 0.78);
   position: sticky;
   top: 0;
   z-index: 100;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow: var(--shadow-card);
-}
-
-.logo {
-  font-weight: 700;
-  letter-spacing: .08em;
-  color: var(--acc);
-  font-size: 22px;
-  background: var(--gradient-acc);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-}
-
-.logo::after {
-  content: '';
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  background: var(--acc);
-  border-radius: 50%;
-  animation: pulse 2s infinite;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 @keyframes pulse {
@@ -199,32 +285,38 @@ header {
 .pill:hover {
   border-color: var(--acc);
   color: var(--acc);
-  background: rgba(88, 166, 255, 0.1);
+  background: rgba(56, 189, 248, 0.12);
   transform: translateY(-1px);
 }
 
 .pill.ok {
   color: var(--ok2);
   border-color: var(--ok);
-  background: rgba(63, 185, 80, 0.1);
+  background: rgba(52, 211, 153, 0.12);
 }
 
 .pill.err {
   color: var(--err2);
   border-color: var(--err);
-  background: rgba(248, 81, 73, 0.1);
+  background: rgba(251, 113, 133, 0.12);
   animation: error-pulse 1s infinite;
 }
 
 .pill.warn {
   color: var(--warn2);
   border-color: var(--warn);
-  background: rgba(210, 153, 34, 0.1);
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.pill.muted {
+  color: var(--muted2);
+  border-color: var(--line);
+  background: var(--panel3);
 }
 
 @keyframes error-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.3); }
-  50% { box-shadow: 0 0 0 8px rgba(248, 81, 73, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(251, 113, 133, 0); }
 }
 
 /* ===================================================================
@@ -278,26 +370,46 @@ button.ghost:hover:not(:disabled) {
 
 nav {
   display: flex;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-sm) var(--spacing-xl);
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-  overflow-x: auto;
-  position: sticky;
-  top: 60px;
-  z-index: 99;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  position: static;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--spacing-lg);
+}
+
+.nav-group:last-child { margin-bottom: 0; }
+
+.nav-group-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted2);
+  padding: 0 12px;
+  margin-bottom: 6px;
 }
 
 nav button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
   background: transparent;
   color: var(--muted);
   border: 1px solid transparent;
-  padding: 8px 14px;
+  padding: 9px 12px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
-  transition: var(--transition);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: var(--transition-fast);
   white-space: nowrap;
   position: relative;
 }
@@ -310,21 +422,31 @@ nav button:hover {
 
 nav button.on {
   color: var(--acc2);
-  border-color: var(--acc);
-  background: rgba(88, 166, 255, 0.1);
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+  border-color: var(--line2);
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.16), rgba(56, 189, 248, 0.03));
+}
+
+/* Sentinel attention: the dashboard points at what needs a human. */
+nav button.attn {
+  color: var(--warn2);
+  border-color: var(--warn);
+  animation: attnPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes attnPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.35); }
+  50% { box-shadow: 0 0 0 7px rgba(251, 191, 36, 0); }
 }
 
 nav button.on::after {
   content: '';
   position: absolute;
-  bottom: -2px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 4px;
-  height: 4px;
-  background: var(--acc);
-  border-radius: 50%;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--gradient-acc);
 }
 
 /* ===================================================================
@@ -333,8 +455,377 @@ nav button.on::after {
 
 main {
   padding: var(--spacing-xl);
-  max-width: 1800px;
+  max-width: 1600px;
+  width: 100%;
   margin: 0 auto;
+  flex: 1;
+}
+
+/* VRAM gauge (moved out of the old inline <style>; probe-driven, honest n/a). */
+.vram-monitor {
+  background: var(--panel3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--spacing-lg);
+}
+
+.vram-text {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.vram-bar {
+  height: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.vram-fill {
+  height: 100%;
+  width: 0;
+  background: var(--gradient-acc);
+  border-radius: var(--radius-full);
+  transition: width 0.5s ease;
+}
+
+/* ===================================================================
+   CHAT FACE — the thread sits on the God's Eye stage
+   =================================================================== */
+
+.chat-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: calc(100vh - 200px);
+}
+
+/* Dependency-free 3D orbital motif, faded behind the conversation. */
+.chat-orb {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 520px;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.8;
+  border-radius: var(--radius);
+  background: radial-gradient(120% 90% at 50% 0%, rgba(56, 189, 248, 0.14), transparent 62%);
+  -webkit-mask-image: linear-gradient(180deg, #000 35%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 35%, transparent 100%);
+}
+
+#godsEyeCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.chat-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 260px;
+  max-height: calc(100vh - 400px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(8, 12, 21, 0.42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.chat-seed { color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+.chat-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.chat-who {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-top: 9px;
+}
+
+.chat-body {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(13, 19, 32, 0.88);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-you .chat-body {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.chat-hermus .chat-body { border-color: rgba(232, 193, 90, 0.35); }
+.chat-hermus .chat-who { color: var(--herm2); }
+
+.chat-sys .chat-who,
+.chat-sys .chat-body { color: var(--muted2); }
+
+.chat-sys .chat-body {
+  background: transparent;
+  border-style: dashed;
+  font-size: 11px;
+}
+
+.chat-body.pending::after {
+  content: "\258d";
+  color: var(--acc2);
+  animation: chatBlink 1s steps(2, end) infinite;
+}
+
+@keyframes chatBlink {
+  to { opacity: 0; }
+}
+
+.chat-row.is-error .chat-body {
+  background: rgba(251, 113, 133, 0.08);
+  border-color: var(--err);
+  color: var(--err2);
+}
+
+/* Live telemetry rail: the canonical event bus, beside the conversation. */
+.chat-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(8, 12, 21, 0.66);
+}
+
+.chat-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-rail-head h3 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--acc2);
+}
+
+.chat-rail-filter { width: 100%; }
+
+/* `.feed` fixes a 300px height later in this file, so the rail needs the
+ * higher-specificity descendant selector to let it flex instead. */
+.chat-rail .feed {
+  flex: 1;
+  height: auto;
+  min-height: 120px;
+  max-height: calc(100vh - 400px);
+  background: transparent;
+  border: none;
+  padding: 0 0 0 2px;
+}
+
+.composer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#chatInput {
+  width: 100%;
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel3);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+#chatInput:focus-visible {
+  outline: none;
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.composer-hint { color: var(--muted); font-size: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-body.pending::after { animation: none; }
+}
+
+@media (max-width: 900px) {
+  .chat-shell { grid-template-columns: minmax(0, 1fr); }
+  .chat-rail { display: none; }
+}
+
+/* ===================================================================
+   DRAWERS — rarely-used panels collapse out of the default view
+   =================================================================== */
+
+.drawer {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel3);
+}
+
+.drawer.full,
+details.full {
+  grid-column: 1 / -1;
+}
+
+.drawer > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: var(--spacing-md) var(--spacing-lg);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drawer > summary::-webkit-details-marker { display: none; }
+
+.drawer > summary::before {
+  content: '\25B8';
+  color: var(--acc);
+  transition: transform 0.2s ease;
+}
+
+.drawer[open] > summary::before { transform: rotate(90deg); }
+
+.drawer > summary h2 { margin: 0; font-size: 14px; }
+
+.drawer-body { padding: 0 var(--spacing-lg) var(--spacing-lg); }
+
+.drawer[open] .drawer-body { animation: drawerOpen 0.25s ease; transform-origin: top; }
+
+@keyframes drawerOpen {
+  from { opacity: 0; transform: rotateX(-8deg); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ===================================================================
+   STATUS TRAY - header readouts on demand (keeps the header calm)
+   =================================================================== */
+
+.status-tray {
+  position: relative;
+}
+
+.status-tray > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.status-tray > summary::-webkit-details-marker { display: none; }
+.status-tray > summary::marker { content: ""; }
+
+.status-tray[open] > summary {
+  color: var(--acc2);
+  border-color: var(--acc);
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.status-tray-body {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 140;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  width: max-content;
+  max-width: min(520px, 92vw);
+  padding: var(--spacing-md);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.18s ease;
+}
+
+/* Credits / external references */
+.credit {
+  color: var(--acc2);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--line2);
+}
+
+.credit:hover { color: var(--acc); border-bottom-color: var(--acc); }
+
+.footer-credit {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted2);
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer[open] .drawer-body { animation: none; }
+  #godsEyeCanvas { transform: none; }
+}
+
+/* Collapse the sidebar into a horizontal strip on narrow viewports. */
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .sidebar-foot { display: none; }
+  nav { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .nav-group { flex-direction: row; flex-wrap: wrap; gap: 6px; margin-bottom: 0; }
+  .nav-group-label { display: none; }
+  nav button { width: auto; }
 }
 
 .tab {
@@ -1306,6 +1797,29 @@ a:focus-visible {
   }
 }
 
+/* Second guard: decorative and looped animations beyond the first block.
+   Users who opt out of motion get a still dashboard — the information is
+   carried by color/text, not by the animation itself. */
+@media (prefers-reduced-motion: reduce) {
+  .particle,
+  .jarvis-orb,
+  .vram-fill::after,
+  .btn-loader,
+  .connection-flow,
+  .glow,
+  [style*="animation"] {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 /* ===================================================================
    RESPONSIVE
    =================================================================== */
@@ -1763,9 +2277,6 @@ progress::-moz-progress-bar {
    =================================================================== */
 
 /* Live Bus Feed */
-.bus-feed { padding: var(--spacing-lg); display: flex; flex-direction: column; min-height: 300px; }
-.feed-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-md); flex-wrap: wrap; gap: var(--spacing-md); }
-.feed-header h3 { display: flex; align-items: center; gap: var(--spacing-sm); font-size: 14px; }
 .feed-controls { display: flex; gap: var(--spacing-sm); flex-wrap: wrap; align-items: center; }
 .feed-controls select { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--spacing-xs) var(--spacing-sm); color: var(--fg); font: inherit; font-size: 12px; min-width: 140px; }
 .feed-controls select:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2); }
@@ -1787,9 +2298,7 @@ progress::-moz-progress-bar {
    =================================================================== */
 
 /* Live Screen Panel */
-.screen-panel { padding: var(--spacing-lg); display: flex; flex-direction: column; min-height: 400px; }
 .screen-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-md); flex-wrap: wrap; gap: var(--spacing-md); }
-.screen-header h3 { display: flex; align-items: center; gap: var(--spacing-sm); font-size: 14px; }
 .screen-controls { display: flex; align-items: center; gap: var(--spacing-md); flex-wrap: wrap; }
 .screen-controls select { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--spacing-sm) var(--spacing-md); color: var(--fg); font: inherit; font-size: 13px; min-width: 200px; }
 .screen-controls select:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2); }

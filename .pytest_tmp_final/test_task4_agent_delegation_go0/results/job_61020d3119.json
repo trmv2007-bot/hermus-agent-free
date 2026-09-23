@@ -1,0 +1,10 @@
+{
+  "job_id": "job_61020d3119",
+  "kind": "agent.general",
+  "status": "succeeded",
+  "finished": "2026-09-23T20:57:06+05:30",
+  "result": {
+    "ok": true,
+    "answer": "BACKGROUND WORK"
+  }
+}

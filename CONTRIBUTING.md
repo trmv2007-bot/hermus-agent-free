@@ -79,34 +79,37 @@ Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.md) an
 git clone https://github.com/your-username/hermus-agent-free.git
 cd hermus-agent-free
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# One command: creates .venv and installs runtime + dev dependencies
+make setup
 
-# Install dependencies
-pip install -r requirements.txt -r requirements-dev.txt
-
-# Install in development mode
-pip install -e .
-
-# Run the bootstrap script
+# Run the bootstrap script (data layout, migrations, health checks)
 ./setup.sh
 
 # Verify installation
-hermus --help
+./hermus --help
 ```
 
 ### Running Tests
 
+The repo ships canonical make targets for everything (they run inside `.venv`):
+
 ```bash
-# Run all tests
-pytest
+# Fast suite: unit + integration tests (skips tests/eval, ~1 min)
+make test
 
-# Run specific test file
-pytest tests/test_file.py
+# Entire suite including evals
+make test-full
 
-# Run with coverage
-pytest --cov=core --cov-report=html
+# Suite with coverage for core/ + gateway/
+make test-cov
+```
+
+You can also invoke pytest directly from `.venv`:
+
+```bash
+pytest tests/test_file.py                     # one file
+pytest tests/test_module.py::TestClass::test  # one test
+.venv/bin/python -m pytest tests/ -q          # what `make test` runs
 ```
 
 ## 📝 Commit Message Guidelines
@@ -123,7 +126,7 @@ We follow conventional commit messages for consistency. Each commit message shou
 ```
 feat: add support for new model provider
 fix: resolve memory leak in mission engine
- docs: update README with installation instructions
+docs: update README with installation instructions
 refactor: simplify tool execution logic
 test: add unit tests for counsel system
 chore: update dependencies
@@ -152,13 +155,13 @@ chore: update dependencies
 
 ```bash
 # Format Python code
-ruff format
+make format
 
 # Lint Python code
-ruff check
+make lint
 
-# Type check
-mypy core/
+# Type check foundation modules (full tree: make typecheck-full, advisory)
+make typecheck
 ```
 
 ## 🧪 Testing
@@ -175,7 +178,8 @@ mypy core/
 ```python
 # tests/test_module.py
 import pytest
-from hermus.core.module import some_function
+
+from core.module import some_function
 
 
 class TestModule:
@@ -186,22 +190,6 @@ class TestModule:
     def test_error_handling(self):
         with pytest.raises(ValueError):
             some_function(invalid_input)
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run specific test
-pytest tests/test_module.py::TestModule::test_function_behavior
-
-# Run with coverage
-pytest --cov=core --cov-report=html
 ```
 
 ## 📚 Documentation
@@ -250,8 +238,8 @@ Raises:
 3. **Make your changes** following the code style guidelines
 4. **Write tests** for new functionality
 5. **Update documentation** as needed
-6. **Run tests**: Ensure all tests pass
-7. **Run linting**: `ruff check` and `mypy`
+6. **Run the checks**: `make test && make lint && make typecheck`
+7. **Reference architecture**: keep one owner per capability — see [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ### Submitting a Pull Request
 

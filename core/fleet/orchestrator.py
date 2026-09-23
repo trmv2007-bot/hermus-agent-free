@@ -1,36 +1,87 @@
 """Fleet Orchestrator - roadmap step 4."""
 
 from __future__ import annotations
-import asyncio
-import time
-import re
-import uuid
-from dataclasses import dataclass
-from typing import Any, Callable, List, Dict
 
-from core.fleet.registry import FleetRegistry, LiveAgent
+import asyncio
+import re
+import time
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Dict, List
+
 from core.fleet.bus import FleetBus, FleetEvent
 from core.fleet.missions import (
-    MissionManager, Mission, Subtask, MissionError,
-    PROPOSED, CLAIMING, WORKING, REVIEWING, SYNTHESIZING, DONE, FAILED, SUSPENDED,
-    LEASE_SECONDS, CLAIM_TIMEOUT_S, STALL_LIMIT, MAX_REPLANS, MAX_REVIEW_RETRIES,
-    PER_AGENT_BUDGET_SHARE, BUDGET_WARN_RATIO,
-    GATE_AFTER_DECOMPOSE, GATE_AFTER_REVIEW, GATE_ON_CONFLICT,
-    GATE_ON_BUDGET_WARNING, GATE_ON_STALL_REPLAN,
-    POLICY_FIRST_RESULT, POLICY_HIGHEST_RELIABILITY,
-    POLICY_JUDGE_MODEL, POLICY_ASK_USER,
-    MISSION_OPENED, CLAIM, SUBTASK, RESULT, REVIEW, SYNTHESIS,
-    GATE_PENDING, GATE_RESOLVED, MISSION_TERMINATED,
-    BUDGET_WARNING, ALERT, STATE_CHANGED,
+    ALERT,
+    BUDGET_WARN_RATIO,
+    BUDGET_WARNING,
+    CLAIM,
+    CLAIM_TIMEOUT_S,
+    CLAIMING,
+    DONE,
+    FAILED,
+    GATE_AFTER_DECOMPOSE,
+    GATE_AFTER_REVIEW,
+    GATE_ON_BUDGET_WARNING,
+    GATE_ON_CONFLICT,
+    GATE_ON_STALL_REPLAN,
+    GATE_PENDING,
+    GATE_RESOLVED,
+    LEASE_SECONDS,
+    MAX_REPLANS,
+    MAX_REVIEW_RETRIES,
+    MISSION_OPENED,
+    MISSION_TERMINATED,
+    PER_AGENT_BUDGET_SHARE,
+    POLICY_ASK_USER,
+    POLICY_FIRST_RESULT,
+    POLICY_HIGHEST_RELIABILITY,
+    POLICY_JUDGE_MODEL,
     PROPOSE,
+    PROPOSED,
+    RESULT,
+    REVIEW,
+    REVIEWING,
+    STALL_LIMIT,
+    STATE_CHANGED,
+    SUBTASK,
+    SUSPENDED,
+    SYNTHESIS,
+    SYNTHESIZING,
+    WORKING,
+    Mission,
+    MissionError,
+    MissionManager,
+    Subtask,
 )
+from core.fleet.registry import FleetRegistry, LiveAgent
 from core.log import get_logger
 
 logger = get_logger(__name__)
 
-Planner = Callable[[str], List[str]]
+Planner = Callable[[str], list[str]]
 Verifier = Callable[[dict[str, Any], Any], tuple[bool, str]]
-Judge = Callable[[str, List[Dict[str, Any]]], str]
+Judge = Callable[[str, list[dict[str, Any]]], str]
+
+#: A Judge returns free text, so it cannot carry an ``ok`` field. Correctness is
+#: the verifier's decision; the judge records a review note and may still veto
+#: by opening with one of these markers — the same string-marker convention
+#: ``_detect_conflicts`` already uses for ``CONTRADICTS:``.
+JUDGE_VETO_MARKERS = ("FAIL", "REJECT", "VETO")
+
+
+def judge_passed(note: str) -> bool:
+    head = (note or "").strip().upper()
+    return not head.startswith(JUDGE_VETO_MARKERS)
+
+#: core.llm answers with this text when no provider is reachable (core/llm.py).
+#: A mock fallback is not a completed subtask — core/mission.py:1058 applies the
+#: same rule to missions, and the dashboard refuses to present it as success.
+MOCK_FALLBACK_MARKER = "Fallback mock for:"
+
+
+def is_mock_fallback(text: Any) -> bool:
+    return MOCK_FALLBACK_MARKER in str(text or "")
 
 @dataclass
 class OrchestrationResult:
@@ -39,10 +90,11 @@ class OrchestrationResult:
     synthesis: dict[str, Any] | None = None
     error: str | None = None
     partial: bool = False
+    state: str | None = None
 
 class Orchestrator:
 
-    def __init__(self, registry: FleetRegistry, bus: FleetBus, *, planner: Callable[[str], List[str]] | None = None, verifier: Callable[[dict[str, Any], Any], tuple[bool, str]] | None = None, judge: Callable[[str, List[Dict[str, Any]]], str] | None = None, lease_seconds: float = 300.0, claim_timeout_s: float = 120.0) -> None:
+    def __init__(self, registry: FleetRegistry, bus: FleetBus, *, planner: Callable[[str], list[str]] | None = None, verifier: Callable[[dict[str, Any], Any], tuple[bool, str]] | None = None, judge: Callable[[str, list[dict[str, Any]]], str] | None = None, lease_seconds: float = 300.0, claim_timeout_s: float = 120.0) -> None:
         self.registry = registry
         self.bus = bus
         self.planner = planner
@@ -54,7 +106,7 @@ class Orchestrator:
         self.missions = MissionManager(bus, lease_seconds=300.0, claim_timeout_s=120.0)
         self._active_orchestrations: dict[str, dict[str, Any]] = {}
 
-    def _default_decompose(self, goal: str) -> List[str]:
+    def _default_decompose(self, goal: str) -> list[str]:
         parts = re.split(r"\band\b|\bthen\b|;|\n", goal, flags=re.IGNORECASE)
         parts = [p.strip() for p in parts if p.strip() and len(p.strip()) > 10]
         if len(parts) >= 2: return parts[:5]
@@ -63,7 +115,7 @@ class Orchestrator:
     async def _claim_round(self, mission_id: str, agent_ids: list[str] | None = None) -> None:
         mission = self.missions.get(mission_id)
         available_agents = [a for a in self.registry.list() if a.state == "IDLE" and (agent_ids is None or a.agent_id in agent_ids)]
-        
+
         # If no agents available and no specific agent_ids requested, spawn a default agent
         if not available_agents and agent_ids is None:
             try:
@@ -81,21 +133,21 @@ class Orchestrator:
                         break
             except Exception:
                 pass
-        
+
         if not available_agents:
             return
-        
+
         open_subtasks = [s for s in mission.subtasks if s.status == "open"]
         if not open_subtasks:
             return
-        
+
         # Assign each open subtask to an available agent (round-robin)
         for i, subtask in enumerate(open_subtasks):
             agent = available_agents[i % len(available_agents)]
             subtask.status = "claimed"
             subtask.claimed_by = agent.agent_id
             subtask.lease_until = time.time() + self.lease_seconds
-            
+
             # Post CLAIM event
             self.bus.append(
                 sender="orchestrator",
@@ -110,7 +162,7 @@ class Orchestrator:
                 target=agent.agent_id,
                 est_tokens=10,
             )
-        
+
         await asyncio.sleep(0.1)
         self.missions._transition(mission, WORKING)
 
@@ -124,6 +176,12 @@ class Orchestrator:
                 result = self.registry.assign(subtask.claimed_by, task_prompt, idempotency_key=f"{mission_id}:{subtask.id}")
                 if result.get("executed") and not result.get("deduplicated"):
                     content = result.get("content", ""); tokens = result.get("tokens", 0)
+                    if is_mock_fallback(content):
+                        # No model was reachable — this subtask did NOT complete,
+                        # and reporting it as done would be a fabricated success.
+                        subtask.status = "failed"; subtask.result = ""
+                        self.bus.append(sender="orchestrator", kind=ALERT, content={"mission_id": mission_id, "subtask_id": subtask.id, "level": "critical", "message": "no model reachable: agent returned the local mock fallback, not a real result"}, mission_id=mission_id, est_tokens=24)
+                        continue
                     subtask.status = "done"; subtask.result = content
                     self._record_agent_tokens(mission_id, subtask.claimed_by, tokens)
                     mission.blackboard.append({"key": subtask.id, "result": content, "agent": subtask.claimed_by})
@@ -144,8 +202,12 @@ class Orchestrator:
                 while retries <= MAX_REVIEW_RETRIES:
                     if self.judge:
                         try:
-                            judge_result = self.judge(f"Review this subtask result for correctness:\nSubtask: {subtask.text}\nResult: {subtask.result}", [{"role": "user", "content": f"Subtask: {subtask.text}\nResult: {subtask.result}"}])
-                            ok = bool(judge_result.get("ok", True)); note = str(judge_result.get("note", "reviewed"))
+                            # Same candidate shape _resolve passes to the judge;
+                            # a second, different contract for the same callable
+                            # is how every judged subtask used to blow up here.
+                            candidates = [{"subtask_id": subtask.id, "text": subtask.text, "result": subtask.result, "agent": subtask.claimed_by}]
+                            note = str(self.judge(f"Review this subtask result for correctness:\nSubtask: {subtask.text}\nResult: {subtask.result}", candidates))
+                            ok = judge_passed(note)
                         except Exception as exc: ok, note = False, f"judge raised: {exc}"
                     else: ok, note = True, "auto-approved (no judge)"
                     subtask.reviews.append({"reviewer": "judge", "ok": ok, "note": note})
@@ -217,6 +279,25 @@ class Orchestrator:
         self.missions._transition(mission, resume_state)
         return True
 
+    def _gate_stop(self, mission_id: str) -> OrchestrationResult | None:
+        """Stop honestly when a HITL gate parked the mission.
+
+        MissionManager owns the gates: ``_gate_pending`` suspends the mission and
+        waits for a human. The orchestrator must never auto-approve one on top of
+        that — it both re-suspended an already-suspended mission (illegal
+        transition) and defeated the point of asking a human at all.
+        """
+        m = self.missions.get(mission_id)
+        if m.state != SUSPENDED:
+            return None
+        pending = [str(g.get("gate")) for g in m.gates_pending if g.get("gate")]
+        return OrchestrationResult(
+            mission_id=mission_id,
+            success=False,
+            state=m.state,
+            error="awaiting human approval: " + (", ".join(dict.fromkeys(pending)) or "gate"),
+        )
+
     def _check_budget(self, mission_id: str) -> tuple[bool, str | None]:
         mission = self.missions.get(mission_id)
         if mission.budget_used >= mission.budget_total:
@@ -241,30 +322,30 @@ class Orchestrator:
     async def _detect_and_handle_stalls(self, mission_id: str) -> bool:
         """Detect stalls (3 no-progress cycles in WORKING/REVIEWING) and trigger replan (max 2)."""
         mission = self.missions.get(mission_id)
-        
+
         # Only detect stalls in WORKING or REVIEWING states
         if mission.state not in (WORKING, REVIEWING):
             return True
-        
+
         if not hasattr(mission, "_stall_count"):
             mission._stall_count = 0
-        
+
         recent_completions = sum(1 for s in mission.subtasks if s.status == "done")
         if not hasattr(mission, "_last_completion_count"):
             mission._last_completion_count = recent_completions
             return True
-        
+
         # Only start counting stalls after at least one subtask has completed
         if mission._last_completion_count == 0:
             return True
-        
+
         if recent_completions > mission._last_completion_count:
             mission._stall_count = 0
             mission._last_completion_count = recent_completions
             return True
-        
+
         mission._stall_count += 1
-        
+
         if mission._stall_count >= STALL_LIMIT:
             if mission.replans >= MAX_REPLANS:
                 self.bus.append(
@@ -280,7 +361,7 @@ class Orchestrator:
                 )
                 self.missions._transition(mission, FAILED)
                 return False
-            
+
             mission.replans += 1
             self.bus.append(
                 sender="orchestrator",
@@ -293,70 +374,141 @@ class Orchestrator:
                 mission_id=mission_id,
                 est_tokens=20,
             )
-            
+
             if GATE_ON_STALL_REPLAN in mission.hitl_gates:
                 await self._handle_gate(mission_id, GATE_ON_STALL_REPLAN, {"replan": mission.replans})
-            
+
             if self.planner:
                 new_subtask_texts = self.planner(mission.goal)
             else:
                 new_subtask_texts = self._default_decompose(mission.goal)
-            
+
             for text in new_subtask_texts:
                 mission.subtasks.append(Subtask(id=str(uuid.uuid4())[:8], text=text))
-            
+
             mission._stall_count = 0
             mission._last_completion_count = recent_completions
-            
+
             # Add new subtasks but DON'T change state - let the work loop continue
             # The new open subtasks will be picked up in the next work phase iteration
             return True
-        
+
         return True
 
-    async def orchestrate(self, goal: str, *, agent_ids: list[str] | None = None, budget_tokens: int = 10000, rounds: int | None = None, hitl_gates: list[str] | None = None, resolution_policy: str = "first_result") -> "OrchestrationResult":
+    async def drive_round(self, mission_id: str, agent_ids: list[str] | None = None) -> dict[str, Any]:
+        """One budget-checked claim+work round on an EXISTING mission.
+
+        Public entry point for the fleet watchdog: it never opens or closes
+        missions, it only moves pending subtasks forward through the same
+        claim/work/stall machinery ``orchestrate`` uses.
+        """
+        mission = self.missions.get(mission_id)
+        ok, warn = self._check_budget(mission_id)
+        if not ok:
+            return {"ok": False, "reason": warn or "budget exceeded"}
+        done_before = sum(1 for s in mission.subtasks if s.status in ("done", "failed"))
+        await self._claim_round(mission_id, agent_ids)
+        mission = self.missions.get(mission_id)
+        if mission.state == CLAIMING:
+            self.missions._transition(mission, WORKING)
+        await self._work_phase(mission_id, agent_ids)
+        await self._detect_and_handle_stalls(mission_id)
+        mission = self.missions.get(mission_id)
+        done_after = sum(1 for s in mission.subtasks if s.status in ("done", "failed"))
+
+        # Finish what the round completed. Without this a watchdog-driven mission
+        # whose last subtask just landed stayed in WORKING forever and was
+        # re-driven on every tick. SUSPENDED missions are left to a human.
+        closed = False
+        if mission.state == WORKING and mission.subtasks and all(s.status in ("done", "failed") for s in mission.subtasks):
+            self.missions._transition(mission, REVIEWING)
+            await self._verify_and_review(mission_id)
+            synthesis = self._synthesize(mission_id, mission.resolution_policy)
+            finished = self.missions.get(mission_id)
+            landed = sum(1 for s in finished.subtasks if s.status == "done" and s.result)
+            self.missions.close(
+                mission_id,
+                reason="complete" if landed else f"error: no subtasks completed ({len(finished.subtasks)} proposed)",
+                synthesis=synthesis,
+            )
+            mission = self.missions.get(mission_id)
+            closed = True
+
+        return {
+            "ok": True,
+            "completed_delta": done_after - done_before,
+            "claimed": sum(1 for s in mission.subtasks if s.status in ("claimed", "working")),
+            "closed": closed,
+            "state": mission.state,
+        }
+
+    async def orchestrate(self, goal: str, *, agent_ids: list[str] | None = None, budget_tokens: int = 10000, rounds: int | None = None, hitl_gates: list[str] | None = None, resolution_policy: str = "first_result") -> OrchestrationResult:
         mission = self.missions.open(goal=goal, budget_tokens=budget_tokens, hitl_gates=hitl_gates, resolution_policy=resolution_policy)
         try:
-            if self.planner: self.missions.decompose(mission.mission_id, self.planner)
-            else: self._default_decompose(goal)
-            if hitl_gates and GATE_AFTER_DECOMPOSE in hitl_gates: await self._handle_gate(mission.mission_id, GATE_AFTER_DECOMPOSE, {"subtasks": [s.to_dict() for s in mission.subtasks]})
+            # decompose() is the only path that publishes subtasks AND moves the
+            # mission out of PROPOSED, so the default decomposer must go through
+            # it too — calling _default_decompose() for its discarded return
+            # value left missions stranded in PROPOSED.
+            self.missions.decompose(mission.mission_id, self.planner or self._default_decompose)
+            stop = self._gate_stop(mission.mission_id)
+            if stop: return stop
             await self._claim_round(mission.mission_id, agent_ids)
-            
+
             # Ensure mission is in WORKING state
             mission = self.missions.get(mission.mission_id)
             if mission.state == CLAIMING:
                 self.missions._transition(mission, WORKING)
-            
+
             for _ in range(rounds or 10):
                 await self._work_phase(mission.mission_id, agent_ids)
                 ok, warn = self._check_budget(mission.mission_id)
-                if not ok: return OrchestrationResult(mission_id=mission.mission_id, success=False, error=warn or "Budget exceeded", partial=True)
-                if not await self._detect_and_handle_stalls(mission.mission_id): return OrchestrationResult(mission_id=mission.mission_id, success=False, error="Mission failed: max replans exceeded after stalls", partial=True)
+                if not ok: return OrchestrationResult(mission_id=mission.mission_id, success=False, error=warn or "Budget exceeded", partial=True, state=self.missions.get(mission.mission_id).state)
+                if not await self._detect_and_handle_stalls(mission.mission_id): return OrchestrationResult(mission_id=mission.mission_id, success=False, error="Mission failed: max replans exceeded after stalls", partial=True, state=self.missions.get(mission.mission_id).state)
                 mission = self.missions.get(mission.mission_id)
                 if all(s.status in ("done", "failed") for s in mission.subtasks): break
                 await asyncio.sleep(0.5)
-            
+
             # Ensure mission is in WORKING state before verification
             mission = self.missions.get(mission.mission_id)
             if mission.state == CLAIMING:
                 self.missions._transition(mission, WORKING)
             if mission.state == WORKING:
                 self.missions._transition(mission, REVIEWING)
-            
+
             await self._verify_and_review(mission.mission_id)
-            if hitl_gates and GATE_AFTER_REVIEW in hitl_gates: await self._handle_gate(mission.mission_id, GATE_AFTER_REVIEW, {"reviews": [s.reviews for s in mission.subtasks]})
-            
+            stop = self._gate_stop(mission.mission_id)
+            if stop: return stop
+
             # _synthesize will handle the transition to SYNTHESIZING
             synthesis = self._synthesize(mission.mission_id, resolution_policy)
             conflicts = self._detect_conflicts([{"subtask_id": s.id, "result": s.result, "agent": s.claimed_by} for s in mission.subtasks if s.status == "done"])
-            if conflicts and GATE_ON_CONFLICT in (hitl_gates or []): await self._handle_gate(mission.mission_id, GATE_ON_CONFLICT, {"conflicts": conflicts})
-            self.missions.close(mission.mission_id, reason="complete", synthesis=synthesis)
-            return OrchestrationResult(mission_id=mission.mission_id, success=True, synthesis=synthesis, partial=any(s.status != "done" for s in mission.subtasks))
+            closed = self.missions.get(mission.mission_id)
+            total = len(closed.subtasks)
+            # Count the same way _synthesize does: a "done" subtask with no result
+            # completed nothing, and must not let success disagree with
+            # synthesis["subtasks_completed"].
+            done = sum(1 for s in closed.subtasks if s.status == "done" and s.result)
+            unfinished = total - done
+            # A mission that completed nothing is not "done" — closing it with any
+            # reason other than "complete" is what MissionManager maps to FAILED.
+            if done == 0:
+                self.missions.close(mission.mission_id, reason=f"error: no subtasks completed ({total} proposed)", synthesis=synthesis)
+            else:
+                self.missions.close(mission.mission_id, reason="complete", synthesis=synthesis)
+            return OrchestrationResult(
+                mission_id=mission.mission_id,
+                success=bool(total) and done == total,
+                synthesis=synthesis,
+                error=(None if done == total else f"{done}/{total} subtasks completed"),
+                partial=bool(unfinished),
+                state=closed.state,
+            )
         except Exception as e:
             from core.fleet.missions import MissionError
             logger.error(f"Orchestration failed: {e}")
             self.missions.close(mission.mission_id, reason=f"error: {e}", synthesis={"error": str(e)})
-            
+            failed_state = self.missions.get(mission.mission_id).state if "mission" in locals() else None
+
             # Handle budget errors specially
             if isinstance(e, MissionError) and ("exceed" in str(e).lower() or "budget" in str(e).lower()):
                 return OrchestrationResult(
@@ -364,12 +516,14 @@ class Orchestrator:
                     success=False,
                     error=f"Mission budget exceeded: {e}",
                     partial=True,
+                    state=failed_state,
                 )
 
             return OrchestrationResult(
                 mission_id=mission.mission_id if "mission" in locals() else "",
                 success=False,
                 error=str(e),
+                state=failed_state,
             )
 
     def close(self) -> None:

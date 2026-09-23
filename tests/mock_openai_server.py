@@ -66,7 +66,9 @@ class Handler(BaseHTTPRequestHandler):
         )
 
 
-def serve(port=9999):
+def serve(port=0):
+    """Start the mock server; port 0 asks the OS for a free one (read it back
+    from srv.server_address[1]) so parallel runs never collide."""
     srv = HTTPServer(("127.0.0.1", port), Handler)
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
@@ -75,7 +77,7 @@ def serve(port=9999):
 
 if __name__ == "__main__":
     srv = serve()
-    print("mock server on 127.0.0.1:9999")
+    print(f"mock server on 127.0.0.1:{srv.server_address[1]}")
     import time
 
     try:

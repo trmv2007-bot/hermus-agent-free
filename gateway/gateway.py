@@ -182,7 +182,7 @@ async def _presence_heartbeat_loop():
 
 async def _background_agent_watchdog():
     """Periodically revive stale/dead persistent background agents."""
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
 
     while True:
         try:
@@ -192,6 +192,19 @@ async def _background_agent_watchdog():
         except Exception as e:
             logger.error(f"[Gateway] background agents tick error: {e}")
         await asyncio.sleep(30)
+
+
+async def _fleet_watchdog_loop():
+    """Autonomy layer: self-heal the fleet and drive eligible missions.
+
+    Every act is audited on the durable FleetBus; the emergency brake and the
+    Orchestrator's budget/HITL gates outrank it (core.fleet.watchdog).
+    """
+    from core.fleet.watchdog import ensure_watchdog
+    from gateway.routes_fleet import _get_orchestrator, _get_registry
+
+    wd = ensure_watchdog(_get_registry(), orchestrator=_get_orchestrator())
+    await wd.run()
 
 
 async def _local_engine_watchdog():
@@ -271,6 +284,19 @@ async def _memory_maintenance_loop():
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
     setup_logging()
+    
+    # Validate critical configuration at startup (can be skipped with HERMUS_SKIP_VALIDATION=1)
+    if os.getenv("HERMUS_SKIP_VALIDATION", "").lower() not in ("1", "true", "yes"):
+        try:
+            from bootstrap import validate_critical_config
+            validate_critical_config(skip_validation=False)
+            logger.info("[Gateway] Critical config validation passed")
+        except SystemExit:
+            logger.error("[Gateway] Critical config validation failed - gateway will not start")
+            raise
+        except Exception as e:
+            logger.warning(f"[Gateway] Config validation error (non-fatal): {e}")
+    
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
     if getattr(config, "auto_start_channels", True):
@@ -303,6 +329,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[Gateway] Fleet Orchestrator unavailable: {e}")
 
+    # Agent-pool warm-up belongs to the lifespan, not to module import: it used
+    # to be a fire-and-forget loop.create_task() behind a bare except in
+    # routes_agents.py, which produced "Task was destroyed but it is pending"
+    # and could silently never run.
+    agent_system_task = None
+    try:
+        from gateway.routes_agents import _init_agent_system
+
+        agent_system_task = asyncio.create_task(_init_agent_system())
+    except Exception as e:
+        logger.error(f"[Gateway] agent-system init failed to start: {e}")
+
     presence_task = None
     if getattr(config, "presence_enabled", True):
         try:
@@ -328,6 +366,12 @@ async def lifespan(app: FastAPI):
             engine_task = asyncio.create_task(_local_engine_watchdog())
         except Exception as e:
             logger.error(f"[Gateway] local-engine watchdog failed to start: {e}")
+    fleet_wd_task = None
+    if getattr(config, "fleet_watchdog_enabled", True):
+        try:
+            fleet_wd_task = asyncio.create_task(_fleet_watchdog_loop())
+        except Exception as e:
+            logger.error(f"[Gateway] fleet watchdog failed to start: {e}")
     try:
         yield
     finally:
@@ -335,14 +379,29 @@ async def lifespan(app: FastAPI):
         # route new traffic elsewhere), then give in-flight jobs a bounded
         # window to finish before the process tears itself down.
         _lifecycle.state.begin_drain("shutdown")
-        if presence_task and not presence_task.done():
-            presence_task.cancel()
-        if maintenance_task and not maintenance_task.done():
-            maintenance_task.cancel()
-        if watchdog_task and not watchdog_task.done():
-            watchdog_task.cancel()
-        if engine_task and not engine_task.done():
-            engine_task.cancel()
+        loops = [
+            ("agent-system-init", agent_system_task),
+            ("presence", presence_task),
+            ("memory-maintenance", maintenance_task),
+            ("background-agents", watchdog_task),
+            ("local-engine", engine_task),
+            ("fleet-watchdog", fleet_wd_task),
+        ]
+        for _name, _task in loops:
+            if _task is not None and not _task.done():
+                _task.cancel()
+        # Await every cancellation: cancelling without awaiting lets a loop die
+        # mid-iteration after the process has already moved on, and hides the
+        # exception it died with.
+        for _name, _task in loops:
+            if _task is None or _task.done():
+                continue
+            try:
+                await asyncio.wait_for(_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception as _exc:
+                logger.error(f"[Gateway] {_name} loop ended with an error: {_exc}")
         # Shutdown Fleet Orchestrator
         if orchestrator is not None:
             try:
@@ -421,6 +480,18 @@ def register_error_handlers(target: FastAPI) -> None:
 
     async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.error("unhandled gateway error: %r", exc, exc_info=(type(exc), exc, exc.__traceback__))
+        # Map recognized exception shapes (typed causes, TimeoutError,
+        # FileNotFoundError, HTTP-aware upstream errors, ...) onto the taxonomy
+        # so callers get a real status/code. Unrecognized exceptions collapse to
+        # a redacted internal 500 — the message never leaks exception text.
+        try:
+            from core.errors import map_exception
+
+            mapped = map_exception(exc)
+        except Exception:  # mapping must never mask the original failure
+            mapped = None
+        if mapped is not None and mapped.code not in ("internal",):
+            return JSONResponse(status_code=mapped.status, content={"success": False, **mapped.to_dict()})
         return JSONResponse(
             status_code=500,
             content={
@@ -527,6 +598,7 @@ from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_fleet import router as _fleet_router  # noqa: E402
+from gateway.routes_fleet import ws_router as _fleet_ws_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -551,7 +623,8 @@ app.include_router(_canonical_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
 app.include_router(_presence_router, dependencies=_gate_control)
 app.include_router(_agents_router, dependencies=_gate_control)
-app.include_router(_fleet_router)
+app.include_router(_fleet_router, dependencies=_gate_control)
+app.include_router(_fleet_ws_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -718,6 +791,18 @@ async def control_room_js():
 async def control_room_css():
     """Control-room stylesheet."""
     return _serve_control_asset("control.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/jarvis-hud.css")
+async def jarvis_hud_css():
+    """JARVIS HUD overlay stylesheet (additive layer above control.css)."""
+    return _serve_control_asset("jarvis-hud.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/jarvis-hud.js")
+async def jarvis_hud_js():
+    """JARVIS HUD client: renders /api/jarvis/status as futuristic gauges."""
+    return _serve_control_asset("jarvis-hud.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/static/console.js")

@@ -1,0 +1,19 @@
+{
+  "agent_id": "7fb453cd-faff-431b-95f9-fa93fec46c1e",
+  "name": "Ancient",
+  "memory": [],
+  "summary": "",
+  "cursor": 0,
+  "stats": {
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tokens": 0,
+    "cost_est": 0.0,
+    "latency_ms": 0.0
+  },
+  "executed_task_ids": [],
+  "pending_approval": null,
+  "current_task": null,
+  "checkpointed_at": "2026-09-23T15:25:43.152577+00:00",
+  "imported_legacy": true
+}

@@ -1,0 +1,1 @@
+{"seq": 1, "id": "c61d9eee-4ff1-41bc-ac96-e9a32b7cfce3", "ts": "2026-09-23T20:55:43.276029+05:30", "sender": "coord", "target": "a1", "kind": "user_task", "priority": 4, "content": "build the report", "reply_to": null, "mission_id": "msn_1", "trace_id": "tr_1", "est_tokens": 42}

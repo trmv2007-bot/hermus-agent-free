@@ -37,14 +37,14 @@ def _permission_guard(tool: str, args: dict | None = None):
 
 @router.get("/agents")
 async def background_agents_list():
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
 
     return {"agents": agent_manager.list()}
 
 
 @router.post("/agents/start")
 async def background_agents_start(payload: dict):
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
 
     name = payload.get("name", "")
     if not name:
@@ -54,7 +54,7 @@ async def background_agents_start(payload: dict):
 
 @router.post("/agents/stop")
 async def background_agents_stop(payload: dict):
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
 
     name = payload.get("name", "")
     if not name:
@@ -64,7 +64,7 @@ async def background_agents_stop(payload: dict):
 
 @router.post("/agents/create")
 async def background_agents_create(payload: dict):
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
 
     name = payload.get("name", "")
     if not name:

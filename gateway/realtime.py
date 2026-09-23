@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -44,15 +43,6 @@ router = APIRouter()
 ws_router = APIRouter()
 
 _agent_getter: Callable[..., Any] | None = None
-
-
-def _auth_ok(token: str | None, header_token: str | None) -> bool:
-    import hmac
-
-    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
-    if not expected:
-        return True
-    return hmac.compare_digest(str(token or header_token or ""), str(expected))
 
 
 # ------------------------------------------------------------------ SSE helpers
@@ -282,8 +272,9 @@ async def ws_agent(websocket: WebSocket):
     server → client: every run event (token deltas, tool calls/results, steps)
     plus {"type":"ack"|"result"|"error"|"pong"|"hello"}.
     """
-    token = websocket.query_params.get("token") or websocket.headers.get("X-Hermus-Token")
-    if not _auth_ok(token, None):
+    from gateway.context import ws_token_ok
+
+    if not ws_token_ok(websocket):
         await websocket.close(code=1008, reason="Unauthorized")
         return
     await websocket.accept()
@@ -629,10 +620,22 @@ async def skill_forge_validate(payload: dict[str, Any] = None):
 
     from core.skill_forge import skill_forge
 
-    path = str(payload.get("path") or (Path(skill_forge.skills_dir) / str(payload.get("name") or "")))
-    if not Path(path).exists():
-        return JSONResponse({"error": f"not found: {path}"}, status_code=404)
-    return await asyncio.to_thread(skill_forge.validate, Path(path))
+    root = Path(skill_forge.skills_dir).resolve()
+    raw = payload.get("path")
+    candidate = Path(str(raw)).expanduser() if raw else Path(skill_forge.skills_dir) / str(payload.get("name") or "")
+    try:
+        resolved = candidate.resolve()
+    except (OSError, ValueError):
+        return JSONResponse({"error": "bad path"}, status_code=400)
+    # A request-supplied path may not reach outside the skills directory.
+    if resolved != root and root not in resolved.parents:
+        return JSONResponse(
+            {"error": "path_outside_skills_dir", "message": f"path must live under {root}", "code": "path_outside_skills_dir"},
+            status_code=400,
+        )
+    if not resolved.exists():
+        return JSONResponse({"error": f"not found: {resolved}"}, status_code=404)
+    return await asyncio.to_thread(skill_forge.validate, resolved)
 
 
 # ---- sandbox ---------------------------------------------------------------
@@ -658,7 +661,9 @@ async def sandbox_run(payload: dict[str, Any] = None):
         cwd=payload.get("cwd"),
         network=payload.get("network"),
         policy=payload.get("policy") or None,
-        allow_dangerous=bool(payload.get("allow_dangerous")),
+        # The dangerous-pattern screen is server-side policy only. A caller that
+        # could set this per request could switch off its own guardrail.
+        allow_dangerous=bool(getattr(config, "sandbox_allow_dangerous", False)),
         purpose="api:/sandbox/run",
     )
     denied = res.get("returncode") == 126 and "blocked by sandbox policy" in str(res.get("error"))

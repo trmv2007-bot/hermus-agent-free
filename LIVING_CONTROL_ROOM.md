@@ -80,8 +80,11 @@ panel but may not enter native fullscreen.
 
 ## Connected modules
 
-The control room is organised as ten tabs (Overview, Missions, Computer, Jobs,
-Telemetry, Safety, Remote, Presence, Voice, Systems). The **Systems** tab is not
+The control room is organised as ten tabs (Chat, Agents, Missions,
+Computer, Jobs, Safety, Remote, Presence, Voice, Systems). **Chat** is the face:
+the composer drives `POST /stream/command` (falling back to a synchronous
+`POST /command` turn) and the canonical event bus streams beside it. The
+**Systems** tab is not
 a fixed set of cards: it renders `GET /api/v1/console/manifest` — the capability
 manifest declared in `core/console.py` — and probes every panel through
 `GET /api/v1/console/panels`. Registered subsystems therefore show up

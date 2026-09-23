@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from pathlib import Path
 
 from fastapi import Request
 
@@ -54,6 +55,28 @@ def _agent_factory(platform: str, user_id: str, model: str = None, mode: str = "
 def _token_matches(provided: str | None, expected: str) -> bool:
     """Constant-time token comparison to avoid timing side channels."""
     return hmac.compare_digest(str(provided or ""), str(expected))
+
+
+def readable_path_roots() -> list:
+    """The only roots a request-supplied path may resolve to."""
+    return [Path(config.workspace_dir).expanduser().resolve(), Path(config.base_dir).resolve()]
+
+
+def resolve_readable_path(raw) -> Path | None:
+    """Resolve a request-supplied path inside ``readable_path_roots``.
+
+    Returns ``None`` when it escapes — ``..`` traversal, a symlink out of the
+    root, or an absolute path elsewhere on the disk. Endpoints that hand a path
+    to a reader (embeddings ingest, skill validation) must not turn the dashboard
+    into an arbitrary file-read primitive.
+    """
+    try:
+        p = Path(str(raw)).expanduser()
+        p = (p if p.is_absolute() else config.resolve_path(str(p))).resolve()
+    except (OSError, ValueError):
+        return None
+    roots = readable_path_roots()
+    return p if any(p == root or root in p.parents for root in roots) else None
 
 
 def _check_gateway_auth(request: Request, x_hermus_token: str | None = None) -> None:

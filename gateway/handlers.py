@@ -530,7 +530,7 @@ class _PseudoCtx:
 
 def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: bool = True) -> dict[str, str]:
     """Register every gateway job kind. Returns the kind → description map."""
-    from core.agent_manager import make_agent_computer_handler, make_agent_general_handler
+    from core.agent_handlers import make_agent_computer_handler, make_agent_general_handler
 
     kinds = {
         "runtime.turn": (

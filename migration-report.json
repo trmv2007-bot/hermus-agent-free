@@ -1,0 +1,46 @@
+{
+  "started_at": "2026-09-21T11:55:37.015353",
+  "completed_at": "2026-09-21T11:55:37.033590",
+  "steps": [
+    {
+      "phase": "inspect",
+      "action": "found_legacy_harness",
+      "source": "C:\\Users\\rishi\\hermus-agent-free\\data\\harness",
+      "target": null,
+      "details": {
+        "file_count": 120
+      },
+      "timestamp": "2026-09-21T11:55:37.031122"
+    },
+    {
+      "phase": "inspect",
+      "action": "found_fleet_v2",
+      "source": "C:\\Users\\rishi\\hermus-agent-free\\data\\fleet",
+      "target": null,
+      "details": {
+        "path": "C:\\Users\\rishi\\hermus-agent-free\\data\\fleet",
+        "agent_count": 1,
+        "bus_segments": 1,
+        "has_snapshot": false
+      },
+      "timestamp": "2026-09-21T11:55:37.031666"
+    },
+    {
+      "phase": "migrate",
+      "action": "no_legacy_agents",
+      "source": null,
+      "target": null,
+      "details": {
+        "path": "C:\\Users\\rishi\\hermus-agent-free\\data\\agents"
+      },
+      "timestamp": "2026-09-21T11:55:37.033171"
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "summary": {
+    "total_steps": 3,
+    "warnings": 0,
+    "errors": 0
+  }
+}

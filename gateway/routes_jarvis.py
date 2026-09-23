@@ -26,7 +26,7 @@ def _active_count(rows: list[dict]) -> int:
 @router.get("/api/jarvis/status")
 async def jarvis_status():
     """One factual snapshot used by the JARVIS status/telemetry panels."""
-    from core.agent_manager import agent_manager
+    from core.fleet.facade import agent_manager
     from core.artifact_manager import artifact_manager
     from core.computer.resources import get_resource_monitor
     from core.config import config

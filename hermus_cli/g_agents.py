@@ -10,12 +10,36 @@ gone.
 from __future__ import annotations
 
 import sys
+import uuid
 from pathlib import Path
 
 from core.config import config
+from core.fleet.bus import FleetBus
+from core.fleet.registry import FleetRegistry, chat_via_freellm
 
 from ._common import CLIContext, add_computer_task_args, add_screen_start_args
 from ._spec import Command, no_action
+
+
+def _get_fleet_registry() -> FleetRegistry:
+    """Return a FleetRegistry instance for CLI use.
+
+    Creates a FleetBus with the standard data directory and a FleetRegistry
+    using the default chat adapter. This mirrors the gateway's registry setup
+    but works standalone for CLI operations.
+    """
+    bus = FleetBus(base_dir=config.resolve_path("data/fleet"))
+    reg = FleetRegistry(bus, chat_fn=chat_via_freellm)
+    reg.boot()  # Load persisted agents from bus snapshot + replay
+    return reg
+
+
+def _find_agent_by_name(registry: FleetRegistry, name: str):
+    """Find an agent by name (case-insensitive) in the registry."""
+    for agent in registry.list():
+        if agent.name.casefold() == name.casefold():
+            return agent
+    return None
 
 
 def _configure_agent(subparsers) -> None:
@@ -57,40 +81,91 @@ def _configure_agent(subparsers) -> None:
 
 
 def _run_agent(args, ctx: CLIContext) -> None:
-    from core.agent_manager import agent_manager
+    import json
+
+    from core.agent_handlers import register_agent_handlers
+    from gateway.queue import job_queue
+
+    reg = _get_fleet_registry()
 
     if args.agent_action == "create":
-        r = agent_manager.create(args.name, role=args.role, model=args.model)
-        print(f"{'✅' if r.get('success') else '❌'} {r.get('name') or r.get('error')} (role={r.get('role', '')})")
+        # Map old role/persona/model to FleetRegistry spec
+        spec = {
+            "name": args.name,
+            "persona": args.role,  # role becomes persona in fleet
+            "model": args.model or "",
+            "provider": "groq",  # default provider
+        }
+        agent = reg.spawn(spec)
+        print(f"[OK] {agent.name} (id={agent.agent_id}) spawned with role={args.role}")
     elif args.agent_action == "start":
-        r = agent_manager.start(args.name)
-        print(
-            f"{'✅' if r.get('success') else '❌'} {args.name} ready (execution on canonical job queue)"
-            if r.get("success")
-            else f"❌ {r.get('error')}"
-        )
-    elif args.agent_action == "status":
-        s = agent_manager.status(args.name)
-        if not s.get("success"):
-            print(f"❌ {s.get('error')}")
+        # In FleetRegistry, agents are spawned in IDLE state - no separate "start" needed
+        agent = _find_agent_by_name(reg, args.name)
+        if agent is None:
+            print(f"[ERROR] agent '{args.name}' not found")
         else:
-            print(f" {args.name} | role={s.get('role')} status={s.get('status')} queue={s.get('queue')}")
+            print(f"[OK] {args.name} (id={agent.agent_id}) already running in state={agent.state}")
+    elif args.agent_action == "status":
+        agent = _find_agent_by_name(reg, args.name)
+        if agent is None:
+            print(f"[ERROR] agent '{args.name}' not found")
+        else:
+            print(f" {args.name} | id={agent.agent_id} role={agent.persona} state={agent.state} provider={agent.provider} model={agent.model}")
     elif args.agent_action == "stop":
-        r = agent_manager.stop(args.name)
-        print(f"{'✅' if r.get('success') else '❌'} {args.name} stopped")
+        agent = _find_agent_by_name(reg, args.name)
+        if agent is None:
+            print(f"[ERROR] agent '{args.name}' not found")
+        else:
+            reg.dismiss(agent.agent_id, confirm=True)
+            print(f"[OK] {args.name} dismissed")
     elif args.agent_action == "job":
-        r = agent_manager.submit_job(args.name, {"task": " ".join(args.task)})
-        if r.get("success") and args.wait:
-            r = agent_manager.wait_job(args.name, r["job_id"], timeout=args.timeout)
-        print(__import__("json").dumps(r, indent=2, default=str))
+        # Submit job via canonical Job queue (same as agent_manager did)
+        agent = _find_agent_by_name(reg, args.name)
+        if agent is None:
+            print(f"[ERROR] agent '{args.name}' not found")
+            return
+        role = agent.persona or "generic"
+        kind = "agent.computer" if role == "computer-operator" else "agent.general"
+        try:
+            register_agent_handlers(job_queue)
+            payload = {"task": " ".join(args.task), "agent": args.name, "name": args.name, "role": role}
+            queued = job_queue.submit(kind, payload, session_key=f"agent:{args.name}")
+        except KeyError as exc:
+            print(f"[ERROR] {exc}")
+            return
+        except Exception as exc:
+            print(f"[ERROR] canonical queue unavailable: {exc}")
+            return
+        result = {"success": True, "name": args.name, "job_id": queued.id, "queued": True, "status": queued.status}
+        if result.get("success") and args.wait:
+            # Wait for job completion
+            import time
+            deadline = time.monotonic() + max(0.0, float(args.timeout))
+            while time.monotonic() <= deadline:
+                st = job_queue.status(queued.id)
+                status = st.get("status") or "unknown"
+                if status in ("succeeded", "failed", "cancelled", "blocked"):
+                    result = {"success": True, "status": status, "name": args.name, "job_id": queued.id, "result": st.get("result"), "error": st.get("error")}
+                    break
+                time.sleep(0.2)
+            else:
+                result = {"success": False, "status": "timeout", "name": args.name, "job_id": queued.id, "error": f"job did not finish within {args.timeout:g}s"}
+        print(json.dumps(result, indent=2, default=str))
     elif args.agent_action == "result":
-        print(__import__("json").dumps(agent_manager.job_status(args.name, args.job_id), indent=2, default=str))
+        agent = _find_agent_by_name(reg, args.name)
+        if agent is None:
+            print(f"[ERROR] agent '{args.name}' not found")
+            return
+        st = job_queue.status(args.job_id)
+        status = st.get("status") or "unknown"
+        result = {"success": True, "status": status, "name": args.name, "job_id": args.job_id, "result": st.get("result"), "error": st.get("error")}
+        print(json.dumps(result, indent=2, default=str))
     elif args.agent_action == "list":
-        agents = agent_manager.list()
+        agents = reg.list()
         if not agents:
             print("No agents. Create one: hermus agent create researcher --role researcher")
         for a in agents:
-            print(f" - {a.get('name')} | role={a.get('role')} status={a.get('status')} alive={a.get('alive')}")
+            print(f" - {a.name} | id={a.agent_id} role={a.persona} state={a.state} provider={a.provider} model={a.model}")
     else:
         no_action(ctx, "agent")
 

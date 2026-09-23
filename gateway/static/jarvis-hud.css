@@ -1,0 +1,196 @@
+/* ===================================================================
+   JARVIS HUD — futuristic overlay for the HERMUS control room.
+   Loaded AFTER control.css; additive only (new class namespace: .hud-*,
+   plus scoped accents on #jarvisOrbContainer). No layout overrides for
+   existing panels, so the base theme and its tests stay intact.
+
+   Data honesty: every value rendered here comes from /api/jarvis/status.
+   The "unavailable" state is a first-class visual (dim gauge + n/a), the
+   same way /readyz maps to "not ready".
+   =================================================================== */
+
+:root {
+  --hud-cyan: #4fd8ff;
+  --hud-cyan-dim: rgba(79, 216, 255, 0.35);
+  --hud-cyan-faint: rgba(79, 216, 255, 0.08);
+  --hud-amber: #f0b83e;
+  --hud-red: #ff5f56;
+  --hud-grid: rgba(79, 216, 255, 0.06);
+}
+
+/* ---------- HUD frame: corner brackets + faint grid backdrop ---------- */
+
+.hud-frame {
+  position: relative;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--hud-cyan-dim);
+  border-radius: 10px;
+  background:
+    linear-gradient(var(--hud-grid) 1px, transparent 1px) 0 0 / 100% 28px,
+    linear-gradient(90deg, var(--hud-grid) 1px, transparent 1px) 0 0 / 28px 100%,
+    radial-gradient(ellipse at 50% -20%, var(--hud-cyan-faint), transparent 60%),
+    rgba(8, 14, 22, 0.55);
+  overflow: hidden;
+}
+
+/* Corner brackets — pure CSS, no extra markup. */
+.hud-frame::before,
+.hud-frame::after,
+.hud-frame > .hud-corner-tl,
+.hud-frame > .hud-corner-br {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--hud-cyan);
+  pointer-events: none;
+}
+.hud-frame::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.hud-frame::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.hud-frame > .hud-corner-tl { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+.hud-frame > .hud-corner-br { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+
+/* Slow scanline sweep across the frame. */
+.hud-frame > .hud-sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(79, 216, 255, 0.05) 48%, rgba(79, 216, 255, 0.12) 50%, transparent 52%);
+  animation: hud-sweep 7s linear infinite;
+  pointer-events: none;
+}
+@keyframes hud-sweep {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100%); }
+}
+
+/* ---------- Gauges (SVG rings) ---------- */
+
+.hud-gauges {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+}
+
+.hud-gauge { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+
+.hud-gauge svg { width: 96px; height: 96px; }
+
+.hud-gauge .ring-bg {
+  fill: none;
+  stroke: rgba(79, 216, 255, 0.12);
+  stroke-width: 7;
+}
+
+.hud-gauge .ring-val {
+  fill: none;
+  stroke: var(--hud-cyan);
+  stroke-width: 7;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease;
+  filter: drop-shadow(0 0 4px var(--hud-cyan-dim));
+}
+
+.hud-gauge .ring-val.warn { stroke: var(--hud-amber); }
+.hud-gauge .ring-val.crit { stroke: var(--hud-red); }
+
+.hud-gauge .gauge-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------- Core readout + fleet bars ---------- */
+
+.hud-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.hud-kv .k { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; align-self: center; }
+.hud-kv .v { color: var(--fg); font-weight: 600; }
+.hud-kv .v.ok { color: var(--ok2, #4ae27a); }
+.hud-kv .v.warn { color: var(--warn2, #f0883e); }
+.hud-kv .v.err { color: var(--err2, #ff6b6b); }
+
+.hud-bars { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+
+.hud-bar .bar-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hud-bar .bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(79, 216, 255, 0.1);
+  border: 1px solid rgba(79, 216, 255, 0.15);
+  overflow: hidden;
+}
+.hud-bar .bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--hud-cyan-dim), var(--hud-cyan));
+  box-shadow: 0 0 6px var(--hud-cyan-dim);
+  transition: width 0.6s ease;
+}
+.hud-bar .bar-fill.warn { background: linear-gradient(90deg, rgba(240, 184, 62, 0.4), var(--hud-amber)); }
+.hud-bar .bar-fill.crit { background: linear-gradient(90deg, rgba(255, 95, 86, 0.4), var(--hud-red)); }
+
+/* ---------- Voice line + event ticker ---------- */
+
+.hud-voice {
+  margin-top: 12px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--hud-cyan);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--fg-secondary);
+  background: rgba(79, 216, 255, 0.05);
+  min-height: 1.2em;
+}
+
+.hud-ticker {
+  margin-top: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 96px;
+  overflow: hidden;
+}
+.hud-ticker .tick { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-ticker .tick .ts { color: var(--hud-cyan-dim); margin-right: 8px; }
+.hud-ticker .tick .st-ok { color: var(--ok2, #4ae27a); }
+.hud-ticker .tick .st-warn { color: var(--warn2, #f0883e); }
+.hud-ticker .tick .st-err { color: var(--err2, #ff6b6b); }
+
+/* ---------- Orb accents (scoped: never rewrites base orb styles) ---------- */
+
+#jarvisOrbContainer { filter: drop-shadow(0 0 10px var(--hud-cyan-dim)); }
+
+/* ---------- Reduced motion: HUD must go still ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-frame > .hud-sweep,
+  .hud-bar .bar-fill,
+  .hud-gauge .ring-val {
+    animation: none;
+    transition: none;
+  }
+}

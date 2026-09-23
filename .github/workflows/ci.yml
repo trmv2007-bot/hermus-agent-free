@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The lint step diffs against the base commit, which needs history.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      # The tree carries a documented legacy lint backlog (~250 findings, mostly
+      # unused imports and one-line `if x: return` style), so gating on a full
+      # `ruff check .` would mean either mass-reformatting unrelated files or
+      # switching the rule set off. Instead every changed file must be clean —
+      # debt can only shrink. Clear the backlog and this can become `ruff check .`.
+      - name: Ruff (changed files)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE:-}" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "${BASE}" HEAD -- '*.py')
+          else
+            files=$(git ls-files '*.py')
+          fi
+          if [ -z "$files" ]; then
+            echo "No Python files changed."
+            exit 0
+          fi
+          echo "$files" | tr '\n' ' ' | xargs python -m ruff check
+
+      - name: Type check the strict foundation modules
+        run: python -m mypy core/log.py core/errors.py
+
+      - name: Tests
+        run: python -m pytest tests -q

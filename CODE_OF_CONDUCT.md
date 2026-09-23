@@ -36,7 +36,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at [INSERT EMAIL]. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement via [GitHub Issues](https://github.com/trmv2007-bot/hermus-agent-free/issues). For sensitive reports, contact the maintainers directly on GitHub ([@trmv2007-bot](https://github.com/trmv2007-bot)). All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
@@ -76,4 +76,4 @@ For answers to common questions about this code of conduct, see the FAQ at [http
 
 ---
 
-**Contact**: For any questions or concerns regarding this Code of Conduct, please open an issue or contact the project maintainers.
+**Contact**: For any questions or concerns regarding this Code of Conduct, please open an issue or contact the project maintainers on GitHub.

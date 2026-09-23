@@ -15,10 +15,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..agent_manager import AgentManager, agent_manager
+from ..fleet.bus import FleetBus
+from ..fleet.registry import FleetRegistry, chat_via_freellm
 from ..llm import FreeLLM
 from ..models import get_model_gateway
+from ..agent_handlers import register_agent_handlers
 from .planner import TaskGraph
+from gateway.queue import job_queue
 
 
 @dataclass
@@ -78,11 +81,15 @@ class MultiAgentDelegator:
 
     def __init__(
         self,
-        manager: AgentManager | None = None,
+        registry: FleetRegistry | None = None,
         llm: FreeLLM | None = None,
         root: str = "data/delegations",
     ):
-        self.manager = manager or agent_manager
+        if registry is None:
+            bus = FleetBus()
+            registry = FleetRegistry(bus, chat_fn=chat_via_freellm)
+            registry.boot()
+        self.registry = registry
         self.llm = llm or get_model_gateway().llm()
         root_path = Path(root).expanduser()
         if not root_path.is_absolute() and root == "data/delegations":
@@ -162,33 +169,23 @@ class MultiAgentDelegator:
     def _ensure_agent(self, role: str) -> str:
         safe_role = re.sub(r"[^a-z0-9-]+", "-", role.lower()).strip("-") or "generic"
         name = f"hermus-{safe_role}"
-        status = self.manager.status(name)
-        if not status.get("success"):
-            created = self.manager.create(
-                name,
-                role=role
-                if role
-                in {
-                    "researcher",
-                    "coder",
-                    "system-monitor",
-                    "scheduler",
-                    "memory-manager",
-                    "watchdog",
-                    "computer-operator",
-                    "coordinator",
-                    "generic",
-                }
-                else "generic",
-            )
-            if not created.get("success") and "already exists" not in str(created.get("error")):
-                raise RuntimeError(created.get("error") or f"could not create {name}")
-            status = self.manager.status(name)
-        if not status.get("alive"):
-            started = self.manager.start(name)
-            if not started.get("success") and "already running" not in str(started.get("error")):
-                raise RuntimeError(started.get("error") or f"could not start {name}")
-        return name
+        # Find agent by name in FleetRegistry
+        agent = None
+        for a in self.registry.list():
+            if a.name.casefold() == name.casefold():
+                agent = a
+                break
+        if agent is None:
+            # Create agent via FleetRegistry spawn
+            spec = {
+                "name": name,
+                "persona": role,
+                "model": "",
+                "provider": "groq",
+            }
+            agent = self.registry.spawn(spec)
+        # FleetRegistry agents are spawned in IDLE state - no separate "start" needed
+        return agent.agent_id
 
     def execute(
         self,
@@ -220,33 +217,52 @@ class MultiAgentDelegator:
             # parallel; there is only one computer-operator name, serializing GUI input.
             submitted = []
             for unit in ready:
-                agent_name = unit.agent or self._ensure_agent(unit.role)
+                agent_id = unit.agent or self._ensure_agent(unit.role)
                 dependency_context = {dep: results[dep].get("result") for dep in unit.depends_on}
-                job = self.manager.submit_job(
-                    agent_name,
-                    {
+                # Submit job via canonical Job queue
+                role = unit.role
+                kind = "agent.computer" if role == "computer-operator" else "agent.general"
+                try:
+                    register_agent_handlers(job_queue)
+                    payload = {
                         "task": unit.task,
                         "role": unit.role,
                         "delegation_id": plan.plan_id,
                         "unit_id": unit.unit_id,
                         "dependencies": dependency_context,
+                        "agent": agent_id,
+                        "name": agent_id,
                         **unit.payload,
-                    },
-                )
-                if not job.get("success"):
-                    return {"success": False, "plan": plan.to_dict(), "jobs": jobs, "error": job.get("error")}
-                record = {**job, "unit_id": unit.unit_id, "role": unit.role, "agent": agent_name}
+                    }
+                    queued = job_queue.submit(kind, payload, session_key=f"agent:{agent_id}")
+                except KeyError as exc:
+                    return {"success": False, "plan": plan.to_dict(), "jobs": jobs, "error": str(exc)}
+                except Exception as exc:
+                    return {"success": False, "plan": plan.to_dict(), "jobs": jobs, "error": f"canonical queue unavailable: {exc}"}
+                
+                record = {"success": True, "name": agent_id, "job_id": queued.id, "queued": True, "status": queued.status,
+                          "unit_id": unit.unit_id, "role": unit.role, "agent": agent_id}
                 jobs.append(record)
                 submitted.append(record)
 
             for record in submitted:
                 if wait:
-                    status = self.manager.wait_job(record["agent"], record["job_id"], timeout=timeout_per_unit)
+                    import time
+                    deadline = time.monotonic() + max(0.0, float(timeout_per_unit))
+                    while time.monotonic() <= deadline:
+                        st = job_queue.status(record["job_id"])
+                        status = st.get("status") or "unknown"
+                        if status in ("succeeded", "failed", "cancelled", "blocked"):
+                            status = {"success": True, "status": status, "name": record["agent"], "job_id": record["job_id"], "result": st.get("result"), "error": st.get("error")}
+                            break
+                        time.sleep(0.2)
+                    else:
+                        status = {"success": False, "status": "timeout", "name": record["agent"], "job_id": record["job_id"], "error": f"job did not finish within {timeout_per_unit:g}s"}
                 else:
                     status = {"success": True, "status": "queued", "job_id": record["job_id"]}
                 results[record["unit_id"]] = status
                 pending.pop(record["unit_id"], None)
-                if wait and (not status.get("success") or status.get("status") != "finished"):
+                if wait and (not status.get("success") or status.get("status") != "succeeded"):
                     output = {
                         "success": False,
                         "plan": plan.to_dict(),

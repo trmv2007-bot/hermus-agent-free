@@ -98,9 +98,11 @@ def test_illegal_transition_rejected(tmp_path):
         reg.pause(agent.agent_id)
 
     # Legal transitions emitted state_changed bus events; the illegal ones did not.
+    # spawn folds SPAWNING→IDLE into the single agent.spawned append (WAL-first
+    # rule), so the only state_changed here is IDLE→SLEEPING.
     events = reg.bus.tail(kind=STATE_CHANGED)
     transitions = [(e.content["from"], e.content["to"]) for e in events]
-    assert transitions == [("SPAWNING", "IDLE"), ("IDLE", "SLEEPING")]
+    assert transitions == [("IDLE", "SLEEPING")]
 
 
 def test_name_collision_auto_suffix_case_insensitive(tmp_path):

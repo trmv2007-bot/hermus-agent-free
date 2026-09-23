@@ -1,0 +1,32 @@
+{
+  "agent_id": "a332b2aa-71a7-40c0-9558-1a6fd30603fc",
+  "name": "Quiet",
+  "persona": "",
+  "provider": "groq",
+  "model": "",
+  "key_name": null,
+  "state": "ERROR",
+  "memory": [
+    {
+      "role": "user",
+      "content": "trigger a failure please",
+      "ts": "2026-09-23T14:07:13.250671+00:00"
+    }
+  ],
+  "summary": "",
+  "skills": [],
+  "stats": {
+    "tasks_done": 0,
+    "tasks_failed": 1,
+    "tokens": 0,
+    "cost_est": 0.0,
+    "latency_ms": 0.0
+  },
+  "cursor": 0,
+  "executed_task_ids": [],
+  "schema_version": 1,
+  "current_task": "8519e6bdd2ab4af5a08b6c130208df76",
+  "last_activity": "2026-09-23T14:07:13.250834+00:00",
+  "created_at": "2026-09-23T14:07:09.147731+00:00",
+  "pending_approval": null
+}

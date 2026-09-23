@@ -101,7 +101,7 @@ def test_task2_tool_failure_is_typed_not_reported_as_success():
     assert "disk full" in res.error_message
 
 
-def test_task2_mission_uses_agent_executor_with_tool_gateway():
+def test_task2_mission_uses_agent_executor_with_tool_gateway(tmp_path: Path):
     """MissionEngine exercises a node via an executor that uses the ToolGateway."""
     from core.mission import MissionEngine, MissionState
     from core.tool_registry import ToolRegistry
@@ -116,7 +116,7 @@ def test_task2_mission_uses_agent_executor_with_tool_gateway():
         r = gw.execute("demo.echo", {"msg": goal})
         return {"answer": r.output["echo"], "content": r.output["echo"], "success": r.ok}
 
-    eng = MissionEngine(executor=executor, storage_dir=Path("/tmp/msn_task2"))
+    eng = MissionEngine(executor=executor, storage_dir=tmp_path / "msn_task2")
     report = eng.start_mission("write a line", budget_steps=3, max_repairs=0)
     assert report is not None
     assert hasattr(report, "mission_id") and report.mission_id
@@ -162,14 +162,14 @@ def test_task3_job_retry_recovers_from_failure():
     assert status["result"]["answer"] == "recovered"
 
 
-def test_task3_exhausted_retries_reports_failed_not_completed():
+def test_task3_exhausted_retries_reports_failed_not_completed(tmp_path: Path):
     """A permanently failing mission must surface FAILED/blocked, NOT a 'completed'."""
     from core.mission import MissionEngine, MissionState
 
     def executor(goal, ctx):
         return {"error": "permanently failing", "success": False}
 
-    eng = MissionEngine(executor=executor, storage_dir=Path("/tmp/msn_task3b"))
+    eng = MissionEngine(executor=executor, storage_dir=tmp_path / "msn_task3b")
     report = eng.start_mission("never succeeds", budget_steps=2, max_repairs=1)
     # Must surface an explicit non-success state; must NOT silently report 'completed'.
     assert report.state in (MissionState.FAILED.value, MissionState.BLOCKED.value), report.state
@@ -208,28 +208,31 @@ def test_task4_canonical_jobqueue_executes_and_returns_result():
     assert calls  # handler actually executed (single invocation)
 
 
-def test_task4_agent_manager_delegates_to_canonical_queue(tmp_path):
-    """AgentManager is a delegation facade; it must surface queue='canonical' and
-    route submission through the canonical Job queue (no bespoke worker lifecycle)."""
-    from core.agent_manager import AgentManager
-    from core.workspace import workspace
+def test_task4_agent_delegation_goes_through_canonical_queue(tmp_path):
+    """Named-agent background work is submitted as a canonical Job (no bespoke lifecycle)."""
+    from gateway.queue import STATUS_DONE, STATUS_FAILED, JobQueue
 
-    # Isolate the workspace root so the test never touches the real ~/.hermus.
-    # Save and restore base_dir so it cannot leak into other tests in the run.
-    prior_base = workspace.base_dir
-    try:
-        workspace.base_dir = tmp_path / "home"
-        ag = workspace.dirs["agents"]
-        ag.mkdir(parents=True, exist_ok=True)
+    from core.agent_handlers import register_agent_handlers
 
-        am = AgentManager()
-        assert am.create("worker", role="generic")["success"] is True
-        st = am.start("worker")
-        assert st["success"] is True
-        assert st.get("queue") == "canonical"
-        assert am.status("worker")["alive"] is True
-    finally:
-        workspace.base_dir = prior_base
+    async def drive():
+        q = JobQueue(workers=1, maxsize=100, default_timeout=15, persist=str(tmp_path / "jobs.log"))
+        # Deterministic handler so no live model is required.
+        q.register("agent.general", lambda ctx: {"ok": True, "answer": ctx.payload["task"].upper()})
+        # Idempotent registration of the remaining agent-role kinds.
+        register_agent_handlers(q, overwrite=False)
+        await q.start()
+        job = q.submit("agent.general", {"agent": "worker", "task": "background work"}, run_id="run_task4b")
+        for _ in range(400):
+            st = q.status(job.id)
+            if st.get("status") in (STATUS_DONE, STATUS_FAILED):
+                break
+            await asyncio.sleep(0.01)
+        await q.stop()
+        return q.status(job.id)
+
+    status = asyncio.run(drive())
+    assert status["status"] == STATUS_DONE, status
+    assert status["result"]["answer"] == "BACKGROUND WORK"
 
 
 # ---------------------------------------------------------------------------
@@ -260,23 +263,24 @@ def test_task5_mission_persists_and_reconstructs_after_engine_recreated():
         assert persisted.read_text(encoding="utf-8")  # durable JSON written
 
 
-def test_task5_event_bus_replays_after_bus_recreated():
+def test_task5_event_bus_replays_after_bus_recreated(tmp_path):
     """The canonical EventBus is durable: a fresh bus re-reads the log (reconnect)."""
-    import tempfile
-
     from core.events import EventBus
 
-    with tempfile.TemporaryDirectory() as td:
-        log = Path(td) / "events.jsonl"
-        b1 = EventBus(log_path=log)
-        from core.contracts import EventEnvelope
+    from core.contracts import EventEnvelope
 
-        b1.publish(EventEnvelope(command="mission.start", type="command.requested", status="running", source="test"))
-        b1.close()
-        # A reconnect (new bus) replays the durable log.
-        b2 = EventBus(log_path=log)
+    log = tmp_path / "events.jsonl"
+    b1 = EventBus(log_path=log)
+    b1.publish(EventEnvelope(command="mission.start", type="command.requested", status="running", source="test"))
+    b1.close()
+    # A reconnect (new bus) replays the durable log.
+    b2 = EventBus(log_path=log)
+    try:
         evs = b2.replay(since_cursor=0)
         assert any(e.command == "mission.start" for e in evs)
+    finally:
+        # Leaving this handle open made the temp dir undeletable on Windows.
+        b2.close()
 
 
 # ---------------------------------------------------------------------------
@@ -319,13 +323,11 @@ def test_task6_computer_verifier_records_before_after():
 # ---------------------------------------------------------------------------
 # Task 7 — Memory: store → later mission → retrieve → use
 # ---------------------------------------------------------------------------
-def test_task7_memory_roundtrip_typed_and_session():
-    import tempfile
-
+def test_task7_memory_roundtrip_typed_and_session(tmp_path):
     from core.memory import MemoryFacade
 
-    with tempfile.TemporaryDirectory() as td:
-        m = MemoryFacade(db_path=os.path.join(td, "memory2.db"))
+    m = MemoryFacade(db_path=str(tmp_path / "memory2.db"))
+    try:
         # Typed memory store + retrieve.
         m.remember("semantic", "The CI runs pytest with --timeout=60", importance=8)
         hits = m.recall("pytest timeout", limit=5)
@@ -338,6 +340,9 @@ def test_task7_memory_roundtrip_typed_and_session():
         m.add_token_usage("sess7", {"model": "free", "prompt_tokens": 10, "completion_tokens": 5})
         usage = m.get_token_usage("sess7")
         assert usage.get("count", 0) >= 1
+    finally:
+        # The SQLite handle kept the temp dir locked on Windows.
+        m.close()
 
 
 # ---------------------------------------------------------------------------

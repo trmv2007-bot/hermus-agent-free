@@ -1,11 +1,7 @@
 # ⚡ HERMUS Agent Free
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/docs/assets/hermus-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/docs/assets/hermus-light.png">
-    <img alt="HERMUS Logo" src="https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/docs/assets/hermus-dark.png" width="200">
-  </picture>
+  <img alt="HERMUS Logo" src="docs/assets/hermus-dark.png" width="200">
 </p>
 
 <p align="center">
@@ -17,8 +13,7 @@
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/stargazers"><img src="https://img.shields.io/github/stars/trmv2007-bot/hermus-agent-free?style=for-the-badge&color=58a6ff" alt="Stars"></a>
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
 <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
-<a href="https://github.com/trmv2007-bot/hermus-agent-free/actions"><img src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&style=for-the-badge" alt="CI"></a>
-<a href="https://discord.gg/example"><img src="https://img.shields.io/discord/123456789.svg?style=for-the-badge&logo=discord&label=Community" alt="Discord"></a>
+<a href="https://github.com/trmv2007-bot/hermus-agent-free/graphs/contributors"><img src="https://img.shields.io/github/contributors/trmv2007-bot/hermus-agent-free?style=for-the-badge" alt="Contributors"></a>
 </p>
 
 ---
@@ -62,63 +57,65 @@ cd hermus-agent-free
 
 ### 🌐 Gateway & Integrations
 
-- **CLI** - Full command-line interface
-- **Web Dashboard** - Live task progress, agents, telemetry, reasoning
-- **Telegram** - Mobile and desktop integration
-- **Discord** - Server and bot integration
-- **Slack** - Workspace webhook support
-- **Voice** - Local speech-to-text and text-to-speech
-- **Computer Control** - Browser automation and system interaction
+- **CLI** — Full command-line interface (`./hermus`)
+- **Web Dashboard** — Live task progress, agents, telemetry, reasoning
+- **Telegram** — Mobile and desktop integration
+- **Discord** — Server and bot integration
+- **Voice** — Local speech-to-text and text-to-speech
+- **Computer Control** — Browser automation and system interaction
+- **Android Companion** — Consent-gated on-device agent bridge
 
 ### 🛡️ Safety & Trust
 
-- **Red Line Policy** - Clear boundaries for autonomous actions
-- **Approval System** - Scoped grants for yellow-zone actions
-- **Emergency Brake** - Immediate stop capability
-- **Audit Logs** - Complete action tracking and review
-- **Sandboxing** - Multiple isolation backends (Docker, Podman, bubblewrap)
+- **Red Line Policy** — Clear boundaries for autonomous actions
+- **Approval System** — Scoped grants for yellow-zone actions
+- **Emergency Brake** — Immediate stop capability
+- **Audit Logs** — Complete action tracking and review
+- **Sandboxing** — Multiple isolation backends (Docker, Podman, gVisor)
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        HERMUS AGENT                             │
-├─────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐      │
-│  │   Gateway   │    │   Mission    │    │   Memory    │      │
-│  │   & API     │◄──►│   Engine     │◄──►│   System     │      │
-│  └─────────────┘    └─────────────┘    └─────────────┘      │
-│          ▲                  ▲                  ▲                │
-│          │                  │                  │                │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐      │
-│  │   CLI       │    │   SWE Mode   │    │   Counsel    │      │
-│  └─────────────┘    └─────────────┘    └─────────────┘      │
-│          ▲                  ▲                  ▲                │
-│          │                  │                  │                │
-│  ┌───────────────────────────────────────────────────────┐   │
-│  │                Tool System & Sandbox                   │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                       HERMUS AGENT                           │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐       │
+│  │   Gateway   │◄──►│   Mission   │◄──►│   Memory    │       │
+│  │   & API     │    │   Engine    │    │   System    │       │
+│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘       │
+│         │                  │                  │              │
+│  ┌──────▼──────┐    ┌──────▼──────┐    ┌──────▼──────┐       │
+│  │    CLI      │    │  SWE Mode   │    │   Counsel   │       │
+│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘       │
+│         │                  │                  │              │
+│  ┌──────▼──────────────────▼──────────────────▼──────┐       │
+│  │           Tool System & Sandbox                   │       │
+│  └───────────────────────────────────────────────────┘       │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+The canonical, detailed reference lives in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### 🎨 Control Room Dashboard
 
 The **Control Room** at `http://localhost:8000/control` is your command center:
 
-- **📊 Overview** - System health, capabilities, and event log
-- **🎭 Presence** - Agent identity, state, goals, and continuity
-- **🎤 Voice** - Speech-to-text and text-to-speech
-- **📋 Jobs** - Queue management and execution tracking
-- **🚀 Missions** - Autonomous task management
-- **📈 Telemetry** - Live event streaming
-- **💻 Computer** - System automation and control
-- **🔗 Remote** - External integrations
-- **🛡️ Safety** - Red lines, approvals, and emergency controls
-- **⚙️ Systems** - All subsystems at a glance
+| Tab | Purpose |
+|-----|---------|
+| **Chat** | Talk to HERMUS (streamed replies) beside the live event rail |
+| **Agents** | Fleet agents, live roster states, and assignments |
+| **Presence** | Agent identity, state, goals, and continuity |
+| **Voice** | Speech-to-text and text-to-speech |
+| **Jobs** | Queue management and execution tracking |
+| **Missions** | Autonomous task management |
+| **Computer** | System automation and control |
+| **Remote** | External integrations |
+| **Safety** | Red lines, approvals, and emergency controls |
+| **Systems** | Health, capabilities, VRAM, replay, typed commands, and every subsystem at a glance |
 
 ---
 
@@ -126,58 +123,64 @@ The **Control Room** at `http://localhost:8000/control` is your command center:
 
 ### Start an Autonomous Mission
 ```bash
-hermus mission start "Build and test a web application that does X"
+./hermus mission start "Build and test a web application that does X"
 ```
 
 ### Run Software Engineering Workflow
 ```bash
-hermus swe run "Fix the failing tests and package the project"
+./hermus swe run "Fix the failing tests and package the project"
 ```
 
 ### Use AI Counsel for Complex Decisions
 ```bash
-hermus counsel run "Compare three architectures and recommend the best one"
+./hermus counsel run "Compare three architectures and recommend the best one"
 ```
 
 ### Interactive Terminal Agent
 ```bash
-hermus
+./hermus
 ```
 
 ### Check System Health
 ```bash
-hermus doctor
+./hermus doctor
 ```
+
+More commands live in the [CLI cheatsheet](QUICKSTART.md).
 
 ---
 
 ## 🔧 Configuration
 
-Hermus is configured through environment variables. See [`.env.example`](.env.example) for all options.
-
-### Key Configuration Variables
+Hermus is configured through environment variables (prefix `HERMUS_`). The
+typed settings model in `core/config.py` is the source of truth — key examples:
 
 ```bash
-# Model Providers
-HERMUS_MODEL_PROVIDER=ollama
-HERMUS_MODEL_NAME=llama3.2
+# Model (provider-prefixed: ollama/..., groq/..., hf/..., mock/...)
+HERMUS_MODEL=ollama/llama3.1:8b
 
 # Gateway
-HERMUS_GATEWAY_PORT=8000
-HERMUS_GATEWAY_TOKEN=your-secret-token
+HERMUS_GATEWAY_TOKEN=your-secret-token   # optional; required when exposing beyond localhost
 
 # Safety
-HERMUS_SAFETY_ENABLED=1
-HERMUS_SANDBOX_BACKEND=docker
+HERMUS_PERMISSIONS_ENFORCE=1
+HERMUS_SANDBOX=auto                      # auto | docker | podman | gvisor | local | off
 
 # Memory
-HERMUS_MEMORY_ENABLED=1
+HERMUS_MEMORY2_ENABLED=1
 HERMUS_MEMORY_SWEEP_MINUTES=60
 
-# Multi-Agent
+# Multi-agent
 HERMUS_COUNSEL_ENABLED=1
-HERMUS_COUNSEL_MAX_MEMBERS=5
+HERMUS_COUNSEL_MAX_MEMBERS=6
+
+# Mission runtime
+HERMUS_MISSION_RUNTIME=1
+HERMUS_MISSION_BUDGET_STEPS=48
 ```
+
+Provider API keys (`GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, …)
+are auto-discovered from `.env` — add them once with `./hermus multikey add`.
 
 ---
 
@@ -188,6 +191,7 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [QUICKSTART.md](QUICKSTART.md) | Installation, onboarding, CLI cheatsheet |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Canonical architecture reference |
 | [LIVING_CONTROL_ROOM.md](LIVING_CONTROL_ROOM.md) | Control room design and features |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and PR process |
 | [RED_LINES.md](RED_LINES.md) | Safety boundaries and red-line policy |
 | [AUTONOMY_BOUNDARIES.md](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
 | [CAPABILITY_LEDGER.md](CAPABILITY_LEDGER.md) | Visible ledger of powers and capabilities |
@@ -198,23 +202,20 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 
 ## 🛠️ Model Providers
 
-Hermus supports multiple model providers:
+Hermus supports multiple model providers behind one gateway:
 
 ### Local Models (Recommended)
-- **Ollama** - Primary local model path
-- **NoLlama** - Intel NPU and GPU support
+- **Ollama** — primary local model path
+- **NoLlama** — Intel NPU and Arc GPU support
 - **Any local OpenAI-compatible endpoint**
 
 ### Hosted Providers
-- Compatible with any OpenAI-compatible API
+- Compatible with any OpenAI-compatible API (Groq, OpenRouter, Gemini, …)
 - Free-tier providers can be configured
 - No vendor lock-in
 
-### Model Families Supported
-- Llama 2/3
-- Mistral
-- Phi
-- And any other compatible models
+The router auto-selects a compatible model per task (tool calling, vision,
+context size) instead of trusting name keywords — see `HERMUS_AUTO_SELECT_MODEL`.
 
 ---
 
@@ -222,19 +223,17 @@ Hermus supports multiple model providers:
 
 We welcome contributions! Please:
 
-1. ✨ **Star** the repository
-2. 🐛 **Report** bugs and issues
-3. 💬 **Join** the Discord community
-4. 📝 **Read** the [Contributing Guide](CONTRIBUTING.md)
-5. 🔧 **Submit** pull requests
+1. 🐛 **Report** bugs and issues
+2. 📝 **Read** the [Contributing Guide](CONTRIBUTING.md)
+3. 🔧 **Submit** pull requests
 
 ### Development Setup
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+make setup          # creates .venv, installs runtime + dev dependencies
+make test           # fast test suite
+./hermus doctor     # health/diagnostics report
 ```
 
 ---
@@ -260,18 +259,4 @@ Hermus Agent Free is released under the **MIT License**. See [LICENSE](LICENSE).
 
 <p align="center">
   Made with ❤️ by <a href="https://github.com/trmv2007-bot">trmv2007-bot</a> and contributors
-</p>
-
----
-
-<p align="center">
-  <a href="https://github.com/trmv2007-bot/hermus-agent-free">
-    <img src="https://img.shields.io/github/forks/trmv2007-bot/hermus-agent-free?style=social" alt="Forks">
-  </a>
-  <a href="https://github.com/trmv2007-bot/hermus-agent-free">
-    <img src="https://img.shields.io/github/issues/trmv2007-bot/hermus-agent-free?style=social" alt="Issues">
-  </a>
-  <a href="https://github.com/trmv2007-bot/hermus-agent-free">
-    <img src="https://img.shields.io/github/contributors/trmv2007-bot/hermus-agent-free?style=social" alt="Contributors">
-  </a>
 </p>

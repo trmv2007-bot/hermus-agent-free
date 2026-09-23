@@ -146,71 +146,66 @@ def _new_agents_dir(tmp_path):
 
 
 def test_agent_manager_lifecycle(tmp_path):
-    """AgentManager is a registry + delegation facade; the canonical Job queue owns execution."""
-    from core.agent_manager import AgentManager
-    from core.workspace import workspace
+    """The fleet facade is the registry surface; the canonical Job queue owns execution."""
+    from core.fleet.bus import FleetBus
+    from core.fleet.facade import AgentManagerFacade
+    from core.fleet.registry import FleetRegistry
 
-    # Isolate the workspace root so real agent dirs under ~/.hermus are never
-    # created (and restored on exit, so the singleton never leaks across tests).
-    prior_base = workspace.base_dir
-    try:
-        _new_agents_dir(tmp_path)
-        am = AgentManager()
-        assert am.create("tester", role="generic")["success"]
-        assert not am.create("tester", role="generic")["success"]  # duplicate
+    def stub_chat_fn(messages):
+        task = ""
+        for turn in messages:
+            if turn.get("role") == "user":
+                task = turn.get("content") or ""
+        return {"content": f"stub-reply:{task}", "tokens": 7}
 
-        # start/stop are registry lifecycle flags — no subprocess, pid, heartbeat file.
-        st = am.start("tester")
-        assert st["success"] and st["queue"] == "canonical"
-        status = am.status("tester")
-        assert status["success"] and status["status"] == "registered"
-        assert status["alive"] is True
-        am.stop("tester")
-        # The removed protocol left no bespoke state.json / jobs / results files.
-        ag = tmp_path / "agents" / "tester"
-        assert not (ag / "state.json").exists()
+    bus = FleetBus(base_dir=tmp_path / "fleet")
+    bus.load()
+    registry = FleetRegistry(bus, chat_fn=stub_chat_fn, roster_dir=tmp_path / "agents")
+    am = AgentManagerFacade(registry=registry)
 
-        # Job submission is a canonical Job; the registry does NOT write jobs/*.json.
-        job = am.submit_job("tester", {"task": "hello"})
-        assert job.get("success") is True
-        assert (ag / "jobs").exists() is False
+    assert am.create("tester", role="generic")["success"]
+    assert not am.create("tester", role="generic")["success"]  # duplicate
 
-        # The watchdog reports honestly and delegates recovery to the queue.
-        tick = am.watchdog_tick(restart=False)
-        assert tick["recovery_owner"] == "canonical-job-queue"
-        assert isinstance(tick["stale"], list)
-    finally:
-        workspace.base_dir = prior_base
+    # stop pauses the live roster agent; start on a non-paused agent is refused
+    # honestly (there is no process to start in the fleet model).
+    stopped = am.stop("tester")
+    assert stopped["success"] and stopped["registry"] == "fleet-registry"
+    status = am.status("tester")
+    assert status["success"] and status["status"] == "PAUSED"
+    assert status["alive"] is True
+    started = am.start("tester")
+    assert started["success"] and started["registry"] == "fleet-registry"
+    # The fleet model owns no bespoke per-agent state/jobs/results files.
+    ag = tmp_path / "agents" / "tester"
+    assert not (ag / "state.json").exists()
+
+    # Job submission routes to FleetRegistry.assign (synchronous, idempotent).
+    job = am.submit_job("tester", {"task": "hello"})
+    assert job.get("success") is True
+    assert job.get("executed") is True
+    assert job.get("result") == "stub-reply:hello"
+    assert (ag / "jobs").exists() is False
+
+    # The watchdog reports the roster honestly — no fabricated restarts.
+    tick = am.watchdog_tick(restart=False)
+    assert tick["recovery_owner"] == "fleet-registry"
+    assert isinstance(tick["stale"], list)
 
 
 def test_no_production_path_creates_agent_json_jobs():
-    """Architecture gate: AgentManager no longer owns a jobs/*.json/results/*.json lifecycle.
+    """Architecture gate: no module owns a bespoke jobs/*.json/results/*.json lifecycle.
 
-    Agent job execution is owned by the canonical Job system. The agent registry
-    (core/agent_manager.py) must not reference a ``jobs`` or ``results``
-    sub-directory behind the agent dir, and no other module may define its own
-    per-agent JSON job queue.
+    Agent job execution is owned by the canonical Job system; agent identity is
+    owned by the Fleet Registry. The retired ``core/agent_manager.py`` must not
+    come back, and no other module may define its own per-agent JSON job queue.
     """
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    src = (root / "core" / "agent_manager.py").read_text(encoding="utf-8")
-    # Strip the module docstring so checks operate on code, not narrative.
-    if src.startswith('"""'):
-        end = src.index('"""', 3)
-        am = src[end + 3 :]
-    else:
-        am = src
-    # No bespoke file-based job/result queue remains.
-    assert '"jobs"' not in am and "'jobs'" not in am
-    assert '"results"' not in am and "'results'" not in am
-    assert "worker_loop" not in am and "worker_entry" not in am
-    # The registry writes only identity metadata.
-    assert "agent.json" in am
-    # No other production module spawns its own background worker subprocess protocol.
+    # The legacy split-brain registry stays deleted.
+    assert not (root / "core" / "agent_manager.py").exists(), "agent_manager.py must stay deleted"
+    # No production module spawns its own background worker subprocess protocol.
     for p in list((root / "core").rglob("*.py")) + list((root / "gateway").rglob("*.py")):
-        if p.name in ("agent_manager.py", "handlers.py", "queue.py"):
-            continue
         text = p.read_text(encoding="utf-8")
         assert "worker_loop" not in text, f"{p} references removed worker_loop"
     # The only public agent-role Job kinds reach the canonical queue via the gateway.

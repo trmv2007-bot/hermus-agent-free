@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/fleet")
 
+#: WebSocket routes live on their own router because the gateway's HTTP auth
+#: dependency cannot be applied to a router that carries WS endpoints (a failing
+#: dependency closes a socket with the wrong code). They self-authenticate via
+#: gateway.context.ws_token_ok instead.
+ws_router = APIRouter(prefix="/api/fleet")
+
 
 # ------------------------------------------------------------------
 # Spawn
@@ -410,11 +416,36 @@ async def orchestrate_mission(body: dict[str, Any] | None = None):
     return {
         "success": result.success,
         "mission_id": result.mission_id,
-        "state": "done" if result.success else "failed",
+        # The mission's real state when the orchestrator knows it; a mission
+        # parked on a HITL gate reports "suspended", not "failed".
+        "state": result.state or ("done" if result.success else "failed"),
         "synthesis": result.synthesis,
         "error": result.error,
         "partial": result.partial,
     }
+
+
+@router.get("/watchdog")
+async def watchdog_status():
+    """Honest autonomy report: what the fleet watchdog did, on its own."""
+    from core.fleet.watchdog import get_watchdog
+
+    wd = get_watchdog()
+    if wd is None:
+        return {"ok": False, "reason": "watchdog not installed"}
+    return {"ok": True, **wd.status()}
+
+
+@router.post("/watchdog/toggle")
+async def watchdog_toggle(body: dict[str, Any] | None = None):
+    """Enable/disable the autonomy layer (the brake still outranks it)."""
+    from core.fleet.watchdog import get_watchdog
+
+    wd = get_watchdog()
+    if wd is None:
+        return {"ok": False, "reason": "watchdog not installed"}
+    wd.enabled = bool((body or {}).get("enabled", not wd.enabled))
+    return {"ok": True, "enabled": wd.enabled}
 
 
 @router.post("/keys")
@@ -486,23 +517,175 @@ async def get_screen_frame():
 
 
 
-@router.websocket("/ws/fleet")
+
+# Event kinds the dashboard agent feed forwards to connected WS clients.
+_FLEET_FEED_KINDS = frozenset({
+    "state_changed", "broadcast", "result",
+    "mission_opened", "mission_terminated",
+    "agent.spawned", "agent.updated",
+})
+
+def _ws_auth_ok(websocket) -> bool:
+    """Delegate to the single owner of the WS token policy (gateway.context)."""
+    from gateway.context import ws_token_ok
+
+    return ws_token_ok(websocket)
+
+def _fleet_ws_snapshot(reg):
+    return {"agents": [_agent_card(a) for a in reg.list()], "count": len(reg.list())}
+
+
+def _fleet_event_to_client_msg(reg, ev):
+    """Project a FleetBus event into the dashboard client envelope.
+
+    Secrets and full credential material are never included — only public card
+    fields (name, state) are projected.
+    """
+    kind = ev.kind
+    content = ev.content
+    target = ev.target
+
+    if kind == "state_changed" and isinstance(content, dict):
+        agent_id = content.get("agent_id") or target
+        agent = reg.get(agent_id) if agent_id else None
+        return {
+            "type": "fleet.state_changed",
+            "seq": ev.seq, "id": ev.id, "ts": ev.ts,
+            "agent_id": agent_id,
+            "agent_name": agent.name if agent else None,
+            "old_state": content.get("old_state"),
+            "new_state": content.get("new_state") or (agent.state if agent else None),
+            "reason": content.get("reason"),
+        }
+
+    if kind == "broadcast":
+        return {
+            "type": "fleet.broadcast",
+            "seq": ev.seq, "id": ev.id, "ts": ev.ts,
+            "content": content, "sender": ev.sender,
+        }
+
+    if kind == "result" and isinstance(content, dict):
+        return {
+            "type": "fleet.result",
+            "seq": ev.seq, "id": ev.id, "ts": ev.ts,
+            "agent_id": target,
+            "task_id": content.get("task_id"),
+            "executed": content.get("executed"),
+            "blocked": content.get("blocked"),
+            "needs_approval": content.get("needs_approval"),
+        }
+
+    if kind in ("mission_opened", "mission_terminated") and isinstance(content, dict):
+        return {
+            "type": "fleet." + kind,
+            "seq": ev.seq, "id": ev.id, "ts": ev.ts,
+            "mission_id": content.get("mission_id"),
+            "goal": content.get("goal"),
+            "state": content.get("state"),
+        }
+
+    if kind in ("agent.spawned", "agent.updated") and target:
+        agent = reg.get(target)
+        if agent is not None:
+            return {
+                "type": "fleet.agent_updated",
+                "seq": ev.seq, "id": ev.id, "ts": ev.ts,
+                "agent_id": target,
+                "agent_name": agent.name,
+                "state": agent.state,
+                "event_kind": kind,
+            }
+    return None
+
+
+async def _fleet_ws_poll_and_send(websocket, reg, *, poll_interval_s=1.0):
+    """Poll the FleetBus for new events and forward filtered ones to websocket.
+
+    The FleetBus has no push/subscribe primitive, so this closes the gap by
+    polling the durable log for events newer than the client's last seen seq
+    and forwarding only the dashboard-relevant kinds.
+
+    TODO(Solar-2026-02): replace polling with an asyncio.Event/notify path when
+    FleetBus grows a push primitive, so a quiet fleet burns no CPU.
+    """
+    import asyncio
+
+    bus = reg.bus
+    last_seq = 0
+
+    while True:
+        try:
+            await asyncio.sleep(poll_interval_s)
+        except asyncio.CancelledError:
+            break
+
+        try:
+            new_since = bus.last_seq
+            if new_since <= last_seq:
+                continue
+
+            new_events = await asyncio.to_thread(
+                lambda: list(bus._iter_events(last_seq + 1))
+            )
+            if not new_events:
+                last_seq = new_since
+                continue
+
+            sent = 0
+            for ev in new_events:
+                if ev.seq > last_seq:
+                    last_seq = ev.seq
+                if ev.kind not in _FLEET_FEED_KINDS:
+                    continue
+                msg = _fleet_event_to_client_msg(reg, ev)
+                if msg is None:
+                    continue
+                try:
+                    await websocket.send_json(msg)
+                    sent += 1
+                except Exception:
+                    return
+            if sent == 0 and last_seq < new_since:
+                last_seq = new_since
+        except Exception as exc:
+            logger.debug("[routes_fleet] fleet_ws poll error: %s", exc)
+            await asyncio.sleep(poll_interval_s)
+@ws_router.websocket("/ws/fleet")
 async def fleet_ws(websocket: WebSocket):
     """WebSocket live stream: state changes, messages, results, approvals (SPEC §9).
 
-    The client receives a JSON envelope for every fleet bus event that matches
-    broadcast kinds or is addressed to the client's session.
+    Auth: token from ?token= or X-Hermus-Token; open when no gateway token
+    configured. Sends initial snapshot then polls FleetBus for deltas.
     """
+    if not _ws_auth_ok(websocket):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
     await websocket.accept()
-    # Send initial hello message
     await websocket.send_json({"type": "hello", "protocol": "hermus.fleet.v1"})
-    # Wait for client to disconnect (like ws_agent does)
+
+    reg = _get_registry()
     try:
-        while True:
+        await websocket.send_json({"type": "snapshot", "data": _fleet_ws_snapshot(reg)})
+
+        import asyncio as _asyncio
+
+        poll_task = _asyncio.create_task(_fleet_ws_poll_and_send(websocket, reg))
+        try:
+            while True:
+                try:
+                    await _asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                except WebSocketDisconnect:
+                    break
+                except _asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    break
+        finally:
+            poll_task.cancel()
             try:
-                await websocket.receive_text()
-            except WebSocketDisconnect:
-                break
+                await poll_task
             except Exception:
                 pass
     except WebSocketDisconnect:
@@ -515,29 +698,80 @@ async def fleet_ws(websocket: WebSocket):
             pass
 
 
-@router.websocket("/ws/fleet/screen")
+@ws_router.websocket("/ws/fleet/screen")
 async def fleet_screen_ws(websocket: WebSocket):
     """Low-FPS live screen mirror WebSocket (SPEC §9).
 
-    Sends JPEG frames at ~1-2 FPS. Placeholder for now.
+    Streams JPEG-compressed frames from the rolling screen recorder.
+    Starts the recorder if not already running (best-effort).
+
+    Auth: token from ?token= or X-Hermus-Token; open when no gateway token
+    configured (local default).
     """
+    if not _ws_auth_ok(websocket):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
     await websocket.accept()
     await websocket.send_json({"type": "hello", "protocol": "hermus.fleet.screen.v1"})
+
+    # Get the screen recorder
     try:
+        from core.integrations import _screen_recorder
+        recorder = _screen_recorder()
+    except Exception as exc:
+        logger.warning("[routes_fleet] failed to get screen recorder: %s", exc)
+        await websocket.send_json({
+            "type": "error",
+            "message": f"Screen recorder unavailable: {exc}",
+        })
+        await websocket.close()
+        return
+
+    # Start recorder if not running
+    if not recorder.running:
+        try:
+            start_result = recorder.start(max_seconds=0, fps=2, output_path=None)
+            if not start_result.get("success"):
+                logger.warning("[routes_fleet] could not start screen recorder: %s", start_result.get("error"))
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Could not start screen recorder: {start_result.get('error', 'unknown error')}",
+                })
+        except Exception as exc:
+            logger.warning("[routes_fleet] exception starting screen recorder: %s", exc)
+
+    try:
+        last_seq = -1
         while True:
-            # Placeholder - real implementation would capture and send screen frames
-            await websocket.send_json({
-                "type": "frame",
-                "data": None,
-                "timestamp": None,
-                "message": "screen mirror not yet wired in this build",
-            })
-            await asyncio.sleep(1.0)
+            # Get latest frame from recorder's rolling buffer
+            latest = recorder.latest()
+            if latest and latest.get("sequence", -1) != last_seq:
+                last_seq = latest.get("sequence", -1)
+                # Frame data is already JPEG-compressed bytes
+                frame_data = latest.get("data")
+                if frame_data:
+                    # Send as base64 for JSON transport
+                    import base64
+                    b64 = base64.b64encode(frame_data).decode("ascii")
+                    await websocket.send_json({
+                        "type": "frame",
+                        "data": b64,
+                        "timestamp": latest.get("ts"),
+                        "sequence": latest.get("sequence"),
+                        "captured_at": latest.get("captured_at"),
+                        "offset": latest.get("offset"),
+                    })
+            await asyncio.sleep(0.5)  # ~2 FPS
     except WebSocketDisconnect:
         pass
     except Exception as exc:
         logger.warning("[routes_fleet] fleet_screen_ws error: %s", exc)
         try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(exc),
+            })
             await websocket.close()
         except Exception:
             pass

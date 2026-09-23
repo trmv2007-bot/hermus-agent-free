@@ -1,0 +1,32 @@
+{
+  "agent_id": "dad13147-3d59-48e2-97f6-f5e5eb61c271",
+  "name": "Braked",
+  "persona": "",
+  "provider": "groq",
+  "model": "",
+  "key_name": null,
+  "state": "ERROR",
+  "memory": [
+    {
+      "role": "user",
+      "content": "trigger a failure please",
+      "ts": "2026-09-23T14:07:09.141474+00:00"
+    }
+  ],
+  "summary": "",
+  "skills": [],
+  "stats": {
+    "tasks_done": 0,
+    "tasks_failed": 1,
+    "tokens": 0,
+    "cost_est": 0.0,
+    "latency_ms": 0.0
+  },
+  "cursor": 0,
+  "executed_task_ids": [],
+  "schema_version": 1,
+  "current_task": "53b37b0c07e047b092ca731a1e6a4141",
+  "last_activity": "2026-09-23T14:07:09.141624+00:00",
+  "created_at": "2026-09-23T14:07:05.033312+00:00",
+  "pending_approval": null
+}

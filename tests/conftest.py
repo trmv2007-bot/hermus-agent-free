@@ -38,6 +38,9 @@ import os
 # the suite asserts (step budgets, doctor caps, verify thresholds, ...). This
 # makes the suite deterministic regardless of local config.
 os.environ["HERMUS_NO_DOTENV"] = "1"
+# The gateway lifespan runs bootstrap.validate_critical_config(); in the test
+# environment Ollama/port-8000 checks would fail every TestClient app startup.
+os.environ["HERMUS_SKIP_VALIDATION"] = "1"
 
 import pytest  # noqa: E402
 

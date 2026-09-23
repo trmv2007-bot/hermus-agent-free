@@ -222,23 +222,6 @@ async def list_agents(request: Request) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{agent_id}")
-async def get_agent(request: Request, agent_id: str) -> dict:
-    """Get information about a specific agent."""
-    try:
-        pool = get_pool()
-        agent = pool.get_agent(agent_id)
-
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-
-        return {"status": "ok", "agent": agent.to_dict()}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/{agent_id}/run")
 async def run_agent_task(request: Request, agent_id: str, task: dict) -> dict:
@@ -761,14 +744,21 @@ async def get_rtx3050_status(request: Request) -> dict:
 
 @router.get("/vram/monitor")
 async def monitor_vram(request: Request) -> dict:
-    """Get current VRAM usage (simulated or real if available)."""
+    """Report real GPU VRAM usage when it can be measured.
+
+    The control room's contract is that the UI never simulates success, so
+    this endpoint reports measured values only: torch/CUDA when present,
+    otherwise an explicit ``available: false`` with the reason — never an
+    invented estimate (the old 3.5GB-per-agent guess fabricated data).
+    """
     try:
         lfp = get_local_first()
         gpu_info = lfp.detect_gpu()
 
-        # Try to get real VRAM usage
         vram_used = None
-        vram_total = gpu_info.get("vram", 8)  # Default to 8GB for RTX 3050
+        vram_total = gpu_info.get("vram")  # GB, may be None when unknown
+        source = "torch"
+        reason = None
 
         try:
             import torch
@@ -776,28 +766,41 @@ async def monitor_vram(request: Request) -> dict:
             if torch.cuda.is_available():
                 vram_used = torch.cuda.memory_allocated(0) / (1024**3)  # GB
                 vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        except Exception:
-            pass
+            else:
+                reason = "CUDA not available"
+        except ImportError:
+            source = "none"
+            reason = "torch not installed"
+        except Exception as exc:  # noqa: BLE001
+            source = "none"
+            reason = f"torch probe failed: {exc}"
 
         if vram_used is None:
-            # Simulate VRAM usage
-            pool = get_pool()
-            agents = pool.get_all_agents()
-            agent_count = len(agents)
+            return {
+                "status": "ok",
+                "available": False,
+                "source": source,
+                "reason": reason or "no VRAM probe available",
+                "gpu_detected": bool(gpu_info.get("detected", False)),
+                "gpu_name": gpu_info.get("name"),
+                "vram_used_gb": None,
+                "vram_total_gb": vram_total,
+                "vram_percent": None,
+                "safe_limit_gb": 7,
+                "is_over_limit": False,
+                "recommendation": "VRAM telemetry unavailable on this machine",
+            }
 
-            # Estimate VRAM based on agent count (rough estimate)
-            # Each agent with a model loaded uses ~3-4GB
-            vram_used = min(7, agent_count * 3.5)  # Cap at 7GB safe limit
-
-        vram_percent = (vram_used / vram_total) * 100 if vram_total > 0 else 0
-
+        vram_percent = (vram_used / vram_total) * 100 if vram_total else 0
         return {
             "status": "ok",
-            "vram_used_gb": round(vram_used, 2) if vram_used else 0,
-            "vram_total_gb": round(vram_total, 2),
+            "available": True,
+            "source": source,
+            "vram_used_gb": round(vram_used, 2),
+            "vram_total_gb": round(vram_total, 2) if vram_total else None,
             "vram_percent": round(vram_percent, 1),
             "safe_limit_gb": 7,
-            "is_over_limit": vram_percent > 85,
+            "is_over_limit": vram_total is not None and vram_percent > 85,
             "recommendation": "Reduce agents" if vram_percent > 85 else "OK",
         }
     except Exception as e:
@@ -1011,7 +1014,11 @@ import asyncio
 
 
 async def _init_agent_system():
-    """Initialize the agent system."""
+    """Initialize the agent system.
+
+    Started by the gateway lifespan (gateway.gateway) so the task has an owner
+    that can await it on shutdown — not by module import.
+    """
     try:
         await init_pool()
         logger.info("Agent system initialized")
@@ -1019,12 +1026,26 @@ async def _init_agent_system():
         logger.error(f"Error initializing agent system: {e}")
 
 
-# Run initialization in background
-try:
-    loop = asyncio.get_event_loop()
-    loop.create_task(_init_agent_system())
-except Exception:
-    pass
+# NOTE: GET /{agent_id} is intentionally declared LAST. FastAPI matches
+# routes in declaration order, so a single-segment dynamic route placed above
+# literal ones (e.g. /messages) would shadow them — /api/v1/agents/messages
+# was resolving to get_agent("messages") and answering 404.
+@router.get("/{agent_id}")
+async def get_agent(request: Request, agent_id: str) -> dict:
+    """Get information about a specific agent."""
+    try:
+        pool = get_pool()
+        agent = pool.get_agent(agent_id)
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        return {"status": "ok", "agent": agent.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def get_agent_router() -> APIRouter:

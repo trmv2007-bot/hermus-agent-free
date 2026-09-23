@@ -1,0 +1,42 @@
+{
+  "agent_id": "4e698a49-27c2-4313-86a6-e0dac0fe9d24",
+  "name": "Friday",
+  "memory": [
+    {
+      "role": "user",
+      "content": "t-1",
+      "ts": "2026-09-23T15:25:27.205449+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "ok-1",
+      "ts": "2026-09-23T15:25:27.205457+00:00"
+    },
+    {
+      "role": "user",
+      "content": "t-2",
+      "ts": "2026-09-23T15:25:27.208450+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "ok-2",
+      "ts": "2026-09-23T15:25:27.208458+00:00"
+    }
+  ],
+  "summary": "",
+  "cursor": 6,
+  "stats": {
+    "tasks_done": 2,
+    "tasks_failed": 0,
+    "tokens": 10,
+    "cost_est": 0.0,
+    "latency_ms": 0.003
+  },
+  "executed_task_ids": [
+    "s1",
+    "s2"
+  ],
+  "pending_approval": null,
+  "current_task": null,
+  "checkpointed_at": "2026-09-23T15:25:27.210559+00:00"
+}

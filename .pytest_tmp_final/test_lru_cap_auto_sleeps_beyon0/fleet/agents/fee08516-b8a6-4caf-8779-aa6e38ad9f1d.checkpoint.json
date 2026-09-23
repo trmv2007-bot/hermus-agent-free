@@ -1,0 +1,18 @@
+{
+  "agent_id": "fee08516-b8a6-4caf-8779-aa6e38ad9f1d",
+  "name": "A1",
+  "memory": [],
+  "summary": "",
+  "cursor": 0,
+  "stats": {
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tokens": 0,
+    "cost_est": 0.0,
+    "latency_ms": 0.0
+  },
+  "executed_task_ids": [],
+  "pending_approval": null,
+  "current_task": null,
+  "checkpointed_at": "2026-09-23T15:25:30.402710+00:00"
+}

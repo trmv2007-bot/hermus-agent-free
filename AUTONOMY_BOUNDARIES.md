@@ -11,7 +11,66 @@ rewrite, bypass, or silently weaken during autonomous work.
 
 For the complete human-readable constitution, see [`RED_LINES.md`](RED_LINES.md).
 For the machine-readable policy, see [`policies/red_lines.json`](policies/red_lines.json).
-For discovered/granted/missing powers, see [`CAPABILITY_LEDGER.md`](CAPABILITY_LEDGER.md), updated through `core.capability_ledger` / `hermus powers list/add/propose` / the Control Room Safety tab. The Control Room header also surfaces pending approval count, blocked mission count, emergency-brake state, and a compact Jarvis Safety Core status. The Safety Event Timeline reads `GET /safety/events` from the canonical EventBus so approvals, grants, emergency-stop changes, mission blockers, policy denials, and capability-ledger changes are visible in one audit feed. `GET /safety/report` and `hermus safety report` produce an Autonomy Safety Report summarizing the same control-plane state for review/export. `POST /safety/preflight` and `hermus safety preflight <goal>` predict likely actions, red/yellow/green zones, missing approvals/capabilities, emergency-stop state, and whether the goal is READY, NEEDS_APPROVAL, BLOCKED_BY_RED_LINE, MISSING_CAPABILITY, or EMERGENCY_STOP_ACTIVE before execution. Mission starts run pre-flight by default, carry the pre-flight metadata on `MissionReport`, and refuse red-line or emergency-stop blockers; NEEDS_APPROVAL/MISSING_CAPABILITY can be recorded only as an explicit planning-mode blocked mission. Pre-flight can also create draft pending approval prompts through `POST /safety/preflight/approvals`, `POST /missions/{mission_id}/preflight/approvals`, or `hermus safety preflight <goal> --create-approval-prompts`; mission reports include `create_prompts_action` when a blocked pre-flight has draft prompts available. Mission prompt creation groups related prompts into approval bundles (`GET /permissions/bundles`, `POST /permissions/bundles/resolve`), which may approve/deny all items while preserving individual scoped grants, TTL/use limits, audit events, and optional mission resume after approval. Missing capabilities are tracked in a readiness/activation registry (`GET /capabilities/registry`, `hermus powers registry/setup/request-activation/activate`); setup can generate a proposal and planning command, but activation requires an approved `capability_activate` request. The first practical capability is `local_folder_defensive_scan` / `POST /local-defense/scan` / `hermus safety scan-folder`, a read-only approved-folder scanner that reports suspicious indicators without returning file contents; with `save_report` / `--save-report` it writes a Markdown report artifact and can attach evidence to a mission via `mission_id`. `POST /local-defense/missions` and `hermus safety scan-mission` create a deterministic gated scan mission; after its approval bundle is approved, `POST /local-defense/missions/{mission_id}/run` / bundle resume can run the scanner and complete the mission with a report artifact. Saved reports are listed through `GET /local-defense/reports`, opened through `GET /local-defense/reports/{name}`, displayed in the Control Room, and summarized by `hermus safety report`. These prompts still require user approval and do not execute or grant anything by themselves. Blocked yellow actions, protected-boundary denials, red-line denials, and unregistered tools can automatically record the needed/missing power there for later review. Setup proposals list approvals, likely files, tests, activation gates, and risks without granting the power.
+For discovered/granted/missing powers, see [`CAPABILITY_LEDGER.md`](CAPABILITY_LEDGER.md),
+updated through `core.capability_ledger`, `hermus powers list/add/propose`, or the
+Control Room Safety tab.
+
+### Safety surfaces
+
+- **Control Room header** — pending approval count, blocked mission count,
+  emergency-brake state, and a compact Jarvis Safety Core status.
+- **Safety Event Timeline** — `GET /safety/events` reads the canonical EventBus
+  so approvals, grants, emergency-stop changes, mission blockers, policy
+  denials, and capability-ledger changes are visible in one audit feed.
+- **Autonomy Safety Report** — `GET /safety/report` and `hermus safety report`
+  summarize the same control-plane state for review/export.
+
+### Pre-flight checks
+
+`POST /safety/preflight` and `hermus safety preflight <goal>` predict likely
+actions, red/yellow/green zones, missing approvals/capabilities, emergency-stop
+state, and a verdict of `READY`, `NEEDS_APPROVAL`, `BLOCKED_BY_RED_LINE`,
+`MISSING_CAPABILITY`, or `EMERGENCY_STOP_ACTIVE` before execution.
+
+- Mission starts run pre-flight by default, carry the pre-flight metadata on
+  `MissionReport`, and refuse red-line or emergency-stop blockers;
+  `NEEDS_APPROVAL` / `MISSING_CAPABILITY` can be recorded only as an explicit
+  planning-mode blocked mission.
+- Pre-flight can create draft pending approval prompts via
+  `POST /safety/preflight/approvals`,
+  `POST /missions/{mission_id}/preflight/approvals`, or
+  `hermus safety preflight <goal> --create-approval-prompts`; mission reports
+  include `create_prompts_action` when a blocked pre-flight has draft prompts
+  available.
+- Related prompts are grouped into approval bundles (`GET /permissions/bundles`,
+  `POST /permissions/bundles/resolve`). A bundle may approve/deny all items at
+  once while preserving individual scoped grants, TTL/use limits, audit events,
+  and optional mission resume after approval. These prompts still require user
+  approval and do not execute or grant anything by themselves.
+
+### Capability readiness
+
+Missing capabilities are tracked in a readiness/activation registry
+(`GET /capabilities/registry`; `hermus powers registry`, `setup`,
+`request-activation`, `activate`). Setup can generate a proposal and planning
+command, but activation requires an approved `capability_activate` request.
+Blocked yellow actions, protected-boundary denials, red-line denials, and
+unregistered tools can automatically record the needed/missing power there for
+later review. Setup proposals list approvals, likely files, tests, activation
+gates, and risks without granting the power.
+
+The first practical capability is `local_folder_defensive_scan`
+(`POST /local-defense/scan`, `hermus safety scan-folder`): a read-only
+approved-folder scanner that reports suspicious indicators without returning
+file contents. With `save_report` / `--save-report` it writes a Markdown report
+artifact and can attach evidence to a mission via `mission_id`.
+`POST /local-defense/missions` and `hermus safety scan-mission` create a
+deterministic gated scan mission; after its approval bundle is approved,
+`POST /local-defense/missions/{mission_id}/run` or bundle resume runs the
+scanner and completes the mission with a report artifact. Saved reports are
+listed through `GET /local-defense/reports`, opened through
+`GET /local-defense/reports/{name}`, displayed in the Control Room, and
+summarized by `hermus safety report`.
 
 ## Red lines
 

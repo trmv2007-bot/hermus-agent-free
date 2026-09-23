@@ -9,6 +9,29 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 
+def _redact_custom_api(api: dict) -> dict:
+    """Project a stored custom API down to what is safe to send to a client.
+
+    Entries carry a live credential in ``auth.token`` / ``auth.value``
+    (core/custom_api.py), so the raw record must never be returned. Both
+    /keys/list and /custom-apis/list go through here so there is exactly one
+    redaction rule.
+    """
+    auth = api.get("auth") or {}
+    token = auth.get("token") or auth.get("value") or ""
+    return {
+        "name": api["name"],
+        "description": api.get("description", ""),
+        "url": api.get("url", ""),
+        "method": api.get("method", "GET"),
+        "preview": f"{token[:6]}...{token[-4:]}"
+        if token and len(token) > 10
+        else ("no-token" if not token else "****"),
+        "id": api.get("id", ""),
+        "created": api.get("created", ""),
+    }
+
+
 @router.get("/keys/list")
 async def keys_list():
     """List API keys - redacted preview + health/models metadata for dashboard"""
@@ -22,22 +45,7 @@ async def keys_list():
         total_llm = sum(len(v) for v in llm_raw.values())
 
         custom_apis = custom_api_manager.list_apis()
-        custom_redacted = []
-        for api in custom_apis:
-            token = api.get("auth", {}).get("token") or api.get("auth", {}).get("value") or ""
-            custom_redacted.append(
-                {
-                    "name": api["name"],
-                    "description": api.get("description", ""),
-                    "url": api.get("url", ""),
-                    "method": api.get("method", "GET"),
-                    "preview": f"{token[:6]}...{token[-4:]}"
-                    if token and len(token) > 10
-                    else ("no-token" if not token else "****"),
-                    "id": api.get("id", ""),
-                    "created": api.get("created", ""),
-                }
-            )
+        custom_redacted = [_redact_custom_api(api) for api in custom_apis]
 
         return {
             "llm_keys": redacted,
@@ -131,11 +139,11 @@ async def custom_apis_add(payload: dict):
 
 @router.get("/custom-apis/list")
 async def custom_apis_list():
-    """List custom APIs"""
+    """List custom APIs — redacted, never the stored credential."""
     try:
         from core.custom_api import custom_api_manager
 
-        apis = custom_api_manager.list_apis()
+        apis = [_redact_custom_api(api) for api in custom_api_manager.list_apis()]
         return {"custom_apis": apis, "count": len(apis)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

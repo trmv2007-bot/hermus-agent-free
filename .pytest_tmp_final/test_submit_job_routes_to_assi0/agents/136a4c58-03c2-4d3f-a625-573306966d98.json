@@ -1,0 +1,39 @@
+{
+  "agent_id": "136a4c58-03c2-4d3f-a625-573306966d98",
+  "name": "worker",
+  "persona": "",
+  "provider": "groq",
+  "model": "",
+  "key_name": null,
+  "state": "IDLE",
+  "memory": [
+    {
+      "role": "user",
+      "content": "build the shed",
+      "ts": "2026-09-23T15:25:53.322351+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "stub-reply:build the shed",
+      "ts": "2026-09-23T15:25:53.322364+00:00"
+    }
+  ],
+  "summary": "",
+  "skills": [],
+  "stats": {
+    "tasks_done": 1,
+    "tasks_failed": 0,
+    "tokens": 7,
+    "cost_est": 0.0,
+    "latency_ms": 0.003
+  },
+  "cursor": 3,
+  "executed_task_ids": [
+    "legacy-e506f38fb2c67358"
+  ],
+  "schema_version": 1,
+  "current_task": null,
+  "last_activity": "2026-09-23T15:25:53.323483+00:00",
+  "created_at": "2026-09-23T15:25:50.151643+00:00",
+  "pending_approval": null
+}

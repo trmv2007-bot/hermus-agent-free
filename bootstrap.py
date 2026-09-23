@@ -580,6 +580,117 @@ def doctor() -> dict[str, Any]:
     }
 
 
+def validate_critical_config(*, skip_validation: bool = False) -> dict[str, Any]:
+    """Validate critical runtime configuration.
+
+    Checks:
+    - Ollama reachable when model=ollama/*
+    - max_tool_steps >= 8
+    - Required directories writable
+    - Port 8000 free for gateway
+
+    Returns a dict with validation results. Raises SystemExit on failure
+    unless skip_validation is True.
+    """
+    if skip_validation:
+        return {"skipped": True, "message": "Validation skipped via --skip-validation"}
+
+    from core.config import config
+    import socket
+    import urllib.request
+    import urllib.error
+
+    results = {"ok": True, "checks": []}
+    errors = []
+
+    def add_check(name: str, ok: bool, message: str, details: dict | None = None):
+        check = {"name": name, "ok": ok, "message": message}
+        if details:
+            check["details"] = details
+        results["checks"].append(check)
+        if not ok:
+            errors.append(f"{name}: {message}")
+
+    # 1. Check Ollama reachable when model=ollama/*
+    model = getattr(config, "model", "") or ""
+    if model.startswith("ollama/"):
+        ollama_url = getattr(config, "ollama_base_url", "http://localhost:11434")
+        try:
+            req = urllib.request.Request(f"{ollama_url}/api/tags", method="GET")
+            urllib.request.urlopen(req, timeout=5)
+            add_check("ollama_reachable", True, f"Ollama reachable at {ollama_url}")
+        except urllib.error.URLError as exc:
+            add_check("ollama_reachable", False, f"Ollama not reachable at {ollama_url}: {exc}", {"url": ollama_url, "error": str(exc)})
+        except Exception as exc:
+            add_check("ollama_reachable", False, f"Ollama check failed: {exc}", {"url": ollama_url, "error": str(exc)})
+
+    # 2. Check max_tool_steps >= 8
+    max_steps = getattr(config, "max_tool_steps", 32)
+    if max_steps >= 8:
+        add_check("max_tool_steps", True, f"max_tool_steps={max_steps} >= 8")
+    else:
+        add_check("max_tool_steps", False, f"max_tool_steps={max_steps} < 8 (minimum required)", {"value": max_steps, "minimum": 8})
+
+    # 3. Check required directories writable
+    from core.workspace import workspace
+    try:
+        dirs_to_check = [
+            workspace.dirs["root"],
+            workspace.dirs["agents"],
+            workspace.dirs["checkpoints"],
+            workspace.dirs["artifacts"],
+            workspace.dirs["missions"],
+            workspace.dirs["projects"],
+            workspace.dirs["memory"],
+            workspace.dirs["skills"],
+            workspace.dirs["sessions"],
+            workspace.dirs["credentials"],
+            workspace.dirs["logs"],
+            workspace.dirs["profiles"],
+            workspace.dirs["uploads"],
+        ]
+        all_writable = True
+        unwritable = []
+        for d in dirs_to_check:
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+                test_file = d / ".write_test"
+                test_file.write_text("test")
+                test_file.unlink()
+            except OSError as exc:
+                all_writable = False
+                unwritable.append({"path": str(d), "error": str(exc)})
+        if all_writable:
+            add_check("directories_writable", True, "All required directories are writable")
+        else:
+            add_check("directories_writable", False, "Some required directories are not writable", {"unwritable": unwritable})
+    except Exception as exc:
+        add_check("directories_writable", False, f"Directory check failed: {exc}", {"error": str(exc)})
+
+    # 4. Check port 8000 free
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(("127.0.0.1", 8000))
+            if result == 0:
+                add_check("port_8000_free", False, "Port 8000 is already in use", {"port": 8000})
+            else:
+                add_check("port_8000_free", True, "Port 8000 is free")
+    except Exception as exc:
+        add_check("port_8000_free", False, f"Port check failed: {exc}", {"error": str(exc)})
+
+    results["ok"] = len(errors) == 0
+    results["errors"] = errors
+
+    if not results["ok"]:
+        error_msg = "Critical config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        print(error_msg, file=sys.stderr)
+        if not skip_validation:
+            sys.exit(1)
+
+    return results
+
+
 def _add_install_failures(report: dict[str, Any], failures: list[dict[str, Any]]) -> None:
     if not failures:
         return
@@ -798,9 +909,12 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-browser", action="store_true", help="do not download Chromium; verification still reports its state"
     )
     parser.add_argument("--skip-optional", action="store_true", help="do not install optional requirements")
+    parser.add_argument("--skip-validation", action="store_true", help="skip critical config validation (for CI)")
     parser.add_argument("--json", action="store_true", help="emit the deep installation report as JSON")
     args = parser.parse_args(argv)
     if args.command == "doctor":
+        # Run critical config validation first
+        validate_critical_config(skip_validation=args.skip_validation)
         report = doctor()
         print(json.dumps(report, indent=2, default=str) if args.json else json.dumps(report, indent=2, default=str))
         return int(report.get("exit", 1))

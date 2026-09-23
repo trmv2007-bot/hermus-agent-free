@@ -11,6 +11,7 @@ This ensures HERMUS works 100% offline with zero configuration.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import time

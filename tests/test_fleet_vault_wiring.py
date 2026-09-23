@@ -76,7 +76,7 @@ def test_chat_via_freellm_stubbed_vault_and_llm(tmp_path, monkeypatch):
     import core.llm as llm_module
 
     class StubLLM:
-        def __init__(self, model, api_key=None, base_url=None, provider=None):
+        def __init__(self, model, api_key=None, base_url=None, provider=None, **_kw):
             pass
 
         def chat(self, messages):
@@ -113,7 +113,7 @@ def test_chat_via_freellm_no_key_falls_back_to_autodetect(tmp_path, monkeypatch)
     import core.llm as llm_module
 
     class StubLLM:
-        def __init__(self, model, api_key=None, base_url=None, provider=None):
+        def __init__(self, model, api_key=None, base_url=None, provider=None, **_kw):
             pass
 
         def chat(self, messages):
@@ -229,7 +229,7 @@ def test_chat_via_freellm_surfaces_tool_calls(tmp_path, monkeypatch):
 
     monkeypatch.setattr('core.multi_key.multi_key_manager.get_key_bundle', lambda provider: {'key': 'sk-test', 'base_url': 'http://fake/v1', 'default_model': 'fake-model'})
     class StubLLM:
-        def __init__(self, model, api_key=None, base_url=None, provider=None): pass
+        def __init__(self, model, api_key=None, base_url=None, provider=None, **_kw): pass
         def chat(self, messages): return type('obj', (), {'content': 'I will call a tool', 'tool_calls': [{'id': 'call_1', 'function': {'name': 'do_thing', 'arguments': '{}'}}], 'usage': {'total_tokens': 55}})()
     import core.llm as llm_module
     monkeypatch.setattr(llm_module, 'FreeLLM', lambda *a, **kw: StubLLM(*a, **kw))

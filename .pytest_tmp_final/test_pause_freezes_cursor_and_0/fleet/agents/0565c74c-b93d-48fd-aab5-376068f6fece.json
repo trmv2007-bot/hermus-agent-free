@@ -1,0 +1,39 @@
+{
+  "agent_id": "0565c74c-b93d-48fd-aab5-376068f6fece",
+  "name": "Friday",
+  "persona": "the butler",
+  "provider": "groq",
+  "model": "groq/llama-3.3-70b",
+  "key_name": null,
+  "state": "IDLE",
+  "memory": [
+    {
+      "role": "user",
+      "content": "runs now",
+      "ts": "2026-09-23T15:25:20.851733+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "ok-1",
+      "ts": "2026-09-23T15:25:20.851743+00:00"
+    }
+  ],
+  "summary": "",
+  "skills": [],
+  "stats": {
+    "tasks_done": 1,
+    "tasks_failed": 0,
+    "tokens": 5,
+    "cost_est": 0.0,
+    "latency_ms": 0.004
+  },
+  "cursor": 5,
+  "executed_task_ids": [
+    "1bb15d1906374d54b1782a9f5e5c006e"
+  ],
+  "schema_version": 1,
+  "current_task": null,
+  "last_activity": "2026-09-23T15:25:20.851787+00:00",
+  "created_at": "2026-09-23T15:25:17.679257+00:00",
+  "pending_approval": null
+}

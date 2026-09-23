@@ -59,7 +59,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Avatar / talking video** | `core.avatar.AvatarService` | `data/avatar` (voices/audio/jobs) | optional local HeyGem-compatible connector |
 | **World state** | `core.state.WorldStateFacade` | `core.computer.world_state` | one writable path |
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
-| **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
+| **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core.fleet.registry.FleetRegistry` (named-agent roster) | durable event log + results | lease/heartbeat/reaper |
 | **Delegation** | `subagents.subagent` (facade) `→` `subagent.delegate` Job on `gateway.queue.JobQueue` | job log + results | the queue owns lifecycle; `core.delegation` is only the worker implementation |
 | **Web acquisition** | `core.web.WebGateway` (see `docs/WEB_ACQUISITION.md`) | bounded page cache (`core.cache` LRU) + in-memory session jars | `ToolGateway → tools.web_acquisition → WebGateway → StrategyRouter → Scrapling backend` (the only Scrapling importer; required base dependency, browser strategy remains platform-aware) |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
@@ -70,7 +70,7 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Errors** | `core.errors.HermusError` | — | one typed taxonomy (`code`/`status`/`retryable`) |
 | **Async runtime** | `core/aio.py` | shared `httpx.AsyncClient` | `run_sync` / `gather_limit`; blocking core calls are wrapped in `asyncio.to_thread` at the gateway edge |
 | **CLI** | `hermus_cli/` (dispatch) + `hermus.py` (shim) | — | one module per command group; no command logic in the shim |
-| **Gateway** | `gateway/gateway.py` + `gateway/{envelope,middleware,lifecycle}.py` | — | transport + the cross-cutting HTTP contract (see §2.1) |
+| **Gateway** | `gateway/gateway.py` + `gateway/{envelope,middleware,lifecycle}.py` | — | transport + the cross-cutting HTTP contract (see §3.1) |
 
 Speech/media integration follows the same one-owner rule:
 
@@ -114,7 +114,7 @@ Speech/media integration follows the same one-owner rule:
   existing keys are preserved. A client can therefore branch on `code` and
   retry on `retryable` without per-route special cases.
 
-### 2.1 Gateway HTTP layer (cross-cutting)
+### 3.1 Gateway HTTP layer (cross-cutting)
 
 The gateway is transport, but "transport" now includes one consistent HTTP
 contract applied by middleware rather than by each route:
@@ -149,7 +149,7 @@ Registration order is the reverse of the on-the-wire order: Starlette's
 `add_middleware` inserts at index 0, so the **last** middleware registered is
 the **outermost**.
 
-### 2.2 Control room assets
+### 3.2 Control room assets
 
 `/control` is the single production UI and is a projection — it owns no truth.
 It is served as markup plus assets rather than one inline monolith:
@@ -197,7 +197,7 @@ Browser code is exercised by `tests/test_control_room_ux.py`, which evaluates
 the real script in Node against a minimal DOM stub — behaviour, not just
 syntax.
 
-### 3.1 Delegation execution path (canonical)
+### 3.3 Delegation execution path (canonical)
 
 Delegation is **entered only through the canonical JobQueue**; there is no second
 delegation lifecycle.
@@ -255,7 +255,7 @@ The final tree must not contain two competing implementations.
 3. Migrate legacy memory consumers → `core.memory.get_memory()` entirely; retire `core/compat/legacy_memory.py` as a public path (facade already owns the v1 backend).
 4. ~~Collapse `providers`/`model_fleet`/`router2`/`multi_key`/`provider_resolver` behind `ModelGateway`.~~ **resolved — no duplicate found.** Detect-first analysis verified these are ONE mutually-dependent provider stack, not competing implementations; `ModelGateway` is the single facade. No deletion warranted. (Future nicety, not a deletion: have the live runtime's model-selection path also go through `ModelGateway`.)
 5. ~~Rebuild the UI shell on `snapshot + replay`; replace the four `dashboard*.html` surfaces.~~ ✅ **done** — the single production control room is `/control`; root `/` → `/control`. Real feature depth is preserved through the backend APIs it drives (`/computer/*`, `/remote/*`, `/api/jarvis/status`, `/events/recent`, `/dashboard/status`, `/dashboard/events`, `/jobs`, `/api/v1/*`, `/doctor/*`, `/speech/*`). The four legacy HTML surfaces + the `living-deck.*`/`hermus-client.js`/`jarvis-control.js` assets and the `/dashboard*`, `/jarvis`, `/dashboard-assets/*`, and the HTML-only `/computer/dashboard` + `/remote` routes were **deleted**.
-6. ~~Delete duplicate agent managers / orchestration concepts with no distinct contract.~~ ✅ **done** — `AgentManager` is now a thin named-agent registry + delegation facade; its detached subprocess `worker_loop`, and its own `state.json` heartbeat + `jobs/*.json`/`results/*.json` lifecycle were removed. Background work is executed by the canonical Job queue.
+6. ~~Delete duplicate agent managers / orchestration concepts with no distinct contract.~~ ✅ **done** — `core/agent_manager.py` was deleted: the named-agent roster lives in `core.fleet.registry.FleetRegistry` (the legacy `core.agent_manager` surface is kept only as a drop-in compat facade in `core.fleet.facade`), and the agent role handlers moved to `core/agent_handlers.py` on the canonical Job queue. Background work is executed by the canonical Job queue.
 
 ### Remaining (Final One-Shot Spec §3/§7/§16)
 1. ~~**Control-room cleanup**~~ ✅ **done** — `/control` is the only production control room; root → `/control`; legacy dashboard HTML/JS/routes deleted; all real capability preserved through backend APIs.
@@ -265,7 +265,7 @@ The final tree must not contain two competing implementations.
 5. ~~**Setup**~~ ✅ **done** — one idempotent `bootstrap`/`start`/`doctor`. `bootstrap.py` distinguishes required vs optional deps and fails truthfully on missing required modules; `setup.sh` handles OS packages then delegates to the bootstrap; `activate.sh`/launchers are thin (no business logic, no `|| true` masking of required deps). Setup-contract gates added.
 6. ~~**Android control subsystem (Spec §16–19) backend**~~ ✅ **built** — `core.android` is the single Android boundary: `AndroidTool` (facade) reached via `ToolGateway` → `android_*` tools and `/android/*` API. Real `AdbAndroidTransport` (screencap/uiautomator/tap/text/keyevent/am start) + signed companion-bridge transport; explicit consent (denied by default) + configurable allowed-ops allowlist; HMAC-SHA256 secure pairing/sign/verify; append-only audit log + EventBus mirror; honest `android_control_unavailable` reporting. ⚠️ **Device/emulator E2E remains UNTESTED** — it requires a live device + the Android Agent Companion app and is never marked WORKING on mocks.
 7. ~~**Android Agent Companion (on-device half) + end-to-end control**~~ ✅ **reference built + agentic loop proven** — `android_companion/` (native Kotlin/Gradle: signed bridge server on loopback `127.0.0.1:8080`, accessibility `DeviceController`, `MediaProjection` `ScreenCapture`, consent `PairingActivity`) uses only documented permission-gated APIs (no security bypass). The backend Android path was fixed in the integration pass: ADB transport now reads binary screenshots safely (§8), retrieves the real UI tree by dumping then cat-ing the XML and parsing it (§9), resolves the launcher activity for app launch (§10), the singleton provisions a real transport via `build_default_transport()` (§7), and the bridge transport enforces loopback/HTTPS in code (§13). `core/android/simulate.py` implements the real `AndroidTransport` interface on a deterministic "device" so the full observe → reason → act → verify → continue loop is exercised through the real `ToolGateway`; `core/android/observe.py` (semantic observation — reason over labels/buttons/fields, not raw coords); `core/android/verify.py` (before/action/after). `tests/test_android_agentic_loop.py` proves the loop; `tests/test_android_subsystem.py` (20) covers the fixed ADB/UI/launch/factory/bridge paths. ⚠️ **Physical device/emulator + live-model E2E remain NOT VERIFIED** (no SDK/device/keys here); exact steps in `docs/archive/FINAL_REPORT.md` §52.
-7. ~~**Restart/resume (Spec §13)**~~ ✅ **done** — `MissionEngine.load_mission()`; restart tests (kill worker → fresh engine loads → resumes → completes; duplicate-execution prevented; cancel state survives). **Host-level computer E2E remains UNTESTED** (guarded test skips without pyautogui + a real display); computer *capability* is reported honestly (`computer_control_unavailable` when real control is unavailable). Provider-E2E on a real API key remains UNTESTED (no keys in this environment).
+8. ~~**Restart/resume (Spec §13)**~~ ✅ **done** — `MissionEngine.load_mission()`; restart tests (kill worker → fresh engine loads → resumes → completes; duplicate-execution prevented; cancel state survives). **Host-level computer E2E remains UNTESTED** (guarded test skips without pyautogui + a real display); computer *capability* is reported honestly (`computer_control_unavailable` when real control is unavailable). Provider-E2E on a real API key remains UNTESTED (no keys in this environment).
 
 ---
 

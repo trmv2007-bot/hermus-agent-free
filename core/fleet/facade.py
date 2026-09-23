@@ -70,13 +70,10 @@ def _moved(op: str, **extra: Any) -> dict[str, Any]:
 
 
 def _legacy_roles() -> tuple[str, ...]:
-    """The legacy role vocabulary (lazy import keeps legacy retire-able)."""
-    try:
-        from core.agent_manager import ROLES  # local import avoids import cycles
+    """The legacy role vocabulary (single owner: ``core.agent_roles``)."""
+    from core.agent_roles import ROLES
 
-        return tuple(ROLES)
-    except Exception:  # pragma: no cover - legacy module being retired
-        return _FALLBACK_ROLES
+    return tuple(ROLES)
 
 
 class AgentManagerFacade:
@@ -314,7 +311,11 @@ class AgentManagerFacade:
 #: Drop-in replacement for the legacy ``core.agent_manager.agent_manager``.
 fleet_facade = AgentManagerFacade()
 
-__all__ = ["AgentManagerFacade", "fleet_facade"]
+#: Legacy import name. ``from core.agent_manager import agent_manager`` moved to
+#: ``from core.fleet.facade import agent_manager`` — one line, same call surface.
+agent_manager = fleet_facade
 
+# Legacy vocabulary re-exports (single owner: ``core.agent_roles``).
+from core.agent_roles import ROLES, ROLE_HANDLERS, register_handler  # noqa: E402
 
-# __APPEND_MARKER__
+__all__ = ["AgentManagerFacade", "fleet_facade", "agent_manager", "ROLES", "ROLE_HANDLERS", "register_handler"]

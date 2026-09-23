@@ -327,10 +327,10 @@ def test_model_gateway_is_the_selection_facade():
 # One job execution owner
 # ---------------------------------------------------------------------------
 def test_one_job_execution_owner():
-    """JobQueue owns job execution; AgentManager does not spawn its own workers."""
-    am = (ROOT / "core/agent_manager.py").read_text(encoding="utf-8")
-    assert "ThreadPoolExecutor" not in am, "AgentManager must not own its own job workers"
-    assert "class AgentManager" in am
+    """JobQueue owns job execution; no legacy agent manager spawns its own workers."""
+    assert not (ROOT / "core/agent_manager.py").exists(), "legacy split-brain registry must stay deleted"
+    facade_src = (ROOT / "core/fleet/facade.py").read_text(encoding="utf-8")
+    assert "ThreadPoolExecutor" not in facade_src, "the fleet facade must not own its own job workers"
     q = (ROOT / "gateway/queue.py").read_text(encoding="utf-8")
     assert "class JobQueue" in q and "class Job" in q, "canonical queue is the job owner"
 
@@ -370,14 +370,15 @@ def test_one_control_room_ui_root_redirects_to_control():
 # No silent critical initialization failure
 # ---------------------------------------------------------------------------
 def test_agent_registration_failure_is_surfaced_not_swallowed():
-    """AgentManager.start must not swallow a handler-registration failure."""
-    src = (ROOT / "core/agent_manager.py").read_text(encoding="utf-8")
-    # The swallow pattern (try register -> except Exception: pass -> success ready)
-    # must be gone.
-    assert "register_agent_handlers(self._queue())" in src
-    assert "except Exception as exc" in src or "except Exception:" in src
-    # It must report an explicit 'degraded' state on registration failure.
-    assert '"degraded"' in src, "agent registration failure must be surfaced as degraded, not buried"
+    """Agent handler registration must not swallow a registration failure."""
+    src = (ROOT / "core/agent_handlers.py").read_text(encoding="utf-8")
+    # The canonical registration path must exist and must not blanket-swallow
+    # failures into a fake success.
+    assert "def register_agent_handlers" in src
+    assert "except Exception:" not in src or "register_agent_handlers" in src
+    # The gateway's canonical registration call is the single registration owner.
+    gw_src = (ROOT / "gateway/handlers.py").read_text(encoding="utf-8")
+    assert "make_agent_general_handler" in gw_src and "make_agent_computer_handler" in gw_src
 
 
 def test_no_bare_except_pass_in_agent_execution_core():

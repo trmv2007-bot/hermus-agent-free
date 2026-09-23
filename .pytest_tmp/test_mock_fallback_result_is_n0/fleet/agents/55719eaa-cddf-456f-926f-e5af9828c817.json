@@ -1,0 +1,61 @@
+{
+  "agent_id": "55719eaa-cddf-456f-926f-e5af9828c817",
+  "name": "DefaultWorker",
+  "persona": "You are a helpful assistant that completes subtasks efficiently.",
+  "provider": "groq",
+  "model": "",
+  "key_name": null,
+  "state": "IDLE",
+  "memory": [
+    {
+      "role": "user",
+      "content": "Subtask: Research: Build a simple calculator app\nGoal: Build a simple calculator app",
+      "ts": "2026-09-23T15:03:01.923858+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Fallback mock for: Subtask: Research: Build a simple calcul",
+      "ts": "2026-09-23T15:03:01.923873+00:00"
+    },
+    {
+      "role": "user",
+      "content": "Subtask: Plan: Build a simple calculator app\nGoal: Build a simple calculator app",
+      "ts": "2026-09-23T15:03:01.927678+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Fallback mock for: Subtask: Plan: Build a simple calculator",
+      "ts": "2026-09-23T15:03:01.927691+00:00"
+    },
+    {
+      "role": "user",
+      "content": "Subtask: Execute: Build a simple calculator app\nGoal: Build a simple calculator app",
+      "ts": "2026-09-23T15:03:01.930734+00:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Fallback mock for: Subtask: Execute: Build a simple calcula",
+      "ts": "2026-09-23T15:03:01.930749+00:00"
+    }
+  ],
+  "summary": "",
+  "skills": [],
+  "stats": {
+    "tasks_done": 3,
+    "tasks_failed": 0,
+    "tokens": 15,
+    "cost_est": 0.0,
+    "latency_ms": 0.004
+  },
+  "cursor": 18,
+  "executed_task_ids": [
+    "m_a282d1e5ff11:s1",
+    "m_a282d1e5ff11:s2",
+    "m_a282d1e5ff11:s3"
+  ],
+  "schema_version": 1,
+  "current_task": null,
+  "last_activity": "2026-09-23T15:03:01.930844+00:00",
+  "created_at": "2026-09-23T15:02:57.069848+00:00",
+  "pending_approval": null
+}

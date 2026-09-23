@@ -28,6 +28,7 @@ This module is stdlib-only (like :mod:`core.log`) so any layer can import it.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 
@@ -179,6 +180,82 @@ class VerificationError(HermusError):
     status = 500
 
 
+# ---------------------------------------------------------------------------
+# Exception mapping — one place that turns arbitrary raised exceptions into
+# the typed taxonomy, so gateway/queue edges can normalize without each caller
+# re-deriving status codes from string matching.
+# ---------------------------------------------------------------------------
+_KNOWN_HTTP_STATUS = (400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504)
+
+# ``BaseExceptionGroup`` is a builtin only on Python 3.11+; keep 3.10 working.
+try:
+    _EXC_GROUP_TYPES: tuple[type[BaseException], ...] = (BaseExceptionGroup,)  # type: ignore[name-defined]
+except NameError:  # pragma: no cover - Python 3.10
+    _EXC_GROUP_TYPES = ()
+
+
+def map_exception(exc: BaseException) -> HermusError:
+    """Map an arbitrary exception onto the typed taxonomy.
+
+    Already-typed errors pass through unchanged (identity), so callers can
+    ``raise map_exception(exc)`` unconditionally. Well-known stdlib/library
+    exception shapes are recognized so a caller that wrapped a typed error
+    (``ExceptionGroup``, ``except Exception as e: raise RuntimeError(...)``)
+    still gets its real status code instead of a blanket 500. Anything else
+    becomes a generic retryable-``False`` internal error whose message keeps
+    only the exception type name + text — never a traceback.
+    """
+    if isinstance(exc, HermusError):
+        return exc
+
+    # Recognize nested causes first (ExceptionGroup from asyncio.gather, and
+    # single-cause chains), so the innermost typed error wins.
+    causes: list[BaseException] = []
+    if _EXC_GROUP_TYPES and isinstance(exc, _EXC_GROUP_TYPES):
+        causes.extend(exc.exceptions)
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None:
+        causes.append(cause)
+    for inner in causes:
+        if isinstance(inner, HermusError):
+            return inner
+
+    # Recognized stdlib/library shapes.
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return OperationTimeoutError(str(exc) or "operation timed out")
+    if isinstance(exc, PermissionError):
+        return ForbiddenError(str(exc))
+    if isinstance(exc, FileNotFoundError):
+        return NotFoundError(str(exc), details={"path": getattr(exc, "filename", None) or ""})
+    if isinstance(exc, NotImplementedError):
+        return UnavailableError(str(exc) or "not implemented")
+    if isinstance(exc, ConnectionError):
+        return UnavailableError(str(exc) or "connection failed", details={"kind": type(exc).__name__})
+
+    # HTTP-aware exceptions (httpx.HTTPStatusError, requests.HTTPError, ...):
+    # carry a ``response`` with a real status code.
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and status in _KNOWN_HTTP_STATUS:
+        if status == 429:
+            return RateLimitError(str(exc) or "rate limited")
+        if status >= 500:
+            return HermusError(
+                str(exc) or f"upstream returned {status}",
+                code="provider_error",
+                status=status,
+                retryable=True,
+            )
+        return HermusError(
+            str(exc) or f"request rejected with {status}",
+            code="invalid_request",
+            status=status,
+            retryable=False,
+        )
+
+    return HermusError(f"{type(exc).__name__}: {exc}", code="internal", status=500, retryable=False)
+
+
 __all__ = [
     "HermusError",
     "ConfigError",
@@ -195,4 +272,5 @@ __all__ = [
     "MissionError",
     "MissionBlockedError",
     "VerificationError",
+    "map_exception",
 ]

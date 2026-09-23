@@ -1,0 +1,273 @@
+/* ===================================================================
+   THE HOOD - JARVIS 3D instrument space (opt-in, GPU-composited)
+   Face = calm HERMUS dashboard. Hood = every instrument pulled into a
+   real 3D room: CSS 3D transforms (GPU-composited) carry live DOM panels
+   around the God's-Eye globe. No external 3D library, fully offline.
+   =================================================================== */
+
+.hood[hidden] { display: none; }
+
+.hood {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  overflow: hidden;
+  --hood-r: 470px;
+  background:
+    radial-gradient(1200px 800px at 50% 32%, #0a1626 0%, #05070d 58%, #020308 100%);
+  perspective: 1400px;
+  perspective-origin: 50% 42%;
+  cursor: grab;
+}
+
+.hood.dragging { cursor: grabbing; }
+
+.hood-sky {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, rgba(125, 211, 252, 0.8), transparent 60%),
+    radial-gradient(1px 1px at 34% 68%, rgba(125, 211, 252, 0.5), transparent 60%),
+    radial-gradient(1.5px 1.5px at 58% 14%, rgba(232, 193, 90, 0.6), transparent 60%),
+    radial-gradient(1px 1px at 72% 44%, rgba(125, 211, 252, 0.7), transparent 60%),
+    radial-gradient(1px 1px at 86% 76%, rgba(125, 211, 252, 0.45), transparent 60%),
+    radial-gradient(1.5px 1.5px at 22% 84%, rgba(125, 211, 252, 0.55), transparent 60%),
+    radial-gradient(1px 1px at 46% 38%, rgba(230, 237, 243, 0.5), transparent 60%),
+    radial-gradient(1px 1px at 64% 90%, rgba(125, 211, 252, 0.4), transparent 60%);
+  animation: hoodDrift 90s linear infinite alternate;
+}
+
+@keyframes hoodDrift {
+  from { transform: translate3d(-1.5%, -1%, 0); }
+  to { transform: translate3d(1.5%, 1%, 0); }
+}
+
+.hood-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+  mix-blend-mode: overlay;
+}
+
+#hoodCanvas {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  z-index: 2;
+  width: min(54vmin, 560px);
+  height: min(54vmin, 560px);
+  transform: translate(-50%, -50%);
+  opacity: 0.92;
+  filter: drop-shadow(0 0 46px rgba(56, 189, 248, 0.28));
+  pointer-events: none;
+}
+
+/* The instrument ring: panels live in real 3D space around the globe. */
+.hood-room {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: 0;
+  height: 0;
+  z-index: 1;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.hood-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 360px;
+  height: 440px;
+  margin: -220px 0 0 -180px;
+  transform: rotateY(calc(var(--a) * 72deg + 36deg)) translateZ(var(--hood-r, 560px));
+  backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(160deg, rgba(10, 22, 38, 0.94), rgba(6, 10, 18, 0.9));
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 14px;
+  box-shadow: 0 0 34px rgba(56, 189, 248, 0.22), inset 0 0 60px rgba(56, 189, 248, 0.06);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: default;
+}
+
+.hood-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.16), transparent);
+}
+
+.hood-panel h3 {
+  margin: 0;
+  font: 600 12px/1.2 var(--font-mono);
+  letter-spacing: 0.12em;
+  color: var(--acc2);
+}
+
+.hood-face {
+  background: transparent;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--acc);
+  border-radius: 999px;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+}
+
+.hood-face:hover { background: rgba(56, 189, 248, 0.15); color: var(--acc2); }
+
+.hood-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 12px;
+  font: 11px/1.55 var(--font-mono);
+  color: var(--fg-secondary);
+}
+
+.hood-body .note { color: var(--muted); }
+
+.hood-node {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 8px;
+  background: rgba(10, 20, 34, 0.6);
+  color: var(--fg-secondary);
+  font: inherit;
+}
+
+.hood-node:hover {
+  border-color: var(--acc);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+  color: var(--fg);
+}
+
+.hood-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.hood-dot.s-idle { background: var(--ok); }
+.hood-dot.s-working, .hood-dot.s-thinking { background: var(--acc); box-shadow: 0 0 8px rgba(56, 189, 248, 0.7); }
+.hood-dot.s-error, .hood-dot.s-blocked { background: var(--err); box-shadow: 0 0 8px rgba(251, 113, 133, 0.7); }
+.hood-dot.s-paused, .hood-dot.s-sleeping { background: var(--muted2); }
+
+.hood-node .st { margin-left: auto; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+.hood-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 2px;
+  border-bottom: 1px dashed rgba(56, 189, 248, 0.14);
+}
+
+.hood-row .k { color: var(--muted); }
+.hood-row .v { color: var(--fg); text-align: right; word-break: break-word; }
+.hood-row .v.ok { color: var(--ok2); }
+.hood-row .v.err { color: var(--err2); }
+.hood-row .v.warn { color: var(--warn2); }
+
+/* Bottom HUD chrome */
+.hood-hud {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 14px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(0deg, rgba(3, 5, 10, 0.92), transparent);
+  pointer-events: none;
+}
+
+.hood-hud > * { pointer-events: auto; }
+
+.hood-title {
+  font: 700 16px/1.2 var(--font-mono);
+  letter-spacing: 0.22em;
+  color: var(--acc2);
+  text-shadow: 0 0 18px rgba(56, 189, 248, 0.5);
+}
+
+.hood-sub {
+  font: 400 11px/1.4 var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-left: 10px;
+}
+
+.hood-hint { font: 400 11px/1.4 var(--font-mono); color: var(--muted2); }
+
+.hood-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Agent detail / control card */
+.hood-detail {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  z-index: 3;
+  width: 300px;
+  padding: 12px 14px;
+  background: linear-gradient(160deg, rgba(10, 22, 38, 0.96), rgba(6, 10, 18, 0.94));
+  border: 1px solid rgba(232, 193, 90, 0.4);
+  border-radius: 12px;
+  box-shadow: 0 0 26px rgba(232, 193, 90, 0.15);
+  font: 11px/1.55 var(--font-mono);
+  color: var(--fg-secondary);
+}
+
+.hood-detail h4 {
+  margin: 0 0 8px;
+  font: 600 12px/1.2 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--herm, #e8c15a);
+}
+
+.hood-detail .bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+.hood-detail button {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--acc2);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+}
+
+.hood-detail button:hover { background: rgba(56, 189, 248, 0.22); }
+.hood-detail button.danger { background: linear-gradient(135deg, #ff4757, #ff3838); border: none; color: #fff; }
+
+/* Face-side affordances */
+.hood-btn {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, rgba(232, 193, 90, 0.14), rgba(232, 193, 90, 0.05));
+  border: 1px solid rgba(232, 193, 90, 0.45);
+  color: var(--herm, #e8c15a);
+  border-radius: var(--radius-sm);
+  font: 600 12px/1.2 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.hood-btn:hover { background: rgba(232, 193, 90, 0.2); box-shadow: 0 0 14px rgba(232, 193, 90, 0.25); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hood-sky { animation: none; }
+  .hood-room { transition: none; }
+}

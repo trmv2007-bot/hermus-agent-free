@@ -210,3 +210,79 @@ def test_gateway_handlers_render_canonical_envelope():
     with pytest.raises(NotFoundError):
         raise NotFoundError("still an exception", details={})
     assert issubclass(NotFoundError, HermusError)
+
+
+def test_map_exception_passes_typed_errors_through_unchanged():
+    from core.errors import NotFoundError, map_exception
+
+    err = NotFoundError("no such run", details={"run_id": "r1"})
+    assert map_exception(err) is err
+
+
+def test_map_exception_recognizes_stdlib_shapes():
+    from core.errors import ForbiddenError, NotFoundError, OperationTimeoutError, UnavailableError, map_exception
+
+    mapped = map_exception(TimeoutError("took too long"))
+    assert isinstance(mapped, OperationTimeoutError)
+    assert mapped.retryable is True
+
+    assert isinstance(map_exception(PermissionError("no")), ForbiddenError)
+
+    missing = map_exception(FileNotFoundError("gone"))
+    assert isinstance(missing, NotFoundError)
+
+    assert isinstance(map_exception(NotImplementedError("later")), UnavailableError)
+
+
+def test_map_exception_unwraps_typed_causes():
+    from core.errors import NotFoundError, map_exception
+
+    try:
+        try:
+            raise NotFoundError("the real cause")
+        except NotFoundError as inner:
+            raise RuntimeError("wrap") from inner
+    except RuntimeError as wrapped:
+        mapped = map_exception(wrapped)
+    assert isinstance(mapped, NotFoundError)
+    assert mapped.message == "the real cause"
+
+
+def test_map_exception_reads_http_status_off_response():
+    from core.errors import RateLimitError, map_exception
+
+    class _Resp:
+        status_code = 429
+
+    class _UpstreamError(Exception):
+        response = _Resp()
+
+    mapped = map_exception(_UpstreamError("slow down"))
+    assert isinstance(mapped, RateLimitError)
+    assert mapped.retryable is True
+
+
+def test_map_exception_unknown_errors_collapse_to_redacted_internal():
+    from core.errors import map_exception
+
+    mapped = map_exception(ValueError("kaboom-secret-stack"))
+    assert mapped.code == "internal"
+    assert mapped.status == 500
+    assert mapped.retryable is False
+
+
+def test_map_exception_exception_group_finds_typed_member():
+    import builtins
+
+    if not hasattr(builtins, "ExceptionGroup"):
+        pytest.skip("ExceptionGroup requires Python 3.11+")
+    from core.errors import MissionBlockedError, map_exception
+
+    try:
+        try:
+            raise MissionBlockedError("needs approval")
+        except MissionBlockedError as inner:
+            raise builtins.ExceptionGroup("fanout", [ValueError("other"), inner])
+    except builtins.ExceptionGroup as group:
+        mapped = map_exception(group)
+    assert isinstance(mapped, MissionBlockedError)

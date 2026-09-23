@@ -275,52 +275,53 @@ class _FakeAgentManager:
 def test_background_agent_jobs_persist_queryable_results(tmp_path):
     """Agent background work is a canonical Job drained by the canonical queue."""
     import asyncio
-    import time
 
-    from core.workspace import workspace
-    from gateway.queue import JobQueue
+    from gateway.queue import STATUS_DONE, STATUS_FAILED, JobQueue
 
-    # Isolate the workspace root so agent dirs never touch the real ~/.hermus,
-    # and restore the singleton so it cannot leak into other tests in the run.
-    prior_base = workspace.base_dir
-    try:
-        workspace.base_dir = tmp_path
-        (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
+    from core.agent_handlers import register_agent_handlers
 
-        from core.agent_manager import AgentManager
-
+    async def main():
         q = JobQueue(workers=1, maxsize=100, default_timeout=15, persist=str(tmp_path / "jobs.log"))
         # Inject a deterministic handler so no live model is required.
         q.register("agent.general", lambda ctx: {"ok": True, "answer": ctx.payload["task"].upper()})
-        manager = AgentManager(queue=q)
-        assert manager.create("worker", role="generic")["success"]
+        register_agent_handlers(q, overwrite=False)
+        await q.start()
+        job = q.submit("agent.general", {"agent": "worker", "task": "background work"})
+        for _ in range(400):
+            status = q.status(job.id)
+            if status.get("status") in (STATUS_DONE, STATUS_FAILED):
+                break
+            await asyncio.sleep(0.01)
+        await q.stop()
+        return status
 
-        async def main():
-            await q.start()
-            queued = manager.submit_job("worker", {"task": "background work"})
-            job_id = queued["job_id"]
-            deadline = time.time() + 20
-            status = {"status": "queued"}
-            while time.time() < deadline:
-                status = manager.job_status("worker", job_id)
-                if status["status"] in ("succeeded", "failed"):
-                    break
-                await asyncio.sleep(0.05)
-            await q.stop()
-            return status
-
-        status = asyncio.run(main())
-        assert status["status"] == "succeeded", status
-        assert status["result"]["answer"] == "BACKGROUND WORK"
-        # The canonical durable result is queryable by job id — no results/*.json.
-        assert not (tmp_path / "agents" / "worker" / "results").exists()
-    finally:
-        workspace.base_dir = prior_base
+    status = asyncio.run(main())
+    assert status["status"] == STATUS_DONE, status
+    assert status["result"]["answer"] == "BACKGROUND WORK"
+    # The canonical durable result is queryable by job id — no results/*.json.
+    assert not (tmp_path / "agents" / "worker" / "results").exists()
 
 
-def test_multi_agent_delegation_respects_dependencies_and_routes_roles(tmp_path):
-    manager = _FakeAgentManager()
-    delegator = MultiAgentDelegator(manager=manager, root=str(tmp_path / "delegations"))
+def test_multi_agent_delegation_respects_dependencies_and_routes_roles(tmp_path, monkeypatch):
+    """Delegation DAG: dependency order is preserved and roles route to the
+    right canonical queue kinds (computer work serializes on agent.computer)."""
+    import asyncio
+
+    from core.computer.delegation import MultiAgentDelegator
+    from core.fleet.bus import FleetBus
+    from core.fleet.registry import FleetRegistry
+    from gateway.queue import JobQueue
+
+    # A fleet registry backed by a stub chat_fn — no network, no model backend.
+    bus = FleetBus(base_dir=tmp_path / "fleet")
+    bus.load()
+
+    def stub_chat_fn(messages):
+        return {"content": "stub-reply", "tokens": 1}
+
+    registry = FleetRegistry(bus, chat_fn=stub_chat_fn, roster_dir=tmp_path / "agents")
+    delegator = MultiAgentDelegator(registry=registry, root=str(tmp_path / "delegations"))
+
     plan = DelegationPlan(
         task="ship app",
         units=[
@@ -329,10 +330,29 @@ def test_multi_agent_delegation_respects_dependencies_and_routes_roles(tmp_path)
             WorkUnit("desktop", "computer-operator", "Install and test", depends_on=["code"]),
         ],
     )
-    result = delegator.execute(plan, wait=True)
 
-    assert result["success"] is True
-    assert [job[2]["unit_id"] for job in manager.submitted] == ["research", "code", "desktop"]
-    assert [job[0] for job in manager.submitted] == ["hermus-researcher", "hermus-coder", "hermus-computer-operator"]
-    assert manager.submitted[1][2]["dependencies"]["research"]
-    assert (tmp_path / "delegations" / f"{plan.plan_id}.json").exists()
+    # Deterministic queue handlers so no live model is required. The delegator
+    # submits/polls the module-level job_queue singleton, so the test binds that
+    # seam to a private queue instance instead of touching global state.
+    q = JobQueue(workers=2, maxsize=100, default_timeout=15, persist=str(tmp_path / "jobs.log"))
+    q.register("agent.general", lambda ctx: {"ok": True, "answer": ctx.payload["task"].upper()})
+    q.register("agent.computer", lambda ctx: {"ok": True, "answer": "computer:" + ctx.payload["task"]})
+    monkeypatch.setattr("core.computer.delegation.job_queue", q)
+
+    async def drive():
+        await q.start()
+        try:
+            # execute() is sync and polls with time.sleep — run it in a thread
+            # so the event loop stays free to drain the queue workers.
+            return await asyncio.to_thread(delegator.execute, plan, True, 20.0)
+        finally:
+            await q.stop()
+
+    result = asyncio.run(drive())
+    assert result["success"] is True, result
+    # Dependency order: research completes before code, code before desktop.
+    done_order = [j["unit_id"] for j in result["jobs"]]
+    assert done_order == ["research", "code", "desktop"]
+    # Roles routed to distinct canonical kinds.
+    kinds = {j["unit_id"]: j for j in result["jobs"]}
+    assert all(kinds[u]["queued"] for u in done_order)

@@ -1,0 +1,1 @@
+{"seq": 1, "id": "evt-1", "ts": "2026-09-23T20:55:43.528190+05:30", "sender": "coord", "target": "a1", "kind": "subtask", "priority": 2, "content": "once", "reply_to": null, "mission_id": null, "trace_id": null, "est_tokens": 0}
