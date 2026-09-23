@@ -766,8 +766,13 @@ class FleetRegistry:
         else:
             agent._warmup_status = "ok"
 
-    def update(self, agent_id: str, patch: dict[str, Any]) -> LiveAgent:
-        """Update name/persona/model/key_name/skills; name uniqueness re-checked."""
+    def update(self, agent_id: str, patch: dict[str, Any], *, allow_suffix: bool = False) -> LiveAgent:
+        """Update name/persona/model/key_name/skills; name uniqueness re-checked.
+
+        A rename onto a taken name is refused the same way an explicit spawn is:
+        renaming to ``winston-2`` behind the caller's back leaves the roster and
+        the caller's belief about it in different states.
+        """
         patch = dict(patch or {})
         allowed = ("name", "persona", "model", "key_name", "skills")
         unknown = sorted(set(patch) - set(allowed))
@@ -778,7 +783,7 @@ class FleetRegistry:
             if agent.state == DESTROYED:
                 raise RegistryError(f"agent {agent_id!r} is destroyed")
             if "name" in patch:
-                agent.name = self._unique_name(patch["name"], exclude_agent_id=agent.agent_id, allow_suffix=True)
+                agent.name = self._unique_name(patch["name"], exclude_agent_id=agent.agent_id, allow_suffix=allow_suffix)
             if "persona" in patch:
                 agent.persona = str(patch["persona"] or "")
             if "model" in patch:

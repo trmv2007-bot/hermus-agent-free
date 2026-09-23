@@ -127,10 +127,15 @@ def test_name_collision_rejects_unless_suffixing_is_requested(tmp_path):
     third = reg.spawn({"name": "FRIDAY"}, allow_suffix=True)
     assert (second.name, third.name) == ("Friday-2", "Friday-3")
 
-    # update() re-checks uniqueness (rename onto a taken name still suffixes).
+    # update() re-checks uniqueness the same way: a rename onto a taken name is
+    # refused rather than quietly suffixed.
     reg.update(first.agent_id, {"name": "winston"})
-    renamed = reg.update(second.agent_id, {"name": "WINSTON"})
-    assert renamed.name == "winston-2"
+    with pytest.raises(RegistryError):
+        reg.update(second.agent_id, {"name": "WINSTON"})
+    assert second.name == "Friday-2", "a refused rename must leave the record alone"
+
+    # Opt-in suffixing still exists for internal callers.
+    assert reg.update(second.agent_id, {"name": "WINSTON"}, allow_suffix=True).name == "winston-2"
 
 # --------------------------------------------------------------------------- #
 # §3/§5 durability: WAL-first spawn, boot rebuild, corrupt cache
