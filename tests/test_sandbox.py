@@ -134,6 +134,22 @@ def test_staged_files_are_visible_to_the_command():
     assert "3" in res["stdout"] and "a\nb\nc" in res["stdout"]
 
 
+def test_staged_files_survive_non_ascii_content():
+    """A staging or decode step that assumes the locale codec silently loses text:
+    the write raises, the except swallows it, and the command runs without its
+    input file — a wrong answer that looks like a successful run."""
+    body = "cause → upstream timeout\ncafé\n"
+    res = sandbox.run("cat notes.txt", files={"notes.txt": body}, purpose="test:utf8")
+    assert res["returncode"] == 0, res
+    assert res["stdout"] == body, res["stdout"]
+
+
+def test_a_command_may_print_non_ascii_without_failing():
+    res = sandbox.run("printf 'ready → done\\n'", purpose="test:utf8-out")
+    assert res["returncode"] == 0, res
+    assert "→" in res["stdout"]
+
+
 def test_staged_files_cannot_escape_the_scratch_dir():
     victim = Path(_TMP) / "escaped.txt"
     sandbox.run("cat ../escaped.txt || true", files={"../escaped.txt": "nope"}, purpose="test:escape")

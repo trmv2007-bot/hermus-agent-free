@@ -281,7 +281,7 @@ def test_generated_skill_py_is_valid_python_and_replayable():
 
     path = Path(_TMP) / "skills_gen" / f"{cand.name}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(code)
+    path.write_text(code, encoding="utf-8")
     spec = importlib.util.spec_from_file_location(f"gen_{cand.name}", str(path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

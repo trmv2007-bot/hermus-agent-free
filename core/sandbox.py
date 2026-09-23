@@ -545,7 +545,7 @@ class Sandbox:
                     ):
                         continue  # refuse ../ escapes out of the scratch dir
                     safe.parent.mkdir(parents=True, exist_ok=True)
-                    safe.write_text(str(content))
+                    safe.write_text(str(content), encoding="utf-8")
                     staged += 1
                 except Exception:
                     continue
@@ -857,7 +857,13 @@ class Sandbox:
                 argv,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                # The child speaks UTF-8 even when this interpreter's locale does
+                # not: with text=True alone, a command that prints a non-ASCII
+                # byte raises UnicodeDecodeError through communicate() and the
+                # run is reported as a failure that never happened.
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 cwd=limits.get("cwd") or str(workdir),
                 env=env_final,
                 stdin=subprocess.PIPE,
