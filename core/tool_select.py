@@ -72,6 +72,10 @@ CORE_TOOLS: frozenset[str] = frozenset(
         "memory_recall",
         "task_status",
         "delegate_tasks",
+        # Context is tiered: the prompt carries the minimum and this is how the
+        # model reaches the rest. If it is not offered from step one, the
+        # on-demand tier does not exist in practice.
+        "context_read",
     }
 )
 

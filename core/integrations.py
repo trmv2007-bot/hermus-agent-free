@@ -432,6 +432,36 @@ def register_architecture_tools(registry) -> None:
             source="core.integrations",
         )
 
+    def context_read(topic: str, query: str = "", limit: int = 12) -> dict[str, Any]:
+        from .context import read_context
+
+        return read_context(topic, query, limit=limit)
+
+    registry.register(
+        "context_read",
+        context_read,
+        {
+            "type": "function",
+            "function": {
+                "name": "context_read",
+                "description": (
+                    "Load deeper context that is deliberately not in the prompt: architecture, endpoints, "
+                    "tools (catalog and schemas), memory, docs. Call topic='list' first to see what exists."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {"type": "string", "enum": ["list", "architecture", "endpoints", "tools", "memory", "docs"]},
+                        "query": {"type": "string", "description": "What to look for within the topic"},
+                        "limit": {"type": "integer", "default": 12},
+                    },
+                    "required": ["topic"],
+                },
+            },
+        },
+        source="core.context",
+    )
+
 
 def _screen_recorder():
     # module-level singleton, created lazily to avoid a display grab at import time

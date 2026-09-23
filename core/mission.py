@@ -1015,6 +1015,7 @@ def make_agent_backed_executor(
                     model=model or getattr(_config, "model", None) or "ollama/llama3.1:8b",
                     session_id=f"mission_{os.urandom(4).hex()}",
                     mode="agent",
+                    lean_context=True,
                 )
 
             # Per-node file baseline: precise diff, scoped to this mission.

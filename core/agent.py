@@ -36,8 +36,14 @@ class HermusAgent:
         max_steps: int = None,
         api_key: str = None,
         base_url: str = None,
+        lean_context: bool = False,
     ):
         self.model_name = model or config.model
+        # Mission nodes already receive their brief in the user message; the
+        # chat scaffolding (curated memory, presence, user model, skills,
+        # lessons) is what a *conversation* needs, not a single-purpose worker.
+        self.lean_context = bool(lean_context)
+        self._last_context_report: dict = {}
         self._model_pinned = model is not None
         from .models import get_model_gateway
 
@@ -230,142 +236,61 @@ class HermusAgent:
             logger.warning(f"[Router] skipped ({e})")
             return None
 
-    def _build_system_prompt(self, user_message: str = "", emit=None) -> str:
-        curated = memory.get_curated_memory(limit=10)
-        curated_text = "\n".join([f"- {m['key']}: {m['value'][:200]}" for m in curated]) if curated else "No curated memory yet."
+    def _build_system_prompt(
+        self,
+        user_message: str = "",
+        emit=None,
+        *,
+        lean: bool | None = None,
+        task_brief: str = "",
+        mission_state: str = "",
+    ) -> str:
+        """Render this turn's prompt through the tiered context assembler.
 
-        user_model = memory.load_user_model()
-        user_model_text = json.dumps(user_model, indent=2)[:1000] if user_model else "No user model yet."
+        The assembler — not this method — decides what is sufficient: the core
+        tier is identity/capabilities/constraints/minimal state, the task tier
+        adds only what bears on the request, and everything else is reachable
+        through ``context_read``. ``self._last_context_report`` carries the
+        measured size of each block so a regression is visible from the
+        dashboard and tests rather than inferred.
+        """
+        from .context import ContextRequest, build_system_prompt
 
-        skills = skill_manager.list_skills()
-        skills_text = ", ".join([s["name"] for s in skills[:15]]) if skills else "No skills yet."
-
-        nudges = memory.periodic_nudges()
-        nudges_text = "\n".join(nudges) if nudges else "No nudges."
-
-        # Report what the model will actually be OFFERED, not the catalog size.
-        # With per-turn selection these differ (e.g. 21 offered vs 179
-        # registered); telling the model it has 179 tools when 21 are in the
-        # request invites it to call ones it cannot see.
-        offered_tools = self._tools_for_turn(user_message)
-        tool_count = len(offered_tools) if offered_tools else len(self.tools)
+        lean = self.lean_context if lean is None else bool(lean)
+        offered = self._tools_for_turn(user_message)
+        tool_count = len(offered) if offered else len(self.tools)
+        # Report what the model will actually be OFFERED, not the catalog size:
+        # telling it 187 tools exist when 21 are in the request invites calls to
+        # tools it cannot see.
         tool_note = (
             ""
             if tool_count >= len(self.tools)
             else f" of {len(self.tools)} registered — a subset chosen for this request"
             " (call `expand_tools` if you need one that is not listed)"
         )
-
-        # Lessons loop (Phase 3): past corrections/failures injected into the prompt
-        lessons_block = ""
-        try:
-            from .reasoning.lessons import lessons_store
-
-            lessons_block = lessons_store.to_prompt_block(user_message)
-        except Exception as exc:
-            record_issue("memory", "lessons_prompt", exc, retryable=False, fallback="turn continues without lessons block")
-
-        # Typed memory: hybrid recall + decay + eviction via the canonical facade.
-        memory2_block = ""
-        if getattr(config, "memory2_enabled", True):
-            try:
-                ctx = memory.recall_context(user_message, limit=5, project=self.project)
-                memory2_block = (ctx or {}).get("text") or ""
-                if emit is not None:
-                    emit(
-                        "memory_recalled",
-                        {
-                            "mode": ctx.get("mode"),
-                            "kept": len(ctx.get("kept") or []),
-                            "evicted": len(ctx.get("evicted") or []),
-                            "ids": (ctx.get("ids") or [])[:12],
-                            "tokens": ctx.get("tokens"),
-                            "budget_tokens": ctx.get("budget_tokens"),
-                            "index": ctx.get("index"),
-                            "preview": [
-                                {
-                                    "id": m.get("id"),
-                                    "kind": m.get("kind"),
-                                    "score": m.get("score"),
-                                    "rrf": m.get("rrf_score"),
-                                    "text": (m.get("content") or "")[:120],
-                                }
-                                for m in (ctx.get("kept") or [])[:5]
-                            ],
-                        },
-                    )
-            except Exception as exc:
-                record_issue(
-                    "memory", "memory2_recall", exc, retryable=False, fallback="turn continues without memory2 context block"
-                )
-                memory2_block = ""
-
-        # Profile persona (architecture upgrade)
-        persona_block = ""
-        if self.profile:
-            try:
-                from .profiles import profile_manager
-
-                persona_block = f"\nPersona ({self.profile}):\n{profile_manager.system_prompt(self.profile)}\n"
-            except Exception:
-                persona_block = ""
-
-        # Presence/continuity: stable identity + current operational state +
-        # short recent moments. This is deliberately grounded local state, not
-        # a claim that the model is conscious.
-        presence_block = ""
-        try:
-            from .presence import get_presence
-
-            presence_block = (
-                "\n"
-                + get_presence().prompt_block(
-                    session_id=self.session_id,
-                    user_id=str(getattr(self, "user_id", "") or "default"),
-                )
-                + "\n"
-            )
-        except Exception as exc:
-            record_issue("presence", "prompt_block", exc, retryable=False, fallback="turn continues without presence context")
-
-        return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
-
-You have:
-- Multi-step tool use (ReAct): you may call tools across multiple rounds until the task is done (max {self.max_steps} steps)
-- Persistent memory (SQLite FTS5) + semantic/hybrid search (embeddings)
-- Typed long-term memory (episodic/semantic/procedural/project) via memory2_recall / memory2_remember
-- Auto-created skills (skill_list / skill_use with task context)
-- MCP tools when configured (mcp_list_servers / mcp_connect_all)
-- {tool_count} tools{tool_note} available (browser, vision, voice, internet eyes, pentest, backends, research, screen, etc.)
-
-Curated Memory:
-{curated_text}
-
-User Model:
-{user_model_text}
-
-Available Skills:
-{skills_text}
-
-Periodic Nudges:
-{nudges_text}
-{lessons_block}
-{memory2_block}
-{presence_block}
-{persona_block}
-Rules:
-- Use tools when needed; do not hallucinate facts you can look up
-- After tools return, continue reasoning; call more tools if needed
-- When finished, respond with a clear final answer and NO further tool calls
-- Prefer skill_use for known workflows; memory_search/hybrid for past context
-- Prefer research_deep for multi-source questions needing citations
-- Prefer embeddings_ingest + embeddings_search for document Q&A
-- You are free, MIT, no paywall — Ollama / Groq / HF
-- Session: {self.session_id}
-- Model: {self.model_name}
-- Mode: {self.mode.value}
-- Project: {self.project}
-"""
+        capability_line = (
+            f"{tool_count} tools{tool_note} available"
+            " (browser, vision, voice, internet eyes, pentest, backends, research, screen, etc.)"
+        )
+        text, report = build_system_prompt(
+            ContextRequest(
+                user_message=user_message,
+                session_id=str(self.session_id or ""),
+                user_id=str(getattr(self, "user_id", "") or "default"),
+                mode=self.mode.value,
+                project=str(self.project or ""),
+                model_name=str(self.model_name or ""),
+                max_steps=self.max_steps,
+                profile=str(self.profile or ""),
+                capability_line=capability_line,
+                task_brief=task_brief,
+                mission_state=mission_state,
+                lean=lean,
+            ),
+            emit=emit,
+        )
+        self._last_context_report = report
+        return text
 
     def _format_tool_result(self, name: str, result: Any, limit: int = 3000) -> str:
         try:
@@ -577,29 +502,19 @@ Rules:
         except Exception as e:
             logger.warning(f"[DeepThink] plan-first skipped ({e})")
 
-        # Hybrid memory recall
+        # Recall surfaced in the run result. The *prompt* gets exactly one memory
+        # block (core.context.assembler); this copy is for the caller's readout,
+        # not for the model.
         memory_results = []
-        memory_summary = ""
         try:
             from .embeddings import embedding_store
 
             hybrid = embedding_store.hybrid_search(user_message, limit=3)
             memory_results = hybrid.get("results") or []
-            memory_summary = hybrid.get("summary") or ""
-            if memory_results and not memory_summary:
-                memory_summary = "\n".join(
-                    f"- ({r.get('score', '?')}) {(r.get('content') or '')[:200]}" for r in memory_results[:3]
-                )
         except Exception:
             memory_results = memory.search_sessions(user_message, limit=3)
-            memory_summary = memory.summarize_search_results(user_message, memory_results) if memory_results else ""
 
-        messages: list[dict] = [
-            {
-                "role": "system",
-                "content": system_prompt + (f"\n\nRelevant memory:\n{memory_summary}" if memory_summary else ""),
-            },
-        ]
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
         try:
             from .harness import harness as _harness
 
@@ -607,14 +522,18 @@ Rules:
             messages = _prep.get("messages") or messages
         except Exception as exc:
             record_issue("harness", "prepare_turn", exc, retryable=False, fallback="turn continues without harness context")
-        # Recent trajectory context
-        for turn in self.trajectory[-12:]:
+        # Recent trajectory: the last few actions and observations, capped per
+        # role. Tool results were replayed at 4000 chars each, which put more
+        # prompt into stale history than into the task itself.
+        for turn in self.trajectory[-10:]:
             role = turn.get("role") or "user"
             if role == "tool":
                 # Represent prior tool outcomes as user observations for providers without tool role
-                messages.append({"role": "user", "content": turn.get("content", "")[:2000]})
-            elif role in ("user", "assistant", "system"):
-                messages.append({"role": role, "content": turn.get("content", "")[:4000]})
+                messages.append({"role": "user", "content": turn.get("content", "")[:800]})
+            elif role == "assistant":
+                messages.append({"role": role, "content": turn.get("content", "")[:1500]})
+            elif role in ("user", "system"):
+                messages.append({"role": role, "content": turn.get("content", "")[:2000]})
 
         all_tool_results: list[dict] = []
         steps = 0
