@@ -29,6 +29,25 @@ class MissionState(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class OutcomeState(str, Enum):
+    """How much of a claimed result the system confirmed for itself.
+
+    Distinct from ``MissionState``, which tracks lifecycle position. A mission
+    can be COMPLETED and still only CLAIMED: the workers finished their nodes,
+    and nothing independent checked the outcome. The order below is the order
+    of increasing confidence, and it is what a workspace or a repair loop
+    should switch on rather than a mission's own summary text.
+    """
+
+    UNKNOWN = "unknown"  # nothing was observed either way
+    CLAIMED = "claimed"  # only the worker's own report
+    EXECUTED = "executed"  # actions ran, outcome not looked at
+    OBSERVED = "observed"  # something was measured, verdict not reached
+    PARTIALLY_VERIFIED = "partially_verified"  # some checks grounded, not all
+    VERIFIED = "verified"  # deterministic checks agree with the claim
+    FAILED = "failed"  # checked and found not to have happened
+
+
 @dataclass
 class MissionNode:
     """The required node contract (Rebuild spec §10)."""

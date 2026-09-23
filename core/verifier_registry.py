@@ -20,6 +20,61 @@ from typing import Any
 
 from .workspace import workspace
 
+#: Checks whose verdict came from something the system did or accessed for
+#: itself: it ran the tests, parsed the file, opened the archive, made the
+#: request. These are the only checks that can certify an outcome happened.
+GROUNDED_CHECKS = frozenset(
+    {
+        "apk_container_valid",
+        "ast_syntax",
+        "file_exists",
+        "file_executable",
+        "git_status",
+        "gradle_build_scripts",
+        "html_entrypoint",
+        "http_response",
+        "json_valid",
+        "manifest_exists",
+        "manifest_valid",
+        "node_project",
+        "port_listening",
+        "test_suite",
+    }
+)
+
+#: Checks that examined the text the worker handed over. A test run reported in
+#: a log, citation markers in an answer, "looks like real substance" — all
+#: measurements of a *claim*, useful as corroboration and worthless as proof:
+#: a self-typed verdict line is not evidence.
+SELF_REPORTED_CHECKS = frozenset(
+    {
+        "citations_present",
+        "marker_scan",
+        "runtime_output",
+        "structured_format",
+        "substance",
+    }
+)
+
+SOURCE_OBSERVED = "observed"
+SOURCE_WORKER_REPORTED = "worker-reported"
+SOURCE_UNCLASSIFIED = "unclassified"
+
+
+def classify_check(check: str) -> str:
+    """Which of the three trusts a check's verdict deserves, default conservative.
+
+    An unclassified check is not counted as grounded, so adding a new verifier
+    check without saying where its input comes from can never silently upgrade
+    a mission's outcome.
+    """
+    name = str(check or "")
+    if name in GROUNDED_CHECKS:
+        return SOURCE_OBSERVED
+    if name in SELF_REPORTED_CHECKS:
+        return SOURCE_WORKER_REPORTED
+    return SOURCE_UNCLASSIFIED
+
 
 @dataclass
 class VerificationResult:
@@ -37,8 +92,27 @@ class VerificationResult:
     artifacts: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def provenance(self) -> dict[str, Any]:
+        """How this verdict was reached, in terms of who could have forged it."""
+        counts = {SOURCE_OBSERVED: 0, SOURCE_WORKER_REPORTED: 0, SOURCE_UNCLASSIFIED: 0}
+        observed: list[str] = []
+        for item in self.evidence:
+            source = classify_check(str((item or {}).get("check") or ""))
+            counts[source] += 1
+            if source == SOURCE_OBSERVED:
+                observed.append(str((item or {}).get("check")))
+        return {
+            "counts": counts,
+            "observed_checks": sorted(set(observed)),
+            "grounded": counts[SOURCE_OBSERVED] > 0,
+            "certifiable": bool(self.verified and counts[SOURCE_OBSERVED] > 0 and counts[SOURCE_UNCLASSIFIED] == 0),
+        }
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["provenance"] = self.provenance
+        return data
 
 
 class BaseVerifier:

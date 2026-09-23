@@ -12,7 +12,7 @@ optional dependencies.
 
 from .events import Command, CommandStatus, EventEnvelope, EventType, redact
 from .jobs import Job, JobStatus, WorkerLifecycle
-from .mission import MissionNode, MissionState
+from .mission import MissionNode, MissionState, OutcomeState
 from .models import Capability, FailureClass, ModelGatewayResult, ModelRequirement, ModelSelection
 from .tools import Evidence, IdempotencyMode, RiskClass, SideEffectClass, ToolDescriptor, ToolResult, ToolStatus
 
@@ -34,6 +34,7 @@ __all__ = [
     # mission
     "MissionNode",
     "MissionState",
+    "OutcomeState",
     # models
     "ModelRequirement",
     "ModelSelection",

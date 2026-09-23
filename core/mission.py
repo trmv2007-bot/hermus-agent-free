@@ -312,6 +312,10 @@ class MissionReport:
     agent_claim: dict[str, Any] = field(default_factory=dict)
     verified_result: dict[str, Any] = field(default_factory=dict)
     disagreements: list[dict[str, Any]] = field(default_factory=list)
+    #: One of core.contracts.OutcomeState — how much of the claim the system
+    #: confirmed for itself. Read this, not ``final_proof``, to know whether the
+    #: requested thing actually happened.
+    outcome_state: str = "unknown"
 
     # -- state helpers ------------------------------------------------------
     TERMINAL_STATES = (MissionState.COMPLETED.value, MissionState.CANCELLED.value)
@@ -398,6 +402,7 @@ class MissionReport:
             "agent_claim": self.agent_claim,
             "verified_result": self.verified_result,
             "disagreements": self.disagreements,
+            "outcome_state": self.outcome_state,
             "resumable": self.is_resumable(),
             # diagnostics for every non-completed mission (stage/reason/resume)
             "failure": (self.failure_summary() if self.state != MissionState.COMPLETED.value else None),
@@ -444,6 +449,7 @@ class MissionReport:
             agent_claim=data.get("agent_claim") or {},
             verified_result=data.get("verified_result") or {},
             disagreements=list(data.get("disagreements") or []),
+            outcome_state=str(data.get("outcome_state") or "unknown"),
         )
 
 
@@ -1198,6 +1204,40 @@ def make_agent_backed_executor(
     return executor
 
 
+def derive_outcome_state(
+    *,
+    claim_complete: bool,
+    verified: bool,
+    provenance: dict[str, Any],
+    missing_artifacts: list[str] | None = None,
+    nodes_ran: bool = False,
+) -> str:
+    """Rank how much of the claim the system confirmed with its own instruments.
+
+    Order matters: a reported deliverable that is not on disk is a checked
+    negative, not an unknown. Beyond that, "verified" only earns VERIFIED when
+    the checks that produced it were grounded *and* the workers agreed with them.
+    """
+    from .contracts import OutcomeState
+    from .verifier_registry import SOURCE_OBSERVED
+
+    if missing_artifacts:
+        return OutcomeState.FAILED.value
+    counts = (provenance or {}).get("counts") or {}
+    observed = int(counts.get(SOURCE_OBSERVED) or 0)
+    if verified:
+        if claim_complete and (provenance or {}).get("certifiable"):
+            return OutcomeState.VERIFIED.value
+        return OutcomeState.PARTIALLY_VERIFIED.value
+    if observed:
+        # The system looked with tools of its own and the verifier did not
+        # confirm the outcome: that is a negative measurement, not silence.
+        return OutcomeState.FAILED.value if claim_complete else OutcomeState.OBSERVED.value
+    if claim_complete:
+        return OutcomeState.CLAIMED.value
+    return OutcomeState.EXECUTED.value if nodes_ran else OutcomeState.UNKNOWN.value
+
+
 def assess_claim_vs_verified(
     report: MissionReport,
     *,
@@ -1207,6 +1247,7 @@ def assess_claim_vs_verified(
     node_count: int = 0,
     missing_artifacts: list[str] | None = None,
     repair_round: int = 0,
+    nodes_ran: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Record what was claimed, what was checked, and where the two disagree.
 
@@ -1219,6 +1260,8 @@ def assess_claim_vs_verified(
     verified = bool(getattr(verification, "verified", False))
     approved = bool(critic.get("approved"))
     missing = list(missing_artifacts or [])
+    provenance = dict(getattr(verification, "provenance", None) or {})
+    observed_checks = int((provenance.get("counts") or {}).get("observed") or 0)
 
     report.agent_claim = {
         "dag_all_completed": bool(dag_all_completed),
@@ -1237,6 +1280,7 @@ def assess_claim_vs_verified(
         "evidence_count": len(getattr(verification, "evidence", None) or []),
         "critic_approved": approved,
         "critic_score": critic.get("overall_score"),
+        "provenance": provenance,
         "source": f"core.verifier_registry[{report.domain}] + critic panel",
     }
 
@@ -1277,6 +1321,24 @@ def assess_claim_vs_verified(
                 "severity": "warning",
             }
         )
+
+    if verified and dag_all_completed and not observed_checks:
+        found.append(
+            {
+                "kind": "verified_only_on_worker_supplied_text",
+                "claim": "the mission reported itself complete and the verifier agreed",
+                "fact": "every check the verifier ran examined output the worker handed over; nothing was observed independently",
+                "severity": "blocking",
+            }
+        )
+
+    report.outcome_state = derive_outcome_state(
+        claim_complete=bool(dag_all_completed),
+        verified=verified,
+        provenance=provenance,
+        missing_artifacts=missing,
+        nodes_ran=bool(node_count) if nodes_ran is None else bool(nodes_ran),
+    )
 
     stamp = datetime.now().isoformat()
     for item in found:

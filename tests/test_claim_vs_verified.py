@@ -10,17 +10,31 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.mission import MissionReport, MissionState, assess_claim_vs_verified
+from core.contracts import OutcomeState
+from core.mission import MissionReport, MissionState, assess_claim_vs_verified, derive_outcome_state
+from core.verifier_registry import VerificationResult, classify_check
 
 
 class FakeVerification:
+    """Mirrors VerificationResult, including how it derives provenance."""
+
     def __init__(self, *, verified=True, score=0.9, errors=None, evidence=None, structural=True, behavioral=True):
         self.verified = verified
         self.score = score
         self.errors = errors or []
-        self.evidence = evidence if evidence is not None else [{"kind": "file", "path": "a.py"}]
+        self.evidence = evidence if evidence is not None else [{"type": "behavioral", "check": "test_suite", "status": "passed"}]
         self.structural_verified = structural
         self.behavioral_verified = behavioral
+
+    @property
+    def provenance(self) -> dict:
+        # Reuse the real dataclass so this fake cannot drift from it.
+        return VerificationResult(
+            verified=self.verified,
+            score=self.score,
+            domain="python",
+            evidence=self.evidence,
+        ).provenance
 
 
 def _report(tmp_path: Path, **kw) -> MissionReport:
@@ -85,6 +99,58 @@ def test_agreement_still_leaves_both_sides_on_the_record(tmp_path):
     assert report.agent_claim["nodes"] == 2
     assert report.verified_result["critic_approved"] is True
     assert "verifier_registry" in report.verified_result["source"]
+    assert report.outcome_state == OutcomeState.VERIFIED.value
+
+
+def test_a_verdict_from_worker_supplied_text_alone_is_not_verification(tmp_path):
+    """A log that says "tests passed" was written by the party being graded."""
+    report = _report(tmp_path)
+    found = assess_claim_vs_verified(
+        report,
+        dag_all_completed=True,
+        verification=FakeVerification(evidence=[{"type": "behavioral", "check": "runtime_output", "status": "clean"}]),
+        critic={"approved": True, "overall_score": 95},
+        node_count=2,
+    )
+    assert [d["kind"] for d in found] == ["verified_only_on_worker_supplied_text"]
+    assert report.verified_result["provenance"]["grounded"] is False
+    assert report.outcome_state == OutcomeState.PARTIALLY_VERIFIED.value
+
+
+def test_an_unclassified_check_never_counts_as_grounding():
+    """A new verifier check cannot upgrade an outcome just by existing."""
+    assert classify_check("brand_new_check") == "unclassified"
+    provenance = VerificationResult(verified=True, score=1.0, domain="python", evidence=[{"check": "brand_new_check"}]).provenance
+    assert provenance["grounded"] is False and provenance["certifiable"] is False
+
+
+def test_outcome_state_ladder():
+    grounded = {"counts": {"observed": 2, "worker-reported": 1, "unclassified": 0}, "certifiable": True}
+    weak = {"counts": {"observed": 0, "worker-reported": 3, "unclassified": 0}, "certifiable": False}
+    assert derive_outcome_state(claim_complete=True, verified=True, provenance=grounded) == OutcomeState.VERIFIED.value
+    assert (
+        derive_outcome_state(claim_complete=True, verified=True, provenance=weak) == OutcomeState.PARTIALLY_VERIFIED.value
+    )
+    assert derive_outcome_state(claim_complete=True, verified=False, provenance=weak) == OutcomeState.CLAIMED.value
+    assert (
+        derive_outcome_state(claim_complete=True, verified=False, provenance=grounded) == OutcomeState.FAILED.value
+    )
+    assert (
+        derive_outcome_state(claim_complete=False, verified=False, provenance=grounded) == OutcomeState.OBSERVED.value
+    )
+    assert (
+        derive_outcome_state(claim_complete=False, verified=False, provenance=weak, nodes_ran=True)
+        == OutcomeState.EXECUTED.value
+    )
+    assert (
+        derive_outcome_state(claim_complete=False, verified=False, provenance=weak, nodes_ran=False)
+        == OutcomeState.UNKNOWN.value
+    )
+    # A deliverable that is not on disk outranks every softer reading.
+    assert (
+        derive_outcome_state(claim_complete=True, verified=True, provenance=grounded, missing_artifacts=["a.py"])
+        == OutcomeState.FAILED.value
+    )
 
 
 def test_an_incomplete_dag_that_verified_is_a_warning_not_a_block(tmp_path):
