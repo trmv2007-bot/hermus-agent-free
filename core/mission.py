@@ -304,6 +304,14 @@ class MissionReport:
     error: dict[str, Any] | None = None
     recoverable: bool = True
     restarts_used: int = 0
+    # ---- claim vs verified ----------------------------------------------------
+    # What the workers asserted and what the system independently checked are two
+    # different facts, and collapsing them into one boolean throws away the only
+    # evidence that a self-report was wrong. Both are kept; where they disagree,
+    # the disagreement is recorded rather than swallowed.
+    agent_claim: dict[str, Any] = field(default_factory=dict)
+    verified_result: dict[str, Any] = field(default_factory=dict)
+    disagreements: list[dict[str, Any]] = field(default_factory=list)
 
     # -- state helpers ------------------------------------------------------
     TERMINAL_STATES = (MissionState.COMPLETED.value, MissionState.CANCELLED.value)
@@ -387,6 +395,9 @@ class MissionReport:
             "error": self.error,
             "recoverable": self.recoverable,
             "restarts_used": self.restarts_used,
+            "agent_claim": self.agent_claim,
+            "verified_result": self.verified_result,
+            "disagreements": self.disagreements,
             "resumable": self.is_resumable(),
             # diagnostics for every non-completed mission (stage/reason/resume)
             "failure": (self.failure_summary() if self.state != MissionState.COMPLETED.value else None),
@@ -430,6 +441,9 @@ class MissionReport:
             error=data.get("error"),
             recoverable=bool(data.get("recoverable", True)),
             restarts_used=int(data.get("restarts_used") or 0),
+            agent_claim=data.get("agent_claim") or {},
+            verified_result=data.get("verified_result") or {},
+            disagreements=list(data.get("disagreements") or []),
         )
 
 
@@ -1184,6 +1198,95 @@ def make_agent_backed_executor(
     return executor
 
 
+def assess_claim_vs_verified(
+    report: MissionReport,
+    *,
+    dag_all_completed: bool,
+    verification: Any,
+    critic: dict[str, Any],
+    node_count: int = 0,
+    missing_artifacts: list[str] | None = None,
+    repair_round: int = 0,
+) -> list[dict[str, Any]]:
+    """Record what was claimed, what was checked, and where the two disagree.
+
+    The success condition below reads one boolean, which is enough to decide
+    whether to repair but throws away the only evidence that a self-report was
+    wrong. Keeping the claim and the verdict apart makes a mission that *said* it
+    finished without verifying legible to the repair loop, the workspace and the
+    tests — a worker's sentence is an input to measurement, never proof.
+    """
+    verified = bool(getattr(verification, "verified", False))
+    approved = bool(critic.get("approved"))
+    missing = list(missing_artifacts or [])
+
+    report.agent_claim = {
+        "dag_all_completed": bool(dag_all_completed),
+        "nodes": int(node_count),
+        "artifacts_claimed": len(report.artifacts),
+        "artifacts_missing_on_disk": missing,
+        "summary": str(report.final_proof or "")[:400],
+        "source": "worker self-report (DAG node statuses + reported outputs)",
+    }
+    report.verified_result = {
+        "verified": verified,
+        "score": float(getattr(verification, "score", 0.0) or 0.0),
+        "structural_verified": bool(getattr(verification, "structural_verified", True)),
+        "behavioral_verified": bool(getattr(verification, "behavioral_verified", True)),
+        "errors": [str(e)[:200] for e in (getattr(verification, "errors", None) or [])][:5],
+        "evidence_count": len(getattr(verification, "evidence", None) or []),
+        "critic_approved": approved,
+        "critic_score": critic.get("overall_score"),
+        "source": f"core.verifier_registry[{report.domain}] + critic panel",
+    }
+
+    found: list[dict[str, Any]] = []
+    if dag_all_completed and not verified:
+        found.append(
+            {
+                "kind": "claimed_complete_but_unverified",
+                "claim": "every DAG node reported COMPLETED",
+                "fact": "the domain verifier did not confirm the outcome",
+                "severity": "blocking",
+            }
+        )
+    if verified and not approved:
+        found.append(
+            {
+                "kind": "verified_but_critic_rejected",
+                "claim": "structural/behavioral checks passed",
+                "fact": str(critic.get("summary") or "the critic panel withheld approval"),
+                "severity": "blocking",
+            }
+        )
+    if missing:
+        found.append(
+            {
+                "kind": "claimed_artifacts_missing_on_disk",
+                "claim": f"{len(missing)} reported deliverable(s) exist",
+                "fact": "not found at the reported path: " + ", ".join(missing[:5]),
+                "severity": "blocking",
+            }
+        )
+    if not dag_all_completed and verified:
+        found.append(
+            {
+                "kind": "incomplete_dag_but_verified",
+                "claim": "some DAG nodes did not report completion",
+                "fact": "verification still passed on the evidence available",
+                "severity": "warning",
+            }
+        )
+
+    stamp = datetime.now().isoformat()
+    for item in found:
+        report.disagreements.append({**item, "repair_round": int(repair_round), "detected_at": stamp})
+    # A long repair loop must not grow the durable record without bound.
+    if len(report.disagreements) > 24:
+        del report.disagreements[: len(report.disagreements) - 24]
+    return found
+
+
 class MissionEngine:
     """Unified Mission Lifecycle & DAG Controller with Autonomous Repair Loop.
 
@@ -1871,8 +1974,22 @@ class MissionEngine:
                 },
             )
 
-            # Success condition
+            # Success condition — but first, keep the claim and the verdict apart.
             all_dag_completed = all(n.status == DAGNodeStatus.COMPLETED.value for n in dag.nodes.values())
+            disagreements = assess_claim_vs_verified(
+                report,
+                dag_all_completed=all_dag_completed,
+                verification=v_res,
+                critic=critic_res,
+                node_count=len(dag.nodes),
+                missing_artifacts=[a for a in report.artifacts if not Path(a).exists()],
+                repair_round=int(budget.repairs_used or 0),
+            )
+            if disagreements:
+                _emit(
+                    "mission_claim_disagreement",
+                    {"disagreements": [d["kind"] for d in disagreements], "severity": disagreements[0]["severity"]},
+                )
             if all_dag_completed and v_res.verified and critic_res.get("approved"):
                 for req in report.requirements:
                     req.satisfied = True
