@@ -12,15 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 from core.log import get_logger
-from core.config import config
 from core.providers import PROVIDER_PRESETS
-from .agent import Agent, AgentConfig, AgentState, AgentRole
+
+from .agent import Agent, AgentConfig, AgentRole, AgentState
 
 logger = get_logger(__name__)
 
@@ -46,7 +44,7 @@ class PoolConfig:
     )
 
     @classmethod
-    def from_env(cls) -> "PoolConfig":
+    def from_env(cls) -> PoolConfig:
         """Load configuration from environment."""
         return cls(
             max_agents=int(os.environ.get("HERMUS_MAX_AGENTS", "100")),
@@ -139,7 +137,7 @@ class AgentPool:
             self._cleanup_task.cancel()
 
         # Destroy all agents
-        for agent_id, agent in list(self._agents.items()):
+        for agent in list(self._agents.values()):
             agent.destroy()
 
         logger.info("🛑 Agent pool stopped")
@@ -183,7 +181,14 @@ class AgentPool:
         return destroyed
 
     async def create_agent(
-        self, name: str = None, role: AgentRole = AgentRole.GENERAL, provider: str = None, model: str = None, **kwargs
+        self,
+        name: str = None,
+        role: AgentRole = AgentRole.GENERAL,
+        provider: str = None,
+        model: str = None,
+        api_key: str = None,
+        base_url: str = None,
+        **kwargs
     ) -> Agent:
         """
         Create a new agent in the pool.
@@ -193,6 +198,11 @@ class AgentPool:
             role: Agent role/specialization
             provider: Provider to use (ollama, groq, mistral, etc.)
             model: Model to use
+            api_key: Explicit credential. These two are named parameters rather
+                than kwargs, because forwarding them by both routes used to raise
+                "got multiple values for keyword argument 'api_key'" — which made
+                every /api/v1/agents/create request fail with a 500.
+            base_url: Explicit endpoint, same treatment.
             **kwargs: Additional config
 
         Returns:
@@ -208,12 +218,9 @@ class AgentPool:
             # Select provider if not specified
             provider = provider or self._select_provider(role)
 
-            # Get API key if needed
-            api_key = None
-            base_url = None
-
-            if provider != "ollama" and provider != "nollama":
-                # Try to get a key for this provider
+            # Fill in from the vault only when the caller did not name a
+            # credential; these used to be reset to None here unconditionally.
+            if provider != "ollama" and provider != "nollama" and not api_key:
                 keys = self._provider_keys.get(provider, [])
                 if keys:
                     # Round-robin selection
@@ -317,7 +324,7 @@ class AgentPool:
 
         return defaults.get(provider, "mistral:7b")
 
-    def get_agent(self, agent_id: str) -> Optional[Agent]:
+    def get_agent(self, agent_id: str) -> Agent | None:
         """Get an agent by ID."""
         return self._agents.get(agent_id)
 
@@ -477,7 +484,7 @@ class AgentPool:
 
 
 # Global pool instance
-_pool: Optional[AgentPool] = None
+_pool: AgentPool | None = None
 
 
 def get_pool() -> AgentPool:

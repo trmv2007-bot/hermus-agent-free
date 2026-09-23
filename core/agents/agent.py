@@ -13,17 +13,13 @@ Each Agent has:
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Optional
 
 from core.log import get_logger
-from core.config import config
 
 logger = get_logger(__name__)
 
@@ -39,6 +35,11 @@ class AgentState(Enum):
     ERROR = "error"
     SLEEPING = "sleeping"
     DESTROYED = "destroyed"
+
+
+#: Stand-in for a credential in any serialized view. Presence is useful to a UI;
+#: the value is not.
+MASKED_API_KEY = "****"
 
 
 class AgentRole(Enum):
@@ -75,7 +76,10 @@ class AgentConfig:
             "provider": self.provider,
             "model": self.model,
             "role": self.role.value,
-            "api_key": self.api_key,
+            # Never the credential itself: this dict is returned by /create and
+            # /list, and a roster endpoint must not be a way to read keys back.
+            "api_key": MASKED_API_KEY if self.api_key else None,
+            "has_api_key": bool(self.api_key),
             "base_url": self.base_url,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
@@ -84,13 +88,16 @@ class AgentConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AgentConfig":
+    def from_dict(cls, data: dict) -> AgentConfig:
+        supplied = data.get("api_key")
         return cls(
             name=data.get("name"),
             provider=data.get("provider", "ollama"),
             model=data.get("model", "mistral:7b"),
             role=AgentRole(data.get("role", "general")),
-            api_key=data.get("api_key"),
+            # A masked preview is not a key: restore to None rather than handing
+            # the placeholder to a provider and failing with a confusing 401.
+            api_key=None if supplied in (None, MASKED_API_KEY) else supplied,
             base_url=data.get("base_url"),
             max_tokens=data.get("max_tokens", 4096),
             temperature=data.get("temperature", 0.7),
@@ -176,7 +183,7 @@ class Agent:
     """
 
     # Class-level registry for all agents
-    _registry: dict[str, "Agent"] = {}
+    _registry: dict[str, Agent] = {}
     _message_queues: dict[str, asyncio.Queue] = {}
 
     def __init__(self, agent_id: str = None, config: AgentConfig = None, **kwargs):
@@ -190,7 +197,7 @@ class Agent:
         self.role = self.config.role
 
         # Agent relationships
-        self.connections: dict[str, "Agent"] = {}  # agent_id -> Agent
+        self.connections: dict[str, Agent] = {}  # agent_id -> Agent
         self.team_id: str = None
 
         # Resource management
@@ -340,13 +347,13 @@ class Agent:
                     count += 1
         return count
 
-    def connect(self, other: "Agent") -> None:
+    def connect(self, other: Agent) -> None:
         """Establish a connection to another agent."""
         self.connections[other.agent_id] = other
         other.connections[self.agent_id] = self
         logger.info(f"🔗 Agent {self.config.name} connected to {other.config.name}")
 
-    def disconnect(self, other: "Agent") -> None:
+    def disconnect(self, other: Agent) -> None:
         """Remove connection to another agent."""
         if other.agent_id in self.connections:
             del self.connections[other.agent_id]
@@ -467,7 +474,7 @@ class Agent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Agent":
+    def from_dict(cls, data: dict) -> Agent:
         """Deserialize agent from dict."""
         config = AgentConfig.from_dict(data.get("config", {}))
         agent = cls(agent_id=data.get("agent_id"), config=config)
@@ -483,12 +490,12 @@ class Agent:
         return agent
 
     @classmethod
-    def get_agent(cls, agent_id: str) -> Optional["Agent"]:
+    def get_agent(cls, agent_id: str) -> Agent | None:
         """Get an agent by ID."""
         return cls._registry.get(agent_id)
 
     @classmethod
-    def get_all_agents(cls) -> list["Agent"]:
+    def get_all_agents(cls) -> list[Agent]:
         """Get all active agents."""
         return list(cls._registry.values())
 
@@ -522,7 +529,6 @@ class Agent:
             List of destroyed agent IDs
         """
         destroyed = []
-        current_time = time.time()
 
         for agent_id, agent in list(cls._registry.items()):
             if agent.is_idle(timeout) and agent.state != AgentState.WORKING:
