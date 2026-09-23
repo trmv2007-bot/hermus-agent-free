@@ -75,3 +75,7 @@ test_output.txt
 migration-report.json
 outputs/
 logs/
+
+# Frontend build residue (the bundle itself is committed so /workspace works without Node)
+frontend/*.tsbuildinfo
+gateway/static/workspace/**/*.map

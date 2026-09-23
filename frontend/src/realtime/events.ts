@@ -1,0 +1,88 @@
+// Runtime events become workspace operations here, in one pure function, so the
+// rule "what reaches the user's screen" has a single answer.
+//
+// The workspace is deliberately not an event viewer that opens a panel per
+// message: telemetry-class events land in the tray and only the few events a
+// user can act on take a surface.
+
+import type { WorkspaceOp } from "../state/workspace-store";
+
+export interface RuntimeEvent {
+  type?: string;
+  kind?: string;
+  id?: string;
+  ts?: number | string;
+  data?: Record<string, unknown>;
+}
+
+export interface PlanResult {
+  /** Operations to apply to the workspace. */
+  ops: WorkspaceOp[];
+  /** Tray entries worth remembering without taking screen space. */
+  tray: { label: string; detail: string; at: number }[];
+  /** Whether the advanced workspace should reveal itself. */
+  reveal: boolean;
+}
+
+const ACTIONABLE_MISSION_EVENTS = new Set(["mission_claim_disagreement", "mission_requirement_breach", "mission_repair_stopped"]);
+
+function eventKind(event: RuntimeEvent): string {
+  return String(event.type ?? event.kind ?? "");
+}
+
+function missionId(event: RuntimeEvent): string | undefined {
+  const data = event.data ?? {};
+  const value = data.mission_id ?? data.id ?? data.mission;
+  return typeof value === "string" && value ? value : undefined;
+}
+
+export function planForEvent(event: RuntimeEvent): PlanResult {
+  const kind = eventKind(event);
+  const data = event.data ?? {};
+  const at = Date.now();
+
+  if (!kind) return { ops: [], tray: [], reveal: false };
+
+  if (kind.startsWith("agent.") || kind === "fleet.state_changed" || kind === "agent_updated") {
+    const name = String((data as Record<string, unknown>).name ?? (data as Record<string, unknown>).agent_id ?? "worker");
+    return {
+      ops: [{ op: "open", surface: { kind: "worker", title: `Worker · ${name}`, source: { kind: "event", ref: kind } } }],
+      tray: [{ label: kind, detail: name, at }],
+      // Roster churn is not something the user asked to watch.
+      reveal: false,
+    };
+  }
+
+  if (ACTIONABLE_MISSION_EVENTS.has(kind)) {
+    const id = missionId(event) ?? "unknown";
+    return {
+      ops: [
+        { op: "open", surface: { kind: "mission", title: `Mission · ${id.slice(0, 12)}`, source: { kind: "event", ref: id } } },
+        { op: "open", surface: { kind: "evidence", title: `Evidence · ${id.slice(0, 12)}`, source: { kind: "event", ref: id } } },
+      ],
+      tray: [{ label: kind, detail: id, at }],
+      // Something went wrong that the user can act on: show the space.
+      reveal: true,
+    };
+  }
+
+  if (kind === "mission_finished" || kind === "mission_opened" || kind === "mission_state" || kind === "mission_verification") {
+    const id = missionId(event) ?? "unknown";
+    return {
+      ops: [{ op: "open", surface: { kind: "mission", title: `Mission · ${id.slice(0, 12)}`, source: { kind: "event", ref: id } } }],
+      tray: [{ label: kind, detail: String((data as Record<string, unknown>).state ?? ""), at }],
+      reveal: kind === "mission_finished" || kind === "mission_opened",
+    };
+  }
+
+  if (kind.startsWith("emergency_stop") || kind === "computer.emergency_stop") {
+    return {
+      ops: [{ op: "open", surface: { kind: "computer", title: "Computer view · halted", source: { kind: "event", ref: kind }, act: false } }],
+      tray: [{ label: "emergency stop", detail: "the computer control path stopped", at }],
+      reveal: true,
+    };
+  }
+
+  // Context, tool selection and step telemetry are readouts, not requests.
+  return { ops: [], tray: [{ label: kind, detail: "", at }], reveal: false };
+}

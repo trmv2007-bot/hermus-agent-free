@@ -835,6 +835,70 @@ async def control_console_js():
     return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
 
 
+# ---------------------------------------------------------------------------
+# Advanced workspace — a built front end, not another hand-written page
+# ---------------------------------------------------------------------------
+#: The React/Vite bundle emitted by ``frontend/`` (npm run build). It is served
+#: from the same origin so the SPA reuses the gateway's own auth and event
+#: streams. No token is injected into this document: a page that carried the
+#: gateway secret would hand it to whoever could load the page, so the operator
+#: supplies it once through ``?token=`` and the app keeps it in sessionStorage.
+_WORKSPACE_DIR = Path(__file__).parent / "static" / "workspace"
+_WORKSPACE_MEDIA = {
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".map": "application/json",
+    ".woff2": "font/woff2",
+    ".png": "image/png",
+}
+
+
+@app.get("/workspace/app")
+async def workspace_app():
+    """The advanced workspace shell. The product UI remains /control.
+
+    ``/workspace`` itself is the existing workspace-state JSON API in
+    ``routes_subsystems`` — the document lives one level down so serving the app
+    never shadows it.
+    """
+    index = _WORKSPACE_DIR / "index.html"
+    if not index.is_file():
+        return Response(
+            "the workspace is not built in this checkout\n\n"
+            "    cd frontend && npm install && npm run build\n",
+            status_code=501,
+            media_type="text/plain; charset=utf-8",
+        )
+    return Response(
+        index.read_text(encoding="utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/static/workspace/{asset_path:path}")
+async def workspace_asset(asset_path: str):
+    """Serve one file from the built bundle, contained to that directory.
+
+    An asset path arrives from the browser, so it is resolved before being opened
+    and rejected unless it stays inside the workspace directory.
+    """
+    root = _WORKSPACE_DIR.resolve()
+    target = (root / asset_path).resolve()
+    if root not in target.parents or not target.is_file():
+        return Response("workspace asset not found", status_code=404, media_type="text/plain; charset=utf-8")
+    media = _WORKSPACE_MEDIA.get(target.suffix.lower(), "application/octet-stream")
+    return Response(
+        target.read_bytes(),
+        media_type=media,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/static/fonts/InterVariable.woff2")
 async def font_inter():
     """Inter variable font (OFL)."""
