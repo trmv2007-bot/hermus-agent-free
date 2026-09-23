@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -130,3 +131,40 @@ def test_the_model_panel_reads_the_catalogue_key_the_gateway_sends():
     assert "catalog" in body, "the workspace client maps `catalog`; a rename here breaks the panel"
     if body["catalog"]:
         assert {"id", "name"} <= set(body["catalog"][0])
+
+
+_READS_ENTRY = re.compile(r'"(/[^"]+)":\s*\[([^\]]+)\]')
+
+#: How to reach one sample record per endpoint.
+_SAMPLE = {
+    "/jobs": lambda c: c.get("/jobs").json().get("jobs", []),
+    "/queue/status": lambda c: [c.get("/queue/status").json().get("queue", {})],
+    "/missions": lambda c: c.get("/missions").json().get("missions", []),
+    "/api/fleet/agents": lambda c: c.get("/api/fleet/agents").json().get("agents", []),
+}
+
+
+def _panel_reads() -> dict[str, list[str]]:
+    """The field list the panels depend on, read from the client itself.
+
+    One declaration in ``client.ts`` rather than a duplicate list in Python, so
+    the check cannot drift away from the code it is guarding.
+    """
+    source = CLIENT_TS.read_text(encoding="utf-8")
+    head, _, tail = source.partition("export const READS")
+    assert tail, "client.ts must declare READS — the fields its panels depend on"
+    body = tail.split("} as const", 1)[0]
+    return {match.group(1): [name.strip().strip('"') for name in match.group(2).split(",") if name.strip()] for match in _READS_ENTRY.finditer(body)}
+
+
+@pytest.mark.parametrize("path", sorted(_SAMPLE))
+def test_the_fields_a_panel_reads_are_still_in_the_response(path):
+    fields = _panel_reads().get(path)
+    assert fields, f"client.ts declares no read-fields for {path}"
+
+    sample = _SAMPLE[path](_client())
+    if not sample:
+        pytest.skip(f"{path} has no records right now; shape cannot be checked")
+
+    missing = set(fields) - set(sample[0])
+    assert not missing, f"{path} no longer carries {missing} that the workspace reads"
