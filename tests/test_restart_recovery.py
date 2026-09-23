@@ -66,6 +66,46 @@ def test_mission_restart_continue_after_engine_recreated(tmp_path):
     assert final.state == MissionState.COMPLETED.value
 
 
+def test_claim_verdict_and_evidence_survive_a_restart(tmp_path):
+    """What was claimed, what was checked and the evidence behind it must all be
+    readable by a process that never saw the run happen."""
+    from core.mission import MissionEngine, MissionState
+
+    store = tmp_path / "missions"
+    phase = {"restarted": False}
+
+    def executor(node, ctx):
+        if not phase["restarted"]:
+            return {"success": False, "blocked": True, "blocker_reason": "worker killed"}
+        return {"success": True, "output": "done", "evidence": [{"check": "ok", "status": "passed"}]}
+
+    eng1 = MissionEngine(executor=executor, storage_dir=store)
+    r1 = eng1.start_mission("restart with evidence", budget_steps=6, max_repairs=1)
+    assert r1.state == MissionState.BLOCKED.value
+    phase["restarted"] = True
+
+    eng2 = MissionEngine(executor=executor, storage_dir=store)
+    resumed = eng2.resume_mission(r1.mission_id)
+    assert resumed.state == MissionState.COMPLETED.value
+    assert resumed.agent_claim and resumed.verified_result
+    assert resumed.outcome_state in {"verified", "partially_verified"}
+    assert resumed.evidence_refs
+
+    # A third process: fresh engine, nothing carried in RAM, own evidence store.
+    eng3 = MissionEngine(storage_dir=store)
+    final = eng3.load_mission(r1.mission_id)
+    assert final.outcome_state == resumed.outcome_state
+    assert final.evidence_refs == resumed.evidence_refs
+    assert final.disagreements == resumed.disagreements
+    assert final.agent_claim == resumed.agent_claim
+
+    for ref in final.evidence_refs:
+        record = eng3.evidence.get(ref)
+        assert record is not None and record.mission_id == final.mission_id
+        assert eng3.evidence.recheck(ref)["found"] is True
+    assert f"Evidence for mission {final.mission_id}" in eng3.evidence.digest(final.mission_id)
+
+
 def test_restart_duplicate_execution_prevented(tmp_path):
     """A completed mission must NOT be re-runnable ('duplicate execution')."""
     from core.mission import MissionEngine, MissionState
