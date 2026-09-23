@@ -15,9 +15,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
 
 from core.log import get_logger
 
@@ -87,7 +85,7 @@ class AgentMessage:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AgentMessage":
+    def from_dict(cls, data: dict) -> AgentMessage:
         return cls(
             message_id=data.get("message_id", str(uuid.uuid4())),
             sender_id=data.get("sender_id"),
@@ -118,6 +116,41 @@ class MessageBus:
         self._subscriptions: dict[str, list[str]] = {}  # topic -> [agent_ids]
         self._max_history = 1000
         self._lock = asyncio.Lock()
+
+    def _publish(self, message: AgentMessage, kind: str) -> None:
+        """Project agent traffic onto the canonical event bus.
+
+        This inbox is how a message is delivered; it is not a durable record. A
+        second bus that only lives in this process means agent conversations
+        disappear on restart and cannot be replayed by the workspace or the
+        harness, so each one is mirrored onto ``core.events`` in the same shape
+        the dashboard bridge already uses.
+        """
+        try:
+            from ..contracts import CommandStatus, EventEnvelope, EventType
+            from ..events import get_bus
+
+            get_bus().publish(
+                EventEnvelope(
+                    type=EventType.STATE_CHANGED.value,
+                    command=kind,
+                    target=message.target_id or "broadcast",
+                    args_redacted={
+                        "message_id": message.message_id,
+                        "sender_id": message.sender_id,
+                        "target_id": message.target_id,
+                        "message_type": message.message_type.value,
+                        "priority": message.priority.value,
+                        # A preview, not the transcript: the event log is read by
+                        # surfaces that do not need every payload in full.
+                        "preview": str(message.content or "")[:200],
+                    },
+                    status=CommandStatus.PENDING.value,
+                    source="agents.messaging",
+                )
+            )
+        except Exception as exc:  # a mirror failing must never eat the delivery
+            logger.warning(f"could not mirror {kind} onto the event bus: {exc}")
 
     async def send(
         self,
@@ -166,6 +199,7 @@ class MessageBus:
             del self._pending_responses[response_to]
 
         logger.debug(f"📮 Message {message.message_id[:8]}: {sender_id} -> {target_id} [{message_type.value}]")
+        self._publish(message, "agent.message")
 
         return message
 
@@ -208,12 +242,13 @@ class MessageBus:
                 self._message_history = self._message_history[-self._max_history // 2 :]
 
         logger.info(f"📢 Broadcast from {sender_id}: {content[:50]}...")
+        self._publish(message, "agent.broadcast")
 
         return message
 
     async def request(
         self, sender_id: str, target_id: str, content: str, timeout: float = 30.0, **kwargs
-    ) -> Optional[AgentMessage]:
+    ) -> AgentMessage | None:
         """
         Send a request and wait for a response.
 
@@ -266,6 +301,7 @@ class MessageBus:
             subscribers = self._subscriptions.get(topic, [])
 
         count = 0
+        delivered: list[AgentMessage] = []
         for agent_id in subscribers:
             # Create a copy of the message for each subscriber
             msg = AgentMessage(
@@ -277,8 +313,18 @@ class MessageBus:
                 priority=message.priority,
                 metadata=message.metadata,
             )
-            # Deliver to subscriber
+            delivered.append(msg)
+            self._publish(msg, "agent.topic")
             count += 1
+
+        # The copies have to be recorded to count as delivered. This loop used to
+        # build one per subscriber, discard it, and return the subscriber count —
+        # a caller could not tell an ignored topic broadcast from a read one.
+        if delivered:
+            async with self._lock:
+                self._message_history.extend(delivered)
+                if len(self._message_history) > self._max_history:
+                    self._message_history = self._message_history[-self._max_history // 2 :]
 
         return count
 
@@ -353,7 +399,7 @@ class MessageBus:
 
 
 # Global message bus instance
-_bus: Optional[MessageBus] = None
+_bus: MessageBus | None = None
 
 
 def get_bus() -> MessageBus:
