@@ -62,6 +62,7 @@ from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
 from .atomic_io import atomic_write_json, file_lock
 from .critic import critic_manager
+from .failure_recovery import RecoveryAction, count_attempts, diagnose, nodes_to_reset, repeat_of_last
 from .mission_files import MissionFileScope
 from .rollback import rollback_manager
 from .run_events import record_issue
@@ -2114,29 +2115,92 @@ class MissionEngine:
                 )
                 return report
 
-            # D. DIAGNOSE & REPAIR LOOP
-            if budget.repairs_used < budget.max_repairs and not budget.exhausted(PHASE_REPAIR):
+            # D. DIAGNOSE & REPAIR LOOP — typed and bounded. An exhausted
+            # strategy is dropped, and a round identical to the last one stops
+            # the loop rather than spending the remaining budget repeating a
+            # known failure.
+            recovery = diagnose(
+                error_code=(report.error or {}).get("code"),
+                errors=list(v_res.errors) + [str(d) for d in (critic_res.get("repair_directives") or [])],
+                missing_artifacts=[a for a in report.artifacts if not Path(a).exists()],
+                verified=bool(v_res.verified),
+                attempts=count_attempts(report.repair_history),
+                evidence_refs=report.evidence_refs[-6:],
+            )
+            can_repair = budget.repairs_used < budget.max_repairs and not budget.exhausted(PHASE_REPAIR)
+            exhausted = recovery.actions == [RecoveryAction.ABORT]
+            if can_repair and (exhausted or repeat_of_last(report.repair_history, recovery)):
+                report.repair_history.append(
+                    {
+                        **recovery,
+                        "repair_round": budget.repairs_used + 1,
+                        "recovery_actions": [RecoveryAction.ABORT.value],
+                        "outcome": (
+                            "stopped: no distinct recovery action left for this failure"
+                            if exhausted
+                            else "stopped: this round would repeat the previous one against the same errors"
+                        ),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+                _emit(
+                    "mission_repair_stopped",
+                    {"failure_class": recovery.failure_class, "reason": "no distinct recovery action left" if exhausted else "repeating a known failure"},
+                )
+                self._save_mission(report)
+                break
+
+            if can_repair:
                 budget.repairs_used += 1
                 _spend(PHASE_REPAIR, 1)
                 report.state = MissionState.DIAGNOSING.value
 
-                diagnosis = {
-                    "repair_round": budget.repairs_used,
-                    "verifier_errors": v_res.errors,
-                    "critic_directives": critic_res.get("repair_directives", []),
-                    "timestamp": datetime.now().isoformat(),
-                }
-                report.repair_history.append(diagnosis)
+                rewound = nodes_to_reset(dag, recovery)
+                repair_hints = v_res.errors + critic_res.get("repair_directives", [])
+                if rewound is not None and not rewound:
+                    # Nothing is rewinding — a transport failure on work that all
+                    # "completed" is a verdict problem, not a node problem.
+                    report.repair_history.append(
+                        {
+                            **recovery,
+                            "repair_round": budget.repairs_used,
+                            "outcome": "no rewindable node; the gap is between claim and evidence",
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
+                    _emit("mission_repair_stopped", {"failure_class": recovery.failure_class, "reason": "nothing to rewind"})
+                    self._save_mission(report)
+                    break
 
                 report.state = MissionState.REPAIRING.value
-                repair_hints = v_res.errors + critic_res.get("repair_directives", [])
-                for node in dag.nodes.values():
+                targets = dag.nodes if rewound is None else {k: v for k, v in dag.nodes.items() if k in rewound}
+                for node in targets.values():
                     node.status = DAGNodeStatus.READY.value
                     node.inputs["repair_hints"] = repair_hints
                     node.retries = 0
 
+                report.repair_history.append(
+                    {
+                        **recovery,
+                        "repair_round": budget.repairs_used,
+                        "verifier_errors": v_res.errors,
+                        "critic_directives": critic_res.get("repair_directives", []),
+                        "nodes_rewound": sorted(targets.keys()),
+                        "whole_dag": rewound is None,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
                 report.state = MissionState.PLANNING.value
-                _emit("mission_repair", {"round": budget.repairs_used, "hints": [str(h)[:120] for h in repair_hints[:6]]})
+                _emit(
+                    "mission_repair",
+                    {
+                        "round": budget.repairs_used,
+                        "failure_class": recovery.failure_class,
+                        "recovery_actions": [a.value for a in recovery.actions],
+                        "nodes_rewound": sorted(targets.keys())[:12],
+                        "hints": [str(h)[:120] for h in repair_hints[:6]],
+                    },
+                )
                 self._save_mission(report)
                 continue
             else:
