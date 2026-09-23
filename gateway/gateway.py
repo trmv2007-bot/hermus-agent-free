@@ -284,7 +284,7 @@ async def _memory_maintenance_loop():
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
     setup_logging()
-    
+
     # Validate critical configuration at startup (can be skipped with HERMUS_SKIP_VALIDATION=1)
     if os.getenv("HERMUS_SKIP_VALIDATION", "").lower() not in ("1", "true", "yes"):
         try:
@@ -296,7 +296,7 @@ async def lifespan(app: FastAPI):
             raise
         except Exception as e:
             logger.warning(f"[Gateway] Config validation error (non-fatal): {e}")
-    
+
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
     if getattr(config, "auto_start_channels", True):
@@ -308,21 +308,21 @@ async def lifespan(app: FastAPI):
         await _realtime.startup(app, agent_getter=get_agent_for_user)
     except Exception as e:
         logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
-    
+
     # Initialize Fleet Orchestrator (roadmap step 4)
     orchestrator = None
     try:
+        from core.fleet.bus import FleetBus
         from core.fleet.orchestrator import Orchestrator
         from core.fleet.registry import FleetRegistry, chat_via_freellm
-        from core.fleet.bus import FleetBus
-        
+
         # Get or create the fleet registry
         reg = getattr(app.state, "fleet_registry", None)
         if reg is None:
             bus = FleetBus()
             reg = FleetRegistry(bus, chat_fn=chat_via_freellm)
             app.state.fleet_registry = reg
-        
+
         orchestrator = Orchestrator(reg, reg.bus)
         app.state.fleet_orchestrator = orchestrator
         logger.info("[Gateway] Fleet Orchestrator initialized")
@@ -580,8 +580,8 @@ _realtime.install(app)
 
 # Per-concern routers (extracted from this module; see gateway/routes_*.py).
 # Mounted after the realtime layer so its routes keep precedence.
-from gateway.routes_android import router as _android_router  # noqa: E402
 from gateway.routes_agents import router as _agents_router  # noqa: E402
+from gateway.routes_android import router as _android_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
 from gateway.routes_channels import router as _channels_router  # noqa: E402
@@ -589,6 +589,8 @@ from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
 from gateway.routes_console import router as _console_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
+from gateway.routes_fleet import router as _fleet_router  # noqa: E402
+from gateway.routes_fleet import ws_router as _fleet_ws_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
@@ -597,8 +599,6 @@ from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
-from gateway.routes_fleet import router as _fleet_router  # noqa: E402
-from gateway.routes_fleet import ws_router as _fleet_ws_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -797,6 +797,30 @@ async def control_room_css():
 async def jarvis_hud_css():
     """JARVIS HUD overlay stylesheet (additive layer above control.css)."""
     return _serve_control_asset("jarvis-hud.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/hood.css")
+async def hood_css():
+    """Instrument-space (hood) stylesheet. Referenced by control.html head."""
+    return _serve_control_asset("hood.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/hood.js")
+async def hood_js():
+    """Instrument-space shell: opens/closes the hood and drives its readouts."""
+    return _serve_control_asset("hood.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/gods-eye.js")
+async def gods_eye_js():
+    """Canvas globe rendered from local math — no external 3D library."""
+    return _serve_control_asset("gods-eye.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/assets/favicon.svg")
+async def favicon_svg():
+    """Tab icon."""
+    return _serve_control_asset("assets/favicon.svg", "image/svg+xml")
 
 
 @app.get("/static/jarvis-hud.js")

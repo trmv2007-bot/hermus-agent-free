@@ -533,34 +533,38 @@ Free stack: No API keys needed for ollama/ + DuckDuckGo search + SQLite FTS5
 
                 # For free version, simple non-streaming but could stream via llm.chat_stream()
                 try:
-                    # Try streaming via LLM
-                    from core.models import get_model_gateway
+                    # ONE owner for the turn. The TUI used to stream a speculative
+                    # completion straight from the gateway with the full tool
+                    # catalog, print it, and then call agent.chat() — which ran the
+                    # whole ReAct loop again. Two model calls, two prompts, and the
+                    # text on screen could disagree with the answer returned.
+                    streamed: list[str] = []
 
-                    # Build messages similar to agent
-                    messages = [
-                        {"role": "system", "content": self.agent._build_system_prompt()},
-                        {"role": "user", "content": text},
-                    ]
-                    # Stream
-                    full_response = ""
-                    for chunk in get_model_gateway().stream(messages, tools=self.agent.tools):
-                        print(chunk, end="", flush=True)
-                        full_response += chunk
+                    def _on_event(kind, payload, _sink=streamed):
+                        if kind == "llm_delta":
+                            piece = str((payload or {}).get("text") or "")
+                            if piece:
+                                _sink.append(piece)
+                                print(piece, end="", flush=True)
 
-                    # Actually call agent.chat for full logic with tools (for now use non-streaming result after)
-                    # For TUI, we already streamed via chat_stream, but need real agent logic
-                    result = self.agent.chat(text)
-                    # If result has tools, print tools
+                    result = self.agent.chat(text, stream=True, on_event=_on_event)
+
                     if result.get("tool_results"):
                         print(f"\n[Tools: {', '.join([tr['tool'] for tr in result['tool_results']])}]")
 
-                    # If skill created
                     if result.get("skill_created") and result["skill_created"].get("created"):
                         print(f"\n[New skill auto-created: {result['skill_created']['name']} - self-improving]")
 
-                    # If we streamed earlier, we already printed, but ensure final response printed if different
-                    if full_response.strip() != result["response"][: len(full_response)].strip():
-                        print(f"\n{result['response']}")
+                    answer = str(result.get("response") or "")
+                    if "".join(streamed).strip() != answer.strip():
+                        # Streaming can stop at a tool round; the final answer
+                        # still has to reach the screen.
+                        if streamed:
+                            print()
+                        print(answer)
+                        streamed.clear()
+                    else:
+                        print()
 
                 except KeyboardInterrupt:
                     print("\n[Interrupted - Ctrl+C] Use /exit to quit or continue chatting")
