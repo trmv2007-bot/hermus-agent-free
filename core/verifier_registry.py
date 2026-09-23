@@ -576,21 +576,78 @@ class GenericVerifier(BaseVerifier):
         text = str(context.get("output") or context.get("result") or "").strip()
         low = text.lower()
         problems = [m for m in self.ERROR_MARKERS if m in low]
-        ok = bool(text) and not problems
+        text_ok = bool(text) and not problems
 
-        evidence = [
-            {"type": "behavioral", "check": "marker_scan", "status": "clean" if ok else "failed", "problems_found": problems}
+        evidence: list[dict[str, Any]] = [
+            {"type": "behavioral", "check": "marker_scan", "status": "clean" if text_ok else "failed", "problems_found": problems}
         ]
         errors = [f"Problem marker detected: '{p}'" for p in problems] if problems else []
+        warnings: list[str] = []
+
+        # The grounded half: look at the deliverables instead of reading the
+        # description of them. Before this, every check this verifier ran
+        # examined text the worker supplied, so a generic mission could only ever
+        # be as verified as the worker's own sentence.
+        root_dir = Path(context.get("workspace_dir") or context.get("target_dir") or workspace.root)
+        reported = [str(a).strip() for a in (context.get("artifacts") or []) if str(a).strip()]
+        present = 0
+        absent: list[str] = []
+        empty: list[str] = []
+        for item in reported:
+            path = Path(item) if Path(item).is_absolute() else root_dir / item
+            if not path.exists():
+                absent.append(item)
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError:
+                absent.append(item)
+                continue
+            if size == 0:
+                empty.append(item)
+                continue
+            present += 1
+            evidence.append({"type": "structural", "check": "file_exists", "file": str(path), "status": "present", "size_bytes": size})
+
+        if reported:
+            if absent:
+                errors.append(f"Reported deliverable(s) not found on disk: {', '.join(absent[:8])}")
+            if empty:
+                errors.append(f"Reported deliverable(s) exist but are empty: {', '.join(empty[:8])}")
+            grounded_ok = present > 0 and not absent and not empty
+            if present and not grounded_ok:
+                warnings.append(f"{present} of {len(reported)} reported deliverables are actually there")
+        else:
+            warnings.append("No deliverable was reported, so nothing could be checked on disk — the verdict rests on the worker's own output text")
+
+        # Text problems alone used to be enough to pass. Now a reported file that
+        # is not there fails even when the prose reads clean.
+        verified = text_ok and (bool(reported) == (present > 0 and not absent and not empty))
+
+        # A verified outcome scores as before; the ungrounded-ness is expressed
+        # by provenance and the outcome state, not by quietly docking points.
+        if verified:
+            score = 1.0
+        elif text_ok and reported:
+            score = 0.4
+        else:
+            score = 0.3 if text else 0.0
 
         return VerificationResult(
-            verified=ok,
-            score=1.0 if ok else (0.3 if text else 0.0),
+            verified=verified,
+            score=score,
             domain=self.domain,
-            structural_verified=bool(text),
-            behavioral_verified=ok,
+            structural_verified=bool(reported) == bool(present) and not absent and not empty,
+            behavioral_verified=text_ok,
             evidence=evidence,
             errors=errors,
+            warnings=warnings,
+            details={
+                "deliverables_reported": len(reported),
+                "deliverables_present": present,
+                "deliverables_missing": absent[:10],
+                "deliverables_empty": empty[:10],
+            },
         )
 
 
