@@ -82,6 +82,9 @@ function WorkspaceShell() {
         <button type="button" className="logo" onClick={onLogo} title={`${CLICKS_TO_ENTER} clicks opens the workspace · Alt+W toggles`}>
           HERMUS
         </button>
+        <a className="back" href="/control" title="Back to the product UI">
+          ← control room
+        </a>
         <CommandBar />
         <div className="link-state" title={linkLabel.join(" · ")}>
           {Object.entries(link).map(([name, state]) => (

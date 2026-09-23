@@ -85,3 +85,13 @@ def test_a_missing_asset_says_so_instead_of_serving_html():
     response = _client().get("/static/workspace/assets/definitely-not-here.js")
     assert response.status_code == 404
     assert "text/html" not in response.headers.get("content-type", "")
+
+
+def test_the_product_ui_and_the_workspace_link_to_each_other():
+    """The advanced space is otherwise undiscoverable, and the SPA needs a way
+    back to the face."""
+    control = _client().get("/control").text
+    assert "/workspace/app" in control, "control.html lost its way into the workspace"
+
+    bundle = _client().get("/static/workspace/assets/workspace.js").text
+    assert "/control" in bundle, "the workspace lost its link back to the product UI"

@@ -59,6 +59,20 @@ code,
   padding: 4px 6px;
 }
 
+.back {
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.back:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .link-state {
   display: flex;
   gap: 8px;

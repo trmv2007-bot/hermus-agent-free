@@ -164,6 +164,26 @@ body {
 
 .brand-mark { flex: none; filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.35)); }
 
+/* The way into the advanced workspace: quiet text, not a second call to action. */
+.brand-workspace {
+  margin-left: auto;
+  align-self: flex-start;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mut, #8d9ab0);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.brand-workspace:hover {
+  color: var(--acc, #38bdf8);
+  border-color: currentColor;
+}
+
 .brand-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 
 .brand-name {
