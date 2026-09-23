@@ -5,7 +5,7 @@
 
 import { wsUrl } from "../api/client";
 import { useWorkspace } from "../state/workspace-store";
-import { planForEvent, type RuntimeEvent } from "./events";
+import { digest, planForEvent, type RuntimeEvent } from "./events";
 
 export type LinkState = "connecting" | "open" | "closed" | "error";
 
@@ -40,7 +40,7 @@ export function connectStream(path: string, onState: (state: LinkState, detail?:
     const plan = planForEvent(event);
     const workspace = useWorkspace.getState();
     if (plan.ops.length) workspace.applyOps(plan.ops);
-    for (const entry of plan.tray) workspace.pushTray(entry);
+    for (const entry of plan.tray) workspace.pushTray({ ...entry, detail: entry.detail || digest(event.data) });
     if (plan.reveal && !workspace.advanced) workspace.setAdvanced(true);
   };
 

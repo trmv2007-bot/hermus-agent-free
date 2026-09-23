@@ -3,7 +3,7 @@
 // user can act on happens.
 
 import { describe, expect, it } from "vitest";
-import { planForEvent } from "./events";
+import { digest, planForEvent } from "./events";
 
 describe("event → workspace planning", () => {
   it("opens a mission surface when a mission finishes, and reveals the space", () => {
@@ -55,5 +55,27 @@ describe("event → workspace planning", () => {
 
   it("ignores a frame it cannot read", () => {
     expect(planForEvent({})).toEqual({ ops: [], tray: [], reveal: false });
+  });
+});
+
+describe("digest", () => {
+  it("renders the fewest fields that still identify a frame", () => {
+    expect(digest({ mission_id: "msn_1", state: "failed" })).toBe("mission_id=msn_1 state=failed");
+    expect(digest({})).toBe("");
+    expect(digest(undefined)).toBe("");
+  });
+
+  it("keeps nested payloads short instead of dumping them", () => {
+    const line = digest({ data: { long: "y".repeat(400) } });
+
+    expect(line.length).toBeLessThan(80);
+    expect(line).toContain("data=");
+  });
+
+  it("caps how many fields one row shows", () => {
+    const line = digest({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 });
+
+    expect(line.split(" ")).toHaveLength(4);
+    expect(line).not.toContain("f=");
   });
 });

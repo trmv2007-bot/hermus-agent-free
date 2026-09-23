@@ -5,6 +5,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, GatewayError, type MissionView } from "../api/client";
+import { digest } from "../realtime/events";
+
 import { useWorkspace } from "../state/workspace-store";
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -330,38 +332,58 @@ export function TelemetryPanel() {
 }
 
 export function LogsPanel() {
-  const events = useQuery({ queryKey: ["events-recent"], queryFn: () => api.events(80), refetchInterval: 4000 });
-
-  if (events.isError) return <Probe error={events.error} path="/events/recent" />;
-  if (!events.data) return <Loading what="the recent event feed" />;
+  // The live streams are the real feed. ``/events/recent`` is a separate
+  // in-process mirror that is empty until something publishes to it, so polling
+  // it alone would show a healthy-looking page with nothing on it.
+  const tray = useWorkspace((state) => state.tray);
+  const [showDurable, setShowDurable] = useState(false);
+  const durable = useQuery({
+    queryKey: ["events-recent"],
+    queryFn: () => api.events(80),
+    enabled: showDurable,
+    refetchInterval: showDurable ? 5000 : false,
+  });
 
   return (
     <div className="panel">
       <ul className="logs">
-        {events.data
-          .slice()
-          .reverse()
-          .slice(0, 60)
-          .map((event, index) => (
-            <li key={String(event.id ?? `row-${index}`)}>
-              <span className="muted">{typeof event.ts === "string" ? event.ts.slice(11, 19) : ""}</span>
-              <b>{event.type ?? "event"}</b>
-              <span className="mono">{summarisePayload(event.data)}</span>
-            </li>
-          ))}
-        {!events.data.length ? <li className="muted">no events recorded since the gateway started</li> : null}
+        {tray.map((entry) => (
+          <li key={`${entry.label}-${entry.at}`}>
+            <span className="muted">{new Date(entry.at).toISOString().slice(11, 19)}</span>
+            <b>{entry.label}</b>
+            <span className="mono">{entry.detail}</span>
+          </li>
+        ))}
+        {!tray.length ? <li className="muted">nothing has arrived on the live streams since this tab opened</li> : null}
       </ul>
-      <p className="muted tiny">this is the runtime trace, not the model&rsquo;s context — nothing here is sent to a worker</p>
+
+      <footer className="panel-foot">
+        <button type="button" className="ghost" onClick={() => setShowDurable(true)}>
+          also read /events/recent
+        </button>
+      </footer>
+      {showDurable ? (
+        durable.isError ? (
+          <Probe error={durable.error} path="/events/recent" />
+        ) : (
+          <ul className="logs">
+            {(durable.data ?? []).slice(0, 40).map((event, index) => (
+              <li key={String(event.id ?? `durable-${index}`)}>
+                <span className="muted" />
+                <b>{event.type ?? "event"}</b>
+                <span className="mono">{digest(event.data)}</span>
+              </li>
+            ))}
+            {!durable.data?.length ? <li className="muted">the durable mirror has nothing recorded</li> : null}
+          </ul>
+        )
+      ) : null}
+      <p className="muted tiny">
+        this is the runtime trace, not the model&rsquo;s context — nothing shown here is sent to a worker because it appears
+        here.
+      </p>
     </div>
   );
-}
-
-function summarisePayload(data: Record<string, unknown> | undefined): string {
-  if (!data) return "";
-  return Object.entries(data)
-    .slice(0, 4)
-    .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value).slice(0, 40) : String(value).slice(0, 40)}`)
-    .join(" ");
 }
 
 export function PendingPanel({ label }: { label: string }) {

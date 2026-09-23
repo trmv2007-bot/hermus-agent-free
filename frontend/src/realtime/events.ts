@@ -30,6 +30,15 @@ function eventKind(event: RuntimeEvent): string {
   return String(event.type ?? event.kind ?? "");
 }
 
+/** A compact, honest one-liner for a runtime frame. */
+export function digest(data: Record<string, unknown> | undefined): string {
+  if (!data) return "";
+  return Object.entries(data)
+    .slice(0, 4)
+    .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value).slice(0, 40) : String(value).slice(0, 40)}`)
+    .join(" ");
+}
+
 function missionId(event: RuntimeEvent): string | undefined {
   const data = event.data ?? {};
   const value = data.mission_id ?? data.id ?? data.mission;
