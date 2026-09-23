@@ -193,3 +193,39 @@ def test_evidence_is_reachable_through_the_on_demand_tier(tmp_path, monkeypatch)
     assert "1 observed" in by_mission["text"] and entry.id in by_mission["text"]
 
     assert read_context("evidence", "ev_nope")["success"] and not read_context("evidence", "ev_nope")["text"]
+
+
+def test_the_http_face_serves_references_and_rechecks_them(tmp_path, monkeypatch):
+    """A surface opens evidence over the same split the prompt uses: list the
+    references, fetch one, and ask the store whether its artifact still holds."""
+    from fastapi.testclient import TestClient
+
+    import core.mission as mission_module
+    from core.mission import MissionEngine
+    from gateway.gateway import app
+
+    def executor(node, ctx):
+        return {"success": True, "output": "done", "evidence": [{"check": "ok", "status": "passed"}]}
+
+    engine = MissionEngine(executor=executor, storage_dir=tmp_path / "missions")
+    report = engine.start_mission("evidence over http", budget_steps=4)
+    assert report.evidence_refs
+    monkeypatch.setattr(mission_module, "mission_engine", engine)
+    client = TestClient(app)
+
+    listed = client.get(f"/missions/{report.mission_id}/evidence")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["mission_id"] == report.mission_id
+    assert body["referenced_by_report"] == report.evidence_refs
+    assert body["outcome_state"] == report.outcome_state
+    assert [entry["id"] for entry in body["evidence"]] == report.evidence_refs
+
+    ref = body["evidence"][0]["id"]
+    one = client.get(f"/missions/{report.mission_id}/evidence/{ref}")
+    assert one.status_code == 200
+    assert one.json()["recheck"]["found"] is True
+
+    # A reference is not a capability: it only reads inside its own mission.
+    assert client.get(f"/missions/other-mission/evidence/{ref}").status_code == 404
+    assert client.get(f"/missions/{report.mission_id}/evidence/ev_does_not_exist").status_code == 404

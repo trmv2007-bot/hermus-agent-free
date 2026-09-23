@@ -802,6 +802,51 @@ async def mission_get_api(mission_id: str):
     return report.to_dict()
 
 
+@router.get("/missions/{mission_id}/evidence")
+async def mission_evidence_list_api(mission_id: str, source: str | None = None, limit: int = 50):
+    """The filed evidence behind a mission: references, their source, one line each.
+
+    A surface opens this rather than having payloads inlined into it, which is
+    the same split the model's context uses. ``source`` filters to
+    observed / worker-reported / unclassified.
+    """
+    from core.mission import mission_engine
+
+    report = await asyncio.to_thread(mission_engine.get_mission, mission_id)
+    if not report:
+        return JSONResponse({"error": f"Mission {mission_id} not found"}, status_code=404)
+    records = await asyncio.to_thread(
+        lambda: mission_engine.evidence.list(mission_id, limit=max(1, min(int(limit or 50), 500)), source=source)
+    )
+    return {
+        "mission_id": mission_id,
+        "outcome_state": report.outcome_state,
+        "state": report.state,
+        "referenced_by_report": report.evidence_refs,
+        "digest": mission_engine.evidence.digest(mission_id, limit=len(records) or 1),
+        "evidence": [entry.to_dict() for entry in records],
+    }
+
+
+@router.get("/missions/{mission_id}/evidence/{ref}")
+async def mission_evidence_get_api(mission_id: str, ref: str, recheck: bool = True):
+    """Open one record, and by default look at its artifact again right now.
+
+    The re-check is the answer to "did it actually happen, still?" without
+    re-reading anyone's claim about it.
+    """
+    from core.mission import mission_engine
+
+    record = await asyncio.to_thread(mission_engine.evidence.get, ref)
+    # Scoped to the requested mission: a reference is not a capability.
+    if record is None or record.mission_id != str(mission_id):
+        return JSONResponse({"error": f"no evidence {ref} for mission {mission_id}"}, status_code=404)
+    payload = record.to_dict()
+    if recheck:
+        payload["recheck"] = await asyncio.to_thread(mission_engine.evidence.recheck, ref)
+    return payload
+
+
 @router.post("/missions/{mission_id}/preflight/approvals")
 async def mission_preflight_approvals_api(mission_id: str):
     from core.autonomy_preflight import create_preflight_approval_requests
