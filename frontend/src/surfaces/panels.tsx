@@ -166,27 +166,64 @@ export function EvidencePanel({ surfaceId }: { surfaceId: string }) {
   );
 }
 
+function elapsedSince(iso?: string): string {
+  if (!iso) return "never";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "unknown";
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
 export function WorkerPanel({ surfaceId }: { surfaceId: string }) {
   const query = useQuery({ queryKey: ["agents"], queryFn: () => api.agents(), refetchInterval: 5000 });
+  const title = useWorkspace.getState().surfaces[surfaceId]?.title ?? "";
+  const wanted = title.startsWith("Worker · ") ? title.slice("Worker · ".length) : "";
+
   if (query.isError) return <Probe error={query.error} path="/api/fleet/agents" />;
-  if (!query.data) return <Loading what="the worker roster" />;
-  const name = useWorkspace.getState().surfaces[surfaceId]?.title.replace("Worker · ", "");
+  if (!query.data) return <Loading what="the durable roster" />;
+
+  const agents = query.data.filter((agent) => !wanted || agent.name === wanted || agent.id === wanted);
+  const byState = query.data.reduce<Record<string, number>>((acc, agent) => {
+    acc[agent.state] = (acc[agent.state] ?? 0) + 1;
+    return acc;
+  }, {});
 
   return (
-    <ul className="panel rows">
-      {query.data
-        .filter((agent) => !name || agent.name === name || agent.agent_id === name)
-        .map((agent) => (
-          <li key={agent.agent_id}>
-            <span className={agent.state.toLowerCase()}>{agent.state}</span>
-            <b>{agent.name}</b>
-            <span className="muted">
-              {agent.provider}/{agent.model || "unassigned"}
-            </span>
-            <em className="muted">{agent.current_task ? "busy" : "idle"}</em>
+    <div className="panel">
+      <p className="muted tiny">
+        {query.data.length} worker(s)
+        {Object.entries(byState).map(([state, count]) => ` · ${state.toLowerCase()} ${count}`)}
+      </p>
+      <ul className="workers">
+        {agents.map((agent) => (
+          <li key={agent.id}>
+            <span className={`pill state-${agent.state.toLowerCase()}`}>{agent.state.toLowerCase()}</span>
+            <div className="worker-main">
+              <b>{agent.name}</b>
+              <span className="muted">
+                {agent.provider}/{agent.model || "no model assigned"}
+                {agent.key_name ? ` · key ${agent.key_name}` : " · no key alias"}
+              </span>
+              {agent.current_task ? <em className="task">on: {String(agent.current_task).slice(0, 90)}</em> : <em className="muted">nothing assigned</em>}
+            </div>
+            <div className="worker-meta">
+              <span>
+                {agent.stats?.tasks_done ?? 0} done / {agent.stats?.tasks_failed ?? 0} failed
+              </span>
+              <span className="muted">{elapsedSince(agent.last_activity)}</span>
+            </div>
           </li>
         ))}
-    </ul>
+        {!agents.length ? <li className="muted">no worker matches this surface</li> : null}
+      </ul>
+      <p className="muted tiny">
+        a sleeping worker means HERMUS kept its session, task history and checkpoint so it can be resumed without being
+        rebuilt. It does not mean a remote provider is still holding a model loaded — nothing here can know that.
+      </p>
+    </div>
   );
 }
 

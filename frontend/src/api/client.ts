@@ -44,15 +44,20 @@ export interface EvidenceView {
   recheck?: { state: string; found: boolean };
 }
 
+/** The fleet card shape — see ``_agent_card`` in gateway/routes_fleet.py. */
 export interface AgentView {
-  agent_id: string;
+  id: string;
   name: string;
   state: string;
   provider: string;
   model: string;
-  current_task?: string | null;
-  stats?: Record<string, number>;
+  key_name?: string | null;
+  skills?: string[];
   last_activity?: string;
+  created_at?: string;
+  stats?: { tasks_done?: number; tasks_failed?: number; tokens?: number };
+  memory_summary?: string;
+  current_task?: string | null;
 }
 
 export interface KeyProbe {

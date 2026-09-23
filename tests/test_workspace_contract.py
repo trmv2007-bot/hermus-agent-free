@@ -88,6 +88,43 @@ def test_the_key_health_panel_will_not_render_fields_that_do_not_exist():
         assert {"provider", "healthy", "success"} <= set(probe)
 
 
+def test_the_roster_card_has_every_field_the_worker_centre_reads():
+    """The Worker Center panel was written against ``agent_id``; the card names it
+    ``id``, which would have rendered an empty roster with no error anywhere.
+
+    Built from the projection itself rather than the live roster, because an empty
+    fleet would make this test vacuously pass.
+    """
+    from datetime import datetime, timezone
+
+    from gateway.routes_fleet import _agent_card
+
+    class StubStats:
+        def to_dict(self):
+            return {"tasks_done": 3, "tasks_failed": 1, "tokens": 4200}
+
+    class StubAgent:
+        agent_id = "agt_1"
+        name = "Friday"
+        state = "IDLE"
+        provider = "groq"
+        model = "llama-3.3-70b"
+        key_name = "groq-primary"
+        skills = ["triage"]
+        last_activity = datetime.now(timezone.utc).isoformat()
+        created_at = last_activity
+        stats = StubStats()
+        summary = "handled 3 tasks"
+        current_task = None
+
+    card = _agent_card(StubAgent())
+    panel_fields = {"id", "name", "state", "provider", "model", "key_name", "stats", "last_activity", "current_task"}
+    missing = panel_fields - set(card)
+    assert not missing, f"the fleet card no longer carries {missing}"
+    assert card["id"] == "agt_1", "the panel keys React rows off `id`"
+    assert {"tasks_done", "tasks_failed", "tokens"} <= set(card["stats"])
+
+
 def test_the_model_panel_reads_the_catalogue_key_the_gateway_sends():
     body = _client().get("/engine/models").json()
     assert "catalog" in body, "the workspace client maps `catalog`; a rename here breaks the panel"

@@ -501,3 +501,69 @@ button.ghost {
     transition: border-color 120ms ease;
   }
 }
+
+/* Worker Center: roster rows with the state a watcher actually reads first. */
+.workers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.workers li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 0;
+}
+
+.pill {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 1px 7px;
+  color: var(--muted);
+  align-self: center;
+  white-space: nowrap;
+}
+
+.pill.state-working,
+.pill.state-thinking {
+  color: var(--accent);
+  border-color: currentColor;
+}
+
+.pill.state-idle {
+  color: var(--ok);
+}
+
+.pill.state-error,
+.pill.state-blocked {
+  color: var(--bad);
+}
+
+.worker-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.worker-main .task {
+  color: var(--text);
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.worker-meta {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
