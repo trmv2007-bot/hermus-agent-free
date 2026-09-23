@@ -14,6 +14,9 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
   const focusSurface = useWorkspace((state) => state.focusSurface);
   const closeSurface = useWorkspace((state) => state.closeSurface);
   const minimizeSurface = useWorkspace((state) => state.minimizeSurface);
+  const maximizeSurface = useWorkspace((state) => state.maximizeSurface);
+  const unmaximizeSurface = useWorkspace((state) => state.unmaximizeSurface);
+  const hideSurface = useWorkspace((state) => state.hideSurface);
   const dockSurface = useWorkspace((state) => state.dockSurface);
   const togglePin = useWorkspace((state) => state.togglePin);
   const viewport = useWorkspace((state) => state.viewport);
@@ -56,6 +59,16 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
           </button>
           <button type="button" title="dock right" onClick={() => dockSurface(surface.id, surface.dock === "right" ? "none" : "right")}>
             ◨
+          </button>
+          <button
+            type="button"
+            title={surface.restoreGeometry ? "restore size" : "maximise"}
+            onClick={() => (surface.restoreGeometry ? unmaximizeSurface(surface.id) : maximizeSurface(surface.id))}
+          >
+            {surface.restoreGeometry ? "❐" : "□"}
+          </button>
+          <button type="button" title="hide — stays open, takes no space" onClick={() => hideSurface(surface.id)}>
+            ⌄
           </button>
           <button type="button" title="minimize" onClick={() => minimizeSurface(surface.id)}>
             –

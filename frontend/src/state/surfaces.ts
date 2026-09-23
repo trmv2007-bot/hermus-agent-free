@@ -54,6 +54,8 @@ export interface Surface {
   kind: SurfaceKind;
   title: string;
   geometry: Geometry;
+  /** Present only while maximised: where this surface sat before, so undoing it is exact. */
+  restoreGeometry?: Geometry;
   visible: boolean;
   focused: boolean;
   dock: DockSide;

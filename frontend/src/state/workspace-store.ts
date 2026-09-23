@@ -45,6 +45,10 @@ export type WorkspaceOp =
   | { op: "resize"; id: string; w: number; h: number }
   | { op: "dock"; id: string; side: DockSide }
   | { op: "minimize"; id: string }
+  | { op: "maximize"; id: string }
+  | { op: "unmaximize"; id: string }
+  | { op: "hide"; id: string }
+  | { op: "show"; id: string }
   | { op: "restore"; id: string }
   | { op: "pin"; id: string; pinned: boolean }
   | { op: "rename"; id: string; title: string };
@@ -69,6 +73,10 @@ interface WorkspaceState {
   dockSurface: (id: string, side: DockSide) => void;
   minimizeSurface: (id: string) => void;
   restoreSurface: (id: string) => void;
+  maximizeSurface: (id: string) => void;
+  unmaximizeSurface: (id: string) => void;
+  hideSurface: (id: string) => void;
+  showSurface: (id: string) => void;
   togglePin: (id: string) => void;
   renameSurface: (id: string, title: string) => void;
   setAdvanced: (on: boolean) => void;
@@ -137,6 +145,10 @@ export function validateOp(value: unknown): { ok: true; op: WorkspaceOp } | { ok
     case "close":
     case "focus":
     case "minimize":
+    case "maximize":
+    case "unmaximize":
+    case "hide":
+    case "show":
     case "restore":
       return id ? { ok: true, op: { op: value.op, id } } : { ok: false, reason: "no surface id" };
     case "move":
@@ -347,6 +359,76 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  /** Fill the stage, remembering exactly where the surface came from. */
+  maximizeSurface: (id) => {
+    const state = get();
+    const surface = state.surfaces[id];
+    if (!surface || surface.restoreGeometry) return;
+    const chrome = 92; // topbar + dock tray
+    const geometry: Geometry = {
+      x: 0,
+      y: 0,
+      w: Math.max(MIN_W, state.viewport.w),
+      h: Math.max(MIN_H, state.viewport.h - chrome),
+      z: state.zTop + 1,
+    };
+    set({
+      zTop: geometry.z,
+      focusedId: id,
+      surfaces: {
+        ...state.surfaces,
+        [id]: {
+          ...surface,
+          restoreGeometry: surface.geometry,
+          geometry,
+          dock: "none",
+          visible: true,
+          focused: true,
+          lifecycle: "active",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    get().persist();
+  },
+
+  unmaximizeSurface: (id) => {
+    const state = get();
+    const surface = state.surfaces[id];
+    if (!surface?.restoreGeometry) return;
+    set({
+      surfaces: {
+        ...state.surfaces,
+        [id]: { ...surface, geometry: surface.restoreGeometry, restoreGeometry: undefined, updatedAt: Date.now() },
+      },
+    });
+    get().persist();
+  },
+
+  /** Hidden, not closed: its data and identity survive, it just takes no space. */
+  hideSurface: (id) => {
+    const state = get();
+    const surface = state.surfaces[id];
+    if (!surface) return;
+    set({
+      surfaces: { ...state.surfaces, [id]: { ...surface, visible: false, focused: false, lifecycle: "background", updatedAt: Date.now() } },
+      focusedId: state.focusedId === id ? null : state.focusedId,
+    });
+    get().persist();
+  },
+
+  showSurface: (id) => {
+    const state = get();
+    const surface = state.surfaces[id];
+    if (!surface || surface.visible) return;
+    const z = state.zTop + 1;
+    set({
+      zTop: z,
+      focusedId: id,
+      surfaces: { ...state.surfaces, [id]: { ...surface, visible: true, focused: true, lifecycle: "active", geometry: { ...surface.geometry, z }, updatedAt: Date.now() } },
+    });
+  },
+
   togglePin: (id) => {
     const state = get();
     const surface = state.surfaces[id];
@@ -438,6 +520,18 @@ function applyOne(state: WorkspaceState, set: (partial: Partial<WorkspaceState>)
     case "minimize":
       state.minimizeSurface(op.id);
       return;
+    case "maximize":
+      state.maximizeSurface(op.id);
+      return;
+    case "unmaximize":
+      state.unmaximizeSurface(op.id);
+      return;
+    case "hide":
+      state.hideSurface(op.id);
+      return;
+    case "show":
+      state.showSurface(op.id);
+      return;
     case "restore":
       state.restoreSurface(op.id);
       return;
@@ -464,4 +558,11 @@ export function minimizedSurfaces(state: { surfaces: Record<string, Surface>; or
   return state.order
     .map((id) => state.surfaces[id])
     .filter((surface): surface is Surface => Boolean(surface) && surface.lifecycle === "minimized");
+}
+
+/** Everything out of sight but still alive: minimised or hidden, both restorable. */
+export function stowedSurfaces(state: { surfaces: Record<string, Surface>; order: string[] }): Surface[] {
+  return state.order
+    .map((id) => state.surfaces[id])
+    .filter((surface): surface is Surface => Boolean(surface) && !surface.visible);
 }

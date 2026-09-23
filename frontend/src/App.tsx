@@ -8,7 +8,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectStream, STREAMS, type LinkState } from "./realtime/connection";
-import { minimizedSurfaces, useWorkspace, visibleSurfaces } from "./state/workspace-store";
+import { stowedSurfaces, useWorkspace, visibleSurfaces } from "./state/workspace-store";
 import type { SurfaceKind } from "./state/surfaces";
 import { SurfaceFrame } from "./shell/SurfaceFrame";
 import { CommandBar } from "./shell/CommandBar";
@@ -40,13 +40,13 @@ function WorkspaceShell() {
   const tray = useWorkspace((state) => state.tray);
   const resetLayout = useWorkspace((state) => state.resetLayout);
   const openSurface = useWorkspace((state) => state.openSurface);
-  const restoreSurface = useWorkspace((state) => state.restoreSurface);
+  const showSurface = useWorkspace((state) => state.showSurface);
   const setViewport = useWorkspace((state) => state.setViewport);
   const link = useLiveLink();
   const clicks = useRef<number[]>([]);
   const linkLabel = useMemo(() => Object.entries(link).map(([name, state]) => `${name}: ${state}`), [link]);
   const shown = useMemo(() => visibleSurfaces({ surfaces, order }), [surfaces, order]);
-  const hidden = useMemo(() => minimizedSurfaces({ surfaces, order }), [surfaces, order]);
+  const stowed = useMemo(() => stowedSurfaces({ surfaces, order }), [surfaces, order]);
 
   useEffect(() => {
     const measure = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
@@ -146,8 +146,8 @@ function WorkspaceShell() {
           ) : null}
 
           <footer className="dock">
-            {hidden.map((surface) => (
-              <button key={surface.id} type="button" className="chip" onClick={() => restoreSurface(surface.id)}>
+            {stowed.map((surface) => (
+              <button key={surface.id} type="button" className="chip" onClick={() => showSurface(surface.id)}>
                 {surface.title}
               </button>
             ))}

@@ -4,7 +4,7 @@
 // is not on the typed list is refused rather than obeyed.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { minimizedSurfaces, useWorkspace, visibleSurfaces } from "./workspace-store";
+import { minimizedSurfaces, stowedSurfaces, useWorkspace, visibleSurfaces } from "./workspace-store";
 
 function reset() {
   useWorkspace.setState({ surfaces: {}, order: [], zTop: 10, focusedId: null, advanced: false, rejected: [], tray: [] });
@@ -143,5 +143,62 @@ describe("typed self-modification", () => {
     expect(outcome.applied).toBe(1);
     expect(outcome.rejected).toBe(0);
     expect(useWorkspace.getState().surfaces.ghost).toBeUndefined();
+  });
+});
+
+describe("maximise, hide and stow", () => {
+  it("fills the stage and returns to the exact geometry it came from", () => {
+    useWorkspace.getState().setViewport({ w: 1400, h: 900 });
+    const id = useWorkspace.getState().openSurface({ kind: "mission", source: { kind: "user" } });
+    const before = useWorkspace.getState().surfaces[id].geometry;
+
+    useWorkspace.getState().maximizeSurface(id);
+    const maximised = useWorkspace.getState().surfaces[id];
+    expect(maximised.geometry.x).toBe(0);
+    expect(maximised.geometry.w).toBe(1400);
+    expect(maximised.geometry.h).toBeLessThan(900);
+    expect(maximised.dock).toBe("none");
+
+    useWorkspace.getState().unmaximizeSurface(id);
+    expect(useWorkspace.getState().surfaces[id].geometry).toEqual(before);
+    expect(useWorkspace.getState().surfaces[id].restoreGeometry).toBeUndefined();
+  });
+
+  it("does not lose the original geometry when maximised twice", () => {
+    const id = useWorkspace.getState().openSurface({ kind: "logs", source: { kind: "user" } });
+    const before = useWorkspace.getState().surfaces[id].geometry;
+
+    useWorkspace.getState().maximizeSurface(id);
+    useWorkspace.getState().maximizeSurface(id);
+
+    expect(useWorkspace.getState().surfaces[id].restoreGeometry).toEqual(before);
+  });
+
+  it("hides without closing, and stows both kinds for the tray", () => {
+    const hidden = useWorkspace.getState().openSurface({ kind: "model", source: { kind: "user" } });
+    const minimised = useWorkspace.getState().openSurface({ kind: "worker", source: { kind: "user" } });
+    useWorkspace.getState().hideSurface(hidden);
+    useWorkspace.getState().minimizeSurface(minimised);
+
+    const state = useWorkspace.getState();
+    expect(visibleSurfaces(state).map((s) => s.id)).not.toContain(hidden);
+    expect(state.surfaces[hidden]).toBeDefined();
+    expect(state.surfaces[hidden].lifecycle).toBe("background");
+    expect(stowedSurfaces(state).map((s) => s.id).sort()).toEqual([hidden, minimised].sort());
+
+    useWorkspace.getState().showSurface(hidden);
+    const shown = useWorkspace.getState();
+    expect(shown.surfaces[hidden].visible).toBe(true);
+    expect(shown.surfaces[hidden].geometry.z).toBeGreaterThan(state.surfaces[hidden].geometry.z);
+  });
+
+  it("reaches the new operations through the typed list only", () => {
+    const id = useWorkspace.getState().openSurface({ kind: "evidence", source: { kind: "user" } });
+
+    expect(useWorkspace.getState().applyOps([{ op: "maximize", id }])).toEqual({ applied: 1, rejected: 0 });
+    expect(useWorkspace.getState().surfaces[id].restoreGeometry).toBeDefined();
+    expect(useWorkspace.getState().applyOps([{ op: "unmaximize", id }, { op: "hide", id }])).toEqual({ applied: 2, rejected: 0 });
+    expect(useWorkspace.getState().surfaces[id].visible).toBe(false);
+    expect(useWorkspace.getState().applyOps([{ op: "destroy_world", id }])).toEqual({ applied: 0, rejected: 1 });
   });
 });
