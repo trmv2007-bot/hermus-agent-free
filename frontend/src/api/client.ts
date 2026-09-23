@@ -55,21 +55,26 @@ export interface AgentView {
   last_activity?: string;
 }
 
-export interface KeyHealthView {
+export interface KeyProbe {
   provider: string;
-  alias: string;
+  base_url?: string;
+  model_tested?: string;
+  success: boolean;
   healthy: boolean;
-  cooldown_until?: number | null;
-  rpm_remaining?: number | null;
-  last_error?: string | null;
+  timestamp?: number;
+  error?: string | null;
+  models_probe?: { success?: boolean; count?: number; error?: string | null };
 }
 
-export interface ModelView {
-  ref: string;
-  provider: string;
-  capabilities?: string[];
-  healthy?: boolean;
-  latency_ms?: number | null;
+/** A local model in the engine catalogue — not a live worker, and not health. */
+export interface ModelCatalogEntry {
+  id: string;
+  name: string;
+  repo?: string;
+  roles?: string[];
+  devices?: string[];
+  est_size_gb?: number;
+  notes?: string;
 }
 
 /**
@@ -154,7 +159,8 @@ export const api = {
     get<{ evidence: EvidenceView[]; outcome_state: string; digest: string }>(`/missions/${encodeURIComponent(id)}/evidence`),
   evidence: (id: string, ref: string) => get<EvidenceView>(`/missions/${encodeURIComponent(id)}/evidence/${encodeURIComponent(ref)}`),
   agents: () => get<{ agents: AgentView[] }>("/api/fleet/agents").then((r) => r.agents ?? []),
-  keys: () => get<{ keys: KeyHealthView[] }>("/api/v1/keys/health").then((r) => r.keys ?? []),
-  models: () => get<{ models: ModelView[] }>("/engine/models").then((r) => r.models ?? []),
+  /** A live probe of every configured provider — deliberately not polled. */
+  keys: () => get<{ results: KeyProbe[] }>("/keys/health").then((r) => r.results ?? []),
+  catalogue: () => get<{ catalog: ModelCatalogEntry[] }>("/engine/models").then((r) => r.catalog ?? []),
   command: (text: string) => post<{ success: boolean; response?: string }>("/api/v1/commands", { command: text }),
 };

@@ -191,39 +191,42 @@ export function WorkerPanel({ surfaceId }: { surfaceId: string }) {
 }
 
 export function ModelPanel() {
-  const models = useQuery({ queryKey: ["models"], queryFn: () => api.models() });
-  const keys = useQuery({ queryKey: ["keys"], queryFn: () => api.keys() });
+  const models = useQuery({ queryKey: ["model-catalogue"], queryFn: () => api.catalogue() });
+  const keys = useQuery({ queryKey: ["key-health"], queryFn: () => api.keys() });
 
   return (
     <div className="panel two-col">
       <section>
-        <h4>Models</h4>
+        <h4>Local model catalogue</h4>
         {models.isError ? <Probe error={models.error} path="/engine/models" /> : null}
-        {!models.isError && !models.data ? <Loading what="models" /> : null}
+        {!models.isError && !models.data ? <Loading what="the model catalogue" /> : null}
         <ul className="rows">
-          {(models.data ?? []).slice(0, 30).map((model) => (
-            <li key={model.ref}>
-              <b>{model.ref}</b>
-              <span className="muted">{(model.capabilities ?? []).join(", ") || "capabilities unknown"}</span>
+          {(models.data ?? []).slice(0, 40).map((model) => (
+            <li key={model.id}>
+              <b>{model.name || model.id}</b>
+              <span className="muted">{(model.roles ?? []).join(", ") || "no roles declared"}</span>
             </li>
           ))}
         </ul>
       </section>
       <section>
-        <h4>Key health</h4>
-        {keys.isError ? <Probe error={keys.error} path="/api/v1/keys/health" /> : null}
-        {!keys.isError && !keys.data ? <Loading what="key health" /> : null}
+        <h4>Provider health</h4>
+        {keys.isError ? <Probe error={keys.error} path="/keys/health" /> : null}
+        {!keys.isError && !keys.data ? <Loading what="provider health (this probes each provider now)" /> : null}
         <ul className="rows">
-          {(keys.data ?? []).map((key) => (
-            <li key={`${key.provider}:${key.alias}`}>
-              <span className={key.healthy ? "ok" : "down"}>{key.healthy ? "healthy" : "unavailable"}</span>
-              <b>{key.alias}</b>
-              <span className="muted">{key.provider}</span>
-              {key.last_error ? <em className="muted">{key.last_error}</em> : null}
+          {(keys.data ?? []).map((probe) => (
+            <li key={`${probe.provider}:${probe.base_url ?? ""}`}>
+              <span className={probe.healthy ? "ok" : "down"}>{probe.healthy ? "reachable" : "unreachable"}</span>
+              <b>{probe.provider}</b>
+              <span className="muted">{probe.model_tested ?? ""}</span>
+              {probe.error ? <em className="muted">{String(probe.error).slice(0, 120)}</em> : null}
             </li>
           ))}
         </ul>
-        <p className="muted tiny">aliases and health only — key material never reaches this app</p>
+        <p className="muted tiny">
+          this panel triggers a real probe of every configured provider when it opens, and shows what came back — including
+          the refusals. Key material never reaches this app.
+        </p>
       </section>
     </div>
   );
