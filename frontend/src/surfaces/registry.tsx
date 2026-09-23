@@ -3,7 +3,7 @@
 // that exists.
 
 import type { SurfaceKind } from "../state/surfaces";
-import { ChatPanel, EvidencePanel, ModelPanel, MissionPanel, PendingPanel, WorkerPanel } from "./panels";
+import { ChatPanel, EvidencePanel, LogsPanel, ModelPanel, MissionPanel, PendingPanel, TelemetryPanel, WorkerPanel } from "./panels";
 
 export interface SurfaceComponent {
   (props: { surfaceId: string }): JSX.Element;
@@ -15,6 +15,8 @@ export const RENDERERS: Partial<Record<SurfaceKind, SurfaceComponent>> = {
   evidence: EvidencePanel,
   worker: WorkerPanel,
   model: ModelPanel,
+  telemetry: TelemetryPanel,
+  logs: LogsPanel,
 };
 
 export function rendererFor(kind: SurfaceKind): SurfaceComponent {

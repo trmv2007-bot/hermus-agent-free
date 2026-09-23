@@ -82,6 +82,39 @@ export interface ModelCatalogEntry {
   notes?: string;
 }
 
+/** ``GET /jobs`` — the live queue and its recent work. */
+export interface JobView {
+  id: string;
+  kind: string;
+  status: string;
+  attempts?: number;
+  max_attempts?: number;
+  duration_ms?: number | null;
+  elapsed_ms?: number | null;
+  error?: string | null;
+  created?: string;
+  created_at?: string;
+}
+
+export interface QueueView {
+  found?: boolean;
+  enabled?: boolean;
+  started?: boolean;
+  backend?: string;
+  workers?: number;
+  maxsize?: number;
+  by_status?: Record<string, number>;
+  registered_kinds?: string[];
+}
+
+export interface EventView {
+  id?: string | number;
+  type?: string;
+  ts?: string | number;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 /**
  * The gateway token is not stored in this app. The serving template injects
  * `window.__HERMUS_GATEWAY_TOKEN`, or the operator passes `?token=` once and it
@@ -168,4 +201,15 @@ export const api = {
   keys: () => get<{ results: KeyProbe[] }>("/keys/health").then((r) => r.results ?? []),
   catalogue: () => get<{ catalog: ModelCatalogEntry[] }>("/engine/models").then((r) => r.catalog ?? []),
   command: (text: string) => post<{ success: boolean; response?: string }>("/api/v1/commands", { command: text }),
+  queue: () => get<{ queue: QueueView }>("/queue/status").then((r) => r.queue ?? {}),
+  jobs: () => get<{ jobs: JobView[]; queue: QueueView }>("/jobs").then((r) => r.jobs ?? []),
+  events: (limit = 60) => get<{ count: number; events: EventView[] }>(`/events/recent?limit=${limit}`).then((r) => r.events ?? []),
 };
+
+/** Fields the workspace panels read, in one place so a Python test can check them. */
+export const READS = {
+  "/jobs": ["id", "kind", "status", "attempts", "duration_ms", "error"],
+  "/queue/status": ["backend", "workers", "maxsize", "enabled", "started", "by_status"],
+  "/missions": ["mission_id", "goal", "state", "outcome_state", "evidence_refs"],
+  "/api/fleet/agents": ["id", "name", "state", "provider", "model", "key_name", "stats", "current_task"],
+} as const;

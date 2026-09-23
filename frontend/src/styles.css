@@ -567,3 +567,42 @@ button.ghost {
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* Telemetry and the runtime trace. */
+.bad {
+  color: var(--bad);
+}
+
+.pill.state-failed,
+.pill.state-error {
+  color: var(--bad);
+  border-color: currentColor;
+}
+
+.pill.state-running,
+.pill.state-pending {
+  color: var(--warn);
+}
+
+.logs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.logs li {
+  display: grid;
+  grid-template-columns: 66px 150px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  border-bottom: 1px solid var(--line);
+  padding: 3px 0;
+}
+
+.logs .mono {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

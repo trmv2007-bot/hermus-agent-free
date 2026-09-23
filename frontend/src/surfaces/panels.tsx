@@ -281,6 +281,89 @@ export function ChatPanel({ surfaceId }: { surfaceId: string }) {
   );
 }
 
+export function TelemetryPanel() {
+  const queue = useQuery({ queryKey: ["queue"], queryFn: () => api.queue(), refetchInterval: 5000 });
+  const jobs = useQuery({ queryKey: ["jobs"], queryFn: () => api.jobs(), refetchInterval: 5000 });
+
+  if (queue.isError) return <Probe error={queue.error} path="/queue/status" />;
+  if (!queue.data) return <Loading what="the queue" />;
+
+  const q = queue.data;
+  const failures = (jobs.data ?? []).filter((job) => job.status === "failed" || job.error);
+
+  return (
+    <div className="panel">
+      <p className="mono">
+        backend {q.backend ?? "?"} · workers {q.workers ?? "?"} · capacity {q.maxsize ?? "?"} · enabled{" "}
+        {q.enabled ? "yes" : "no"} · started {q.started ? "yes" : "no"}
+      </p>
+      {q.by_status && Object.keys(q.by_status).length ? (
+        <p className="muted tiny">
+          {Object.entries(q.by_status)
+            .map(([status, count]) => `${status} ${count}`)
+            .join(" · ")}
+        </p>
+      ) : null}
+
+      <h4>Recent work</h4>
+      {jobs.isError ? <Probe error={jobs.error} path="/jobs" /> : null}
+      <ul className="rows">
+        {(jobs.data ?? []).slice(0, 12).map((job) => (
+          <li key={job.id}>
+            <span className={`pill state-${job.status ?? "unknown"}`}>{job.status ?? "?"}</span>
+            <b>{job.kind}</b>
+            <span className="muted">
+              {job.duration_ms != null ? `${job.duration_ms}ms` : "no duration"} · attempt {job.attempts ?? 1}/{job.max_attempts ?? 1}
+            </span>
+            {job.error ? <em className="bad">{String(job.error).slice(0, 90)}</em> : null}
+          </li>
+        ))}
+        {!jobs.data?.length ? <li className="muted">nothing has run through the queue yet</li> : null}
+      </ul>
+      {failures.length ? (
+        <p className="muted tiny">
+          {failures.length} job(s) carry an error — open one from the mission surface to see what was attempted.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function LogsPanel() {
+  const events = useQuery({ queryKey: ["events-recent"], queryFn: () => api.events(80), refetchInterval: 4000 });
+
+  if (events.isError) return <Probe error={events.error} path="/events/recent" />;
+  if (!events.data) return <Loading what="the recent event feed" />;
+
+  return (
+    <div className="panel">
+      <ul className="logs">
+        {events.data
+          .slice()
+          .reverse()
+          .slice(0, 60)
+          .map((event, index) => (
+            <li key={String(event.id ?? `row-${index}`)}>
+              <span className="muted">{typeof event.ts === "string" ? event.ts.slice(11, 19) : ""}</span>
+              <b>{event.type ?? "event"}</b>
+              <span className="mono">{summarisePayload(event.data)}</span>
+            </li>
+          ))}
+        {!events.data.length ? <li className="muted">no events recorded since the gateway started</li> : null}
+      </ul>
+      <p className="muted tiny">this is the runtime trace, not the model&rsquo;s context — nothing here is sent to a worker</p>
+    </div>
+  );
+}
+
+function summarisePayload(data: Record<string, unknown> | undefined): string {
+  if (!data) return "";
+  return Object.entries(data)
+    .slice(0, 4)
+    .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value).slice(0, 40) : String(value).slice(0, 40)}`)
+    .join(" ");
+}
+
 export function PendingPanel({ label }: { label: string }) {
   return (
     <div className="panel">
