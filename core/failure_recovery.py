@@ -64,6 +64,9 @@ PLAYBOOK: dict[str, list[RecoveryAction]] = {
     # A deliverable that is not on disk is the worker's claim failing, not a
     # transport problem: re-run the work that should have produced it.
     "missing_artifact": [RecoveryAction.PLAN_REPAIR, RecoveryAction.RETRY_NODE, RecoveryAction.REPLAN],
+    # A requirement whose own check failed: fix the work that answers it, not the
+    # whole plan, unless that has already been tried.
+    "requirement_breach": [RecoveryAction.PLAN_REPAIR, RecoveryAction.REPLAN, RecoveryAction.ESCALATE_HITL],
     "not_verified": [RecoveryAction.PLAN_REPAIR, RecoveryAction.REPLAN, RecoveryAction.ESCALATE_HITL],
     FailureClass.UNKNOWN.value: [RecoveryAction.PLAN_REPAIR, RecoveryAction.RETRY_NODE, RecoveryAction.ESCALATE_HITL],
 }
@@ -116,6 +119,7 @@ def classify(
     error_code: str | None = None,
     errors: list[str] | None = None,
     missing_artifacts: list[str] | None = None,
+    breached_requirements: list[str] | None = None,
     verified: bool = False,
     cancelled: bool = False,
 ) -> str:
@@ -125,6 +129,8 @@ def classify(
     code = str(error_code or "").strip().lower()
     if code in _STRUCTURAL_CODES:
         return _STRUCTURAL_CODES[code]
+    if breached_requirements:
+        return "requirement_breach"
     if missing_artifacts:
         return "missing_artifact"
     haystack = " ".join(str(e).lower() for e in (errors or []))
@@ -164,6 +170,7 @@ def diagnose(
     error_code: str | None = None,
     errors: list[str] | None = None,
     missing_artifacts: list[str] | None = None,
+    breached_requirements: list[str] | None = None,
     verified: bool = False,
     cancelled: bool = False,
     attempts: dict[str, int] | None = None,
@@ -174,6 +181,7 @@ def diagnose(
         error_code=error_code,
         errors=errors,
         missing_artifacts=missing_artifacts,
+        breached_requirements=breached_requirements,
         verified=verified,
         cancelled=cancelled,
     )
@@ -185,6 +193,7 @@ def diagnose(
             "basis": "structured_error_code" if structured else ("text_match" if errors else "outcome"),
             "errors": [str(e)[:200] for e in (errors or [])][:6],
             "missing_artifacts": [str(a) for a in (missing_artifacts or [])][:6],
+            "breached_requirements": [str(r) for r in (breached_requirements or [])][:10],
             "evidence_refs": list(evidence_refs or [])[-6:],
         }
     )

@@ -64,6 +64,7 @@ from .atomic_io import atomic_write_json, file_lock
 from .critic import critic_manager
 from .failure_recovery import RecoveryAction, count_attempts, diagnose, nodes_to_reset, repeat_of_last
 from .mission_files import MissionFileScope
+from .requirement_oracles import apply as apply_requirement_oracles
 from .rollback import rollback_manager
 from .run_events import record_issue
 from .verifier_registry import verifier_registry
@@ -93,6 +94,15 @@ class MissionRequirement:
     satisfied: bool = False
     evidence: list[str] = field(default_factory=list)
     verifier_domain: str | None = None
+    # An oracle is a deterministic check this requirement can be held to; without
+    # one, a satisfied flag is only the mission's own word about it.
+    oracle: str = ""
+    target: str = ""
+    deadline_s: float | None = None
+    #: satisfied | breached | claimed | unobserved — how ``satisfied`` was reached.
+    status: str = "unobserved"
+    verified_by: list[str] = field(default_factory=list)
+    check_detail: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1702,11 +1712,17 @@ class MissionEngine:
         req_objs = []
         raw_reqs = requirements or [f"Complete: {goal}"]
         for idx, r in enumerate(raw_reqs, start=1):
+            # A requirement may be a sentence or a spec with an oracle attached;
+            # only the second kind can be checked rather than assumed.
+            spec = r if isinstance(r, dict) else {"description": str(r)}
             req_objs.append(
                 MissionRequirement(
-                    id=f"req_{idx}",
-                    description=r,
+                    id=str(spec.get("id") or f"req_{idx}"),
+                    description=str(spec.get("description") or ""),
                     verifier_domain=detected_domain,
+                    oracle=str(spec.get("oracle") or ""),
+                    target=str(spec.get("target") or ""),
+                    deadline_s=spec.get("deadline_s"),
                 )
             )
 
@@ -2089,10 +2105,34 @@ class MissionEngine:
                     retryable=True,
                     fallback="verdict stands on its own; the evidence was simply not filed",
                 )
-            if all_dag_completed and v_res.verified and critic_res.get("approved"):
+            # Per-requirement oracles: an overall good verdict is not evidence
+            # that each thing asked for happened.
+            elapsed_s: float | None = None
+            try:
+                elapsed_s = (datetime.now() - datetime.fromisoformat(report.started_at)).total_seconds()
+            except (TypeError, ValueError):
+                elapsed_s = None
+            filed = [entry for ref in report.evidence_refs if (entry := self.evidence.get(ref)) is not None]
+            buckets = apply_requirement_oracles(
+                report,
+                workspace_root=workspace.root,
+                evidence_records=filed,
+                elapsed_s=elapsed_s,
+            )
+            breached = list(buckets.get("breached") or [])
+            if breached:
+                _emit(
+                    "mission_requirement_breach",
+                    {"requirements": [str(r) for r in breached], "detail": [str(r.check_detail)[:160] for r in report.requirements if r.id in breached]},
+                )
+            if all_dag_completed and v_res.verified and critic_res.get("approved") and not breached:
+                # Requirements with no oracle are still inherited from the overall
+                # verdict — but their status says "claimed", so a reader can tell
+                # the difference between checked and assumed.
                 for req in report.requirements:
-                    req.satisfied = True
-                    req.evidence = [str(e) for e in v_res.evidence]
+                    if req.status in ("claimed", "unobserved"):
+                        req.satisfied = True
+                        req.evidence = [str(e) for e in v_res.evidence]
 
                 report.state = MissionState.COMPLETED.value
                 report.progress_pct = 100
@@ -2123,6 +2163,7 @@ class MissionEngine:
                 error_code=(report.error or {}).get("code"),
                 errors=list(v_res.errors) + [str(d) for d in (critic_res.get("repair_directives") or [])],
                 missing_artifacts=[a for a in report.artifacts if not Path(a).exists()],
+                breached_requirements=breached,
                 verified=bool(v_res.verified),
                 attempts=count_attempts(report.repair_history),
                 evidence_refs=report.evidence_refs[-6:],
