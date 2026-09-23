@@ -35,7 +35,7 @@ from core.sandbox import (  # noqa: E402
 
 STATUS = sandbox.status()
 BACKEND = STATUS["backend"]
-JAIL_LIMITS = BACKEND in ("local", "bwrap")  # rlimits are installed on these paths only
+JAIL_LIMITS = BACKEND in ("local", "bwrap") and os.name == "posix"  # rlimits are installed on these paths only
 
 
 # --------------------------------------------------------------------------
@@ -149,7 +149,7 @@ def test_secrets_never_enter_the_child_env():
     assert "HERMUS_PUBLIC=visible" in res2["stdout"]
     if not SandboxPolicy.from_config().network:
         # no-network mode also blackholes proxies so naive clients fail fast
-        assert "HTTP_PROXY" in res2["stdout"]
+        assert "HTTP_PROXY" in res2["stdout"] or "http_proxy" in res2["stdout"]  # proxy is exported lowercase by some shells
 
 
 def test_stdin_and_exit_codes_are_propagated():

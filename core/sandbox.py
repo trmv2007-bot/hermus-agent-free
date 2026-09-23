@@ -132,6 +132,24 @@ class SandboxPolicy:
         return d
 
 
+def shell_argv(command: str) -> list[str]:
+    """An argv prefix that runs this POSIX-style command line on this host.
+
+    ``/bin/sh`` is hardcoded into the container and bubblewrap paths because
+    those only exist on Linux and run against their own rootfs. Direct local
+    execution is different: it runs on the developer's machine, and on Windows a
+    ``/bin/sh`` does not exist, so every sandboxed command died with
+    ``FileNotFoundError`` and the whole isolation layer silently became a no-op.
+    """
+    if os.name == "posix":
+        return ["/bin/sh", "-c", command]
+    declared = os.environ.get("SHELL") or ""
+    for candidate in (declared, shutil.which("bash"), shutil.which("sh")):
+        if candidate and Path(candidate).is_file():
+            return [candidate, "-c", command]
+    return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command]
+
+
 @dataclass
 class SandboxResult:
     success: bool
@@ -749,7 +767,7 @@ class Sandbox:
         reason: str,
     ) -> SandboxResult:
         """Hardened local execution: rlimits + new session + no new privs."""
-        argv: list[str] = ["/bin/sh", "-c", command]
+        argv: list[str] = shell_argv(command)
         if not pol.network and self.probe.unshare_net():
             # A real network cut (empty netns), not just an env hint.
             argv = [self.probe.binary("unshare"), "-n", *argv]
@@ -912,13 +930,29 @@ def sandbox_tag() -> str:
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except Exception:
+    if os.name == "posix":
         try:
-            proc.kill()
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            return
         except Exception:
             pass
+    else:
+        # Windows has no process groups: killing only the shell leaves its
+        # children alive and holding the stdout pipe open, so a timed-out
+        # command appears to take its cleanup timeout to "die". /T kills the tree.
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=10,
+            )
+            return
+        except Exception:
+            pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
 
 
 def _kill_container(binary: str, name: str) -> None:
