@@ -8,18 +8,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from core.fleet.bus import FleetBus
 from core.fleet.registry import (
+    BINDING_NO_HEALTHY_KEYS,
+    BINDING_OK,
     DEFAULT_CHAT_FN,
     FleetRegistry,
-    IDLE,
     chat_via_freellm,
 )
-from core.fleet.bus import FleetBus
-
 
 # Helpers
 
@@ -47,14 +45,13 @@ def _bus(tmp_path):
 
 def test_default_chat_fn_is_chat_via_freellm():
     """DEFAULT_CHAT_FN must be the exact same object as chat_via_freellm."""
-    from core.fleet.registry import DEFAULT_CHAT_FN, chat_via_freellm
 
     assert DEFAULT_CHAT_FN is chat_via_freellm, "DEFAULT_CHAT_FN must be the same object as chat_via_freellm"
 
 
 def test_registry_uses_default_chat_fn_when_none_passed(tmp_path):
     """Registry with chat_fn=None uses DEFAULT_CHAT_FN (chat_via_freellm)."""
-    from core.fleet.registry import DEFAULT_CHAT_FN, FleetRegistry
+    from core.fleet.registry import FleetRegistry
 
     bus = FleetBus(base_dir=str(tmp_path / "fleet"), fsync=False, snapshot_every_events=0, snapshot_interval_s=0)
     reg = FleetRegistry(bus, chat_fn=None)
@@ -65,7 +62,7 @@ def test_registry_uses_default_chat_fn_when_none_passed(tmp_path):
 
 def test_chat_via_freellm_stubbed_vault_and_llm(tmp_path, monkeypatch):
     """chat_via_freellm uses Vault key bundle + FreeLLM; returns content + tokens."""
-    from core.fleet.registry import chat_via_freellm, LiveAgent
+    from core.fleet.registry import LiveAgent
 
     bundle = {"key": "sk-test-1234567890", "base_url": "http://fake/v1", "default_model": "fake-model"}
     # Note: llm_resp intentionally omits tool_calls (or has non-empty) so the code path adds it to result
@@ -101,7 +98,7 @@ def test_chat_via_freellm_stubbed_vault_and_llm(tmp_path, monkeypatch):
 
 def test_chat_via_freellm_no_key_falls_back_to_autodetect(tmp_path, monkeypatch):
     """When Vault returns no bundle, chat_via_freellm falls back to FreeLLM auto-detection."""
-    from core.fleet.registry import chat_via_freellm, LiveAgent
+    from core.fleet.registry import LiveAgent
 
     # Patch Vault to return no bundle (simulating no keys configured)
     monkeypatch.setattr(
@@ -195,12 +192,13 @@ def test_spawn_records_no_healthy_bindings(tmp_path, monkeypatch, caplog):
     bus = FleetBus(base_dir=str(tmp_path / 'fleet'), fsync=False, snapshot_every_events=0, snapshot_interval_s=0)
     reg = FleetRegistry(bus, chat_fn=lambda m: {'content': 'x', 'tokens': 1})
     agent = reg.spawn({'name': 'sick', 'provider': 'groq', 'model': 'llama'})
-    assert agent._warmup_status == 'no_healthy_bindings'
+    assert agent.binding_status == BINDING_NO_HEALTHY_KEYS
+    # The degraded binding has to survive a reload, not live only on the live object.
+    assert agent.to_dict()["binding_status"] == BINDING_NO_HEALTHY_KEYS
     assert any('cannot reach provider groq' in r.message for r in caplog.records if r.levelname == 'WARNING')
 
 def test_spawn_ok_when_vault_has_keys(tmp_path, monkeypatch):
-    """When Vault has healthy keys, agent gets _warmup_status='ok'."""
-    from core.multi_key import multi_key_manager
+    """When Vault has healthy keys, agent gets binding_status='ok'."""
 
     # Mock the free-tier warm-up to return a healthy provider
     monkeypatch.setattr(
@@ -221,11 +219,11 @@ def test_spawn_ok_when_vault_has_keys(tmp_path, monkeypatch):
     reg = FleetRegistry(bus, chat_fn=lambda m: {"content": "x", "tokens": 1})
     agent = reg.spawn({"name": "healthy", "provider": "groq", "model": "llama"})
 
-    assert agent._warmup_status == "ok"
+    assert agent.binding_status == BINDING_OK
 
 def test_chat_via_freellm_surfaces_tool_calls(tmp_path, monkeypatch):
     """When LLM returns tool_calls, chat_via_freellm surfaces them."""
-    from core.fleet.registry import chat_via_freellm, LiveAgent
+    from core.fleet.registry import LiveAgent
 
     monkeypatch.setattr('core.multi_key.multi_key_manager.get_key_bundle', lambda provider: {'key': 'sk-test', 'base_url': 'http://fake/v1', 'default_model': 'fake-model'})
     class StubLLM:

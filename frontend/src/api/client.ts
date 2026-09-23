@@ -58,6 +58,8 @@ export interface AgentView {
   stats?: { tasks_done?: number; tasks_failed?: number; tokens?: number };
   memory_summary?: string;
   current_task?: string | null;
+  /** Whether a usable credential was found for this provider. */
+  binding_status?: string;
 }
 
 export interface KeyProbe {
@@ -211,5 +213,5 @@ export const READS = {
   "/jobs": ["id", "kind", "status", "attempts", "duration_ms", "error"],
   "/queue/status": ["backend", "workers", "maxsize", "enabled", "started", "by_status"],
   "/missions": ["mission_id", "goal", "state", "outcome_state", "evidence_refs"],
-  "/api/fleet/agents": ["id", "name", "state", "provider", "model", "key_name", "stats", "current_task"],
+  "/api/fleet/agents": ["id", "name", "state", "provider", "model", "key_name", "stats", "current_task", "binding_status"],
 } as const;

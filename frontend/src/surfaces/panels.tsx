@@ -209,6 +209,13 @@ export function WorkerPanel({ surfaceId }: { surfaceId: string }) {
                 {agent.provider}/{agent.model || "no model assigned"}
                 {agent.key_name ? ` · key ${agent.key_name}` : " · no key alias"}
               </span>
+              {agent.binding_status && agent.binding_status !== "ok" ? (
+                <em className="bad">
+                  {agent.binding_status === "no_healthy_bindings"
+                    ? "no healthy credential for this provider — a task sent here will fail, not queue"
+                    : `provider binding ${agent.binding_status}`}
+                </em>
+              ) : null}
               {agent.current_task ? <em className="task">on: {String(agent.current_task).slice(0, 90)}</em> : <em className="muted">nothing assigned</em>}
             </div>
             <div className="worker-meta">

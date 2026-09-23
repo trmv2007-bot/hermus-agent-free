@@ -115,11 +115,12 @@ def test_the_roster_card_has_every_field_the_worker_centre_reads():
         last_activity = datetime.now(timezone.utc).isoformat()
         created_at = last_activity
         stats = StubStats()
+        binding_status = "ok"
         summary = "handled 3 tasks"
         current_task = None
 
     card = _agent_card(StubAgent())
-    panel_fields = {"id", "name", "state", "provider", "model", "key_name", "stats", "last_activity", "current_task"}
+    panel_fields = {"id", "name", "state", "provider", "model", "key_name", "stats", "last_activity", "current_task", "binding_status"}
     missing = panel_fields - set(card)
     assert not missing, f"the fleet card no longer carries {missing}"
     assert card["id"] == "agt_1", "the panel keys React rows off `id`"

@@ -14,27 +14,25 @@ Honest contract:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
-import asyncio
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from core.fleet.orchestrator import Orchestrator
 from core.fleet.registry import (
-    AGENT_STATES,
     DESTROYED,
     ERROR,
     IDLE,
-    IllegalTransition,
     PAUSED,
-    RegistryError,
     SLEEPING,
     WORKING,
     FleetRegistry,
+    IllegalTransition,
+    RegistryError,
 )
-from core.fleet.orchestrator import Orchestrator
-from core.fleet.bus import FleetBus
 
 logger = logging.getLogger(__name__)
 
@@ -351,7 +349,7 @@ async def resume_agent(agent_id: str):
 async def broadcast_message(body: dict[str, Any] | None = None):
     """Broadcast a message to all agents (SPEC §9).
 
-    Body: {content, priority?}
+    Body: {content}
     Returns: {success, event_id, seq}
     """
     body = body or {}
@@ -361,7 +359,6 @@ async def broadcast_message(body: dict[str, Any] | None = None):
             {"success": False, "error": "bad_request", "message": "content is required", "code": "bad_request"},
             status_code=400,
         )
-    priority = int(body.get("priority", 1))
     reg = _get_registry()
     event = reg.broadcast(content)
     return {"success": True, "event_id": event.id, "seq": event.seq}
@@ -382,7 +379,7 @@ async def orchestrate_mission(body: dict[str, Any] | None = None):
             {"success": False, "error": "bad_request", "message": "goal is required", "code": "bad_request"},
             status_code=400,
         )
-    
+
     agents = body.get("agents")
     if agents == "all":
         agents = None  # Use all available agents
@@ -625,8 +622,11 @@ async def _fleet_ws_poll_and_send(websocket, reg, *, poll_interval_s=1.0):
             if new_since <= last_seq:
                 continue
 
+            # `since` is bound at call time. Capturing `last_seq` by name let the
+            # worker thread read a value the loop had already advanced, so the
+            # reader could skip events it had not sent.
             new_events = await asyncio.to_thread(
-                lambda: list(bus._iter_events(last_seq + 1))
+                lambda since=last_seq + 1: list(bus._iter_events(since))
             )
             if not new_events:
                 last_seq = new_since
@@ -838,6 +838,10 @@ def _agent_card(agent) -> dict[str, Any]:
         },
         "memory_summary": agent.summary or "",
         "current_task": agent.current_task,
+        # Whether a usable credential was found for this worker's provider. A
+        # worker can be IDLE and still be unable to do anything, and that has to
+        # be visible instead of discovered by a failing task.
+        "binding_status": agent.binding_status,
     }
 
 

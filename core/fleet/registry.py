@@ -97,6 +97,13 @@ AGENT_TRANSITIONS: dict[str, tuple[str, ...]] = {
     DESTROYED: (),
 }
 
+#: What the boot warm-up probe concluded about a worker's provider. A worker with
+#: no usable credential is surfaced as blocked — never as ready with a retry that
+#: cannot succeed.
+BINDING_OK = "ok"
+BINDING_NO_HEALTHY_KEYS = "no_healthy_bindings"
+BINDING_UNCHECKED = "unchecked"
+
 #: Event kinds (dotted sub-kinds are accepted by the bus, §6 deviation note).
 KIND_AGENT_SPAWNED = "agent.spawned"
 KIND_AGENT_UPDATED = "agent.updated"
@@ -191,6 +198,7 @@ class LiveAgent:
     cursor: int = 0
     executed_task_ids: set[str] = field(default_factory=set)
     schema_version: int = SCHEMA_VERSION
+    binding_status: str = BINDING_UNCHECKED
     current_task: str | None = None
     last_activity: str = ""
     created_at: str = ""
@@ -212,6 +220,7 @@ class LiveAgent:
             "cursor": int(self.cursor),
             "executed_task_ids": sorted(self.executed_task_ids),
             "schema_version": int(self.schema_version),
+            "binding_status": self.binding_status,
             "current_task": self.current_task,
             "last_activity": self.last_activity,
             "created_at": self.created_at,
@@ -249,6 +258,7 @@ class LiveAgent:
             cursor=int(data.get("cursor") or 0),
             executed_task_ids=executed,
             schema_version=int(data.get("schema_version") or SCHEMA_VERSION),
+            binding_status=str(data.get("binding_status") or BINDING_UNCHECKED),
             current_task=data.get("current_task"),
             last_activity=str(data.get("last_activity") or ""),
             created_at=str(data.get("created_at") or ""),
@@ -657,7 +667,7 @@ class FleetRegistry:
         keys, a light Vault health probe checks that at least one healthy binding
         exists. When no healthy binding is reachable the agent is still spawned
         (the registry never refuses a spawn due to provider health) but
-        ``agent._warmup_status`` is set to ``'no_healthy_bindings'`` and a
+        ``agent.binding_status`` is set to ``'no_healthy_bindings'`` and a
         warning is logged so the dashboard can surface the degraded state.
 
         This is a Vault-side health check (:meth:`MultiKeyManager.get_dispatchable_entries`
@@ -725,7 +735,7 @@ class FleetRegistry:
         """Light Vault health probe for a newly spawned agent (roadmap step 2).
 
         Checks whether the agent's provider has at least one healthy, dispatchable
-        key binding. When it does not, sets ``agent._warmup_status`` and logs a
+        key binding. When it does not, sets ``agent.binding_status`` and logs a
         warning. Never raises — a missing provider is a degraded state, not a
         spawn failure.
         """
@@ -757,14 +767,14 @@ class FleetRegistry:
             logger.debug("[FleetRegistry] warm-up Vault probe skipped for %s: %s", provider, exc)
 
         if not healthy:
-            agent._warmup_status = "no_healthy_bindings"
+            agent.binding_status = BINDING_NO_HEALTHY_KEYS
             logger.warning(
                 "[FleetRegistry] %s cannot reach provider %s — no healthy keys",
                 agent.name,
                 provider,
             )
         else:
-            agent._warmup_status = "ok"
+            agent.binding_status = BINDING_OK
 
     def update(self, agent_id: str, patch: dict[str, Any], *, allow_suffix: bool = False) -> LiveAgent:
         """Update name/persona/model/key_name/skills; name uniqueness re-checked.
