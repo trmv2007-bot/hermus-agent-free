@@ -212,14 +212,6 @@ function updateSafetyCore(){
   if (core) core.innerHTML = kpi(activeBrake ? "ACTIVE" : "clear", "emergency brake") + kpi(String(pendingN), "pending approvals") + kpi(String(blockedN), "blocked missions") + kpi("visible", "capability ledger");
 }
 
-function getJSON(url){
-  const t0 = Date.now();
-  return fetch(url, { headers: { "Accept": "application/json" } }).then((r) => {
-    const ms = Date.now() - t0;
-    if (!r.ok) throw new Error(url + " -> " + r.status);
-    return r.json().then((j) => ({ j, ms }));
-  });
-}
 function kpi(v,l){ return `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`; }
 
 // ---------- tabs ----------
@@ -275,6 +267,7 @@ function refreshTab(name){
   else if (name === "systems") { if (window.HermusConsole) window.HermusConsole.refresh(); }
   else if (name === "presence") refreshPresence();
   else if (name === "agents") refreshAgents();
+  else if (name === "settings") refreshSettings();
 }
 
 // ---------- PRESENCE / CONTINUITY ----------
@@ -1075,6 +1068,186 @@ function refreshDoctor(){
   if (host) host.innerHTML = '<div class="note">open the Systems tab to read the doctor panel.</div>';
 }
 RETRY_ACTIONS.doctor = refreshDoctor;
+
+// ---------- SETTINGS ----------
+/* The write surface: what an operator may change, read live from the gateway.
+ *
+ * A stored secret never comes back to the browser — /keys/list hands over the
+ * server's own redacted preview, and that preview is the only key material this
+ * panel can display, so "copy the key out of the UI" is impossible by omission.
+ * Removal addresses an entry by provider + label, never by its value.
+ *
+ * Installing an update deliberately stays in the Systems console: one confirm
+ * path per destructive action, rather than one per screen that mentions it. */
+function envelopeError(res){
+  const err = new Error((res && res.message) || ("http_" + ((res && res.status) || 0)));
+  err.envelope = res;
+  return err;
+}
+
+function healthPill(entry){
+  // Custom APIs carry no health record at all; saying so beats a green pill.
+  if (entry.custom) return '<span class="pill muted">no health record</span>';
+  const status = entry.health_status || (entry.healthy ? "healthy" : "untested");
+  const cls = entry.healthy ? "ok" : (entry.quarantined || /fail|error/.test(status) ? "err" : "muted");
+  return `<span class="pill ${cls}">${esc(status)}</span>`;
+}
+
+async function refreshSettingsKeys(){
+  const cells = $("#settingsKeysSummary");
+  const body = document.querySelector("#settingsKeys tbody");
+  try {
+    const { j } = await getJSON("/keys/list");
+    const pooled = j.llm_keys || {};
+    const keys = Object.keys(pooled).reduce(
+      (acc, provider) => acc.concat((pooled[provider] || []).map((k) => Object.assign({ provider }, k))), []);
+    const apis = (j.custom_apis || []).map((a) => Object.assign({ provider: "custom", custom: true }, a));
+    const rows = keys.concat(apis);
+    const healthy = rows.filter((r) => r.healthy).length;
+    const failing = rows.filter((r) => r.quarantined || /fail|error/.test(String(r.health_status || ""))).length;
+    cells.innerHTML = kpi(String(j.total_llm_keys != null ? j.total_llm_keys : keys.length), "pooled keys")
+      + kpi(String(healthy), "healthy") + kpi(String(failing), "failing")
+      + kpi(String(j.total_custom_apis != null ? j.total_custom_apis : apis.length), "custom APIs");
+    body.innerHTML = rows.map((k) => `<tr>
+      <td>${esc(k.provider)}</td>
+      <td>${esc(k.name || "")}</td>
+      <td><code>${esc(k.preview == null ? "—" : k.preview)}</code></td>
+      <td>${healthPill(k)}</td>
+      <td>${esc(k.models_count != null ? k.models_count : "—")}</td>
+      <td>${esc(k.rpm_limit != null ? k.rpm_limit : "—")}</td>
+      <td><button class="ghost" data-credential-kind="${k.custom ? "api" : "key"}" data-credential-provider="${esc(k.provider)}" data-credential-ref="${esc(k.name || k.id || "")}">remove</button></td>
+    </tr>`).join("") || stateRowHtml({ empty: "nothing in the pool yet" }, 7);
+    body.querySelectorAll("button[data-credential-kind]").forEach((b) => b.addEventListener("click", () => removeCredential(b.dataset.credentialKind, b.dataset.credentialProvider, b.dataset.credentialRef)));
+  } catch(e){
+    body.innerHTML = stateRowHtml({ error: e.envelope || { message: e.message } }, 7, { label: "key pool", onRetryId: "settings" });
+  }
+}
+
+function removeCredential(kind, provider, ref){
+  const out = $("#settingsAddOut");
+  if (!ref) { out.innerHTML = '<div class="note">that entry has no label or id, so there is nothing to address</div>'; return; }
+  // A key is removed by its stored label; the value never travels to the browser.
+  const url = kind === "api" ? "/custom-apis/remove" : "/keys/remove";
+  const payload = kind === "api" ? { id: ref, name: ref } : { provider, name: ref, key: ref };
+  out.innerHTML = '<div class="note">removing ' + esc(ref) + '…</div>';
+  postJSON(url, payload).then((res) => {
+    if (!res.ok) { out.innerHTML = ""; reportFailure("remove " + (kind === "api" ? "API" : "key"), envelopeError(res), () => removeCredential(kind, provider, ref)); return; }
+    const d = res.data || {};
+    if (d.success === false) { out.innerHTML = '<div class="note">refused: ' + esc(d.error || d.message || "the gateway said no") + '</div>'; return; }
+    out.innerHTML = '<div>removed <code>' + esc(ref) + '</code></div>';
+    refreshSettingsKeys();
+  });
+}
+
+/* One POST path for the settings writes, so a refusal always surfaces the
+ * gateway's own reason instead of a form that quietly kept its values. */
+function postWithFeedback(what, payload, url, out, done){
+  out.innerHTML = '<div class="note">sending ' + esc(what) + '…</div>';
+  postJSON(url, payload).then((res) => {
+    if (!res.ok) { out.innerHTML = ""; reportFailure(what, envelopeError(res), () => postWithFeedback(what, payload, url, out, done)); return; }
+    const d = res.data || {};
+    if (d.success === false || d.error) { out.innerHTML = '<div class="note">' + esc(what) + ' refused: ' + esc(d.error || d.message || "the gateway said no") + '</div>'; return; }
+    out.innerHTML = '<div>' + esc(what) + ' accepted.</div>';
+    done();
+  });
+}
+
+function addSettingKey(){
+  const provider = $("#addKeyProvider").value.trim();
+  const key = $("#addKeyValue").value.trim();
+  const label = $("#addKeyName").value.trim();
+  const out = $("#settingsAddOut");
+  if (!provider || !key) { out.innerHTML = '<div class="note">provider and key are both required</div>'; return; }
+  const payload = { provider, key };
+  if (label) payload.name = label;
+  postWithFeedback("key", payload, "/keys/add", out, () => {
+    // The typed secret leaves the field as soon as the gateway has it.
+    $("#addKeyValue").value = "";
+    refreshSettingsKeys();
+  });
+}
+
+function addSettingApi(){
+  const name = $("#addApiName").value.trim();
+  const url = $("#addApiUrl").value.trim();
+  const description = $("#addApiDescription").value.trim();
+  const out = $("#settingsAddOut");
+  if (!name || !url || !description) { out.innerHTML = '<div class="note">name, url and description are all required by the gateway</div>'; return; }
+  postWithFeedback("custom API", { name, url, description }, "/custom-apis/add", out, refreshSettingsKeys);
+}
+
+async function refreshSettingsPool(){
+  try {
+    const { j } = await getJSON("/api/v1/agents/pool/config");
+    const c = j.config || {};
+    const put = (id, value) => { const el = $(id); if (el && value != null) el.value = String(value); };
+    put("#poolMaxAgents", c.max_agents);
+    put("#poolMaxConcurrent", c.max_concurrent);
+    put("#poolIdleTimeout", c.idle_timeout);
+    put("#poolCleanupInterval", c.cleanup_interval);
+    setPill("#settingsPoolState", "pool: live", "ok");
+  } catch(e){
+    setPill("#settingsPoolState", "pool: unavailable", "err");
+  }
+}
+
+function saveSettingsPool(){
+  const out = $("#settingsAddOut");
+  const limits = {
+    max_agents: $("#poolMaxAgents").value.trim(),
+    max_concurrent: $("#poolMaxConcurrent").value.trim(),
+    idle_timeout: $("#poolIdleTimeout").value.trim(),
+    cleanup_interval: $("#poolCleanupInterval").value.trim(),
+  };
+  const payload = {};
+  const bad = [];
+  Object.keys(limits).forEach((field) => {
+    const raw = limits[field];
+    if (!raw) return; // the route applies only the fields present, so blanks stay untouched
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) bad.push(field); else payload[field] = n;
+  });
+  if (bad.length) { out.innerHTML = '<div class="note">not a number: ' + esc(bad.join(", ")) + '</div>'; return; }
+  if (!Object.keys(payload).length) { out.innerHTML = '<div class="note">nothing to save — every field is blank</div>'; return; }
+  postWithFeedback("pool limits", payload, "/api/v1/agents/pool/config", out, () => {
+    toast("Pool limits saved", "ok");
+    refreshSettingsPool();
+  });
+}
+
+async function refreshSettingsUpdate(){
+  const cells = $("#settingsUpdate");
+  const feed = $("#settingsUpdateFeed");
+  feed.innerHTML = '<div class="note">checking the remote…</div>';
+  try {
+    const { j } = await getJSON("/update/check");
+    const local = j.local || {};
+    const remote = j.remote || {};
+    // A failed check must not read as "up to date": the envelope for these
+    // routes returns {"error": ...} with a 200, so the error is the state.
+    if (j.error) {
+      cells.innerHTML = kpi("unknown", "update");
+      feed.innerHTML = '<div class="note">the gateway could not check: ' + esc(j.error) + '</div>';
+      return;
+    }
+    const state = j.update_available ? "available" : (j.up_to_date ? "current" : "unknown");
+    cells.innerHTML = kpi(state, "update") + kpi(local.short || "—", "local") + kpi(remote.short || "—", "remote");
+    feed.innerHTML = '<div>local <code>' + esc(local.short || "?") + '</code> ' + esc(local.message || "") + ' (' + esc(local.date || "?") + ')</div>'
+      + '<div>remote <code>' + esc(remote.short || "?") + '</code> ' + esc(remote.message || "") + ' · ' + esc(remote.author || "?") + '</div>'
+      + (j.update_available ? '<div class="note">Install from the Systems console update panel.</div>' : "");
+  } catch(e){
+    cells.innerHTML = kpi("unknown", "update");
+    feed.innerHTML = '<div class="note">update check failed: ' + esc(e.message) + '</div>';
+  }
+}
+
+function refreshSettings(){
+  refreshSettingsKeys();
+  refreshSettingsPool();
+  refreshSettingsUpdate();
+}
+RETRY_ACTIONS.settings = refreshSettings;
+
 // ---------- wiring ----------
 $("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
 $("#cmdBtn").addEventListener("click", postCommand);
@@ -1102,6 +1275,12 @@ $("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
 $("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
 $("#preflightRun").addEventListener("click", runPreflight);
 $("#preflightApprovals").addEventListener("click", createPreflightApprovals);
+$("#settingsKeyAdd").addEventListener("click", addSettingKey);
+$("#settingsApiAdd").addEventListener("click", addSettingApi);
+$("#settingsPoolSave").addEventListener("click", saveSettingsPool);
+$("#settingsUpdateCheck").addEventListener("click", refreshSettingsUpdate);
+$("#addKeyValue").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingKey(); });
+$("#addApiUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingApi(); });
 $("#runDownloadsScan").addEventListener("click", runDownloadsScan);
 $("#startDownloadsScanMission").addEventListener("click", startDownloadsScanMission);
 $("#refreshScanReports").addEventListener("click", listScanReports);

@@ -16,7 +16,10 @@ What is proven:
 * ``toast`` emits into the aria-live region and carries Retry + request id;
 * ``refreshReadiness`` maps /readyz 200 -> live, 503 -> "not ready" (never a
   fabricated "live"), unreachable -> offline;
-* the tab strip is a real ARIA tablist with roving tabindex and keyboard nav.
+* the tab strip is a real ARIA tablist with roving tabindex and keyboard nav;
+* the Settings tab renders the key pool without ever putting a secret in the
+  DOM, reads the pool limits before saving them, and refuses to call a check
+  that failed "up to date".
 
 Node is optional (``shutil.which("node")``) — like the existing JS syntax test,
 these skip when Node is absent rather than failing an unrelated environment.
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -155,6 +159,133 @@ def node_available():
     if not shutil.which("node"):
         pytest.skip("node not installed")
     return True
+
+
+def test_settings_does_not_duplicate_the_update_pull_action():
+    """Installing an update is destructive and the Systems console already gates
+    it behind a confirm. A second button for the same POST would be a second
+    policy to keep in sync, so Settings only reports the state."""
+    room = ROOM_JS.read_text(encoding="utf-8")
+    start = room.index("// ---------- SETTINGS")
+    settings_block = room[start : room.index("// ---------- wiring", start)]
+    assert "/update/pull" not in settings_block
+    assert "/update/check" in settings_block
+
+
+def test_every_endpoint_settings_calls_is_routable():
+    """The pool config path is the trap here: the router is mounted under a
+    prefix, so ``/pool/config`` 404s while the real path resolves. Checked
+    against the OpenAPI schema, which is built from what actually resolves."""
+    from fastapi.testclient import TestClient
+
+    from gateway.gateway import app
+
+    room = ROOM_JS.read_text(encoding="utf-8")
+    start = room.index("// ---------- SETTINGS")
+    settings_block = room[start : room.index("// ---------- wiring", start)]
+    called = set(re.findall(r'"(/[a-z0-9\-_/]+)"', settings_block))
+    assert {"/keys/list", "/keys/add", "/api/v1/agents/pool/config", "/update/check"} <= called, called
+
+    routes = set(TestClient(app).get("/openapi.json").json().get("paths", {}))
+    missing = sorted(path for path in called if path not in routes)
+    assert not missing, f"called by the Settings tab but not routable: {missing}"
+
+
+def test_settings_key_table_never_renders_a_secret(node_available):
+    """/keys/list is redacted server-side. The panel must render the preview and
+    nothing else — a raw ``key`` field in the payload is the leak to prove out."""
+    out = run_in_node(
+        """
+        (async () => {
+          const payload = {
+            llm_keys: {
+              groq: [
+                { name: "prod", preview: "gsk_ab...9z", healthy: true, health_status: "ok",
+                  models_count: 3, rpm_limit: 30, key: "gsk_SECRET_MUST_NOT_RENDER" },
+                { name: "quiet", preview: "gsk_xy...11", healthy: false, models_count: 0,
+                  key: "gsk_SECOND_SECRET_MUST_NOT_RENDER" },
+              ],
+              hf: [],
+            },
+            custom_apis: [{ name: "weather", preview: "no-token", id: "custom_weather_1" }],
+            total_llm_keys: 2,
+            total_custom_apis: 1,
+          };
+          global.fetch = async () => ({
+            ok: true, status: 200, headers: { get: () => "req_1" },
+            text: async () => JSON.stringify(payload),
+          });
+          await refreshSettingsKeys();
+          console.log(JSON.stringify({
+            rows: REGISTRY["#settingsKeys tbody"].innerHTML,
+            cells: REGISTRY["#settingsKeysSummary"].innerHTML,
+          }));
+        })();
+        """
+    )
+    assert "gsk_ab...9z" in out["rows"] and "gsk_xy...11" in out["rows"]
+    assert "MUST_NOT_RENDER" not in out["rows"]
+    # An untested key says so; a custom API has no health record to show.
+    assert "untested" in out["rows"] and "no health record" in out["rows"]
+    assert "ok" in out["rows"]
+    assert "failing" in out["cells"] and "custom APIs" in out["cells"]
+
+
+def test_settings_update_failure_is_unknown_not_current(node_available):
+    """The management routes answer {"error": ...} with a 200, so a check that
+    failed has to read as unknown — never as an up-to-date install."""
+    out = run_in_node(
+        """
+        (async () => {
+          const results = {};
+          const serve = (body) => { global.fetch = async () => ({
+            ok: true, status: 200, headers: { get: () => "req_2" },
+            text: async () => JSON.stringify(body),
+          }); };
+          serve({ error: "git ls-remote failed" });
+          await refreshSettingsUpdate();
+          results.failed = [REGISTRY["#settingsUpdate"].innerHTML, REGISTRY["#settingsUpdateFeed"].innerHTML];
+          serve({ update_available: false, up_to_date: true, local: { short: "aaaa111" }, remote: { short: "aaaa111" } });
+          await refreshSettingsUpdate();
+          results.current = [REGISTRY["#settingsUpdate"].innerHTML, REGISTRY["#settingsUpdateFeed"].innerHTML];
+          console.log(JSON.stringify(results));
+        })();
+        """
+    )
+    assert "unknown" in out["failed"][0] and "git ls-remote failed" in out["failed"][1]
+    assert "current" in out["current"][0] and "unknown" not in out["current"][0]
+
+
+def test_settings_pool_save_refuses_a_non_number_and_sends_only_filled_fields(node_available):
+    out = run_in_node(
+        """
+        (async () => {
+          // Boot-time probes also go through fetch, so only the pool writes count.
+          const calls = [];
+          global.fetch = async (url, opts) => {
+            calls.push([url, (opts || {}).body]);
+            return { ok: true, status: 200, headers: { get: () => "req_3" }, text: async () => '{"status":"ok"}' };
+          };
+          const posted = () => calls.filter((c) => c[0] === "/api/v1/agents/pool/config");
+          document.querySelector("#settingsAddOut");
+          document.querySelector("#poolMaxAgents").value = "12";
+          document.querySelector("#poolMaxConcurrent").value = "ten";
+          document.querySelector("#poolIdleTimeout").value = "";
+          document.querySelector("#poolCleanupInterval").value = "";
+          saveSettingsPool();
+          await new Promise((r) => setTimeout(r, 0));
+          const rejected = [posted().length, REGISTRY["#settingsAddOut"].innerHTML];
+          document.querySelector("#poolMaxConcurrent").value = "4";
+          saveSettingsPool();
+          await new Promise((r) => setTimeout(r, 0));
+          console.log(JSON.stringify({ rejected, accepted: posted()[0] }));
+        })();
+        """
+    )
+    assert out["rejected"][0] == 0, "a non-numeric limit must not reach the gateway"
+    assert "max_concurrent" in out["rejected"][1]
+    sent = json.loads(out["accepted"][1])
+    assert sent == {"max_agents": 12, "max_concurrent": 4}
 
 
 # ---------------------------------------------------------------------------
@@ -353,8 +484,8 @@ def test_readiness_pill_maps_ready_draining_and_offline(node_available):
 def test_markup_is_a_real_tablist():
     html = CONTROL_HTML.read_text(encoding="utf-8")
     assert 'role="tablist"' in html
-    assert html.count('role="tab"') == 10
-    assert html.count('role="tabpanel"') == 10
+    assert html.count('role="tab"') == 11
+    assert html.count('role="tabpanel"') == 11
     assert html.count('aria-selected="true"') == 1  # exactly one selected
     assert html.count('tabindex="0"') == 1  # roving tabindex: one tabbable
     assert 'aria-controls="tab-chat"' in html
@@ -362,6 +493,16 @@ def test_markup_is_a_real_tablist():
     # The chat face replaced both of them; neither may come back as a tab.
     assert 'data-tab="overview"' not in html
     assert 'data-tab="telemetry"' not in html
+
+
+def test_settings_tab_is_wired_to_a_panel_and_a_refresher():
+    """A tab whose panel or refresher is missing renders as an empty room."""
+    html = CONTROL_HTML.read_text(encoding="utf-8")
+    room = ROOM_JS.read_text(encoding="utf-8")
+    assert 'data-tab="settings"' in html
+    assert 'id="tab-settings" role="tabpanel" aria-labelledby="tabbtn-settings"' in html
+    assert 'name === "settings") refreshSettings()' in room
+    assert "RETRY_ACTIONS.settings = refreshSettings" in room
 
 
 def test_select_tab_maintains_aria_state(node_available):

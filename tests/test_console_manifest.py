@@ -222,11 +222,12 @@ def test_console_script_reuses_the_control_room_plumbing():
 
 
 def test_console_tab_replaced_the_bespoke_doctor_tab_only():
-    """Ten tabs after the chat face: the Doctor card moved into the console, the
-    Fleet Agents tab was added, and Chat replaced Overview + Telemetry; no
-    bespoke doctor tab remains."""
+    """Eleven tabs after the chat face: the Doctor card moved into the console, the
+    Fleet Agents tab was added, Chat replaced Overview + Telemetry, and Settings
+    came last for the key pool and the worker-pool limits; no bespoke doctor
+    tab remains."""
     html = (ROOT / "gateway/control.html").read_text(encoding="utf-8")
-    assert html.count('role="tab"') == 10
+    assert html.count('role="tab"') == 11
     assert 'data-tab="doctor"' not in html, "the bespoke doctor tab should be the doctor panel now"
     assert "doctor" in {p.id for p in console.panels()}, "the doctor capability must still be reachable"
 
