@@ -120,11 +120,9 @@
           <button type="submit" id="chatSend">Send</button>
           <button type="button" id="chatStop" class="ghost" hidden>stop</button>
           <span id="chatStatus" class="pill muted">idle</span>
-          <span class="composer-hint">replies come from <code>core.runtime</code> &#8212; a failed turn says so instead of inventing an answer.</span>
         </div>
       </form>
 
-      <div class="hint">Motif after <a class="credit" href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noopener">gods-eye-view</a>, drawn locally with plain canvas math &#8212; no external 3D library, fully offline. Every number in this room comes from a live probe; open a tab or <b>open the hood</b> to see it, and nothing here is simulated.</div>
     </div>
   </div>
 
@@ -283,24 +281,9 @@
           <span id="hfWake" class="tag">wake word: --</span>
           <progress id="hfLevel" value="0" max="1" style="width:160px"></progress>
         </div>
-        <div class="hint">
-          Hands-free keeps the microphone open and listens continuously: it detects
-          speech by energy (no button press), transcribes it, and only acts when the
-          utterance starts with the wake word. Talking over the assistant interrupts
-          it. <strong>Arming this holds the mic open for as long as it stays on</strong>
-          -- every detected utterance is sent to speech-to-text before the wake word is
-          checked. Requires <code>HERMUS_VOICE_HANDSFREE=1</code>.
-        </div>
         <div class="cells" id="voiceCaps"></div>
-        <div class="hint">
-          Speaks first, works second: voice input is transcribed,
-          returns a short spoken acknowledgment, and queues the real work as a
-          <code>voice.reply</code> job. The acknowledgment is a canned phrase by
-          default -- no model call -- so it lands in well under a second instead of
-          waiting out a full tool-carrying agent turn.
-        </div>
         <div class="feed" id="voiceLog" style="height:260px">
-          <div class="note">Nothing said yet. Mic audio is transcribed locally (faster-whisper); speech is synthesized locally (Piper/espeak).</div>
+          <div class="note">Nothing said yet.</div>
         </div>
       </section>
     </div>
@@ -437,7 +420,6 @@
           <thead><tr><th>id</th><th>mission</th><th>requests</th><th>title</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
-        <div class="hint">Bundles approve/deny multiple draft prompts while preserving individual scoped grants.</div>
       </section>
       <section class="full">
         <h2>Pending yellow-action approval prompts</h2>
@@ -445,7 +427,6 @@
           <thead><tr><th>id</th><th>tool</th><th>red lines</th><th>suggested scope</th><th>purpose</th><th>created</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
-        <div class="hint">Pending prompts are created when a yellow action has no matching grant. Approving creates a scoped grant for retry; denying closes the prompt.</div>
       </section>
       <section class="full">
         <h2>Active approval grants</h2>
@@ -495,7 +476,6 @@
           </div>
           <div class="vram-bar"><div class="vram-fill" id="vramFill" style="width: 0%;"></div></div>
         </div>
-        <div class="hint">Shows n/a when the host has no measurable VRAM — never a fabricated number.</div>
       </section>
 
       <!-- JARVIS HUD: futuristic frame, REAL data from /api/jarvis/status (on demand) -->
@@ -542,19 +522,14 @@
         <button id="consoleRefresh" class="ghost">Refresh panels</button>
         <button id="consoleProbeAll" class="ghost">Live-probe every panel</button>
       </div>
-      <div class="hint">
-        Each card reads a live value. If it cannot be read, the card says so and
-        shows the real error rather than filling in something plausible.
-      </div>
     </section>
     <div class="console-grid" id="consolePanels"><div class="note">loading manifest...</div></div>
   </div>
     </main>
 
     <footer>
-      HERMUS -- Local-First Autonomous Fleet | face: HERMUS &#183; hood: JARVIS instruments &#183; autonomy: watchdog-guarded.
-      Everything shown here was read from the running system.
-      <span class="footer-credit">3D god&#8217;s-eye motif after <a class="credit" href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noopener">gods-eye-view</a> (rendered locally, no external 3D library).</span>
+      HERMUS
+      <span class="footer-credit">gods-eye motif: <a class="credit" href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noopener">gods-eye-view</a> &#8212; drawn locally, not live data.</span>
     </footer>
   </div>
 </div>

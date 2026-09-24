@@ -1129,14 +1129,14 @@ async function refreshVoiceStatus(){
       kpi((j.tts && (j.tts.backend || j.tts.selected)) || "none", "tts backend") +
       kpi((j.stt && (j.stt.model || (j.stt.models && j.stt.models[0]))) || "none", "stt model") +
       kpi(j.queue_ready ? "ready" : "not started", "job queue");
-    if (!j.enabled) vlog("voice", "disabled — set HERMUS_VOICE_ENABLED=1");
+    if (!j.enabled) vlog("voice", "voice is disabled on this server");
     _hfCfg = j.handsfree || null;
     const hf = _hfCfg || {};
     const wake = $("#hfWake");
     if (wake) {
       wake.textContent = hf.enabled
         ? (hf.wake_required ? "wake word: " + (hf.wake_word || "(none)") : "wake word: not required")
-        : "hands-free: needs HERMUS_VOICE_HANDSFREE=1";
+        : "hands-free: off";
     }
     const arm = $("#hfArm");
     if (arm) arm.disabled = !hf.enabled;
@@ -1157,7 +1157,7 @@ async function armHandsFree(){
   const HC = window.HermusClient;
   if (!HC) { vlog("voice", "client script not loaded"); return; }
   if (!_hfCfg || !_hfCfg.enabled) {
-    vlog("voice", "hands-free is off server-side — set HERMUS_VOICE_HANDSFREE=1");
+    vlog("voice", "hands-free is off on this server");
     return;
   }
   const cfg = _hfCfg;
