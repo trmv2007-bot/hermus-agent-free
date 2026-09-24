@@ -44,12 +44,26 @@ def test_referenced_asset_is_served(asset):
         assert "{" in body
 
 
-def test_fonts_used_by_the_stylesheet_are_routed():
-    """Fonts are declared in CSS, so the markup scan above cannot see them."""
+def test_assets_declared_in_the_stylesheet_are_served():
+    """Fonts are referenced relatively from ``control.css``, so a check written
+    against absolute ``/static/`` paths matches nothing and passes while every
+    font request 500s — which is exactly what happened here.
+    """
     from gateway.gateway import app
 
     css = (ROOT / "gateway" / "static" / "control.css").read_text(encoding="utf-8")
-    urls = sorted(set(re.findall(r"url\(['\"]?(/static/[^'\")]+)", css)))
+    refs = sorted(set(re.findall(r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""", css)))
+    local = [ref for ref in refs if not ref.startswith("data:")]
+    assert local, f"no local assets referenced by control.css — the regex is wrong ({refs})"
+
     client = TestClient(app)
-    for url in urls:
-        assert client.get(url).status_code == 200, f"{url} is declared in control.css but not served"
+    for ref in local:
+        # Relative to the stylesheet's own directory, which is how a browser
+        # resolves it.
+        url = "/static/" + ref if not ref.startswith("/") else ref
+        response = client.get(url)
+        assert response.status_code == 200, f"{url} is declared in control.css but returns {response.status_code}"
+        assert len(response.content) > 100, f"{url} is served but empty ({len(response.content)} bytes)"
+        if url.endswith(".woff2"):
+            assert response.content[:4] == b"wOF2", f"{url} is not a real woff2 payload"
+            assert "font" in response.headers.get("content-type", "")

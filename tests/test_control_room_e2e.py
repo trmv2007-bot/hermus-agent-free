@@ -42,10 +42,10 @@ def test_control_room_serves_from_real_backend_seeds():
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     text = control_room_source()
-    # snapshot + replay + command architecture, no UI-owned truth
-    assert "Snapshot" in text and "Replay" in text
+    # Honesty is a property of the wiring, not a caption: the page must reach the
+    # real command endpoint, and must not narrate its own architecture.
     assert "/api/v1/commands" in text
-    assert "never simulates success" in text or "never owns truth" in text
+    assert "nothing here is pre-scripted or simulated" in text
     # every meaningful control maps to a real backend command
     for api in (
         "/api/v1/system/health",
@@ -74,6 +74,25 @@ def test_control_room_serves_from_real_backend_seeds():
     # the header and browser-only SSE/WS transports receive the query token.
     assert "X-Hermus-Token" in text
     assert "__HERMUS_GATEWAY_TOKEN" in text
+
+
+def test_the_product_face_shows_capabilities_not_internals():
+    """The visible page speaks in capabilities; endpoints belong to the code.
+
+    ``control.html`` used to carry ~25 user-facing strings like
+    ``POST /api/v1/commands`` and ``Snapshot = GET /jobs``, which is architecture
+    exposition rendered as a product. The wiring still has to be there — in the
+    script, where it belongs.
+    """
+    c = _client()
+    markup = c.get("/control").text
+    script = c.get("/static/control-room.js").text
+
+    for needle in ("GET /", "POST /", "WS /", "EventSource /", "canonical owner", "never owns truth", "generated from core/console.py"):
+        assert needle not in markup, f"{needle!r} is user-visible architecture narration"
+
+    assert "/api/v1/commands" in script, "the command path belongs in the wiring, not on the button"
+    assert "/computer/run" in script and "/jobs" in script
     client_js = Path("gateway/static/control-client.js").read_text()
     assert "?token=" in client_js
 

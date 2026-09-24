@@ -20,11 +20,12 @@ def test_single_control_room_replaces_the_jarvis_page():
     # No fake claims that the old Jarvis surface hard-coded.
     for banner in ("318 Test Suites Verified Passing", "Page scrape active", "Autonomy: 100%"):
         assert banner not in text
-    # Real canonical projections.
-    assert "Snapshot" in text
-    assert "Replay" in text
-    assert "/api/v1/commands" in text
-    assert "never simulates success" in text
+    # The page promises only what it can show: live readings, nothing canned.
+    assert "nothing here is pre-scripted or simulated" in text
+    # The wiring is where the endpoints live now, not the visible copy.
+    script = TestClient(app).get("/static/control-room.js").text
+    assert "/api/v1/commands" in script
+    assert "/api/jarvis/status" in text, "the status aggregate must still be reachable from the page"
     # The old Jarvis page route is gone.
     assert TestClient(app).get("/jarvis").status_code == 404
 

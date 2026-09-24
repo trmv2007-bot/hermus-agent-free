@@ -757,6 +757,9 @@ async def control_room():
     )
 
 
+_BINARY_ASSET_SUFFIXES = {".woff2", ".woff", ".ttf", ".otf", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp"}
+
+
 def _serve_control_asset(name: str, media_type: str) -> Response:
     """Read one control-room asset from ``gateway/static``.
 
@@ -768,8 +771,15 @@ def _serve_control_asset(name: str, media_type: str) -> Response:
     path = Path(__file__).parent / "static" / name
     if not path.exists():
         return Response(f"{name} not found", status_code=404, media_type="text/plain")
+    # Fonts are binary. Decoding them as UTF-8 raised on every request, so the
+    # page asked for its two typefaces and got a 500 for each — silently falling
+    # back to system fonts while looking like a styling problem.
+    if path.suffix.lower() in _BINARY_ASSET_SUFFIXES:
+        body: bytes = path.read_bytes()
+    else:
+        body = path.read_text(encoding="utf-8").encode("utf-8")
     return Response(
-        path.read_text(encoding="utf-8"),
+        body,
         media_type=media_type,
         headers={"Cache-Control": "no-store, max-age=0"},
     )

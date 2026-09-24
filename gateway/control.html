@@ -60,7 +60,7 @@
     <div class="sidebar-foot">
       <button class="hood-btn" id="hoodOpenBtn" title="Open the JARVIS instrument space (key: H)">&#9881;&#65039; Open the hood</button>
       <span class="sidebar-foot-line">snapshot &#8226; replay &#8226; typed commands</span>
-      <span class="sidebar-foot-line muted">the UI never owns truth</span>
+      <span class="sidebar-foot-line muted">live readings only</span>
     </div>
   </aside>
 
@@ -101,7 +101,7 @@
       <div class="chat-shell">
         <div class="chat-thread" id="chatThread" role="log" aria-live="polite" aria-label="Conversation with HERMUS">
           <div class="chat-seed">No turns yet. This thread fills only from real replies to
-            <code>POST /stream/command</code> &#8212; nothing here is pre-scripted or simulated.</div>
+            nothing here is pre-scripted or simulated.</div>
         </div>
 
         <aside class="chat-rail" aria-label="Live telemetry">
@@ -110,7 +110,7 @@
             <button id="tmClear" class="ghost" title="Clear the event rail">clear</button>
           </header>
           <input id="tmSearch" class="chat-rail-filter" placeholder="filter by type..." />
-          <div class="feed chat-feed" id="tmFeed"><div class="note">Live stream via `WS /dashboard/events`; fallback poll `GET /events/recent`.</div></div>
+          <div class="feed chat-feed" id="tmFeed"><div class="note">Live updates, with a poll fallback when the stream drops.</div></div>
         </aside>
       </div>
 
@@ -293,7 +293,7 @@
         </div>
         <div class="cells" id="voiceCaps"></div>
         <div class="hint">
-          Speaks first, works second: <code>POST /voice/command</code> transcribes,
+          Speaks first, works second: voice input is transcribed,
           returns a short spoken acknowledgment, and queues the real work as a
           <code>voice.reply</code> job. The acknowledgment is a canned phrase by
           default -- no model call -- so it lands in well under a second instead of
@@ -309,12 +309,11 @@
   <!-- ============ JOBS ============ -->
   <div class="tab" id="tab-jobs" role="tabpanel" aria-labelledby="tabbtn-jobs">
     <section>
-      <h2>Snapshot &#8226; Job queue <span id="qstatus" class="tag"></span></h2>
+      <h2>Job queue <span id="qstatus" class="tag"></span></h2>
       <table id="jobs">
         <thead><tr><th>id</th><th>kind</th><th>status</th><th>attempts</th><th>run</th><th>created</th></tr></thead>
         <tbody></tbody>
       </table>
-      <div class="hint">Snapshot = `GET /jobs` &#8226; live per-job = `EventSource /jobs/{id}/events`.</div>
     </section>
   </div>
 
@@ -330,7 +329,6 @@
         <tbody></tbody>
       </table>
       <div class="feed" id="missionOut" style="height:140px"><div class="note">Blocked missions with approval requests can approve+retry, then resume.</div></div>
-      <div class="hint">Snapshot = `GET /missions`. Resume = `POST /missions/{id}/resume`. Approval = `POST /permissions/pending/resolve`.</div>
     </section>
   </div>
 
@@ -340,13 +338,12 @@
       <section>
         <h2>Computer agent &#8226; status</h2>
         <div class="cells" id="compStatus"></div>
-        <div class="hint">Snapshot = `GET /computer/status` (real control center + task store).</div>
       </section>
       <section>
         <h2>Run a computer task</h2>
         <div class="bar"><input id="compTask" placeholder="objective e.g. open the browser" /></div>
-        <div class="bar"><button id="compRun">POST /computer/run</button><button id="compStop" class="danger">Emergency stop</button></div>
-        <div class="feed" id="compOut"><div class="note">Runs through the canonical queue; observes real outcome.</div></div>
+        <div class="bar"><button id="compRun">Run a computer task</button><button id="compStop" class="danger">Emergency stop</button></div>
+        <div class="feed" id="compOut"><div class="note">Queued like any other job; the outcome is read back, not assumed.</div></div>
       </section>
       <section class="full">
         <h2>Computer tasks &#8226; real task store</h2>
@@ -364,7 +361,6 @@
       <section>
         <h2>Remote control &#8226; snapshot</h2>
         <div class="cells" id="remoteStatus"></div>
-        <div class="hint">Snapshot = `GET /remote/status` + `GET /remote/approvals`.</div>
       </section>
       <section>
         <h2>Approvals &#8226; pending prompts</h2>
@@ -389,7 +385,6 @@
           <thead><tr><th>#</th><th>red line</th><th>summary</th></tr></thead>
           <tbody></tbody>
         </table>
-        <div class="hint">Policy = `GET /red-lines/policy`. Yellow actions need a matching scoped grant; red actions are blocked.</div>
       </section>
       <details class="drawer">
         <summary><h2>Create scoped approval grant</h2></summary>
@@ -412,7 +407,7 @@
         <div class="drawer-body">
           <div class="bar"><input id="preflightGoal" placeholder="goal e.g. scan ~/Downloads for malware, then email me a report" /></div>
           <div class="bar"><button id="preflightRun" class="ghost">Run pre-flight</button><button id="preflightApprovals" class="ghost">Create draft approval prompts</button></div>
-          <div class="feed" id="preflightOut" style="height:220px"><div class="note">Pre-flight = `POST /safety/preflight`; approval drafts = `POST /safety/preflight/approvals`; predicts READY / NEEDS_APPROVAL / BLOCKED_BY_RED_LINE / MISSING_CAPABILITY before execution.</div></div>
+          <div class="feed" id="preflightOut" style="height:220px"><div class="note">Checks the plan before anything runs and says what will need your approval.</div></div>
         </div>
       </details>
       <details class="drawer full">
@@ -433,8 +428,8 @@
       <section class="full">
         <h2>Safety Event Timeline</h2>
         <div class="bar"><button id="safetyEventsRefresh" class="ghost">Refresh safety events</button><button id="safetyReportBtn" class="ghost">Generate safety report</button></div>
-        <div class="feed" id="safetyEvents" style="height:240px"><div class="note">Shows approvals, grants, emergency brake, mission blockers, policy denials, and capability ledger changes from the canonical EventBus.</div></div>
-        <div class="feed" id="safetyReport" style="height:220px;margin-top:10px"><div class="note">Report = `GET /safety/report?format=markdown` summarizing approvals, grants, blockers, discoveries, and emergency-stop state.</div></div>
+        <div class="feed" id="safetyEvents" style="height:240px"><div class="note">Approvals, grants, the emergency brake, blockers and policy denials as they happen.</div></div>
+        <div class="feed" id="safetyReport" style="height:220px;margin-top:10px"><div class="note">A written account of approvals, grants, blockers and the emergency-stop state.</div></div>
       </section>
       <section class="full">
         <h2>Approval bundles</h2>
@@ -463,7 +458,7 @@
         <summary><h2>Capability readiness / activation registry</h2></summary>
         <div class="drawer-body">
           <div class="bar"><button id="capRegistryRefresh" class="ghost">Refresh registry</button><button id="capSetup" class="ghost">Setup selected power</button><button id="capActivationRequest" class="ghost">Request activation</button></div>
-          <div class="feed" id="capRegistry" style="height:180px"><div class="note">Registry = `GET /capabilities/registry`. Setup proposes implementation; activation requires explicit approval.</div></div>
+          <div class="feed" id="capRegistry" style="height:180px"><div class="note">Setup proposes a way to do something; it only happens once you approve it.</div></div>
         </div>
       </details>
       <details class="drawer full">
@@ -472,7 +467,7 @@
           <div class="bar"><input id="powerName" placeholder="discovered power e.g. Gmail delegated send" /></div>
           <div class="bar"><input id="powerUse" placeholder="use e.g. reply to approved emails" /><input id="powerRisk" placeholder="risk e.g. reputation/privacy" /></div>
           <div class="bar"><input id="powerApproval" placeholder="needed approval/setup" /><button id="powerAdd">Record power</button><button id="powerPropose" class="ghost">Propose setup</button></div>
-          <div class="feed" id="capLedger" style="height:340px"><div class="note">Ledger = `GET /capabilities/ledger` from CAPABILITY_LEDGER.md.</div></div>
+          <div class="feed" id="capLedger" style="height:340px"><div class="note">What HERMUS can do today, and what it has deliberately not been given.</div></div>
         </div>
       </details>
     </div>
@@ -482,15 +477,13 @@
   <div class="tab" id="tab-systems" role="tabpanel" aria-labelledby="tabbtn-systems">
     <div class="grid">
       <section>
-        <h2>Snapshot &#8226; System health</h2>
+        <h2>System health</h2>
         <div class="cells" id="health"></div>
-        <div class="hint">Snapshot = `GET /api/v1/system/health` &#8214; every value from a live probe.</div>
       </section>
 
       <section>
-        <h2>Snapshot &#8226; Capabilities</h2>
+        <h2>Capabilities</h2>
         <div class="cells" id="caps"></div>
-        <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
       </section>
 
       <section class="full">
@@ -502,7 +495,7 @@
           </div>
           <div class="vram-bar"><div class="vram-fill" id="vramFill" style="width: 0%;"></div></div>
         </div>
-        <div class="hint">Reads `GET /api/v1/agents/vram/monitor`; shows n/a when the host has no measurable VRAM &#8212; never a fabricated number.</div>
+        <div class="hint">Shows n/a when the host has no measurable VRAM — never a fabricated number.</div>
       </section>
 
       <!-- JARVIS HUD: futuristic frame, REAL data from /api/jarvis/status (on demand) -->
@@ -516,14 +509,13 @@
       </details>
 
       <details class="drawer full">
-        <summary><h2>Replay &#8226; Canonical event log</h2></summary>
+        <summary><h2>Event log</h2></summary>
         <div class="drawer-body">
           <div class="bar">
             <input id="runId" placeholder="run / mission / trace id (e.g. run_abc)" />
             <button id="replayBtn">Replay timeline</button>
           </div>
           <div class="feed" id="log"><div class="note">No run selected &#8214; reconstructs state from the durable EventBus.</div></div>
-          <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` re-reads the durable event log.</div>
         </div>
       </details>
 
@@ -535,14 +527,14 @@
           </div>
           <div class="bar">
             <input id="cmdArgs" placeholder='args JSON e.g. {"goal":"..."}' value="{}" />
-            <button id="cmdBtn">POST /api/v1/commands</button>
+            <button id="cmdBtn">Send command</button>
           </div>
-          <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
+          <div class="feed" id="cmdOut"><div class="note">Every control is a real request; nothing is faked while the backend is down.</div></div>
         </div>
       </details>
     </div>
     <section class="full">
-      <h2>Systems &#8226; generated from core/console.py</h2>
+      <h2>Systems</h2>
       <div class="cells" id="consoleSummary"></div>
       <div class="bar">
         <input id="consoleFilter" placeholder="filter panels (name, owner, group)..." />
@@ -551,10 +543,8 @@
         <button id="consoleProbeAll" class="ghost">Live-probe every panel</button>
       </div>
       <div class="hint">
-        Every card is read from its canonical owner at request time. A card that
-        cannot be read says so and shows the real error; nothing here is
-        substituted to look complete. Actions post to the endpoint named on the
-        card -- the console adds no privileged path of its own.
+        Each card reads a live value. If it cannot be read, the card says so and
+        shows the real error rather than filling in something plausible.
       </div>
     </section>
     <div class="console-grid" id="consolePanels"><div class="note">loading manifest...</div></div>
@@ -563,7 +553,7 @@
 
     <footer>
       HERMUS -- Local-First Autonomous Fleet | face: HERMUS &#183; hood: JARVIS instruments &#183; autonomy: watchdog-guarded.
-      The UI never owns truth and never simulates success.
+      Everything shown here was read from the running system.
       <span class="footer-credit">3D god&#8217;s-eye motif after <a class="credit" href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noopener">gods-eye-view</a> (rendered locally, no external 3D library).</span>
     </footer>
   </div>
