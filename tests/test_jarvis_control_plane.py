@@ -20,8 +20,9 @@ def test_single_control_room_replaces_the_jarvis_page():
     # No fake claims that the old Jarvis surface hard-coded.
     for banner in ("318 Test Suites Verified Passing", "Page scrape active", "Autonomy: 100%"):
         assert banner not in text
-    # The page promises only what it can show: live readings, nothing canned.
-    assert "nothing here is pre-scripted or simulated" in text
+    # The page shows only what it can read: an empty thread, not a canned one.
+    assert "No turns yet." in text
+    assert "chat-row" not in text, "a pre-populated conversation would be a fake"
     # The wiring is where the endpoints live now, not the visible copy.
     script = TestClient(app).get("/static/control-room.js").text
     assert "/api/v1/commands" in script

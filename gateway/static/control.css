@@ -813,22 +813,6 @@ details.full {
   animation: fadeIn 0.18s ease;
 }
 
-/* Credits / external references */
-.credit {
-  color: var(--acc2);
-  text-decoration: none;
-  border-bottom: 1px dashed var(--line2);
-}
-
-.credit:hover { color: var(--acc); border-bottom-color: var(--acc); }
-
-.footer-credit {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted2);
-  font-size: 12px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .drawer[open] .drawer-body { animation: none; }
   #godsEyeCanvas { transform: none; }

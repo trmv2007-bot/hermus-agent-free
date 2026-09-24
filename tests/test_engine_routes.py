@@ -220,11 +220,16 @@ def test_control_room_wires_the_telemetry_feed():
     assert "/events/recent?limit=" in html
     assert "/dashboard/events" in html, "the live event stream is the telemetry path"
     assert "telemetry" in html.lower()
-    # No simulated success / placeholder text.
+    # No placeholder left in the markup standing in for live data, and the
+    # promise is structural rather than a caption: the served thread ships empty
+    # and the first row appears only when a real reply arrives. Checked against
+    # the page, because the script that renders rows mentions "chat-row" itself.
     assert "Loading activity feed…" not in html
-    honest = ("never simulates success" in html or "never owns truth" in html
-              or "nothing here is pre-scripted or simulated" in html)
-    assert honest, "the page must still promise it is not showing canned state"
+    from fastapi.testclient import TestClient
+
+    from gateway.gateway import app
+
+    assert "chat-row" not in TestClient(app).get("/control").text
 
 
 # ---------------------------------------------------------------------------

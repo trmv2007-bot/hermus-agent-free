@@ -45,7 +45,11 @@ def test_control_room_serves_from_real_backend_seeds():
     # Honesty is a property of the wiring, not a caption: the page must reach the
     # real command endpoint, and must not narrate its own architecture.
     assert "/api/v1/commands" in text
-    assert "nothing here is pre-scripted or simulated" in text
+    # Nothing is pre-populated to look alive: the chat ships an empty state, and
+    # a fabricated transcript would show up as rows in the served markup.
+    markup = c.get("/control").text
+    assert 'class="chat-seed">No turns yet.</div>' in markup
+    assert "chat-row" not in markup, "the served page must not contain canned messages"
     # every meaningful control maps to a real backend command
     for api in (
         "/api/v1/system/health",
