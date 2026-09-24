@@ -12,7 +12,6 @@ export function CommandBar() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const openSurface = useWorkspace((state) => state.openSurface);
-  const setAdvanced = useWorkspace((state) => state.setAdvanced);
 
   const send = async () => {
     const command = text.trim();
@@ -24,7 +23,6 @@ export function CommandBar() {
     // so an inferred layout is correctable rather than mysterious.
     const plan = planForRequest(command);
     for (const surface of plan.surfaces) openSurface(surface);
-    if (plan.intent !== "general") setAdvanced(true);
 
     try {
       const response = await api.command(command);

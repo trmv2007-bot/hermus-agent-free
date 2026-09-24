@@ -58,7 +58,8 @@ interface WorkspaceState {
   order: string[];
   zTop: number;
   focusedId: string | null;
-  advanced: boolean;
+  /** Full-HUD mode: the topbar and dock slide to the edges and the room owns the screen. */
+  immersive: boolean;
   viewport: Viewport;
   /** Readouts that arrived but were not given screen space, newest first. */
   tray: { label: string; detail: string; at: number }[];
@@ -79,7 +80,9 @@ interface WorkspaceState {
   showSurface: (id: string) => void;
   togglePin: (id: string) => void;
   renameSurface: (id: string, title: string) => void;
-  setAdvanced: (on: boolean) => void;
+  /** Full-HUD mode: chrome recedes to the edges and the room owns the screen. */
+  setImmersive: (on: boolean) => void;
+  toggleImmersive: () => void;
   setViewport: (viewport: Viewport) => void;
   applyOps: (ops: unknown) => { applied: number; rejected: number };
   resetLayout: () => void;
@@ -200,7 +203,7 @@ function initial(): Pick<WorkspaceState, "surfaces" | "order" | "zTop"> {
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   ...initial(),
   focusedId: null,
-  advanced: false,
+  immersive: false,
   viewport: { w: 1280, h: 800 },
   tray: [],
   rejected: [],
@@ -364,12 +367,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const state = get();
     const surface = state.surfaces[id];
     if (!surface || surface.restoreGeometry) return;
-    const chrome = 92; // topbar + dock tray
     const geometry: Geometry = {
       x: 0,
       y: 0,
       w: Math.max(MIN_W, state.viewport.w),
-      h: Math.max(MIN_H, state.viewport.h - chrome),
+      h: Math.max(MIN_H, state.viewport.h),
       z: state.zTop + 1,
     };
     set({
@@ -445,7 +447,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     get().persist();
   },
 
-  setAdvanced: (on) => set({ advanced: on }),
+  setImmersive: (on) => set({ immersive: on }),
+  toggleImmersive: () => set({ immersive: !get().immersive }),
   setViewport: (viewport) => set({ viewport }),
 
   /**

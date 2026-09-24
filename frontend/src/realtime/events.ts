@@ -20,7 +20,7 @@ export interface PlanResult {
   ops: WorkspaceOp[];
   /** Tray entries worth remembering without taking screen space. */
   tray: { label: string; detail: string; at: number }[];
-  /** Whether the advanced workspace should reveal itself. */
+  /** Whether the event is worth pulling the room back out of full-HUD mode. */
   reveal: boolean;
 }
 

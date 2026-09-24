@@ -69,6 +69,8 @@ export interface Surface {
   updatedAt: number;
 }
 
+/** The region the room may occupy: the stage with the dock rail subtracted,
+ * measured from the shell rather than assumed from the window. */
 export interface Viewport {
   w: number;
   h: number;

@@ -41,7 +41,7 @@ export function connectStream(path: string, onState: (state: LinkState, detail?:
     const workspace = useWorkspace.getState();
     if (plan.ops.length) workspace.applyOps(plan.ops);
     for (const entry of plan.tray) workspace.pushTray({ ...entry, detail: entry.detail || digest(event.data) });
-    if (plan.reveal && !workspace.advanced) workspace.setAdvanced(true);
+    if (plan.reveal && workspace.immersive) workspace.setImmersive(false);
   };
 
   const open = () => {

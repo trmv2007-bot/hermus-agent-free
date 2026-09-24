@@ -1,20 +1,29 @@
-/* The advanced workspace is dense by nature, but it is an instrument panel, not
-   a light show: no ambient gradients, no decorative motion, one accent, and the
-   reading surface stays calm while nothing is demanding attention. */
+/* An instrument panel with a HUD on it. The room is deliberately dramatic —
+   depth, glow, movable surfaces — but the reading surface inside a panel stays
+   quiet: one accent family, no motion that is not answering a real state, and
+   everything animated collapses to a static layout under prefers-reduced-motion. */
 
 :root {
   color-scheme: dark;
-  --bg: #0b0e13;
+  --bg: #070a10;
   --bg-surface: #121722;
   --bg-raised: #171d2a;
   --line: #232b3a;
   --text: #dfe6f1;
   --muted: #8d9ab0;
   --accent: #4fd1c5;
+  --accent-cool: #6d8dff;
+  --accent-warm: #c99bff;
   --bad: #f2777a;
   --warn: #f6c177;
   --ok: #9ece6a;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  /* The glass recipe repeats across the chrome so a panel and the rail read as
+     one material at different depths. */
+  --glass: linear-gradient(180deg, rgb(23 29 42 / 78%), rgb(9 12 18 / 88%));
+  --glass-blur: blur(14px) saturate(150%);
+  --edge: rgb(79 209 197 / 22%);
+  --lift: 0 24px 60px rgb(0 0 0 / 55%);
 }
 
 * {
@@ -45,8 +54,11 @@ code,
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-raised);
+  border-bottom: 1px solid var(--edge);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  position: relative;
+  z-index: 3;
 }
 
 .logo {
@@ -163,60 +175,111 @@ button.ghost {
   border-radius: 999px;
 }
 
-.calm {
-  padding: 40px clamp(18px, 6vw, 72px);
-  max-width: 720px;
-}
-
-.calm-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.tray {
-  margin-top: 26px;
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-
-.tray ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .stage {
   position: relative;
   flex: 1;
   overflow: hidden;
+  z-index: 1;
 }
 
 .surface {
   position: absolute;
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid rgb(109 141 255 / 18%);
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 18px 44px rgb(0 0 0 / 45%);
+  box-shadow: var(--lift), inset 0 1px 0 rgb(255 255 255 / 5%);
 }
 
 .surface.focused {
-  border-color: var(--accent);
+  border-color: rgb(79 209 197 / 55%);
+  box-shadow: var(--lift), 0 0 0 1px rgb(79 209 197 / 18%), 0 0 42px -12px rgb(79 209 197 / 45%);
+}
+
+/* Corner brackets, drawn as the two ends of the frame rather than four nodes. */
+.hud-corners {
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 2;
+}
+
+.surface.focused .hud-corners,
+.surface.held .hud-corners {
+  opacity: 0.9;
+}
+
+.hud-corners::before,
+.hud-corners::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--accent);
+}
+
+.hud-corners::before {
+  left: 0;
+  top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.hud-corners::after {
+  right: 0;
+  bottom: 0;
+  border-left: 0;
+  border-top: 0;
+}
+
+.surface.held {
+  transform: translateY(-2px);
+  box-shadow: 0 34px 80px rgb(0 0 0 / 68%), 0 0 0 1px rgb(79 209 197 / 30%), 0 0 60px -10px rgb(109 141 255 / 45%);
+}
+
+.geom {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  opacity: 0.85;
 }
 
 .surface-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px 6px 10px;
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--line);
+  padding: 7px 8px 7px 11px;
+  background: linear-gradient(180deg, rgb(79 209 197 / 9%), rgb(109 141 255 / 5%));
+  border-bottom: 1px solid rgb(109 141 255 / 16%);
   cursor: grab;
   user-select: none;
+  position: relative;
+}
+
+.surface-bar:active {
+  cursor: grabbing;
+}
+
+/* The lit top edge: which panel the room is currently pointing at. */
+.surface-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(79 209 197 / 70%), transparent);
+  opacity: 0;
+}
+
+.surface.focused .surface-bar::after,
+.surface.held .surface-bar::after {
+  opacity: 1;
 }
 
 .surface-bar h2 {
@@ -269,16 +332,17 @@ button.ghost {
   flex: 1;
   overflow: auto;
   padding: 10px 12px;
+  background: rgb(7 10 16 / 62%);
 }
 
 .grip {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 45%, var(--line) 45%);
+  background: linear-gradient(135deg, transparent 42%, rgb(79 209 197 / 45%) 42%);
 }
 
 .panel h3 {
@@ -472,9 +536,13 @@ button.ghost {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 6px 10px;
-  background: var(--bg-raised);
-  border-top: 1px solid var(--line);
+  padding: 7px 12px;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border-top: 1px solid var(--edge);
+  /* Above every panel: a surface's own z runs from the store's zTop counter, and
+     the rail has to stay reachable no matter how many times the room was clicked. */
+  z-index: 860;
 }
 
 .dock .spacer {
@@ -494,11 +562,50 @@ button.ghost {
   gap: 8px;
   text-align: center;
   color: var(--muted);
+  font-family: var(--mono);
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .surface {
-    transition: border-color 120ms ease;
+    transition: border-color 140ms ease, box-shadow 180ms ease, transform 180ms ease;
+    animation: surface-in 260ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+  }
+
+  .topbar,
+  .dock {
+    transition: opacity 220ms ease, transform 260ms ease;
+  }
+
+  .pod,
+  .hud-exit,
+  .back,
+  .link-state {
+    transition: opacity 200ms ease, transform 220ms ease, box-shadow 200ms ease, border-color 160ms ease;
+  }
+
+  .orb {
+    transition: opacity 200ms ease, box-shadow 200ms ease;
+  }
+
+  /* Only the auto-placed core glides to a new spot. Dragged chrome must follow
+     the pointer on the same frame, so left/top stay untransitioned there. */
+  .orb-auto {
+    transition: opacity 200ms ease, box-shadow 200ms ease, left 260ms ease, top 260ms ease;
+  }
+
+  .fan-slot {
+    transition: transform 160ms ease, box-shadow 200ms ease, border-color 160ms ease;
+  }
+}
+
+/* Transform only, never opacity: a slide that cannot tick leaves the panel 10px
+   low, while a fade that cannot tick leaves the whole room invisible. */
+@keyframes surface-in {
+  from {
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    transform: none;
   }
 }
 
@@ -605,4 +712,248 @@ button.ghost {
 .logs .mono {
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ HUD room */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The depth field. One element writes --px/--py from a pointer sample; nothing
+   here re-renders React when the mouse moves. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  --px: 0;
+  --py: 0;
+  background: radial-gradient(120% 90% at 50% 0%, #0d1424 0%, var(--bg) 55%, #04060b 100%);
+}
+
+.bd-grid {
+  position: absolute;
+  inset: -25%;
+  background-image: linear-gradient(rgb(109 141 255 / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(109 141 255 / 7%) 1px, transparent 1px);
+  background-size: 52px 52px;
+  transform: translate3d(calc(var(--px) * -26px), calc(var(--py) * -26px), 0);
+  mask-image: radial-gradient(85% 70% at 50% 45%, #000 25%, transparent 80%);
+}
+
+.bd-glow {
+  position: absolute;
+  inset: -30%;
+  background: radial-gradient(38% 34% at 22% 24%, rgb(79 209 197 / 16%), transparent 70%),
+    radial-gradient(42% 38% at 78% 76%, rgb(141 109 255 / 15%), transparent 72%);
+  transform: translate3d(calc(var(--px) * 40px), calc(var(--py) * 40px), 0);
+}
+
+.bd-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(110% 110% at 50% 50%, transparent 55%, rgb(2 4 8 / 72%) 100%);
+}
+
+.empty > span:first-child {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+}
+
+/* The core. Its hue and sweep carry state; its position carries where the work is. */
+.orb {
+  position: absolute;
+  z-index: 880;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+  filter: drop-shadow(0 0 22px rgb(79 209 197 / 28%));
+}
+
+.orb:active {
+  cursor: grabbing;
+}
+
+.orb-attention {
+  filter: drop-shadow(0 0 22px rgb(251 191 36 / 32%));
+}
+
+.orb-blocked {
+  filter: drop-shadow(0 0 18px rgb(100 116 139 / 30%));
+}
+
+.orb canvas {
+  display: block;
+}
+
+.orb-state {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.orb-small .orb-state {
+  display: none;
+}
+
+/* The launch pod and the fan of surfaces it opens. */
+.pod {
+  position: absolute;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  border: 1px solid var(--edge);
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 55%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.pod:hover,
+.pod:focus-visible {
+  border-color: rgb(79 209 197 / 65%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 55%), 0 0 26px -6px rgb(79 209 197 / 60%);
+  outline: none;
+}
+
+.pod-core {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, var(--accent), var(--accent-cool), var(--accent-warm), var(--accent));
+  opacity: 0.85;
+}
+
+.pod-open {
+  border-color: rgb(79 209 197 / 70%);
+}
+
+.fan {
+  position: absolute;
+  inset: 0;
+  z-index: 870;
+  pointer-events: none;
+}
+
+.fan-arc {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed rgb(109 141 255 / 20%);
+}
+
+.fan-slot {
+  position: absolute;
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  color: var(--accent);
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 45%);
+}
+
+.fan-slot:hover,
+.fan-slot:focus-visible {
+  border-color: rgb(79 209 197 / 75%);
+  color: var(--text);
+  box-shadow: 0 8px 22px rgb(0 0 0 / 45%), 0 0 24px -6px rgb(79 209 197 / 70%);
+  outline: none;
+  transform: scale(1.07);
+}
+
+/* Full-HUD mode: the chrome folds to the edges, the room keeps the screen. */
+[data-hud="recessed"] .topbar {
+  background: linear-gradient(180deg, rgb(23 29 42 / 45%), rgb(9 12 18 / 8%));
+  border-bottom-color: transparent;
+}
+
+[data-hud="recessed"] .back,
+[data-hud="recessed"] .link-state {
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-hud="recessed"] .topbar:hover .back,
+[data-hud="recessed"] .topbar:hover .link-state {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+[data-hud="recessed"] .dock {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(105%);
+}
+
+.hud-exit {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 910;
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgb(9 12 18 / 70%);
+  border-color: var(--edge);
+  border-radius: 999px;
+  padding: 5px 11px;
+}
+
+.hud-exit:hover {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bd-glow {
+    animation: glow-drift 34s ease-in-out infinite alternate;
+  }
+
+  .pod-core {
+    animation: pod-spin 7s linear infinite;
+  }
+
+  .pod-open .pod-core {
+    animation-duration: 2s;
+  }
+}
+
+@keyframes glow-drift {
+  from {
+    transform: translate3d(calc(var(--px) * 40px - 2%), calc(var(--py) * 40px + 1%), 0) scale(1);
+  }
+  to {
+    transform: translate3d(calc(var(--px) * 40px + 3%), calc(var(--py) * 40px - 2%), 0) scale(1.06);
+  }
+}
+
+@keyframes pod-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { minimizedSurfaces, stowedSurfaces, useWorkspace, visibleSurfaces } from "./workspace-store";
 
 function reset() {
-  useWorkspace.setState({ surfaces: {}, order: [], zTop: 10, focusedId: null, advanced: false, rejected: [], tray: [] });
+  useWorkspace.setState({ surfaces: {}, order: [], zTop: 10, focusedId: null, immersive: false, rejected: [], tray: [] });
 }
 
 beforeEach(reset);
@@ -156,7 +156,9 @@ describe("maximise, hide and stow", () => {
     const maximised = useWorkspace.getState().surfaces[id];
     expect(maximised.geometry.x).toBe(0);
     expect(maximised.geometry.w).toBe(1400);
-    expect(maximised.geometry.h).toBeLessThan(900);
+    // The shell measures the room and hands it over, so filling it is exact: the
+    // dock rail is already off the bottom of this number.
+    expect(maximised.geometry.h).toBe(900);
     expect(maximised.dock).toBe("none");
 
     useWorkspace.getState().unmaximizeSurface(id);

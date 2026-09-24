@@ -3,7 +3,7 @@
 // workspace store, so an agent moving the same surface mid-drag is not a race
 // against a component-local copy of the layout.
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
 import { MIN_H, MIN_W, type Surface } from "../state/surfaces";
 import { rendererFor } from "../surfaces/registry";
@@ -22,21 +22,28 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
   const viewport = useWorkspace((state) => state.viewport);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const grow = useRef<{ ox: number; oy: number; w: number; h: number } | null>(null);
+  // Held geometry drives the lifted look and the live readout. It is component
+  // state on purpose: it is view furniture, and the store stays the layout owner.
+  const [held, setHeld] = useState(false);
   const render = rendererFor(surface.kind);
   const geometry = surface.geometry;
 
   return (
     <section
-      className={`surface ${surface.focused ? "focused" : ""} ${surface.dock !== "none" ? `docked docked-${surface.dock}` : ""}`}
+      className={`surface ${surface.focused ? "focused" : ""} ${held ? "held" : ""} ${
+        surface.dock !== "none" ? `docked docked-${surface.dock}` : ""
+      }`}
       style={{ left: geometry.x, top: geometry.y, width: geometry.w, height: geometry.h, zIndex: geometry.z }}
       onPointerDown={() => focusSurface(surface.id)}
       aria-label={surface.title}
     >
+      <span className="hud-corners" aria-hidden="true" />
       <header
         className="surface-bar"
         onPointerDown={(event) => {
           if ((event.target as HTMLElement).closest("button")) return;
           drag.current = { dx: event.clientX - geometry.x, dy: event.clientY - geometry.y };
+          setHeld(true);
           (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
@@ -45,10 +52,16 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
         }}
         onPointerUp={() => {
           drag.current = null;
+          setHeld(false);
         }}
       >
         <span className={`kind kind-${surface.kind}`} aria-hidden="true" />
         <h2 title={surface.title}>{surface.title}</h2>
+        {held ? (
+          <span className="geom mono">
+            {geometry.x},{geometry.y} · {geometry.w}×{geometry.h}
+          </span>
+        ) : null}
         <span className={`source-tag tag-${surface.source.kind}`}>{surface.source.kind}</span>
         <div className="surface-tools">
           <button type="button" title="pin — survives a layout reset" className={surface.pinned ? "on" : ""} onClick={() => togglePin(surface.id)}>
@@ -88,6 +101,7 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
         title="drag to resize"
         onPointerDown={(event) => {
           grow.current = { ox: event.clientX, oy: event.clientY, w: geometry.w, h: geometry.h };
+          setHeld(true);
           (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
           event.stopPropagation();
         }}
@@ -101,6 +115,7 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
         }}
         onPointerUp={() => {
           grow.current = null;
+          setHeld(false);
         }}
       />
     </section>
