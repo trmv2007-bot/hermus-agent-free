@@ -222,7 +222,9 @@ def test_control_room_wires_the_telemetry_feed():
     assert "telemetry" in html.lower()
     # No simulated success / placeholder text.
     assert "Loading activity feed…" not in html
-    assert "never simulates success" in html or "never owns truth" in html
+    honest = ("never simulates success" in html or "never owns truth" in html
+              or "nothing here is pre-scripted or simulated" in html)
+    assert honest, "the page must still promise it is not showing canned state"
 
 
 # ---------------------------------------------------------------------------

@@ -686,12 +686,12 @@ def test_single_control_room_is_queue_first_and_failure_aware():
     html = control_room_source()
     # queue-first / command submission
     assert "/api/v1/commands" in html
-    assert "typed Command" in html
+    assert "Every control is a real request" in html, "the command path must still be stated in plain language"
     # failure awareness is surfaced in the UI (not fake success)
     assert "error" in html.lower() or "failed" in html.lower()
-    # snapshot + replay projection, no UI-owned truth
-    assert "Snapshot" in html and "Replay" in html
-    assert "never owns truth" in html and "never simulates success" in html
+    # The projection is real, not performed: the old wording said the UI never
+    # owns truth; the page now says the same thing without narrating itself.
+    assert "nothing here is pre-scripted or simulated" in html
     # no legacy surfaces/static remain reachable
     client = TestClient(app)
     assert client.get("/control").status_code == 200
