@@ -665,6 +665,24 @@ class PresenceManager:
         self._emit("goal_checkin", result)
         return {"success": True, "goal": result}
 
+    def mark_checkin_pending(self, goal_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        """Mark a check-in as IN FLIGHT, not delivered.
+
+        Queuing a proactive turn is not the same as the user receiving it. This
+        records only that a check-in was scheduled, so the same goal does not
+        re-fire on the next heartbeat. Deliberately leaves ``last_checkin_at``
+        and ``checkin_count`` untouched so the goal remains due until a real
+        delivery confirms the user was actually told.
+        """
+        with self._lock:
+            for goal in self._data["goals"]:
+                if goal.get("id") == str(goal_id) and _visible_to_user(goal, user_id):
+                    goal["checkin_pending_at"] = _now()
+                    goal["updated_at"] = _now()
+                    self._save_locked()
+                    return {"success": True, "pending": True, "delivered": False, "goal_id": str(goal_id)}
+        return {"success": False, "error": f"goal '{goal_id}' not found"}
+
     def _check_ins_due_locked(self, *, user_id: str | None = None) -> list[dict[str, Any]]:
         try:
             after_minutes = max(1, int(getattr(config, "presence_checkin_after_minutes", 240)))

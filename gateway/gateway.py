@@ -137,15 +137,22 @@ def _queue_due_presence_checkin(snapshot: dict) -> dict | None:
             session_key="presence:default",
             run_id=run_id,
         )
-        get_presence().mark_checkin(goal_id, user_id="default")
+        # NOTE: deliberately NOT mark_checkin() here. Queuing is not delivery.
+        # The old code acknowledged the check-in the moment the job was
+        # submitted, so a failed turn, a model error or an absent client silently
+        # consumed the reminder and the goal was never raised again. Instead we
+        # only mark that a check-in is IN FLIGHT (so the same goal does not re-fire
+        # on every heartbeat) and leave acknowledgement to the real delivery path,
+        # which marks it delivered only after a sink confirms.
+        get_presence().mark_checkin_pending(goal_id, user_id="default")
         get_presence().record_moment(
             "proactive_checkin",
             f"Queued a safe status check on {title}",
             run_id=job.run_id,
-            metadata={"goal_id": goal_id},
+            metadata={"goal_id": goal_id, "delivered": False},
             emit=False,
         )
-        return {"job_id": job.id, "run_id": job.run_id, "goal_id": goal_id}
+        return {"job_id": job.id, "run_id": job.run_id, "goal_id": goal_id, "delivered": False}
     except Exception as exc:
         logger.warning(f"[Presence] proactive check-in skipped: {type(exc).__name__}: {exc}")
         return None
