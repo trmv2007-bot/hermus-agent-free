@@ -308,9 +308,183 @@ class HermusDoctor:
         findings.extend(self._analyze_stuck(signals.get("stuck") or {}))
         findings.extend(self._analyze_resources(signals.get("resources") or {}))
         findings.extend(self._analyze_watchdog(signals.get("watchdog") or []))
+        findings.extend(self._analyze_model_tiers())
         findings.extend(self._analyze_web_security())
 
         findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.category))
+        return findings
+
+    # -- two-tier model policy ------------------------------------------------
+    @staticmethod
+    def _analyze_model_tiers() -> list[Finding]:
+        """Report the live state of the main (API) tier and the local tier.
+
+        The doctor is itself the first consumer of the local model, so this
+        check is what tells a user why their assistant got slower or dumber
+        after a config change: quota exhausted, credential expired, local model
+        missing, or the router parked on the fallback.
+
+        Credential *presence* and expiry are reported. Values never are.
+        """
+        findings: list[Finding] = []
+        try:
+            from .config import config as _config
+        except Exception:  # noqa: BLE001
+            return findings
+
+        main = getattr(_config, "model", "") or ""
+        local = getattr(_config, "local_model", "") or ""
+        doctor_model = getattr(_config, "doctor_model", "") or ""
+
+        main_provider = main.split("/", 1)[0].lower() if "/" in main else ""
+        main_ready = True
+        main_notes: list[str] = []
+
+        # --- main tier -------------------------------------------------------
+        if not main:
+            main_ready = False
+            main_notes.append("no main model configured")
+        elif main_provider == "nous":
+            try:
+                from .nous_auth import token_status
+
+                status = token_status()
+                if not status.get("configured"):
+                    main_ready = False
+                    main_notes.append("no Nous credential found")
+                elif status.get("expired"):
+                    main_ready = False
+                    main_notes.append(f"credential expired ({status.get('expires_in')})")
+                else:
+                    main_notes.append(f"credential ok, expires {status.get('expires_in')}")
+            except Exception as exc:  # noqa: BLE001
+                main_notes.append(f"credential state unknown ({type(exc).__name__})")
+        elif main_provider in ("", "ollama", "mock", "hf", "huggingface"):
+            main_notes.append("no hosted credential required")
+        else:
+            main_notes.append(f"hosted provider '{main_provider}'")
+
+        # --- local tier ------------------------------------------------------
+        local_ready = bool(local)
+        local_notes: list[str] = []
+        if local:
+            try:
+                from .llm import list_ollama_models
+
+                installed = list_ollama_models()
+                wanted = local.split("/", 1)[1] if "/" in local else local
+                if installed:
+                    hit = [m for m in installed if m == wanted or m.startswith(wanted + ":")]
+                    if hit:
+                        local_notes.append(f"model '{hit[0]}' present in Ollama")
+                    else:
+                        local_ready = False
+                        local_notes.append(
+                            f"'{wanted}' is not installed (have: {', '.join(installed[:6])})"
+                        )
+                else:
+                    local_ready = False
+                    local_notes.append("Ollama is not reachable or has no models")
+            except Exception as exc:  # noqa: BLE001
+                local_ready = False
+                local_notes.append(f"Ollama unreachable ({type(exc).__name__})")
+        else:
+            local_ready = False
+            local_notes.append("no local model configured")
+
+        # --- router state ----------------------------------------------------
+        router_note = ""
+        fallback_active = False
+        try:
+            from .model_router import get_router
+
+            rstatus = get_router().status()
+            fallback_active = bool(rstatus.get("fallback_active"))
+            if fallback_active:
+                router_note = (
+                    f"router is on the local fallback for another "
+                    f"{rstatus.get('fallback_remaining_s')}s"
+                )
+            elif rstatus.get("local_model_max_chars"):
+                router_note = (
+                    f"prompts up to {rstatus['local_model_max_chars']} characters go local; "
+                    f"longer prompts go to the main model"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+        summary = "; ".join(
+            [
+                f"main={main or 'none'} ({'; '.join(main_notes) or 'unknown'})",
+                f"local={local or 'none'} ({'; '.join(local_notes) or 'unknown'})",
+                f"doctor={doctor_model or local or 'none'}",
+                router_note or "no routing policy",
+            ]
+        )
+
+        if not main_ready and not local_ready:
+            findings.append(
+                _finding(
+                    SEVERITY_CRITICAL,
+                    "model-tiers",
+                    "Neither model tier is usable",
+                    summary,
+                    [
+                        "Fix the main model credential, or",
+                        f"ollama pull {local.split('/', 1)[1] if '/' in local else local}",
+                    ],
+                    component="model",
+                )
+            )
+        elif not main_ready:
+            findings.append(
+                _finding(
+                    SEVERITY_HIGH,
+                    "model-tiers",
+                    "Main model is not usable; every turn is degrading to the local model",
+                    summary,
+                    [
+                        "Check the credential for the main provider (presence only is reported here).",
+                        "Hermus falls back to the local model automatically until it recovers.",
+                    ],
+                    component="model",
+                )
+            )
+        elif not local_ready:
+            findings.append(
+                _finding(
+                    SEVERITY_MEDIUM,
+                    "model-tiers",
+                    "Local model tier is unavailable (no doctor model, no fallback)",
+                    summary,
+                    [
+                        f"ollama pull {local.split('/', 1)[1] if '/' in local else local}",
+                        "Start Ollama if it is not running.",
+                    ],
+                    component="model",
+                )
+            )
+        elif fallback_active:
+            findings.append(
+                _finding(
+                    SEVERITY_MEDIUM,
+                    "model-tiers",
+                    "Router is running on the local fallback",
+                    summary,
+                    ["The main model failed recently; Hermes retries it after the fallback window."],
+                    component="model",
+                )
+            )
+        else:
+            findings.append(
+                _finding(
+                    SEVERITY_INFO,
+                    "model-tiers",
+                    "Two-tier model policy is healthy",
+                    summary,
+                    component="model",
+                )
+            )
         return findings
 
     # -- web acquisition security posture ------------------------------------

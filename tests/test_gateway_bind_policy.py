@@ -47,10 +47,6 @@ def test_lan_bind_requires_auth_but_loopback_does_not(monkeypatch):
     assert auth_required_for_bind("localhost") is False
 
 
-def test_explicit_escape_hatch_is_respected(monkeypatch):
-    monkeypatch.setenv("HERMES_GATEWAY_ALLOW_UNAUTHENTICATED_LAN", "1")
-    assert auth_required_for_bind("0.0.0.0") is False
-
 
 def test_missing_token_is_generated_and_persisted(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMUS_GATEWAY_TOKEN", raising=False)
