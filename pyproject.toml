@@ -59,6 +59,19 @@ dependencies = [
 # install.
 optional = [
 ]
+
+# Real desktop control. Without these, core/computer/* correctly falls back to the
+# dry-run backends and the agent cannot actually click, type, or see - it can only
+# plan. Installing this extra is what turns computer control from a simulation
+# into real input. `hermes doctor` reports which state you are in.
+gui = [
+  "pyautogui>=0.9.54",      # mouse + keyboard injection (FAILSAFE = corner-panic stop)
+  "pynput>=1.7.7",          # lower-level input, more reliable under load than pyautogui alone
+  "mss>=9.0.1",            # fast multi-monitor screen capture (sight)
+  "pywinauto>=0.6.8",      # real Win32 window control (focus, menus, close)
+  "pygetwindow>=0.0.9",    # window enumerate/move/resize
+  "uiautomation>=2.0.22",  # UI Automation tree -> act on elements by NAME, not coordinates
+]
 dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",

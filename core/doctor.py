@@ -309,6 +309,7 @@ class HermusDoctor:
         findings.extend(self._analyze_resources(signals.get("resources") or {}))
         findings.extend(self._analyze_watchdog(signals.get("watchdog") or []))
         findings.extend(self._analyze_model_tiers())
+        findings.extend(self._analyze_computer_control())
         findings.extend(self._analyze_web_security())
 
         findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.category))
@@ -486,6 +487,69 @@ class HermusDoctor:
                 )
             )
         return findings
+
+    # -- real desktop control ------------------------------------------------
+    @staticmethod
+    def _analyze_computer_control() -> list[Finding]:
+        """Report whether the agent can ACTUALLY control the desktop.
+
+        Without the ``gui`` extra, core/computer/* falls back to dry-run
+        backends that record actions without performing them. Everything looks
+        healthy - plans render, action records exist, verify passes - while the
+        agent cannot move the mouse. That silent simulation is the single most
+        misleading state this project can be in, so the doctor names it
+        explicitly instead of leaving it to be discovered at runtime.
+        """
+        findings: list[Finding] = []
+        try:
+            from core.computer import detect_computer_capability
+
+            cap = detect_computer_capability()
+        except Exception as exc:  # noqa: BLE001 - probe must never break the doctor
+            return [
+                _finding(
+                    SEVERITY_MEDIUM,
+                    "computer_control_unknown",
+                    "Desktop control state could not be determined",
+                    f"{type(exc).__name__}: {exc}"[:220],
+                    ["Import core.computer locally to reproduce the failing probe"],
+                    component="computer",
+                )
+            ]
+
+        if cap.get("available"):
+            backends = ", ".join(
+                f"{name}={(row or {}).get('backend', '?')}" for name, row in sorted((cap.get("backends") or {}).items())
+            )
+            # Informational on purpose: real control is working, so there is
+            # nothing for the user to fix.
+            findings.append(
+                _finding(
+                    SEVERITY_INFO,
+                    "computer_control_real",
+                    "Real desktop control is active",
+                    backends[:220],
+                    [],
+                    component="computer",
+                )
+            )
+            return findings
+
+        backends = cap.get("backends") or {}
+        dry = sorted(name for name, row in backends.items() if (row or {}).get("dry_run"))
+        return [
+            _finding(
+                SEVERITY_MEDIUM,
+                "computer_control_simulated",
+                "Desktop control is simulated, not real",
+                str(cap.get("reason") or f"dry-run backends: {', '.join(dry)}")[:220],
+                [
+                    "pip install -e '.[gui]'  # pyautogui, mss, pywinauto, uiautomation",
+                    "Until then the agent can plan and record actions but cannot move the mouse or see the screen",
+                ],
+                component="computer",
+            )
+        ]
 
     # -- web acquisition security posture ------------------------------------
     @staticmethod
