@@ -67,6 +67,7 @@ except ImportError:  # executed as a plain module (python gateway/gateway.py)
 # gateway.context; re-exported here so `from gateway.gateway import ...`
 # and `monkeypatch.setattr("gateway.gateway.get_agent_for_user", ...)`
 # keep working exactly as before the split.
+from gateway.bind_policy import auth_required_for_bind, ensure_gateway_token, is_loopback_host
 from gateway.context import (  # noqa: F401
     AGENTS,
     _agent_chat,
@@ -1425,14 +1426,34 @@ def setup(platform: str):
         logger.info(f"Platform {platform} setup - just set env token")
 
 
-def start(port: int = None):
+def start(port: int = None, host: str = None):
     port = port or config.gateway_port
+    host = host or os.getenv("HERMUS_GATEWAY_HOST", "0.0.0.0")
+
+    # Serving computer-control and remote-approval on every interface with no
+    # credential lets anything on the LAN drive the machine. The bind address
+    # now decides the auth policy instead of the other way round.
+    if auth_required_for_bind(host):
+        token, generated, persisted = ensure_gateway_token()
+        if generated:
+            where = f"written to .env ({Path(__file__).resolve().parents[1] / '.env'})" if persisted else "process env only (not persisted)"
+            logger.warning("=" * 72)
+            logger.warning(f"Gateway bound to {host} (reachable from your LAN) and no token was set.")
+            logger.warning(f"Generated one: {where}")
+            logger.warning(f"  HERMES_GATEWAY_TOKEN={token}")
+            logger.warning("Send it as the X-Hermus-Token header, or ?token=... in the URL.")
+            logger.warning("Lock down to this machine only with HERMES_GATEWAY_HOST=127.0.0.1")
+            logger.warning("=" * 72)
+        else:
+            logger.info(f"Gateway bound to {host} - token auth required (X-Hermus-Token)")
+    else:
+        logger.info(f"Gateway bound to {host} (loopback only) - token auth optional")
     logger.info(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
     logger.info("Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
     logger.info("Channels: /channels/status, /channels/start, /telegram/send")
     logger.info("Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
     logger.info(f"Docs: http://localhost:{port}/docs")
-    logger.info(f"Control room: http://localhost:{port}/control")
+    logger.info(f"Control room: http://{'localhost' if is_loopback_host(host) else host}:{port}/control")
     logger.info(f"Computer control (API): http://localhost:{port}/computer/status")
     logger.info(f"Remote control (API): http://localhost:{port}/remote/status")
     logger.info("Plugins: /plugins | Resources: /computer/resources | Delegation: /computer/delegate")
@@ -1440,7 +1461,7 @@ def start(port: int = None):
         f"Telegram mode={getattr(config, 'telegram_mode', 'auto')} | auto_channels={getattr(config, 'auto_start_channels', True)}"
     )
     logger.info("Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
