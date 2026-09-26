@@ -1,5 +1,6 @@
 """Multi-AI Collaboration - Multiple AIs can talk to each other for anything, free"""
 
+import hashlib
 import uuid
 from datetime import datetime
 
@@ -62,7 +63,7 @@ class MultiAIChat:
         self.agents.append(agent)
         logger.info(
             f"[MultiAI] Added agent {name} | model {agent.model} | "
-            f"key={(api_key[:8] + '...') if api_key else 'auto'} | persona: {persona[:50]}..."
+            f"key={_fingerprint(api_key) if api_key else 'auto'} | persona: {persona[:50]}..."
         )
         return agent
 
@@ -319,6 +320,14 @@ class MultiAIChat:
 
 # Global multi-AI manager
 multi_ai_manager = MultiAIChat()
+
+
+
+def _fingerprint(key_val: str | None) -> str:
+    """Non-reversible id for an API key. Never log key material."""
+    if not key_val:
+        return "none"
+    return hashlib.sha256(key_val.encode("utf-8", "replace")).hexdigest()[:12]
 
 # Example personas for quick use
 PERSONA_PRESETS = {

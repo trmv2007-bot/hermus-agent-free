@@ -219,7 +219,7 @@ class ResponseTimeTester:
             key_name = key_entry.get("name", "") if isinstance(key_entry, dict) else ""
             if not key_val:
                 continue
-            logger.info(f"[ResponseTime] Testing {provider} key {key_name or key_val[:10]}...")
+            logger.info(f"[ResponseTime] Testing {provider} key {key_name or key_fingerprint(key_val)}...")
             result = self.test_llm_key(provider, key_val, model=model, prompt=prompt)
             results.append(result)
 
