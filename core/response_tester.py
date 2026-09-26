@@ -1,3 +1,4 @@
+from core.multi_key import key_fingerprint
 """Response Time Tester - Test how much time API key takes to get response from AI model - free"""
 
 import json
@@ -79,7 +80,7 @@ class ResponseTimeTester:
 
         result = {
             "provider": provider,
-            "api_key_preview": f"{api_key[:6]}...{api_key[-4:]}" if api_key and len(api_key) > 10 else "****",
+            "api_key_preview": key_fingerprint(api_key),
             "api_key_full": api_key,
             "model": model or f"{provider}/default",
             "model_tested": health.get("model_tested") if isinstance(health, dict) else model,
@@ -167,7 +168,7 @@ class ResponseTimeTester:
             test_result = {
                 "api_name": api_name,
                 "api_id": target_api.get("id", ""),
-                "api_key_preview": f"{api_key[:6]}...{api_key[-4:]}"
+                "api_key_preview": key_fingerprint(api_key)
                 if api_key and len(api_key) > 10
                 else f"{(target_api.get('auth', {}).get('token', '') or '')[:6]}...{(target_api.get('auth', {}).get('token', '') or '')[-4:]}"
                 if (target_api.get("auth", {}).get("token", "") or "")

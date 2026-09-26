@@ -7,6 +7,7 @@ Multi-API Keys — any AI API key works.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -24,6 +25,17 @@ from .config import config
 from .providers import get_provider, list_providers
 
 logger = get_logger(__name__)
+
+
+def key_fingerprint(key_val: str | None) -> str:
+    """Stable, non-reversible identifier for an API key.
+
+    Use this wherever a key has to be named - logs, per-key counters, doctor
+    output. Never print a prefix or suffix of the key itself.
+    """
+    if not key_val:
+        return "none"
+    return hashlib.sha256(key_val.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 def _today_utc() -> str:
@@ -46,7 +58,7 @@ def _key_preview(key_val: str) -> str:
     if not key_val:
         return "(no-key)"
     if len(key_val) > 10:
-        return f"{key_val[:6]}...{key_val[-4:]}"
+        return key_fingerprint(key_val)
     return "****"
 
 
@@ -978,7 +990,7 @@ class MultiKeyManager:
         if provider in self.key_failures:
             self.key_failures[provider][key] = self.key_failures[provider].get(key, 0) + 1
         logger.error(
-            f"[MultiKey] Key {key[:10]}... for {provider} failed ({error}), failures: {self.key_failures[provider].get(key, 0)}"
+            f"[MultiKey] key {key_fingerprint(key)} for {provider} failed ({error}), failures: {self.key_failures[provider].get(key, 0)}"
         )
         quarantined: list[str] = []
 

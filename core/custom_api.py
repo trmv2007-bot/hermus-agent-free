@@ -246,7 +246,7 @@ class CustomAPIManager:
                                 multi_key_manager.mark_key_success(provider_key, chosen_token)
                             else:
                                 multi_key_manager.mark_key_failed(provider_key, chosen_token, result.get("error", ""))
-                            result["used_key"] = f"{chosen_token[:10]}... (multi-key {len(matching)} keys round-robin)"
+                            result["used_key"] = f"{key_fingerprint(chosen_token)} (multi-key {len(matching)} keys round-robin)"
                             result["total_keys_for_this_api"] = len(matching)
                             return result
             except Exception as e:

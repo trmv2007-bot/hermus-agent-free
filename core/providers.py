@@ -56,6 +56,22 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_rpm": 3,
         "default_tpm": 40000,
     },
+    "nous": {
+        "name": "Nous Portal",
+        "base_url": "https://inference-api.nousresearch.com/v1",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+        "default_model": "stealth/space-bunny-alpha",
+        "supports_tools": True,
+        "env_key": "NOUS_API_KEY",
+        # The access token is short-lived (about an hour) and is read by
+        # core.nous_auth from the shared auth file the desktop app refreshes in
+        # place. Do not paste a key into .env: it expires silently.
+        "notes": "OpenAI-compatible portal; token resolved by core.nous_auth",
+        "default_rpm": 30,
+    },
     "groq": {
         "name": "Groq",
         "base_url": "https://api.groq.com/openai/v1",

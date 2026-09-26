@@ -18,6 +18,7 @@ if os.getenv("HERMUS_NO_DOTENV", "") not in ("1", "true", "True"):
         from dotenv import load_dotenv
 
         load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+
     except Exception:  # python-dotenv is optional until setup.sh installs it
         pass
 
@@ -155,6 +156,14 @@ class Config(BaseSettings):
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
+    # Nous Portal: short-lived OAuth token, resolved by core.nous_auth from the
+    # shared auth file the desktop app refreshes. Setting NOUS_API_KEY by hand
+    # still works and takes precedence.
+    nous_api_key: str | None = Field(default=None, validation_alias="NOUS_API_KEY")
+    nous_base_url: str = Field(
+        default="https://inference-api.nousresearch.com/v1",
+        validation_alias="NOUS_BASE_URL",
+    )
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
     # Agent loop
@@ -197,6 +206,16 @@ class Config(BaseSettings):
     # Auto-select a compatible model when the selected one cannot do the job.
     # On by default: a tool-required request must recover to a tool-capable
     # provider instead of silently failing with "no model providers".
+    # ---- two-tier model policy -------------------------------------
+    # `model` is the main brain (an API model). `local_model` is the
+    # always-available local model used for doctor, short/simple turns
+    # (saves API quota) and as the fallback when the API is down.
+    local_model: str | None = Field(default=None, validation_alias="HERMUS_LOCAL_MODEL")
+    # Prompts at or below this many characters go to the local model.
+    # 0 disables short-turn routing (everything goes to the main model).
+    local_model_max_chars: int = Field(default=280, validation_alias="HERMUS_LOCAL_MODEL_MAX_CHARS")
+    # Minutes to stay on the local model after a main-model failure.
+    local_model_fallback_minutes: int = Field(default=10, validation_alias="HERMUS_LOCAL_FALLBACK_MINUTES")
     auto_select_model: EnvFlag = Field(default=True, validation_alias="HERMUS_AUTO_SELECT_MODEL")
 
     # DeepThink — plan-first thinking (Phase 0)
@@ -493,5 +512,15 @@ class Config(BaseSettings):
             return path
         return self.base_dir / path
 
+
+# The Nous Portal token is short-lived (~1h) and is refreshed in place by the
+# desktop app in a shared auth file, so resolve it before the settings object
+# is built. A key pasted into .env would expire silently an hour later.
+try:
+    from core.nous_auth import ensure_env as _nous_ensure_env
+
+    _nous_ensure_env()
+except Exception:  # noqa: BLE001 - credentials must never block startup
+    pass
 
 config = Config()

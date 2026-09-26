@@ -80,6 +80,7 @@ Repository = "https://github.com/trmv2007-bot/hermus-agent-free"
 # this, so the list is explicit. Adding a top-level package means adding it
 # here too - tests/test_packaging.py enforces that.
 [tool.setuptools]
+py-modules = ["bootstrap"]
 packages = [
   "backends",
   "core",

@@ -42,6 +42,8 @@ class FreeLLM:
         temperature: float | None = None,
     ):
         self.model = model or config.model
+        # last tier decision, for doctor/diagnostics reporting
+        self.last_route = None
         self.temperature = temperature
         # Allow override of provider/model
         if provider:
@@ -310,6 +312,11 @@ class FreeLLM:
                         pass
                 return out
             except CompatAPIError as e:
+                try:
+                    from .model_router import get_router
+                    get_router().record_failure(self.model)
+                except Exception:
+                    pass
                 last_err = e
                 try:
                     multi_key_manager.mark_key_failed(used_provider, current_key, e.message, rate_limit=e.rate_limit)
@@ -585,10 +592,35 @@ class FreeLLM:
         content = data.get("response", "")
         return LLMResponse(content)
 
+    # ------------------------------------------------- two-tier model policy
+    def _apply_two_tier(self, messages: list[dict], tools: list[dict] = None) -> None:
+        """Point this instance at the tier the router picked for this call.
+
+        Cheap and idempotent: when the router agrees with the current tier it
+        does nothing. When it disagrees it moves ``provider``/``model_name`` so
+        the dispatch below reaches the right backend. Health is recorded by the
+        caller through :func:`core.model_router.get_router`.
+        """
+        try:
+            from .model_router import get_router
+
+            decision = get_router().route(
+                messages,
+                has_tools=bool(tools),
+                current=(self.provider, self.model_name),
+            )
+        except Exception:
+            return
+        if decision.switched and decision.provider:
+            self.provider = decision.provider
+            self.model_name = decision.model_name
+        self.last_route = decision
+
     def chat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Route to provider. Any unknown provider → OpenAI-compatible HTTP."""
         self.last_tools_disabled_reason = None
         self.last_fallback = None
+        self._apply_two_tier(messages, tools)
         p = self.provider
         if p == "mock":
             return self._call_mock(messages, tools)
@@ -610,6 +642,7 @@ class FreeLLM:
         """
         self.last_tools_disabled_reason = None
         self.last_fallback = None
+        self._apply_two_tier(messages, tools)
         p = self.provider
         if p == "mock":
             return self._call_mock(messages, tools)
