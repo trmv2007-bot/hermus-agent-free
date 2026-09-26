@@ -441,6 +441,10 @@ class Config(BaseSettings):
     web_termux_restrict: EnvFlag = Field(default=True, validation_alias="HERMUS_WEB_TERMUX_RESTRICT")
 
     # Timeouts / sizes (resource control — spec §11)
+    # Seconds to wait on a hosted LLM request. A free-tier model can be
+    # slow rather than broken; 120s turned a working answer into a
+    # failure and a fallback onto the small local model.
+    llm_timeout: int = Field(default=300, validation_alias="HERMUS_LLM_TIMEOUT")
     web_request_timeout: float = Field(default=20.0, validation_alias="HERMUS_WEB_TIMEOUT")
     web_browser_timeout: float = Field(default=45.0, validation_alias="HERMUS_WEB_BROWSER_TIMEOUT")
     web_max_response_bytes: int = Field(default=5242880, validation_alias="HERMUS_WEB_MAX_RESPONSE_BYTES")

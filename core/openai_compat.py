@@ -247,7 +247,7 @@ def chat_completions(
     tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = None,
-    timeout: int = 120,
+    timeout: int = 300,
     extra_headers: dict = None,
     extra_body: dict = None,
 ) -> CompatResponse:
@@ -321,7 +321,7 @@ async def achat_completions(
     tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = None,
-    timeout: int = 120,
+    timeout: int = 300,
     extra_headers: dict = None,
     extra_body: dict = None,
     client=None,
@@ -404,7 +404,7 @@ def stream_chat_completions(
     tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = None,
-    timeout: int = 120,
+    timeout: int = 300,
     extra_headers: dict = None,
     on_delta: callable | None = None,
 ) -> CompatResponse:
@@ -774,7 +774,7 @@ def _anthropic_messages(
     tools: list[dict] = None,
     temperature: float = 0.7,
     max_tokens: int = 2048,
-    timeout: int = 120,
+    timeout: int = 300,
 ) -> CompatResponse:
     """Minimal Anthropic Messages API support."""
     start = time.time()

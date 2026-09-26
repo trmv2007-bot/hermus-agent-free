@@ -42,6 +42,8 @@ class FreeLLM:
         temperature: float | None = None,
     ):
         self.model = model or config.model
+        # Hosted-model ceiling. Read once; a slow model should wait, not fail.
+        self.timeout = int(getattr(config, "llm_timeout", 300) or 300)
         # last tier decision, for doctor/diagnostics reporting
         self.last_route = None
         self.temperature = temperature
@@ -291,7 +293,7 @@ class FreeLLM:
                     api_key=current_key,
                     base_url=base_url,
                     tools=tools,
-                    timeout=120,
+                    timeout=self.timeout,
                     **extra_kwargs,
                 )
                 try:
@@ -358,7 +360,7 @@ class FreeLLM:
                     api_key="ollama",
                     base_url=base_v1,
                     tools=tools,
-                    timeout=120,
+                    timeout=self.timeout,
                 )
                 return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
             except CompatAPIError:
@@ -441,7 +443,7 @@ class FreeLLM:
                         api_key=fb.get("key") or "",
                         base_url=fb.get("base_url") or "",
                         tools=fallback_tools,
-                        timeout=120,
+                        timeout=self.timeout,
                     )
                     try:
                         multi_key_manager.mark_key_success(
@@ -718,7 +720,7 @@ class FreeLLM:
                     api_key=current_key,
                     base_url=base_url,
                     tools=tools,
-                    timeout=120,
+                    timeout=self.timeout,
                     client=client,
                     **extra_kwargs,
                 )
@@ -776,7 +778,7 @@ class FreeLLM:
                     api_key="ollama",
                     base_url=base_v1,
                     tools=tools,
-                    timeout=120,
+                    timeout=self.timeout,
                     client=client,
                 )
                 return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
@@ -858,7 +860,7 @@ class FreeLLM:
                         api_key=fb.get("key") or "",
                         base_url=fb.get("base_url") or "",
                         tools=fallback_tools,
-                        timeout=120,
+                        timeout=self.timeout,
                         client=client,
                     )
                     try:
@@ -1017,7 +1019,7 @@ class FreeLLM:
                     base_url=target.get("base_url"),
                     tools=stream_tools,
                     temperature=self.temperature if self.temperature is not None else 0.7,
-                    timeout=120,
+                    timeout=self.timeout,
                     on_delta=on_delta,
                 )
                 return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
