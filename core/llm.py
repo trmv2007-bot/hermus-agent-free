@@ -57,6 +57,12 @@ class FreeLLM:
             self.provider, self.model_name = parse_model_ref(self.model)
         self.api_key_override = api_key
         self.base_url_override = base_url
+        # True when the caller deliberately chose this provider/endpoint for this
+        # instance (a council seat, a pinned subagent, a probe). Such a caller
+        # owns its choice: the two-tier router must not quietly redirect it to
+        # the local model, or a multi-model panel silently collapses into N
+        # copies of one small model while still reporting success.
+        self._explicit_provider = bool(provider) or bool(base_url) or bool(api_key)
         # Set per-call when tools were requested but the chosen provider cannot
         # accept them (preset ``supports_tools: False``). The agent surfaces
         # this to the user instead of silently going tool-less — the model then
@@ -603,6 +609,11 @@ class FreeLLM:
         the dispatch below reaches the right backend. Health is recorded by the
         caller through :func:`core.model_router.get_router`.
         """
+        if getattr(self, "_explicit_provider", False):
+            # Caller pinned this seat on purpose. Respect it; do not spend its
+            # choice on quota heuristics. last_route stays None so callers can
+            # tell "not routed" apart from "routed and switched".
+            return
         try:
             from .model_router import get_router
 
