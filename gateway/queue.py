@@ -38,6 +38,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -298,6 +299,12 @@ class JobQueue:
         # and a freshly constructed queue (tests, an in-process restart) starts
         # accepting work again.
         self._draining = False
+        # Jobs are dispatched to this executor, NOT the loop's default one. An
+        # executor we do not own cannot be drained: run_in_executor(None, ...)
+        # hides the worker thread from stop(), so jobs outlive the queue and keep
+        # writing to a stream the test/app has already closed.
+        self._executor: ThreadPoolExecutor | None = None
+        self._inflight: set[Future] = set()
         self.retry_backoff = float(getattr(config, "gateway_queue_retry_backoff", 1.5) or 1.5)
         self.cancel_grace = float(getattr(config, "gateway_queue_cancel_grace", 15) or 15)
         self.persist_path = Path(persist or config.resolve_path(str(getattr(config, "gateway_jobs_log", "data/jobs/jobs.jsonl"))))
@@ -366,6 +373,32 @@ class JobQueue:
             except asyncio.TimeoutError:
                 for t in pending:
                     t.cancel()
+
+        # Drain executor threads too. A lane task completes as soon as the work
+        # is handed to the executor, so the gather above does not imply the job
+        # itself has finished. Without this, a still-running mission outlives
+        # stop(), keeps logging into a closed stream, and keeps the process
+        # alive - the defect this was added to fix.
+        executor, self._executor = self._executor, None
+        if executor is not None:
+            inflight = [f for f in self._inflight if not f.done()]
+            if inflight:
+                loop = asyncio.get_running_loop()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*inflight, return_exceptions=True),
+                        timeout=drain_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Queue] %d job(s) still running after %.1fs; "
+                        "forcing executor shutdown so no thread outlives the queue",
+                        len(inflight),
+                        drain_timeout,
+                    )
+                del loop
+            executor.shutdown(wait=False, cancel_futures=True)
+        self._inflight.clear()
         self._started = False
 
     # ------------------------------------------------------------------ intake
@@ -552,7 +585,14 @@ class JobQueue:
                 pending = asyncio.ensure_future(_call_with_context(handler, ctx))
                 result = await (asyncio.wait_for(pending, timeout=job.timeout) if job.timeout else pending)
             else:
-                fut = self._loop.run_in_executor(None, _call_with_context, handler, ctx)
+                if self._executor is None:
+                    self._executor = ThreadPoolExecutor(
+                        max_workers=self.workers,
+                        thread_name_prefix="hermus-job",
+                    )
+                fut = self._loop.run_in_executor(self._executor, _call_with_context, handler, ctx)
+                self._inflight.add(fut)
+                fut.add_done_callback(self._inflight.discard)
                 if job.timeout:
                     try:
                         result = await asyncio.wait_for(asyncio.shield(fut), timeout=job.timeout)
