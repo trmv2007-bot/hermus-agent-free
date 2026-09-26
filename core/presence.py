@@ -106,6 +106,23 @@ def _visible_to_user(item: dict[str, Any], user_id: str | None) -> bool:
     return not owner or owner == requested
 
 
+def _accepts_two(fn: Any) -> bool:
+    """True when a sink accepts (message, item) as well as (message)."""
+    try:
+        import inspect
+
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    positional = [
+        p
+        for p in sig.parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    has_varargs = any(p.kind is p.VAR_POSITIONAL for p in sig.parameters.values())
+    return has_varargs or len(positional) >= 2
+
+
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -712,6 +729,122 @@ class PresenceManager:
     def check_ins_due(self, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             return self._check_ins_due_locked(user_id=user_id)
+
+    # ------------------------------------------------------- check-in delivery
+    def _delivery_sink(self) -> Any:
+        """Return the configured delivery sink, or None when none is wired.
+
+        Resolution order is deliberate: an explicitly injected sink wins (that
+        is how the gateway pushes a real notification), then the config/env
+        pointer. Nothing here fabricates a sink - with no sink configured,
+        delivery reports ``no_sink`` rather than pretending the user was told.
+        """
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            return sink
+        try:
+            from . import config as _cfg
+
+            target = getattr(_cfg, "presence_checkin_sink", None) or os.environ.get("HERMUS_CHECKIN_SINK") or ""
+            target = str(target).strip()
+            if not target:
+                return None
+            if ":" not in target:
+                return None
+            module_name, _, attr = target.partition(":")
+            mod = __import__(module_name, fromlist=[attr])
+            return getattr(mod, attr, None)
+        except Exception:
+            return None
+
+    def deliver_check_ins(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 3,
+        sink: Any = None,
+    ) -> dict[str, Any]:
+        """Actually deliver due check-ins to the user.
+
+        This is the half that was missing: ``check_ins_due`` computes, this
+        delivers. Each check-in is sent through the sink, and only a sink that
+        explicitly confirms (``ok``/``True``/``None`` return, no exception) marks
+        the goal as checked in. A failing or missing sink leaves state untouched
+        so the same reminder can be retried instead of being silently lost.
+        """
+        try:
+            limit = max(1, min(20, int(limit)))
+        except (TypeError, ValueError):
+            limit = 3
+
+        target = sink if sink is not None else self._delivery_sink()
+        due = self.check_ins_due(user_id=user_id)
+        if not due:
+            return {"success": True, "delivered": [], "skipped": [], "reason": "", "sink": bool(target)}
+        if target is None:
+            return {
+                "success": False,
+                "delivered": [],
+                "skipped": [d.get("id") for d in due],
+                "reason": "no_sink",
+                "sink": False,
+            }
+
+        delivered: list[str] = []
+        skipped: list[str] = []
+        last_reason = ""
+        for item in due[:limit]:
+            goal_id = item.get("id")
+            age = item.get("age_minutes")
+            message = self._render_checkin(item)
+            try:
+                outcome = target(message, item) if _accepts_two(target) else target(message)
+            except Exception as exc:  # noqa: BLE001 - a bad sink must not break presence
+                last_reason = f"{type(exc).__name__}: {exc}"[:200]
+                skipped.append(goal_id)
+                continue
+            if outcome is False:
+                last_reason = "sink declined delivery"
+                skipped.append(goal_id)
+                continue
+            # Confirmed: acknowledge it, and only now.
+            with self._lock:
+                for goal in self._data.get("goals", []):
+                    if isinstance(goal, dict) and goal.get("id") == goal_id:
+                        goal["last_checkin_at"] = _now()
+                        goal["checkin_count"] = _safe_int(goal.get("checkin_count"), minimum=0) + 1
+                        goal["updated_at"] = _now()
+                        break
+                self._save_locked()
+            self._emit("checkin_delivered", {"goal": goal_id, "age_minutes": age}, actor="agent")
+            delivered.append(goal_id)
+            _ = message  # message is what the sink already received
+
+        return {
+            "success": bool(delivered) or not skipped,
+            "delivered": delivered,
+            "skipped": skipped,
+            "reason": last_reason,
+            "sink": True,
+        }
+
+    @staticmethod
+    def _render_checkin(item: dict[str, Any]) -> str:
+        """Human-readable check-in line. Pure, so it is trivially testable."""
+        title = _safe_text(item.get("title"), 160) or "an ongoing goal"
+        try:
+            age = int(float(item.get("age_minutes") or 0))
+        except (TypeError, ValueError):
+            age = 0
+        if age >= 60:
+            when = f"{age // 60}h ago"
+        else:
+            when = f"{age}m ago"
+        return f"Checking in - still on: {title} (last touched {when}). Need me to keep going, change course, or drop it?"
+
+    def set_checkin_sink(self, sink: Any) -> None:
+        """Install the delivery sink (used by the gateway to push notifications)."""
+        self._sink = sink
 
     # ---------------------------------------------------------------- heartbeat
     def heartbeat(self, *, force_event: bool = False) -> dict[str, Any]:
