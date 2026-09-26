@@ -320,3 +320,84 @@ if __name__ == "__main__":
             traceback.print_exc()
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+# Every one of these passed the deny screen before the Windows patterns existed.
+WINDOWS_DESTRUCTIVE = [
+    r"del /f /s /q C:\Windows",
+    r"DEL /F /S /Q C:\*.*",
+    r"format C: /q",
+    r"rd /s /q C:\Windows",
+    r"rmdir /s /q C:\Users",
+    r"Remove-Item -Recurse -Force C:\Users\rishi",
+    r"Get-ChildItem | Remove-Item -Recurse -Force",
+    r"reg delete HKLM /f",
+    r"cipher /w:C",
+    r"diskpart",
+    r"takeown /f C:\Windows /r /d y",
+    r"icacls C:\ /grant everyone:F /t",
+    r"vssadmin delete shadows /all /quiet",
+    r"net user add backdoor P@ss /add",
+    r"bcdedit /set testsigning on",
+    r"schtasks /create /sc onstart /tn pwn",
+    r"wevtutil cl System",
+    r"Restart-Computer -Force",
+    r"netsh advfirewall set allprofiles state off",
+]
+
+
+def test_windows_deny_list_blocks_destructive_commands():
+    """The host is Windows; a POSIX-only deny screen protects nothing here.
+
+    Verified before this test existed: all of the above returned zero hits.
+    """
+    from core.sandbox import dangerous_patterns_for_platform
+
+    pats = dangerous_patterns_for_platform("win32")
+    for cmd in WINDOWS_DESTRUCTIVE:
+        hits = scan_command(cmd, pats)
+        assert hits, f"dangerous Windows command passed the screen: {cmd!r}"
+
+
+def test_windows_deny_list_does_not_block_ordinary_commands():
+    """A deny screen that blocks everything is not a deny screen."""
+    from core.sandbox import dangerous_patterns_for_platform
+
+    pats = dangerous_patterns_for_platform("win32")
+    for cmd in [
+        r"dir C:\Users\rishi",
+        r"type README.md",
+        r"python -m pytest -q",
+        r"git status",
+        r"del notes.txt",
+        r"Remove-Item notes.txt",
+    ]:
+        assert not scan_command(cmd, pats), f"ordinary command was blocked: {cmd!r}"
+
+
+def test_posix_platform_keeps_posix_patterns_only():
+    from core.sandbox import dangerous_patterns_for_platform
+
+    linux = dangerous_patterns_for_platform("linux")
+    assert "rm -rf /" and scan_command("rm -rf / ", linux)
+    assert not any("diskpart" in p for p in linux)
+
+
+def test_limits_report_what_is_actually_enforced_not_what_was_requested():
+    """`no_new_privs: true` on a platform that cannot set it is a lie.
+
+    The old code echoed the policy request. Callers (and the Control Room) read
+    these flags as containment, so the result has to distinguish requested from
+    enforced.
+    """
+    res = sandbox.run("echo ok", purpose="test:enforcement-reporting")
+    limits = res["limits"]
+    assert "enforced" in limits and "unenforced" in limits
+    if os.name == "nt":
+        # No rlimits, no PR_SET_NO_NEW_PRIVS, no setsid on Windows.
+        assert limits["enforced"]["no_new_privs"] is False
+        assert limits["enforced"]["setsid"] is False
+        assert limits["enforced"]["memory_mb"] is False
+        assert "no_new_privs" in limits["unenforced"]
+    for key in ("enforced", "unenforced"):
+        assert isinstance(limits[key], (dict, list))

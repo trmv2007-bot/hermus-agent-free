@@ -75,7 +75,7 @@ REQUIRED_PIP = [
     "tiktoken",
     "Pillow",
     "fastapi",
-    "uvicorn",
+    "uvicorn[standard]",
     "python-multipart",
     "psutil",
     "httpx",
@@ -83,15 +83,14 @@ REQUIRED_PIP = [
     "playwright",
     "scrapling[fetchers]",
     "faster-whisper",
-    "imageio-ffmpeg",
     "feedparser",
     "pypdf",
     "PyYAML",
+    "imageio-ffmpeg",
     "APScheduler",
     "prompt_toolkit",
     "rich",
     "websockets",
-    "pytest",
 ]
 
 # Optional imports are capability-labelled rather than treated as required core

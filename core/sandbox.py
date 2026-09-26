@@ -70,6 +70,57 @@ DANGEROUS_PATTERNS = (
     r"\bgit\s+push\s+--force",
     r"\bDROP\s+(TABLE|DATABASE)\b",
 )
+
+# The patterns above are POSIX-only, and this project's only supported host is
+# Windows. Without these, every destructive Windows command passed the screen:
+# del /f /s /q, format, rd /s /q, Remove-Item -Recurse -Force, reg delete,
+# cipher /w, diskpart, takeown, vssadmin delete shadows, net user add,
+# bcdedit, schtasks /create. Matched case-insensitively, and PowerShell cmdlet
+# syntax is matched with optional backticks because `Remove-Item` is how it is
+# usually written in agent-generated commands.
+WINDOWS_DANGEROUS_PATTERNS = (
+    # `del` and friends take several flags before the target, so the flag group
+    # repeats. A leading \b before "/" is never a boundary (space and "/" are both
+    # non-word), which is what let `takeown /f` and `icacls /grant` through.
+    r"\bdel\s+(?:/[a-z]+\s+)+(?:[a-z]:\\|\*)",  # del /f /s /q C:\Windows
+    r"\bdel\s+/[a-z]{1,3}\s+\*",
+    r"\bformat\s+[a-z]:",  # format C: /q
+    r"\brd\s+(?:/[a-z]+\s+)+[a-z]:",  # rd /s /q C:\Windows
+    r"\brmdir\s+(?:/[a-z]+\s+)+[a-z]:",
+    r"\bremove-item\b.*(-recurse|-force)",  # PowerShell, backticks optional
+    r"\breg\s+delete\b",  # reg delete HKLM /f
+    r"\bcipher\s+/w",  # secure-erase a volume
+    r"\bdiskpart\b",
+    r"\btakeown\b.*/[a-z]",  # takeown /f C:\Windows /r /d y
+    r"\bicacls\b.*/grant\b",
+    r"\bvssadmin\b.*\bdelete\b",
+    r"\bnet\s+user\s+add\b",
+    r"\bbcdedit\b.*\b(set|delete)\b",
+    r"\bschtasks\b.*/create\b",
+    r"\bwevtutil\b.*\b(clear|cl)\b",
+    r"\bcipher\b.*\bw\b.*\bclean\b",
+    r"\bdefrag\b.*/verylowdisk\b",
+    r"\bshutdown\b|\brestart-computer\b|\bstop-computer\b",
+    r"\bdisable-windowsoptionalfeature\b|\benable-windowsoptionalfeature\b",
+    r"\bnetsh\b.*\b(set|delete)\b",
+)
+
+
+def dangerous_patterns_for_platform(platform_name: str | None = None) -> tuple[str, ...]:
+    """Patterns that actually guard the host we are running on.
+
+    A safety screen that only knows POSIX commands is not a safety screen on
+    Windows - it reads as protection while passing `format C: /q`.
+
+    An explicit `platform_name` is authoritative (that is how the tests reason
+    about the other platform); with no argument we answer for the live host.
+    """
+    name = (platform_name or sys.platform or "").lower()
+    is_windows = name.startswith("win") if platform_name else (os.name == "nt")
+    if is_windows:
+        return DANGEROUS_PATTERNS + WINDOWS_DANGEROUS_PATTERNS
+    return DANGEROUS_PATTERNS
+
 SECRET_ENV_RE = re.compile(r"(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|ACCESS_KEY|PRIVATE_KEY|AUTH)", re.I)
 ENV_ALLOW_DEFAULT = ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "TZ", "PYTHONIOENCODING", "PYTHONUNBUFFERED")
 
@@ -99,7 +150,7 @@ class SandboxPolicy:
     drop_capabilities: tuple[str, ...] = ("ALL",)
     add_capabilities: tuple[str, ...] = ()
     env_allowlist: tuple[str, ...] = ENV_ALLOW_DEFAULT
-    deny_patterns: tuple[str, ...] = DANGEROUS_PATTERNS
+    deny_patterns: tuple[str, ...] = field(default_factory=lambda: dangerous_patterns_for_platform())
     max_output_chars: int = 6000
     keep_artifacts: bool = False
     confine_to_workspace: bool = True
@@ -771,16 +822,32 @@ class Sandbox:
         if not pol.network and self.probe.unshare_net():
             # A real network cut (empty netns), not just an env hint.
             argv = [self.probe.binary("unshare"), "-n", *argv]
+        network_dropped = argv[0].endswith("unshare")
+        # What this platform can ACTUALLY enforce. On Windows _preexec is a no-op,
+        # so rlimits, no_new_privs and setsid are not applied - reporting them as
+        # True made the result dict claim containment that did not exist.
+        posix_jail = os.name == "posix" and resource is not None
+        enforced = {
+            "memory_mb": posix_jail,
+            "cpu_seconds": posix_jail,
+            "pids": posix_jail,
+            "disk_mb": False,  # never enforced on either path; rlimits cannot cap disk
+            "no_new_privs": posix_jail and pol.soft_no_new_privs,
+            "setsid": posix_jail,
+            "network_dropped": network_dropped,
+        }
         limits = {
             "memory_mb": pol.memory_mb,
             "cpu_seconds": pol.timeout,
             "pids": pol.pids,
             "disk_mb": pol.disk_mb,
             "network": pol.network,
-            "network_dropped": argv[0].endswith("unshare"),
+            "network_dropped": network_dropped,
             "rlimits": resource is not None,
-            "no_new_privs": pol.soft_no_new_privs,
-            "setsid": os.name == "posix",
+            "no_new_privs": enforced["no_new_privs"],
+            "setsid": posix_jail,
+            "enforced": enforced,
+            "unenforced": sorted(k for k, v in enforced.items() if not v),
             "cwd": self._exec_cwd(pol, workdir),
             "reason": reason,
         }

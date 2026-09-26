@@ -49,7 +49,7 @@ def test_pyproject_declares_build_system_and_metadata():
 def test_hermes_console_script_is_importable_and_callable():
     data = _pyproject()
     scripts = data["project"].get("scripts", {})
-    assert "hermus" in scripts, "the product entrypoint must be a console script"
+    assert "hermes" in scripts, "the product entrypoint must be a console script"
     target = scripts["hermes"]
     module_name, _, attr = target.partition(":")
     module = __import__(module_name, fromlist=[attr])
@@ -72,10 +72,16 @@ def test_declared_dependencies_cover_requirements_runtime():
     declared = {re.split(r"[<>=!~\[; ]", d, maxsplit=1)[0].strip().lower().replace("_", "-")
                 for d in data["project"]["dependencies"]}
     required = _requirement_names((ROOT / "requirements.txt").read_text(encoding="utf-8"))
-    # requirements.txt also lists test-only helpers; those live in optional/dev.
-    missing = {name for name in required if name not in declared}
-    known_optional = {"faster-whisper", "scrapling"}
-    assert missing <= known_optional, f"runtime deps missing from pyproject: {sorted(missing - known_optional)}"
+    # requirements.txt also lists helpers that are optional or dev-only. Those
+    # live in [project.optional-dependencies]; a name appearing in neither is
+    # the actual drift this test exists to catch.
+    optional = {re.split(r"[<>=!~\[; ]", d, maxsplit=1)[0].strip().lower().replace("_", "-")
+                for group in ("optional", "dev")
+                for d in data["project"].get("optional-dependencies", {}).get(group, [])}
+    missing = {name for name in required if name not in declared and name not in optional}
+    assert not missing, (
+        f"in requirements.txt but in neither dependencies nor optional-dependencies: {sorted(missing)}"
+    )
 
 
 def test_every_top_level_package_is_declared():
@@ -106,3 +112,64 @@ def test_lane_markers_are_registered_and_used(marker):
     cfg = _pyproject()["tool"]["pytest"]["ini_options"]
     registered = " ".join(cfg.get("markers", []))
     assert f"{marker}:" in registered
+
+
+def _bootstrap_list(name: str) -> list:
+    """Read a bootstrap list literal, bracket-aware.
+
+    A regex like `\[.*?\]` stops at the first `]`, which lands inside
+    "uvicorn[standard]" and silently truncates the list - the kind of test that
+    passes because it compared the wrong data.
+    """
+    lines = (ROOT / "bootstrap.py").read_text(encoding="utf-8").splitlines()
+    try:
+        start = next(i for i, l in enumerate(lines) if l.startswith(f"{name} = ["))
+    except StopIteration:
+        raise AssertionError(f"bootstrap.{name} not found - update this guard if it moved")
+    body = []
+    for line in lines[start + 1:]:
+        if line.strip() == "]":
+            break
+        body.append(line)
+    return re.findall(r'"([^"]+)"', chr(10).join(body))
+
+
+def test_bootstrap_required_pip_list_is_parallel_to_imports() -> None:
+    """REQUIRED_IMPORTS and REQUIRED_PIP are documented as parallel lists.
+
+    Doctor checks the first; bootstrap installs the second. If they drift, Doctor
+    demands an import the installer never provides and reports it as missing.
+    """
+    imports = _bootstrap_list("REQUIRED_IMPORTS")
+    pips = _bootstrap_list("REQUIRED_PIP")
+    assert len(imports) == len(pips), (
+        f"REQUIRED_IMPORTS has {len(imports)} entries but REQUIRED_PIP has {len(pips)}"
+    )
+
+
+def _dist_name(spec: str) -> str:
+    """Normalise a requirement to a bare distribution name.
+
+    PEP 503 normalisation: drop extras, drop any version/specifier suffix,
+    lowercase, and treat '_' and '.' as '-'. Both sides of every comparison in
+    this file go through here, because normalising only one side turns
+    'uvicorn[standard]' and 'prompt_toolkit' into phantom drift.
+    """
+    name = re.split(r"[<>=!~;\[ ]", spec, maxsplit=1)[0]
+    return re.sub(r"[-_.]+", "-", name.strip()).lower()
+
+
+def test_bootstrap_required_pip_is_installable_from_pyproject() -> None:
+    """Every distribution bootstrap must install has to be a real dependency.
+
+    Regression: scrapling sat in [project.optional-dependencies] while bootstrap
+    demanded it, so a clean `pip install -e .` left 38 web tests failing and 6 of
+    the 8 canonical web tools inert. An extra is a choice; REQUIRED_PIP is a contract.
+    """
+    data = _pyproject()
+    declared = {_dist_name(d) for d in data["project"].get("dependencies", [])}
+    missing = {n for n in (_dist_name(x) for x in _bootstrap_list("REQUIRED_PIP")) if n not in declared}
+    assert not missing, (
+        "bootstrap.REQUIRED_PIP entries missing from [project.dependencies]: "
+        f"{sorted(missing)}"
+    )
