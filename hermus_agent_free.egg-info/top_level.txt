@@ -1,9 +1,0 @@
-backends
-core
-gateway
-hermus_cli
-pentest
-scheduler
-subagents
-tools
-tui

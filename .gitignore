@@ -79,3 +79,8 @@ logs/
 # Frontend build residue (the bundle itself is committed so /workspace works without Node)
 frontend/*.tsbuildinfo
 gateway/static/workspace/**/*.map
+
+# build/packaging metadata
+*.egg-info/
+build/
+dist/
