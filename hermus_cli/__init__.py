@@ -11,6 +11,7 @@ that one list, so the parser can no longer disagree with the dispatcher.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from core.config import config
 from core.log import setup_logging
@@ -77,4 +78,20 @@ def main() -> None:
     COMMANDS[args.command].run(args, ctx)
 
 
-__all__ = ["COMMANDS", "SPECS", "build_parser", "main"]
+def run() -> int:
+    """Console-script entrypoint for the installed `hermes` command.
+
+    Returns a process exit code. Ctrl-C in an interactive session is a normal
+    way to leave, not a crash: without this the CLI dies with a traceback.
+    """
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(chr(10) + "Interrupted.", file=sys.stderr)
+        return 130
+    except SystemExit as exc:  # argparse already printed the reason
+        return int(exc.code or 0)
+    return 0
+
+
+__all__ = ["COMMANDS", "SPECS", "build_parser", "main", "run"]

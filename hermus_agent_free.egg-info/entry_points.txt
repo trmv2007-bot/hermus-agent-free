@@ -1,0 +1,2 @@
+[console_scripts]
+hermes = hermus_cli:run
