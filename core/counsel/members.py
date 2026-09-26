@@ -77,10 +77,19 @@ def _assign_models(specs: list[dict], model: str | None = None) -> list[dict]:
         if not pick and workers:
             pick = workers[len(assigned) % len(workers)]
         if pick:
-            s["model"] = f"{pick['provider']}/{pick['model']}"
+            provider = str(pick.get("provider") or "").strip()
+            name = str(pick.get("model") or "").strip()
+            # A worker may already carry its registry namespace
+            # ("ollama/SparkLLM/Spark-X2.5-4B:latest"). Prepending the provider
+            # again produced "ollama/ollama/...", which Ollama answers with a
+            # 404 - every council agent then failed and the mission went blocked
+            # for a reason that had nothing to do with the work.
+            if provider and name.lower().startswith(provider.lower() + "/"):
+                name = name[len(provider) + 1 :]
+            s["model"] = f"{provider}/{name}" if provider else name
             s["api_key"] = pick.get("key") or ""
             s["base_url"] = pick.get("base_url") or ""
-            used_providers.add(pick.get("provider"))
+            used_providers.add(provider)
         else:
             s["model"] = model or config.model
         assigned.append(s)
