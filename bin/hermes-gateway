@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+PORT="${1:-8000}"
+echo -e "[0;36mHermus Live Gateway[0m"
+echo -e "  - Control Center: http://localhost:${PORT}/control"
+echo -e "  - Health:         http://localhost:${PORT}/api/v1/system/health"
+echo -e "  - Doctor:         ./hermes doctor"
+echo ""
+
+win_root() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# Match bin/hermes: never run the gateway with a different interpreter from the
+# one that owns installed packages.
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" "$ROOT/hermes.py" gateway start --port "$PORT"
+elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  ROOT_WIN="$(win_root "$ROOT")"
+  exec "$ROOT/.venv/Scripts/python.exe" "$ROOT_WIN\hermes.py" gateway start --port "$PORT"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 "$ROOT/hermes.py" gateway start --port "$PORT"
+else
+  exec python "$ROOT/hermes.py" gateway start --port "$PORT"
+fi

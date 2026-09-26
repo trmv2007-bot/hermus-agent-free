@@ -38,6 +38,9 @@ class ProfileManager:
     def __init__(self, profiles_dir: Path | None = None):
         self.profiles_dir = Path(profiles_dir) if profiles_dir else workspace.dirs["profiles"]
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        # Keep one facade per profile so delete() can close SQLite handles
+        # before removing the directory (required on Windows).
+        self._memories: dict[str, MemoryFacade] = {}
 
     def _profile_dir(self, name: str) -> Path:
         return self.profiles_dir / _safe_name(name)
@@ -45,7 +48,10 @@ class ProfileManager:
     def _memory(self, name: str) -> MemoryFacade:
         # Canonical facade owns the typed backend; the per-profile DB path is the
         # only available knob (every profile keeps an independent store).
-        return MemoryFacade(db_path=str(self._profile_dir(name) / "memory2.db"))
+        key = _safe_name(name)
+        if key not in self._memories:
+            self._memories[key] = MemoryFacade(db_path=str(self._profile_dir(name) / "memory2.db"))
+        return self._memories[key]
 
     def create(self, name: str, persona: str | None = None, model: str | None = None) -> dict[str, Any]:
         pdir = self._profile_dir(name)
@@ -87,6 +93,9 @@ class ProfileManager:
             return {"success": False, "error": f"profile '{name}' not found"}
         import shutil
 
+        facade = self._memories.pop(_safe_name(name), None)
+        if facade is not None:
+            facade.close()
         shutil.rmtree(pdir)
         return {"success": True, "name": name}
 

@@ -120,7 +120,12 @@ class AutonomyPreflightReport:
         return "\n".join(lines)
 
 
-def preflight_goal(goal: str, *, actions: list[dict[str, Any]] | None = None) -> AutonomyPreflightReport:
+def preflight_goal(
+    goal: str,
+    *,
+    actions: list[dict[str, Any]] | None = None,
+    approval_store: Any = None,
+) -> AutonomyPreflightReport:
     goal = str(goal or "").strip()
     inferred = [PreflightAction(**a) for a in actions] if actions else infer_actions(goal)
     emergency = _emergency_state()
@@ -130,7 +135,7 @@ def preflight_goal(goal: str, *, actions: list[dict[str, Any]] | None = None) ->
     red_blocks: list[dict[str, Any]] = []
 
     for action in inferred:
-        finding = assess_preflight_action(action)
+        finding = assess_preflight_action(action, approval_store=approval_store)
         findings.append(finding)
         fd = {**finding.to_dict(), "expected_capability": action.expected_capability}
         if finding.missing_approval:
@@ -182,7 +187,7 @@ def create_preflight_approval_requests(
     This creates *pending prompts only*. It never grants approval and never
     retries/executes the blocked action.
     """
-    report = preflight_goal(goal)
+    report = preflight_goal(goal, approval_store=approval_store)
     if approval_store is None:
         approval_store = _default_approval_store()
     if approval_store is None:
@@ -225,7 +230,7 @@ def create_preflight_approval_requests(
     }
 
 
-def assess_preflight_action(action: PreflightAction) -> PreflightFinding:
+def assess_preflight_action(action: PreflightAction, *, approval_store: Any = None) -> PreflightFinding:
     safety = assess_tool_action(action.tool, action.args)
     decision = "allow" if safety.zone == "green" else "ask" if safety.zone == "yellow" else "deny"
     capabilities: list[str] = []
@@ -242,9 +247,10 @@ def assess_preflight_action(action: PreflightAction) -> PreflightFinding:
         if action.tool not in DEFAULT_POLICY and not any(key in action.tool for key in DEFAULT_POLICY):
             missing_capability = True
             missing_reason = "tool/connector is not registered in the permission policy yet"
-        if decision == "ask" and getattr(permission_manager, "approvals", None) is not None:
+        store = approval_store if approval_store is not None else getattr(permission_manager, "approvals", None)
+        if decision == "ask" and store is not None:
             approval_present = bool(
-                permission_manager.approvals.allowed(action.tool, action.args, safety.to_dict(), consume=False)
+                store.allowed(action.tool, action.args, safety.to_dict(), consume=False)
             )
     except Exception:
         if action.tool in {"send_email", "wallet_trade", "calendar_write", "connector_setup"}:

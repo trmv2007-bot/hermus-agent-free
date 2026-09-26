@@ -34,9 +34,16 @@ def _offline(tmp_path):
     os.environ["HERMUS_AGENT_DEPTH"] = "0"
     from core.config import config
 
+    old_model, old_steps = config.model, config.max_tool_steps
+    old_memory2 = getattr(config, "memory2_enabled", True)
     config.model = "mock/mock"
     config.max_tool_steps = 2
-    yield
+    config.memory2_enabled = True
+    try:
+        yield
+    finally:
+        config.model, config.max_tool_steps = old_model, old_steps
+        config.memory2_enabled = old_memory2
 
 
 def _saved_rpc():

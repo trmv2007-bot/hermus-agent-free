@@ -12,6 +12,8 @@ Two invariants matter:
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 import time
 
 import pytest
@@ -28,6 +30,13 @@ from core.nollama import (
     NollamaManager,
     model_dir_ready,
 )
+
+
+def _fake_venv_python(venv: pathlib.Path) -> pathlib.Path:
+    """Match the real venv interpreter layout for this host (Windows uses Scripts)."""
+    if os.name == "nt":
+        return venv / "Scripts" / "python.exe"
+    return venv / "bin" / "python"
 
 
 @pytest.fixture
@@ -72,9 +81,9 @@ def test_install_downloads_no_model_weights(mgr, monkeypatch):
         if "venv" in cmd:
             # Stand in for `python -m venv`: the real thing creates the interpreter.
             venv = pathlib.Path(cmd[-1])
-            (venv / "bin").mkdir(parents=True, exist_ok=True)
-            (venv / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
-            return 0, ""
+            interpreter = _fake_venv_python(venv)
+            interpreter.parent.mkdir(parents=True, exist_ok=True)
+            interpreter.write_text("#!/bin/sh\n", encoding="utf-8")
         return 0, ""
 
     monkeypatch.setattr(nl, "_shell", fake_shell)
@@ -118,10 +127,11 @@ def test_start_never_binds_the_gateway_port(mgr, monkeypatch, tmp_path):
     """NoLlama's 8000 default would shadow the Hermus gateway."""
     mgr.home.mkdir(parents=True, exist_ok=True)
     (mgr.home / "nollama.py").write_text("# server\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin").mkdir(parents=True)
-    (mgr.home / "venv" / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin" / "python").chmod(0o755)
-
+    interpreter = _fake_venv_python(mgr.home / "venv")
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.write_text("#!/bin/sh\n", encoding="utf-8")
+    if os.name != "nt":
+        interpreter.chmod(0o755)
     captured = {}
 
     class FakeProc:
@@ -154,10 +164,11 @@ def test_start_auto_resolves_downloaded_model_dir(mgr, monkeypatch):
     NoLlama automatically instead of relying on its internal registry."""
     mgr.home.mkdir(parents=True, exist_ok=True)
     (mgr.home / "nollama.py").write_text("# server\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin").mkdir(parents=True)
-    (mgr.home / "venv" / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin" / "python").chmod(0o755)
-
+    interpreter = _fake_venv_python(mgr.home / "venv")
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.write_text("#!/bin/sh\n", encoding="utf-8")
+    if os.name != "nt":
+        interpreter.chmod(0o755)
     captured = {}
 
     class FakeProc:

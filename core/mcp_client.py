@@ -48,6 +48,7 @@ class MCPServerConnection:
         self._initialized = False
         self.last_error: str | None = None
         self._buf = b""
+        self._reader_thread: threading.Thread | None = None
 
     def _next_id(self) -> int:
         self._id += 1
@@ -69,6 +70,11 @@ class MCPServerConnection:
                 bufsize=0,  # unbuffered binary
             )
             self._buf = b""
+            if os.name == "nt":
+                # select() only accepts sockets on Windows; a pipe needs a
+                # reader thread so the request loop can still honour timeouts.
+                self._reader_thread = threading.Thread(target=self._pump_stdout, daemon=True)
+                self._reader_thread.start()
             init = self._request(
                 "initialize",
                 {
@@ -141,6 +147,20 @@ class MCPServerConnection:
             self.proc.stdin.write(raw + b"\n")
         self.proc.stdin.flush()
 
+    def _pump_stdout(self) -> None:
+        """Feed stdout into the parser on Windows, where select cannot watch pipes."""
+        proc = self.proc
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            while True:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    return
+                self._buf += chunk
+        except (OSError, ValueError):
+            return
+
     def _read_message(self, timeout: float = 12.0) -> dict:
         """Read one JSON-RPC message supporting NDJSON or Content-Length."""
         if not self.proc or not self.proc.stdout:
@@ -160,7 +180,11 @@ class MCPServerConnection:
             if parsed is not None:
                 return parsed
 
-            # Read more bytes with timeout via select
+            # Read more bytes with timeout via select. Windows pipes are not
+            # selectable; the reader thread above fills the buffer instead.
+            if os.name == "nt":
+                time.sleep(0.01)
+                continue
             import select
 
             remaining = max(0.05, deadline - time.time())

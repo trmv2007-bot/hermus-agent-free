@@ -87,11 +87,14 @@ async def keys_add(payload: dict):
     """Add ANY AI API key — auto health + model discovery"""
     try:
         from core.multi_key import multi_key_manager
+        from core.providers import get_provider
 
         provider = payload.get("provider", "groq")
         key = payload.get("key") or payload.get("api_key") or payload.get("token")
         name = payload.get("name")
-        if not key and provider not in ("ollama", "lmstudio"):
+        # The registry is what decides a keyless provider, and multi_key already
+        # trusts it; a hard-coded list here had drifted off nollama and vllm.
+        if not key and not get_provider(provider).get("no_auth"):
             return JSONResponse({"success": False, "error": "Missing key/api_key/token"}, status_code=400)
 
         result = multi_key_manager.add_key(

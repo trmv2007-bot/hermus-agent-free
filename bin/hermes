@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+# Native Windows paths cannot be handed to the MSYS bash as POSIX paths: the
+# venv interpreter is a Windows binary, so translate the repo root first.
+win_root() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" "$ROOT/hermes.py" "$@"
+elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  ROOT_WIN="$(win_root "$ROOT")"
+  exec "$ROOT/.venv/Scripts/python.exe" "$ROOT_WIN\hermes.py" "$@"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 "$ROOT/hermes.py" "$@"
+else
+  exec python "$ROOT/hermes.py" "$@"
+fi

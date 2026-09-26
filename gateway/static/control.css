@@ -1182,6 +1182,31 @@ button.ghost:hover {
   flex: 1;
 }
 
+/* A labelled control. The name has to survive typing: a placeholder-only form
+   asks the operator to remember what a half-filled box meant. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field > span {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field.grow {
+  flex: 1;
+}
+
+.field input,
+.field select {
+  width: 100%;
+}
+
 /* ===================================================================
    TABLES
    =================================================================== */

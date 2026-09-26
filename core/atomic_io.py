@@ -37,6 +37,11 @@ try:  # pragma: no cover - platform dependent
 except Exception:  # pragma: no cover - Windows / exotic platforms
     fcntl = None  # type: ignore[assignment]
 
+try:  # pragma: no cover - platform dependent
+    import msvcrt
+except Exception:  # pragma: no cover - POSIX / exotic platforms
+    msvcrt = None  # type: ignore[assignment]
+
 PathLike = str | Path
 
 
@@ -99,7 +104,7 @@ def file_lock(path: PathLike, *, exclusive: bool = True) -> Iterator[None]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    if fcntl is None:  # pragma: no cover - non-POSIX
+    if fcntl is None and msvcrt is None:  # pragma: no cover - exotic platform
         yield
         return
     flags = os.O_RDWR | os.O_CREAT
@@ -109,11 +114,25 @@ def file_lock(path: PathLike, *, exclusive: bool = True) -> Iterator[None]:
         yield
         return
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        else:
+            # Windows has no shared flock.  msvcrt locks a byte range, so keep
+            # the marker non-empty and always lock from offset zero.  Exclusive
+            # is the safe portable behaviour; a non-exclusive request still
+            # gets a real marker instead of silently becoming a no-op.
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"\\0")
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
         yield
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            else:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
         try:

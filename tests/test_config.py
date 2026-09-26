@@ -82,7 +82,11 @@ def test_env_lookup_is_case_sensitive(monkeypatch):
 
     monkeypatch.setenv("HERMUS_MODEL", "mock/mock")
     monkeypatch.setenv("hermus_model", "must_be_ignored")
-    assert Config().model == "mock/mock"
+    # Windows environment names are case-insensitive at the OS boundary; POSIX
+    # keeps the distinct key that pydantic-settings is meant to ignore.
+    import os
+    expected = "must_be_ignored" if os.name == "nt" else "mock/mock"
+    assert Config().model == expected
 
 
 def test_invalid_values_raise_validation_error(monkeypatch):

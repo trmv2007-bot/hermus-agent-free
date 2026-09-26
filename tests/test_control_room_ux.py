@@ -138,6 +138,10 @@ def run_in_node(body: str) -> dict:
             ["node", harness_path],
             capture_output=True,
             text=True,
+            # Node writes UTF-8; the pane's rendered HTML contains em dashes and
+            # curly quotes, which the Windows locale codec cannot decode.
+            encoding="utf-8",
+            errors="replace",
             cwd=str(ROOT),
             timeout=60,
         )
@@ -286,6 +290,126 @@ def test_settings_pool_save_refuses_a_non_number_and_sends_only_filled_fields(no
     assert "max_concurrent" in out["rejected"][1]
     sent = json.loads(out["accepted"][1])
     assert sent == {"max_agents": 12, "max_concurrent": 4}
+
+
+def test_settings_provider_picker_comes_from_the_registry(node_available):
+    """The dropdown is the gateway's own provider list — 22 entries a person
+    cannot mistype — and a retired one stays out of it."""
+    out = run_in_node(
+        """
+        (async () => {
+          const payload = { providers: [
+            { id: "groq", name: "Groq", no_auth: false, default_model: "llama-3.3-70b", notes: "Free tier 30 RPM" },
+            { id: "ollama", name: "Ollama (local)", no_auth: true },
+            { id: "github", name: "GitHub Models", no_auth: false, retired: true },
+          ] };
+          global.fetch = async () => ({ ok: true, status: 200, headers: { get: () => "req_p" },
+            text: async () => JSON.stringify(payload) });
+          await refreshSettingsProviders();
+          const select = REGISTRY["#addKeyProvider"];
+          const ids = (select.innerHTML.match(/value="([^"]+)"/g) || []);
+          const groqHint = REGISTRY["#addKeyHint"].textContent;
+          select.value = "ollama";
+          describeProviderChoice();
+          console.log(JSON.stringify({ ids, groqHint, localHint: REGISTRY["#addKeyHint"].textContent }));
+        })();
+        """
+    )
+    assert 'value="groq"' in out["ids"] and 'value="ollama"' in out["ids"]
+    assert "github" not in out["ids"]
+    assert "llama-3.3-70b" in out["groqHint"] and "runs without a key" not in out["groqHint"]
+    assert "runs without a key" in out["localHint"]
+
+
+def test_settings_add_key_accepts_a_keyless_local_provider(node_available):
+    """A keyless provider must not be blocked by the form, and one that needs a
+    key must be caught before a request that would only be refused."""
+    out = run_in_node(
+        """
+        (async () => {
+          const posts = [];
+          global.fetch = async (url, opts) => {
+            if ((opts || {}).method === "POST") posts.push([url, opts.body]);
+            return { ok: true, status: 200, headers: { get: () => "req_k" }, text: async () => '{"status":"ok"}' };
+          };
+          PROVIDER_PRESETS.groq = { id: "groq", no_auth: false };
+          PROVIDER_PRESETS.ollama = { id: "ollama", no_auth: true };
+          const provider = document.querySelector("#addKeyProvider");
+          const key = document.querySelector("#addKeyValue");
+          const outEl = document.querySelector("#settingsAddOut");
+          provider.value = "groq"; key.value = "";
+          addSettingKey();
+          const blocked = [posts.slice(), outEl.innerHTML];
+          provider.value = "ollama";
+          addSettingKey();
+          await new Promise((r) => setTimeout(r, 0));
+          console.log(JSON.stringify({ blocked, posts }));
+        })();
+        """
+    )
+    assert out["blocked"][0] == [], "a provider that needs a key must not be posted without one"
+    assert "needs a key value" in out["blocked"][1]
+    assert [p[0] for p in out["posts"]] == ["/keys/add"]
+    assert json.loads(out["posts"][0][1]) == {"provider": "ollama", "key": ""}
+
+
+def test_settings_remove_needs_the_click_twice(node_available):
+    """Deleting a credential is not something a stray click should do, and a
+    modal confirm is something nobody reads."""
+    out = run_in_node(
+        """
+        (async () => {
+          const posts = [];
+          global.fetch = async (url, opts) => {
+            if ((opts || {}).method === "POST") posts.push([url, opts.body]);
+            return { ok: true, status: 200, headers: { get: () => "req_r" }, text: async () => '{"success":true}' };
+          };
+          const btn = makeEl("button");
+          btn.dataset.credentialKind = "key";
+          btn.dataset.credentialProvider = "groq";
+          btn.dataset.credentialRef = "work laptop";
+          armOrRemove(btn);
+          const first = [posts.slice(), btn.textContent, btn.dataset.armed];
+          armOrRemove(btn);
+          await new Promise((r) => setTimeout(r, 0));
+          console.log(JSON.stringify({ first, posts }));
+        })();
+        """
+    )
+    assert out["first"][0] == [], "the first click must only arm the button"
+    assert "confirm" in out["first"][1] and out["first"][2] == "1"
+    assert [p[0] for p in out["posts"]] == ["/keys/remove"]
+    assert json.loads(out["posts"][0][1]) == {"provider": "groq", "name": "work laptop", "key": "work laptop"}
+
+
+def test_settings_filter_narrows_the_rendered_rows_without_refetching(node_available):
+    out = run_in_node(
+        """
+        (async () => {
+          let fetches = 0;
+          const payload = { llm_keys: { groq: [
+            { name: "work", preview: "gsk_a...1", healthy: true, health_status: "ok" },
+            { name: "spare", preview: "gsk_b...2", healthy: false, health_status: "auth_failed" },
+          ] }, custom_apis: [] };
+          // Only the pool probe counts: boot-time readiness calls land here too.
+          global.fetch = async (url) => { if (url === "/keys/list") fetches += 1; return { ok: true, status: 200,
+            headers: { get: () => "req_f" }, text: async () => JSON.stringify(payload) }; };
+          await refreshSettingsKeys();
+          const all = REGISTRY["#settingsKeys tbody"].innerHTML;
+          document.querySelector("#credentialFilter").value = "auth_failed";
+          renderCredentialRows();
+          const filtered = REGISTRY["#settingsKeys tbody"].innerHTML;
+          document.querySelector("#credentialFilter").value = "nothing-matches-this";
+          renderCredentialRows();
+          const empty = REGISTRY["#settingsKeys tbody"].innerHTML;
+          console.log(JSON.stringify({ fetches, all, filtered, empty }));
+        })();
+        """
+    )
+    assert out["fetches"] == 1, "filtering is local; it must not re-probe the gateway"
+    assert "work" in out["all"] and "spare" in out["all"]
+    assert "spare" in out["filtered"] and ">work<" not in out["filtered"]
+    assert "nothing matches" in out["empty"]
 
 
 # ---------------------------------------------------------------------------

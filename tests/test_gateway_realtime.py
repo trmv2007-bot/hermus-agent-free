@@ -28,6 +28,16 @@ os.environ.setdefault("HERMUS_EMBED_BACKEND", "hash")
 
 from core.config import config  # noqa: E402
 
+# Keep this module offline setup local; other test modules share the config singleton.
+_CONFIG_KEYS = (
+    "model", "max_tool_steps", "memory_db_path", "memory2_db_path",
+    "trajectory_path", "user_model_path", "embeddings_db_path",
+    "auto_start_channels", "background_agents_enabled", "memory_sweep_minutes",
+    "gateway_queue_enabled", "gateway_queue_workers", "gateway_queue_timeout",
+    "gateway_queue_retry_backoff",
+)
+_ORIGINAL_CONFIG = {key: getattr(config, key) for key in _CONFIG_KEYS}
+
 config.model = "mock/mock"
 config.max_tool_steps = 2
 config.memory_db_path = str(Path(_TMP) / "memory.db")
@@ -1050,3 +1060,8 @@ def test_telegram_webhook_optional_secret():
     # Unset secret => webhook stays open (legacy poll/webhook).
     with TestClient(g.app) as c:
         assert c.post("/webhook/telegram", json={}).status_code != 401
+
+def teardown_module():
+    for key, value in _ORIGINAL_CONFIG.items():
+        setattr(config, key, value)
+

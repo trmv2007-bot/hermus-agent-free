@@ -63,7 +63,10 @@ def register_computer_tools(registry) -> None:
         else:
             result = method(**kwargs)
         result = dict(result or {})
+        # Report the mode explicitly.  ``allow_dry_run`` is the request flag;
+        # ``dry_run`` is the honest capability label callers and tests consume.
         result["allow_dry_run"] = bool(allow_dry_run)
+        result["dry_run"] = bool(allow_dry_run)
         return result
 
     registry.register(

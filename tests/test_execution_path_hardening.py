@@ -702,17 +702,16 @@ def test_single_control_room_is_queue_first_and_failure_aware():
 # ===========================================================================
 # 11. CI is committed, not just documented
 # ===========================================================================
-def test_ci_is_local_not_hosted():
-    """Hosted CI is intentionally not part of this repo (local gates only).
+def test_ci_is_committed_and_local_gates_documented():
+    """Hosted CI is present in this checkout, while local gates stay usable.
 
-    Guard against dangling references: no workflow files, no CI badge in the
-    README, and the local gate commands stay documented.
+    The repository intentionally carries a small GitHub Actions workflow; the
+    contract is that it is committed, the README does not point at a removed
+    workflow, and the local pytest gate remains documented.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     workflows = root / ".github" / "workflows"
-    assert not workflows.exists(), (
-        "GitHub Actions was intentionally removed; if you want hosted CI back, re-add it deliberately and update this test"
-    )
+    assert (workflows / "ci.yml").is_file(), "the committed CI workflow is missing"
     readme = (root / "README.md").read_text(encoding="utf-8")
     assert "actions/workflows" not in readme, "README still references a CI badge"
     assert "docs/ci-workflow.yml" not in readme, "README points at a removed file"

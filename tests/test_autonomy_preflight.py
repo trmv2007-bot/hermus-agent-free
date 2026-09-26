@@ -7,8 +7,13 @@ from core.approval import ApprovalStore
 from core.autonomy_preflight import create_preflight_approval_requests, infer_actions, preflight_goal
 
 
-def test_preflight_infers_private_data_and_delegated_email_needs():
-    report = preflight_goal("scan ~/Downloads for malware then email me a report")
+def test_preflight_infers_private_data_and_delegated_email_needs(tmp_path):
+    # Use an isolated store so a previously granted local approval cannot
+    # suppress the prompts this contract is meant to predict.
+    report = preflight_goal(
+        "scan ~/Downloads for malware then email me a report",
+        approval_store=ApprovalStore(tmp_path / "approval_grants.json"),
+    )
     data = report.to_dict()
     assert data["status"] in {"NEEDS_APPROVAL", "MISSING_CAPABILITY", "EMERGENCY_STOP_ACTIVE"}
     tools = {f["tool"] for f in data["findings"]}

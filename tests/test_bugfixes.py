@@ -591,3 +591,32 @@ def test_gateway_router_split_surface():
     assert not missing, f"routes lost in the gateway split: {missing}"
     # Sanity: the surface is substantial, not just the composition root.
     assert len(paths) >= 120, f"expected the full gateway surface, got {len(paths)} routes"
+
+
+def test_keyless_providers_are_judged_by_the_registry(tmp_path, monkeypatch):
+    """Which provider can be stored without a credential was a hard-coded pair of
+    names on the route, while the registry it feeds says four are keyless — so
+    nollama and vllm could not be added from the dashboard even though
+    ``multi_key`` serves them fine. One source of truth, checked at the boundary
+    where the two disagreed."""
+    from fastapi.testclient import TestClient
+
+    import core.multi_key as multi_key_module
+    from gateway.gateway import app
+
+    added = []
+
+    def record(provider, api_key, **kwargs):
+        added.append(provider)
+        return {"success": True}
+
+    monkeypatch.setattr(multi_key_module.multi_key_manager, "add_key", record)
+    client = TestClient(app)
+
+    for provider in ("ollama", "lmstudio", "vllm", "nollama"):
+        assert client.post("/keys/add", json={"provider": provider}).status_code == 200, provider
+    assert added == ["ollama", "lmstudio", "vllm", "nollama"]
+
+    refused = client.post("/keys/add", json={"provider": "groq"})
+    assert refused.status_code == 400
+    assert added == ["ollama", "lmstudio", "vllm", "nollama"], "a provider that needs a credential must not reach the store"

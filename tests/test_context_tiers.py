@@ -130,8 +130,8 @@ def test_on_demand_context_is_offered_from_the_first_step():
 def test_exactly_one_memory_block_per_turn(monkeypatch):
     from core.memory import memory
 
-    monkeypatch.setattr(memory, "recall_context", lambda *a, **k: {"text": "Typed recall:\n- user likes terse answers", "kept": [1], "mode": "hybrid"}, raising=False)
-    monkeypatch.setattr(memory, "get_curated_memory", lambda *a, **k: [{"key": "pref", "value": "terse"}], raising=False)
+    monkeypatch.setattr(type(memory), "recall_context", lambda *a, **k: {"text": "Typed recall:\n- user likes terse answers", "kept": [1], "mode": "hybrid"}, raising=False)
+    monkeypatch.setattr(type(memory), "get_curated_memory", lambda *a, **k: [{"key": "pref", "value": "terse"}], raising=False)
     text, report = _render(_req())
     kinds = [b["kind"] for b in report["blocks"]]
     assert kinds.count("memory") == 1
@@ -142,8 +142,8 @@ def test_exactly_one_memory_block_per_turn(monkeypatch):
 def test_curated_memory_is_the_fallback_when_typed_recall_is_empty(monkeypatch):
     from core.memory import memory
 
-    monkeypatch.setattr(memory, "recall_context", lambda *a, **k: {"text": "", "kept": []}, raising=False)
-    monkeypatch.setattr(memory, "get_curated_memory", lambda *a, **k: [{"key": "pref", "value": "terse"}], raising=False)
+    monkeypatch.setattr(type(memory), "recall_context", lambda *a, **k: {"text": "", "kept": []}, raising=False)
+    monkeypatch.setattr(type(memory), "get_curated_memory", lambda *a, **k: [{"key": "pref", "value": "terse"}], raising=False)
     text, _ = _render(_req())
     assert "Curated memory" in text and "pref" in text
 
@@ -151,7 +151,7 @@ def test_curated_memory_is_the_fallback_when_typed_recall_is_empty(monkeypatch):
 def test_lean_mission_node_carries_no_conversation_scaffolding(monkeypatch):
     from core.memory import memory
 
-    monkeypatch.setattr(memory, "recall_context", lambda *a, **k: {"text": "recall noise", "kept": [1]}, raising=False)
+    monkeypatch.setattr(type(memory), "recall_context", lambda *a, **k: {"text": "recall noise", "kept": [1]}, raising=False)
     text, report = _render(_req(lean=True))
     kinds = {b["kind"] for b in report["blocks"]}
     assert not kinds & {"memory", "continuity", "user", "skills", "lessons"}
@@ -177,6 +177,6 @@ def test_report_is_emitted_for_observability():
 def test_memory_helper_returns_none_without_any_recall(monkeypatch):
     from core.memory import memory
 
-    monkeypatch.setattr(memory, "recall_context", lambda *a, **k: {"text": "", "kept": []}, raising=False)
-    monkeypatch.setattr(memory, "get_curated_memory", lambda *a, **k: [], raising=False)
+    monkeypatch.setattr(type(memory), "recall_context", lambda *a, **k: {"text": "", "kept": []}, raising=False)
+    monkeypatch.setattr(type(memory), "get_curated_memory", lambda *a, **k: [], raising=False)
     assert _memory(_req()) is None

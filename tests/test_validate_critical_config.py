@@ -28,6 +28,9 @@ def test_validation_reports_all_four_checks(monkeypatch):
     import core.config as config_module
 
     monkeypatch.setattr(config_module.config, "model", "mock/mock", raising=False)
+    # Do not inherit another test module singleton mutation; this check owns
+    # the healthy default budget explicitly.
+    monkeypatch.setattr(config_module.config, "max_tool_steps", 32, raising=False)
     results = bootstrap.validate_critical_config()
     names = {c["name"] for c in results["checks"]}
     assert names == {"max_tool_steps", "directories_writable", "port_8000_free"}

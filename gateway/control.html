@@ -61,7 +61,7 @@
     <div class="sidebar-foot">
       <button class="hood-btn" id="hoodOpenBtn" title="Open the JARVIS instrument space (key: H)">&#9881;&#65039; Open the hood</button>
       <span class="sidebar-foot-line">snapshot &#8226; replay &#8226; typed commands</span>
-      <span class="sidebar-foot-line muted">live readings only</span>
+      <span class="sidebar-foot-line muted">live readings only &middot; nothing here is pre-scripted or simulated</span>
     </div>
   </aside>
 
@@ -532,6 +532,11 @@
       <section class="full">
         <h2>Credentials &#8226; key pool</h2>
         <div class="cells" id="settingsKeysSummary"></div>
+        <div class="bar">
+          <label class="field grow"><span>find</span><input id="credentialFilter" placeholder="provider, label, health" /></label>
+          <button id="settingsShowAdd">Add a key</button>
+          <button id="settingsKeysRefresh" class="ghost">Refresh</button>
+        </div>
         <table id="settingsKeys">
           <thead><tr><th>provider</th><th>label</th><th>key</th><th>health</th><th>models</th><th>rpm</th><th></th></tr></thead>
           <tbody></tbody>
@@ -539,19 +544,20 @@
         <div class="hint">Only what the gateway already redacted is listed here — a stored key is never sent back to the browser.</div>
       </section>
 
-      <details class="drawer full">
+      <details class="drawer full" id="settingsAddDrawer">
         <summary><h2>Add</h2></summary>
         <div class="drawer-body">
           <div class="bar">
-            <input id="addKeyProvider" placeholder="provider e.g. groq, openrouter" />
-            <input id="addKeyValue" placeholder="key value" type="password" autocomplete="off" />
-            <input id="addKeyName" placeholder="label (optional)" />
+            <label class="field grow"><span>provider</span><select id="addKeyProvider"></select></label>
+            <label class="field grow"><span>key value</span><input id="addKeyValue" type="password" autocomplete="off" /></label>
+            <label class="field grow"><span>label (optional)</span><input id="addKeyName" placeholder="e.g. work laptop" /></label>
             <button id="settingsKeyAdd">Add key</button>
           </div>
+          <div class="hint" id="addKeyHint">Providers that run on this machine need no key value.</div>
           <div class="bar">
-            <input id="addApiName" placeholder="custom api name" />
-            <input id="addApiUrl" placeholder="url https://..." />
-            <input id="addApiDescription" placeholder="what it returns" />
+            <label class="field grow"><span>api name</span><input id="addApiName" /></label>
+            <label class="field grow"><span>url</span><input id="addApiUrl" placeholder="https://..." /></label>
+            <label class="field grow"><span>what it returns</span><input id="addApiDescription" /></label>
             <button id="settingsApiAdd" class="ghost">Add custom API</button>
           </div>
           <div class="feed" id="settingsAddOut" style="height:110px"><div class="note">Nothing is sent until you press one of the two buttons.</div></div>
@@ -561,25 +567,25 @@
       <section>
         <h2>Worker pool</h2>
         <div class="bar">
-          <input id="poolMaxAgents" placeholder="max agents" />
-          <input id="poolMaxConcurrent" placeholder="max concurrent" />
+          <label class="field grow"><span>max agents</span><input id="poolMaxAgents" /></label>
+          <label class="field grow"><span>max concurrent</span><input id="poolMaxConcurrent" /></label>
         </div>
         <div class="bar">
-          <input id="poolIdleTimeout" placeholder="idle timeout s" />
-          <input id="poolCleanupInterval" placeholder="cleanup interval s" />
+          <label class="field grow"><span>idle timeout &#8226; seconds</span><input id="poolIdleTimeout" /></label>
+          <label class="field grow"><span>cleanup interval &#8226; seconds</span><input id="poolCleanupInterval" /></label>
         </div>
         <div class="bar">
           <button id="settingsPoolSave">Save limits</button>
           <span id="settingsPoolState" class="pill muted">pool: &#8212;</span>
         </div>
-        <div class="hint">Per-provider ceilings are configured on the gateway, not from here.</div>
+        <div class="hint">Leave a box empty to keep its current value. Per-provider ceilings are set on the gateway.</div>
       </section>
 
       <section>
         <h2>Updates</h2>
         <div class="cells" id="settingsUpdate"></div>
         <div class="bar"><button id="settingsUpdateCheck" class="ghost">Check remote</button></div>
-        <div class="feed" id="settingsUpdateFeed" style="height:120px"><div class="note">Commit info read from this repository and its remote. Installing stays in Systems.</div></div>
+        <div class="feed" id="settingsUpdateFeed" style="height:120px"><div class="note">Commit info read from this repository and its remote.</div></div>
       </section>
     </div>
   </div>

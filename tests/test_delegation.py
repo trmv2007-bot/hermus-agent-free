@@ -27,6 +27,13 @@ os.environ["HERMUS_AGENT_DEPTH"] = "0"
 
 from core.config import config  # noqa: E402
 
+# Module-level offline setup must not leak into unrelated tests.
+_CONFIG_KEYS = (
+    "model", "max_tool_steps", "memory2_db_path", "memory_db_path",
+    "trajectory_path", "embeddings_db_path", "delegation_timeout",
+)
+_ORIGINAL_CONFIG = {key: getattr(config, key) for key in _CONFIG_KEYS}
+
 config.model = "mock/mock"
 config.max_tool_steps = 2
 config.memory2_db_path = str(Path(_TMP) / "memory2.db")
@@ -412,3 +419,8 @@ if __name__ == "__main__":
             traceback.print_exc()
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+def teardown_module():
+    for key, value in _ORIGINAL_CONFIG.items():
+        setattr(config, key, value)
+

@@ -1090,7 +1090,55 @@ function healthPill(entry){
   if (entry.custom) return '<span class="pill muted">no health record</span>';
   const status = entry.health_status || (entry.healthy ? "healthy" : "untested");
   const cls = entry.healthy ? "ok" : (entry.quarantined || /fail|error/.test(status) ? "err" : "muted");
-  return `<span class="pill ${cls}">${esc(status)}</span>`;
+  const why = entry.quarantined ? "quarantined by the gateway after repeated failures"
+    : entry.healthy ? "the last probe passed"
+    : /fail|error/.test(status) ? "the last probe failed — this provider will not be chosen"
+    : "no health probe has run for this key yet";
+  return `<span class="pill ${cls}" title="${esc(why)}">${esc(status)}</span>`;
+}
+
+/* The rows are kept so the filter box works without another round trip: the
+   pool can hold dozens of keys and re-probing to find one is silly. */
+let CREDENTIAL_ROWS = [];
+
+function credentialRow(k){
+  return `<tr>
+      <td>${esc(k.provider)}</td>
+      <td>${esc(k.name || "")}</td>
+      <td><code>${esc(k.preview == null ? "—" : k.preview)}</code></td>
+      <td>${healthPill(k)}</td>
+      <td>${esc(k.models_count != null ? k.models_count : "—")}</td>
+      <td>${esc(k.rpm_limit != null ? k.rpm_limit : "—")}</td>
+      <td><button class="ghost" data-credential-kind="${k.custom ? "api" : "key"}" data-credential-provider="${esc(k.provider)}" data-credential-ref="${esc(k.name || k.id || "")}">remove</button></td>
+    </tr>`;
+}
+
+function renderCredentialRows(){
+  const body = document.querySelector("#settingsKeys tbody");
+  const needle = $("#credentialFilter").value.trim().toLowerCase();
+  const shown = needle ? CREDENTIAL_ROWS.filter((k) => (
+    [k.provider, k.name, k.preview, k.health_status, k.custom ? "custom api" : "key"].join(" ").toLowerCase().includes(needle)
+  )) : CREDENTIAL_ROWS;
+  body.innerHTML = shown.map(credentialRow).join("")
+    || stateRowHtml({ empty: (CREDENTIAL_ROWS.length && needle) ? "nothing matches “" + needle + "”" : "nothing in the pool yet" }, 7);
+  body.querySelectorAll("button[data-credential-kind]").forEach((b) => b.addEventListener("click", () => armOrRemove(b)));
+}
+
+const REMOVE_ARM_MS = 4000;
+
+/* Removing a credential is one click too many to be an accident, and one
+ * confirm dialog too many to be used. The button asks for itself twice. */
+function armOrRemove(btn){
+  const kind = btn.dataset.credentialKind, provider = btn.dataset.credentialProvider, ref = btn.dataset.credentialRef;
+  if (btn.dataset.armed === "1") { removeCredential(kind, provider, ref); return; }
+  btn.dataset.armed = "1";
+  btn.classList.add("danger");
+  btn.textContent = "confirm remove";
+  setTimeout(() => {
+    btn.dataset.armed = "";
+    btn.classList.remove("danger");
+    btn.textContent = "remove";
+  }, REMOVE_ARM_MS);
 }
 
 async function refreshSettingsKeys(){
@@ -1102,23 +1150,15 @@ async function refreshSettingsKeys(){
     const keys = Object.keys(pooled).reduce(
       (acc, provider) => acc.concat((pooled[provider] || []).map((k) => Object.assign({ provider }, k))), []);
     const apis = (j.custom_apis || []).map((a) => Object.assign({ provider: "custom", custom: true }, a));
-    const rows = keys.concat(apis);
-    const healthy = rows.filter((r) => r.healthy).length;
-    const failing = rows.filter((r) => r.quarantined || /fail|error/.test(String(r.health_status || ""))).length;
+    CREDENTIAL_ROWS = keys.concat(apis);
+    const healthy = CREDENTIAL_ROWS.filter((r) => r.healthy).length;
+    const failing = CREDENTIAL_ROWS.filter((r) => r.quarantined || /fail|error/.test(String(r.health_status || ""))).length;
     cells.innerHTML = kpi(String(j.total_llm_keys != null ? j.total_llm_keys : keys.length), "pooled keys")
       + kpi(String(healthy), "healthy") + kpi(String(failing), "failing")
       + kpi(String(j.total_custom_apis != null ? j.total_custom_apis : apis.length), "custom APIs");
-    body.innerHTML = rows.map((k) => `<tr>
-      <td>${esc(k.provider)}</td>
-      <td>${esc(k.name || "")}</td>
-      <td><code>${esc(k.preview == null ? "—" : k.preview)}</code></td>
-      <td>${healthPill(k)}</td>
-      <td>${esc(k.models_count != null ? k.models_count : "—")}</td>
-      <td>${esc(k.rpm_limit != null ? k.rpm_limit : "—")}</td>
-      <td><button class="ghost" data-credential-kind="${k.custom ? "api" : "key"}" data-credential-provider="${esc(k.provider)}" data-credential-ref="${esc(k.name || k.id || "")}">remove</button></td>
-    </tr>`).join("") || stateRowHtml({ empty: "nothing in the pool yet" }, 7);
-    body.querySelectorAll("button[data-credential-kind]").forEach((b) => b.addEventListener("click", () => removeCredential(b.dataset.credentialKind, b.dataset.credentialProvider, b.dataset.credentialRef)));
+    renderCredentialRows();
   } catch(e){
+    CREDENTIAL_ROWS = [];
     body.innerHTML = stateRowHtml({ error: e.envelope || { message: e.message } }, 7, { label: "key pool", onRetryId: "settings" });
   }
 }
@@ -1152,12 +1192,46 @@ function postWithFeedback(what, payload, url, out, done){
   });
 }
 
+/* The provider dropdown is the gateway's own registry, not a list typed into
+ * the markup: 22 providers with display names, and the retired ones stay out. */
+const PROVIDER_PRESETS = {};
+
+function describeProviderChoice(){
+  const preset = PROVIDER_PRESETS[$("#addKeyProvider").value] || {};
+  const parts = [];
+  if (preset.no_auth) parts.push("runs without a key");
+  if (preset.default_model) parts.push("default model " + preset.default_model);
+  if (preset.notes) parts.push(preset.notes);
+  $("#addKeyHint").textContent = parts.length ? parts.join(" · ") : "paste the key for this provider";
+}
+
+async function refreshSettingsProviders(){
+  const select = $("#addKeyProvider");
+  const hint = $("#addKeyHint");
+  try {
+    const { j } = await getJSON("/providers");
+    const kept = (j.providers || []).filter((p) => !p.retired);
+    kept.forEach((p) => { PROVIDER_PRESETS[p.id] = p; });
+    const wanted = select.value || "groq";
+    select.innerHTML = kept.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    if (PROVIDER_PRESETS[wanted] && !PROVIDER_PRESETS[wanted].retired) select.value = wanted;
+    describeProviderChoice();
+  } catch(e){
+    select.innerHTML = '<option value="">providers unavailable</option>';
+    hint.textContent = "the gateway could not list its providers: " + e.message;
+  }
+}
+
 function addSettingKey(){
   const provider = $("#addKeyProvider").value.trim();
   const key = $("#addKeyValue").value.trim();
   const label = $("#addKeyName").value.trim();
   const out = $("#settingsAddOut");
-  if (!provider || !key) { out.innerHTML = '<div class="note">provider and key are both required</div>'; return; }
+  if (!provider) { out.innerHTML = '<div class="note">pick a provider first</div>'; return; }
+  if (!key && !(PROVIDER_PRESETS[provider] || {}).no_auth) {
+    out.innerHTML = '<div class="note">' + esc(provider) + ' needs a key value</div>';
+    return;
+  }
   const payload = { provider, key };
   if (label) payload.name = label;
   postWithFeedback("key", payload, "/keys/add", out, () => {
@@ -1234,7 +1308,7 @@ async function refreshSettingsUpdate(){
     cells.innerHTML = kpi(state, "update") + kpi(local.short || "—", "local") + kpi(remote.short || "—", "remote");
     feed.innerHTML = '<div>local <code>' + esc(local.short || "?") + '</code> ' + esc(local.message || "") + ' (' + esc(local.date || "?") + ')</div>'
       + '<div>remote <code>' + esc(remote.short || "?") + '</code> ' + esc(remote.message || "") + ' · ' + esc(remote.author || "?") + '</div>'
-      + (j.update_available ? '<div class="note">Install from the Systems console update panel.</div>' : "");
+      + (j.update_available ? '<div class="bar"><button class="ghost" data-goto-tab="systems">open Systems to install</button></div>' : "");
   } catch(e){
     cells.innerHTML = kpi("unknown", "update");
     feed.innerHTML = '<div class="note">update check failed: ' + esc(e.message) + '</div>';
@@ -1242,6 +1316,7 @@ async function refreshSettingsUpdate(){
 }
 
 function refreshSettings(){
+  refreshSettingsProviders();
   refreshSettingsKeys();
   refreshSettingsPool();
   refreshSettingsUpdate();
@@ -1279,6 +1354,19 @@ $("#settingsKeyAdd").addEventListener("click", addSettingKey);
 $("#settingsApiAdd").addEventListener("click", addSettingApi);
 $("#settingsPoolSave").addEventListener("click", saveSettingsPool);
 $("#settingsUpdateCheck").addEventListener("click", refreshSettingsUpdate);
+$("#settingsKeysRefresh").addEventListener("click", refreshSettingsKeys);
+$("#credentialFilter").addEventListener("input", renderCredentialRows);
+$("#addKeyProvider").addEventListener("change", describeProviderChoice);
+$("#settingsShowAdd").addEventListener("click", () => {
+  const drawer = $("#settingsAddDrawer");
+  drawer.open = true;
+  $("#addKeyProvider").focus();
+});
+document.addEventListener("click", (ev) => {
+  const jump = ev.target && ev.target.closest ? ev.target.closest("[data-goto-tab]") : null;
+  if (jump) selectTab(jump.dataset.gotoTab);
+});
+$("#addKeyProvider").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingKey(); });
 $("#addKeyValue").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingKey(); });
 $("#addApiUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingApi(); });
 $("#runDownloadsScan").addEventListener("click", runDownloadsScan);
