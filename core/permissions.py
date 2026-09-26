@@ -149,6 +149,41 @@ DEFAULT_POLICY: dict[str, tuple] = {
     "system_config": (Risk.ADMIN, Decision.ASK, [Capability.ADMIN]),
 }
 
+# Tools that dispatch several actions behind one registered name. The policy
+# table above is written per action (computer_click, computer_type_text, ...),
+# so a dispatcher that is not expanded here matches nothing and falls through to
+# DEFAULT_RISK=read / DEFAULT_DECISION=ask. That is not a cosmetic gap: it made
+# the GUI deny-line dead config, because the only registered desktop tool is
+# `computer_action` and none of the 17 computer_* rules ever applied to it.
+# Verified before this table: computer_action(action="click") -> read/ask,
+# while the unregistered computer_click -> gui/deny.
+MULTIPLEXED_ACTION_KEYS: dict[str, str] = {
+    "computer_action": "computer_{action}",
+    "android_action": "android_{action}",
+    "screen_action": "screen_{action}",
+}
+
+
+def expanded_policy_name(tool_name: str, args: dict[str, Any] | None = None) -> str:
+    """Resolve a multiplexed tool to the policy key for the action it will run.
+
+    Returns "" when the tool is not a dispatcher or carries no usable action, so
+    callers can treat "" as "no expansion available" and fall back to the plain
+    tool name.
+    """
+    template = MULTIPLEXED_ACTION_KEYS.get(tool_name)
+    if not template:
+        return ""
+    for arg_key in ("action", "op", "operation", "name", "command"):
+        raw = (args or {}).get(arg_key)
+        if not isinstance(raw, str):
+            continue
+        action = raw.strip().lower().replace("-", "_").replace(" ", "_")
+        if action and action.isidentifier():
+            return template.format(action=action)
+    return ""
+
+
 DEFAULT_DECISION = Decision.ASK
 DEFAULT_RISK = Risk.READ
 DEFAULT_CAPS = [Capability.READ]
@@ -183,13 +218,20 @@ class PermissionManager:
         decision = DEFAULT_DECISION
         caps = list(DEFAULT_CAPS)
 
-        # longest matching policy key wins
+        # Longest matching policy key wins. A multiplexed dispatcher is matched
+        # both by its own name and by the expanded action key, so
+        # computer_action(action="click") is judged by the computer_click rule
+        # rather than by the read/ask default.
+        candidates = [tool_name]
+        expanded = expanded_policy_name(tool_name, args)
+        if expanded:
+            candidates.append(expanded)
         matched = None
         for key, entry in DEFAULT_POLICY.items():
             r = entry[0]
             d = entry[1]
             c = entry[2] if len(entry) > 2 else [Capability.READ]
-            if tool_name == key or (len(key) > 3 and key in tool_name):
+            if any(name == key or (len(key) > 3 and key in name) for name in candidates):
                 if matched is None or len(key) > len(matched):
                     matched = key
                     risk, decision, caps = r, d, c

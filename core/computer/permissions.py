@@ -191,17 +191,41 @@ class EmergencyStop:
             default = Path(__file__).resolve().parents[2] / "data" / "recordings" / ".computer-stop.json"
             self.halt_path = default.resolve()
 
+    def _global_halt_state(self) -> tuple[bool, str | None]:
+        """The system-wide brake, as seen from the computer layer.
+
+        There are two latches by design: the workspace-wide emergency stop that
+        `hermes stop` and POST /emergency/stop write, and this computer-scoped
+        one. The controller only ever read the second, so pulling the big red
+        lever did not stop a running desktop agent - verified: after
+        get_emergency_stop().activate() the controller gate still answered
+        allowed=True. Reading the global latch here closes that gap; releasing
+        one brake deliberately does not release the other.
+        """
+        try:
+            from core.emergency_stop import get_emergency_stop
+
+            state = get_emergency_stop().state()
+            return bool(state.active), (state.reason or None)
+        except Exception:  # noqa: BLE001 - inspecting the brake must never break control
+            return False, None
+
     @property
     def halted(self) -> bool:
         if self._halted.is_set():
             return True
-        return self.halt_path.exists()
+        if self.halt_path.exists():
+            return True
+        return self._global_halt_state()[0]
 
     @property
     def reason(self) -> str | None:
         if self._halted.is_set():
             return self._reason
-        return self._read_file_reason()
+        local = self._read_file_reason()
+        if local:
+            return local
+        return self._global_halt_state()[1]
 
     def _read_file_reason(self) -> str | None:
         try:

@@ -10,6 +10,8 @@ Labels:
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 
@@ -26,6 +28,28 @@ def _has_display():
     import os
 
     return bool(os.environ.get("DISPLAY"))
+
+
+@contextlib.contextmanager
+def computer_control_granted():
+    """Temporarily allow `computer_action`, the way an operator would.
+
+    `computer_action` now classifies as gui/deny by default, which is the point:
+    the registry only ever exposes the dispatcher, so before dispatcher-aware
+    policy lookup every real click fell through to read/ask and ran ungated.
+    These tests are about the tool's honest reporting, not about the gate, so
+    they grant the capability explicitly rather than relying on that bug.
+    """
+    from core.permissions import permission_manager
+
+    overrides = permission_manager.overrides
+    allowlist = overrides.setdefault("allowlist", [])
+    before = list(allowlist)
+    allowlist.append("computer_action")
+    try:
+        yield
+    finally:
+        overrides["allowlist"] = before
 
 
 def test_computer_tools_registered():
@@ -59,7 +83,8 @@ def test_computer_action_reports_unavailable_on_fallback(tmp_path):
     tool_registry.load(force=True)
     if _has_pyautogui() and _has_display():
         pytest.skip("real control available — covered by host-E2E test")
-    r = tool_registry.execute("computer_action", {"action": "click", "args": {"x": 5, "y": 5}})
+    with computer_control_granted():
+        r = tool_registry.execute("computer_action", {"action": "click", "args": {"x": 5, "y": 5}})
     assert r.get("ok") is False
     assert r.get("error") == "computer_control_unavailable"
     assert r.get("reason")
@@ -79,7 +104,8 @@ def test_computer_action_missing_args_is_an_error():
     from core.tool_registry import tool_registry
 
     tool_registry.load(force=True)
-    r = tool_registry.execute("computer_action", {"action": "click"})
+    with computer_control_granted():
+        r = tool_registry.execute("computer_action", {"action": "click"})
     assert r.get("ok") is False
     assert r.get("error") == "missing_args"
 
