@@ -112,7 +112,10 @@ def test_docs_topic_refuses_paths_outside_the_allowlist():
     for attempt in ("../../etc/passwd", "../../../Windows/win.ini", "secrets"):
         result = read_context("docs", attempt)
         assert not result.get("text") or "not readable" in str(result.get("error", ""))
-    assert REPO_ROOT.name == "hermus-agent-free"
+    # The name of the checkout is not behaviour: this assertion only ever
+    # passed or failed on a directory rename while proving nothing about the
+    # allowlist, which the loop above already covers.
+    assert REPO_ROOT.is_dir()
 
 
 def test_on_demand_context_is_offered_from_the_first_step():

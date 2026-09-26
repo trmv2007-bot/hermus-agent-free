@@ -42,6 +42,7 @@ if str(ROOT) not in sys.path:
 # kept as import-name -> capability checks because pip names and import names
 # differ (python-dotenv -> dotenv, Pillow -> PIL, PyYAML -> yaml).
 REQUIRED_IMPORTS = [
+    "huggingface_hub",
     "pydantic",
     "dotenv",
     "requests",
@@ -69,6 +70,7 @@ REQUIRED_IMPORTS = [
 # Kept for the public/bootstrap compatibility contract and for a useful repair
 # hint. Installation itself reads requirements.txt rather than this list.
 REQUIRED_PIP = [
+    "huggingface_hub",
     "pydantic",
     "python-dotenv",
     "requests",
@@ -111,7 +113,6 @@ OPTIONAL = [
     ("redis", "queue.redis"),
     ("markdownify", "web.markdown"),
     ("groq", "provider.groq"),
-    ("huggingface_hub", "provider.hf"),
     ("paramiko", "backend.ssh"),
     ("modal", "backend.modal"),
     ("telegram", "channel.telegram"),
