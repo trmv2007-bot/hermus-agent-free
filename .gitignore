@@ -84,3 +84,6 @@ gateway/static/workspace/**/*.map
 *.egg-info/
 build/
 dist/
+
+# Voice models: 149MB of weights, fetched once, never committed.
+models/hermus-voice-models/
