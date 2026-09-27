@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
 import { KIND_TITLES } from "../state/surfaces";
-import { ARC_SPAN_DEG, EDGE, fanRadius, fanSlots, HERO_SPAN_DEG, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "../state/launcher";
+import { ARC_SPAN_DEG, EDGE, fanRadius, fanSlots, HERO_SPAN_DEG, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, RING_CLEARANCE, SLOT_SIZE } from "../state/launcher";
 
 export function Launcher() {
   // The store's viewport is the room itself: the stage with the dock rail taken
@@ -79,8 +79,15 @@ export function Launcher() {
   // to one side, because there it genuinely is shoved into a corner.
   const hero = (placement?.size ?? 0) > 200;
   const span = hero ? HERO_SPAN_DEG : ARC_SPAN_DEG;
+  // The ring is measured from the core's centre, so it has to clear the core's
+  // RADIUS — a 300px core is 150px out from centre, and a 92px ring drew every
+  // entry inside it. Also clamped to the room: a ring wider than the stage
+  // pushes entries to the corners, which is worse than a tight ring.
+  const coreRadius = hero ? (placement?.size ?? 0) / 2 : POD_SIZE / 2;
+  const roomRadius = Math.min(room.w, room.h) / 2 - SLOT_SIZE - EDGE;
+  const innerRadius = Math.max(0, Math.min(coreRadius + RING_CLEARANCE, roomRadius));
   const slots = fanSlots(centre, room, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE, span);
-  const radius = fanRadius(LAUNCHER_KINDS.length, SLOT_SIZE, span);
+  const radius = fanRadius(LAUNCHER_KINDS.length, SLOT_SIZE, span, innerRadius);
 
   return (
     <div className="fan" aria-label="surfaces you can open">

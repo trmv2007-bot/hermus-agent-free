@@ -18,6 +18,8 @@ import {
   type Geometry,
   type Surface,
   type SurfaceKind,
+  type StageView,
+  clampZoom,
   type SurfaceSource,
   type Viewport,
 } from "./surfaces";
@@ -81,6 +83,13 @@ interface WorkspaceState {
   /** Accepts a value or an updater, so a click handler can toggle without
    *  reading state it does not own. */
   setFanOpen: (open: boolean | ((previous: boolean) => boolean)) => void;
+  /** Screen-pixel pan plus a world scale, applied to the whole surface layer. */
+  stage: StageView;
+  setStage: (stage: StageView | ((previous: StageView) => StageView)) => void;
+  panBy: (dx: number, dy: number) => void;
+  /** Zoom by `factor` while keeping the world point under (screenX, screenY) fixed. */
+  zoomAt: (screenX: number, screenY: number, factor: number) => void;
+  resetStage: () => void;
   /** Readouts that arrived but were not given screen space, newest first. */
   tray: { label: string; detail: string; at: number }[];
   /** Operations that were refused, with the reason — never silently dropped. */
@@ -228,6 +237,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   viewport: { w: 1280, h: 800 },
   orbPlacement: null,
   fanOpen: false,
+  stage: { panX: 0, panY: 0, zoom: 1 },
   tray: [],
   rejected: [],
 
@@ -476,6 +486,33 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setOrbPlacement: (orbPlacement) => set({ orbPlacement }),
   setFanOpen: (fanOpen) =>
     set((state) => ({ fanOpen: typeof fanOpen === "function" ? fanOpen(state.fanOpen) : fanOpen })),
+
+  /**
+   * The stage is a canvas you can pan and zoom, not a fixed frame.
+   *
+   * `pan` is in screen pixels and `zoom` scales the world layer, so surfaces keep
+   * storing real coordinates in world space and the transform does the rest.
+   */
+  setStage: (stage) => set((state) => ({ stage: typeof stage === "function" ? stage(state.stage) : stage })),
+  panBy: (dx, dy) => set((state) => ({ stage: { ...state.stage, panX: state.stage.panX + dx, panY: state.stage.panY + dy } })),
+
+  /**
+   * Zoom about a fixed screen point, the way every canvas does it.
+   *
+   * The naive version — multiply the scale, leave pan alone — slides whatever is
+   * under the cursor out from under the cursor. This keeps it still: the world
+   * point under the cursor is solved for before the zoom and re-projected after.
+   */
+  zoomAt: (screenX, screenY, factor) =>
+    set((state) => {
+      const next = clampZoom(state.stage.zoom * factor);
+      if (next === state.stage.zoom) return state;
+      const worldX = (screenX - state.stage.panX) / state.stage.zoom;
+      const worldY = (screenY - state.stage.panY) / state.stage.zoom;
+      return { stage: { zoom: next, panX: screenX - worldX * next, panY: screenY - worldY * next } };
+    }),
+
+  resetStage: () => set({ stage: { panX: 0, panY: 0, zoom: 1 } }),
 
   /**
    * Apply agent- or shell-supplied operations. Ids are resolved against the state

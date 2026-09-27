@@ -77,6 +77,33 @@ export interface Viewport {
   h: number;
 }
 
+/**
+ * Where you are looking in the room.
+ *
+ * `panX`/`panY` are screen pixels applied before the scale; `zoom` scales the
+ * world layer. Surfaces keep real world coordinates, so nothing inside a surface
+ * has to know about this — the transform lives entirely on the stage.
+ */
+export interface StageView {
+  panX: number;
+  panY: number;
+  zoom: number;
+}
+
+export const ZOOM_MIN = 0.35;
+export const ZOOM_MAX = 2.2;
+
+/**
+ * Zoom limits.
+ *
+ * Below ~0.35 a panel is smaller than its own controls, and above ~2.2 a single
+ * panel swallows the whole room — past the point where panning is useful.
+ */
+export function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
+}
+
 export const KIND_TITLES: Record<SurfaceKind, string> = {
   chat: "Conversation",
   mission: "Mission",

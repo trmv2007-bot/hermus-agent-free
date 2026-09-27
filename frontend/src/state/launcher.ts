@@ -21,6 +21,9 @@ export const ARC_SPAN_DEG = 100;
 export const HERO_SPAN_DEG = 360;
 const SLOT_GAP = 8;
 const MIN_RADIUS = 92;
+/** Air between the core's edge and the nearest entry, so a slot never overlaps
+ *  the thing it is supposed to point at. */
+export const RING_CLEARANCE = 34;
 
 /** Kinds the operator can call up by hand. Every one either renders a real panel
  * or says plainly that it is not built. */
@@ -51,15 +54,25 @@ export const KIND_GLYPH: Record<SurfaceKind, string> = {
  * A full ring is spaced by circumference instead of by arc length: eleven slots
  * around 360 degrees at the same radius as a 100-degree fan would overlap badly.
  */
-export function fanRadius(count: number, size = SLOT_SIZE, spanDeg = ARC_SPAN_DEG): number {
-  if (count <= 1) return MIN_RADIUS;
+export function fanRadius(
+  count: number,
+  size = SLOT_SIZE,
+  spanDeg = ARC_SPAN_DEG,
+  innerRadius = 0,
+): number {
+  // Whatever else the maths says, the ring has to clear the core it is drawn
+  // around. A 300px hero core with a 92px ring puts every entry inside the orb,
+  // where the orb's own hit area swallows the clicks.
+  const floor = Math.max(MIN_RADIUS, innerRadius + RING_CLEARANCE);
+  if (count <= 1) return floor;
   if (spanDeg >= 360) {
+    // A ring is spaced by circumference, not arc length.
     const needed = (count * (size + SLOT_GAP)) / (2 * Math.PI);
-    return Math.max(MIN_RADIUS, Math.round(needed));
+    return Math.max(floor, Math.round(needed));
   }
   const spanRad = (Math.min(spanDeg, 180) * Math.PI) / 180;
   const needed = ((count - 1) * (size + SLOT_GAP)) / spanRad;
-  return Math.max(MIN_RADIUS, Math.round(needed));
+  return Math.max(floor, Math.round(needed));
 }
 
 export interface FanSlot {
@@ -111,6 +124,7 @@ export function fanSlots(
   podSize = POD_SIZE,
   slotSize = SLOT_SIZE,
   spanDeg: number = ARC_SPAN_DEG,
+  innerRadius = 0,
 ): FanSlot[] {
   const cx = anchor.x + podSize / 2;
   const cy = anchor.y + podSize / 2;
@@ -118,7 +132,7 @@ export function fanSlots(
   // A ring has no diagonal to point along, so it is anchored to the top (270deg
   // in screen terms, since y grows downward) and distributed from there.
   const diagonal = ring ? -90 : fanCenterDeg(anchor, podSize, viewport);
-  const radius = fanRadius(kinds.length, slotSize, spanDeg);
+  const radius = fanRadius(kinds.length, slotSize, spanDeg, innerRadius);
   const spread = kinds.length > 1 ? spanDeg : 0;
   const max = Math.max(EDGE, viewport.w - slotSize - EDGE);
   const maxY = Math.max(EDGE, viewport.h - slotSize - EDGE);

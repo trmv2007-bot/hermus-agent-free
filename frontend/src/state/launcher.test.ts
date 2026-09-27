@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Viewport } from "./surfaces";
-import { EDGE, fanCenterDeg, fanRadius, fanSlots, HERO_SPAN_DEG, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "./launcher";
+import { EDGE, fanCenterDeg, fanRadius, fanSlots, HERO_SPAN_DEG, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, RING_CLEARANCE, SLOT_SIZE } from "./launcher";
 
 const ROOM: Viewport = { w: 1280, h: 708 };
 const KINDS = LAUNCHER_KINDS;
@@ -83,11 +83,46 @@ describe("fanSlots", () => {
     }
   });
 
-  it("spaces a full ring by circumference, not by arc length", () => {
-    // Reusing the 100-degree arc's radius for a 360-degree fan would put all
-    // eleven entries on top of each other.
-    const ring = fanRadius(KINDS.length, SLOT_SIZE, HERO_SPAN_DEG);
-    expect(ring * 2 * Math.PI).toBeGreaterThanOrEqual(KINDS.length * SLOT_SIZE);
+  it("keeps a ring outside the core it is drawn around", () => {
+    // A 300px hero core is 150px out from its centre. A ring at the old fixed
+    // 92px floor drew every entry INSIDE the orb, where the orb's own hit area
+    // swallowed the click and the icons could not be opened at all.
+    const core = 300;
+    const cx = 1400 / 2;
+    const cy = 700 / 2;
+    const room: Viewport = { w: 1400, h: 700 };
+    const anchor = { x: cx - POD_SIZE / 2, y: cy - POD_SIZE / 2 };
+    const inner = core / 2 + RING_CLEARANCE;
+    const slots = fanSlots(anchor, room, KINDS, POD_SIZE, SLOT_SIZE, HERO_SPAN_DEG, inner);
+
+    for (const slot of slots) {
+      const centreX = slot.x + SLOT_SIZE / 2;
+      const centreY = slot.y + SLOT_SIZE / 2;
+      expect(Math.hypot(centreX - cx, centreY - cy)).toBeGreaterThan(core / 2 + SLOT_SIZE / 2);
+    }
+  });
+
+  it("keeps a ring inside the room at every size it is shown at", () => {
+    for (const [w, h] of [
+      [1280, 708],
+      [900, 600],
+      [700, 500],
+    ] as [number, number][]) {
+      const room: Viewport = { w, h };
+      const cx = w / 2;
+      const cy = h / 2;
+      const size = Math.max(56, Math.min(300, Math.min(w, h) - EDGE * 2));
+      const roomRadius = Math.min(w, h) / 2 - SLOT_SIZE - EDGE;
+      const inner = Math.max(0, Math.min(size / 2 + RING_CLEARANCE, roomRadius));
+      const slots = fanSlots({ x: cx - POD_SIZE / 2, y: cy - POD_SIZE / 2 }, room, KINDS, POD_SIZE, SLOT_SIZE, HERO_SPAN_DEG, inner);
+      expect(slots).toHaveLength(KINDS.length);
+      for (const slot of slots) {
+        expect(slot.x).toBeGreaterThanOrEqual(0);
+        expect(slot.y).toBeGreaterThanOrEqual(0);
+        expect(slot.x + SLOT_SIZE).toBeLessThanOrEqual(w);
+        expect(slot.y + SLOT_SIZE).toBeLessThanOrEqual(h);
+      }
+    }
   });
 });
 

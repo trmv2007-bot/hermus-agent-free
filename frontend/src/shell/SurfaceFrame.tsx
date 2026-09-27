@@ -32,6 +32,8 @@ const HANDLES: Array<{ dir: Dir; className: string }> = [
 export function SurfaceFrame({ surface }: { surface: Surface }) {
   const moveSurface = useWorkspace((state) => state.moveSurface);
   const resizeSurface = useWorkspace((state) => state.resizeSurface);
+  // Pointer deltas are screen pixels; surface geometry is world coordinates.
+  const zoom = useWorkspace((state) => state.stage.zoom);
   const focusSurface = useWorkspace((state) => state.focusSurface);
   const closeSurface = useWorkspace((state) => state.closeSurface);
   const minimizeSurface = useWorkspace((state) => state.minimizeSurface);
@@ -56,8 +58,14 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
   const pull = (event: React.PointerEvent<HTMLElement>, dir: Dir) => {
     const held0 = grow.current;
     if (!held0) return;
-    const dx = event.clientX - held0.ox;
-    const dy = event.clientY - held0.oy;
+    // The stage is zoomable, and pointer deltas arrive in SCREEN pixels while
+    // surfaces store WORLD coordinates. Without dividing by the zoom, dragging
+    // an edge at 2x moves the panel twice as far as the cursor travelled — the
+    // classic "resizing feels broken when zoomed" bug.
+    const rawX = event.clientX - held0.ox;
+    const rawY = event.clientY - held0.oy;
+    const dx = rawX / zoom;
+    const dy = rawY / zoom;
 
     let { x, y, w, h } = held0;
 
@@ -152,7 +160,7 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
         }}
         onPointerMove={(event) => {
           if (!drag.current) return;
-          moveSurface(surface.id, event.clientX - drag.current.dx, event.clientY - drag.current.dy);
+          moveSurface(surface.id, (event.clientX - drag.current.dx) / zoom, (event.clientY - drag.current.dy) / zoom);
         }}
         onPointerUp={() => {
           drag.current = null;

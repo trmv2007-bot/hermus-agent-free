@@ -687,6 +687,38 @@ button.ghost {
   flex: 1;
   overflow: hidden;
   z-index: 1;
+  /* Panning and zooming are gestures, not text selection. */
+  touch-action: none;
+  cursor: grab;
+}
+
+.stage:active {
+  cursor: grabbing;
+}
+
+/* The floor. Drawn in SCREEN space with the cell size derived from the zoom, so
+   the lines stay 1px and evenly spaced at any scale. A grid inside `.world`
+   would scale its own line weight — soft at high zoom, a solid wash at low. */
+.stage-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, rgb(109 141 255 / 7%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(109 141 255 / 7%) 1px, transparent 1px);
+  background-size: var(--cell, 32px) var(--cell, 32px);
+  background-position: var(--cell-x, 0) var(--cell-y, 0);
+}
+
+/* Everything that lives in world coordinates. One transform, applied to the
+   whole room, which is why surfaces never have to know they are zoomable. */
+.world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  z-index: 1;
+  will-change: transform;
 }
 
 .surface {

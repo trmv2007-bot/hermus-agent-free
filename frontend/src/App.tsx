@@ -15,6 +15,7 @@ import { CommandBar } from "./shell/CommandBar";
 import { Backdrop } from "./shell/Backdrop";
 import { Orb } from "./shell/Orb";
 import { Launcher } from "./shell/Launcher";
+import { StageCanvas } from "./shell/StageCanvas";
 
 const ACTIVATION_WINDOW_MS = 1500;
 const CLICKS_TO_ENTER = 3;
@@ -56,14 +57,18 @@ function WorkspaceShell() {
   // taller font or a wrapped rail cannot drop a surface behind it.
   useEffect(() => {
     const measure = () => {
-      const box = stage.current?.getBoundingClientRect();
+      // The stage element is owned by StageCanvas now, so it is found by class
+      // rather than held as a ref here. There is exactly one of them.
+      const node = stage.current ?? document.querySelector<HTMLElement>(".stage");
+      const box = node?.getBoundingClientRect();
       if (!box || !box.width) return;
       const rail = dock.current?.getBoundingClientRect().height ?? 0;
       setViewport({ w: Math.round(box.width), h: Math.round(Math.max(200, box.height - rail)) });
     };
     measure();
     const observer = new ResizeObserver(measure);
-    if (stage.current) observer.observe(stage.current);
+    const node = stage.current ?? document.querySelector<HTMLElement>(".stage");
+    if (node) observer.observe(node);
     window.addEventListener("resize", measure);
     return () => {
       observer.disconnect();
@@ -125,7 +130,7 @@ function WorkspaceShell() {
         </div>
       </header>
 
-      <main className="stage" ref={stage}>
+      <StageCanvas>
         {shown.map((surface) => (
           <SurfaceFrame key={surface.id} surface={surface} />
         ))}
@@ -137,8 +142,9 @@ function WorkspaceShell() {
 
         <Orb />
         <Launcher />
+      </StageCanvas>
 
-        <footer className="dock" ref={dock}>
+      <footer className="dock" ref={dock}>
           {stowed.map((surface) => (
             <button key={surface.id} type="button" className="chip" onClick={() => showSurface(surface.id)}>
               {surface.title}
@@ -159,7 +165,6 @@ function WorkspaceShell() {
             exit hud
           </button>
         ) : null}
-      </main>
     </div>
   );
 }
