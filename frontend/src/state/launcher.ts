@@ -27,7 +27,7 @@ export const RING_CLEARANCE = 34;
 
 /** Kinds the operator can call up by hand. Every one either renders a real panel
  * or says plainly that it is not built. */
-export const LAUNCHER_KINDS: SurfaceKind[] = ["chat", "mission", "worker", "evidence", "model", "telemetry", "logs", "computer", "memory", "terminal", "diagnostics"];
+export const LAUNCHER_KINDS: SurfaceKind[] = ["chat", "mission", "worker", "evidence", "model", "telemetry", "logs", "computer", "memory", "terminal", "diagnostics", "voice"];
 
 export const KIND_GLYPH: Record<SurfaceKind, string> = {
   chat: "◉",
@@ -45,6 +45,7 @@ export const KIND_GLYPH: Record<SurfaceKind, string> = {
   computer: "▦",
   media: "◐",
   diagnostics: "⚙",
+  voice: "◍",
 };
 
 /**

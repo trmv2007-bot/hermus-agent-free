@@ -65,11 +65,38 @@ log = logging.getLogger(__name__)
 
 # Where the models live. Overridable so the same code runs from a checkout, a
 # test fixture, or wherever the user put them.
-MODEL_ROOT = Path(os.environ.get("HERMUS_VOICE_MODELS", Path.home() / "hermus-voice-models"))
-
 KWS_DIRNAME = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 ASR_DIRNAME = "sherpa-onnx-streaming-zipformer-en"
 TTS_VOICE = "en_US-amy-medium.onnx"
+
+# The first candidate that actually contains the models wins, and the search is
+# ordered by likelihood rather than by a single hardcoded path. A single wrong
+# default is worse than no default: the status endpoint then reports every
+# model missing, with the path it looked at in the message, and the natural
+# reading is "voice is broken" rather than "voice is in the folder you put it
+# in". The error message is only useful if the path in it is usually right.
+#
+# This is defined after the names above because it reads them at call time, and
+# it is called at import time — putting it above them is a NameError on import.
+def _default_model_root() -> Path:
+    override = os.environ.get("HERMUS_VOICE_MODELS")
+    if override:
+        return Path(override)
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = [
+        repo_root / "models" / "hermus-voice-models",
+        Path.home() / "hermus-voice-models",
+        repo_root / "models" / "voice",
+    ]
+    for candidate in candidates:
+        if (candidate / "tts" / TTS_VOICE).exists():
+            return candidate
+    # Nothing found — return the in-repo location, because that is where
+    # `python scripts/fetch_voice_models.py` puts them.
+    return candidates[0]
+
+
+MODEL_ROOT = _default_model_root()
 
 DEFAULT_WAKE_WORDS = ("hey jarvis", "hermes", "hey hermes")
 

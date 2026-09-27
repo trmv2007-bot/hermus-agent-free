@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspace, visibleSurfaces } from "../state/workspace-store";
 import { advance, breath, initialPresence, makeRandom, type Presence, type PresenceState } from "../state/presence";
 import { ORB_SIZE, orbStateFor, placeOrb, STATE_LABEL, type OrbState } from "../state/orb";
+import { getVoiceState, subscribeVoice, voiceOverridesOrb } from "../voice/store";
 import { grabOffset, screenToWorld, type ScreenFrame } from "../state/coords";
 
 const HUES: Record<OrbState, [string, string]> = {
@@ -17,6 +18,14 @@ const HUES: Record<OrbState, [string, string]> = {
   verifying: ["#f6c177", "#4fd1c5"],
   attention: ["#fbbf24", "#fb7185"],
   blocked: ["#64748b", "#475569"],
+  // Listening is steady and open — it is waiting on you, not working.
+  listening: ["#4fd1c5", "#22d3ee"],
+  // Thinking turns the other way from working, so the two are separable at a
+  // glance without reading the label.
+  thinking: ["#a78bfa", "#818cf8"],
+  // Speaking pulses on the breath rather than sweeping, because speech has an
+  // envelope and a sweep does not.
+  speaking: ["#f6c177", "#4fd1c5"],
 };
 
 /**
@@ -32,6 +41,9 @@ const MOTION: Record<OrbState, { speed: number; sweep: number; swell: number }> 
   verifying: { speed: -0.0016, sweep: 0.9, swell: 0.035 },
   attention: { speed: 0.0008, sweep: 0.35, swell: 0.03 },
   blocked: { speed: 0, sweep: 0, swell: 0 },
+  listening: { speed: 0.0006, sweep: 0.5, swell: 0.04 },
+  thinking: { speed: -0.0019, sweep: 0.85, swell: 0.045 },
+  speaking: { speed: 0.0012, sweep: 0.7, swell: 0.075 },
 };
 
 /**
@@ -193,7 +205,13 @@ export function Orb() {
   // A dragged orb keeps the size the room asked for only while it is where the
   // room put it; once you have placed it yourself it stays full size.
   const size = manual ? ORB_SIZE : auto.size;
-  const state = useMemo(() => orbStateFor(tray), [tray]);
+  // Voice wins over the tray. A room that is mid-task and also being spoken to
+  // should look like it is being spoken to — otherwise the mouth moves and the
+  // orb still reads as busy, and the user cannot tell which one has attention.
+  const trayState = useMemo(() => orbStateFor(tray), [tray]);
+  const [voiceState, setVoiceState] = useState(getVoiceState());
+  useEffect(() => subscribeVoice(setVoiceState), []);
+  const state = (voiceOverridesOrb(voiceState) ?? trayState) as OrbState;
   const setOrbPlacement = useWorkspace((store) => store.setOrbPlacement);
 
   // Publish the real placement so the pod can dock against it. Without this the

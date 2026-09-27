@@ -224,6 +224,101 @@ def _run_inline(payload: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # endpoints
 # --------------------------------------------------------------------------- #
+@router.post("/voice/hear")
+async def voice_hear(payload: dict):
+    """Transcribe a chunk of audio and report any wake word inside it.
+
+    This is the ears. Everything else in this module speaks; nothing before
+    this point could listen, so "voice-first" was a name on a route that could
+    only ever talk back.
+
+    Uses core.voice (sherpa-onnx), not tools.voice. Two reasons, both measured
+    on this machine:
+      * it is genuinely streaming and local, so a partial result can be
+        rendered mid-utterance instead of after a long pause
+      * it needs no model download at request time and no network, so a
+        cold start is a ~1.5s model construction rather than a HuggingFace
+        fetch
+
+    Transcript and wake hits come back together. The browser cannot know
+    whether the chunk it just captured contains a wake word until the
+    recogniser has run, and a second round trip for that is dead air in the
+    middle of a conversation.
+    """
+    import base64
+    import binascii
+
+    from core.voice import get_voice
+
+    raw = payload.get("audio")
+    if not isinstance(raw, str) or not raw:
+        return JSONResponse({"ok": False, "error": "no audio in request"}, status_code=400)
+    if raw.lstrip().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    try:
+        pcm = base64.b64decode(raw, validate=False)
+    except (binascii.Error, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": f"audio is not valid base64: {exc}"}, status_code=400)
+    if not pcm:
+        return JSONResponse({"ok": False, "error": "audio decoded to zero bytes"}, status_code=400)
+    if len(pcm) > 8 * 1024 * 1024:
+        return JSONResponse({"ok": False, "error": f"audio too large: {len(pcm)} bytes"}, status_code=413)
+
+    try:
+        rate = int(payload.get("sample_rate") or 16000)
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "sample_rate must be an integer"}, status_code=400)
+    if not 8000 <= rate <= 48000:
+        return JSONResponse({"ok": False, "error": f"sample_rate {rate} is not a real audio rate"}, status_code=400)
+
+    # Reject audio too short to contain a single recogniser frame BEFORE
+    # handing it to the model.
+    #
+    # The recogniser is fed a stream and a stream needs at least one frame;
+    # feed it three bytes and it raises from C++ with no Python traceback,
+    # which surfaces as an opaque 500. A browser genuinely sends these — the
+    # tail flush at stop() can be a handful of samples, and a data: URL with
+    # a truncated body decodes to almost nothing — so this is a normal input,
+    # not a malformed one, and it deserves a message rather than a stack.
+    min_bytes = int(rate * 2 * 0.1)  # 100ms of 16-bit mono
+    if len(pcm) < min_bytes:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": f"audio is too short to transcribe: {len(pcm)} bytes, need at least {min_bytes} (0.1s)",
+                "heard": False,
+            },
+            status_code=400,
+        )
+
+    voice = get_voice()
+    available = (await asyncio.to_thread(voice.status)).available
+    if not available:
+        return JSONResponse(
+            {"ok": False, "error": "voice models are not installed on this machine", "hearable": False},
+            status_code=503,
+        )
+
+    # Both are CPU-bound model calls, several seconds of them. Inline they
+    # would stall the event loop, which means the room freezes — panels, event
+    # bus, orb animation — at exactly the moment someone is talking to it.
+    try:
+        text, wake = await asyncio.gather(
+            asyncio.to_thread(voice.transcribe, pcm, rate),
+            asyncio.to_thread(voice.detect_wake, pcm, rate),
+        )
+    except RuntimeError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+
+    return {
+        "ok": True,
+        "hearable": True,
+        "text": text,
+        "wake": [{"at": at, "keyword": keyword} for at, keyword in wake],
+        "duration_s": round(len(pcm) / 2 / rate, 2),
+    }
+
+
 @router.get("/voice/status")
 async def voice_status():
     """What voice-first mode will actually do on this install."""
@@ -243,6 +338,19 @@ async def voice_status():
         stt = {"error": f"{type(exc).__name__}: {exc}"[:200]}
     from core.presence import get_presence
 
+    # The ears, reported honestly. This is deliberately separate from `stt`
+    # above, which describes the whisper model the legacy path would use.
+    # Saying "a model is available" while the room cannot hear anything is
+    # the same failure shape as a TTS that reports success and returns
+    # silence, and it deserves the same guard.
+    ears = {"available": False, "reason": "not checked"}
+    try:
+        from core.voice import get_voice as _get_voice
+
+        ears = (await asyncio.to_thread(_get_voice().status)).as_dict()
+    except Exception as exc:  # noqa: BLE001 — status must never raise
+        ears = {"available": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+
     return {
         "enabled": bool(config.voice_enabled),
         "ack_mode": str(config.voice_ack_mode or "canned"),
@@ -250,6 +358,7 @@ async def voice_status():
         "speak_answer": bool(config.voice_speak_answer),
         "answer_max_chars": int(config.voice_answer_max_chars),
         "stt_model": str(config.voice_stt_model),
+        "ears": ears,
         "handsfree": {
             "enabled": bool(config.voice_handsfree),
             "wake_word": str(config.voice_wake_word or ""),

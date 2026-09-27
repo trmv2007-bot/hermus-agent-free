@@ -1844,3 +1844,34 @@ button.ghost {
     display: none;
   }
 }
+
+/* --- voice ---------------------------------------------------------------- */
+/* The mic button is the only control in the room that can fail for reasons
+   outside the machine's control, so it is the one that states the reason. */
+.voice-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; height: 100%; overflow: auto; }
+.voice-capability { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.voice-cap { padding: 2px 7px; border-radius: 999px; border: 1px solid; }
+.voice-cap-yes { color: #4fd1c5; border-color: #4fd1c544; background: #4fd1c510; }
+.voice-cap-no  { color: #64748b; border-color: #64748b44; background: #64748b10; }
+.voice-refresh { margin-left: auto; font-size: 10px; color: #7dd3fc; background: none; border: 1px solid #7dd3fc33; border-radius: 6px; padding: 2px 7px; cursor: pointer; }
+.voice-refresh:hover { background: #7dd3fc18; }
+.voice-reason { margin: 0; font-size: 11px; color: #94a3b8; line-height: 1.45; }
+.voice-controls { display: flex; align-items: center; gap: 10px; }
+.voice-mic { padding: 7px 13px; border-radius: 8px; border: 1px solid #4fd1c5aa; background: #4fd1c518; color: #4fd1c5; font-size: 12px; cursor: pointer; }
+.voice-mic:disabled { opacity: .4; cursor: not-allowed; }
+.voice-mic-live { background: #fb718525; border-color: #fb7185cc; color: #fb7185; }
+.voice-meter { flex: 1; height: 5px; border-radius: 999px; background: #1e293b; overflow: hidden; }
+.voice-meter-fill { height: 100%; width: 100%; transform-origin: left center; transform: scaleX(0); background: linear-gradient(90deg, #4fd1c5, #22d3ee); transition: transform 70ms linear, opacity 120ms; }
+.voice-phase { font-size: 11px; color: #94a3b8; min-width: 78px; }
+.voice-error { margin: 0; font-size: 11px; color: #fb7185; line-height: 1.45; }
+.voice-say { display: flex; gap: 7px; }
+.voice-input { flex: 1; min-width: 0; padding: 7px 9px; border-radius: 8px; border: 1px solid #1e3a4a; background: #0a0f1a; color: #e2e8f0; font-size: 12px; }
+.voice-input:disabled { opacity: .45; }
+.voice-send { padding: 7px 12px; border-radius: 8px; border: 1px solid #4fd1c555; background: #4fd1c512; color: #4fd1c5; font-size: 12px; cursor: pointer; }
+.voice-send:disabled { opacity: .4; cursor: not-allowed; }
+.voice-transcript { border-top: 1px solid #14202e; padding-top: 9px; }
+.voice-transcript-head { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #64748b; }
+.voice-wake { color: #4fd1c5; }
+.voice-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: #e2e8f0; }
+.voice-text-empty { color: #475569; font-style: italic; }
+.voice-turns { margin: 0; font-size: 10px; color: #475569; }

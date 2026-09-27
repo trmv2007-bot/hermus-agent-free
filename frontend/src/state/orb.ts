@@ -7,7 +7,18 @@
 
 import type { Surface, Viewport } from "./surfaces";
 
-export type OrbState = "idle" | "working" | "verifying" | "attention" | "blocked";
+export type OrbState =
+  | "idle"
+  | "working"
+  | "verifying"
+  | "attention"
+  | "blocked"
+  // Voice. These are driven by the microphone and the speaker rather than the
+  // event tray, and they outrank it: a room that is mid-task and also being
+  // spoken to should look like it is being spoken to.
+  | "listening"
+  | "thinking"
+  | "speaking";
 
 export interface OrbPlacement {
   x: number;
@@ -139,4 +150,7 @@ export const STATE_LABEL: Record<OrbState, string> = {
   verifying: "verifying",
   attention: "needs attention",
   blocked: "blocked",
+  listening: "listening",
+  thinking: "thinking",
+  speaking: "speaking",
 };

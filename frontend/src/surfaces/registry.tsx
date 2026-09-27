@@ -4,6 +4,7 @@
 
 import type { SurfaceKind } from "../state/surfaces";
 import { ChatPanel, ComputerPanel, DiagnosticsPanel, EvidencePanel, LogsPanel, MemoryPanel, ModelPanel, MissionPanel, PendingPanel, TelemetryPanel, TerminalPanel, WorkerPanel } from "./panels";
+import { VoicePanel } from "./VoicePanel";
 
 export interface SurfaceComponent {
   (props: { surfaceId: string }): JSX.Element;
@@ -21,6 +22,7 @@ export const RENDERERS: Partial<Record<SurfaceKind, SurfaceComponent>> = {
   computer: ComputerPanel,
   memory: MemoryPanel,
   terminal: TerminalPanel,
+  voice: VoicePanel,
 };
 
 export function rendererFor(kind: SurfaceKind): SurfaceComponent {
