@@ -117,6 +117,31 @@ export interface EventView {
   [key: string]: unknown;
 }
 
+/** `GET /computer/status` — the live-desktop control state. */
+export interface ComputerStatus {
+  backends?: { total?: number; running?: number; interrupted?: number; failed?: number } & Record<string, unknown>;
+  control?: { active?: boolean; halted?: boolean; halt_reason?: string | null } & Record<string, unknown>;
+  recording?: Record<string, unknown>;
+  current_task?: Record<string, unknown> | null;
+  tasks?: Record<string, unknown>[];
+  task_stats?: Record<string, number>;
+  skills?: { skills?: unknown[]; stats?: Record<string, number> } & Record<string, unknown>;
+  recent_events?: Record<string, unknown>[];
+  timestamp?: string | number;
+}
+
+/** `POST /memory2/recall` — what Hermus already knows. */
+export interface MemoryHit {
+  id?: string | number;
+  text?: string;
+  content?: string;
+  kind?: string;
+  project?: string;
+  score?: number;
+  created_at?: string | number;
+  [key: string]: unknown;
+}
+
 /**
  * The gateway token is not stored in this app. The serving template injects
  * `window.__HERMUS_GATEWAY_TOKEN`, or the operator passes `?token=` once and it
@@ -192,6 +217,26 @@ export async function post<T>(path: string, body?: unknown, signal?: AbortSignal
   return (await response.json()) as T;
 }
 
+/**
+ * Fetch a binary body (the live screen frame) as an object URL.
+ *
+ * `get` would try to `response.json()` a JPEG. The caller owns the returned
+ * URL and must `URL.revokeObjectURL` it, or a surface that polls every second
+ * leaks a blob per frame for the life of the tab.
+ */
+export async function getBlobUrl(path: string, signal?: AbortSignal): Promise<string> {
+  const token = gatewayToken();
+  const response = await fetch(path, {
+    signal,
+    headers: token ? { "X-Hermus-Token": token } : {},
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    throw new GatewayError(response.status, `${response.status} ${response.statusText}`, path);
+  }
+  return URL.createObjectURL(await response.blob());
+}
+
 export const api = {
   missions: () => get<{ missions: MissionView[] }>("/missions").then((r) => r.missions ?? []),
   mission: (id: string) => get<MissionView>(`/missions/${encodeURIComponent(id)}`),
@@ -206,6 +251,14 @@ export const api = {
   queue: () => get<{ queue: QueueView }>("/queue/status").then((r) => r.queue ?? {}),
   jobs: () => get<{ jobs: JobView[]; queue: QueueView }>("/jobs").then((r) => r.jobs ?? []),
   events: (limit = 60) => get<{ count: number; events: EventView[] }>(`/events/recent?limit=${limit}`).then((r) => r.events ?? []),
+  computerStatus: () => get<ComputerStatus>("/computer/status"),
+  computerResources: () => get<Record<string, unknown>>("/computer/resources"),
+  /** The live screen, as an object URL the caller must revoke. 404 = no frame yet. */
+  liveFrame: (signal?: AbortSignal) => getBlobUrl("/computer/live-frame", signal),
+  memoryRecall: (query: string, limit = 10) =>
+    post<{ results: MemoryHit[] }>("/memory2/recall", { query, limit }).then((r) => r.results ?? []),
+  memoryRemember: (text: string, kind?: string, project?: string) =>
+    post<{ success?: boolean; error?: string }>("/memory2/remember", { text, kind, project }),
 };
 
 /** Fields the workspace panels read, in one place so a Python test can check them. */

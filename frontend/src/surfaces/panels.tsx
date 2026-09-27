@@ -3,7 +3,7 @@
 // rebuild is meant to remove.
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, GatewayError, type MissionView } from "../api/client";
 import { digest } from "../realtime/events";
 
@@ -400,6 +400,190 @@ export function PendingPanel({ label }: { label: string }) {
         <b>{label} is not built yet</b>
         <span>The surface exists so the layout is real, but it will not show invented content.</span>
       </p>
+    </div>
+  );
+}
+
+/**
+ * The live desktop, and what the agent is actually doing to it.
+ *
+ * PRODUCT.md §3 lists "Live screen" as a surface and §4 forbids reporting a
+ * capability as working when it is not. So this panel distinguishes three
+ * things that are easy to conflate and that the product has conflated before:
+ *
+ *   - the frame is a real JPEG from `/computer/live-frame`, and
+ *   - the *backends* driving it are real input injection or the dry-run ones.
+ *
+ * A frame on screen is not proof the mouse moves. `backends` carries which is
+ * which, and the panel says so in words rather than letting a screenshot imply
+ * capability it does not have. `/screen/frame` is deliberately NOT used: it
+ * returns `success: true` with a null frame and a "not yet wired" message,
+ * which is exactly the lying-green-light §4 exists to stop.
+ */
+export function ComputerPanel() {
+  const [frame, setFrame] = useState<string | null>(null);
+  const [frameError, setFrameError] = useState<string | null>(null);
+  const [live, setLive] = useState(true);
+  const status = useQuery({ queryKey: ["computer-status"], queryFn: () => api.computerStatus(), refetchInterval: 3000 });
+
+  useEffect(() => {
+    if (!live) return;
+    const controller = new AbortController();
+    let revoked: string | null = null;
+    let cancelled = false;
+
+    // 2s is a deliberate compromise: fast enough to feel live, slow enough that
+    // a 1440p JPEG does not saturate the gateway on every tick.
+    const tick = async () => {
+      try {
+        const url = await api.liveFrame(controller.signal);
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        if (revoked) URL.revokeObjectURL(revoked);
+        revoked = url;
+        setFrame(url);
+        setFrameError(null);
+      } catch (error) {
+        if (cancelled || controller.signal.aborted) return;
+        const detail = error instanceof GatewayError ? `${error.status}` : String(error);
+        setFrameError(detail);
+      } finally {
+        if (!cancelled) timer = window.setTimeout(tick, 2000);
+      }
+    };
+
+    let timer = window.setTimeout(tick, 0);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [live]);
+
+  if (status.isError) return <Probe error={status.error} path="/computer/status" />;
+  const data = status.data;
+  const backends = data?.backends ?? {};
+  const real = Number(backends.running ?? 0) > 0;
+
+  return (
+    <div className="panel computer">
+      <div className="screen">
+        {frame ? (
+          <img className="screen-frame" src={frame} alt="the agent's current view of the desktop" />
+        ) : frameError ? (
+          <p className="probe" data-state="error">
+            <b>no live frame</b>
+            <span>GET /computer/live-frame returned {frameError}.</span>
+            <em>No frame is being recorded right now. This is the recorder&apos;s state, not a broken panel.</em>
+          </p>
+        ) : (
+          <p className="probe loading">waiting for the first frame…</p>
+        )}
+      </div>
+
+      <p className={`capability ${real ? "capability-real" : "capability-simulated"}`} data-state={real ? "real" : "simulated"}>
+        {real ? (
+          <>
+            <b>Real control.</b> {String(backends.running)} of {String(backends.total ?? 0)} input backend(s) running
+            {Number(backends.failed ?? 0) > 0 ? ` · ${String(backends.failed)} failed` : ""}. The agent can move the mouse
+            and type.
+          </>
+        ) : (
+          <>
+            <b>Simulated control.</b> No input backend is running, so what you see above is a camera, not a pair of hands.
+            Plans will record intent without acting. Install the <code>gui</code> extra to make this real.
+          </>
+        )}
+      </p>
+
+      <footer className="panel-foot">
+        <label className="toggle">
+          <input type="checkbox" checked={live} onChange={(event) => setLive(event.target.checked)} />
+          {live ? "polling every 2s" : "paused"}
+        </label>
+        {data?.control?.halted ? <span className="warn">halted: {String(data.control.halt_reason ?? "no reason given")}</span> : null}
+      </footer>
+    </div>
+  );
+}
+
+/**
+ * What Hermus already knows — searchable, and writable.
+ *
+ * §3 lists memory as "what Hermus knows, editable", so this is both a read and
+ * a write. Recall is a real query against memory2, not a filter over a
+ * hardcoded list: an empty result says the store is empty for that query, which
+ * is different from the surface being broken.
+ */
+export function MemoryPanel() {
+  const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
+  const recall = useQuery({
+    queryKey: ["memory", query],
+    queryFn: () => api.memoryRecall(query, 20),
+    enabled: searched && query.trim().length > 0,
+  });
+
+  return (
+    <div className="panel memory">
+      <form
+        className="memory-search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSearched(true);
+          recall.refetch();
+        }}
+      >
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="what does Hermus know about…"
+          aria-label="search memory"
+        />
+        <button type="submit">recall</button>
+      </form>
+
+      {recall.isError ? <Probe error={recall.error} path="/memory2/recall" /> : null}
+      {searched && !recall.isFetching && !recall.isError ? (
+        <ul className="memory-hits">
+          {(recall.data ?? []).map((hit, index) => (
+            <li key={String(hit.id ?? index)}>
+              {String(hit.text ?? hit.content ?? JSON.stringify(hit))}
+              {hit.kind ? <span className="muted tiny"> · {String(hit.kind)}</span> : null}
+            </li>
+          ))}
+          {!recall.data?.length ? <li className="muted">nothing stored matches that</li> : null}
+        </ul>
+      ) : null}
+
+      <form
+        className="memory-write"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!draft.trim()) return;
+          const result = await api.memoryRemember(draft.trim());
+          setNote(result?.success ? "stored" : (result?.error ?? "the store refused it"));
+          if (result?.success) {
+            setDraft("");
+            setSearched(true);
+            recall.refetch();
+          }
+        }}
+      >
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="tell Hermus something to remember"
+          aria-label="write to memory"
+        />
+        <button type="submit">remember</button>
+      </form>
+      {note ? <p className="muted tiny">{note}</p> : null}
     </div>
   );
 }

@@ -17,7 +17,7 @@ const MIN_RADIUS = 92;
 
 /** Kinds the operator can call up by hand. Every one either renders a real panel
  * or says plainly that it is not built. */
-export const LAUNCHER_KINDS: SurfaceKind[] = ["chat", "mission", "worker", "evidence", "model", "telemetry", "logs", "diagnostics"];
+export const LAUNCHER_KINDS: SurfaceKind[] = ["chat", "mission", "worker", "evidence", "model", "telemetry", "logs", "computer", "memory", "diagnostics"];
 
 export const KIND_GLYPH: Record<SurfaceKind, string> = {
   chat: "◉",
