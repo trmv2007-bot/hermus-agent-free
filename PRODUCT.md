@@ -219,10 +219,31 @@ As of 2026-09-26. This section is a snapshot, not a promise.
 
 **Built but not wired into the product:**
 
-- The workspace itself (`frontend/`) — works, and is not yet the home screen.
-- `control.html` — works, and is currently home when it should be a drawer.
-- Five duplicate UIs: `hood.*`, `jarvis-hud.*`, `gods-eye.js`, `console.js`,
-  `control-client.js`.
+- Nothing in this list any more. The workspace (`frontend/`) is `/` and
+  `control.html` is a surface inside it, both as of `1d4112c`.
+
+**Correction — "five duplicate UIs" was wrong (2026-09-27).**
+
+This section previously listed `hood.*`, `jarvis-hud.*`, `gods-eye.js`,
+`console.js` and `control-client.js` as duplicate UIs to delete. They are not.
+All five are `<script>`/`<link>` dependencies of `control.html` (71KB of JS
+against a 37KB document) and each does something distinct:
+
+| File | What it actually is |
+|---|---|
+| `control-client.js` | the drawer's main client — SSE run stream, speech, tabs |
+| `console.js` | the console panel: manifest load, panel refresh |
+| `jarvis-hud.js` | gauges, byte/uptime formatters for the instrument feel |
+| `hood.js` | the camera/orbit "open hood" transition |
+| `gods-eye.js` | the eye animation |
+
+`control.html` is a real multi-tab application — chat, jobs, agents, missions,
+computer, remote, voice, presence, safety, systems, settings. Deleting its
+scripts would have gutted the diagnostics drawer this document requires.
+
+The genuine duplication was **which screen you land on**, not how many files a
+screen is made of. That is fixed. There is one workspace, and the control room
+is a surface in it. There is no second UI left to delete.
 
 **Not implemented:**
 
@@ -232,14 +253,24 @@ As of 2026-09-26. This section is a snapshot, not a promise.
 - Unified conversational surface.
 - Module decomposition — `mission.py` 2426→1866, `gateway.py` 1457, `agent.py`
   1373 remain oversized.
-- Test suite integrity: `tests/` is ~90% untracked, so a fresh clone is
-  effectively untestable. This is a **correctness risk**, not a chore.
+- Test suite integrity: **resolved, and it was never broken.** This section
+  previously claimed `tests/` was ~90% untracked and that a fresh clone was
+  "effectively untestable". That was a bad read of a partial `git ls-files`.
+  Measured: 172 test files tracked, 0 missing from disk, 0 secret leaks. Do not
+  re-audit this.
 
 **Suspect, not yet re-measured:**
 
 - A 25-failure baseline was recorded while Ollama was down. Those failures are
   likely environmental, not real defects. The baseline must be re-measured
   before any of it is treated as a bug.
+- Three tests hang on `d6b50bc` and still do, verified against a pristine
+  checkout with zero local changes:
+  `test_command_multipart_attachment_e2e_mock`,
+  `test_command_json_still_works`, `test_mission_report_has_response_field`
+  (all in `tests/test_dashboard_connectivity_fixes.py`). They block in a
+  request or in the gateway lifespan shutdown. Real defects, but not new ones —
+  do not attribute them to whatever you just changed.
 
 ---
 
@@ -247,12 +278,22 @@ As of 2026-09-26. This section is a snapshot, not a promise.
 
 In order. Not a wish list — the sequence that unblocks the rest.
 
-1. **Re-measure the baseline with Ollama running.** Until the real failure count
-   is known, nobody knows what is broken. Guessing here is how six UIs happened.
-2. **Get `tests/` under version control.** A project whose quality gate is
-   untracked cannot be trusted by anyone, including future models.
-3. **Promote the workspace to `/` and delete the five duplicate UIs.** No new
-   features. The unlock is deletion.
+1. ~~**Re-measure the baseline with Ollama running.**~~ **Partly done.** The
+   suite runs green on the files that matter for this change (56 pass), and the
+   three known hangs are now pinned as pre-existing. The full-suite count is
+   still unmeasured — see §9.
+2. ~~**Get `tests/` under version control.**~~ **Never needed.** `tests/` was
+   already tracked; the claim that it was not came from a bad read. Closed.
+3. ~~**Promote the workspace to `/`.**~~ **Done** in `1d4112c`. The "delete the
+   five duplicate UIs" half of this move was based on a false premise and was
+   not performed — see the correction in §9. The unlock was the promotion, not
+   the deletion.
+
+**What is left, in order:**
+
+1. Measure the full-suite baseline on a stable disk and record the real number.
+2. Fix the three hanging tests — they are genuine defects, just old ones.
+3. The oversized modules: `gateway.py` 1457, `agent.py` 1373, `mission.py` 1866.
 
 Then, and only then, the JARVIS behaviours that are genuinely missing: remote
 approval, embedded browser, cross-device.
