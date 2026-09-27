@@ -86,6 +86,38 @@ async def workspace_info():
     }
 
 
+@router.post("/workspace/ops")
+async def workspace_ops(payload: dict):
+    """Ask the room to do something: open, move, resize, dock, close a panel.
+
+    The agent's route into the workspace. Ops are validated here before they are
+    published, so a malformed request is refused with a reason the caller can
+    act on rather than reaching the room and being dropped there.
+
+    A refusal is a 400 with `reason`, not a 200 with an empty list: "nothing
+    happened" and "that was not allowed" are different answers, and the agent
+    needs to be able to tell them apart to decide whether to retry.
+    """
+    from core import workspace_ops as ops
+
+    try:
+        result = ops.request(payload.get("ops"), actor=str(payload.get("actor") or "agent"), trace_id=payload.get("trace_id"))
+    except ops.OpRefusal as refusal:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "op_refused", "reason": refusal.reason, "index": refusal.index},
+        )
+    return result
+
+
+@router.get("/workspace/ops")
+async def workspace_ops_vocabulary():
+    """The op names this build accepts, so a caller can discover them."""
+    from core import workspace_ops as ops
+
+    return {"ops": sorted(ops.OP_NAMES)}
+
+
 @router.post("/workspace/create")
 async def workspace_create(payload: dict):
     from core.workspace import workspace as ws

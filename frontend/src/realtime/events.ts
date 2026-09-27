@@ -6,6 +6,7 @@
 // user can act on take a surface.
 
 import type { WorkspaceOp } from "../state/workspace-store";
+import { validateOp } from "../state/workspace-store";
 
 export interface RuntimeEvent {
   type?: string;
@@ -89,6 +90,31 @@ export function planForEvent(event: RuntimeEvent): PlanResult {
       ops: [{ op: "open", surface: { kind: "computer", title: "Computer view · halted", source: { kind: "event", ref: kind }, act: false } }],
       tray: [{ label: "emergency stop", detail: "the computer control path stopped", at }],
       reveal: true,
+    };
+  }
+
+  // The agent asking the room to do something. These ops are already
+  // server-validated by core/workspace_ops.py, but they still go through
+  // applyOps -> validateOp on this side: the client is not a trust boundary
+  // for its own state, and a stale id (the surface closed a moment ago) has to
+  // be refused here where the refusal is visible, not thrown on the floor.
+  if (kind === "workspace_op") {
+    const payload = (data?.args_redacted ?? data ?? {}) as Record<string, unknown>;
+    const raw = (payload.ops ?? []) as unknown;
+    const list = Array.isArray(raw) ? raw : [];
+    const accepted = list.filter((op): op is WorkspaceOp => validateOp(op).ok);
+    return {
+      ops: accepted,
+      tray: [
+        {
+          label: "workspace op",
+          detail: accepted.length
+            ? accepted.map((op) => op.op).join(", ")
+            : `refused: ${list.length} op(s) did not pass client validation`,
+          at,
+        },
+      ],
+      reveal: false,
     };
   }
 
