@@ -129,12 +129,11 @@ function WorkspaceShell() {
         {shown.map((surface) => (
           <SurfaceFrame key={surface.id} surface={surface} />
         ))}
-        {!shown.length ? (
-          <p className="empty">
-            <span>no surface open</span>
-            <span className="muted tiny">open one from the launch pod</span>
-          </p>
-        ) : null}
+
+        {/* No "no surface open" notice. When the room is empty the core takes the
+            middle of it at hero size, and a two-line caption sitting on top of a
+            300px orb competed with the thing it was describing. The empty state
+            is the core; it needs no label to say so. */}
 
         <Orb />
         <Launcher />

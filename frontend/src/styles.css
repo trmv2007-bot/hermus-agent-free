@@ -867,17 +867,6 @@ button.ghost {
   font-size: 12px;
 }
 
-.empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  gap: 8px;
-  text-align: center;
-  color: var(--muted);
-  font-family: var(--mono);
-}
-
 @media (prefers-reduced-motion: no-preference) {
   .surface {
     transition: border-color 140ms ease, box-shadow 180ms ease, transform 180ms ease;
@@ -1075,13 +1064,6 @@ button.ghost {
   position: absolute;
   inset: 0;
   background: radial-gradient(110% 110% at 50% 50%, transparent 55%, rgb(2 4 8 / 72%) 100%);
-}
-
-.empty > span:first-child {
-  color: var(--muted);
-  text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 0.22em;
 }
 
 /* The core. Its hue and sweep carry state; its position carries where the work is. */
