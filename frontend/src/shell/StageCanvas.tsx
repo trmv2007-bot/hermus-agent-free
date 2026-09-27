@@ -94,6 +94,34 @@ export function StageCanvas({ children }: { children: React.ReactNode }) {
     const node = stageRef.current;
     if (!node) return;
     const onWheel = (event: WheelEvent) => {
+      // A wheel over a panel that can still scroll in that direction belongs to
+      // the panel, not to the room.
+      //
+      // Without this, every attempt to read past the bottom of a panel zooms the
+      // entire room, and a panel with no overflow left cannot be scrolled at
+      // all because there is no fallback. That is the worst version of the bug:
+      // the gesture does something, just never the thing you asked for.
+      const target = event.target as HTMLElement | null;
+      if (target && target !== node) {
+        const scroller = target.closest<HTMLElement>(".surface-body, .panel, [data-scrollable]");
+        if (scroller && scroller !== node) {
+          const canScroll = (axis: "y" | "x") => {
+            const primary = axis === "y" ? "scrollHeight" : "scrollWidth";
+            const box = axis === "y" ? "clientHeight" : "clientWidth";
+            const extent = scroller[primary] - scroller[box];
+            if (extent <= 1) return false;
+            // At the end of its travel, the panel is done and the room should
+            // take the gesture back. Otherwise a panel scrolled to the end
+            // traps the wheel and the room can never be zoomed from over it.
+            const delta = axis === "y" ? event.deltaY : event.deltaX;
+            const pos = axis === "y" ? scroller.scrollTop : scroller.scrollLeft;
+            if (delta > 0) return pos < extent - 1;
+            if (delta < 0) return pos > 1;
+            return false;
+          };
+          if (canScroll("y") || (event.deltaX !== 0 && canScroll("x"))) return;
+        }
+      }
       event.preventDefault();
       const box = node.getBoundingClientRect();
       zoomAt(event.clientX - box.left, event.clientY - box.top, event.deltaY < 0 ? 1.12 : 1 / 1.12);
