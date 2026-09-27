@@ -31,12 +31,22 @@ function surface(id: string, x: number, y: number, w: number, h: number, z = 10)
 }
 
 describe("placeOrb", () => {
-  it("holds the lower-right corner of the room when nothing is on screen", () => {
+  it("takes the middle of the room at hero size when nothing is on screen", () => {
+    // An empty room is the one moment the core can BE the room. It used to hold
+    // the lower-right corner at ORB_SIZE, which read as an ornament in a 1280px
+    // stage rather than as the subject.
     const placed = placeOrb([], VIEWPORT);
-    expect(placed.size).toBe(ORB_SIZE);
     expect(placed.anchor).toBe("empty");
-    expect(placed.x).toBe(VIEWPORT.w - ORB_SIZE - 18);
-    expect(placed.y).toBe(VIEWPORT.h - ORB_SIZE - 18);
+    expect(placed.size).toBeGreaterThan(ORB_SIZE);
+    // Dead centre, both axes.
+    expect(placed.x + placed.size / 2).toBeCloseTo(VIEWPORT.w / 2, 0);
+    expect(placed.y + placed.size / 2).toBeCloseTo(VIEWPORT.h / 2, 0);
+  });
+
+  it("never grows past what the room can hold", () => {
+    const tiny = placeOrb([], { w: 200, h: 200 });
+    expect(tiny.size).toBeLessThanOrEqual(200 - 18 * 2);
+    expect(tiny.size).toBeGreaterThanOrEqual(56);
   });
 
   it("sits outside the focused surface on whichever side has room", () => {

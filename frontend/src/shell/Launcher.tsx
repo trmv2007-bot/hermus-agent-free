@@ -7,7 +7,7 @@
 import { useRef, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
 import { KIND_TITLES } from "../state/surfaces";
-import { EDGE, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "../state/launcher";
+import { fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE, podHome } from "../state/launcher";
 
 /** Past this many pixels the pointer intends a drag, not a click. */
 const DRAG_THRESHOLD = 5;
@@ -16,13 +16,22 @@ export function Launcher() {
   // The store's viewport is the room itself: the stage with the dock rail taken
   // off the bottom, measured by the shell.
   const room = useWorkspace((state) => state.viewport);
+  const orbPlacement = useWorkspace((state) => state.orbPlacement);
   const openSurface = useWorkspace((state) => state.openSurface);
   const [placed, setPlaced] = useState<{ x: number; y: number } | null>(null);
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState<string | null>(null);
+  // Dragging is state, not a ref: the CSS transition has to be switched off the
+  // instant the drag starts, and a ref change does not re-render, so the pod
+  // would lag a frame behind the pointer on pickup.
+  const [dragging, setDragging] = useState(false);
   const pointer = useRef<{ ox: number; oy: number; from: { x: number; y: number }; moved: number } | null>(null);
 
-  const parked = { x: EDGE, y: Math.max(EDGE, room.h - POD_SIZE - EDGE) };
-  const anchor = placed ?? parked;
+  // The pod has one home and it belongs to the orb: docked against a small core,
+  // standing off at mid-left when the core has the room to itself. A pod the
+  // user dragged keeps its own position until they double-click to re-dock.
+  const home = podHome(orbPlacement, room);
+  const anchor = placed ?? home;
   // Seven slots of trigonometry, cheaper than the memo that would track it.
   const slots = fanSlots(anchor, room, LAUNCHER_KINDS);
   const radius = fanRadius(LAUNCHER_KINDS.length, SLOT_SIZE);
@@ -52,28 +61,37 @@ export function Launcher() {
               // label, so slots in the left half anchor their text inward.
               data-side={slot.x < anchor.x ? "left" : "right"}
               style={{ left: slot.x, top: slot.y, width: SLOT_SIZE, height: SLOT_SIZE, transitionDelay: `${index * 22}ms` }}
-              title={`open ${KIND_TITLES[slot.kind]}`}
-              aria-label={`open ${slot.kind} surface`}
+              onPointerEnter={() => setHovered(slot.kind)}
+              onPointerLeave={() => setHovered((current) => (current === slot.kind ? null : current))}
+              onFocus={() => setHovered(slot.kind)}
+              onBlur={() => setHovered((current) => (current === slot.kind ? null : current))}
               onClick={() => {
                 openSurface({ kind: slot.kind, source: { kind: "user" } });
                 setOpen(false);
               }}
             >
               <span aria-hidden="true">{KIND_GLYPH[slot.kind]}</span>
-              {/* A glyph alone is a puzzle. The name rides along with it so the
-                  fan can be read without hovering eleven times — and a screen
-                  reader gets the same word a sighted user does. */}
-              <span className="fan-slot-label">{KIND_TITLES[slot.kind]}</span>
+              {/* The name lives in the room, not in a native tooltip. A `title`
+                  renders as a browser box that follows the cursor, is not part of
+                  the workspace, and disappears the moment you look away — which
+                  is exactly the "name box below the cursor" complaint. This is a
+                  real element inside the dashboard, so it survives a screenshot,
+                  a second monitor, and a screen reader. */}
+              <span className="fan-slot-label" data-active={hovered === slot.kind}>
+                {KIND_TITLES[slot.kind]}
+              </span>
+              <span className="sr-only">open {slot.kind} surface</span>
             </button>
           ))}
         </div>
       ) : null}
 
       <div
-        className={`pod ${open ? "pod-open" : ""}`}
+        className={`pod ${open ? "pod-open" : ""} ${dragging ? "pod-dragging" : ""}`}
         style={{ left: anchor.x, top: anchor.y, width: POD_SIZE, height: POD_SIZE }}
         onPointerDown={(event) => {
           pointer.current = { ox: event.clientX - anchor.x, oy: event.clientY - anchor.y, from: anchor, moved: 0 };
+          setDragging(true);
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
@@ -88,6 +106,7 @@ export function Launcher() {
         onPointerUp={() => {
           const wasDrag = (pointer.current?.moved ?? 0) > DRAG_THRESHOLD;
           pointer.current = null;
+          setDragging(false);
           if (!wasDrag) setOpen((current) => !current);
         }}
         onDoubleClick={() => setPlaced(null)}
@@ -99,7 +118,7 @@ export function Launcher() {
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        title={`${open ? "close" : "open"} the launch fan · drag to move · double-click to park`}
+        aria-label="launch surfaces — drag to move, double-click to re-dock to the core"
       >
         <span className="pod-core" aria-hidden="true" />
         {/* Two unlabaged circles in one room is a guessing game: the orb reports
@@ -108,7 +127,6 @@ export function Launcher() {
         <span className="pod-label" aria-hidden="true">
           surfaces
         </span>
-        <span className="sr-only">launch surfaces</span>
       </div>
     </>
   );

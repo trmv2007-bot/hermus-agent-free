@@ -14,6 +14,8 @@ export const EDGE = 12;
 export const ARC_SPAN_DEG = 100;
 const SLOT_GAP = 8;
 const MIN_RADIUS = 92;
+/** How far the pod sits off the orb's left edge when it is docked against it. */
+export const DOCK_GAP = 14;
 
 /** Kinds the operator can call up by hand. Every one either renders a real panel
  * or says plainly that it is not built. */
@@ -52,6 +54,66 @@ export interface FanSlot {
   x: number;
   y: number;
   kind: SurfaceKind;
+  /** Degrees from the anchor, so the renderer can stagger entries along the arc. */
+  angle: number;
+}
+
+/**
+ * Continuous fan angle instead of a per-quadrant jump.
+ *
+ * The fan used to snap between four fixed diagonals — one per quadrant — so
+ * dragging the pod across the midpoint of the screen made all eleven entries
+ * teleport at once. This measures how far the anchor sits from the room's
+ * centre and swings the arc with it, so the fan tracks the pointer continuously
+ * and the entries slide rather than jump.
+ */
+export function fanCenterDeg(anchor: { x: number; y: number }, podSize: number, viewport: Viewport): number {
+  const cx = anchor.x + podSize / 2;
+  const cy = anchor.y + podSize / 2;
+  // -1..1 on each axis: 0 dead centre, ±1 hard against an edge.
+  const nx = viewport.w > 0 ? clampUnit((cx * 2 - viewport.w) / viewport.w) : 0;
+  const ny = viewport.h > 0 ? clampUnit((cy * 2 - viewport.h) / viewport.h) : 0;
+  // Point the fan away from centre, so a pod on the left opens leftward and one
+  // on the right opens rightward. Screen y grows downward, so +y is downward.
+  const awayX = -nx;
+  const awayY = -ny;
+  if (awayX === 0 && awayY === 0) return 45;
+  return (Math.atan2(awayY, awayX) * 180) / Math.PI;
+}
+
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(-1, value));
+}
+
+/**
+ * Where the pod belongs, given where the orb is.
+ *
+ * The room has one focus, so the pod follows it instead of holding a corner the
+ * user already abandoned:
+ *
+ *  - orb small (beside a panel, or pushed aside in a crowded room) → dock
+ *    against the orb's left edge, vertically centred on it. One object.
+ *  - orb hero-sized and centred (an empty room) → stand off at mid-left, clear
+ *    of the core, because parking on top of a 300px orb would hide it.
+ *  - no orb position yet → the bottom-left corner it has always used.
+ *
+ * A dragged pod always wins; this only decides the resting place.
+ */
+export function podHome(orb: { x: number; y: number; size: number } | null, viewport: Viewport): { x: number; y: number } {
+  if (!orb || !viewport.w || !viewport.h) {
+    return { x: EDGE, y: Math.max(EDGE, viewport.h - POD_SIZE - EDGE) };
+  }
+  if (orb.size > 200) {
+    // Hero orb: stand at mid-height on the left, not on top of the core.
+    return {
+      x: EDGE,
+      y: Math.round(viewport.h / 2 - POD_SIZE / 2),
+    };
+  }
+  return {
+    x: Math.max(EDGE, orb.x - POD_SIZE - DOCK_GAP),
+    y: Math.round(orb.y + orb.size / 2 - POD_SIZE / 2),
+  };
 }
 
 /**
@@ -70,10 +132,7 @@ export function fanSlots(
 ): FanSlot[] {
   const cx = anchor.x + podSize / 2;
   const cy = anchor.y + podSize / 2;
-  const rightward = cx * 2 <= viewport.w;
-  const downward = cy * 2 <= viewport.h;
-  // Screen y grows downward, so the diagonal of the open quadrant is:
-  const diagonal = Math.atan2(downward ? 1 : -1, rightward ? 1 : -1) * (180 / Math.PI);
+  const diagonal = fanCenterDeg(anchor, podSize, viewport);
   const radius = fanRadius(kinds.length, slotSize);
   const spread = kinds.length > 1 ? ARC_SPAN_DEG : 0;
   const max = Math.max(EDGE, viewport.w - slotSize - EDGE);
@@ -85,6 +144,6 @@ export function fanSlots(
     const radians = degrees * (Math.PI / 180);
     const x = Math.min(Math.max(cx + radius * Math.cos(radians) - slotSize / 2, EDGE), max);
     const y = Math.min(Math.max(cy + radius * Math.sin(radians) - slotSize / 2, EDGE), maxY);
-    return { kind, x: Math.round(x), y: Math.round(y) };
+    return { kind, x: Math.round(x), y: Math.round(y), angle: Math.round(degrees) };
   });
 }

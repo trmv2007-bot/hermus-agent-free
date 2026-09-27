@@ -61,6 +61,14 @@ interface WorkspaceState {
   /** Full-HUD mode: the topbar and dock slide to the edges and the room owns the screen. */
   immersive: boolean;
   viewport: Viewport;
+  /**
+   * Where the core ended up this frame. The orb paints itself from its own
+   * placement maths, but the pod needs the same answer to decide whether to
+   * dock against it or stand off — two components guessing independently is how
+   * they drift apart, so the orb publishes the result here.
+   */
+  orbPlacement: { x: number; y: number; size: number } | null;
+  setOrbPlacement: (placement: { x: number; y: number; size: number } | null) => void;
   /** Readouts that arrived but were not given screen space, newest first. */
   tray: { label: string; detail: string; at: number }[];
   /** Operations that were refused, with the reason — never silently dropped. */
@@ -206,6 +214,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   focusedId: null,
   immersive: false,
   viewport: { w: 1280, h: 800 },
+  orbPlacement: null,
   tray: [],
   rejected: [],
 
@@ -451,6 +460,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setImmersive: (on) => set({ immersive: on }),
   toggleImmersive: () => set({ immersive: !get().immersive }),
   setViewport: (viewport) => set({ viewport }),
+  setOrbPlacement: (orbPlacement) => set({ orbPlacement }),
 
   /**
    * Apply agent- or shell-supplied operations. Ids are resolved against the state

@@ -992,6 +992,15 @@ button.ghost {
   cursor: grab;
   touch-action: none;
   filter: drop-shadow(0 0 22px rgb(79 209 197 / 28%));
+  /* The core grows to fill an empty room and shrinks back beside a panel. That
+     change is the room reorganising itself, so it eases rather than snaps — and
+     .orb-manual suspends it while the user has hold of the core. */
+  transition: left 460ms cubic-bezier(0.22, 1, 0.36, 1), top 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 460ms cubic-bezier(0.22, 1, 0.36, 1), height 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.orb-manual {
+  transition: none;
 }
 
 .orb:active {
@@ -1039,6 +1048,15 @@ button.ghost {
   box-shadow: 0 12px 30px rgb(0 0 0 / 55%);
   cursor: grab;
   touch-action: none;
+  /* The pod glides between resting places — docked against the core, or at
+     mid-left when the core has the room. Without a transition it teleports every
+     time a surface opens or closes, which reads as a glitch rather than a
+     movement. Excluded while dragging so the pod tracks the pointer exactly. */
+  transition: left 420ms cubic-bezier(0.22, 1, 0.36, 1), top 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pod-dragging {
+  transition: none;
 }
 
 .pod:hover,
@@ -1078,7 +1096,11 @@ button.ghost {
 
 /* Fan slots are 38px squares on an arc, so the name cannot go inside without
    wrapping. It sits outside the square, aligned away from the pod's centre, so
-   labels for the upper half read downward and the lower half read upward. */
+   labels for the upper half read downward and the lower half read upward.
+
+   The name is ALWAYS visible. It used to be `opacity: 0` until hover, which
+   turned eleven glyphs into a guessing game and made the fan unreadable at
+   rest. Dimmed is legible; hidden is not. */
 .fan-slot-label {
   position: absolute;
   left: calc(100% + 7px);
@@ -1090,12 +1112,22 @@ button.ghost {
   color: var(--muted);
   white-space: nowrap;
   pointer-events: none;
-  opacity: 0;
+  opacity: 0.62;
   transition: opacity 140ms ease, color 140ms ease;
+  z-index: 2;
+}
+
+/* Entries slide to their new place on the arc instead of teleporting. The old
+   layout snapped the whole fan between four quadrant diagonals, so crossing the
+   screen's midpoint moved all eleven slots in one jump. The angle is now
+   continuous, and this transition is what makes that readable as movement. */
+.fan-slot {
+  transition: left 380ms cubic-bezier(0.22, 1, 0.36, 1), top 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
 }
 
 .fan-slot:hover .fan-slot-label,
-.fan-slot:focus-visible .fan-slot-label {
+.fan-slot:focus-visible .fan-slot-label,
+.fan-slot-label[data-active="true"] {
   opacity: 1;
   color: var(--text);
 }

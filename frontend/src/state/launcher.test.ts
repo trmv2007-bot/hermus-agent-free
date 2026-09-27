@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Viewport } from "./surfaces";
-import { EDGE, fanRadius, fanSlots, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "./launcher";
+import { EDGE, fanCenterDeg, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, podHome, SLOT_SIZE } from "./launcher";
 
 const ROOM: Viewport = { w: 1280, h: 708 };
 const KINDS = LAUNCHER_KINDS;
@@ -63,6 +63,62 @@ describe("fanSlots", () => {
     for (const slot of slots) {
       expect(slot.x + SLOT_SIZE).toBeLessThanOrEqual(tiny.w);
       expect(slot.y + SLOT_SIZE).toBeLessThanOrEqual(tiny.h);
+    }
+  });
+});
+
+describe("fanCenterDeg", () => {
+  it("swings continuously instead of snapping between quadrants", () => {
+    // The bug being fixed: the angle was one of four fixed diagonals, so
+    // dragging the pod across the screen's horizontal midpoint made all eleven
+    // entries teleport at once. Every position now gets its own angle.
+    const left = fanCenterDeg({ x: 100, y: 300 }, POD_SIZE, ROOM);
+    const nearMid = fanCenterDeg({ x: 600, y: 300 }, POD_SIZE, ROOM);
+    const right = fanCenterDeg({ x: 1100, y: 300 }, POD_SIZE, ROOM);
+
+    expect(left).not.toBe(nearMid);
+    expect(nearMid).not.toBe(right);
+    // And the fan opens away from the middle of the room: a pod hard against the
+    // left edge points the arc rightward (0deg), one against the right edge
+    // points it leftward (180deg). The midpoint between them is the diagonal.
+    expect(left).toBeLessThan(45);
+    expect(right).toBeGreaterThan(135);
+  });
+
+  it("moves in small steps, not in quadrant jumps", () => {
+    const a = fanCenterDeg({ x: 300, y: 400 }, POD_SIZE, ROOM);
+    const b = fanCenterDeg({ x: 310, y: 400 }, POD_SIZE, ROOM);
+    expect(Math.abs(a - b)).toBeLessThan(10);
+  });
+});
+
+describe("podHome", () => {
+  it("docks against the core's left edge when the orb is small", () => {
+    const spot = podHome({ x: 400, y: 300, size: 56 }, ROOM);
+    expect(spot.x + POD_SIZE).toBeLessThanOrEqual(400);
+    expect(spot.y + POD_SIZE / 2).toBeCloseTo(300 + 56 / 2, 0);
+  });
+
+  it("stands off at mid-left when the core has the room to itself", () => {
+    // A hero orb is centred, so docking on it would hide the core entirely.
+    const spot = podHome({ x: 490, y: 200, size: 300 }, ROOM);
+    expect(spot.x).toBe(EDGE);
+    expect(spot.y + POD_SIZE / 2).toBeCloseTo(ROOM.h / 2, 0);
+  });
+
+  it("falls back to the lower-left corner before the orb has reported in", () => {
+    const spot = podHome(null, ROOM);
+    expect(spot.x).toBe(EDGE);
+    expect(spot.y).toBe(ROOM.h - POD_SIZE - EDGE);
+  });
+});
+
+describe("launcher content", () => {
+  it("names and glyphs every kind the operator can open", () => {
+    // A glyph with no name is a puzzle, so both are required per kind.
+    for (const kind of KINDS) {
+      expect(KIND_GLYPH[kind]).toBeTruthy();
+      expect(typeof KIND_GLYPH[kind]).toBe("string");
     }
   });
 });

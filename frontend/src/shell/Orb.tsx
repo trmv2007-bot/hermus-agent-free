@@ -71,6 +71,14 @@ export function Orb() {
   // room put it; once you have placed it yourself it stays full size.
   const size = manual ? ORB_SIZE : auto.size;
   const state = useMemo(() => orbStateFor(tray), [tray]);
+  const setOrbPlacement = useWorkspace((store) => store.setOrbPlacement);
+
+  // Publish the real placement so the pod can dock against it. Without this the
+  // pod has to recompute placeOrb() itself and the two answers drift the moment
+  // either one changes.
+  useEffect(() => {
+    setOrbPlacement({ x: position.x, y: position.y, size });
+  }, [position.x, position.y, size, setOrbPlacement]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -93,7 +101,7 @@ export function Orb() {
 
   return (
     <div
-      className={`orb orb-${state} ${manual ? "" : "orb-auto"} ${size < ORB_SIZE ? "orb-small" : ""}`}
+      className={`orb orb-${state} ${manual ? "orb-manual" : "orb-auto"} ${size < ORB_SIZE ? "orb-small" : ""}`}
       style={{ left: position.x, top: position.y, width: size, height: size }}
       title={title}
       role="img"

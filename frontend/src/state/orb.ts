@@ -21,6 +21,14 @@ export const ORB_SIZE = 132;
 export const ORB_MIN = 56;
 const MARGIN = 18;
 
+/**
+ * An empty room is the one moment the core can be the room. This is the size it
+ * takes when it has the whole stage to itself — deliberately larger than
+ * ORB_SIZE, because "no surface open" means there is nothing to sit beside, and
+ * a 132px dot in a 1600px room still reads as a corner ornament.
+ */
+export const ORB_HERO = 300;
+
 const STATE_BY_EVENT: Array<[RegExp, OrbState]> = [
   [/emergency|red_line|blocked/i, "blocked"],
   [/disagreement|breach|repair_stopped|refus/i, "attention"],
@@ -85,14 +93,22 @@ function freeCorner(surfaces: Surface[], viewport: Viewport, size: number): { x:
 /**
  * Place the core next to the surface that matters.
  *
- * Rules, in order: no visible surfaces means it holds the corner and stays full
- * size; a crowded room means it shrinks and finds the emptiest corner rather
+ * Rules, in order: no visible surfaces means it takes the middle of the room at
+ * hero size, because with nothing to sit beside it should BE the room; a
+ * crowded room means it shrinks to ORB_MIN and finds the emptiest corner rather
  * than covering the work; otherwise it sits just outside the focused surface on
  * whichever side has room.
  */
 export function placeOrb(visible: Surface[], viewport: Viewport): OrbPlacement {
   if (!visible.length) {
-    return { x: viewport.w - ORB_SIZE - MARGIN, y: viewport.h - ORB_SIZE - MARGIN, size: ORB_SIZE, anchor: "empty" };
+    // Centre of the room, and never bigger than the room can hold.
+    const size = Math.max(ORB_MIN, Math.min(ORB_HERO, Math.min(viewport.w, viewport.h) - MARGIN * 2));
+    return {
+      x: Math.round((viewport.w - size) / 2),
+      y: Math.round((viewport.h - size) / 2),
+      size: Math.round(size),
+      anchor: "empty",
+    };
   }
 
   const focused = visible.reduce((top, surface) => (surface.geometry.z >= top.geometry.z ? surface : top), visible[0]);
