@@ -3,9 +3,10 @@
 // that exists.
 
 import type { SurfaceKind } from "../state/surfaces";
-import { ChatPanel, ComputerPanel, DiagnosticsPanel, EvidencePanel, LogsPanel, MemoryPanel, ModelPanel, MissionPanel, PendingPanel, TelemetryPanel, TerminalPanel, WorkerPanel } from "./panels";
-import { VoicePanel } from "./VoicePanel";
+import { ComputerPanel, EvidencePanel, LogsPanel, MemoryPanel, ModelPanel, MissionPanel, PendingPanel, TelemetryPanel, TerminalPanel, WorkerPanel } from "./panels";
+import { ChatPanel } from "./ChatPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { VoicePanel } from "./VoicePanel";
 
 export interface SurfaceComponent {
   (props: { surfaceId: string }): JSX.Element;
@@ -19,12 +20,13 @@ export const RENDERERS: Partial<Record<SurfaceKind, SurfaceComponent>> = {
   model: ModelPanel,
   telemetry: TelemetryPanel,
   logs: LogsPanel,
-  diagnostics: DiagnosticsPanel,
+  // The diagnostics drawer became this. /control still exists and is still the
+  // escape hatch, but the surface you open to change something is this.
+  diagnostics: SettingsPanel,
   computer: ComputerPanel,
   memory: MemoryPanel,
   terminal: TerminalPanel,
   voice: VoicePanel,
-  settings: SettingsPanel,
 };
 
 export function rendererFor(kind: SurfaceKind): SurfaceComponent {

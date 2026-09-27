@@ -156,7 +156,11 @@ describe("typed self-modification", () => {
     expect(outcome.rejected).toBe(0);
     const opened = Object.values(useWorkspace.getState().surfaces).find((s) => s.kind === "diagnostics");
     expect(opened).toBeDefined();
-    expect(opened?.title).toBe("Diagnostics");
+    // The kind is still `diagnostics` — /control is still the drawer the
+    // architecture gates require — but the surface the operator opens is
+    // titled Settings, because it is no longer an embedded read-only dump of
+    // the control room. It is the page you change things on.
+    expect(opened?.title).toBe("Settings");
   });
 });
 

@@ -1,211 +1,238 @@
 /**
- * Settings — what this build is actually running on, and what it can do.
+ * Settings — the writable configuration surface.
  *
- * This is a read of live state, not a form. Nothing here is editable, and
- * that is deliberate: the values come from the gateway's own resolution
- * (which provider won, which device a role landed on, which voice models are
- * actually on disk) and a settings page that showed a *stale copy* of those
- * would be worse than no settings page. To change one, edit the env var the
- * gateway reads and restart — and each row says which.
+ * This is what now sits behind the diagnostics launcher entry. That used to be
+ * an iframe of /control: a read-only dump of numbers behind a label that
+ * implied you could change them. This one can.
  *
- * It replaced the label "diagnostics" on the launcher, which was pointing at
- * an embedded iframe of the control room. That drawer still exists and is
- * still reachable as Diagnostics; it answers "what is broken", this answers
- * "what is this".
+ * Three rules, matching the backend, and the reasoning is in
+ * gateway/routes_settings.py:
+ *
+ *  - A secret arrives masked and is submitted only if you type a new one. The
+ *    placeholder is "unchanged" rather than empty, because an empty field
+ *    means "leave this alone" and clearing a working API key by saving a form
+ *    is not a recoverable mistake.
+ *  - Every value carries a `source`. "file" means you wrote it and it needs a
+ *    restart; "process" means the running gateway is already using it.
+ *    Showing those the same way would claim a change took effect when it has
+ *    not, which is the class of lie this page exists to end.
+ *  - Nothing is autosaved. An explicit save, because these are API keys and a
+ *    keystroke-by-keystroke write is a race with your own typing.
+ *
+ * The live "what is this build running on" read is kept at the bottom rather
+ * than removed: it answers "did my change work", which is the question you
+ * have immediately after saving.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-interface EngineRole {
-  role: string;
-  engine: string;
-  device: string;
-  provider: string;
-  model: string;
-  base_url?: string;
-  reason?: string;
-  supports_tools?: boolean;
+interface SettingItem {
+  key: string;
+  label: string;
+  group: string;
+  secret: boolean;
+  help: string;
+  source: "process" | "file" | "unset";
+  set: boolean;
+  value: string;
+}
+
+interface SettingsPayload {
+  settings: SettingItem[];
+  groups: string[];
+  env_path: string;
+  env_exists: boolean;
+  requires_restart: boolean;
 }
 
 interface EngineStatus {
   status?: string;
-  action?: string;
-  model_needed?: boolean;
-  plan?: { mode?: string; reason?: string; roles?: unknown };
+  plan?: { mode?: string };
 }
 
-/**
- * Roles arrive as an object keyed by role name, not as a list.
- *
- * That is not a detail: declaring them as an array type makes `.map()` compile
- * cleanly and then throw at runtime on the first render, because TypeScript
- * checks the type you asserted rather than the shape the gateway sends. The
- * only thing that catches it is reading an actual response.
- */
-function toRoles(roles: unknown): EngineRole[] {
-  if (Array.isArray(roles)) return roles as EngineRole[];
-  if (roles && typeof roles === "object") {
-    return Object.entries(roles as Record<string, EngineRole>).map(([name, role]) => ({
-      ...role,
-      role: role?.role ?? name,
-    }));
-  }
-  return [];
-}
+const GROUP_TITLES: Record<string, string> = {
+  models: "models",
+  keys: "api keys",
+  voice: "voice",
+  room: "this install",
+};
 
-interface VoiceStatus {
-  enabled?: boolean;
-  speak_answer?: boolean;
-  ack_mode?: string;
-  ack_phrases?: string[];
-  stt_model?: string;
-  ears?: { available?: boolean; reason?: string; wake_words?: string[]; engine?: string };
-  tts?: { available?: boolean; backends?: Record<string, { available?: boolean; detail?: unknown }> };
-}
-
-interface DoctorStatus {
-  status?: string;
-  checks?: Array<{ name?: string; status?: string; detail?: string }>;
-}
-
-function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="set-row">
-      <span className="set-label">{label}</span>
-      <span className="set-value">{value}</span>
-      {hint && <span className="set-hint">{hint}</span>}
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="set-section">
-      <h3 className="set-title">{title}</h3>
-      {children}
-    </section>
-  );
-}
+const SOURCE_TEXT: Record<SettingItem["source"], string> = {
+  process: "live",
+  file: "restart to apply",
+  unset: "not set",
+};
 
 export function SettingsPanel() {
-  const [engine, setEngine] = useState<EngineStatus | null>(null);
-  const [voice, setVoice] = useState<VoiceStatus | null>(null);
-  const [doctor, setDoctor] = useState<DoctorStatus | null>(null);
+  const [payload, setPayload] = useState<SettingsPayload | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [problem, setProblem] = useState("");
+  const [engine, setEngine] = useState<EngineStatus | null>(null);
 
   const load = useCallback(async () => {
-    // One failure must not blank the page: each fetch settles on its own and
-    // an unreachable section says so in place.
-    const get = async <T,>(path: string): Promise<T | null> => {
-      try {
-        const res = await fetch(path);
-        if (!res.ok) return null;
-        return (await res.json()) as T;
-      } catch {
-        return null;
-      }
-    };
-    const [e, v, d] = await Promise.all([get<EngineStatus>("/engine/status"), get<VoiceStatus>("/voice/status"), get<DoctorStatus>("/doctor/status")]);
-    setEngine(e);
-    setVoice(v);
-    setDoctor(d);
-    if (!e && !v && !d) setProblem("the gateway did not answer /engine/status, /voice/status or /doctor/status");
-    else setProblem("");
+    try {
+      const res = await fetch("/settings");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as SettingsPayload;
+      setPayload(body);
+      setDraft({});
+      setProblem("");
+    } catch (err) {
+      setProblem(`could not read settings: ${(err as Error).message}`);
+    }
+    try {
+      const res = await fetch("/engine/status");
+      if (res.ok) setEngine((await res.json()) as EngineStatus);
+    } catch {
+      setEngine(null);
+    }
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const roles = toRoles(engine?.plan?.roles);
-  const ttsBackends = voice?.tts?.backends ?? {};
+  const dirty = useMemo(
+    () =>
+      Object.entries(draft).filter(([key, value]) => {
+        const item = payload?.settings.find((s) => s.key === key);
+        if (!item) return false;
+        // A masked secret is never compared against what was typed — the mask
+        // would make every entry "dirty" and every save look like a change.
+        // Blank is never dirty either, because blank means "leave it alone".
+        return value.trim() !== "" && value !== item.value;
+      }),
+    [draft, payload],
+  );
+
+  const save = useCallback(async () => {
+    if (!dirty.length) return;
+    setSaving(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ set: Object.fromEntries(dirty) }),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string; message?: string; skipped?: string[] };
+      if (!res.ok || !body.ok) {
+        setNotice({ tone: "error", text: body.error ?? `save failed (HTTP ${res.status})` });
+        return;
+      }
+      setNotice({
+        tone: "ok",
+        text:
+          body.message ??
+          (body.skipped?.length
+            ? `${body.skipped.length} field left unchanged — an empty field never clears a saved value`
+            : "saved"),
+      });
+      await load();
+    } catch (err) {
+      setNotice({ tone: "error", text: `save failed: ${(err as Error).message}` });
+    } finally {
+      setSaving(false);
+    }
+  }, [dirty, load]);
+
+  if (problem) {
+    return (
+      <div className="panel">
+        <p className="probe" data-state="error">
+          <b>settings did not load</b>
+          <span>{problem}</span>
+          <em>The gateway may not be running. This stays open so you can retry without leaving the room.</em>
+        </p>
+        <footer className="panel-foot">
+          <button type="button" className="ghost" onClick={() => void load()}>
+            try again
+          </button>
+        </footer>
+      </div>
+    );
+  }
+
+  if (!payload) return <div className="settings"><p className="set-empty">loading…</p></div>;
 
   return (
     <div className="settings">
-      {problem && (
-        <p className="set-problem" data-state="error">
-          <b>nothing answered</b>
-          <span>{problem}</span>
+      {notice && (
+        <p className="set-notice" data-tone={notice.tone}>
+          {notice.text}
         </p>
       )}
 
-      <Section title="models">
-        {engine ? (
-          <>
-            <Row label="plan" value={engine.plan?.mode ?? "—"} />
-            <Row
-              label="state"
-              value={engine.status ?? "—"}
-              hint={engine.action ? `action: ${engine.action}` : undefined}
-            />
-            {roles.map((r) => (
-              <div className="set-role" key={r.role}>
-                <div className="set-role-head">
-                  <span className="set-role-name">{r.role}</span>
-                  <span className="set-role-model">{r.model}</span>
-                </div>
-                <div className="set-role-meta">
-                  {r.engine} · {r.device} · {r.provider}
-                  {r.supports_tools === false && <em className="set-warn"> · no tools</em>}
-                </div>
-                {r.reason && <div className="set-role-reason">{r.reason}</div>}
-              </div>
-            ))}
-            {roles.length === 0 && <p className="set-empty">no roles resolved</p>}
-          </>
-        ) : (
-          <p className="set-empty">loading…</p>
-        )}
-      </Section>
+      {payload.groups.map((group) => (
+        <section className="set-section" key={group}>
+          <h3 className="set-title">{GROUP_TITLES[group] ?? group}</h3>
+          {payload.settings
+            .filter((item) => item.group === group)
+            .map((item) => {
+              const value = draft[item.key] ?? "";
+              return (
+                <label className="set-field" key={item.key}>
+                  <span className="set-field-head">
+                    <span className="set-field-label">{item.label}</span>
+                    <span className="set-source" data-source={item.source}>
+                      {SOURCE_TEXT[item.source]}
+                    </span>
+                  </span>
+                  <span className="set-field-row">
+                    <input
+                      className="set-input"
+                      type={item.secret ? "password" : "text"}
+                      value={value}
+                      placeholder={
+                        item.secret
+                          ? item.set
+                            ? "unchanged — type to replace"
+                            : "not set"
+                          : item.value || "not set"
+                      }
+                      spellCheck={false}
+                      autoComplete="off"
+                      onChange={(event) => setDraft((prev) => ({ ...prev, [item.key]: event.target.value }))}
+                    />
+                    {!item.set && <span className="set-unset">empty</span>}
+                  </span>
+                  {item.help && <span className="set-help">{item.help}</span>}
+                </label>
+              );
+            })}
+        </section>
+      ))}
 
-      <Section title="voice">
-        {voice ? (
-          <>
-            <Row
-              label="speaks"
-              value={voice.tts?.available ? "yes" : "no"}
-              hint={Object.entries(ttsBackends)
-                .map(([name, b]) => `${name} ${b.available ? "✓" : "✗"}`)
-                .join("  ") || undefined}
-            />
-            <Row
-              label="hears"
-              value={voice.ears?.available ? "yes" : "no"}
-              hint={voice.ears?.available ? (voice.ears?.wake_words ?? []).join(", ") : voice.ears?.reason}
-            />
-            <Row label="acknowledge" value={voice.ack_mode ?? "—"} hint="spoken before the slow work starts" />
-            <Row label="speaks answers" value={voice.speak_answer ? "yes" : "no"} />
-            <Row label="engine" value={voice.ears?.engine ?? "—"} />
-            <p className="set-note">
-              Set <code>HERMUS_PIPER_MODEL</code> to a .onnx voice and put the models under
-              <code> models/hermus-voice-models/</code>, then restart. Nothing here downloads on its own.
-            </p>
-          </>
-        ) : (
-          <p className="set-empty">loading…</p>
-        )}
-      </Section>
-
-      <Section title="health">
-        {doctor ? (
-          <>
-            <Row label="doctor" value={doctor.status ?? "—"} />
-            {(doctor.checks ?? []).slice(0, 6).map((c, i) => (
-              <Row key={c.name ?? i} label={c.name ?? `check ${i + 1}`} value={c.status ?? "—"} hint={c.detail} />
-            ))}
-            {(doctor.checks ?? []).length === 0 && <p className="set-empty">no checks reported</p>}
-          </>
-        ) : (
-          <p className="set-empty">loading…</p>
-        )}
-      </Section>
-
-      <footer className="set-foot">
-        <button type="button" className="ghost" onClick={() => void load()}>
-          refresh
+      <footer className="set-actions">
+        <button type="button" className="set-save" onClick={() => void save()} disabled={!dirty.length || saving}>
+          {saving ? "saving…" : `save${dirty.length ? ` ${dirty.length}` : ""}`}
         </button>
-        <span className="set-foot-note">read-only — these come from the gateway, not from this page</span>
+        <button type="button" className="ghost" onClick={() => void load()} disabled={saving}>
+          discard
+        </button>
+        {dirty.length > 0 && <span className="set-dirty">{dirty.map(([k]) => k).join(", ")}</span>}
+        {payload.requires_restart && <span className="set-restart">changes apply on restart</span>}
       </footer>
+
+      <section className="set-section set-section-last">
+        <h3 className="set-title">running now</h3>
+        <p className="set-path">
+          {payload.env_path}
+          {!payload.env_exists && <em> — does not exist yet; saving will create it</em>}
+        </p>
+        {engine ? (
+          <div className="set-row">
+            <span className="set-label">engine</span>
+            <span className="set-value">
+              {engine.plan?.mode ?? "—"} · {engine.status ?? "—"}
+            </span>
+          </div>
+        ) : (
+          <p className="set-empty">engine status unavailable</p>
+        )}
+      </section>
     </div>
   );
 }

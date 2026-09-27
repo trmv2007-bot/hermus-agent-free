@@ -57,7 +57,7 @@ open a proposal that updates this table.
 | Broad local scan | Find malware/leaked secrets/unsafe files | Private data exposure | Folder scope + purpose + redaction policy | not_granted |
 | Agent wallet | Earn/spend/invest from isolated funds | Financial loss/compliance | Wallet/account + reserve + ledger + risk limits | not_granted |
 | Delegated communication | Speak as/for user on approved channels | Reputation/privacy/social harm | Connector + identity/send policy | not_granted |
-
+| Tool capability: reference audio not found: ref_audio.wav | Needed because a requested tool/capability was not registered | unknown until connector/tool is implemented and scoped | Implement/register the tool behind ToolGateway with permissions and tests. Reason: reference audio not found: ref_audio.wav | missing |
 ## Blocked powers
 
 | Power | Reason |
