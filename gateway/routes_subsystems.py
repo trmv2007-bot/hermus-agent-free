@@ -127,6 +127,26 @@ async def memory2_recall(payload: dict):
     }
 
 
+@router.get("/memory2/graph")
+async def memory2_graph(
+    kind: str | None = None,
+    project: str | None = None,
+    limit: int = 400,
+):
+    """Nodes + inferred edges for the memory constellation.
+
+    The store has no link table, so the edges are derived from shared project,
+    shared kind and shared content words. The response says so, and the UI is
+    expected to show it — a graph that looks stored but is actually inferred is
+    exactly the false-success shape §4 forbids.
+    """
+    from core.mem_graph import build_graph
+    from core.memory import memory
+
+    rows = memory.all(kind=kind, project=project, limit=int(limit))
+    return build_graph(rows)
+
+
 @router.get("/permissions/log")
 async def permissions_log(limit: int = 20):
     from core.permissions import permission_manager
