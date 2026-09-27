@@ -144,6 +144,20 @@ describe("typed self-modification", () => {
     expect(outcome.rejected).toBe(0);
     expect(useWorkspace.getState().surfaces.ghost).toBeUndefined();
   });
+
+  it("opens diagnostics as a real surface, not a link out of the room", () => {
+    // PRODUCT.md §3 lists diagnostics as a surface backed by control.html. The
+    // old topbar entry was an <a href="/control">, which made the operator leave
+    // the workspace to inspect anything — the inversion §2 calls the biggest
+    // structural mistake here. The agent must be able to open it too, so it has
+    // to survive validateOp as a known kind.
+    const outcome = useWorkspace.getState().applyOps([{ op: "open", surface: { kind: "diagnostics" } }]);
+
+    expect(outcome.rejected).toBe(0);
+    const opened = Object.values(useWorkspace.getState().surfaces).find((s) => s.kind === "diagnostics");
+    expect(opened).toBeDefined();
+    expect(opened?.title).toBe("Diagnostics");
+  });
 });
 
 describe("maximise, hide and stow", () => {

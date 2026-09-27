@@ -27,13 +27,14 @@ def _client():
 # ---------------------------------------------------------------------------
 # Routing: root + the ONE production control room
 # ---------------------------------------------------------------------------
-def test_root_redirects_to_control():
+def test_root_serves_the_workspace():
+    """Root is the workspace, not a redirect to the drawer (PRODUCT.md §2)."""
     c = _client()
     r = c.get("/", follow_redirects=False)
-    assert r.status_code in (307, 302)
-    assert r.headers.get("location") == "/control"
+    assert r.status_code == 200, "root must not redirect away from the workspace"
+    assert "text/html" in r.headers["content-type"]
     # HEAD is allowed on root (health checks / proxies).
-    assert c.head("/", follow_redirects=False).status_code in (307, 302)
+    assert c.head("/", follow_redirects=False).status_code == 200
 
 
 def test_control_room_serves_from_real_backend_seeds():

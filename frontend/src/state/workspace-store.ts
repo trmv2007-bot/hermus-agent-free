@@ -127,6 +127,7 @@ const KINDS: SurfaceKind[] = [
   "telemetry",
   "computer",
   "media",
+  "diagnostics",
 ];
 
 /** An operation from outside the app is untrusted input: it may name a surface

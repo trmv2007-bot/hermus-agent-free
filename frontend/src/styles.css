@@ -71,18 +71,40 @@ code,
   padding: 4px 6px;
 }
 
-.back {
+/* The control room is a surface now, not a link out — the topbar entry opens it
+   in this room. Same shape the old link had, so the chrome does not shift. */
+.diagnostics-toggle {
   font-size: 12px;
   color: var(--muted);
-  text-decoration: none;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 3px 9px;
+  background: transparent;
+  cursor: pointer;
 }
 
-.back:hover {
+.diagnostics-toggle:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+
+/* The embedded control room fills its surface and scrolls internally, so the
+   surface's own padding would only inset a document that already has margins. */
+.panel.diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
+}
+
+.diagnostics-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #05070b;
 }
 
 .link-state {
@@ -578,7 +600,7 @@ button.ghost {
 
   .pod,
   .hud-exit,
-  .back,
+  .diagnostics-toggle,
   .link-state {
     transition: opacity 200ms ease, transform 220ms ease, box-shadow 200ms ease, border-color 160ms ease;
   }
@@ -892,13 +914,13 @@ button.ghost {
   border-bottom-color: transparent;
 }
 
-[data-hud="recessed"] .back,
+[data-hud="recessed"] .diagnostics-toggle,
 [data-hud="recessed"] .link-state {
   opacity: 0;
   pointer-events: none;
 }
 
-[data-hud="recessed"] .topbar:hover .back,
+[data-hud="recessed"] .topbar:hover .diagnostics-toggle,
 [data-hud="recessed"] .topbar:hover .link-state {
   opacity: 1;
   pointer-events: auto;

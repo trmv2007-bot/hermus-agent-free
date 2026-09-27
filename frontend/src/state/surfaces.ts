@@ -19,7 +19,8 @@ export type SurfaceKind =
   | "logs"
   | "telemetry"
   | "computer"
-  | "media";
+  | "media"
+  | "diagnostics";
 
 export type SurfaceLifecycle = "active" | "background" | "minimized" | "closed";
 
@@ -91,6 +92,7 @@ export const KIND_TITLES: Record<SurfaceKind, string> = {
   telemetry: "Telemetry",
   computer: "Computer view",
   media: "Media",
+  diagnostics: "Diagnostics",
 };
 
 /** New surfaces open in a cascade rather than exactly on top of each other. */

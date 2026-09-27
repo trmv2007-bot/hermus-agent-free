@@ -40,7 +40,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from core.config import config
 from core.log import get_logger, setup_logging
@@ -637,12 +637,33 @@ app.include_router(_fleet_ws_router)
 
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    """Open the single canonical control room (spec §21 / Final One-Shot §7).
+    """The room is the product. ``/`` serves the workspace, not the cockpit.
 
-    Explicitly allows HEAD so health checks / proxies that probe ``/`` with HEAD
-    no longer get a 405. Root opens /control; no legacy dashboard surface.
+    This used to redirect to ``/control``, which made the control room the
+    landing view and the workspace something you had to go and find — the
+    inversion PRODUCT.md §2 calls the single biggest structural mistake in this
+    repository. §2 is explicit: "``/`` is the workspace. ``control.html`` is not
+    the product UI — it is the diagnostics drawer, opened deliberately."
+
+    So the root document is the workspace bundle, and ``/control`` stays exactly
+    where it was for anyone who wants the drawer. HEAD is allowed explicitly so
+    health checks and proxies that probe ``/`` do not get a 405.
     """
-    return RedirectResponse(url="/control", status_code=307)
+    index = _WORKSPACE_DIR / "index.html"
+    if not index.is_file():
+        # No built frontend in this checkout. Falling back to the drawer keeps
+        # the gateway usable and says why, rather than a bare 404.
+        return Response(
+            "the workspace is not built in this checkout — serving the control room instead\n\n"
+            "    cd frontend && npm install && npm run build\n",
+            status_code=501,
+            media_type="text/plain; charset=utf-8",
+        )
+    return Response(
+        index.read_text(encoding="utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/favicon.ico")

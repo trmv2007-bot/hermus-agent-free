@@ -133,9 +133,10 @@ def test_steer_delivered_to_active_run(client):
 
 
 def test_head_root_and_favicon(client):
-    # Don't follow the redirect: HEAD / itself must be allowed (was 405 before).
+    # HEAD / must be served directly (was 405, then a redirect). Root is the
+    # workspace document now — PRODUCT.md §2 — so it answers 200 on its own.
     r = client.head("/", follow_redirects=False)
-    assert r.status_code in (307, 302)
+    assert r.status_code == 200
     fav = client.get("/favicon.ico")
     assert fav.status_code == 200
     assert "svg" in fav.headers.get("content-type", "")

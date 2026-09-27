@@ -343,15 +343,23 @@ def test_one_control_room_ui_only_control_html():
     assert [p.name for p in html] == ["control.html"], "exactly one production UI surface is allowed (gateway/control.html)"
 
 
-def test_one_control_room_ui_root_redirects_to_control():
+def test_root_serves_the_workspace_and_control_is_the_drawer():
+    """``/`` is the room; ``/control`` is the diagnostics drawer.
+
+    PRODUCT.md §2: "``/`` is the workspace. ``control.html`` is not the product
+    UI — it is the diagnostics drawer, opened deliberately." The old gate
+    demanded a redirect to /control, which is the inversion the contract calls
+    the biggest structural mistake in the repository.
+    """
     from fastapi.testclient import TestClient
 
     from gateway.gateway import app
 
     with TestClient(app) as c:
         r = c.get("/", follow_redirects=False)
-        assert r.status_code in (307, 302), "root must redirect to the single control room"
-        assert r.headers.get("location") == "/control"
+        assert r.status_code == 200, "root serves the workspace, it does not bounce"
+        assert "text/html" in r.headers["content-type"]
+        # The drawer is still reachable, deliberately, on its own route.
         assert c.get("/control").status_code == 200
         # Legacy UI surfaces are dead.
         for path in (

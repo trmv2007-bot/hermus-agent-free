@@ -403,3 +403,52 @@ export function PendingPanel({ label }: { label: string }) {
     </div>
   );
 }
+
+/**
+ * The control room, in the room.
+ *
+ * PRODUCT.md §3 lists diagnostics as a surface that backs onto `control.html`
+ * and is "embedded, not a link out" — the old topbar link sent the operator to
+ * a second application, which is the inversion §2 calls the biggest structural
+ * mistake in the repository. Same-origin, so the frame inherits the gateway's
+ * cookies and its asset routes work unchanged.
+ *
+ * The honesty rule (§4) applies to framing too: a frame that cannot load must
+ * say so in the room, not render as a blank rectangle that looks like a
+ * working panel. The load probe is what distinguishes the two.
+ */
+export function DiagnosticsPanel() {
+  const [state, setState] = useState<"loading" | "live" | "unreachable">("loading");
+
+  if (state === "unreachable") {
+    return (
+      <div className="panel">
+        <p className="probe" data-state="error">
+          <b>the control room did not load</b>
+          <span>GET /control did not return a document.</span>
+          <em>The gateway may not be running. This surface stays open so you can retry without leaving the room.</em>
+        </p>
+        <footer className="panel-foot">
+          <button type="button" className="ghost" onClick={() => setState("loading")}>
+            try again
+          </button>
+        </footer>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel diagnostics">
+      <iframe
+        className="diagnostics-frame"
+        src="/control"
+        title="Hermus control room"
+        onLoad={() => setState("live")}
+        onError={() => setState("unreachable")}
+      />
+      <p className="muted tiny">
+        {state === "loading" ? "loading the control room…" : "control room, embedded — the same document /control serves."}
+      </p>
+    </div>
+  );
+}

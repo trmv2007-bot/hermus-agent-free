@@ -41,6 +41,7 @@ function WorkspaceShell() {
   const rejected = useWorkspace((state) => state.rejected);
   const resetLayout = useWorkspace((state) => state.resetLayout);
   const showSurface = useWorkspace((state) => state.showSurface);
+  const openSurface = useWorkspace((state) => state.openSurface);
   const setViewport = useWorkspace((state) => state.setViewport);
   const stage = useRef<HTMLElement>(null);
   const dock = useRef<HTMLElement>(null);
@@ -106,9 +107,14 @@ function WorkspaceShell() {
         >
           HERMUS
         </button>
-        <a className="back" href="/control" title="Back to the product UI">
-          ← control room
-        </a>
+        <button
+          type="button"
+          className="ghost diagnostics-toggle"
+          onClick={() => openSurface({ kind: "diagnostics", source: { kind: "user" } })}
+          title="open the control room in this room — you do not leave the workspace to inspect it"
+        >
+          diagnostics
+        </button>
         <CommandBar />
         <div className="link-state" title={linkLabel.join(" · ")}>
           {Object.entries(link).map(([name, state]) => (
