@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Viewport } from "./surfaces";
-import { EDGE, fanCenterDeg, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "./launcher";
+import { EDGE, fanCenterDeg, fanRadius, fanSlots, HERO_SPAN_DEG, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "./launcher";
 
 const ROOM: Viewport = { w: 1280, h: 708 };
 const KINDS = LAUNCHER_KINDS;
@@ -64,6 +64,30 @@ describe("fanSlots", () => {
       expect(slot.x + SLOT_SIZE).toBeLessThanOrEqual(tiny.w);
       expect(slot.y + SLOT_SIZE).toBeLessThanOrEqual(tiny.h);
     }
+  });
+
+  it("rings a hero core evenly instead of pointing at one side", () => {
+    // A centred, room-sized core has no "away" to face, so the fan goes all the
+    // way round. Eleven entries on the same 100-degree arc would overlap badly.
+    const slots = fanSlots({ x: 490, y: 200 }, ROOM, KINDS, POD_SIZE, SLOT_SIZE, HERO_SPAN_DEG);
+    expect(slots).toHaveLength(KINDS.length);
+
+    // No two entries may sit closer than one slot width, or they touch.
+    const centres = slots.map((slot) => [slot.x + SLOT_SIZE / 2, slot.y + SLOT_SIZE / 2]);
+    for (let i = 0; i < centres.length; i += 1) {
+      for (let j = i + 1; j < centres.length; j += 1) {
+        const [x0, y0] = centres[i];
+        const [x1, y1] = centres[j];
+        expect(Math.hypot(x1 - x0, y1 - y0)).toBeGreaterThanOrEqual(SLOT_SIZE);
+      }
+    }
+  });
+
+  it("spaces a full ring by circumference, not by arc length", () => {
+    // Reusing the 100-degree arc's radius for a 360-degree fan would put all
+    // eleven entries on top of each other.
+    const ring = fanRadius(KINDS.length, SLOT_SIZE, HERO_SPAN_DEG);
+    expect(ring * 2 * Math.PI).toBeGreaterThanOrEqual(KINDS.length * SLOT_SIZE);
   });
 });
 

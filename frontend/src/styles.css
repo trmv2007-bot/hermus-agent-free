@@ -307,100 +307,289 @@ code,
   font-size: 12px;
 }
 
-/* Terminal: output scrolls, input is pinned to the bottom like a real shell so
-   a long run does not push the prompt off the surface. */
-.panel.terminal {
+/* ── Terminal ───────────────────────────────────────────────────────────────
+   Monospace end to end, one bare prompt, no button. A shell does not have a
+   "run" button; it has a line you type into and a cursor. */
+
+.panel.term {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   height: 100%;
   min-height: 0;
-  font-family: var(--mono, ui-monospace, monospace);
+  padding: 0;
+  background: rgb(4 7 12 / 88%);
+  font-family: var(--mono);
 }
 
-.term-scroll {
+/* Title bar: traffic lights, name, then the one fact worth keeping on screen. */
+.term-chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--edge);
+  background: rgb(255 255 255 / 2%);
+  flex: 0 0 auto;
+}
+
+.term-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgb(79 209 197 / 60%);
+}
+
+.term-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.term-spacer {
+  flex: 1;
+}
+
+.term-backend {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.term-backend[data-real="true"] {
+  color: var(--accent);
+  border-color: rgb(79 209 197 / 45%);
+}
+
+.term-clear {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.term-clear:hover {
+  color: var(--text);
+}
+
+/* The scrollback. Grows to fill, scrolls like a terminal, never wraps the
+   panel into a second scrollbar. */
+.term-buffer {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.term-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.term-hint code {
+  color: var(--accent);
 }
 
 .term-entry {
+  margin-bottom: 2px;
+}
+
+.term-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-sigil {
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.term-typed {
+  color: var(--text);
+}
+
+/* Facts about the run, not a paragraph about it. Dim, same line, right of the
+   command — present enough to trust, quiet enough to read past. */
+.term-meta {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 10.5px;
+  color: var(--muted);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.term-out,
+.term-err {
+  margin: 0 0 0 20px;
+  padding: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-out {
+  color: rgb(214 226 240 / 92%);
+}
+
+.term-err {
+  color: #fca5a5;
+}
+
+.term-running .term-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  background: var(--accent);
+  animation: term-blink 1s steps(2, start) infinite;
+}
+
+@keyframes term-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* The prompt line. No button, no border — it is the last line of the buffer. */
+.term-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--edge);
+  background: rgb(255 255 255 / 2%);
+}
+
+.term-form input {
+  flex: 1;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 0;
+  outline: none;
+}
+
+.term-form input::placeholder {
+  color: transparent;
+}
+
+/* ── Model panel ─────────────────────────────────────────────────────────── */
+
+.model-panel {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.term-cmd {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text);
-  word-break: break-word;
-}
-
-.term-prompt {
-  color: var(--accent);
-  margin-right: 6px;
-}
-
-.term-out,
-.term-err {
-  margin: 0;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: rgb(4 6 11 / 80%);
-  border: 1px solid var(--line);
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 320px;
-  overflow: auto;
-}
-
-.term-err {
-  color: #ff8a7a;
-  border-color: rgba(255 138 122, 0.35);
-}
-
-.term-form {
+.model-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
 }
 
-.term-form input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-}
-
-.term-form button {
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+.model-badge {
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--edge);
   color: var(--muted);
-  padding: 3px 10px;
-  font-size: 12px;
-  cursor: pointer;
 }
 
-.term-form button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.model-badge.ok {
+  color: var(--accent);
+  border-color: rgb(79 209 197 / 45%);
 }
 
-.term-form button:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--accent);
+.model-badge.warn {
+  color: var(--accent-warm);
+  border-color: color-mix(in srgb, var(--accent-warm) 40%, transparent);
+}
+
+.model-roles {
+  gap: 2px;
+}
+
+.model-role {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  grid-template-areas:
+    "name model"
+    "name meta"
+    "name why";
+  align-items: baseline;
+  column-gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 4%);
+}
+
+.model-role-name {
+  grid-area: name;
+  font: 10px/1.4 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.model-role b {
+  grid-area: model;
+  font-size: 12.5px;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.model-role .muted {
+  grid-area: meta;
+}
+
+/* The planner's reasoning, in its own line and quieter than the model name —
+   it is the answer to "why this one", not the headline. */
+.model-why {
+  grid-area: why;
+  font-style: normal;
+  opacity: 0.72;
+}
+
+.model-probe {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 3px 0;
+}
+
+.model-err {
+  flex-basis: 100%;
+  font-style: normal;
+  opacity: 0.7;
+}
+
+.model-foot {
+  margin: 6px 0 0;
+  line-height: 1.5;
 }
 
 .link-state {
@@ -1258,6 +1447,33 @@ button.ghost {
   animation: fan-fly 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
   /* The per-entry delay is set inline; it staggers the reveal along the arc so
      the fan unfurls instead of arriving as a block. */
+}
+
+/* The way back in. Same launch vector, played in reverse and ending at the core
+   rather than starting there, so closing the fan reads as the entries being
+   drawn back instead of deleted. Without this the fan blinked out on close while
+   it took 340ms to arrive, which is why opening felt heavier than closing. */
+.fan-slot[data-leave="true"] {
+  animation: fan-retract 300ms cubic-bezier(0.4, 0, 0.6, 1) both;
+  pointer-events: none;
+}
+
+@keyframes fan-retract {
+  from {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--fan-x, 0px), var(--fan-y, 0px)) scale(0.35);
+  }
+}
+
+/* A ringed core gets a full circle as its guide, so the dashed hairline has to
+   become a solid one — a dashed 360-degree ring reads as a dotted texture. */
+.fan-arc[data-hero="true"] {
+  border-style: solid;
+  border-color: rgb(109 141 255 / 12%);
 }
 
 .fan-slot:hover .fan-slot-label,

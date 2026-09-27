@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
 import { KIND_TITLES } from "../state/surfaces";
-import { EDGE, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "../state/launcher";
+import { ARC_SPAN_DEG, EDGE, fanRadius, fanSlots, HERO_SPAN_DEG, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "../state/launcher";
 
 export function Launcher() {
   // The store's viewport is the room itself: the stage with the dock rail taken
@@ -24,19 +24,28 @@ export function Launcher() {
   const setFanOpen = useWorkspace((state) => state.setFanOpen);
   const openSurface = useWorkspace((state) => state.openSurface);
   const [hovered, setHovered] = useState<string | null>(null);
-  // True only for the frame the fan opens. Left true, the fly-out would replay on
-  // every reposition while the core glides to a new home; left false, it never runs.
+  /**
+   * The fan is mounted for a beat AFTER it closes, so the entries can fly back
+   * into the core instead of blinking out of existence.
+   *
+   * `entering` covers the stagger-in; `leaving` covers the stagger-out, reversed
+   * so the last entry to arrive is the first to leave. Unmounting immediately on
+   * close is what made the fan feel like it was switched off rather than closed.
+   */
   const [entering, setEntering] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
-    if (!fanOpen) {
-      setEntering(false);
-      return;
+    if (fanOpen) {
+      setLeaving(false);
+      setEntering(true);
+      const clear = window.setTimeout(() => setEntering(false), 420);
+      return () => window.clearTimeout(clear);
     }
-    setEntering(true);
-    const clear = window.setTimeout(() => setEntering(false), 420);
+    if (!leaving) return;
+    const clear = window.setTimeout(() => setLeaving(false), 380);
     return () => window.clearTimeout(clear);
-  }, [fanOpen]);
+  }, [fanOpen, leaving]);
 
   // Escape closes it from the keyboard, since the scrim is a pointer target.
   useEffect(() => {
@@ -48,7 +57,15 @@ export function Launcher() {
     return () => window.removeEventListener("keydown", onKey);
   }, [fanOpen, setFanOpen]);
 
-  if (!fanOpen) return null;
+  // A close has to start the exit, so the transition into `leaving` is triggered
+  // by the state change rather than only read from it.
+  const [wasOpen, setWasOpen] = useState(fanOpen);
+  useEffect(() => {
+    if (wasOpen && !fanOpen) setLeaving(true);
+    setWasOpen(fanOpen);
+  }, [fanOpen, wasOpen]);
+
+  if (!fanOpen && !leaving) return null;
 
   // Anchored to the core's CENTRE, expressed as a box origin so the existing arc
   // maths (which expects a top-left pod position) keeps working unchanged.
@@ -57,8 +74,13 @@ export function Launcher() {
     : { x: EDGE, y: Math.max(EDGE, room.h - POD_SIZE - EDGE) };
 
   // Seven slots of trigonometry, cheaper than the memo that would track it.
-  const slots = fanSlots(centre, room, LAUNCHER_KINDS);
-  const radius = fanRadius(LAUNCHER_KINDS.length, SLOT_SIZE);
+  // A centred, room-sized core has nothing to point away from, so the fan rings
+  // it and spreads evenly on all sides. A small core beside a panel still opens
+  // to one side, because there it genuinely is shoved into a corner.
+  const hero = (placement?.size ?? 0) > 200;
+  const span = hero ? HERO_SPAN_DEG : ARC_SPAN_DEG;
+  const slots = fanSlots(centre, room, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE, span);
+  const radius = fanRadius(LAUNCHER_KINDS.length, SLOT_SIZE, span);
 
   return (
     <div className="fan" aria-label="surfaces you can open">
@@ -76,6 +98,7 @@ export function Launcher() {
           width: radius * 2,
           height: radius * 2,
         }}
+        data-hero={hero ? "true" : "false"}
         aria-hidden="true"
       />
       {slots.map((slot, index) => (
@@ -89,6 +112,7 @@ export function Launcher() {
           // Marks the first paint after the fan opens, so the fly-out runs
           // once on entry and not on every later reposition.
           data-enter={entering ? "true" : "false"}
+          data-leave={leaving && !fanOpen ? "true" : "false"}
           style={
             {
               left: slot.x,
@@ -99,7 +123,13 @@ export function Launcher() {
               // centre, so every one flies out along its own route.
               "--fan-x": `${centre.x + POD_SIZE / 2 - (slot.x + SLOT_SIZE / 2)}px`,
               "--fan-y": `${centre.y + POD_SIZE / 2 - (slot.y + SLOT_SIZE / 2)}px`,
-              animationDelay: entering ? `${index * 26}ms` : undefined,
+              // Reversed on the way out, so the arc collapses the same way it
+              // opened instead of vanishing in submission order.
+              animationDelay: entering
+                ? `${index * 26}ms`
+                : leaving && !fanOpen
+                  ? `${(LAUNCHER_KINDS.length - 1 - index) * 22}ms`
+                  : undefined,
               transitionDelay: `${index * 22}ms`,
             } as React.CSSProperties
           }

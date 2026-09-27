@@ -327,6 +327,36 @@ export const api = {
   /** A live probe of every configured provider — deliberately not polled. */
   keys: () => get<{ results: KeyProbe[] }>("/keys/health").then((r) => r.results ?? []),
   catalogue: () => get<{ catalog: ModelCatalogEntry[] }>("/engine/models").then((r) => r.catalog ?? []),
+  /**
+   * `GET /engine/status` — what is actually loaded right now.
+   *
+   * This is the endpoint that answers "which model is running", and it carries
+   * the planner's reasoning per role. `/engine/models` is a download catalogue
+   * of things that could be installed, which is a different question.
+   */
+  engineStatus: () =>
+    get<{
+      status: string;
+      action?: string;
+      model_needed?: boolean;
+      recommended_model?: string | null;
+      plan?: {
+        mode?: string;
+        roles?: Record<
+          string,
+          {
+            role: string;
+            engine: string;
+            device?: string;
+            provider?: string;
+            base_url?: string;
+            model?: string;
+            supports_tools?: boolean;
+            reason?: string;
+          }
+        >;
+      };
+    }>("/engine/status"),
   command: (text: string) => post<{ success: boolean; response?: string }>("/api/v1/commands", { command: text }),
   queue: () => get<{ queue: QueueView }>("/queue/status").then((r) => r.queue ?? {}),
   jobs: () => get<{ jobs: JobView[]; queue: QueueView }>("/jobs").then((r) => r.jobs ?? []),

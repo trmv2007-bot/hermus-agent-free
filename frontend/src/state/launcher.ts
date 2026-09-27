@@ -10,8 +10,15 @@ import type { SurfaceKind, Viewport } from "./surfaces";
 export const POD_SIZE = 46;
 export const SLOT_SIZE = 38;
 export const EDGE = 12;
-/** The fan sweeps this much of a circle, centred on the diagonal of the open quadrant. */
+/**
+ * The fan sweeps this much of a circle when it opens to one side.
+ *
+ * When the core is hero-sized and centred there is nothing to point away from,
+ * so the fan opens all the way round instead — see `heroSpreadDeg`.
+ */
 export const ARC_SPAN_DEG = 100;
+/** A centred, room-sized core has no "away" to face, so the fan rings it. */
+export const HERO_SPAN_DEG = 360;
 const SLOT_GAP = 8;
 const MIN_RADIUS = 92;
 
@@ -40,9 +47,16 @@ export const KIND_GLYPH: Record<SurfaceKind, string> = {
 /**
  * Radius wide enough that `count` slots of `size` never touch each other along
  * the arc, with a floor so a single entry does not sit on top of the pod.
+ *
+ * A full ring is spaced by circumference instead of by arc length: eleven slots
+ * around 360 degrees at the same radius as a 100-degree fan would overlap badly.
  */
 export function fanRadius(count: number, size = SLOT_SIZE, spanDeg = ARC_SPAN_DEG): number {
   if (count <= 1) return MIN_RADIUS;
+  if (spanDeg >= 360) {
+    const needed = (count * (size + SLOT_GAP)) / (2 * Math.PI);
+    return Math.max(MIN_RADIUS, Math.round(needed));
+  }
   const spanRad = (Math.min(spanDeg, 180) * Math.PI) / 180;
   const needed = ((count - 1) * (size + SLOT_GAP)) / spanRad;
   return Math.max(MIN_RADIUS, Math.round(needed));
@@ -96,17 +110,23 @@ export function fanSlots(
   kinds: SurfaceKind[] = LAUNCHER_KINDS,
   podSize = POD_SIZE,
   slotSize = SLOT_SIZE,
+  spanDeg: number = ARC_SPAN_DEG,
 ): FanSlot[] {
   const cx = anchor.x + podSize / 2;
   const cy = anchor.y + podSize / 2;
-  const diagonal = fanCenterDeg(anchor, podSize, viewport);
-  const radius = fanRadius(kinds.length, slotSize);
-  const spread = kinds.length > 1 ? ARC_SPAN_DEG : 0;
+  const ring = spanDeg >= 360;
+  // A ring has no diagonal to point along, so it is anchored to the top (270deg
+  // in screen terms, since y grows downward) and distributed from there.
+  const diagonal = ring ? -90 : fanCenterDeg(anchor, podSize, viewport);
+  const radius = fanRadius(kinds.length, slotSize, spanDeg);
+  const spread = kinds.length > 1 ? spanDeg : 0;
   const max = Math.max(EDGE, viewport.w - slotSize - EDGE);
   const maxY = Math.max(EDGE, viewport.h - slotSize - EDGE);
 
   return kinds.map((kind, index) => {
-    const t = kinds.length > 1 ? index / (kinds.length - 1) : 0.5;
+    // On a ring the first entry sits at the top and the rest divide the
+    // remaining arc evenly, so no slot lands under another.
+    const t = kinds.length > 1 ? (ring ? (index + 0.5) / kinds.length : index / (kinds.length - 1)) : 0.5;
     const degrees = diagonal - spread / 2 + spread * t;
     const radians = degrees * (Math.PI / 180);
     const x = Math.min(Math.max(cx + radius * Math.cos(radians) - slotSize / 2, EDGE), max);

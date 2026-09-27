@@ -3,7 +3,7 @@
 // rebuild is meant to remove.
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, GatewayError, type MissionView, type SandboxRun } from "../api/client";
 import { MemoryConstellation } from "./Constellation";
 import { digest } from "../realtime/events";
@@ -237,44 +237,87 @@ export function WorkerPanel({ surfaceId }: { surfaceId: string }) {
   );
 }
 
+/**
+ * What is loaded, and what you could use instead.
+ *
+ * The panel used to open with the download catalogue from /engine/models — every
+ * model Hermus could fetch, each with a repo, a byte count, an install path, a
+ * paragraph of notes, and `installed: false`. None of that answers the question
+ * someone opens this panel to ask, which is "what is running right now".
+ *
+ * So the two questions are split and each gets its own half:
+ *
+ *   LOADED  — /engine/status. The planner's current assignment per role, with
+ *             the reason it chose that model and device. This is the truth.
+ *   USABLE  — /keys/health, one line per provider that answers a real call.
+ *             Probing is deliberately not polled: it costs a round trip per
+ *             provider, so it runs when the panel opens and then stops.
+ *
+ * The catalogue is gone rather than folded in, because a list of things that are
+ * not installed sitting under a heading about what is loaded is how a panel
+ * starts lying by adjacency.
+ */
 export function ModelPanel() {
-  const models = useQuery({ queryKey: ["model-catalogue"], queryFn: () => api.catalogue() });
-  const keys = useQuery({ queryKey: ["key-health"], queryFn: () => api.keys() });
+  const status = useQuery({ queryKey: ["engine-status"], queryFn: () => api.engineStatus(), refetchInterval: 10000 });
+  const keys = useQuery({ queryKey: ["key-health"], queryFn: () => api.keys(), refetchInterval: false });
+
+  const roles = Object.values(status.data?.plan?.roles ?? {});
+  const ready = status.data?.status === "ready";
 
   return (
-    <div className="panel two-col">
-      <section>
-        <h4>Local model catalogue</h4>
-        {models.isError ? <Probe error={models.error} path="/engine/models" /> : null}
-        {!models.isError && !models.data ? <Loading what="the model catalogue" /> : null}
-        <ul className="rows">
-          {(models.data ?? []).slice(0, 40).map((model) => (
-            <li key={model.id}>
-              <b>{model.name || model.id}</b>
-              <span className="muted">{(model.roles ?? []).join(", ") || "no roles declared"}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section>
-        <h4>Provider health</h4>
-        {keys.isError ? <Probe error={keys.error} path="/keys/health" /> : null}
-        {!keys.isError && !keys.data ? <Loading what="provider health (this probes each provider now)" /> : null}
-        <ul className="rows">
-          {(keys.data ?? []).map((probe) => (
-            <li key={`${probe.provider}:${probe.base_url ?? ""}`}>
-              <span className={probe.healthy ? "ok" : "down"}>{probe.healthy ? "reachable" : "unreachable"}</span>
-              <b>{probe.provider}</b>
-              <span className="muted">{probe.model_tested ?? ""}</span>
-              {probe.error ? <em className="muted">{String(probe.error).slice(0, 120)}</em> : null}
-            </li>
-          ))}
-        </ul>
-        <p className="muted tiny">
-          this panel triggers a real probe of every configured provider when it opens, and shows what came back — including
-          the refusals. Key material never reaches this app.
+    <div className="panel model-panel">
+      <header className="model-head">
+        <span className={`model-badge ${ready ? "ok" : "warn"}`}>{status.data?.status ?? (status.isError ? "unreachable" : "…")}</span>
+        {status.data?.plan?.mode ? <span className="muted tiny">planner mode: {status.data.plan.mode}</span> : null}
+        {status.data?.recommended_model ? (
+          <span className="muted tiny">recommends {status.data.recommended_model}</span>
+        ) : null}
+      </header>
+
+      <h4>Loaded — what answers each job right now</h4>
+      {status.isError ? <Probe error={status.error} path="/engine/status" /> : null}
+      {!status.isError && !status.data ? <Loading what="the engine plan" /> : null}
+      {status.data && !roles.length ? (
+        <p className="muted tiny">the planner has not assigned any roles</p>
+      ) : null}
+
+      <ul className="rows model-roles">
+        {roles.map((role) => (
+          <li key={role.role} className="model-role">
+            <span className="model-role-name">{role.role}</span>
+            <b className="mono">{role.model ?? "—"}</b>
+            <span className="muted tiny">
+              {role.engine}
+              {role.device ? ` · ${role.device}` : ""}
+              {role.supports_tools === false ? " · no tools" : ""}
+            </span>
+            {role.reason ? <em className="muted tiny model-why">{role.reason}</em> : null}
+          </li>
+        ))}
+      </ul>
+
+      <h4>Usable — providers that answered a real call</h4>
+      {keys.isError ? <Probe error={keys.error} path="/keys/health" /> : null}
+      {!keys.isError && !keys.data ? <Loading what="provider health (this probes each provider now)" /> : null}
+      <ul className="rows">
+        {(keys.data ?? []).map((probe) => (
+          <li key={`${probe.provider}:${probe.base_url ?? ""}`} className="model-probe">
+            <span className={probe.healthy ? "ok" : "down"}>{probe.healthy ? "up" : "down"}</span>
+            <b>{probe.provider}</b>
+            {probe.model_tested ? <span className="muted tiny mono">{probe.model_tested}</span> : null}
+            {!probe.healthy && probe.error ? (
+              <em className="muted tiny model-err">{String(probe.error).replace(/\s+/g, " ").slice(0, 90)}</em>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {status.data && !ready ? (
+        <p className="muted tiny model-foot">
+          status is <b>{status.data.status}</b>
+          {status.data.action ? ` — the gateway wants to ${status.data.action}` : ""}. The roles above are the plan, not a
+          confirmation that each model is answering.
         </p>
-      </section>
+      ) : null}
     </div>
   );
 }
@@ -598,12 +641,34 @@ export function MemoryPanel() {
  *    surfaced verbatim, including the backend's own note that the local
  *    backend is "defence in depth, not a VM". §4.
  */
+/**
+ * A terminal, not a chat box.
+ *
+ * The old version had a labelled input, a "run" button and a bulleted metadata
+ * line under every command, which is the silhouette of a messenger. A terminal
+ * is monospace all the way down, has one bare prompt, recalls history on the
+ * arrow keys, and keeps its diagnostics to one dim line in the header. The
+ * per-command facts (backend, duration, return code) are still shown — they are
+ * how you know a command actually ran rather than appearing to — but they are a
+ * dim suffix on the same line, not a paragraph.
+ */
 export function TerminalPanel() {
   const [command, setCommand] = useState("");
   const [history, setHistory] = useState<{ command: string; result: SandboxRun }[]>([]);
   const [running, setRunning] = useState(false);
   const [refusal, setRefusal] = useState<{ command: string; detail: string } | null>(null);
+  // Which end of the recalled history the next arrow press walks from.
+  const recall = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const status = useQuery({ queryKey: ["sandbox-status"], queryFn: () => api.sandboxStatus(), refetchInterval: 8000 });
+
+  const backend = status.data?.backend;
+
+  // Keep the newest output in view, the way a real terminal does.
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [history.length, running]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -612,9 +677,10 @@ export function TerminalPanel() {
     setRunning(true);
     setRefusal(null);
     setCommand("");
+    recall.current = null;
     try {
       const result = await api.sandboxRun(line);
-      setHistory((prev) => [...prev, { command: line, result }].slice(-40));
+      setHistory((prev) => [...prev, { command: line, result }].slice(-200));
     } catch (error) {
       const detail = error instanceof GatewayError ? `${error.status} ${error.message}` : String(error);
       setRefusal({ command: line, detail });
@@ -623,87 +689,119 @@ export function TerminalPanel() {
     }
   }
 
-  const backend = status.data?.backend;
+  /** Up/Down walk the history, like any shell. Home and End edit the line. */
+  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (!history.length) return;
+      event.preventDefault();
+      const at = recall.current;
+      if (event.key === "ArrowUp") {
+        const next = at === null ? history.length - 1 : Math.max(0, at - 1);
+        recall.current = next;
+        setCommand(history[next].command);
+      } else {
+        if (at === null) return;
+        const next = at + 1;
+        if (next >= history.length) {
+          recall.current = null;
+          setCommand("");
+        } else {
+          recall.current = next;
+          setCommand(history[next].command);
+        }
+      }
+      return;
+    }
+    if (event.key === "l" && event.ctrlKey) {
+      event.preventDefault();
+      setHistory([]);
+      setRefusal(null);
+    }
+  }
 
   return (
-    <div className="panel terminal">
-      <div className="term-scroll">
-        {!history.length ? (
-          <p className="probe loading">no commands run from this surface yet</p>
-        ) : (
-          history.map((entry, index) => (
-            <div className="term-entry" key={`${entry.result.sandbox_id}-${index}`}>
-              <p className="term-cmd">
-                <span className="term-prompt" aria-hidden="true">
-                  ❯
-                </span>
-                {entry.command}
-                <span className="muted tiny">
-                  {" "}
-                  · {entry.result.backend} · {entry.result.duration_ms}ms · rc {entry.result.returncode}
-                  {entry.result.timeout ? " · TIMED OUT" : ""}
-                </span>
-              </p>
-              {entry.result.stdout ? <pre className="term-out">{entry.result.stdout}</pre> : null}
-              {entry.result.stderr ? <pre className="term-err">{entry.result.stderr}</pre> : null}
-              {entry.result.error ? <p className="term-err">{entry.result.error}</p> : null}
-            </div>
-          ))
-        )}
+    <div className="panel term">
+      <div className="term-chrome">
+        <span className="term-dot" aria-hidden="true" />
+        <span className="term-title">sandbox shell</span>
+        <span className="term-spacer" />
+        {status.data ? (
+          <span className="term-backend" data-real={backend !== "local"} title={status.data.note}>
+            {backend ?? "unknown"}
+            {status.data.active ? ` · ${status.data.active}` : ""}
+          </span>
+        ) : null}
+        {history.length ? (
+          <button type="button" className="term-clear" onClick={() => { setHistory([]); setRefusal(null); }} title="clear the buffer (Ctrl+L)">
+            clear
+          </button>
+        ) : null}
       </div>
 
-      {refusal ? (
-        <p className="probe" data-state="error">
-          <b>refused by policy</b>
-          <span className="mono">{refusal.command}</span>
-          <em>{refusal.detail}</em>
-        </p>
-      ) : null}
+      <div className="term-buffer" ref={scrollRef} role="log" aria-live="polite" aria-label="terminal output">
+        {!history.length && !refusal ? (
+          <p className="term-hint">
+            a real shell in <code>core/sandbox.py</code> — rlimits, separate session, no-new-privs.
+            <br />
+            try <code>whoami</code>, <code>pwd</code>, or <code>dir</code>. ↑ recalls history.
+          </p>
+        ) : null}
+
+        {history.map((entry, index) => (
+          <div className="term-entry" key={`${entry.result.sandbox_id}-${index}`}>
+            <p className="term-line">
+              <span className="term-sigil" aria-hidden="true">❯</span>
+              <span className="term-typed">{entry.command}</span>
+              <span className="term-meta">
+                {entry.result.returncode === 0 ? "ok" : `rc ${entry.result.returncode}`}
+                {" · "}
+                {entry.result.duration_ms}ms
+                {entry.result.timeout ? " · timed out" : ""}
+              </span>
+            </p>
+            {entry.result.stdout ? <pre className="term-out">{entry.result.stdout}</pre> : null}
+            {entry.result.stderr ? <pre className="term-err">{entry.result.stderr}</pre> : null}
+            {entry.result.error ? <p className="term-err">{entry.result.error}</p> : null}
+          </div>
+        ))}
+
+        {refusal ? (
+          <div className="term-entry">
+            <p className="term-line">
+              <span className="term-sigil" aria-hidden="true">❯</span>
+              <span className="term-typed">{refusal.command}</span>
+            </p>
+            <p className="term-err">refused by policy — {refusal.detail}</p>
+          </div>
+        ) : null}
+
+        {running ? (
+          <p className="term-line term-running">
+            <span className="term-sigil" aria-hidden="true">❯</span>
+            <span className="term-caret" />
+          </p>
+        ) : null}
+      </div>
 
       <form className="term-form" onSubmit={submit}>
-        <span className="term-prompt" aria-hidden="true">
-          ❯
-        </span>
+        <span className="term-sigil" aria-hidden="true">❯</span>
         <input
           value={command}
           onChange={(event) => setCommand(event.target.value)}
-          placeholder={running ? "running…" : "run a command in the sandbox"}
+          onKeyDown={onKeyDown}
+          placeholder=""
           aria-label="command"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           disabled={running}
         />
-        <button type="submit" disabled={running || !command.trim()}>
-          {running ? "…" : "run"}
-        </button>
       </form>
-
-      {status.data ? (
-        <p className="capability" data-state={backend === "local" ? "simulated" : "real"}>
-          <b>
-            {backend ?? "unknown"} backend
-            {status.data.active ? ` · ${status.data.active} active` : ""}
-          </b>{" "}
-          {status.data.note}
-        </p>
-      ) : status.isError ? (
-        <Probe error={status.error} path="/sandbox/status" />
-      ) : null}
     </div>
   );
 }
 
-/**
- * The control room, in the room.
- *
- * PRODUCT.md §3 lists diagnostics as a surface that backs onto `control.html`
- * and is "embedded, not a link out" — the old topbar link sent the operator to
- * a second application, which is the inversion §2 calls the biggest structural
- * mistake in the repository. Same-origin, so the frame inherits the gateway's
- * cookies and its asset routes work unchanged.
- *
- * The honesty rule (§4) applies to framing too: a frame that cannot load must
- * say so in the room, not render as a blank rectangle that looks like a
- * working panel. The load probe is what distinguishes the two.
- */
 export function DiagnosticsPanel() {
   const [state, setState] = useState<"loading" | "live" | "unreachable">("loading");
 
