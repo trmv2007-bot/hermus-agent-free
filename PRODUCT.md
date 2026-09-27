@@ -251,6 +251,9 @@ is a surface in it. There is no second UI left to delete.
 - Cross-device control.
 - Embedded browser surface.
 - Unified conversational surface.
+- Surfaces with no renderer yet: `files`, `ide`, `terminal`, `diff`, `media`.
+  They fall through to the "not built yet" panel, which is the honest outcome
+  under §4.
 - Module decomposition — `mission.py` 2426→1866, `gateway.py` 1457, `agent.py`
   1373 remain oversized.
 - Test suite integrity: **resolved, and it was never broken.** This section
@@ -271,6 +274,12 @@ is a surface in it. There is no second UI left to delete.
   (all in `tests/test_dashboard_connectivity_fixes.py`). They block in a
   request or in the gateway lifespan shutdown. Real defects, but not new ones —
   do not attribute them to whatever you just changed.
+- **`GET /screen/frame` lies.** It answers `200 {success: true,
+  frame_base64: null, timestamp: null, message: "screen capture not yet wired
+  in this build"}` — a success response for a feature that does not exist.
+  This is the §4 failure mode at the source. The real route is
+  `GET /computer/live-frame`, which returns an actual JPEG or a 404. Fixing the
+  stub to return 501 (or removing it) is an open, unowned item.
 
 ---
 
