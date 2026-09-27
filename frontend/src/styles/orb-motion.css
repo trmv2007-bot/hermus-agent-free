@@ -1,0 +1,120 @@
+/* Motion and state styling for the core.
+ *
+ * Split out of styles.css on purpose. Two reasons:
+ *
+ *   1. It is a different concern. styles.css is the room; this is the one
+ *      object in the room that moves, and the rules that make motion feel
+ *      right are worth reading on their own.
+ *   2. It is the only stylesheet that has to carry a reduced-motion contract,
+ *      and burying that under 1900 lines of room CSS is how it gets missed.
+ *
+ * The rule everything here obeys: the orb is a readout, so its state is
+ * carried by colour and text, and motion is only ever an accent on top. If a
+ * rule here is removed, the orb must still be legible. That is why every state
+ * has a text label and a distinct hue, and why nothing depends on an
+ * animation to distinguish one state from another.
+ */
+
+/* A speaking orb is lit by the audio actually coming out of the machine, and
+   an unmeasured one is not. The glow follows the state, and a blocked orb is
+   meant to recede almost entirely: a thing that is stuck should not be the
+   brightest object in the room. */
+.orb-voice-listening {
+  filter: drop-shadow(0 0 20px rgb(79 209 197 / 26%));
+}
+
+.orb-voice-thinking {
+  filter: drop-shadow(0 0 22px rgb(167 139 250 / 30%));
+}
+
+.orb-voice-speaking {
+  filter: drop-shadow(0 0 26px rgb(246 193 119 / 34%));
+}
+
+/* Compacting is a wait, and a wait that looks like work reads as a hang. It is
+   dimmer than idle on purpose so it never competes with a state that needs
+   the user. */
+.orb-compacting {
+  filter: drop-shadow(0 0 12px rgb(148 163 184 / 18%));
+}
+
+/* Asleep is not "idle but dimmer". It is off: no glow, and the label recedes
+   with it, because an orb that keeps advertising itself while asleep is a
+   notification that never stops. */
+.orb-asleep {
+  filter: none;
+  opacity: 0.34;
+}
+
+.orb-asleep:hover,
+.orb-asleep:focus-visible {
+  opacity: 0.72;
+}
+
+/* The state label doubles as the honest status line, so it has to be legible
+   against the room and to a screen reader via the aria-label on the button.
+   States that are waiting on something rather than reporting something get a
+   dimmer label, which is the difference between "here is what I am doing" and
+   "here is why nothing is happening". */
+.orb-label-idle,
+.orb-label-asleep {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.orb-label-working,
+.orb-label-speaking {
+  color: var(--text);
+}
+
+.orb-label-compacting {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+/* A live microphone is the one place where the orb reacts to something outside
+   the room, and a visible indicator that the mic is open is not decoration.
+   It is a courtesy: a glowing orb next to a hot microphone light is a thing
+   that should be able to say so in words. */
+.orb-mic-live::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4fd1c5;
+  box-shadow: 0 0 6px rgb(79 209 197 / 70%);
+  pointer-events: none;
+}
+
+/* The reduced-motion contract.
+ *
+ * The canvas animation is driven by rAF in JS, so CSS cannot switch it off on
+ * its own, and the JS honours prefers-reduced-motion separately. This block
+ * handles the part CSS does own: the transitions on the orb's own box, plus
+ * the label fade. Without it, someone who has asked the operating system for
+ * less motion still gets the orb gliding between anchors every 460ms, which
+ * is the most noticeable movement in the room. */
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .orb-manual {
+    transition-duration: 1ms;
+  }
+
+  .orb-dim,
+  .orb-dim:hover,
+  .orb-dim:focus-visible,
+  .orb-asleep,
+  .orb-asleep:hover,
+  .orb-asleep:focus-visible {
+    transition-duration: 1ms;
+  }
+
+  .orb-mic-live::after {
+    /* A steady dot rather than anything that blinks, since blinking is the
+       whole point of asking for less motion. */
+    animation: none;
+  }
+}

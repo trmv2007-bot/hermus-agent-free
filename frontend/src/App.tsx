@@ -159,6 +159,22 @@ function WorkspaceShell() {
         >
           settings
         </button>
+        {/* /control is still a real route, and PRODUCT.md section 2 keeps it
+            as the diagnostics drawer rather than deleting it. The old entry
+            for it was a topbar <a> that made the operator leave the room
+            mid-task, which is why the settings surface above took its place.
+            This is deliberately the quiet way in: a target=_blank link at the
+            far end of the header, so the workspace still has a route back to
+            the raw diagnostics without it being the thing you click first. */}
+        <a
+          className="ghost legacy-diagnostics-link"
+          href="/control"
+          target="_blank"
+          rel="noreferrer"
+          title="raw diagnostics — the legacy control room"
+        >
+          diagnostics
+        </a>
         <CommandBar />
         <div className="link-state" title={linkLabel.join(" · ")}>
           {Object.entries(link).map(([name, state]) => (

@@ -25,9 +25,35 @@ const MIN_RADIUS = 92;
  *  the thing it is supposed to point at. */
 export const RING_CLEARANCE = 34;
 
-/** Kinds the operator can call up by hand. Every one either renders a real panel
- * or says plainly that it is not built. */
-export const LAUNCHER_KINDS: SurfaceKind[] = ["chat", "mission", "worker", "evidence", "model", "telemetry", "logs", "computer", "memory", "terminal", "diagnostics", "voice"];
+/**
+ * Kinds the operator can call up by hand.
+ *
+ * This tuple is the contract with `surfaces/registry.tsx`: it is typed `as const`
+ * so the renderer map can be a total `Record` over it, which means adding a kind
+ * here without writing a panel for it is a compile error rather than an icon
+ * that opens an empty frame.
+ *
+ * Every entry must be a kind that genuinely works. A kind whose backend does
+ * not exist does not belong here, even with an honest "not built" panel behind
+ * it, because the launcher is the room advertising its own capabilities. Kinds
+ * the product still owes (files, ide, diff, media) are absent on purpose: they
+ * stay in `SurfaceKind` so the vocabulary is honest, and an op that names one
+ * is answered with UnbuiltPanel rather than a tile.
+ */
+export const LAUNCHER_KINDS = [
+  "chat",
+  "mission",
+  "worker",
+  "evidence",
+  "model",
+  "telemetry",
+  "logs",
+  "computer",
+  "memory",
+  "terminal",
+  "diagnostics",
+  "voice",
+] as const satisfies readonly SurfaceKind[];
 
 export const KIND_GLYPH: Record<SurfaceKind, string> = {
   chat: "◉",
@@ -121,7 +147,7 @@ function clampUnit(value: number): number {
 export function fanSlots(
   anchor: { x: number; y: number },
   viewport: Viewport,
-  kinds: SurfaceKind[] = LAUNCHER_KINDS,
+  kinds: readonly SurfaceKind[] = LAUNCHER_KINDS,
   podSize = POD_SIZE,
   slotSize = SLOT_SIZE,
   spanDeg: number = ARC_SPAN_DEG,

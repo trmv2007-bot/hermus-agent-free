@@ -1,0 +1,175 @@
+/* The conversation view on the voice surface.
+ *
+ * Separate from styles.css because this is one surface's additions rather
+ * than a change to the room's shared vocabulary, and the voice panel is the
+ * only thing that reads any of it.
+ *
+ * The one rule that shaped the layout: the transcript is the panel, not an
+ * afterthought under the controls. A voice conversation where you cannot see
+ * what was said is a walkie-talkie.
+ */
+
+.voice-convo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+}
+
+.voice-convo-scroll {
+  flex: 1;
+  min-height: 90px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.voice-convo-empty {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+/* The phase line. Named in words rather than animated, because a person
+ * waiting on an answer wants to know what is happening, and a spinner says
+ * only that something might be. */
+.voice-loopline {
+  margin: 0;
+  min-height: 15px;
+  font-size: 11px;
+  letter-spacing: .05em;
+  color: #64748b;
+}
+
+.voice-loopline[data-phase="thinking"] { color: #7dd3fc; }
+.voice-loopline[data-phase="speaking"] { color: #4fd1c5; }
+.voice-loopline[data-phase="idle"] { color: #475569; }
+
+.voice-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 92%;
+}
+
+.voice-turn-you { align-self: flex-end; align-items: flex-end; }
+.voice-turn-hermus { align-self: flex-start; }
+
+.voice-turn-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.voice-turn-you .voice-turn-who { color: #7dd3fc; }
+.voice-turn-hermus .voice-turn-who { color: #4fd1c5; }
+
+/* How a turn arrived. Worth one word: a spoken question and a typed one are
+ * the same conversation, but only one of them could have been misheard. */
+.voice-turn-src {
+  font-style: normal;
+  font-size: 8.5px;
+  letter-spacing: .1em;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid #7dd3fc33;
+  color: #7dd3fc;
+}
+
+.voice-turn-text {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.voice-turn-you .voice-turn-text {
+  background: #7dd3fc12;
+  border: 1px solid #7dd3fc22;
+  color: #e2e8f0;
+  border-bottom-right-radius: 3px;
+}
+
+.voice-turn-hermus .voice-turn-text {
+  background: #4fd1c510;
+  border: 1px solid #4fd1c522;
+  color: #e2e8f0;
+  border-bottom-left-radius: 3px;
+}
+
+/* The empty assistant bubble is the promise that something is coming. */
+.voice-turn-empty {
+  color: #475569;
+  font-style: italic;
+  min-width: 46px;
+}
+
+.voice-turn-error {
+  display: block;
+  margin-top: 5px;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #fb7185;
+}
+
+.voice-heard {
+  border-top: 1px solid #14202e;
+  padding-top: 8px;
+}
+
+.voice-clear {
+  margin-top: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  color: #64748b;
+  background: none;
+  border: 1px solid #1e3a4a;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.voice-clear:hover { color: #94a3b8; border-color: #2d4a5c; }
+
+.voice-stop {
+  align-self: flex-start;
+  padding: 5px 11px;
+  border-radius: 8px;
+  border: 1px solid #fb7185aa;
+  background: #fb718518;
+  color: #fb7185;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.voice-stop:hover { background: #fb718528; }
+
+/* The wake gate. A device across the room needs it and a desk microphone does
+ * not, so it is a switch the user sets rather than a policy the code picks. */
+.voice-wake-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: #64748b;
+  cursor: pointer;
+  line-height: 1.35;
+}
+
+.voice-wake-toggle input { accent-color: #4fd1c5; margin: 0; cursor: pointer; }
+.voice-wake-toggle:hover { color: #94a3b8; }
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-turn-text { transition: none; }
+}

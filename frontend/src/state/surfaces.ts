@@ -5,6 +5,20 @@
 // views through typed operations instead of the app scattering window state
 // across whichever component happened to need a panel.
 
+/**
+ * The vocabulary of what a surface can be.
+ *
+ * This is a superset of what the launcher offers, deliberately, and the gap is
+ * meaningful. `files`, `ide`, `diff` and `media` are kinds the product still
+ * owes (PRODUCT.md §3 lists Files and an embedded browser) and has not built.
+ * They stay in the type so a plan or an agent op can name one and be told
+ * honestly, rather than having the request silently fail validation as a typo.
+ *
+ * They are NOT in `LAUNCHER_KINDS`. The launcher is the room advertising its own
+ * capabilities, so a kind belongs there only once a panel reads a real endpoint
+ * for it. `surfaces/registry.tsx` makes that structural: its renderer map is a
+ * total `Record` over the launcher tuple, so the two cannot drift apart.
+ */
 export type SurfaceKind =
   | "chat"
   | "mission"
@@ -27,8 +41,15 @@ export type SurfaceLifecycle = "active" | "background" | "minimized" | "closed";
 
 export type DockSide = "left" | "right" | "bottom" | "none";
 
-/** Where a surface's data comes from. A surface with no source is a mock, and
- * the shell says so rather than rendering an empty panel that looks alive. */
+/**
+ * Where a surface's data comes from.
+ *
+ * `ref` names the thing the surface is bound to (a mission id, a query string, a
+ * conversation). A panel with a ref reads it and shows a real failure when the
+ * read fails; a panel whose kind has no backend says so outright rather than
+ * rendering an empty frame. Nothing infers data from a missing ref, which is
+ * what keeps "no source" from quietly becoming "no content, and that is fine".
+ */
 export interface SurfaceSource {
   kind: "api" | "event" | "agent" | "user";
   /** Endpoint, event stream or mission id the surface is bound to. */

@@ -27,7 +27,7 @@ function sourceRef(surfaceId: string): string | undefined {
 }
 
 /** A query failure, stated plainly, with what to do about it. */
-export function Probe({ error, path }: { error: unknown; path: string }) {
+function Probe({ error, path }: { error: unknown; path: string }) {
   const detail = error instanceof GatewayError ? `${error.status} ${error.message}` : String(error);
   return (
     <p className="probe" data-state="error">
@@ -323,18 +323,6 @@ export function ModelPanel() {
   );
 }
 
-export function ChatPanel({ surfaceId }: { surfaceId: string }) {
-  const ref = sourceRef(surfaceId) ?? "local";
-  return (
-    <div className="panel">
-      <p className="muted">
-        Conversation surface <code>{ref}</code>. The product chat lives at <code>/control</code>; this panel is the advanced
-        workspace&rsquo;s view of the same run and posts through the same command endpoint.
-      </p>
-    </div>
-  );
-}
-
 export function TelemetryPanel() {
   const queue = useQuery({ queryKey: ["queue"], queryFn: () => api.queue(), refetchInterval: 5000 });
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: () => api.jobs(), refetchInterval: 5000 });
@@ -433,17 +421,6 @@ export function LogsPanel() {
       <p className="muted tiny">
         this is the runtime trace, not the model&rsquo;s context — nothing shown here is sent to a worker because it appears
         here.
-      </p>
-    </div>
-  );
-}
-
-export function PendingPanel({ label }: { label: string }) {
-  return (
-    <div className="panel">
-      <p className="probe" data-state="pending">
-        <b>{label} is not built yet</b>
-        <span>The surface exists so the layout is real, but it will not show invented content.</span>
       </p>
     </div>
   );
@@ -633,7 +610,7 @@ export function MemoryPanel() {
 }
 
 /**
- * A terminal in the room.
+ * A terminal in the room, not a chat box.
  *
  * §3 lists "Terminal — sandboxed process execution" as a surface, and
  * `core/sandbox.py` is a real isolation layer (rlimits, separate session,
@@ -651,17 +628,14 @@ export function MemoryPanel() {
  *  - It does not claim isolation it does not have. The `backend` field is
  *    surfaced verbatim, including the backend's own note that the local
  *    backend is "defence in depth, not a VM". §4.
- */
-/**
- * A terminal, not a chat box.
  *
- * The old version had a labelled input, a "run" button and a bulleted metadata
- * line under every command, which is the silhouette of a messenger. A terminal
- * is monospace all the way down, has one bare prompt, recalls history on the
- * arrow keys, and keeps its diagnostics to one dim line in the header. The
- * per-command facts (backend, duration, return code) are still shown — they are
- * how you know a command actually ran rather than appearing to — but they are a
- * dim suffix on the same line, not a paragraph.
+ * The silhouette matters too. An earlier version had a labelled input, a "run"
+ * button and a bulleted metadata line under every command, which is the
+ * silhouette of a messenger. A terminal is monospace all the way down, has one
+ * bare prompt, and recalls history on the arrow keys. The per-command facts
+ * (backend, duration, return code) are still shown, because they are how you
+ * know a command actually ran rather than appearing to, but they are a dim
+ * suffix on the same line rather than a paragraph.
  */
 export function TerminalPanel() {
   const [command, setCommand] = useState("");
@@ -828,42 +802,6 @@ export function TerminalPanel() {
           disabled={running}
         />
       </form>
-    </div>
-  );
-}
-
-export function DiagnosticsPanel() {
-  const [state, setState] = useState<"loading" | "live" | "unreachable">("loading");
-
-  if (state === "unreachable") {
-    return (
-      <div className="panel">
-        <p className="probe" data-state="error">
-          <b>the control room did not load</b>
-          <span>GET /control did not return a document.</span>
-          <em>The gateway may not be running. This surface stays open so you can retry without leaving the room.</em>
-        </p>
-        <footer className="panel-foot">
-          <button type="button" className="ghost" onClick={() => setState("loading")}>
-            try again
-          </button>
-        </footer>
-      </div>
-    );
-  }
-
-  return (
-    <div className="panel diagnostics">
-      <iframe
-        className="diagnostics-frame"
-        src="/control"
-        title="Hermus control room"
-        onLoad={() => setState("live")}
-        onError={() => setState("unreachable")}
-      />
-      <p className="muted tiny">
-        {state === "loading" ? "loading the control room…" : "control room, embedded — the same document /control serves."}
-      </p>
     </div>
   );
 }
