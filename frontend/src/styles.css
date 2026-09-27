@@ -425,6 +425,21 @@ code,
   color: var(--text);
 }
 
+/* A command the agent ran through this panel, as opposed to one typed into it.
+   Without the mark, the scrollback is a log of things that happened to this
+   terminal and the operator cannot tell their own work from the agent's. */
+.term-agent {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid rgb(79 209 197 / 40%);
+  border-radius: 2px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+
 /* Facts about the run, not a paragraph about it. Dim, same line, right of the
    command — present enough to trust, quiet enough to read past. */
 .term-meta {

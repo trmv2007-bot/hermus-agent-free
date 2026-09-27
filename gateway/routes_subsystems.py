@@ -118,6 +118,35 @@ async def workspace_ops_vocabulary():
     return {"ops": sorted(ops.OP_NAMES)}
 
 
+@router.get("/workspace/act")
+async def workspace_act_vocabulary():
+    """The actions this build can perform, and which panel each one shows in."""
+    from core import workspace_act as actions
+
+    return {"actions": sorted(actions.ACTIONS), "surfaces": actions.ACTION_SURFACE}
+
+
+@router.post("/workspace/act")
+async def workspace_act(payload: dict):
+    """Act THROUGH a surface: run a command in the terminal, write a memory.
+
+    The agent's other route into the room. `workspace_ops` arranges panels; this
+    makes a panel do the thing it exists for, and publishes the result so the
+    panel shows it live instead of the caller quietly receiving a JSON body.
+
+    `ok: false` with an `error` means the action ran and its backend failed —
+    a real answer worth reading. A 400 means the request was refused before
+    anything ran. They are deliberately different status codes.
+    """
+    from core import workspace_act as actions
+
+    try:
+        result = await actions.act(payload.get("action"), payload.get("args"))
+    except actions.ActionRefusal as refusal:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "action_refused", "reason": refusal.reason})
+    return JSONResponse(status_code=200 if result.get("ok") else 502, content=result)
+
+
 @router.post("/workspace/create")
 async def workspace_create(payload: dict):
     from core.workspace import workspace as ws

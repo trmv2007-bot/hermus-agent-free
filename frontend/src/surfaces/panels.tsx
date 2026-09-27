@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, GatewayError, type MissionView, type SandboxRun } from "../api/client";
 import { MemoryConstellation } from "./Constellation";
+import { onRoomEvent } from "../realtime/room-events";
 import { digest } from "../realtime/events";
 
 import { useWorkspace } from "../state/workspace-store";
@@ -572,6 +573,16 @@ export function MemoryPanel() {
   });
   const graph = useQuery({ queryKey: ["memory-graph"], queryFn: () => api.memoryGraph(400) });
 
+  // The graph is a snapshot. When the agent writes a memory through this panel,
+  // the new node has to appear without a manual reload — otherwise the panel
+  // contradicts the store it is drawing.
+  useEffect(() => {
+    return onRoomEvent("workspace_action", (event) => {
+      const data = event.data ?? {};
+      if (data.surface === "memory" && data.ok !== false) void graph.refetch();
+    });
+  }, [graph]);
+
   return (
     <div className="panel memory">
       {graph.isError ? <Probe error={graph.error} path="/memory2/graph" /> : null}
@@ -654,13 +665,31 @@ export function MemoryPanel() {
  */
 export function TerminalPanel() {
   const [command, setCommand] = useState("");
-  const [history, setHistory] = useState<{ command: string; result: SandboxRun }[]>([]);
+  const [history, setHistory] = useState<{ command: string; result: SandboxRun; agent?: boolean }[]>([]);
   const [running, setRunning] = useState(false);
   const [refusal, setRefusal] = useState<{ command: string; detail: string } | null>(null);
   // Which end of the recalled history the next arrow press walks from.
   const recall = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const status = useQuery({ queryKey: ["sandbox-status"], queryFn: () => api.sandboxStatus(), refetchInterval: 8000 });
+
+  // Commands the agent ran through this panel show up here, not just the ones
+  // typed into it. Without this the terminal silently ignores the agent working
+  // "through" it, which is the difference between a panel and a live surface.
+  useEffect(() => {
+    return onRoomEvent("workspace_action", (event) => {
+      const data = event.data ?? {};
+      if (data.surface !== "terminal" || data.ok === false) return;
+      const result = (data.result ?? {}) as Partial<SandboxRun> & { command?: string };
+      const command = typeof result.command === "string" ? result.command : "";
+      if (!command) return;
+      setHistory((prev) => {
+        // The gateway publishes once; a reconnect replay would duplicate lines.
+        if (prev.some((entry) => entry.result.sandbox_id === result.sandbox_id)) return prev;
+        return [...prev, { command, result: result as SandboxRun, agent: true }].slice(-200);
+      });
+    });
+  }, []);
 
   const backend = status.data?.backend;
 
@@ -752,6 +781,7 @@ export function TerminalPanel() {
             <p className="term-line">
               <span className="term-sigil" aria-hidden="true">❯</span>
               <span className="term-typed">{entry.command}</span>
+              {entry.agent ? <span className="term-agent" title="the agent ran this through the panel">jarvis</span> : null}
               <span className="term-meta">
                 {entry.result.returncode === 0 ? "ok" : `rc ${entry.result.returncode}`}
                 {" · "}

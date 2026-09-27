@@ -6,6 +6,7 @@
 import { wsUrl } from "../api/client";
 import { useWorkspace } from "../state/workspace-store";
 import { digest, planForEvent, type RuntimeEvent } from "./events";
+import { emitRoomEvent } from "./room-events";
 
 export type LinkState = "connecting" | "open" | "closed" | "error";
 
@@ -37,6 +38,9 @@ export function connectStream(path: string, onState: (state: LinkState, detail?:
   let stopped = false;
 
   const apply = (event: RuntimeEvent) => {
+    // Panels subscribe to this same stream (see room-events.ts) so an action
+    // the agent performed shows up in the panel it belongs to.
+    emitRoomEvent(event);
     const plan = planForEvent(event);
     const workspace = useWorkspace.getState();
     if (plan.ops.length) workspace.applyOps(plan.ops);
