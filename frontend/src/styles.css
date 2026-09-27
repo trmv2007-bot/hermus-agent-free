@@ -1218,12 +1218,18 @@ button.ghost {
   z-index: 2;
 }
 
-/* Entries slide to their new place on the arc instead of teleporting. The old
-   layout snapped the whole fan between four quadrant diagonals, so crossing the
-   screen's midpoint moved all eleven slots in one jump. The angle is now
-   continuous, and this transition is what makes that readable as movement. */
+/* Position changes ease; the entrance is a separate animation on a separate
+   rule. Folding both into one `transition` list makes the browser try to
+   interpolate `left`/`top` from an animation and a transition at once, and the
+   entry lands before it has visibly left the pod. */
 .fan-slot {
   transition: left 380ms cubic-bezier(0.22, 1, 0.36, 1), top 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
+}
+
+.fan-slot[data-enter="true"] {
+  animation: fan-fly 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* The per-entry delay is set inline; it staggers the reveal along the arc so
+     the fan unfurls instead of arriving as a block. */
 }
 
 .fan-slot:hover .fan-slot-label,
@@ -1244,6 +1250,26 @@ button.ghost {
   border-color: rgb(79 209 197 / 70%);
 }
 
+/* The pod acknowledges the click that opened the fan — it brightens and its
+   core spins up, so the press has a visible consequence on the thing that was
+   pressed rather than only on what appeared. */
+.pod-open .pod-core {
+  animation: pod-pulse 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  opacity: 1;
+}
+
+@keyframes pod-pulse {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .fan {
   position: absolute;
   inset: 0;
@@ -1255,6 +1281,36 @@ button.ghost {
   position: absolute;
   border-radius: 50%;
   border: 1px dashed rgb(109 141 255 / 20%);
+  /* The arc draws itself outward from the pod, so the fan looks like one
+     instrument unfolding rather than a ring that was already there. */
+  animation: arc-draw 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes arc-draw {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Each entry is launched from the pod and flies out to its place on the arc.
+   --fan-x/--fan-y are the vector from the pod's centre to the slot, set inline
+   by the component, so every entry leaves from the same point and travels its
+   own route — a shared scale+fade would read as the whole menu appearing at
+   once, which is exactly the "spawning out of nowhere" complaint. */
+@keyframes fan-fly {
+  from {
+    opacity: 0;
+    transform: translate(var(--fan-x, 0px), var(--fan-y, 0px)) scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
 }
 
 .fan-slot {

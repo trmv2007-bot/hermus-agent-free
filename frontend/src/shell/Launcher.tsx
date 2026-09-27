@@ -4,7 +4,7 @@
 // it stays usable against any edge. Positions are stage-local — the chrome band
 // along the bottom is not somewhere to put a clickable thing.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
 import { KIND_TITLES } from "../state/surfaces";
 import { fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE, podHome } from "../state/launcher";
@@ -25,7 +25,21 @@ export function Launcher() {
   // instant the drag starts, and a ref change does not re-render, so the pod
   // would lag a frame behind the pointer on pickup.
   const [dragging, setDragging] = useState(false);
+  // True only for the frame the fan opens. Left true, the fly-out animation
+  // would re-run on every reposition while the pod glides to a new home; left
+  // false forever, it would never run at all. One frame is the whole window.
+  const [entering, setEntering] = useState(false);
   const pointer = useRef<{ ox: number; oy: number; from: { x: number; y: number }; moved: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setEntering(false);
+      return;
+    }
+    setEntering(true);
+    const clear = window.setTimeout(() => setEntering(false), 420);
+    return () => window.clearTimeout(clear);
+  }, [open]);
 
   // The pod has one home and it belongs to the orb: docked against a small core,
   // standing off at mid-left when the core has the room to itself. A pod the
@@ -60,7 +74,23 @@ export function Launcher() {
               // A label hanging off the right edge of the window is worse than no
               // label, so slots in the left half anchor their text inward.
               data-side={slot.x < anchor.x ? "left" : "right"}
-              style={{ left: slot.x, top: slot.y, width: SLOT_SIZE, height: SLOT_SIZE, transitionDelay: `${index * 22}ms` }}
+              // Marks the first paint after the fan opens, so the fly-out runs
+              // once on entry and not on every later reposition.
+              data-enter={entering ? "true" : "false"}
+              style={
+                {
+                  left: slot.x,
+                  top: slot.y,
+                  width: SLOT_SIZE,
+                  height: SLOT_SIZE,
+                  // Launch vector: from where this entry sits back to the pod's
+                  // centre, so every one flies out along its own route.
+                  "--fan-x": `${anchor.x + POD_SIZE / 2 - (slot.x + SLOT_SIZE / 2)}px`,
+                  "--fan-y": `${anchor.y + POD_SIZE / 2 - (slot.y + SLOT_SIZE / 2)}px`,
+                  animationDelay: entering ? `${index * 26}ms` : undefined,
+                  transitionDelay: `${index * 22}ms`,
+                } as React.CSSProperties
+              }
               onPointerEnter={() => setHovered(slot.kind)}
               onPointerLeave={() => setHovered((current) => (current === slot.kind ? null : current))}
               onFocus={() => setHovered(slot.kind)}
