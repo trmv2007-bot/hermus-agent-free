@@ -102,6 +102,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     "nvidia": {
         "name": "NVIDIA NIM (free endpoints)",
         "base_url": "https://integrate.api.nvidia.com/v1",
+        # NVIDIA's catalog is keyed on the "nvidia/" prefix. Sending the bare
+        # model name returns a bare "404 page not found" with nothing in the
+        # body, which reads like a bad endpoint rather than a bad name.
+        "model_needs_provider_prefix": True,
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "models_path": "/models",

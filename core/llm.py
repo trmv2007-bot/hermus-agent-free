@@ -50,9 +50,20 @@ class FreeLLM:
         # Allow override of provider/model
         if provider:
             self.provider = provider.lower()
-            self.model_name = (
-                model.split("/", 1)[-1] if model and "/" in model else (model or get_provider(provider).get("default_model"))
-            )
+            # Most OpenAI-compatible hosts want the bare model name, so the
+            # "provider/model" prefix is normally stripped. NVIDIA is the
+            # exception: its catalog is literally keyed on the prefix, and
+            # asking for the bare name returns "404 page not found" with no
+            # model list and no hint that the name was the problem.
+            _preset_for_prefix = get_provider(self.provider) or {}
+            if model and "/" in model:
+                self.model_name = (
+                    model
+                    if _preset_for_prefix.get("model_needs_provider_prefix")
+                    else model.split("/", 1)[-1]
+                )
+            else:
+                self.model_name = model or _preset_for_prefix.get("default_model")
         else:
             self.provider, self.model_name = parse_model_ref(self.model)
         self.api_key_override = api_key
@@ -236,14 +247,20 @@ class FreeLLM:
         tools = self._tools_for_provider(requested_tools, used_provider)
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
 
-        if not api_key and not preset.get("no_auth") and not self.base_url_override:
+        if not api_key and not preset.get("no_auth"):
             # No key for the requested provider → discover any configured key
             # from the multikey store OR .env. This intentionally does NOT
             # depend on whether the requested model equals ``config.model``:
             # a tool-required request must recover to a tool-capable provider
-            # even when the user explicitly chose another model. A base_url
-            # override is left alone (the caller deliberately pointed at a
-            # specific endpoint).
+            # even when the user explicitly chose another model.
+            #
+            # A pinned base_url does NOT skip this. Pinning the endpoint says
+            # where to send the request, not that the request should be
+            # anonymous: a caller who pins NVIDIA's URL still expects the
+            # NVIDIA key, and treating the override as "leave it alone" sent
+            # the request with only a Content-Type header. That is what made
+            # the fast provider look broken while a 4B model on CPU silently
+            # became the faster option.
             fb = self._fallback_bundle(require_tools=bool(requested_tools))
             if fb:
                 used_provider = (fb.get("provider") or self.provider).lower()
@@ -680,7 +697,7 @@ class FreeLLM:
         tools = self._tools_for_provider(requested_tools, used_provider)
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
 
-        if not api_key and not preset.get("no_auth") and not self.base_url_override:
+        if not api_key and not preset.get("no_auth"):
             fb = self._fallback_bundle(require_tools=bool(requested_tools))
             if fb:
                 used_provider = (fb.get("provider") or self.provider).lower()
@@ -975,7 +992,7 @@ class FreeLLM:
             if not base.endswith("/v1"):
                 base = base + "/v1"
             return {"provider": "ollama", "model": model, "base_url": base, "api_key": api_key or "ollama"}
-        if not api_key and not preset.get("no_auth") and not self.base_url_override:
+        if not api_key and not preset.get("no_auth"):
             fb = self._fallback_bundle(require_tools=require_tools)
             if not fb:
                 return None
