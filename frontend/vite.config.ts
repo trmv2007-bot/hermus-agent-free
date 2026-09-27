@@ -44,6 +44,18 @@ export default defineConfig({
       "/memory2": "http://127.0.0.1:8000",
       "/workspace": "http://127.0.0.1:8000",
       "/agent": "http://127.0.0.1:8000",
+      // Voice, settings and health. Missing these is how the Settings page
+      // and the microphone panel can both look fine in dev and be completely
+      // dead: every one of them is verified against the gateway on 8000, and
+      // the browser is on 5173, so a route that is not proxied simply does not
+      // exist from the page's point of view.
+      "/settings": "http://127.0.0.1:8000",
+      "/voice": "http://127.0.0.1:8000",
+      // /speech/audio/<id> is where the synthesised WAV is served from, so
+      // without this the assistant speaks into a 404 and the Orb waits for
+      // playback that never starts.
+      "/speech": "http://127.0.0.1:8000",
+      "/doctor": "http://127.0.0.1:8000",
       "/healthz": "http://127.0.0.1:8000",
       "/livez": "http://127.0.0.1:8000",
       "/readyz": "http://127.0.0.1:8000",
