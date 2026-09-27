@@ -1875,3 +1875,30 @@ button.ghost {
 .voice-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: #e2e8f0; }
 .voice-text-empty { color: #475569; font-style: italic; }
 .voice-turns { margin: 0; font-size: 10px; color: #475569; }
+
+/* --- settings ------------------------------------------------------------- */
+/* Read-only by design. Every value here is the gateway's own resolution — which
+   provider won, which device a role landed on, which voice models are on disk —
+   so an editable field would either be ignored or would drift from the truth. */
+.settings { display: flex; flex-direction: column; gap: 14px; padding: 12px; height: 100%; overflow: auto; }
+.set-problem { margin: 0; padding: 9px 11px; border-radius: 8px; border: 1px solid #fb718544; background: #fb718512; display: flex; flex-direction: column; gap: 3px; }
+.set-problem b { color: #fb7185; font-size: 12px; }
+.set-problem span { color: #94a3b8; font-size: 11px; }
+.set-section { display: flex; flex-direction: column; gap: 6px; }
+.set-title { margin: 0 0 2px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #64748b; font-weight: 500; }
+.set-row { display: grid; grid-template-columns: 88px 1fr; gap: 4px 10px; align-items: baseline; font-size: 12px; padding: 3px 0; border-bottom: 1px solid #0e1826; }
+.set-label { color: #64748b; font-size: 11px; letter-spacing: .04em; }
+.set-value { color: #e2e8f0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; word-break: break-word; }
+.set-hint { grid-column: 2; color: #64748b; font-size: 10.5px; }
+.set-role { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid #0e1826; }
+.set-role-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.set-role-name { color: #4fd1c5; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.set-role-model { color: #e2e8f0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; text-align: right; word-break: break-all; }
+.set-role-meta { color: #7dd3fc; font-size: 10.5px; }
+.set-role-reason { color: #64748b; font-size: 10.5px; line-height: 1.45; }
+.set-warn { color: #fbbf24; font-style: normal; }
+.set-empty { margin: 0; color: #475569; font-size: 11.5px; font-style: italic; }
+.set-note { margin: 4px 0 0; color: #64748b; font-size: 10.5px; line-height: 1.55; }
+.set-note code { color: #7dd3fc; background: #0e1826; padding: 1px 4px; border-radius: 3px; font-size: 10px; }
+.set-foot { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.set-foot-note { color: #475569; font-size: 10.5px; }

@@ -154,6 +154,14 @@ function WorkspaceShell() {
         <button
           type="button"
           className="ghost diagnostics-toggle"
+          onClick={() => openSurface({ kind: "settings", source: { kind: "user" } })}
+          title="what this build is running on, and what it can do"
+        >
+          settings
+        </button>
+        <button
+          type="button"
+          className="ghost diagnostics-toggle"
           onClick={() => openSurface({ kind: "diagnostics", source: { kind: "user" } })}
           title="open the control room in this room — you do not leave the workspace to inspect it"
         >
