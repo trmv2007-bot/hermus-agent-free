@@ -191,13 +191,14 @@ interface ChatFrame {
  */
 async function streamChat(
   message: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>,
   signal: AbortSignal,
   onActivity: (text: string) => void,
 ): Promise<string> {
   const res = await fetch("/api/v1/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history: loopHistory() }),
+    body: JSON.stringify({ message, history }),
     signal,
   });
 
@@ -326,6 +327,17 @@ export async function speakTo(text: string, source: "voice" | "typed" = "typed")
 
   const youId = nextId();
   const hermusId = nextId();
+  // History is read BEFORE the new turns are appended.
+  //
+  // The order matters more than it looks. `loopHistory` filters out pending
+  // turns, so reading it after the append would still be correct for the
+  // assistant bubble - but the new "you" turn is already in the list by then,
+  // and the route appends the message itself, so the model would receive the
+  // question twice: once in history and once as the message. Measured on a
+  // real run, the third turn sent
+  //   history: [user, user, user]  message: "..."
+  // which is a conversation with no assistant in it at all.
+  const history = loopHistory();
   setLoopState({
     error: "",
     aborted: false,
@@ -345,10 +357,13 @@ export async function speakTo(text: string, source: "voice" | "typed" = "typed")
     });
 
   try {
-    const answer = await streamChat(message, controller.signal, (activity) =>
+    const answer = await streamChat(message, history, controller.signal, (activity) =>
       setLoopState({ activity }),
     );
-    patchHermus({ text: answer });
+    // `pending` is cleared here, not in the finally block: the answer is
+    // complete at this point, and leaving it set made every answered turn
+    // render as still-arriving.
+    patchHermus({ text: answer, pending: false });
 
     setPhase("speaking", "speaking…");
     try {
@@ -364,14 +379,19 @@ export async function speakTo(text: string, source: "voice" | "typed" = "typed")
     patchHermus({
       pending: false,
       error: aborted ? undefined : (err as Error).message,
-      text: aborted ? "" : "—",
+      // A visible placeholder, so a failed turn is not indistinguishable from
+      // a model that chose to say nothing.
+      text: aborted ? "" : "-",
     });
     if (!aborted) setLoopState({ error: (err as Error).message });
   } finally {
     inFlight = null;
-    const failed = getLoopState().turns.some((t) => t.id === hermusId && t.error);
+    const turn = getLoopState().turns.find((t) => t.id === hermusId);
     setPhase("idle", "");
-    if (failed) setVoiceState({ phase: "error", error: getLoopState().turns.find((t) => t.id === hermusId)?.error ?? "" });
+    if (turn?.error) {
+      setLoopState({ error: turn.error });
+      setVoiceState({ phase: "error", error: turn.error });
+    }
   }
 }
 

@@ -25,6 +25,7 @@ import {
   type SurfaceSource,
   type Viewport,
 } from "./surfaces";
+import { LAUNCHER_KINDS } from "./launcher";
 
 export const LAYOUT_VERSION = 1;
 const STORAGE_KEY = "hermus.workspace.layout";
@@ -152,23 +153,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const KINDS: SurfaceKind[] = [
-  "chat",
-  "mission",
-  "model",
-  "worker",
-  "evidence",
-  "memory",
-  "files",
-  "ide",
-  "terminal",
-  "diff",
-  "logs",
-  "telemetry",
-  "computer",
-  "media",
-  "diagnostics",
-];
+// Derived from the launcher rather than re-listed here.
+//
+// This was a hand-copied array and it silently drifted: `voice` was added to
+// the fan and rendered by the registry, but was missing from this list, so an
+// agent asking to open the microphone surface got HTTP 200 {"ok":true} from
+// /workspace/ops and then the room refused it as an unknown kind. The gateway
+// said yes and the client said no, which is the worst possible shape for this.
+//
+// One source, so a kind cannot exist in the fan and not here.
+const KINDS: SurfaceKind[] = [...LAUNCHER_KINDS];
 
 /** An operation from outside the app is untrusted input: it may name a surface
  * that does not exist or a kind nothing renders. Refusing is the default. */

@@ -4,7 +4,8 @@
 // is not on the typed list is refused rather than obeyed.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { minimizedSurfaces, stowedSurfaces, useWorkspace, visibleSurfaces } from "./workspace-store";
+import { LAUNCHER_KINDS } from "./launcher";
+import { minimizedSurfaces, stowedSurfaces, useWorkspace, validateOp, visibleSurfaces } from "./workspace-store";
 
 function reset() {
   useWorkspace.setState({ surfaces: {}, order: [], zTop: 10, focusedId: null, immersive: false, rejected: [], tray: [] });
@@ -220,5 +221,18 @@ describe("maximise, hide and stow", () => {
     expect(useWorkspace.getState().applyOps([{ op: "unmaximize", id }, { op: "hide", id }])).toEqual({ applied: 2, rejected: 0 });
     expect(useWorkspace.getState().surfaces[id].visible).toBe(false);
     expect(useWorkspace.getState().applyOps([{ op: "destroy_world", id }])).toEqual({ applied: 0, rejected: 1 });
+  });
+});
+
+describe("surface kinds an outside caller may open", () => {
+  it("accepts every kind the launcher offers, including voice", () => {
+    // The bug this guards: KINDS was a hand-copied list that fell behind the
+    // fan, so `voice` was openable from the UI and refused from /workspace/ops
+    // while the gateway answered 200 ok. Deriving the list is the fix; this is
+    // the proof that the derivation cannot be undone by editing one side.
+    for (const kind of LAUNCHER_KINDS) {
+      const result = validateOp({ op: "open", surface: { kind } });
+      expect(result.ok, `kind ${kind} must be openable`).toBe(true);
+    }
   });
 });
