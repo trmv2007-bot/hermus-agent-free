@@ -106,7 +106,7 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "auth_prefix": "Bearer ",
         "models_path": "/models",
         "chat_path": "/chat/completions",
-        "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "default_model": "nvidia/nemotron-3-super-120b-a12b",
         "supports_tools": True,
         "max_tools": 128,
         "env_key": "NVIDIA_API_KEY",

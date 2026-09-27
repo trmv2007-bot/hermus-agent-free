@@ -99,7 +99,7 @@ def test_providers_list():
 
 def test_provider_tool_limit_and_chat_model_ranking():
     from core.llm import FreeLLM
-    from core.openai_compat import _filter_nvidia_free_chat_models, _rank_chat_models
+    from core.openai_compat import NVIDIA_FREE_CHAT_MODELS, _filter_nvidia_free_chat_models, _rank_chat_models
 
     tools = [{"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}} for i in range(140)]
     assert len(FreeLLM()._tools_for_provider(tools, "groq")) == 128
@@ -132,14 +132,19 @@ def test_provider_tool_limit_and_chat_model_ranking():
         [
             {"id": "baai/bge-m3"},
             {"id": "meta/llama-3.1-70b-instruct"},
-            {"id": "nvidia/llama-3.3-nemotron-super-49b-v1.5"},
+            {"id": "nvidia/nemotron-3-super-120b-a12b"},
             {"id": "downloadable/paid-model"},
         ]
     )
     assert [m["id"] for m in filtered] == [
         "meta/llama-3.1-70b-instruct",
-        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "nvidia/nemotron-3-super-120b-a12b",
     ]
+    # The allow-list used to name nvidia/llama-3.3-nemotron-super-49b-v1.5, which
+    # NVIDIA retired on 2026-08-26. A retired id in this list is a model the
+    # filter keeps offering and the API then 410s on, so it is asserted absent
+    # rather than left to rot a second time.
+    assert "nvidia/llama-3.3-nemotron-super-49b-v1.5" not in NVIDIA_FREE_CHAT_MODELS
 
 
 def test_openai_compat_models_and_chat():

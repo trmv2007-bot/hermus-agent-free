@@ -129,7 +129,7 @@ FREE_API_PROVIDERS = {
     "nvidia": {
         "name": "NVIDIA NIM",
         "free_tier": True,
-        "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "default_model": "nvidia/nemotron-3-super-120b-a12b",
         "rate_limit": "~40 RPM",
         "env_key": "NVIDIA_API_KEY",
         "description": "NVIDIA free endpoints",

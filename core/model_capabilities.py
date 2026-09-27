@@ -481,7 +481,7 @@ AUTO_SELECT_CANDIDATES: tuple[str, ...] = (
     "ollama/qwen2.5:7b",
     "ollama/llama3.2:11b",
     "groq/openai/gpt-oss-20b",
-    "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    "nvidia/nemotron-3-super-120b-a12b",
     "openrouter/openrouter/auto",
     "openai/gpt-4o-mini",
 )

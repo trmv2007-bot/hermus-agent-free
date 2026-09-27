@@ -236,7 +236,10 @@ async def list_models(provider: str = Query(..., description="provider id")):
     elif provider == "ollama":
         models = ["llama3", "llama3.1", "mistral", "gemma:7b"]
     elif provider == "nvidia":
-        models = ["nvidia/llama-3.3-nemotron-super-49b-v1.5", "nvidia/llama-3.1-70b-instruct"]
+        # These ids are what the spawn widget offers, so a retired one here is a
+        # model the operator can pick and then get a 410 from. The 49B was EOL'd
+        # by NVIDIA on 2026-08-26.
+        models = ["nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3.5-lightning-30b-a3b"]
     else:
         models = [default] if default else []
 
