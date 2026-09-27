@@ -298,9 +298,25 @@ class SpeechEngine:
                 rate=rate,
             )
         if not selected_backend:
+            # Say WHY, not just that it is missing. This branch fired for the
+            # entire life of the feature — the routes were registered, the
+            # gateway served them, and every call came back spoken: false with
+            # a message that named no remedy. The remedy is one env var.
+            #
+            # The likeliest cause by far is HERMUS_PIPER_MODEL pointing at a
+            # .onnx that was never downloaded; the probe reports the
+            # executable as found and the model as absent, which reads like a
+            # working backend until synthesis is attempted.
             return {
                 "success": False,
-                "error": "No local TTS backend is configured",
+                "error": (
+                    "No local TTS backend is configured. Most likely HERMUS_PIPER_MODEL is unset or "
+                    "points at a .onnx that is not on disk — set it to a real voice file "
+                    "(e.g. models/hermus-voice-models/tts/en_US-amy-medium.onnx) and restart the "
+                    "gateway. Alternatively install espeak-ng or pyttsx3 for a worse voice that needs "
+                    "no model."
+                ),
+                "remedy": "set HERMUS_PIPER_MODEL to a .onnx voice file that exists",
                 "status": self.status(),
             }
 
