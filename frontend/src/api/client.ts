@@ -142,6 +142,47 @@ export interface MemoryHit {
   [key: string]: unknown;
 }
 
+/** `GET /sandbox/status` — which isolation backend is actually in force. */
+export interface SandboxStatus {
+  configured?: string;
+  backend?: string;
+  reason?: string;
+  capabilities?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  active?: number;
+  root?: string;
+  audit_log?: string;
+  note?: string;
+}
+
+/** `POST /sandbox/run` — mirrors core.sandbox.SandboxResult. */
+export interface SandboxRun {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+  returncode: number;
+  backend: string;
+  sandbox_id: string;
+  duration_ms: number;
+  timeout: boolean;
+  error: string;
+  workdir: string;
+  limits?: Record<string, unknown>;
+  audit?: Record<string, unknown>;
+}
+
+/** One line of the sandbox audit log. */
+export interface SandboxAuditEntry {
+  sandbox_id?: string;
+  backend?: string;
+  purpose?: string;
+  command?: string;
+  blocked?: boolean;
+  matched?: string[];
+  at?: string;
+  [key: string]: unknown;
+}
+
 /**
  * The gateway token is not stored in this app. The serving template injects
  * `window.__HERMUS_GATEWAY_TOKEN`, or the operator passes `?token=` once and it
@@ -257,8 +298,18 @@ export const api = {
   liveFrame: (signal?: AbortSignal) => getBlobUrl("/computer/live-frame", signal),
   memoryRecall: (query: string, limit = 10) =>
     post<{ results: MemoryHit[] }>("/memory2/recall", { query, limit }).then((r) => r.results ?? []),
-  memoryRemember: (text: string, kind?: string, project?: string) =>
-    post<{ success?: boolean; error?: string }>("/memory2/remember", { text, kind, project }),
+  /**
+   * The route reads `content` and `kind`, NOT `text` — it calls
+   * `memory.remember(kind, content, ...)`. Sending `text` stores an empty
+   * string and still reports success, which is the §4 failure mode again, one
+   * layer up. Checked against routes_subsystems.py::memory2_remember.
+   */
+  memoryRemember: (content: string, kind = "semantic", project?: string) =>
+    post<{ success?: boolean; error?: string; id?: string | number }>("/memory2/remember", { content, kind, project }),
+  sandboxStatus: () => get<SandboxStatus>("/sandbox/status"),
+  sandboxRun: (command: string, opts?: { timeout?: number; cwd?: string; network?: boolean }) =>
+    post<SandboxRun>("/sandbox/run", { command, ...opts }),
+  sandboxRecent: (limit = 20) => get<{ entries: SandboxAuditEntry[]; path?: string }>(`/sandbox/recent?limit=${limit}`),
 };
 
 /** Fields the workspace panels read, in one place so a Python test can check them. */

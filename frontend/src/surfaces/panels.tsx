@@ -4,7 +4,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { api, GatewayError, type MissionView } from "../api/client";
+import { api, GatewayError, type MissionView, type SandboxRun } from "../api/client";
 import { digest } from "../realtime/events";
 
 import { useWorkspace } from "../state/workspace-store";
@@ -584,6 +584,119 @@ export function MemoryPanel() {
         <button type="submit">remember</button>
       </form>
       {note ? <p className="muted tiny">{note}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * A terminal in the room.
+ *
+ * §3 lists "Terminal — sandboxed process execution" as a surface, and
+ * `core/sandbox.py` is a real isolation layer (rlimits, separate session,
+ * no-new-privs, network dropped via unshare where the kernel allows, or a
+ * container backend) with an audit log. So this is a front end for something
+ * that already works, not a `child_process.spawn` in the browser's shoes.
+ *
+ * Two things it refuses to do:
+ *
+ *  - It cannot turn off the guardrail. `/sandbox/run` derives
+ *    `allow_dangerous` from server config, and this surface sends no such
+ *    field. A 403 from the gateway is shown as "refused by policy" rather than
+ *    a generic error, because a refusal the user cannot read is
+ *    indistinguishable from a broken panel.
+ *  - It does not claim isolation it does not have. The `backend` field is
+ *    surfaced verbatim, including the backend's own note that the local
+ *    backend is "defence in depth, not a VM". §4.
+ */
+export function TerminalPanel() {
+  const [command, setCommand] = useState("");
+  const [history, setHistory] = useState<{ command: string; result: SandboxRun }[]>([]);
+  const [running, setRunning] = useState(false);
+  const [refusal, setRefusal] = useState<{ command: string; detail: string } | null>(null);
+  const status = useQuery({ queryKey: ["sandbox-status"], queryFn: () => api.sandboxStatus(), refetchInterval: 8000 });
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const line = command.trim();
+    if (!line || running) return;
+    setRunning(true);
+    setRefusal(null);
+    setCommand("");
+    try {
+      const result = await api.sandboxRun(line);
+      setHistory((prev) => [...prev, { command: line, result }].slice(-40));
+    } catch (error) {
+      const detail = error instanceof GatewayError ? `${error.status} ${error.message}` : String(error);
+      setRefusal({ command: line, detail });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const backend = status.data?.backend;
+
+  return (
+    <div className="panel terminal">
+      <div className="term-scroll">
+        {!history.length ? (
+          <p className="probe loading">no commands run from this surface yet</p>
+        ) : (
+          history.map((entry, index) => (
+            <div className="term-entry" key={`${entry.result.sandbox_id}-${index}`}>
+              <p className="term-cmd">
+                <span className="term-prompt" aria-hidden="true">
+                  ❯
+                </span>
+                {entry.command}
+                <span className="muted tiny">
+                  {" "}
+                  · {entry.result.backend} · {entry.result.duration_ms}ms · rc {entry.result.returncode}
+                  {entry.result.timeout ? " · TIMED OUT" : ""}
+                </span>
+              </p>
+              {entry.result.stdout ? <pre className="term-out">{entry.result.stdout}</pre> : null}
+              {entry.result.stderr ? <pre className="term-err">{entry.result.stderr}</pre> : null}
+              {entry.result.error ? <p className="term-err">{entry.result.error}</p> : null}
+            </div>
+          ))
+        )}
+      </div>
+
+      {refusal ? (
+        <p className="probe" data-state="error">
+          <b>refused by policy</b>
+          <span className="mono">{refusal.command}</span>
+          <em>{refusal.detail}</em>
+        </p>
+      ) : null}
+
+      <form className="term-form" onSubmit={submit}>
+        <span className="term-prompt" aria-hidden="true">
+          ❯
+        </span>
+        <input
+          value={command}
+          onChange={(event) => setCommand(event.target.value)}
+          placeholder={running ? "running…" : "run a command in the sandbox"}
+          aria-label="command"
+          disabled={running}
+        />
+        <button type="submit" disabled={running || !command.trim()}>
+          {running ? "…" : "run"}
+        </button>
+      </form>
+
+      {status.data ? (
+        <p className="capability" data-state={backend === "local" ? "simulated" : "real"}>
+          <b>
+            {backend ?? "unknown"} backend
+            {status.data.active ? ` · ${status.data.active} active` : ""}
+          </b>{" "}
+          {status.data.note}
+        </p>
+      ) : status.isError ? (
+        <Probe error={status.error} path="/sandbox/status" />
+      ) : null}
     </div>
   );
 }
