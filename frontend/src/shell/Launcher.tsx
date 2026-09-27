@@ -48,6 +48,9 @@ export function Launcher() {
               key={slot.kind}
               type="button"
               className="fan-slot"
+              // A label hanging off the right edge of the window is worse than no
+              // label, so slots in the left half anchor their text inward.
+              data-side={slot.x < anchor.x ? "left" : "right"}
               style={{ left: slot.x, top: slot.y, width: SLOT_SIZE, height: SLOT_SIZE, transitionDelay: `${index * 22}ms` }}
               title={`open ${KIND_TITLES[slot.kind]}`}
               aria-label={`open ${slot.kind} surface`}
@@ -57,6 +60,10 @@ export function Launcher() {
               }}
             >
               <span aria-hidden="true">{KIND_GLYPH[slot.kind]}</span>
+              {/* A glyph alone is a puzzle. The name rides along with it so the
+                  fan can be read without hovering eleven times — and a screen
+                  reader gets the same word a sighted user does. */}
+              <span className="fan-slot-label">{KIND_TITLES[slot.kind]}</span>
             </button>
           ))}
         </div>
@@ -95,6 +102,12 @@ export function Launcher() {
         title={`${open ? "close" : "open"} the launch fan · drag to move · double-click to park`}
       >
         <span className="pod-core" aria-hidden="true" />
+        {/* Two unlabaged circles in one room is a guessing game: the orb reports
+            state, the pod opens things, and nothing on screen said which was
+            which. The pod names itself; the orb already names its state. */}
+        <span className="pod-label" aria-hidden="true">
+          surfaces
+        </span>
         <span className="sr-only">launch surfaces</span>
       </div>
     </>

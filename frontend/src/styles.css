@@ -1056,6 +1056,57 @@ button.ghost {
   opacity: 0.85;
 }
 
+/* The pod is 46px and used to be a bare dot, so it read as a second orb. The
+   label sits under it and names the thing, not its state. */
+.pod-label {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  font: 9px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pod:hover .pod-label,
+.pod:focus-visible .pod-label {
+  color: var(--text);
+}
+
+/* Fan slots are 38px squares on an arc, so the name cannot go inside without
+   wrapping. It sits outside the square, aligned away from the pod's centre, so
+   labels for the upper half read downward and the lower half read upward. */
+.fan-slot-label {
+  position: absolute;
+  left: calc(100% + 7px);
+  top: 50%;
+  transform: translateY(-50%);
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease, color 140ms ease;
+}
+
+.fan-slot:hover .fan-slot-label,
+.fan-slot:focus-visible .fan-slot-label {
+  opacity: 1;
+  color: var(--text);
+}
+
+/* Labels on the right-hand half of the arc would hang off the edge, so they
+   flip to the left of their slot. */
+.fan-slot[data-side="left"] .fan-slot-label {
+  left: auto;
+  right: calc(100% + 7px);
+}
+
 .pod-open {
   border-color: rgb(79 209 197 / 70%);
 }
