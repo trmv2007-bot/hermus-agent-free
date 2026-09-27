@@ -10,25 +10,49 @@
 //   2. The wheel zooms about the cursor. Multiplying the scale while leaving the
 //      pan alone makes whatever sits under the pointer slide out from under it,
 //      which is the single most disorienting thing a zoom can do.
-//   3. The grid is drawn in SCREEN space, not world space, and the cell size is
-//      derived from the zoom. A grid parented to the world layer would scale its
-//      own line weight and go soft or vanish at the ends, and it would stop
-//      looking like a floor.
+//   3. Panning must not re-render React. It used to live in the workspace store,
+//      so every keypress made a new `stage` object and re-rendered the stage,
+//      the backdrop and EVERY open panel — thirty times a second while a key was
+//      held. That was the jitter. The pan is a transform on one element, so it
+//      is written to that element directly and React never hears about it.
+//   4. Zoom DOES stay in the store, because panel drag maths reads it. It
+//      changes on a wheel notch rather than on key repeat, so it costs nothing.
 
 import { useCallback, useEffect, useRef } from "react";
 import { useWorkspace } from "../state/workspace-store";
-import { clampZoom } from "../state/surfaces";
+import { getPan, movePan, resetPan, subscribePan } from "../state/pan";
+import { ActivityRail } from "./ActivityRail";
 
 /** Pixels the pointer must travel before a press counts as a drag, not a click. */
 const DRAG_SLOP = 4;
 
 export function StageCanvas({ children }: { children: React.ReactNode }) {
   const stageRef = useRef<HTMLElement | null>(null);
-  const pan = useWorkspace((s) => s.panBy);
+  const worldRef = useRef<HTMLDivElement | null>(null);
+  const zoom = useWorkspace((s) => s.stage.zoom);
   const zoomAt = useWorkspace((s) => s.zoomAt);
   const resetStage = useWorkspace((s) => s.resetStage);
-  const { panX, panY, zoom } = useWorkspace((s) => s.stage);
-  const world = { transform: `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})` };
+
+  // Refs, not state, so the transform can be written without a render.
+  const panRef = useRef(getPan());
+  const zoomRef = useRef(zoom);
+
+  /** The one place the transform is written. */
+  const applyTransform = useCallback(() => {
+    const node = worldRef.current;
+    if (!node) return;
+    const { x, y } = panRef.current;
+    node.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${zoomRef.current})`;
+  }, []);
+
+  useEffect(() => {
+    panRef.current = getPan();
+  }, []);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+    applyTransform();
+  }, [zoom, applyTransform]);
 
   // Held in refs, not state: re-rendering on every pointermove would fight the
   // drag it is supposed to be tracking.
@@ -47,20 +71,17 @@ export function StageCanvas({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const onPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const held = drag.current;
-      if (!held || held.id !== event.pointerId) return;
-      const dx = event.clientX - held.x;
-      const dy = event.clientY - held.y;
-      if (!held.moved && Math.hypot(dx, dy) < DRAG_SLOP) return;
-      held.moved = true;
-      held.x = event.clientX;
-      held.y = event.clientY;
-      pan(dx, dy);
-    },
-    [pan],
-  );
+  const onPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const held = drag.current;
+    if (!held || held.id !== event.pointerId) return;
+    const dx = event.clientX - held.x;
+    const dy = event.clientY - held.y;
+    if (!held.moved && Math.hypot(dx, dy) < DRAG_SLOP) return;
+    held.moved = true;
+    held.x = event.clientX;
+    held.y = event.clientY;
+    movePan(dx, dy);
+  }, []);
 
   const onPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (drag.current?.id === event.pointerId) drag.current = null;
@@ -87,9 +108,12 @@ export function StageCanvas({ children }: { children: React.ReactNode }) {
     (event: React.MouseEvent<HTMLElement>) => {
       if ((event.target as HTMLElement).closest(".surface, .orb, .fan, .dock")) return;
       resetStage();
+      resetPan();
     },
     [resetStage],
   );
+
+  useEffect(() => subscribePan(() => applyTransform()), [applyTransform]);
 
   return (
     <main
@@ -102,42 +126,22 @@ export function StageCanvas({ children }: { children: React.ReactNode }) {
       onDoubleClick={onDoubleClick}
     >
       {/*
-        The grid lives here, OUTSIDE the world layer, and reads the transform
-        through CSS custom properties. The cells are sized and offset in screen
-        space from those, so the floor stays crisp and evenly spaced at any
-        zoom instead of scaling its own line weight.
+        No grid here. The floor is the backdrop's, driven by the same two
+        numbers — see `.bd-grid`. Drawing a second one inside the stage was what
+        made the floor beat against itself.
       */}
-      <StageGrid />
-      <div className="world" style={world}>
+      <div className="world" ref={worldRef}>
         {children}
       </div>
+
+      {/*
+        Outside the world layer on purpose. The rail is about the ROOM, so it
+        stays put while you pan and zoom the thing it is describing — a readout
+        that scrolls off screen with the content is not a readout.
+      */}
+      <ActivityRail />
     </main>
   );
 }
 
-function StageGrid() {
-  const { panX, panY, zoom } = useWorkspace((s) => s.stage);
-  // A 32px cell in world space is ~24px on screen at 0.75x and ~40px at 1.25x.
-  // Below about 12px the lines turn into a solid wash, so the cell doubles
-  // instead — the same trick ComfyUI and Figma use.
-  const base = 32;
-  let cell = base * zoom;
-  while (cell < 12) cell *= 4;
-  while (cell > 96) cell /= 4;
 
-  return (
-    <div
-      className="stage-grid"
-      aria-hidden="true"
-      style={
-        {
-          "--cell": `${cell}px`,
-          "--cell-x": `${((panX % cell) + cell) % cell}px`,
-          "--cell-y": `${((panY % cell) + cell) % cell}px`,
-        } as React.CSSProperties
-      }
-    />
-  );
-}
-
-export { clampZoom };

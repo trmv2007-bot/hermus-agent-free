@@ -104,6 +104,10 @@ export function clampZoom(value: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
 }
 
+/** The room's snap grid. Arrow keys move by exactly this, and the floor's
+ *  major lines land on it, so a snapped panel edge sits on a visible line. */
+export const GRID_STEP = 24;
+
 export const KIND_TITLES: Record<SurfaceKind, string> = {
   chat: "Conversation",
   mission: "Mission",

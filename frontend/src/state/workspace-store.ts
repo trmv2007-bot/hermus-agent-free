@@ -7,6 +7,7 @@
 // makes self-modification observable and reversible.
 
 import { create } from "zustand";
+import { getPan, movePan, resetPan, setPan } from "./pan";
 import {
   CASCADE_STEP,
   KIND_TITLES,
@@ -20,6 +21,7 @@ import {
   type SurfaceKind,
   type StageView,
   clampZoom,
+  GRID_STEP,
   type SurfaceSource,
   type Viewport,
 } from "./surfaces";
@@ -99,6 +101,15 @@ interface WorkspaceState {
   closeSurface: (id: string) => void;
   focusSurface: (id: string) => void;
   moveSurface: (id: string, x: number, y: number) => void;
+  /**
+   * Nudge a surface by whole grid steps, for the arrow keys.
+   *
+   * Snapping is the point. Free-pixel dragging is right for a mouse and wrong
+   * for a keyboard: pressing Right ten times and landing on the same pixel you
+   * started from is how "it did not move" happens. Landing exactly one cell
+   * away every time is what makes the arrows feel like movement.
+   */
+  nudgeSurface: (id: string, dx: number, dy: number) => void;
   resizeSurface: (id: string, w: number, h: number) => void;
   dockSurface: (id: string, side: DockSide) => void;
   minimizeSurface: (id: string) => void;
@@ -315,6 +326,22 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  nudgeSurface: (id, dx, dy) => {
+    const state = get();
+    const surface = state.surfaces[id];
+    if (!surface) return;
+    const step = GRID_STEP;
+    // Snap the TARGET to the grid rather than adding a step to wherever the
+    // surface happens to be. A surface the mouse left at an off-grid position
+    // then joins the grid on the first keypress instead of staying permanently
+    // one pixel off it forever, which is what accumulating a raw step gives.
+    const gx = surface.geometry.x;
+    const gy = surface.geometry.y;
+    const targetX = Math.round((gx + dx * step) / step) * step;
+    const targetY = Math.round((gy + dy * step) / step) * step;
+    get().moveSurface(id, targetX, targetY);
+  },
+
   moveSurface: (id, x, y) => {
     const state = get();
     const surface = state.surfaces[id];
@@ -494,7 +521,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
    * storing real coordinates in world space and the transform does the rest.
    */
   setStage: (stage) => set((state) => ({ stage: typeof stage === "function" ? stage(state.stage) : stage })),
-  panBy: (dx, dy) => set((state) => ({ stage: { ...state.stage, panX: state.stage.panX + dx, panY: state.stage.panY + dy } })),
+  // Panning is NOT written into this store. It goes to state/pan.ts, which
+  // applies it to the element directly — a pan used to make a new `stage`
+  // object and re-render every open panel, thirty times a second on key repeat.
+  // The store keeps zoom only, which is what panel drag maths actually reads.
+  panBy: (dx, dy) => {
+    movePan(dx, dy);
+  },
 
   /**
    * Zoom about a fixed screen point, the way every canvas does it.
@@ -503,16 +536,33 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
    * under the cursor out from under the cursor. This keeps it still: the world
    * point under the cursor is solved for before the zoom and re-projected after.
    */
-  zoomAt: (screenX, screenY, factor) =>
-    set((state) => {
-      const next = clampZoom(state.stage.zoom * factor);
-      if (next === state.stage.zoom) return state;
-      const worldX = (screenX - state.stage.panX) / state.stage.zoom;
-      const worldY = (screenY - state.stage.panY) / state.stage.zoom;
-      return { stage: { zoom: next, panX: screenX - worldX * next, panY: screenY - worldY * next } };
-    }),
+  zoomAt: (screenX, screenY, factor) => {
+    const { zoom: current } = useWorkspace.getState().stage;
+    const next = clampZoom(current * factor);
+    if (next === current) return;
+    // The pan lives in state/pan.ts, NOT in this store's stage — the world
+    // transform reads it from there. Writing the anchor correction back into
+    // `stage.panX` computed the right pan and then threw it away, so every zoom
+    // landed on the stage origin instead of on the cursor.
+    const { x: panX, y: panY } = getPan();
+    const worldX = (screenX - panX) / current;
+    const worldY = (screenY - panY) / current;
+    // Keep the world point under the cursor fixed:
+    //   (screenX - panX') / next  ==  worldX
+    //   panX' == screenX - worldX * next
+    // There is no `+ panX` term. Adding one — which a refactor here did — is
+    // self-consistent for a single notch and wrong for every one after it, so
+    // it only shows up as zoom that drifts the longer you keep zooming.
+    const nextPanX = screenX - worldX * next;
+    const nextPanY = screenY - worldY * next;
+    setPan(nextPanX, nextPanY);
+    set({ stage: { panX: nextPanX, panY: nextPanY, zoom: next } });
+  },
 
-  resetStage: () => set({ stage: { panX: 0, panY: 0, zoom: 1 } }),
+  resetStage: () => {
+    resetPan();
+    set({ stage: { panX: 0, panY: 0, zoom: 1 } });
+  },
 
   /**
    * Apply agent- or shell-supplied operations. Ids are resolved against the state

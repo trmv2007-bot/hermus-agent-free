@@ -5,9 +5,32 @@
 // surface to re-render.
 
 import { useEffect, useRef } from "react";
+import { useWorkspace } from "../state/workspace-store";
+import { getPan, subscribePan } from "../state/pan";
+import { gridCell } from "../state/grid";
 
+/** The world-space cell. Everything else derives from this. */
 export function Backdrop() {
   const ref = useRef<HTMLDivElement>(null);
+  const zoom = useWorkspace((state) => state.stage.zoom);
+
+  // The floor follows the same pan and zoom as the world layer, so panning moves
+  // the ground with the panels instead of sliding the room over a static floor.
+  // Subscribed to rather than read from state, because panning does not go
+  // through React — this is one style write, not a re-render of the tree.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const paint = () => {
+      const { x, y } = getPan();
+      const cell = gridCell(zoom);
+      el.style.setProperty("--cell", `${cell}px`);
+      el.style.setProperty("--cell-x", `${((x % cell) + cell) % cell}px`);
+      el.style.setProperty("--cell-y", `${((y % cell) + cell) % cell}px`);
+    };
+    paint();
+    return subscribePan(paint);
+  }, [zoom]);
 
   useEffect(() => {
     const el = ref.current;

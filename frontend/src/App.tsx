@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectStream, STREAMS, type LinkState } from "./realtime/connection";
 import { stowedSurfaces, useWorkspace, visibleSurfaces } from "./state/workspace-store";
+import { GRID_STEP } from "./state/surfaces";
 import { SurfaceFrame } from "./shell/SurfaceFrame";
 import { CommandBar } from "./shell/CommandBar";
 import { Backdrop } from "./shell/Backdrop";
@@ -19,6 +20,23 @@ import { StageCanvas } from "./shell/StageCanvas";
 
 const ACTIVATION_WINDOW_MS = 1500;
 const CLICKS_TO_ENTER = 3;
+
+/** Shift multiplies the step, so you can cross the room without 30 presses. */
+const GRID_STEP_FAST = GRID_STEP * 4;
+
+const ARROWS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
+
+/** Elements that own the arrow keys when they have focus. */
+function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
 
 function useLiveLink() {
   const [states, setStates] = useState<Record<string, LinkState>>({ fleet: "connecting" });
@@ -77,11 +95,32 @@ function WorkspaceShell() {
   }, [setViewport]);
 
   // Alt+W is the keyboard path; it does not need the wordmark to be reachable.
+  // The arrow keys are the grid path: with a panel focused they nudge it one
+  // cell, and with nothing focused they pan the room. Both snap, so a keypress
+  // always produces a visible, repeatable change.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "w") {
         event.preventDefault();
         useWorkspace.getState().toggleImmersive();
+        return;
+      }
+      const direction = ARROWS[event.key];
+      if (!direction) return;
+      // A text field owns its own arrow keys — history recall in the terminal,
+      // caret movement in a search box. Stealing them there is the single most
+      // annoying thing a global shortcut can do.
+      if (isTyping(event.target) || event.altKey || event.metaKey || event.ctrlKey) return;
+
+      const store = useWorkspace.getState();
+      const step = event.shiftKey ? GRID_STEP_FAST : GRID_STEP;
+      const target = store.focusedId;
+      if (target && store.surfaces[target]) {
+        event.preventDefault();
+        store.nudgeSurface(target, direction[0], direction[1]);
+      } else {
+        event.preventDefault();
+        store.panBy(-direction[0] * step, -direction[1] * step);
       }
     };
     window.addEventListener("keydown", onKey);

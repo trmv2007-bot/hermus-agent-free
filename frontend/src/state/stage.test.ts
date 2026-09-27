@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { useWorkspace } from "../state/workspace-store";
 import { clampZoom, ZOOM_MAX, ZOOM_MIN } from "./surfaces";
+import { getPan } from "./pan";
+
+// The pan lives in state/pan.ts now and the zoom in the store, so a test that
+// reads both has to read both from where they actually are. Reading pan from
+// the store silently tests a value nothing renders, which is how a wrong zoom
+// formula can pass here and fail under the cursor.
+function view() {
+  const { zoom } = useWorkspace.getState().stage;
+  return { panX: getPan().x, panY: getPan().y, zoom };
+}
 
 /** Where a world point lands on screen. Inverse of the zoom maths. */
 function toScreen(worldX: number, worldY: number, stage: { panX: number; panY: number; zoom: number }) {
@@ -12,7 +22,7 @@ function under(sx: number, sy: number, stage: { panX: number; panY: number; zoom
 }
 
 const store = () => useWorkspace.getState();
-const stage = () => store().stage;
+const stage = () => view();
 
 describe("stage zoom", () => {
   it("clamps to a range where panels stay usable", () => {
@@ -34,7 +44,7 @@ describe("stage zoom", () => {
     expect(after.x).toBeCloseTo(640, 6);
     expect(after.y).toBeCloseTo(360, 6);
     // And it really did zoom, rather than the maths being a no-op.
-    expect(stage().zoom).toBeCloseTo(1.44, 6);
+    expect(store().stage.zoom).toBeCloseTo(1.44, 6);
   });
 
   it("keeps the cursor point fixed when zooming out from an off-centre point", () => {
@@ -45,7 +55,7 @@ describe("stage zoom", () => {
     const after = toScreen(anchor.x, anchor.y, stage());
     expect(after.x).toBeCloseTo(1200, 6);
     expect(after.y).toBeCloseTo(200, 6);
-    expect(stage().zoom).toBeLessThan(1);
+    expect(store().stage.zoom).toBeLessThan(1);
   });
 
   it("does not drift when you zoom in and back out at the same point", () => {
@@ -63,18 +73,18 @@ describe("stage zoom", () => {
   it("pans by whole screen pixels", () => {
     store().resetStage();
     store().panBy(30, -12);
-    expect(stage().panX).toBe(30);
-    expect(stage().panY).toBe(-12);
+    expect(getPan().x).toBe(30);
+    expect(getPan().y).toBe(-12);
     store().panBy(5, 5);
-    expect(stage().panX).toBe(35);
+    expect(getPan().x).toBe(35);
   });
 
   it("refuses to zoom past the limits instead of inverting or stretching", () => {
     store().resetStage();
     for (let i = 0; i < 40; i += 1) store().zoomAt(400, 300, 1.4);
-    expect(stage().zoom).toBe(ZOOM_MAX);
+    expect(store().stage.zoom).toBe(ZOOM_MAX);
     for (let i = 0; i < 80; i += 1) store().zoomAt(400, 300, 1 / 1.4);
-    expect(stage().zoom).toBe(ZOOM_MIN);
+    expect(store().stage.zoom).toBe(ZOOM_MIN);
   });
 
   it("resets to the origin and 1:1", () => {

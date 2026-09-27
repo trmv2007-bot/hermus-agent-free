@@ -65,6 +65,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // .tsx as well as .ts: the interaction tests render real components, and a
+    // glob that skipped them would report a green suite while the very
+    // behaviour they cover went unexercised.
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });

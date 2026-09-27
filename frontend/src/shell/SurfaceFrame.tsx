@@ -12,6 +12,7 @@
 
 import { useRef, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
+import { screenDeltaToWorld } from "../state/coords";
 import { MIN_H, MIN_W, type Surface } from "../state/surfaces";
 import { rendererFor } from "../surfaces/registry";
 
@@ -33,12 +34,13 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
   const moveSurface = useWorkspace((state) => state.moveSurface);
   const resizeSurface = useWorkspace((state) => state.resizeSurface);
   // Pointer deltas are screen pixels; surface geometry is world coordinates.
-  const zoom = useWorkspace((state) => state.stage.zoom);
+  // See state/coords.ts for why the stage origin has to come out too.
+  const stage = useWorkspace((state) => state.stage);
   const focusSurface = useWorkspace((state) => state.focusSurface);
   const closeSurface = useWorkspace((state) => state.closeSurface);
   const minimizeSurface = useWorkspace((state) => state.minimizeSurface);
   const viewport = useWorkspace((state) => state.viewport);
-  const drag = useRef<{ dx: number; dy: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; gx: number; gy: number } | null>(null);
   const grow = useRef<{ ox: number; oy: number; w: number; h: number; x: number; y: number; dir: Dir } | null>(null);
   // Held geometry drives the lifted look and the live readout. It is component
   // state on purpose: it is view furniture, and the store stays the layout owner.
@@ -61,11 +63,11 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
     // The stage is zoomable, and pointer deltas arrive in SCREEN pixels while
     // surfaces store WORLD coordinates. Without dividing by the zoom, dragging
     // an edge at 2x moves the panel twice as far as the cursor travelled — the
-    // classic "resizing feels broken when zoomed" bug.
-    const rawX = event.clientX - held0.ox;
-    const rawY = event.clientY - held0.oy;
-    const dx = rawX / zoom;
-    const dy = rawY / zoom;
+    // classic "resizing feels broken when zoomed" bug. A move is a delta, so
+    // only the zoom applies.
+    const step = screenDeltaToWorld(stage, event.clientX - held0.ox, event.clientY - held0.oy);
+    const dx = step.x;
+    const dy = step.y;
 
     let { x, y, w, h } = held0;
 
@@ -154,13 +156,19 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
         className="surface-bar"
         onPointerDown={(event) => {
           if ((event.target as HTMLElement).closest("button")) return;
-          drag.current = { dx: event.clientX - geometry.x, dy: event.clientY - geometry.y };
+          // A move is a DELTA, so only the zoom applies — the stage origin and
+          // the pan cancel out between two screen positions. Reconstructing an
+          // absolute position here is what made panels slide away from where
+          // they were at any zoom other than 1:1.
+          drag.current = { x: event.clientX, y: event.clientY, gx: geometry.x, gy: geometry.y };
           setHeld(true);
           (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
           if (!drag.current) return;
-          moveSurface(surface.id, (event.clientX - drag.current.dx) / zoom, (event.clientY - drag.current.dy) / zoom);
+          const held0 = drag.current;
+          const step = screenDeltaToWorld(stage, event.clientX - held0.x, event.clientY - held0.y);
+          moveSurface(surface.id, held0.gx + step.x, held0.gy + step.y);
         }}
         onPointerUp={() => {
           drag.current = null;

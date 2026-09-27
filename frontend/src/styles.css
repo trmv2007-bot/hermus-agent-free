@@ -711,21 +711,6 @@ button.ghost {
   cursor: grabbing;
 }
 
-/* The floor. Drawn in SCREEN space with the cell size derived from the zoom, so
-   the lines stay 1px and evenly spaced at any scale. A grid inside `.world`
-   would scale its own line weight — soft at high zoom, a solid wash at low. */
-.stage-grid {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background-image:
-    linear-gradient(to right, rgb(109 141 255 / 7%) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(109 141 255 / 7%) 1px, transparent 1px);
-  background-size: var(--cell, 32px) var(--cell, 32px);
-  background-position: var(--cell-x, 0) var(--cell-y, 0);
-}
-
 /* Everything that lives in world coordinates. One transform, applied to the
    whole room, which is why surfaces never have to know they are zoomable. */
 .world {
@@ -1370,12 +1355,24 @@ button.ghost {
   background: radial-gradient(120% 90% at 50% 0%, #0d1424 0%, var(--bg) 55%, #04060b 100%);
 }
 
+/* THE FLOOR.
+   There is exactly one grid in the room. A second one was added inside the stage
+   for the zoom/pan work and the two overlapped: two 1px line sets at different
+   sizes and offsets, so the floor beat and the eye read it as a moiré pattern
+   rather than as depth.
+
+   So the backdrop's grid is the one, and it is driven by the stage transform:
+   the cell size scales with the zoom and the offset follows the pan, both
+   derived from the same two numbers the world layer uses. The cell steps by 4x
+   when it would fall under 12px (a solid wash) or rise over 96px (too sparse to
+   read as a floor), which is what keeps the lines even at every scale. */
 .bd-grid {
   position: absolute;
   inset: -25%;
   background-image: linear-gradient(rgb(109 141 255 / 7%) 1px, transparent 1px),
     linear-gradient(90deg, rgb(109 141 255 / 7%) 1px, transparent 1px);
-  background-size: 52px 52px;
+  background-size: var(--cell, 52px) var(--cell, 52px);
+  background-position: var(--cell-x, 0) var(--cell-y, 0);
   transform: translate3d(calc(var(--px) * -26px), calc(var(--py) * -26px), 0);
   mask-image: radial-gradient(85% 70% at 50% 45%, #000 25%, transparent 80%);
 }
@@ -1414,17 +1411,22 @@ button.ghost {
   transition: none;
 }
 
-/* A panel is open, so the core stands down: it shrinks toward its own centre and
-   fades out rather than sitting on top of live work. Transform-origin is the
-   centre so it collapses in place instead of sliding toward a corner. It is
-   still in the DOM and still focusable-by-keyboard logic, just not visible —
-   pointer-events go with it so it cannot catch a click meant for the panel. */
-.orb-tucked {
-  transform: scale(0.35);
-  opacity: 0;
-  pointer-events: none;
+/* A panel is open, so the core steps back to a companion beside it.
+   It used to hide outright — `scale(0.35); opacity: 0; pointer-events: none`.
+   That was wrong: a status light which disappears the moment you open something
+   cannot be told apart from one that is simply broken, and the core is the only
+   way back into the room, so hiding it took the launcher with it. It dims and
+   recedes now, and stays clickable. */
+.orb-dim {
+  opacity: 0.5;
+  filter: saturate(0.72);
+  transition: opacity 240ms ease, filter 240ms ease;
+}
+
+.orb-dim:hover,
+.orb-dim:focus-visible {
+  opacity: 0.92;
   filter: none;
-  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
 }
 
 .orb:active {
@@ -1540,7 +1542,10 @@ button.ghost {
 .fan {
   position: absolute;
   inset: 0;
-  z-index: 870;
+  /* Above the core. The scrim covers the whole stage, so if the core paints
+     over the fan the scrim swallows every click on an icon — which looks
+     exactly like the icons being unclickable. */
+  z-index: 900;
   pointer-events: none;
 }
 
@@ -1686,3 +1691,156 @@ button.ghost {
   }
 }
 
+/* The activity rail.
+   The room collects real runtime events and used to display none of them, so it
+   looked exactly as alive as a screenshot: a grid, a glow, and a word. This is
+   that signal, finally drawn.
+
+   It is quiet on purpose. Small monospace, low contrast, at the edge of the
+   room. Its job is to make the room legible in a glance — the difference
+   between a tool that is working and a project that renders. Anything that
+   competed with the panels for attention would defeat that. */
+
+.rail {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 232px;
+  z-index: 860;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 10px;
+  border: 1px solid rgb(109 141 255 / 12%);
+  border-radius: 10px;
+  background: rgb(6 10 18 / 55%);
+  backdrop-filter: blur(10px);
+  /* The rail is furniture, not a target. It must never swallow a drag meant for
+     the room behind it, or the canvas stops panning wherever the rail sits. */
+  pointer-events: none;
+  font-family: var(--mono);
+  overflow: hidden;
+}
+
+.rail-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgb(109 141 255 / 12%);
+  flex: 0 0 auto;
+}
+
+.rail-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rail-stat em {
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.rail-stat b {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: right;
+  /* A model id is long and the rail is narrow. Truncating the middle keeps both
+     ends readable, which matters because the ends are what identify it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.rail-stat[data-tone="ok"] b {
+  color: var(--accent);
+}
+
+.rail-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.rail-feed li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  animation: rail-in 260ms ease both;
+}
+
+/* Newest first is a design choice, and the reason is worth stating: the newest
+   event is the one you are waiting on, so it must not be below the fold. */
+.rail-feed li:first-child .rail-what {
+  color: var(--accent);
+}
+
+.rail-when {
+  color: var(--muted);
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-what {
+  color: rgb(214 226 240 / 80%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-detail {
+  color: var(--muted);
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An empty room that claims to be busy is worse than an empty room that says so. */
+.rail-idle {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--muted);
+  opacity: 0.5;
+  line-height: 1.5;
+}
+
+@keyframes rail-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-feed li {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .rail {
+    display: none;
+  }
+}
