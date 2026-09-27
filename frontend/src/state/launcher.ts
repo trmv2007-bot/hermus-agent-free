@@ -14,8 +14,6 @@ export const EDGE = 12;
 export const ARC_SPAN_DEG = 100;
 const SLOT_GAP = 8;
 const MIN_RADIUS = 92;
-/** How far the pod sits off the orb's left edge when it is docked against it. */
-export const DOCK_GAP = 14;
 
 /** Kinds the operator can call up by hand. Every one either renders a real panel
  * or says plainly that it is not built. */
@@ -83,37 +81,6 @@ export function fanCenterDeg(anchor: { x: number; y: number }, podSize: number, 
 
 function clampUnit(value: number): number {
   return Math.min(1, Math.max(-1, value));
-}
-
-/**
- * Where the pod belongs, given where the orb is.
- *
- * The room has one focus, so the pod follows it instead of holding a corner the
- * user already abandoned:
- *
- *  - orb small (beside a panel, or pushed aside in a crowded room) → dock
- *    against the orb's left edge, vertically centred on it. One object.
- *  - orb hero-sized and centred (an empty room) → stand off at mid-left, clear
- *    of the core, because parking on top of a 300px orb would hide it.
- *  - no orb position yet → the bottom-left corner it has always used.
- *
- * A dragged pod always wins; this only decides the resting place.
- */
-export function podHome(orb: { x: number; y: number; size: number } | null, viewport: Viewport): { x: number; y: number } {
-  if (!orb || !viewport.w || !viewport.h) {
-    return { x: EDGE, y: Math.max(EDGE, viewport.h - POD_SIZE - EDGE) };
-  }
-  if (orb.size > 200) {
-    // Hero orb: stand at mid-height on the left, not on top of the core.
-    return {
-      x: EDGE,
-      y: Math.round(viewport.h / 2 - POD_SIZE / 2),
-    };
-  }
-  return {
-    x: Math.max(EDGE, orb.x - POD_SIZE - DOCK_GAP),
-    y: Math.round(orb.y + orb.size / 2 - POD_SIZE / 2),
-  };
 }
 
 /**

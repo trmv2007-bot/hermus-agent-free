@@ -69,6 +69,18 @@ interface WorkspaceState {
    */
   orbPlacement: { x: number; y: number; size: number } | null;
   setOrbPlacement: (placement: { x: number; y: number; size: number } | null) => void;
+  /**
+   * Whether the launch fan is unfolded.
+   *
+   * This lives in the store, not in the Launcher, because the fan has two
+   * controls in two different components: the core opens it and the core closes
+   * it. Local component state would mean the core could not open a fan it does
+   * not render, and the two would disagree about whether it is open.
+   */
+  fanOpen: boolean;
+  /** Accepts a value or an updater, so a click handler can toggle without
+   *  reading state it does not own. */
+  setFanOpen: (open: boolean | ((previous: boolean) => boolean)) => void;
   /** Readouts that arrived but were not given screen space, newest first. */
   tray: { label: string; detail: string; at: number }[];
   /** Operations that were refused, with the reason — never silently dropped. */
@@ -215,6 +227,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   immersive: false,
   viewport: { w: 1280, h: 800 },
   orbPlacement: null,
+  fanOpen: false,
   tray: [],
   rejected: [],
 
@@ -461,6 +474,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   toggleImmersive: () => set({ immersive: !get().immersive }),
   setViewport: (viewport) => set({ viewport }),
   setOrbPlacement: (orbPlacement) => set({ orbPlacement }),
+  setFanOpen: (fanOpen) =>
+    set((state) => ({ fanOpen: typeof fanOpen === "function" ? fanOpen(state.fanOpen) : fanOpen })),
 
   /**
    * Apply agent- or shell-supplied operations. Ids are resolved against the state

@@ -521,8 +521,6 @@ export function ComputerPanel() {
  */
 export function MemoryPanel() {
   const [query, setQuery] = useState("");
-  const [draft, setDraft] = useState("");
-  const [note, setNote] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
   const recall = useQuery({
     queryKey: ["memory", query],
@@ -566,29 +564,16 @@ export function MemoryPanel() {
         </ul>
       ) : null}
 
-      <form
-        className="memory-write"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (!draft.trim()) return;
-          const result = await api.memoryRemember(draft.trim());
-          setNote(result?.success ? "stored" : (result?.error ?? "the store refused it"));
-          if (result?.success) {
-            setDraft("");
-            setSearched(true);
-            recall.refetch();
-          }
-        }}
-      >
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="tell Hermus something to remember"
-          aria-label="write to memory"
-        />
-        <button type="submit">remember</button>
-      </form>
-      {note ? <p className="muted tiny">{note}</p> : null}
+      {/* No write box. The store already writes on its own after every turn —
+          core/agent.py::_persist_memory2 records the turn as episodic, promotes
+          explicit preferences to semantic, and turns a clean multi-tool sequence
+          into a procedural recipe. A manual field next to that implied you had
+          to remember things by hand, which is both untrue and the reason people
+          forget to. */}
+      <p className="muted tiny memory-auto">
+        Hermus writes to this on its own after every turn — what happened, what you
+        said you prefer, and which tool sequences worked.
+      </p>
     </div>
   );
 }

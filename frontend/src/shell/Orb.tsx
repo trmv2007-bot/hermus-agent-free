@@ -61,8 +61,12 @@ export function Orb() {
   const viewport = useWorkspace((state) => state.viewport);
   const tray = useWorkspace((state) => state.tray);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drag = useRef<{ dx: number; dy: number } | null>(null);
+  // `moved` is how far the press travelled, which is what separates a click on
+  // the core (open the fan) from a drag (reposition it).
+  const drag = useRef<{ dx: number; dy: number; moved: number } | null>(null);
   const [manual, setManual] = useState<{ x: number; y: number } | null>(null);
+  const setFanOpen = useWorkspace((store) => store.setFanOpen);
+  const fanOpen = useWorkspace((store) => store.fanOpen);
 
   const visible = useMemo(() => visibleSurfaces({ surfaces, order }), [surfaces, order]);
   const auto = useMemo(() => placeOrb(visible, viewport), [visible, viewport]);
@@ -101,23 +105,44 @@ export function Orb() {
 
   return (
     <div
-      className={`orb orb-${state} ${manual ? "orb-manual" : "orb-auto"} ${size < ORB_SIZE ? "orb-small" : ""}`}
+      className={`orb orb-${state} ${manual ? "orb-manual" : "orb-auto"} ${size < ORB_SIZE ? "orb-small" : ""} ${
+        // The core is the launcher, so it hides while a panel is open — the
+        // panel's own controls take over and a floating circle over live work is
+        // just an obstruction. It comes back the moment the room empties.
+        visible.length ? "orb-tucked" : ""
+      }`}
       style={{ left: position.x, top: position.y, width: size, height: size }}
       title={title}
-      role="img"
-      aria-label={`HERMUS core — ${STATE_LABEL[state]}`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={fanOpen}
+      aria-label={`HERMUS core — ${STATE_LABEL[state]}. Open the launch fan.`}
       onPointerDown={(event) => {
-        drag.current = { dx: event.clientX - position.x, dy: event.clientY - position.y };
+        drag.current = { dx: event.clientX - position.x, dy: event.clientY - position.y, moved: 0 };
         (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
-        if (!drag.current) return;
-        setManual({ x: event.clientX - drag.current.dx, y: event.clientY - drag.current.dy });
+        const held = drag.current;
+        if (!held) return;
+        const x = event.clientX - held.dx;
+        const y = event.clientY - held.dy;
+        held.moved = Math.max(held.moved, Math.hypot(x - position.x, y - position.y));
+        setManual({ x, y });
       }}
       onPointerUp={() => {
+        const held = drag.current;
         drag.current = null;
+        // A press that never travelled is a click, and a click on the core opens
+        // the launch fan. The core IS the launcher now — there is no second dot
+        // in the room, so this is the only way in.
+        if (!held || held.moved <= 4) setFanOpen((current) => !current);
       }}
       onDoubleClick={() => setManual(null)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        setFanOpen((current) => !current);
+      }}
     >
       <canvas ref={canvasRef} style={{ width: size, height: size }} />
       <span className="orb-state">{STATE_LABEL[state]}</span>

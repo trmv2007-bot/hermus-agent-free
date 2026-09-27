@@ -291,6 +291,11 @@ code,
   border-radius: 50%;
 }
 
+.memory-auto {
+  margin: 0;
+  line-height: 1.5;
+}
+
 .memory-hits {
   list-style: none;
   margin: 0;
@@ -626,19 +631,34 @@ button.ghost {
 .surface-tools {
   display: flex;
   gap: 2px;
+  align-items: center;
 }
 
-.surface-tools button {
+/* Two buttons, shaped like window controls rather than toolbar buttons: a fixed
+   hit area, a glyph centred in it, and no label that reflows the bar. */
+.win-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
   border: 0;
+  border-radius: 4px;
   background: none;
   color: var(--muted);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.surface-tools button.on {
-  color: var(--accent);
+.win-btn:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--text);
+}
+
+.win-close:hover {
+  background: rgb(248 113 113 / 22%);
+  color: #fecaca;
 }
 
 .surface-body {
@@ -648,14 +668,87 @@ button.ghost {
   background: rgb(7 10 16 / 62%);
 }
 
-.grip {
+/* Eight resize handles. Invisible until the panel is hovered, then a 6px band
+   on each edge and a 14px corner — the same affordance every window uses. The
+   old single bottom-right grip was 16px in one corner of a window you had to
+   aim at, which is technically resizable and practically not. */
+.resize-handle {
   position: absolute;
-  right: 0;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.surface:hover .resize-handle,
+.surface.held .resize-handle,
+.resize-handle:focus-visible {
+  opacity: 1;
+}
+
+.edge-n,
+.edge-s {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.edge-n {
+  top: 0;
+  cursor: ns-resize;
+}
+
+.edge-s {
   bottom: 0;
-  width: 16px;
-  height: 16px;
+  cursor: ns-resize;
+}
+
+.edge-e,
+.edge-w {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.edge-e {
+  right: 0;
+}
+
+.edge-w {
+  left: 0;
+}
+
+.edge-ne,
+.edge-nw,
+.edge-se,
+.edge-sw {
+  width: 14px;
+  height: 14px;
+}
+
+.edge-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.edge-nw {
+  top: 0;
+  left: 0;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 42%, rgb(79 209 197 / 45%) 42%);
+}
+
+.edge-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+.edge-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
 }
 
 .panel h3 {
@@ -878,7 +971,6 @@ button.ghost {
     transition: opacity 220ms ease, transform 260ms ease;
   }
 
-  .pod,
   .hud-exit,
   .diagnostics-toggle,
   .link-state {
@@ -1086,6 +1178,19 @@ button.ghost {
   transition: none;
 }
 
+/* A panel is open, so the core stands down: it shrinks toward its own centre and
+   fades out rather than sitting on top of live work. Transform-origin is the
+   centre so it collapses in place instead of sliding toward a corner. It is
+   still in the DOM and still focusable-by-keyboard logic, just not visible —
+   pointer-events go with it so it cannot catch a click meant for the panel. */
+.orb-tucked {
+  transform: scale(0.35);
+  opacity: 0;
+  pointer-events: none;
+  filter: none;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
+}
+
 .orb:active {
   cursor: grabbing;
 }
@@ -1116,65 +1221,6 @@ button.ghost {
 
 .orb-small .orb-state {
   display: none;
-}
-
-/* The launch pod and the fan of surfaces it opens. */
-.pod {
-  position: absolute;
-  z-index: 900;
-  display: grid;
-  place-items: center;
-  border-radius: 15px;
-  border: 1px solid var(--edge);
-  background: var(--glass);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 55%);
-  cursor: grab;
-  touch-action: none;
-  /* The pod glides between resting places — docked against the core, or at
-     mid-left when the core has the room. Without a transition it teleports every
-     time a surface opens or closes, which reads as a glitch rather than a
-     movement. Excluded while dragging so the pod tracks the pointer exactly. */
-  transition: left 420ms cubic-bezier(0.22, 1, 0.36, 1), top 420ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.pod-dragging {
-  transition: none;
-}
-
-.pod:hover,
-.pod:focus-visible {
-  border-color: rgb(79 209 197 / 65%);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 55%), 0 0 26px -6px rgb(79 209 197 / 60%);
-  outline: none;
-}
-
-.pod-core {
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg, var(--accent), var(--accent-cool), var(--accent-warm), var(--accent));
-  opacity: 0.85;
-}
-
-/* The pod is 46px and used to be a bare dot, so it read as a second orb. The
-   label sits under it and names the thing, not its state. */
-.pod-label {
-  position: absolute;
-  top: calc(100% + 5px);
-  left: 50%;
-  transform: translateX(-50%);
-  font: 9px/1 var(--mono);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted);
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.pod:hover .pod-label,
-.pod:focus-visible .pod-label {
-  color: var(--text);
 }
 
 /* Fan slots are 38px squares on an arc, so the name cannot go inside without
@@ -1228,35 +1274,33 @@ button.ghost {
   right: calc(100% + 7px);
 }
 
-.pod-open {
-  border-color: rgb(79 209 197 / 70%);
-}
-
-/* The pod acknowledges the click that opened the fan — it brightens and its
-   core spins up, so the press has a visible consequence on the thing that was
-   pressed rather than only on what appeared. */
-.pod-open .pod-core {
-  animation: pod-pulse 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  opacity: 1;
-}
-
-@keyframes pod-pulse {
-  0% {
-    transform: scale(1);
-  }
-  45% {
-    transform: scale(1.28);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
 .fan {
   position: absolute;
   inset: 0;
   z-index: 870;
   pointer-events: none;
+}
+
+/* Clicking anywhere off the fan closes it. The core is small and sits under the
+   arc, so without this a dismiss meant hitting a moving target. */
+.fan-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgb(4 8 14 / 32%);
+  cursor: default;
+  pointer-events: auto;
+  animation: fan-scrim-in 220ms ease both;
+}
+
+@keyframes fan-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .fan-arc {
@@ -1368,13 +1412,6 @@ button.ghost {
     animation: glow-drift 34s ease-in-out infinite alternate;
   }
 
-  .pod-core {
-    animation: pod-spin 7s linear infinite;
-  }
-
-  .pod-open .pod-core {
-    animation-duration: 2s;
-  }
 }
 
 @keyframes glow-drift {
@@ -1386,8 +1423,3 @@ button.ghost {
   }
 }
 
-@keyframes pod-spin {
-  to {
-    transform: rotate(1turn);
-  }
-}

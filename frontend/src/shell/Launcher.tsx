@@ -1,163 +1,129 @@
-// The launch pod: the room's only always-visible way to create a surface.
+// The launch fan.
 //
-// Drag it anywhere and the fan it opens bends to whichever quadrant has room, so
-// it stays usable against any edge. Positions are stage-local — the chrome band
-// along the bottom is not somewhere to put a clickable thing.
+// There is no separate pod any more. The core and the launcher were two circles
+// in one room that both answered "what can I open", and the operator had to work
+// out which was which. They are one object now: the orb IS the launcher, the fan
+// unfolds from it, and when the room is full the core shrinks beside a panel and
+// carries the launcher with it rather than leaving a second dot behind.
+//
+// The fan still needs an anchor, and it has exactly one: the core's own
+// placement, published through the store as `orbPlacement`. The orb paints itself
+// from placeOrb(); recomputing that here would let the two answers drift.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useWorkspace } from "../state/workspace-store";
 import { KIND_TITLES } from "../state/surfaces";
-import { fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE, podHome } from "../state/launcher";
-
-/** Past this many pixels the pointer intends a drag, not a click. */
-const DRAG_THRESHOLD = 5;
+import { EDGE, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "../state/launcher";
 
 export function Launcher() {
   // The store's viewport is the room itself: the stage with the dock rail taken
   // off the bottom, measured by the shell.
   const room = useWorkspace((state) => state.viewport);
-  const orbPlacement = useWorkspace((state) => state.orbPlacement);
+  const placement = useWorkspace((state) => state.orbPlacement);
+  const fanOpen = useWorkspace((state) => state.fanOpen);
+  const setFanOpen = useWorkspace((state) => state.setFanOpen);
   const openSurface = useWorkspace((state) => state.openSurface);
-  const [placed, setPlaced] = useState<{ x: number; y: number } | null>(null);
-  const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
-  // Dragging is state, not a ref: the CSS transition has to be switched off the
-  // instant the drag starts, and a ref change does not re-render, so the pod
-  // would lag a frame behind the pointer on pickup.
-  const [dragging, setDragging] = useState(false);
-  // True only for the frame the fan opens. Left true, the fly-out animation
-  // would re-run on every reposition while the pod glides to a new home; left
-  // false forever, it would never run at all. One frame is the whole window.
+  // True only for the frame the fan opens. Left true, the fly-out would replay on
+  // every reposition while the core glides to a new home; left false, it never runs.
   const [entering, setEntering] = useState(false);
-  const pointer = useRef<{ ox: number; oy: number; from: { x: number; y: number }; moved: number } | null>(null);
 
   useEffect(() => {
-    if (!open) {
+    if (!fanOpen) {
       setEntering(false);
       return;
     }
     setEntering(true);
     const clear = window.setTimeout(() => setEntering(false), 420);
     return () => window.clearTimeout(clear);
-  }, [open]);
+  }, [fanOpen]);
 
-  // The pod has one home and it belongs to the orb: docked against a small core,
-  // standing off at mid-left when the core has the room to itself. A pod the
-  // user dragged keeps its own position until they double-click to re-dock.
-  const home = podHome(orbPlacement, room);
-  const anchor = placed ?? home;
+  // Escape closes it from the keyboard, since the scrim is a pointer target.
+  useEffect(() => {
+    if (!fanOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFanOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fanOpen, setFanOpen]);
+
+  if (!fanOpen) return null;
+
+  // Anchored to the core's CENTRE, expressed as a box origin so the existing arc
+  // maths (which expects a top-left pod position) keeps working unchanged.
+  const centre = placement
+    ? { x: placement.x + placement.size / 2 - POD_SIZE / 2, y: placement.y + placement.size / 2 - POD_SIZE / 2 }
+    : { x: EDGE, y: Math.max(EDGE, room.h - POD_SIZE - EDGE) };
+
   // Seven slots of trigonometry, cheaper than the memo that would track it.
-  const slots = fanSlots(anchor, room, LAUNCHER_KINDS);
+  const slots = fanSlots(centre, room, LAUNCHER_KINDS);
   const radius = fanRadius(LAUNCHER_KINDS.length, SLOT_SIZE);
 
   return (
-    <>
-      {open ? (
-        <div className="fan" aria-label="surfaces you can open">
-          {/* A hairline of the arc the entries sit on — the fan reads as an
-              instrument, not as a menu that happens to be crooked. */}
-          <span
-            className="fan-arc"
-            style={{
-              left: anchor.x + POD_SIZE / 2 - radius,
-              top: anchor.y + POD_SIZE / 2 - radius,
-              width: radius * 2,
-              height: radius * 2,
-            }}
-            aria-hidden="true"
-          />
-          {slots.map((slot, index) => (
-            <button
-              key={slot.kind}
-              type="button"
-              className="fan-slot"
-              // A label hanging off the right edge of the window is worse than no
-              // label, so slots in the left half anchor their text inward.
-              data-side={slot.x < anchor.x ? "left" : "right"}
-              // Marks the first paint after the fan opens, so the fly-out runs
-              // once on entry and not on every later reposition.
-              data-enter={entering ? "true" : "false"}
-              style={
-                {
-                  left: slot.x,
-                  top: slot.y,
-                  width: SLOT_SIZE,
-                  height: SLOT_SIZE,
-                  // Launch vector: from where this entry sits back to the pod's
-                  // centre, so every one flies out along its own route.
-                  "--fan-x": `${anchor.x + POD_SIZE / 2 - (slot.x + SLOT_SIZE / 2)}px`,
-                  "--fan-y": `${anchor.y + POD_SIZE / 2 - (slot.y + SLOT_SIZE / 2)}px`,
-                  animationDelay: entering ? `${index * 26}ms` : undefined,
-                  transitionDelay: `${index * 22}ms`,
-                } as React.CSSProperties
-              }
-              onPointerEnter={() => setHovered(slot.kind)}
-              onPointerLeave={() => setHovered((current) => (current === slot.kind ? null : current))}
-              onFocus={() => setHovered(slot.kind)}
-              onBlur={() => setHovered((current) => (current === slot.kind ? null : current))}
-              onClick={() => {
-                openSurface({ kind: slot.kind, source: { kind: "user" } });
-                setOpen(false);
-              }}
-            >
-              <span aria-hidden="true">{KIND_GLYPH[slot.kind]}</span>
-              {/* The name lives in the room, not in a native tooltip. A `title`
-                  renders as a browser box that follows the cursor, is not part of
-                  the workspace, and disappears the moment you look away — which
-                  is exactly the "name box below the cursor" complaint. This is a
-                  real element inside the dashboard, so it survives a screenshot,
-                  a second monitor, and a screen reader. */}
-              <span className="fan-slot-label" data-active={hovered === slot.kind}>
-                {KIND_TITLES[slot.kind]}
-              </span>
-              <span className="sr-only">open {slot.kind} surface</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
+    <div className="fan" aria-label="surfaces you can open">
+      {/* Clicking the dimmed field closes the fan. Without it the only way out is
+          the core itself, a small target for a large gesture. */}
+      <button type="button" className="fan-scrim" aria-label="close the launch fan" onClick={() => setFanOpen(false)} />
 
-      <div
-        className={`pod ${open ? "pod-open" : ""} ${dragging ? "pod-dragging" : ""}`}
-        style={{ left: anchor.x, top: anchor.y, width: POD_SIZE, height: POD_SIZE }}
-        onPointerDown={(event) => {
-          pointer.current = { ox: event.clientX - anchor.x, oy: event.clientY - anchor.y, from: anchor, moved: 0 };
-          setDragging(true);
-          event.currentTarget.setPointerCapture(event.pointerId);
+      {/* A hairline of the arc the entries sit on — the fan reads as an
+          instrument, not as a menu that happens to be crooked. */}
+      <span
+        className="fan-arc"
+        style={{
+          left: centre.x + POD_SIZE / 2 - radius,
+          top: centre.y + POD_SIZE / 2 - radius,
+          width: radius * 2,
+          height: radius * 2,
         }}
-        onPointerMove={(event) => {
-          const held = pointer.current;
-          if (!held) return;
-          const next = { x: event.clientX - held.ox, y: event.clientY - held.oy };
-          // Distance from where the press landed, not accumulated jitter: a pod
-          // nudged back to its start is still a click.
-          held.moved = Math.max(held.moved, Math.hypot(next.x - held.from.x, next.y - held.from.y));
-          if (held.moved > DRAG_THRESHOLD) setPlaced(next);
-        }}
-        onPointerUp={() => {
-          const wasDrag = (pointer.current?.moved ?? 0) > DRAG_THRESHOLD;
-          pointer.current = null;
-          setDragging(false);
-          if (!wasDrag) setOpen((current) => !current);
-        }}
-        onDoubleClick={() => setPlaced(null)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          setOpen((current) => !current);
-        }}
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
-        aria-label="launch surfaces — drag to move, double-click to re-dock to the core"
-      >
-        <span className="pod-core" aria-hidden="true" />
-        {/* Two unlabaged circles in one room is a guessing game: the orb reports
-            state, the pod opens things, and nothing on screen said which was
-            which. The pod names itself; the orb already names its state. */}
-        <span className="pod-label" aria-hidden="true">
-          surfaces
-        </span>
-      </div>
-    </>
+        aria-hidden="true"
+      />
+      {slots.map((slot, index) => (
+        <button
+          key={slot.kind}
+          type="button"
+          className="fan-slot"
+          // A label hanging off the right edge of the window is worse than no
+          // label, so slots in the left half anchor their text inward.
+          data-side={slot.x < centre.x ? "left" : "right"}
+          // Marks the first paint after the fan opens, so the fly-out runs
+          // once on entry and not on every later reposition.
+          data-enter={entering ? "true" : "false"}
+          style={
+            {
+              left: slot.x,
+              top: slot.y,
+              width: SLOT_SIZE,
+              height: SLOT_SIZE,
+              // Launch vector: from where this entry sits back to the core's
+              // centre, so every one flies out along its own route.
+              "--fan-x": `${centre.x + POD_SIZE / 2 - (slot.x + SLOT_SIZE / 2)}px`,
+              "--fan-y": `${centre.y + POD_SIZE / 2 - (slot.y + SLOT_SIZE / 2)}px`,
+              animationDelay: entering ? `${index * 26}ms` : undefined,
+              transitionDelay: `${index * 22}ms`,
+            } as React.CSSProperties
+          }
+          onPointerEnter={() => setHovered(slot.kind)}
+          onPointerLeave={() => setHovered((current) => (current === slot.kind ? null : current))}
+          onFocus={() => setHovered(slot.kind)}
+          onBlur={() => setHovered((current) => (current === slot.kind ? null : current))}
+          onClick={() => {
+            openSurface({ kind: slot.kind, source: { kind: "user" } });
+            setFanOpen(false);
+          }}
+        >
+          <span aria-hidden="true">{KIND_GLYPH[slot.kind]}</span>
+          {/* The name lives in the room, not in a native tooltip. A `title`
+              renders as a browser box that follows the cursor, is not part of the
+              workspace, and disappears the moment you look away — which is exactly
+              the "name box below the cursor" complaint. This is a real element
+              inside the dashboard, so it survives a screenshot and a screen reader. */}
+          <span className="fan-slot-label" data-active={hovered === slot.kind}>
+            {KIND_TITLES[slot.kind]}
+          </span>
+          <span className="sr-only">open {slot.kind} surface</span>
+        </button>
+      ))}
+    </div>
   );
 }

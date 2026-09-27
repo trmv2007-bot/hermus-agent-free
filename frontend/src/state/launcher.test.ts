@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Viewport } from "./surfaces";
-import { EDGE, fanCenterDeg, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, podHome, SLOT_SIZE } from "./launcher";
+import { EDGE, fanCenterDeg, fanRadius, fanSlots, KIND_GLYPH, LAUNCHER_KINDS, POD_SIZE, SLOT_SIZE } from "./launcher";
 
 const ROOM: Viewport = { w: 1280, h: 708 };
 const KINDS = LAUNCHER_KINDS;
@@ -89,27 +89,6 @@ describe("fanCenterDeg", () => {
     const a = fanCenterDeg({ x: 300, y: 400 }, POD_SIZE, ROOM);
     const b = fanCenterDeg({ x: 310, y: 400 }, POD_SIZE, ROOM);
     expect(Math.abs(a - b)).toBeLessThan(10);
-  });
-});
-
-describe("podHome", () => {
-  it("docks against the core's left edge when the orb is small", () => {
-    const spot = podHome({ x: 400, y: 300, size: 56 }, ROOM);
-    expect(spot.x + POD_SIZE).toBeLessThanOrEqual(400);
-    expect(spot.y + POD_SIZE / 2).toBeCloseTo(300 + 56 / 2, 0);
-  });
-
-  it("stands off at mid-left when the core has the room to itself", () => {
-    // A hero orb is centred, so docking on it would hide the core entirely.
-    const spot = podHome({ x: 490, y: 200, size: 300 }, ROOM);
-    expect(spot.x).toBe(EDGE);
-    expect(spot.y + POD_SIZE / 2).toBeCloseTo(ROOM.h / 2, 0);
-  });
-
-  it("falls back to the lower-left corner before the orb has reported in", () => {
-    const spot = podHome(null, ROOM);
-    expect(spot.x).toBe(EDGE);
-    expect(spot.y).toBe(ROOM.h - POD_SIZE - EDGE);
   });
 });
 
