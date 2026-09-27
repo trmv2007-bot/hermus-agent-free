@@ -5,6 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, GatewayError, type MissionView, type SandboxRun } from "../api/client";
+import { MemoryConstellation } from "./Constellation";
 import { digest } from "../realtime/events";
 
 import { useWorkspace } from "../state/workspace-store";
@@ -528,9 +529,13 @@ export function MemoryPanel() {
     queryFn: () => api.memoryRecall(query, 20),
     enabled: searched && query.trim().length > 0,
   });
+  const graph = useQuery({ queryKey: ["memory-graph"], queryFn: () => api.memoryGraph(400) });
 
   return (
     <div className="panel memory">
+      {graph.isError ? <Probe error={graph.error} path="/memory2/graph" /> : null}
+      {graph.data ? <MemoryConstellation graph={graph.data} /> : null}
+
       <form
         className="memory-search"
         onSubmit={(event) => {

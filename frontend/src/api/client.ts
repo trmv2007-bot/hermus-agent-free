@@ -142,6 +142,45 @@ export interface MemoryHit {
   [key: string]: unknown;
 }
 
+/**
+ * `GET /memory2/graph` — the memory store as a constellation.
+ *
+ * The store keeps NO link table, so `edges` is derived from shared project,
+ * shared kind and shared content words. `edgesAreInferred` is the backend saying
+ * so out loud, and the UI is expected to show it: a graph that looks stored but
+ * is actually inferred is the false-success shape §4 forbids.
+ */
+export interface MemoryNode {
+  id: string | number;
+  label: string;
+  full: string;
+  kind: string;
+  project: string;
+  importance: number;
+  radius: number;
+  pinned: boolean;
+  ts?: string | null;
+  tokens: number;
+}
+
+export interface MemoryEdge {
+  source: string | number;
+  target: string | number;
+  /** 0..1 — how strong the inferred relationship is. */
+  weight: number;
+  reasons: string[];
+}
+
+export interface MemoryGraph {
+  nodes: MemoryNode[];
+  edges: MemoryEdge[];
+  kinds: string[];
+  edges_are_inferred: boolean;
+  note: string;
+  truncated_nodes: number;
+  truncated_edges: boolean;
+}
+
 /** `GET /sandbox/status` — which isolation backend is actually in force. */
 export interface SandboxStatus {
   configured?: string;
@@ -306,6 +345,7 @@ export const api = {
    */
   memoryRemember: (content: string, kind = "semantic", project?: string) =>
     post<{ success?: boolean; error?: string; id?: string | number }>("/memory2/remember", { content, kind, project }),
+  memoryGraph: (limit = 400) => get<MemoryGraph>("/memory2/graph?limit=" + limit),
   sandboxStatus: () => get<SandboxStatus>("/sandbox/status"),
   sandboxRun: (command: string, opts?: { timeout?: number; cwd?: string; network?: boolean }) =>
     post<SandboxRun>("/sandbox/run", { command, ...opts }),
