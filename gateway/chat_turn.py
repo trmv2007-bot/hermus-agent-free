@@ -161,6 +161,50 @@ def _last_user_text(messages: list[dict]) -> str:
     return ""
 
 
+def _retrieve_context(question: str, limit: int = 3) -> str:
+    """Anything already stored locally that is relevant to this question.
+
+    This is what makes the memory store part of the conversation rather than a
+    feature you visit. The agent path already did this; the direct chat path
+    did not, so a fact you had ingested was unreachable by asking for it, and
+    the only retrieval that ever ran was web search -- which is how the model
+    could answer "I checked the search results [1][2][3]" while citing the
+    internet for something that was sitting in its own database.
+
+    Returns an empty string when there is nothing genuinely relevant, and an
+    empty string is the correct answer most of the time. Injecting low-scoring
+    context teaches the model to treat everything it is told as relevant, which
+    is how a local store ends up making answers worse.
+    """
+    if not question or len(question.strip()) < 4:
+        return ""
+    try:
+        from core.embeddings import embedding_store
+
+        result = embedding_store.hybrid_search(question, limit=limit)
+    except Exception:
+        return ""
+
+    rows = (result or {}).get("results") or []
+    # A store that has not been reindexed returns rows whose vectors cannot be
+    # compared at all; cosine scores them 0.0 and they are indistinguishable
+    # from "nothing matched". Better to say nothing than to quote a document
+    # the search never actually found.
+    try:
+        stale = embedding_store.stale_count()
+    except Exception:
+        stale = 0
+    if stale:
+        return ""
+
+    picked = [r for r in rows if float(r.get("score") or 0) >= 0.35][:limit]
+    if not picked:
+        return ""
+
+    lines = [f"- {r['content'][:400]}" for r in picked]
+    return "Relevant things you already know (from local notes, not the web):\n" + "\n".join(lines)
+
+
 def build_messages(text: str, history: Any = None, system: Any = None) -> list[dict[str, str]]:
     """The message list for one turn: system, cleaned history, the new ask."""
     messages = [
@@ -689,7 +733,22 @@ async def run_turn(
     ``activity``, ``keepalive``, ``replace``, ``grounded``/``escalated``,
     ``error``, ``final``.
     """
+    # Local memory first, and cheaply: one SQLite lookup plus one embed, against
+    # a 190-second agent turn. It is also the only retrieval that consults what
+    # HERMUS has actually been told, so without it every answer comes from the
+    # model or the web and never from you.
+    try:
+        context = await asyncio.to_thread(_retrieve_context, text)
+    except Exception:
+        context = ""
+
     messages = build_messages(text, history, system)
+    if context:
+        # Folded into the system message rather than appended as a user turn:
+        # it is background the model should use, not something it said, and a
+        # fake user message is a small lie about who is talking.
+        messages[0]["content"] = f"{messages[0]['content']}\n\n{context}"
+
     started = time.monotonic()
 
     # Progress first, so the panel has something honest to show during the

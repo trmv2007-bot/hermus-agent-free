@@ -108,3 +108,19 @@ async def pull_model(req: PullRequest) -> StreamingResponse:
         yield f"data: {json.dumps({'type': 'done' if rc == 0 else 'error', 'model': tag, 'returncode': rc})}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+@router.post("/embeddings/reindex")
+async def reindex_embeddings() -> dict[str, Any]:
+    """Re-embed stored rows with the current backend.
+
+    Separate from pull and separate from ingest because it is neither: it
+    rewrites vectors for text that is already stored, and it is the thing you
+    run after the embedding model changes underneath a populated database.
+    """
+    from core.embeddings import embedding_store
+
+    try:
+        return embedding_store.reindex()
+    except Exception as exc:  # noqa: BLE001 - surfaced to the caller
+        raise HTTPException(status_code=500, detail=f"reindex failed: {exc}") from exc
+

@@ -115,14 +115,71 @@ class EmbeddingStore:
         """Always available — hash fallback if Ollama embed model missing."""
         return True
 
+    def stale_count(self) -> int:
+        """Rows embedded by a different backend, and therefore unreadable now.
+
+        This is reported rather than hidden. A 256-dim hash vector scored
+        against a 768-dim query is not a wrong answer, it is *no* answer --
+        cosine returns 0.0 on a dimension mismatch. So a store that half
+        migrated looks like it half works: BM25 still finds the old rows, the
+        vector part silently does not, and the symptom is "retrieval got worse
+        and I cannot say why". Naming the number is the only way out of that.
+        """
+        self._ensure_backend()
+        with using(self.db_path, owner="embeddings") as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM embeddings WHERE dim != ?", (self._dim,))
+            return cur.fetchone()[0]
+
+    def reindex(self) -> dict:
+        """Re-embed stored rows in place with the current backend.
+
+        Self-contained on purpose: the chunk text is already in the table, so
+        this needs neither the original files nor a network round trip. Stale
+        rows keep their content and gain a current-dimension vector; rows that
+        fail are left alone and reported rather than deleted, because losing a
+        document is worse than leaving it unfindable.
+        """
+        self._ensure_backend()
+        with using(self.db_path, owner="embeddings") as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, content FROM embeddings WHERE dim != ?", (self._dim,)
+            )
+            stale = cur.fetchall()
+
+            reindexed, failed = 0, []
+            for row_id, content in stale:
+                try:
+                    vec = self.embed(content or "")
+                    cur.execute(
+                        "UPDATE embeddings SET vector = ?, dim = ?, backend = ? WHERE id = ?",
+                        (_pack_vector(vec), self._dim, self._backend, row_id),
+                    )
+                    reindexed += 1
+                except Exception as exc:  # noqa: BLE001 - counted and reported
+                    failed.append({"id": row_id, "error": str(exc)[:120]})
+            conn.commit()
+
+        return {
+            "reindexed": reindexed,
+            "failed": failed,
+            "remaining_stale": self.stale_count(),
+            "backend": self._backend,
+            "dim": self._dim,
+        }
+
     def backend_info(self) -> dict:
         self._ensure_backend()
+        stale = self.stale_count()
         return {
             "backend": self._backend,
             "model": self.model if self._backend == "ollama" else "hash-fallback",
             "dim": self._dim,
             "db": str(self.db_path),
             "count": self.count(),
+            "stale": stale,
+            "needs_reindex": stale > 0,
         }
 
     def _ensure_backend(self):
@@ -133,12 +190,21 @@ class EmbeddingStore:
             self._backend = "hash"
             self._dim = FALLBACK_DIM
             return
-        # Probe Ollama embeddings
+        # Probe Ollama embeddings.
+        #
+        # The timeout here has to cover a cold model load, not just the request.
+        # This was 5s, and loading nomic-embed-text into an idle daemon takes
+        # about that long -- so the first probe after a restart timed out, and
+        # because the verdict was cached on the instance the process stayed on
+        # hash embeddings for its whole life. Every later request would have
+        # succeeded; only the one unlucky first one decided, and it decided
+        # permanently. The 60s below matches the timeout the real embed call
+        # already used, so the probe is never the weakest link.
         try:
             resp = requests.post(
                 f"{self.ollama_url}/api/embeddings",
                 json={"model": self.model, "prompt": "ping"},
-                timeout=5,
+                timeout=60,
             )
             if resp.status_code == 200:
                 data = resp.json()
