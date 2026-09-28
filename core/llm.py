@@ -18,16 +18,30 @@ import requests
 
 from .aio import get_async_client, run_sync
 from .cache import llm_cache
+import logging
+
 from .config import config
+
+_log = logging.getLogger(__name__)
 from .providers import get_provider, parse_model_ref
 from .token_counter import token_counter
 
 
 class LLMResponse:
-    def __init__(self, content: str, tool_calls: list[dict] | None = None, usage: dict | None = None):
+    def __init__(
+        self,
+        content: str,
+        tool_calls: list[dict] | None = None,
+        usage: dict | None = None,
+        logprobs: list | None = None,
+    ):
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage or {}
+        # Per-token logprobs when the provider returned them. The confidence bar
+        # reads these instead of asking the model how sure it is, because a
+        # model asked that will say it is sure either way.
+        self.logprobs = logprobs or []
 
 
 class FreeLLM:
@@ -66,6 +80,18 @@ class FreeLLM:
                 self.model_name = model or _preset_for_prefix.get("default_model")
         else:
             self.provider, self.model_name = parse_model_ref(self.model)
+            # parse_model_ref always strips the provider prefix, which is right
+            # for most hosts and wrong for NVIDIA. Re-attach it there too, so
+            # the model name is identical whichever branch built it. Otherwise
+            # the streaming path and the blocking path disagree about the same
+            # model, and only one of them works.
+            _prefix_preset = get_provider(self.provider) or {}
+            if (
+                self.model_name
+                and "/" not in self.model_name
+                and _prefix_preset.get("model_needs_provider_prefix")
+            ):
+                self.model_name = f"{self.provider}/{self.model_name}"
         self.api_key_override = api_key
         self.base_url_override = base_url
         # True when the caller deliberately chose this provider/endpoint for this
@@ -366,6 +392,11 @@ class FreeLLM:
 
     def _call_ollama(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Ollama — prefer OpenAI-compatible /v1, fallback to native /api/chat."""
+        # Logprobs are what make the confidence bar measurable, so they are
+        # requested here rather than left to the caller: a caller that has to
+        # know to ask is a caller that forgets, and then every local answer
+        # looks confident because nothing was measured.
+        want_logprobs = True
         # Try openai compat first (tool calling better on newer ollama)
         try:
             from .openai_compat import CompatAPIError, chat_completions
@@ -384,12 +415,23 @@ class FreeLLM:
                     base_url=base_v1,
                     tools=tools,
                     timeout=self.timeout,
+                    logprobs=want_logprobs,
                 )
-                return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                return LLMResponse(
+                    resp.content, resp.tool_calls, usage=resp.usage, logprobs=resp.logprobs
+                )
             except CompatAPIError:
+                # Only this failure means "the compat endpoint is not usable,
+                # try the native one". Anything else used to land in the bare
+                # except below, which silently swallowed a TypeError and
+                # downgraded the whole call to the native path - so a
+                # mistyped kwarg looked exactly like a provider that had no
+                # logprobs, and cost a long time to find.
                 pass
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # Logged, not swallowed. The native endpoint below is the real
+            # fallback, and reaching it should never be silent.
+            _log.warning("ollama compat path unavailable (%s: %s); using native /api/chat", type(exc).__name__, exc)
 
         # Native Ollama chat
         prompt_tokens = token_counter.count_messages(messages) + token_counter.count_tools(tools)
@@ -617,6 +659,27 @@ class FreeLLM:
         content = data.get("response", "")
         return LLMResponse(content)
 
+    def _set_tier(self, provider: str, model_name: str) -> None:
+        """Point this instance at a provider/model, honouring the prefix rule.
+
+        Both the constructor and the two-tier router need this, and they were
+        doing it differently. The router set ``model_name`` straight from
+        ``split_model_ref``, which always strips the provider prefix, so a call
+        that got routed to NVIDIA went out as "nemotron-3-super-120b-a12b" and
+        came back "404 page not found" - intermittently, because a pinned
+        session used the constructor's correct name and a routed one did not.
+        That is the worst shape for this bug: it looked like a flaky provider.
+        """
+        self.provider = (provider or "").lower()
+        self.model_name = model_name or ""
+        preset = get_provider(self.provider) or {}
+        if (
+            self.model_name
+            and "/" not in self.model_name
+            and preset.get("model_needs_provider_prefix")
+        ):
+            self.model_name = f"{self.provider}/{self.model_name}"
+
     # ------------------------------------------------- two-tier model policy
     def _apply_two_tier(self, messages: list[dict], tools: list[dict] = None) -> None:
         """Point this instance at the tier the router picked for this call.
@@ -642,8 +705,7 @@ class FreeLLM:
         except Exception:
             return
         if decision.switched and decision.provider:
-            self.provider = decision.provider
-            self.model_name = decision.model_name
+            self._set_tier(decision.provider, decision.model_name)
         self.last_route = decision
 
     def chat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:

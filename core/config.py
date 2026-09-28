@@ -214,6 +214,19 @@ class Config(BaseSettings):
     # Prompts at or below this many characters go to the local model.
     # 0 disables short-turn routing (everything goes to the main model).
     local_model_max_chars: int = Field(default=280, validation_alias="HERMUS_LOCAL_MODEL_MAX_CHARS")
+    # Which tier handles tool calls. The default sends them to the main model,
+    # because a tool loop needs a model that reliably emits a well-formed call
+    # and a 4B local model does not (measured ~0.50 on BFCL, a coin flip).
+    # Setting this to true inverts that: tools run locally, and the main model
+    # is reserved for the reasoning-heavy turns that are actually worth its
+    # quota. It is a config flag rather than a hard-coded policy because the
+    # right answer depends on the local model in use, not on the router.
+    local_model_handles_tools: bool = Field(default=False, validation_alias="HERMUS_LOCAL_MODEL_HANDLES_TOOLS")
+    # The confidence bar. A local answer whose measured token confidence falls
+    # below this escalates to the main model instead of being returned. 0.55
+    # is a starting point, not a fitted value: raise it to escalate more often,
+    # lower it to trust the small model more. Set to 0 to disable the gate.
+    confidence_bar: float = Field(default=0.55, validation_alias="HERMUS_CONFIDENCE_BAR")
     # Minutes to stay on the local model after a main-model failure.
     local_model_fallback_minutes: int = Field(default=10, validation_alias="HERMUS_LOCAL_FALLBACK_MINUTES")
     auto_select_model: EnvFlag = Field(default=True, validation_alias="HERMUS_AUTO_SELECT_MODEL")

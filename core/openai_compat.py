@@ -34,7 +34,12 @@ class CompatResponse:
         model: str = "",
         latency_ms: int = 0,
         headers: dict | None = None,
+        logprobs: list | None = None,
     ):
+        # Per-token logprobs, when the caller asked for them. The confidence
+        # gate needs these to know whether a small model is actually sure, and
+        # a model asked how sure it is will always say it is.
+        self.logprobs = logprobs or []
         self.content = content or ""
         self.tool_calls = tool_calls or []
         self.usage = usage or {}
@@ -88,6 +93,24 @@ def _parse_tool_calls(msg: dict) -> list[dict]:
             }
         )
     return tool_calls
+
+
+def _extract_logprobs(choice: dict) -> list[float]:
+    """Pull per-token logprobs out of an OpenAI-shaped choice.
+
+    Shape is ``choice["logprobs"]["content"] = [{"logprob": -0.07, ...}, ...]``.
+    Anything unexpected yields an empty list, which the confidence gate treats
+    as "unmeasured" rather than as "confident".
+    """
+    lp = (choice or {}).get("logprobs") or {}
+    items = lp.get("content") if isinstance(lp, dict) else None
+    if not isinstance(items, list):
+        return []
+    out: list[float] = []
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("logprob"), (int, float)):
+            out.append(float(item["logprob"]))
+    return out
 
 
 def _extract_rate_headers(headers: dict) -> dict[str, Any]:
@@ -155,6 +178,7 @@ def _build_chat_request(
     max_tokens: int = None,
     extra_headers: dict = None,
     extra_body: dict = None,
+    logprobs: bool = False,
 ) -> tuple[dict, str, dict, dict]:
     """Pure request builder shared by the sync and async chat paths."""
     preset = get_provider(provider)
@@ -167,6 +191,12 @@ def _build_chat_request(
     }
     if max_tokens:
         body["max_tokens"] = max_tokens
+    if logprobs:
+        # Ollama's /v1 surface takes logprobs + top_logprobs. Asking for the
+        # per-token values is what lets core.confidence measure a real bar
+        # instead of guessing from the text.
+        body["logprobs"] = True
+        body["top_logprobs"] = 2
     norm_tools = _normalize_tools(tools)
     if norm_tools and preset.get("supports_tools", True):
         body["tools"] = norm_tools
@@ -235,6 +265,7 @@ def _parse_chat_response(
         model=data.get("model") or model,
         latency_ms=latency_ms,
         headers=rate,
+        logprobs=_extract_logprobs(choice),
     )
 
 
@@ -250,6 +281,7 @@ def chat_completions(
     timeout: int = 300,
     extra_headers: dict = None,
     extra_body: dict = None,
+    logprobs: bool = False,
 ) -> CompatResponse:
     """
     POST {base}/chat/completions — OpenAI-compatible.
@@ -282,6 +314,7 @@ def chat_completions(
         max_tokens,
         extra_headers,
         extra_body,
+        logprobs,
     )
 
     try:
@@ -407,6 +440,7 @@ def stream_chat_completions(
     timeout: int = 300,
     extra_headers: dict = None,
     on_delta: callable | None = None,
+    logprobs: bool = True,
 ) -> CompatResponse:
     """Streaming (SSE) variant of :func:`chat_completions`.
 
@@ -434,12 +468,19 @@ def stream_chat_completions(
     }
     if max_tokens:
         body["max_tokens"] = max_tokens
+    if logprobs:
+        body["logprobs"] = True
+        body["top_logprobs"] = 2
     norm_tools = _normalize_tools(tools)
     if norm_tools and preset.get("supports_tools", True):
         body["tools"] = norm_tools
         body["tool_choice"] = "auto"
 
     content_parts: list[str] = []
+    # Collected across the stream so the confidence bar can judge a streamed
+    # answer exactly as it judges a blocking one. Without this the gate only
+    # ran on the slow path, which is the path nobody uses.
+    stream_logprobs: list[float] = []
     pending_calls: dict[int, dict[str, Any]] = {}
     usage_raw: dict[str, Any] = {}
     finish_reason = ""
@@ -475,6 +516,8 @@ def stream_chat_completions(
                 if not choices:
                     continue
                 choice = choices[0] or {}
+                for lp in _extract_logprobs(choice):
+                    stream_logprobs.append(lp)
                 finish_reason = choice.get("finish_reason") or finish_reason
                 delta = choice.get("delta") or choice.get("message") or {}
                 piece = delta.get("content")
@@ -540,6 +583,7 @@ def stream_chat_completions(
             raw={"stream": True, "finish_reason": finish_reason},
             model=model,
             latency_ms=latency_ms,
+            logprobs=stream_logprobs,
         )
     except CompatAPIError:
         raise

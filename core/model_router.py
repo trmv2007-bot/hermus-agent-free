@@ -27,6 +27,7 @@ REASON_SAME = "local_is_main_model"
 REASON_SHORT = "short_turn_saves_quota"
 REASON_FALLBACK = "main_model_degraded"
 REASON_TOOLS = "tools_require_main_model"
+REASON_TOOLS_LOCAL = "tools_run_locally"
 
 
 @dataclass(frozen=True)
@@ -87,10 +88,12 @@ class ModelRouter:
         *,
         max_chars: int = 280,
         fallback_minutes: int = 10,
+        local_handles_tools: bool = False,
     ) -> None:
         self.main_model = (main_model or "").strip()
         self.local_model = (local_model or "").strip()
         self.max_chars = max(0, int(max_chars or 0))
+        self.local_handles_tools = bool(local_handles_tools)
         self.fallback_seconds = max(0.0, float(fallback_minutes or 0) * 60.0)
         self._fallback_until: float = 0.0
         self._failures: dict[str, int] = {}
@@ -116,6 +119,13 @@ class ModelRouter:
             decision = self._decide(main_provider, main_name, REASON_SAME, False)
         elif self.fallback_active():
             decision = self._decide(local_provider, local_name, REASON_FALLBACK, True, True)
+        elif has_tools and self.local_handles_tools:
+            # The operator has chosen the local-handles-tools split: talking,
+            # seeing and tool calling all run on the local model, and the main
+            # model is kept for the reasoning-heavy turns that are worth its
+            # quota. This is a deliberate inversion of the default, so it is a
+            # flag and not a change of mind buried in the router.
+            decision = self._decide(local_provider, local_name, REASON_TOOLS_LOCAL, False)
         elif has_tools and self.max_chars > 0 and self.max_chars < 10_000_000:
             # Tool loops need a model that reliably emits tool calls; do not
             # spend those on the small local model.
@@ -218,6 +228,7 @@ def get_router(reload: bool = False) -> ModelRouter:
                 main_model=config.model,
                 local_model=config.local_model,
                 max_chars=config.local_model_max_chars,
+                local_handles_tools=bool(getattr(config, "local_model_handles_tools", False)),
                 fallback_minutes=config.local_model_fallback_minutes,
             )
         except Exception:

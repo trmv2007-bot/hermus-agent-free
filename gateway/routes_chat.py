@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -42,6 +43,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 
 log = logging.getLogger(__name__)
+
+from core.config import config  # noqa: E402
 
 router = APIRouter()
 
@@ -88,6 +91,62 @@ def _clean_history(raw: Any) -> list[dict[str, str]]:
     return out
 
 
+async def _maybe_escalate(
+    answer: str,
+    logprobs,
+    messages: list[dict],
+    elapsed_s: float | None = None,
+) -> tuple[str | None, object | None]:
+    """Ask the main model when the local one is not confident enough.
+
+    The local model answers first because it is free, private and warm. This is
+    the check that decides whether its answer is good enough to show.
+
+    Returns (replacement_text, reading). replacement_text is None when the
+    local answer stands. It never raises: a gate that can fail a conversation
+    is worse than no gate, so every failure here keeps the local answer and
+    says why in the log.
+    """
+    try:
+        from core.confidence import assess
+        from core.config import config
+    except Exception as exc:  # noqa: BLE001
+        log.warning("confidence gate unavailable: %s: %s", type(exc).__name__, exc)
+        return None, None
+
+    bar = float(getattr(config, "confidence_bar", 0.0) or 0.0)
+    if bar <= 0:
+        return None, None
+
+    reading = assess(logprobs, text=answer, bar=bar, elapsed_s=elapsed_s)
+    # No logprobs means unmeasured, not confident, but escalating every call
+    # from a provider that omits them would make the local tier unusable.
+    if not reading.escalate or reading.confidence is None:
+        return None, reading
+
+    from core.config import config as _cfg
+    from core.models import get_model_gateway
+
+    big = _cfg.model
+
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(get_model_gateway().chat, messages, model=big),
+            timeout=TURN_TIMEOUT_S,
+        )
+        text = _extract_text(response)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("escalation to %s failed (%s); keeping the local answer", big, exc)
+        return None, reading
+
+    if not text.strip():
+        # The big model also produced nothing. Showing the local answer beats
+        # an empty bubble, and the frame below already told the client.
+        log.warning("escalation to %s produced no text; keeping the local answer", big)
+        return None, reading
+    return text, reading
+
+
 @router.post("/api/v1/chat")
 async def chat(payload: dict):
     """One conversational turn, streamed as Server-Sent Events.
@@ -128,6 +187,165 @@ async def chat(payload: dict):
             yield _sse(_event("error", {"error": f"no model is reachable: {type(exc).__name__}: {exc}"}))
             return
 
+        # Stream tokens when the provider will, so the first word lands in the
+        # panel while the rest is still being written.
+        #
+        # This is the whole latency story. The provider's first token arrives in
+        # well under a second and the rest trails behind it, so a client that
+        # waits for the final string converts a sub-second first word into a
+        # multi-second silence and then dumps the whole answer at once. The
+        # blocking call below is still the fallback for a provider that cannot
+        # stream, and for the test suite, which asserts on a final frame.
+        queue: asyncio.Queue = asyncio.Queue()
+        _SENTINEL = object()
+        streamed: list[str] = []
+        # Holds the provider's response so the confidence bar can read its
+        # logprobs. This has to exist: without it the assignment in _produce
+        # raises NameError *after* the deltas have already been handed over, so
+        # the turn looks fine to the client and is silently marked truncated in
+        # the log, and the gate never sees a single logprob.
+        result: dict[str, object] = {}
+
+        def _on_delta(chunk: str) -> None:
+            # Called from the provider's worker thread, so the hand-off to the
+            # event loop has to go through a thread-safe call. A bare
+            # queue.put_nowait from another thread is not safe against a
+            # running loop.
+            loop.call_soon_threadsafe(queue.put_nowait, ("delta", chunk))
+
+        def _produce() -> None:
+            try:
+                if payload.get("stream", True):
+                    from core.openai_compat import stream_chat_completions
+
+                    bundle = llm._resolve_bundle()
+                    # Kept, not discarded: the confidence bar reads its
+                    # logprobs, and the streaming path is the one people use.
+                    result["value"] = stream_chat_completions(
+                        provider=llm.provider,
+                        model=llm.model_name,
+                        messages=messages,
+                        api_key=bundle.get("key") or None,
+                        base_url=bundle.get("base_url") or None,
+                        on_delta=_on_delta,
+                    )
+                else:
+                    _ = llm.chat(messages)
+            except Exception as exc:  # noqa: BLE001
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, (_SENTINEL, None))
+
+        loop = asyncio.get_running_loop()
+        worker = threading.Thread(target=_produce, daemon=True, name="chat-turn")
+        worker.start()
+
+        first_token_s: float | None = None
+        deadline = time.monotonic() + TURN_TIMEOUT_S
+        error: Exception | None = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                error = TimeoutError(f"the model did not answer within {TURN_TIMEOUT_S:.0f}s")
+                break
+            try:
+                kind, item = await asyncio.wait_for(queue.get(), timeout=min(remaining, 1.0))
+            except asyncio.TimeoutError:
+                if not worker.is_alive():
+                    break
+                yield _sse(_event("keepalive", {"elapsed_s": round(time.monotonic() - started, 1)}))
+                continue
+            if kind is _SENTINEL:
+                break
+            if kind == "error":
+                error = item
+                break
+            if kind == "event":
+                # A frame about the turn rather than part of the answer, e.g.
+                # the confidence gate handing the question to the main model.
+                # It must not touch `streamed` or it would end up rendered
+                # inside the answer text.
+                for name, data in (item or {}).items():
+                    yield _sse(_event(name, data))
+                continue
+            if item:
+                if first_token_s is None:
+                    first_token_s = round(time.monotonic() - started, 3)
+                    # Tells the panel to move the orb to speaking now, rather
+                    # than at the end, which is what makes it feel alive.
+                    yield _sse(_event("speaking", {"first_token_s": first_token_s}))
+                streamed.append(item)
+                yield _sse(_event("delta", {"text": item}))
+
+        if error is not None:
+            if streamed:
+                # Keep the partial answer. Truncating a real answer because the
+                # deadline hit is worse than showing it short.
+                yield _sse(
+                    _event(
+                        "final",
+                        {
+                            "ok": True,
+                            "content": "".join(streamed),
+                            "elapsed_s": round(time.monotonic() - started, 2),
+                            "first_token_s": first_token_s,
+                            "truncated": True,
+                            "note": str(error),
+                        },
+                    )
+                )
+                return
+            if isinstance(error, TimeoutError):
+                yield _sse(_event("error", {"error": str(error)}))
+            else:
+                log.exception("chat failed")
+                yield _sse(_event("error", {"error": f"{type(error).__name__}: {error}"}))
+            return
+
+        if streamed:
+            # The confidence bar runs here too, not only on the blocking path.
+            # Placing it after this return is what made it dead code: streaming
+            # always succeeded, so the gate never executed once.
+            escalated, reading = await _maybe_escalate(
+                "".join(streamed),
+                getattr(result.get("value"), "logprobs", None),
+                messages,
+                elapsed_s=time.monotonic() - started,
+            )
+            if reading is not None and reading.escalate:
+                # Yielded here rather than pushed onto the queue: the stream loop
+                # has already consumed the sentinel by this point, so anything
+                # queued would sit unread and the user would see a slow answer
+                # with no explanation.
+                yield _sse(
+                    _event(
+                        "escalated",
+                        {
+                            "reason": reading.reason,
+                            "confidence": reading.confidence,
+                            "bar": reading.bar,
+                            "to": config.model,
+                            "replaced": escalated is not None,
+                        },
+                    )
+                )
+            if escalated is not None:
+                streamed = [escalated]
+            yield _sse(
+                _event(
+                    "final",
+                    {
+                        "ok": True,
+                        "content": "".join(streamed),
+                        "elapsed_s": round(time.monotonic() - started, 2),
+                        "first_token_s": first_token_s,
+                    },
+                )
+            )
+            return
+
+        # Nothing streamed, so the provider declined to stream. Do the blocking
+        # call and report it honestly rather than rendering an empty bubble.
         try:
             response = await asyncio.wait_for(asyncio.to_thread(llm.chat, messages), timeout=TURN_TIMEOUT_S)
         except asyncio.TimeoutError:
@@ -139,6 +357,36 @@ async def chat(payload: dict):
             return
 
         answer = _extract_text(response)
+
+        # The confidence bar. The local model answers first because it is free,
+        # private and warm; this is the check that decides whether its answer is
+        # good enough to show or whether the main model should be asked instead.
+        #
+        # It is deliberately after the answer arrives rather than before, so the
+        # fast path pays nothing, and the streamed path runs it too, so a slow
+        # answer is explainable instead of mysterious.
+        escalated, reading = await _maybe_escalate(
+            answer,
+            getattr(response, "logprobs", None),
+            messages,
+            elapsed_s=time.monotonic() - started,
+        )
+        if reading is not None and reading.escalate:
+            yield _sse(
+                _event(
+                    "escalated",
+                    {
+                        "reason": reading.reason,
+                        "confidence": reading.confidence,
+                        "bar": reading.bar,
+                        "to": config.model,
+                        "replaced": escalated is not None,
+                    },
+                )
+            )
+        if escalated is not None:
+            answer = escalated
+
         if not answer.strip():
             # A successful call that produced nothing must not render as an
             # empty bubble, which is indistinguishable from a model that chose
