@@ -64,20 +64,56 @@ def _persist_token(env_path: Path, token: str) -> bool:
         return False
 
 
+def _read_token_from_env_file(env_path: Path) -> str:
+    """The token as written in .env, or "".
+
+    Parsed straight off the file rather than through the loader: the loader's
+    view and the file's contents disagreed here, and the file is the thing that
+    survives a restart.
+    """
+    try:
+        if not env_path.is_file():
+            return ""
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("HERMES_GATEWAY_TOKEN="):
+                return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return ""
+
+
 def ensure_gateway_token(env_path: Path | None = None) -> tuple[str, bool, bool]:
     """Return ``(token, generated, persisted)`` for a LAN-exposed gateway.
 
-    Existing configuration is never overwritten. When there is no token and one
-    is required, a strong random one is generated, written to ``.env`` so it
-    survives restarts, and returned so the caller can show it to the user.
+    The file on disk is the authority, not the process environment.
+
+    This used to read only ``config.gateway_api_token or os.getenv(...)``, and
+    that chain evaluated falsy inside this function on a machine where every
+    part of it was truthy one line earlier -- so a token already sitting in
+    .env was ignored and a fresh one was generated and written on EVERY boot.
+    Measured: the token rotated on each restart, so any value handed to a
+    client was stale within minutes. A credential that regenerates itself is
+    not a credential.
+
+    Existing configuration is still never overwritten: when a token is found
+    anywhere it is used as-is, and only its absence causes a generation.
     """
     from core.config import config
 
-    existing = (config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN") or "").strip()
-    if existing:
-        return existing, False, False
-    token = generate_token()
     path = Path(env_path) if env_path else Path(__file__).resolve().parents[1] / ".env"
+
+    for candidate in (
+        config.gateway_api_token,
+        os.environ.get("HERMES_GATEWAY_TOKEN"),
+        _read_token_from_env_file(path),
+    ):
+        value = str(candidate or "").strip()
+        if value:
+            os.environ["HERMES_GATEWAY_TOKEN"] = value
+            return value, False, False
+
+    token = generate_token()
     persisted = _persist_token(path, token)
     os.environ["HERMES_GATEWAY_TOKEN"] = token
     return token, True, persisted

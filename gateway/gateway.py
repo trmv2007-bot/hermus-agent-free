@@ -339,10 +339,21 @@ async def lifespan(app: FastAPI):
 
     # Before anything that could serve a request. A LAN-exposed control plane
     # with no credential can drive this machine.
-    try:
-        _enforce_bind_policy()
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"[Gateway] bind policy failed: {e}")
+    #
+    # Skipped when the process is not really serving -- under pytest, under
+    # TestClient, during an import. ensure_gateway_token() PERSISTS a generated
+    # token to the developer's real .env, and a test that boots the app with no
+    # token configured then silently rotates the credential on every run. That
+    # happened three times before this guard existed. A security control must
+    # not mutate configuration as a side effect of being imported.
+    if not _is_test_process():
+        try:
+            _enforce_bind_policy()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[Gateway] bind policy failed: {e}")
+    else:
+        logger.info("[Gateway] test process - bind policy not enforced, .env left untouched")
+
 
     # Agent-pool warm-up belongs to the lifespan, not to module import: it used
     # to be a fire-and-forget loop.create_task() behind a bare except in
@@ -1492,6 +1503,20 @@ def setup(platform: str):
             logger.info("Discord token found - bot starts with gateway (mention or DM the bot)")
     else:
         logger.info(f"Platform {platform} setup - just set env token")
+
+
+def _is_test_process() -> bool:
+    """True when this process is a test run rather than a real server.
+
+    Checked from the environment, not from imported test modules: importing
+    test code into the gateway to ask a question would be worse than the
+    problem.
+    """
+    if os.getenv("HERMUS_DISABLE_BIND_POLICY") == "1":
+        return True
+    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PYTEST_VERSION"):
+        return True
+    return "pytest" in Path(sys.argv[0]).name.lower() if sys.argv else False
 
 
 def _enforce_bind_policy() -> tuple[str, str]:
