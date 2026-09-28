@@ -81,6 +81,27 @@ function layout(nodes: MemoryNode[]): Placed[] {
   });
 }
 
+/**
+ * Where a travelling highlight is on a given edge, or -1 when this edge is not
+ * lit right now.
+ *
+ * Deterministic from the clock and the edge index, so it needs no state, no
+ * allocation per frame, and it looks the same every time. Each edge cycles on
+ * its own long period, which means only a few are ever lit at once without
+ * anything having to count them.
+ *
+ * Returns -1 rather than a zero-alpha value for "not lit", so a caller can
+ * skip the draw entirely instead of stroking an invisible circle sixty times a
+ * second.
+ */
+function shimmerPhase(timeMs: number, index: number): number {
+  const period = 9000 + index * 1373;
+  const phase = (timeMs % period) / period;
+  const lit = (phase + index * 0.37) % 1;
+  if (lit > 0.2) return -1;
+  return lit / 0.2;
+}
+
 export function MemoryConstellation({ graph }: { graph: MemoryGraph }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -162,7 +183,9 @@ export function MemoryConstellation({ graph }: { graph: MemoryGraph }) {
       const byId = new Map(projected.map((p) => [String(p.node.id), p]));
 
       ctx.lineWidth = 1;
+      let index = -1;
       for (const edge of graph.edges) {
+        index++;
         const a = byId.get(String(edge.source));
         const b = byId.get(String(edge.target));
         if (!a || !b) continue;
@@ -174,6 +197,26 @@ export function MemoryConstellation({ graph }: { graph: MemoryGraph }) {
         ctx.moveTo(a.sx, a.sy);
         ctx.lineTo(b.sx, b.sy);
         ctx.stroke();
+
+        // A slow pulse travels along a few edges at a time.
+        //
+        // The field already drifts, which is motion, but drift is motion
+        // everywhere at once and so it reads as one object being turned. What
+        // makes a system look like it is doing something rather than merely
+        // existing is a small event that happens on its own and is over. This
+        // is that, and it claims nothing: it is a highlight moving along a
+        // link the backend actually derived, not an invented connection.
+        const phase = shimmerPhase(time, index);
+        if (phase >= 0) {
+          const t = phase;
+          const px = a.sx + (b.sx - a.sx) * t;
+          const py = a.sy + (b.sy - a.sy) * t;
+          const fade = Math.sin(t * Math.PI);
+          ctx.beginPath();
+          ctx.arc(px, py, 2.1, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(180, 240, 255, ${(0.5 * fade).toFixed(3)})`;
+          ctx.fill();
+        }
       }
 
       for (const p of projected) {

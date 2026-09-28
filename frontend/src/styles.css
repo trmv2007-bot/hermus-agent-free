@@ -2026,3 +2026,20 @@ button.pull:disabled { opacity: 0.5; cursor: default; }
   white-space: pre-wrap; max-height: 8rem; overflow-y: auto;
 }
 .models-done { margin-top: 0.7rem; padding: 0.5rem 0.7rem; color: #6fd08c; font-size: 0.8rem; }
+
+/* Press anticipation. The surface lifts on the way the button goes down, not
+   when it comes up. See SurfaceFrame for why that gap matters. */
+.surface.pressing {
+  transform: translateY(-2px) scale(1.004);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(120, 180, 255, 0.22);
+  transition: transform 90ms ease-out, box-shadow 90ms ease-out;
+}
+.surface {
+  transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the acknowledgement, drop the movement. A border change costs nothing
+     and still answers the press. */
+  .surface.pressing { transform: none; box-shadow: 0 0 0 2px rgba(120, 180, 255, 0.35); }
+  .surface { transition: none; }
+}

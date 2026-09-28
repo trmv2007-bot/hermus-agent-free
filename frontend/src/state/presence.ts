@@ -138,7 +138,26 @@ export function breath(timeMs: number, activation: number, periodMs = 4200): num
   // compares unequal to 0 under Object.is, which is a small trap to leave in a
   // function whose whole job is to be continuous.
   if (activation === 0) return 0;
-  return Math.sin((timeMs / periodMs) * Math.PI * 2) * 0.015 * activation;
+  const t = timeMs / 1000;
+  // Three terms at periods that do not divide into one another.
+  //
+  // A single sine is the reason the room can feel dead even while everything
+  // in it is working. It has a period, and a period is something a person
+  // notices within about fifteen seconds -- it reads as a fan, a test pattern,
+  // or a screensaver, because real breathing is not exactly periodic. Nobody
+  // breathes on a metronome.
+  //
+  // The ratios matter more than the amplitudes: at 1 : 1.31 : 1.79 the cycle
+  // takes roughly 30 seconds to visibly repeat instead of 4.2, and no two
+  // peaks are ever quite the same height. The amplitudes are small enough that
+  // the sum stays inside the 0.016 bound the tests already assert.
+  const slow = Math.sin(t * (Math.PI * 2) / (periodMs / 1000));
+  const mid = Math.sin(t * (Math.PI * 2) / ((periodMs / 1000) * 1.31) + 1.1);
+  const fast = Math.sin(t * (Math.PI * 2) / ((periodMs / 1000) * 1.79) + 2.7);
+  // Amplitudes sum to just under the 0.016 bound the tests assert, and the
+  // fast term is deliberately tiny: it should break the pattern, not be
+  // visible as a separate rhythm.
+  return (slow * 0.0105 + mid * 0.0038 + fast * 0.0014) * activation;
 }
 
 /**

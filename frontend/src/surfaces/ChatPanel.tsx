@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { noteInput, releaseAttention } from "../state/attention";
 import { onRoomEvent } from "../realtime/room-events";
 
 interface Turn {
@@ -116,6 +117,10 @@ export function ChatPanel() {
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || busy) return;
+    // The field is done being typed into, so the room stops looking at it and
+    // goes back to the work. The gaze eases out rather than cutting, which is
+    // what makes it read as looking away instead of losing interest.
+    releaseAttention();
 
     const youId = nextId();
     const hermusId = nextId();
@@ -282,7 +287,22 @@ export function ChatPanel() {
           rows={2}
           placeholder="tell HERMUS what to do"
           spellCheck
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            // The room is told where the person is, in viewport fractions, so
+            // the core can look at the field being used. Clearing the field
+            // releases it -- nothing is watching an empty box.
+            const el = event.currentTarget;
+            const r = el.getBoundingClientRect();
+            if (event.target.value.trim()) {
+              noteInput(
+                (r.left + r.width / 2) / window.innerWidth,
+                (r.top + r.height / 2) / window.innerHeight,
+              );
+            } else {
+              releaseAttention();
+            }
+          }}
           onKeyDown={(event) => {
             // Enter sends, Shift+Enter is a newline. The usual inversion is
             // Enter for newline, which makes a chat feel like a textarea.

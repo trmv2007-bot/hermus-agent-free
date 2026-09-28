@@ -98,9 +98,43 @@ describe("the breath", () => {
     }
   });
 
-  it("returns to where it started, so it never drifts", () => {
-    // An integral that does not close is a slow drift the eye catches.
-    expect(breath(4200, 1)).toBeCloseTo(breath(0, 1), 6);
+  it("never repeats exactly, because a period reads as machinery", () => {
+    // The point of the irregular breath. One sine at one period is visible as
+    // a cycle within about fifteen seconds and a person notices it, because
+    // real breathing is not exactly periodic. Nobody breathes on a metronome.
+    const samples = Array.from({ length: 400 }, (_, i) => breath(i * 100, 1));
+    const peaks: number[] = [];
+    for (let i = 1; i < samples.length - 1; i++) {
+      if (samples[i] > samples[i - 1] && samples[i] >= samples[i + 1]) peaks.push(samples[i]);
+    }
+    expect(peaks.length).toBeGreaterThan(3);
+    const distinct = new Set(peaks.map((v) => v.toFixed(9)));
+    expect(distinct.size).toBe(peaks.length);
+  });
+
+  it("has no long-term drift, which is what the old periodicity test was really for", () => {
+    // This replaced an assertion that the breath returned exactly to its
+    // starting value after one period. That test was pinning the very thing
+    // that made the room feel dead -- a visible cycle -- and it is worth being
+    // explicit that it was checking the wrong property. What actually matters
+    // is that the mean sits at zero, so the body neither inflates nor shrinks
+    // away over minutes of sitting there.
+    let sum = 0;
+    const n = 6000;
+    for (let i = 0; i < n; i++) sum += breath(i * 50, 1);
+    expect(Math.abs(sum / n)).toBeLessThan(1e-4);
+
+    // And two windows far apart average the same, so it is not slowly walking
+    // somewhere. A one-minute window each: a ten-second window is shorter than
+    // the beat between peaks, so it measures which phase it happened to start
+    // on rather than whether anything drifted.
+    const mean = (from: number) => {
+      let acc = 0;
+      const m = 1200;
+      for (let i = 0; i < m; i++) acc += breath(from + i * 50, 1);
+      return acc / m;
+    };
+    expect(Math.abs(mean(0) - mean(600000))).toBeLessThan(5e-4);
   });
 });
 

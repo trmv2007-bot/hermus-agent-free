@@ -47,6 +47,15 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
   const [held, setHeld] = useState(false);
   const render = rendererFor(surface.kind);
   const geometry = surface.geometry;
+  // The press lights up on pointerdown rather than on click.
+  //
+  // Click fires when the button is released, so a surface that only responds
+  // to it leaves a gap of however long the press lasted with no feedback at
+  // all. For a fast press that gap is invisible; for anyone who holds the
+  // button, drags half a millimetre, or just has a slower hand, the
+  // interface feels unresponsive even though it is working. Responding on
+  // the way down gives roughly 80ms of lead time for free.
+  const [pressing, setPressing] = useState(false);
 
   /**
    * Resize from any edge, not just the bottom-right corner.
@@ -113,9 +122,15 @@ export function SurfaceFrame({ surface }: { surface: Surface }) {
     <section
       className={`surface ${surface.focused ? "focused" : ""} ${held ? "held" : ""} ${
         surface.dock !== "none" ? `docked docked-${surface.dock}` : ""
-      }`}
+      } ${pressing ? "pressing" : ""}`}
       style={{ left: geometry.x, top: geometry.y, width: geometry.w, height: geometry.h, zIndex: geometry.z }}
-      onPointerDown={() => focusSurface(surface.id)}
+      onPointerDown={() => {
+        setPressing(true);
+        focusSurface(surface.id);
+      }}
+      onPointerUp={() => setPressing(false)}
+      onPointerCancel={() => setPressing(false)}
+      onPointerLeave={() => setPressing(false)}
       aria-label={surface.title}
     >
       <span className="hud-corners" aria-hidden="true" />

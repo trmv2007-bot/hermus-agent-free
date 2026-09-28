@@ -23,6 +23,8 @@
 // microphone nobody is measuring is a lie with a high frame rate.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { coverage, recessionFor, type Rect } from "../state/depth";
+import { nowMs, tickAttention } from "../state/attention";
 import { useWorkspace, visibleSurfaces } from "../state/workspace-store";
 import {
   advance,
@@ -93,6 +95,32 @@ interface PaintOptions {
 }
 
 /**
+ * Turn "the person is typing over there" into a direction the eye can travel in.
+ *
+ * Expressed as a fraction of the Orb's own radius, because that is the unit
+ * the painter already works in, and clamped to a small fraction of it. A core
+ * that lunges across the room to look at something is a camera pan, not a
+ * glance, and it would fight the body rather than lead it.
+ */
+function attentionGaze(
+  att: { target: { x: number; y: number } | null; hold: number },
+  position: { x: number; y: number },
+  orbSize: number,
+): { x: number; y: number } {
+  if (!att.target || att.hold <= 0.001) return { x: 0, y: 0 };
+  const vw = window.innerWidth || 1;
+  const vh = window.innerHeight || 1;
+  const cx = position.x + orbSize / 2;
+  const cy = position.y + orbSize / 2;
+  const dx = att.target.x * vw - cx;
+  const dy = att.target.y * vh - cy;
+  const dist = Math.hypot(dx, dy) || 1;
+  // At most a third of the radius, so the look is legible but restrained.
+  const reach = 0.34 * att.hold;
+  return { x: (dx / dist) * reach, y: (dy / dist) * reach };
+}
+
+/**
  * Draw the Orb from the presence, not from a state.
  *
  * Every animated quantity arrives pre-licensed in `m`, and a channel whose
@@ -105,15 +133,23 @@ function paint(
   p: Presence,
   m: ReturnType<typeof motionFor>,
   opts: PaintOptions,
+  lean: { x: number; y: number } = { x: 0, y: 0 },
+  rec: { glow: number; blur: number; scale: number } = { glow: 1, blur: 0, scale: 1 },
 ) {
   const r = size / 2;
   const [a, b] = HUES[p.state];
   const act = p.activation;
   // Sound without a cast: PresenceState and OrbState are the same set of
   // states, which is what stops this lookup from ever returning undefined.
-  const glow = STATE_GLOW[p.state];
+  // Depth of field and presence glow multiply rather than replace, so a core
+  // that is behind a panel dims whichever state it is in.
+  const glow = STATE_GLOW[p.state] * rec.glow;
 
+  ctx.filter = "none";
   ctx.clearRect(0, 0, size, size);
+  // Softening the whole body, not just the gradient, is what reads as
+  // depth. A blurred edge is the cue the eye uses for distance.
+  if (rec.blur > 0.01) ctx.filter = `blur(${rec.blur.toFixed(2)}px)`;
 
   // --- body ----------------------------------------------------------------
   // The breath is the only clock-driven term left in the whole painter, it is
@@ -122,7 +158,7 @@ function paint(
   const swell = opts.reduceMotion ? 0 : m.swell;
   const cx = r + drift.x;
   const cy = r + drift.y;
-  const radius = r * 0.92 * (1 + swell);
+  const radius = r * 0.92 * (1 + swell) * rec.scale;
 
   const gradient = ctx.createRadialGradient(cx, cy, radius * 0.1, cx, cy, radius);
   gradient.addColorStop(0, tint(b, 0.78 * glow * (0.35 + act * 0.65)));
@@ -140,7 +176,7 @@ function paint(
   ctx.fillStyle = b;
   ctx.globalAlpha = (0.4 + act * 0.5) * glow;
   ctx.beginPath();
-  ctx.ellipse(cx + m.gaze.x * r, cy + m.gaze.y * r, r * 0.12, r * 0.12 * m.aperture, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx + (m.gaze.x + lean.x) * r, cy + (m.gaze.y + lean.y) * r, r * 0.12, r * 0.12 * m.aperture, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalAlpha = 1;
 
@@ -233,6 +269,10 @@ export function Orb() {
   const viewport = useWorkspace((state) => state.viewport);
   const tray = useWorkspace((state) => state.tray);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Surface rects drawn in front of the core, read inside the frame loop. A ref and
+  // not state, because this changes while a panel is dragged and the core must
+  // not re-render sixty times a second because someone moved a window.
+  const frontRects = useRef<Rect[]>([]);
   // `moved` is how far the press travelled, which is what separates a click on
   // the core (open the fan) from a drag (reposition it).
   const drag = useRef<{ screen: ScreenFrame; dx: number; dy: number; startX: number; startY: number; moved: number } | null>(null);
@@ -247,6 +287,15 @@ export function Orb() {
 
   const visible = useMemo(() => visibleSurfaces({ surfaces, order }), [surfaces, order]);
   const auto = useMemo(() => placeOrb(visible, viewport), [visible, viewport]);
+  // The visible surfaces, as world rects, for the depth-of-field check.
+  // World coordinates, which is what `coverage` is written against -- the
+  // core and the panels are positioned in the same space, so mixing screen
+  // pixels in here would silently compare two different coordinate systems.
+  frontRects.current = useMemo(
+    () => visibleSurfaces({ surfaces, order }).map((v) => ({ x: v.geometry.x, y: v.geometry.y, w: v.geometry.w, h: v.geometry.h })),
+    [surfaces, order],
+  );
+
   const position = manual ?? auto;
   // A dragged orb keeps the size the room asked for only while it is where the
   // room put it; once you have placed it yourself it stays full size.
@@ -338,7 +387,18 @@ export function Orb() {
 
       p = advance(p, dt, stateRef.current, rand, eventsRef.current);
       a = advanceAudio(a, dt, p.time, reading);
-      paint(ctx, s, p, motionFor(p, a), opts);
+      // The eye turns toward whoever is typing. This is the whole of it, and it
+      // is worth the line: a system that streams an answer in seconds while
+      // visibly ignoring you for all of them reads as busy, not as listening.
+      const att = tickAttention(dt, nowMs());
+      // A panel drawn over the core is something in front of it, so the core
+      // goes soft and dim rather than being either ignored or hidden. Without
+      // this the room is flat: the core is either fully present under every
+      // panel or absent behind them.
+      const rec = recessionFor(
+        coverage({ x: position.x, y: position.y, w: size, h: size }, frontRects.current),
+      );
+      paint(ctx, s, p, motionFor(p, a), opts, attentionGaze(att, position, size), rec);
       frame = requestAnimationFrame(draw);
     };
     frame = requestAnimationFrame(draw);
