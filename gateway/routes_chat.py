@@ -54,11 +54,24 @@ TURN_TIMEOUT_S = 120.0
 MAX_MESSAGE_CHARS = 8000
 MAX_HISTORY = 40
 
-PERSONA = (
-    "You are HERMUS, a local voice assistant running on the user's own machine. "
-    "Be direct and concrete. Prefer a short true answer over a long hedged one. "
-    "If you do not know, say so plainly rather than guessing."
-)
+def _persona() -> str:
+    """The system prompt, built from the live tool registry.
+
+    Not a constant. A hardcoded persona goes stale the moment a tool is added
+    or removed, and a model that believes it is more capable than it is will
+    confidently promise something it cannot do. Building it per turn costs one
+    registry read, which is already in memory.
+    """
+    try:
+        from core.persona import build_persona
+
+        return build_persona().describe()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("persona unavailable (%s); using the minimal prompt", exc)
+        return (
+            "You are HERMUS, a voice assistant running on the user's own machine. "
+            "Be direct and concrete. If you do not know, say so plainly."
+        )
 
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +180,7 @@ async def chat(payload: dict):
     history = _clean_history(payload.get("history"))
     system = payload.get("system")
     messages = [
-        {"role": "system", "content": system if isinstance(system, str) and system.strip() else PERSONA}
+        {"role": "system", "content": system if isinstance(system, str) and system.strip() else _persona()}
     ]
     messages.extend(history)
     messages.append({"role": "user", "content": text})
