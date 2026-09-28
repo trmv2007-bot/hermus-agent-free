@@ -337,6 +337,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[Gateway] Fleet Orchestrator unavailable: {e}")
 
+    # Before anything that could serve a request. A LAN-exposed control plane
+    # with no credential can drive this machine.
+    try:
+        _enforce_bind_policy()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[Gateway] bind policy failed: {e}")
+
     # Agent-pool warm-up belongs to the lifespan, not to module import: it used
     # to be a fire-and-forget loop.create_task() behind a bare except in
     # routes_agents.py, which produced "Task was destroyed but it is pending"
@@ -1487,6 +1494,74 @@ def setup(platform: str):
         logger.info(f"Platform {platform} setup - just set env token")
 
 
+def _enforce_bind_policy() -> tuple[str, str]:
+    """Make the LAN-exposed-gateway policy actually run, on every launch path.
+
+    This used to live inside ``start()``, which is the console entry point and
+    nothing else. So ``uvicorn gateway.gateway:app --host 0.0.0.0`` -- the way
+    it is run in development, by any process manager, and in every container --
+    skipped it entirely: no token was generated and every gated control-plane
+    route answered unauthenticated on the LAN. The code documented a guarantee
+    that only one of the three ways to start the server honoured.
+
+    The lifespan is the only place every launch path passes through, so the
+    policy runs there. The bind address is read from the OS rather than from
+    arguments, because the arguments are not the same on every path either:
+    ``start()`` defaults to 0.0.0.0 while uvicorn defaults to 127.0.0.1.
+
+    Returns ``(host, "generated" | "existing" | "loopback")``.
+    """
+    # Explicit configuration wins; it is what the operator asked for.
+    host = (os.getenv("HERMUS_GATEWAY_HOST") or "").strip()
+    if not host:
+        # Otherwise ask the OS what THIS process is actually listening on,
+        # matched by pid. Matching on the configured port does not work: the
+        # port an operator passes to `uvicorn --port` is not the port in
+        # config, and the first version of this looked up the configured one,
+        # found nothing, and treated the empty result as loopback -- which is
+        # the one answer that leaves a LAN-exposed control plane open.
+        try:
+            import psutil
+
+            me = os.getpid()
+            found = ""
+            for conn in psutil.net_connections(kind="inet"):
+                if conn.status != psutil.CONN_LISTEN or not conn.laddr:
+                    continue
+                if conn.pid != me:
+                    continue
+                found = str(conn.laddr.ip)
+                if found not in ("0.0.0.0", "::", ""):
+                    break
+            host = found or "0.0.0.0"
+        except Exception as e:  # noqa: BLE001
+            # Cannot tell. Assume the dangerous case rather than the safe one.
+            logger.warning(f"[Gateway] could not determine bind address ({e}); assuming 0.0.0.0")
+            host = "0.0.0.0"
+
+    if not auth_required_for_bind(host):
+        logger.info(f"[Gateway] bound to {host} (loopback only) - token auth optional")
+        return host, "loopback"
+
+    token, generated, persisted = ensure_gateway_token()
+    if generated:
+        where = (
+            "written to .env"
+            if persisted
+            else "process env only (NOT persisted - it changes every restart)"
+        )
+        logger.warning("=" * 72)
+        logger.warning(f"[Gateway] bound to {host} (reachable from your LAN) and no token was set.")
+        logger.warning(f"Generated one: {where}")
+        logger.warning(f"  HERMES_GATEWAY_TOKEN={token}")
+        logger.warning("Send it as the X-Hermus-Token header, or ?token=... in the URL.")
+        logger.warning("Lock down to this machine only with HERMUS_GATEWAY_HOST=127.0.0.1")
+        logger.warning("=" * 72)
+        return host, "generated"
+    logger.info(f"[Gateway] bound to {host} - token auth required (X-Hermus-Token)")
+    return host, "existing"
+
+
 def start(port: int = None, host: str = None):
     port = port or config.gateway_port
     host = host or os.getenv("HERMUS_GATEWAY_HOST", "0.0.0.0")
@@ -1495,6 +1570,9 @@ def start(port: int = None, host: str = None):
     # credential lets anything on the LAN drive the machine. The bind address
     # now decides the auth policy instead of the other way round.
     if auth_required_for_bind(host):
+        # The lifespan already did this for every path. Called again here only
+        # so the console prints the token before the server is listening; if the
+        # lifespan generated one, ensure_gateway_token() returns it unchanged.
         token, generated, persisted = ensure_gateway_token()
         if generated:
             where = f"written to .env ({Path(__file__).resolve().parents[1] / '.env'})" if persisted else "process env only (not persisted)"

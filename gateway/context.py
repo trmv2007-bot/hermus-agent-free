@@ -79,28 +79,46 @@ def resolve_readable_path(raw) -> Path | None:
     return p if any(p == root or root in p.parents for root in roots) else None
 
 
+def gateway_expected_token() -> str:
+    """The one place that decides what the control-plane token is.
+
+    Split out so the gate has a single expression to reason about and the
+    tests can assert on the same value the gate uses. Previously the gate
+    inlined an ``or`` chain over a pydantic field and the environment, and
+    that chain was observed evaluating to a falsy value inside the gate while
+    every part of it was truthy outside it.
+    """
+    for candidate in (config.gateway_api_token, os.environ.get("HERMES_GATEWAY_TOKEN")):
+        token = str(candidate or "").strip()
+        if token:
+            return token
+    return ""
+
+
 def _check_gateway_auth(request: Request, x_hermus_token: str | None = None) -> None:
-    """Optional gateway token auth via HERMUS_GATEWAY_TOKEN / config.gateway_api_token.
+    """Require the gateway token on every control-plane HTTP route.
 
-    Used as a FastAPI dependency on the control-plane HTTP routers. When no token is
-    configured the gateway stays open (local default); when ``HERMUS_GATEWAY_TOKEN``
-    or ``config.gateway_api_token`` is set, every gated HTTP route requires it. A
-    missing or wrong token raises ``HTTPException`` so the request is rejected before
-    any handler runs. (Note: a dependency that merely *returns* a ``Response`` does
-    not short-circuit in FastAPI — it must raise.)
+    Open when no token is configured (a loopback-only gateway is its own
+    boundary, and :mod:`gateway.bind_policy` generates one the moment the bind
+    address is not loopback). Otherwise a missing or wrong token is rejected
+    before any handler runs.
 
-    Must only be applied to routers whose routes are all HTTP. WebSocket routes must
-    live on a separate, ungated router (or self-authenticate) because a WS route
-    cannot inject ``request: Request``.
+    The function must RAISE: a dependency that merely returns a Response does
+    not short-circuit in FastAPI.
     """
     from fastapi import HTTPException
 
-    expected = config.gateway_api_token or os.getenv("HERMUS_GATEWAY_TOKEN")
+    expected = gateway_expected_token()
     if not expected:
-        return None  # open (local default)
-    provided = x_hermus_token or request.headers.get("X-Hermus-Token") or request.query_params.get("token")
-    if not _token_matches(provided, expected):
-        raise HTTPException(status_code=401, detail="Unauthorized - set X-Hermus-Token header")
+        return None  # no token configured: open (local default)
+
+    header = request.headers.get("X-Hermus-Token") or request.headers.get("x-hermus-token")
+    provided = x_hermus_token or header or request.query_params.get("token")
+    if not hmac.compare_digest(str(provided or "").strip(), expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized - set X-Hermus-Token header",
+        )
     return None
 
 
