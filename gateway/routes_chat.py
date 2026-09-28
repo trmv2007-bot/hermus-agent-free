@@ -33,8 +33,11 @@ socket, and ``requests`` releases the GIL for the whole wait.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from typing import Callable
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any
@@ -51,6 +54,10 @@ router = APIRouter()
 # A chat completion. Generous for a free provider behind a cold TLS handshake,
 # and short enough that a wedged turn is reclaimed rather than held.
 TURN_TIMEOUT_S = 120.0
+
+# Ceiling on what the local tier may say in one turn. See the streaming call
+# for the measurements behind it. Override with HERMUS_LOCAL_MAX_TOKENS.
+LOCAL_MAX_TOKENS = int(os.getenv("HERMUS_LOCAL_MAX_TOKENS", "400") or 400)
 MAX_MESSAGE_CHARS = 8000
 MAX_HISTORY = 40
 
@@ -104,11 +111,28 @@ def _clean_history(raw: Any) -> list[dict[str, str]]:
     return out
 
 
+def _last_user_text(messages: list[dict]) -> str:
+    """The user's own words, for deciding what to look up.
+
+    Takes the last user turn rather than the whole prompt: searching for a
+    system prompt or a pasted document is how a retrieval step starts
+    answering a question nobody asked.
+    """
+    for message in reversed(messages or []):
+        if message.get("role") == "user":
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()[:300]
+    return ""
+
+
 async def _maybe_escalate(
     answer: str,
     logprobs,
     messages: list[dict],
     elapsed_s: float | None = None,
+    wanted_urls: tuple[str, ...] = (),
+    progress: "Callable[[str], None] | None" = None,
 ) -> tuple[str | None, object | None]:
     """Ask the main model when the local one is not confident enough.
 
@@ -123,6 +147,7 @@ async def _maybe_escalate(
     try:
         from core.confidence import assess
         from core.config import config
+        from core.grounding import admits_ignorance
     except Exception as exc:  # noqa: BLE001
         log.warning("confidence gate unavailable: %s: %s", type(exc).__name__, exc)
         return None, None
@@ -132,31 +157,175 @@ async def _maybe_escalate(
         return None, None
 
     reading = assess(logprobs, text=answer, bar=bar, elapsed_s=elapsed_s)
+
+    # A model saying "I don't have real-time information" is telling the truth,
+    # and saying it with total confidence. The bar cannot see that, because
+    # certainty about your own ignorance is still certainty - measured on this
+    # machine, that sentence cleared the bar in 10s and the user got no lookup.
+    # So it is a peer trigger, checked before the big model is considered.
+    confessed = admits_ignorance(answer)
+
+    # A reply that was entirely a tool call has already been stripped, so what
+    # is left is empty. That is not a low-confidence answer, it is no answer,
+    # and the model has just told us it wanted to reach the network. Treating
+    # it as "done" would render an empty bubble in the room.
+    wanted_a_lookup = bool(wanted_urls)
+    if wanted_a_lookup and not answer.strip() and not reading.escalate:
+        from dataclasses import replace as _replace
+
+        reading = _replace(
+            reading,
+            escalate=True,
+            confidence=reading.confidence,
+            reason="the model tried to call a tool and had none to call",
+            signals=tuple(reading.signals) + ("wanted_tool",),
+        )
+
+    if confessed and not reading.escalate:
+        from dataclasses import replace as _replace
+
+        reading = _replace(
+            reading,
+            escalate=True,
+            confidence=reading.confidence,
+            reason="the model said it does not know this",
+            signals=tuple(reading.signals) + ("admits_ignorance",),
+        )
+
     # No logprobs means unmeasured, not confident, but escalating every call
     # from a provider that omits them would make the local tier unusable.
-    if not reading.escalate or reading.confidence is None:
+    if not reading.escalate or (reading.confidence is None and not (confessed or wanted_a_lookup)):
         return None, reading
 
     from core.config import config as _cfg
     from core.models import get_model_gateway
 
-    big = _cfg.model
-
+    # Step 2: look it up, before paying for the big model.
+    #
+    # Retrieval is a network round trip and no tokens; a 120B completion is
+    # both. A pre-retrieval router cannot know whether retrieval will help
+    # because that depends on what the index holds, not on the question
+    # (arXiv 2605.27220 calls this the coverage illusion), so the honest
+    # order is cheapest-first and escalate only when a step comes back empty.
+    say = progress or (lambda _msg: None)
+    question = _last_user_text(messages)
+    found = None
+    grounded_text: str | None = None
     try:
-        response = await asyncio.wait_for(
-            asyncio.to_thread(get_model_gateway().chat, messages, model=big),
-            timeout=TURN_TIMEOUT_S,
-        )
-        text = _extract_text(response)
+        from core.grounding import is_searchable, search_for
+
+        # A URL the model itself asked for is better evidence than a search
+        # result list: it named the page it wanted. It is also untrusted input
+        # written by a model, so the scheme is checked here rather than passed
+        # to a fetcher on trust. file:// and friends have no business being
+        # read because a 4B model asked nicely.
+        if wanted_urls:
+            from core.grounding import Grounding, Source
+
+            safe = [u for u in wanted_urls if u.lower().startswith(("http://", "https://"))][:2]
+            if safe:
+                say(f"Reading {len(safe)} page{'s' if len(safe) != 1 else ''} the model picked")
+                found = Grounding(
+                    query=question or safe[0],
+                    sources=tuple(Source(title=u.rsplit("/", 1)[-1] or u, url=u, snippet="") for u in safe),
+                )
+                log.info("model asked for %d url(s); reading those instead of searching", len(safe))
+
+        if found is None and is_searchable(question):
+            say("Searching the web")
+            found = await asyncio.to_thread(search_for, question)
+            if found.useful:
+                research_msgs = [
+                    {
+                        "role": "system",
+                        "content": _persona()
+                        + "\n\nAnswer using the search results below. If they do not "
+                        "contain the answer, say so plainly instead of guessing, and "
+                        "cite the source numbers you used.",
+                    },
+                    *messages,
+                    {"role": "user", "content": found.as_context()},
+                ]
+                say(f"Reading {len(found.sources)} sources")
+                probe = await asyncio.wait_for(
+                    asyncio.to_thread(get_model_gateway().chat, research_msgs),
+                    timeout=TURN_TIMEOUT_S,
+                )
+                candidate = _extract_text(probe)
+                if candidate.strip():
+                    # Adaptive RAG returns the grounded answer only when it is
+                    # better. Retrieval does not reliably help, so trust is
+                    # earned by comparison rather than assumed.
+                    grounded_text = candidate
+            else:
+                log.info("search for %r returned nothing usable; escalating", question[:60])
     except Exception as exc:  # noqa: BLE001
-        log.warning("escalation to %s failed (%s); keeping the local answer", big, exc)
+        log.warning("grounding failed (%s); escalating instead", exc)
+
+    if grounded_text:
+        # The gate is a coroutine and cannot yield, so it annotates the
+        # reading and the caller emits the frame. Returning the sources with it
+        # keeps the client able to show what the answer was based on.
+        reading = replace(
+            reading,
+            stage="grounded",
+            sources=tuple(s.url for s in found.sources) if found else (),
+        )
+        return grounded_text, reading
+
+    # Walk the cascade cheapest-useful-first rather than going straight to the
+    # big model. Groq answers a 120B in about a second; NVIDIA takes 2-6s and
+    # sometimes returns "Service temporarily overloaded". Putting the fast
+    # free tiers first means the slow one is the exception rather than the
+    # default, which is the whole point of having them.
+    tiers = _cfg.escalation_tiers()
+    big = tiers[-1] if tiers else _cfg.model
+    # Only reached when the search came back with nothing usable, or was not
+    # worth doing. Saying so is the point: a silent 25s wait is the thing the
+    # user is trying to escape.
+    say(f"Nothing usable found, escalating")
+
+    text = ""
+    used = ""
+    for tier in tiers:
+        began = time.monotonic()
+        log.warning("cascade: trying %s", tier)
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(get_model_gateway().chat, messages, model=tier),
+                timeout=TURN_TIMEOUT_S,
+            )
+            candidate = _extract_text(response)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "cascade: %s failed after %.1fs (%s: %s)",
+                tier, time.monotonic() - began, type(exc).__name__, exc,
+            )
+            continue
+        log.warning("cascade: %s answered in %.1fs (%d chars)", tier, time.monotonic() - began, len(candidate or ""))
+        if candidate.strip():
+            text = candidate
+            used = tier
+            break
+        # An empty answer is a failure here, not a short reply. Reasoning
+        # models return "" when max_tokens is under the budget they want, so
+        # an empty string means "this tier could not answer", and the next
+        # tier is the right response rather than showing a blank bubble.
+        log.warning("cascade tier %s returned no text; trying the next", tier)
+    if not text.strip():
+        # Every tier came back empty. Showing the local answer beats an empty
+        # bubble, and the frames above already told the client what happened.
+        log.warning("the whole cascade produced no text; keeping the local answer")
         return None, reading
 
-    if not text.strip():
-        # The big model also produced nothing. Showing the local answer beats
-        # an empty bubble, and the frame below already told the client.
-        log.warning("escalation to %s produced no text; keeping the local answer", big)
-        return None, reading
+    if used != big:
+        # Worth reporting: a turn answered by a fast free tier looks identical
+        # to one answered by the big model, and knowing which one ran is the
+        # difference between a 2s answer and a 6s one being explicable.
+        from dataclasses import replace as _replace
+
+        reading = _replace(reading, stage="escalated", model_used=used)
+    say("Writing that up")
     return text, reading
 
 
@@ -234,9 +403,24 @@ async def chat(payload: dict):
                     bundle = llm._resolve_bundle()
                     # Kept, not discarded: the confidence bar reads its
                     # logprobs, and the streaming path is the one people use.
+                    # Capped, because unbounded is what made this slow.
+                    #
+                    # Measured with no cap: the local model took 50s, 64s and
+                    # 78s on three ordinary questions, generating 6,892 to
+                    # 13,070 characters, because it kept going until it chose
+                    # to stop. Every one of those turns then failed the length
+                    # check and was thrown away and redone - so the cap is not
+                    # only a latency fix, it is what stops paying for an answer
+                    # in full and then discarding it.
+                    #
+                    # A 4B model asked a short question has no business needing
+                    # more than this, and hitting the cap is itself the overrun
+                    # signal the gate is built to catch.
+                    cap = payload.get("max_tokens") or LOCAL_MAX_TOKENS
                     result["value"] = stream_chat_completions(
                         provider=llm.provider,
                         model=llm.model_name,
+                        max_tokens=cap,
                         messages=messages,
                         api_key=bundle.get("key") or None,
                         base_url=bundle.get("base_url") or None,
@@ -319,13 +503,56 @@ async def chat(payload: dict):
             # The confidence bar runs here too, not only on the blocking path.
             # Placing it after this return is what made it dead code: streaming
             # always succeeded, so the gate never executed once.
-            escalated, reading = await _maybe_escalate(
-                "".join(streamed),
-                getattr(result.get("value"), "logprobs", None),
-                messages,
-                elapsed_s=time.monotonic() - started,
+            joined, wanted = "".join(streamed), ()
+            try:
+                from core.grounding import strip_tool_json
+
+                joined, wanted = strip_tool_json(joined)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not strip tool json (%s)", exc)
+
+            # The gate runs as a task while the queue keeps being drained, so
+            # each step reaches the user as it happens. Collecting the steps and
+            # dumping them at the end is the same silent wait wearing a
+            # progress-line costume, which is the thing being fixed here.
+            task = asyncio.ensure_future(
+                _maybe_escalate(
+                    joined,
+                    getattr(result.get("value"), "logprobs", None),
+                    messages,
+                    elapsed_s=time.monotonic() - started,
+                    wanted_urls=wanted,
+                    progress=lambda msg: queue.put_nowait(("activity", msg)),
+                )
             )
-            if reading is not None and reading.escalate:
+            # Drained here, in the generator that can actually yield. The gate
+            # reports "searching", "reading sources", "asking the big model"
+            # while it works, and each one goes out on arrival. Batching them
+            # until the end is the same silent wait wearing a progress costume.
+            while not task.done():
+                try:
+                    kind, item = await asyncio.wait_for(queue.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    continue
+                if kind == "activity":
+                    yield _sse(_event("activity", {"data": {"label": str(item)}}))
+            escalated, reading = await task
+            if reading is not None and reading.stage == "grounded":
+                yield _sse(
+                    _event(
+                        "grounded",
+                        {
+                            "reason": reading.reason,
+                            "sources": list(reading.sources)[:4][:4],
+                            # Re-derived here rather than carried out of the
+                            # gate: the gate is where the question was parsed
+                            # out, and duplicating that parse is cheaper than
+                            # widening a return type for one field.
+                            "query": _last_user_text(messages),
+                        },
+                    )
+                )
+            elif reading is not None and reading.escalate:
                 # Yielded here rather than pushed onto the queue: the stream loop
                 # has already consumed the sentinel by this point, so anything
                 # queued would sit unread and the user would see a slow answer
@@ -371,6 +598,18 @@ async def chat(payload: dict):
 
         answer = _extract_text(response)
 
+        # A local model with no tools to call will print the call as prose.
+        # Strip it before anything reads the answer, and treat the fact that it
+        # asked to fetch something as a reason to look: the URL it picked is
+        # usually right, and it is the cheapest evidence available.
+        wanted: tuple[str, ...] = ()
+        try:
+            from core.grounding import strip_tool_json
+
+            answer, wanted = strip_tool_json(answer)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not strip tool json (%s)", exc)
+
         # The confidence bar. The local model answers first because it is free,
         # private and warm; this is the check that decides whether its answer is
         # good enough to show or whether the main model should be asked instead.
@@ -383,6 +622,7 @@ async def chat(payload: dict):
             getattr(response, "logprobs", None),
             messages,
             elapsed_s=time.monotonic() - started,
+            wanted_urls=wanted,
         )
         if reading is not None and reading.escalate:
             yield _sse(

@@ -221,6 +221,37 @@ class Config(BaseSettings):
     # is reserved for the reasoning-heavy turns that are actually worth its
     # quota. It is a config flag rather than a hard-coded policy because the
     # right answer depends on the local model in use, not on the router.
+    # The escalation cascade, cheapest useful tier first.
+    #
+    # NVIDIA is the one that was already here and it is both the slowest and the
+    # least reliable of the three, so putting it behind two free tiers that
+    # answer in a couple of seconds means the slow one is reached far less
+    # often. Order is data, not policy: HERMUS_ESCALATION_ORDER.
+    fast_model: str = Field(default="", validation_alias="HERMUS_FAST_MODEL")
+    mid_model: str = Field(default="", validation_alias="HERMUS_MID_MODEL")
+    escalation_order: str = Field(
+        default="main", validation_alias="HERMUS_ESCALATION_ORDER"
+    )
+
+    def escalation_tiers(self) -> list[str]:
+        """Named tiers in the order they should be tried.
+
+        Reads the order from config rather than hardcoding it, because the
+        right order depends on which keys actually work on a given day, and
+        that is exactly the sort of thing that should be settable from the
+        Settings surface without a code change.
+        """
+        by_name = {"fast": self.fast_model, "mid": self.mid_model, "main": self.model}
+        tiers: list[str] = []
+        for name in (self.escalation_order or "main").split(","):
+            ref = by_name.get(name.strip().lower())
+            # A tier with no key configured is skipped rather than attempted:
+            # calling it would fail, and a failure reads as "the model is down"
+            # when the truth is "that tier was never configured".
+            if ref and ref.strip() and ref not in tiers:
+                tiers.append(ref.strip())
+        return tiers or [self.model]
+
     local_model_handles_tools: bool = Field(default=False, validation_alias="HERMUS_LOCAL_MODEL_HANDLES_TOOLS")
     # The confidence bar. A local answer whose measured token confidence falls
     # below this escalates to the main model instead of being returned. 0.55

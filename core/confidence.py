@@ -127,6 +127,16 @@ class ConfidenceReading:
     # answer is explainable rather than mysterious, and kept after the
     # required fields because a defaulted field cannot precede a plain one.
     elapsed_s: Optional[float] = None
+    # How this turn was actually resolved: "local", "grounded" (a search
+    # answered it) or "escalated" (the main model did). A turn that took four
+    # extra seconds needs to be able to say why, and "because it looked it up"
+    # is a different answer from "because it was unsure".
+    stage: str = "local"
+    # The URLs behind a grounded answer, so the client can show them.
+    sources: tuple = ()
+    # Which tier actually answered. Without it a turn answered by a fast free
+    # tier is indistinguishable from one answered by the big model.
+    model_used: str = ""
     # Structural signals, kept separate from the numeric score so a caller can
     # see whether it was the maths or a hard rule that fired.
     signals: tuple[str, ...] = field(default_factory=tuple)

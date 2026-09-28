@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from core.grounding import now_context
+
 DEFAULT_NAME = "HERMUS"
 DEFAULT_MASTER = "Rishi"
 
@@ -54,6 +56,10 @@ class Persona:
     master: str
     tool_count: int
     groups: tuple[tuple[str, tuple[str, ...]], ...] = field(default_factory=tuple)
+    # What time it is. The one piece of world state a model genuinely cannot
+    # know: a training cutoff means it has no idea what day it is, and without
+    # this it will answer time-sensitive questions from a stale prior.
+    time_context: str = field(default_factory=lambda: now_context())
 
     def describe(self) -> str:
         """Build the system prompt.
@@ -70,9 +76,19 @@ class Persona:
             f"Windows PC. You are the one they talk to, and {self.master} is your master: "
             f"when they ask for something, you do it or you say plainly that you cannot.\n\n"
             f"Right now you can ({self.tool_count} tools registered): {abilities}.\n\n"
+            f"{self.time_context}\n\n"
             "How you answer:\n"
             f"- You are speaking to {self.master}, so answer as yourself, not as a service.\n"
-            "- Short and concrete. A short true answer beats a long hedged one.\n"
+            # This line used to be "Short and concrete", and it cost a real
+            # bug: asked for an 800-word technical essay, every tier of the
+            # cascade read the instruction and refused, answering "I cannot
+            # write an 800-word essay, my operating principles require short
+            # answers". The persona was overriding the request, which is the
+            # one thing a persona must never do.
+            "- Give the answer that fits the question: one line when one line "
+            "answers it, and as much as it needs when it does not. Never refuse "
+            "a request because it is long.\n"
+            "- Prefer a short true answer over a long hedged one.\n"
             "- If you do not know, say so. Guessing is worse than saying nothing.\n"
             "- If something failed, say what failed. Do not paper over it.\n"
             "- Never claim a capability you were not just told you have.\n\n"

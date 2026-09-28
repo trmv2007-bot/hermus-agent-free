@@ -94,3 +94,15 @@ class TestIdentity:
         text = build_persona(registry=_FakeRegistry(["file_read"])).describe()
         for line in LIMITS:
             assert line in text
+
+    def test_it_never_asks_to_be_refused_for_length(self):
+        """The persona must not override the request.
+
+        Regression: the prompt used to say "Short and concrete", and every
+        cascade tier read that as a rule and refused an 800-word essay with
+        "my operating principles require short answers". A persona that
+        overrules the user is worse than no persona.
+        """
+        text = build_persona(registry=_FakeRegistry(["file_read"])).describe()
+        assert "Short and concrete" not in text
+        assert "Never refuse" in text
