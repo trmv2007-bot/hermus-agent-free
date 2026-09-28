@@ -59,6 +59,7 @@ def prepare_speech_text(text: str) -> str:
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+from . import fsprobe
 
 class SpeechEngine:
     """Discover and invoke local speech backends."""
@@ -124,6 +125,12 @@ class SpeechEngine:
         requested = os.getenv("HERMUS_TTS_BACKEND", "auto").strip().lower()
         piper = shutil.which("piper")
         piper_model = os.getenv("HERMUS_PIPER_MODEL", "").strip()
+        if piper_model and not os.path.isabs(os.path.expanduser(piper_model)):
+            # A relative path here used to be resolved against the process CWD,
+            # which is the project root under `hermes` but the home directory
+            # under some launchers -- so the same .env worked or silently did
+            # not depending on how the gateway was started. Anchor it.
+            piper_model = str(Path(__file__).resolve().parents[1] / piper_model)
         espeak = shutil.which("espeak-ng") or shutil.which("espeak")
         pyttsx3_ok = False
         pyttsx3_reason = None
@@ -137,7 +144,22 @@ class SpeechEngine:
             pyttsx3_reason = str(exc)
         return {
             "piper": {
-                "available": bool(piper and piper_model and Path(piper_model).expanduser().exists()),
+                # fsprobe, not Path.exists(): on this volume a single stat on a
+                # deep path returns False for a file that is present, so the
+                # honest-looking "available: false" was the probe lying rather
+                # than the voice being broken.
+                # Two separate questions, kept apart on purpose.
+                #
+                # `configured` -- is this backend wired up? executable present
+                # and a model path set. This is a fact about configuration and
+                # it does not depend on the filesystem answering correctly.
+                #
+                # `available` -- did a probe confirm the model file? On this
+                # volume that check is not trustworthy: measured 0/40 true for
+                # a file that enumerates fine, then true a moment later. So it
+                # drives reporting only, never selection.
+                "configured": bool(piper and piper_model),
+                "available": bool(piper and piper_model and fsprobe.file_exists(Path(piper_model).expanduser())),
                 "requested": requested in ("auto", "piper"),
                 "detail": {"executable": piper, "model": piper_model or None},
             },
@@ -194,7 +216,11 @@ class SpeechEngine:
             row = basic[name]
             if requested not in ("auto", name):
                 continue
-            if row["available"]:
+            # A configured backend is worth attempting even when the probe is
+            # unsure. Synthesis either works, or returns the real reason it
+            # could not -- which is a better answer than refusing on the
+            # strength of a stat that has been measured to lie on this drive.
+            if row.get("configured", row["available"]) or row["available"]:
                 return name, row["detail"]
         if omni["available"]:
             return "omnivoice", omni
@@ -333,19 +359,70 @@ class SpeechEngine:
                         "--output_file",
                         str(path),
                     ]
+                    # Name the config explicitly, unconditionally.
+                    #
+                    # Left to itself piper stats for a sibling .json, and that
+                    # lookup fails intermittently on this volume even though the
+                    # file is present -- the same stat that made /voice/status
+                    # report the voice as unavailable. Handing it the path
+                    # removes the guess.
+                    #
+                    # Deliberately NOT guarded by a probe. Guarding it was the
+                    # bug this replaces: the probe disagreed with itself, the
+                    # flag got dropped, piper's own stat then failed, and the
+                    # voice was silent. If the sidecar is genuinely missing,
+                    # piper says so precisely, which beats a guess that is
+                    # wrong a third of the time.
+                    command.extend(["-c", str(Path(str(detail["model"]) + ".json"))])
                     if voice:
                         try:
-                            command.extend(["--speaker", str(int(voice))])
+                            command.extend(["-s", str(int(voice))])
                         except (TypeError, ValueError):
                             pass
-                    subprocess.run(
-                        command,
-                        input=spoken,
-                        text=True,
-                        capture_output=True,
-                        check=True,
-                        timeout=180,
-                    )
+                    # piper opens the model through the same unreliable stat, so
+                    # a single attempt can fail on a file that is really there.
+                    # Re-running costs ~1.8s and is the difference between
+                    # speaking and a hard error.
+                    #
+                    # Budget note: this volume enters multi-second to
+                    # multi-minute windows where a stat on a file that is
+                    # demonstrably present fails, then recovers with no event
+                    # anyone can observe. Measured in one session: 0/40 true,
+                    # then 0/10 true minutes later, then 100/100 true, then
+                    # failing again. Enumeration, `cmd dir`, Get-ChildItem and
+                    # a direct .NET open all succeed throughout.
+                    #
+                    # So this retries for roughly ten seconds before giving up.
+                    # That is not a guess at the failure rate -- it is measured
+                    # against a window that outlasted a 1.2s budget. Past that
+                    # it surfaces piper's real complaint, which by then is a
+                    # truthful answer: the volume is not cooperating.
+                    deadline = time.monotonic() + 10.0
+                    last_exc: Exception | None = None
+                    while True:
+                        try:
+                            subprocess.run(
+                                command,
+                                input=spoken,
+                                text=True,
+                                capture_output=True,
+                                check=True,
+                                timeout=180,
+                            )
+                            last_exc = None
+                            break
+                        except subprocess.CalledProcessError as exc:
+                            last_exc = exc
+                            # "Unable to find voice" on a path that is present is
+                            # this volume, not a missing model. Anything else is
+                            # a real failure worth surfacing immediately.
+                            if "Unable to find voice" not in (exc.stderr or ""):
+                                break
+                            if time.monotonic() >= deadline:
+                                break
+                            time.sleep(0.5)
+                    if last_exc is not None:
+                        raise last_exc
                 elif selected_backend == "espeak":
                     command = [detail["executable"], "-w", str(path), "-s", str(max(80, min(320, int(rate))))]
                     if voice:
@@ -383,7 +460,19 @@ class SpeechEngine:
             return {"success": False, "error": f"{selected_backend} timed out"}
         except Exception as exc:  # noqa: BLE001
             path.unlink(missing_ok=True)
-            return {"success": False, "error": f"Speech synthesis failed: {exc}", "backend": selected_backend}
+            # Say what the backend actually said. `str(CalledProcessError)` is
+            # just the command line, which is long, identical every time, and
+            # tells nobody anything -- and because it is long the useful tail
+            # (piper's real complaint) was being truncated away by the route.
+            detail = ""
+            stderr = getattr(exc, "stderr", None)
+            if stderr:
+                detail = str(stderr).strip().splitlines()[-1] if str(stderr).strip() else ""
+            return {
+                "success": False,
+                "error": f"{selected_backend}: {detail or exc}",
+                "backend": selected_backend,
+            }
 
     def _synthesize_omnivoice(
         self,

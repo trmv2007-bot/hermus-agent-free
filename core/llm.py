@@ -34,10 +34,22 @@ class LLMResponse:
         tool_calls: list[dict] | None = None,
         usage: dict | None = None,
         logprobs: list | None = None,
+        model: str = "",
+        provider: str = "",
     ):
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage or {}
+        # Which model actually produced this text.
+        #
+        # Not optional bookkeeping. A tier can be swapped underneath the caller
+        # -- an unknown model name falls back to the local one -- and before
+        # this field existed the substitution was invisible: ask for a model
+        # that does not exist, get a confident answer, and no part of the
+        # system could say which model said it. `model` and `provider` may be
+        # empty for an error or mock response; that is itself informative.
+        self.model = model or ""
+        self.provider = provider or ""
         # Per-token logprobs when the provider returned them. The confidence bar
         # reads these instead of asking the model how sure it is, because a
         # model asked that will say it is sure either way.
@@ -355,7 +367,7 @@ class FreeLLM:
                     )
                 except Exception:
                     pass
-                out = LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                out = LLMResponse(resp.content, resp.tool_calls, usage=resp.usage, model=self.model_name, provider=used_provider)
                 if not tools:
                     try:
                         llm_cache.set(cache_key, out)
@@ -474,7 +486,7 @@ class FreeLLM:
                     )
             completion_tokens = token_counter.count_text(content)
             usage = token_counter.estimate_cost(prompt_tokens, completion_tokens, model=f"ollama/{self.model_name}")
-            response = LLMResponse(content, tool_calls, usage=usage)
+            response = LLMResponse(content, tool_calls, usage=usage, model=self.model_name, provider="ollama")
             if not tools:
                 llm_cache.set(cache_key, response)
             return response
@@ -519,7 +531,7 @@ class FreeLLM:
                         )
                     except Exception:
                         pass
-                    return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                    return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage, model=self.model_name, provider=fb_provider)
                 except Exception as e:
                     fb_err = f"Ollama not running and fallback key failed: {e}"
                     usage = token_counter.estimate_cost(

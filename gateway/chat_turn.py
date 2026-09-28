@@ -647,6 +647,7 @@ async def _escalate(
             continue
 
         log.warning("cascade: %s answered in %.1fs (%d chars)", tier, time.monotonic() - began, len(text))
+        used_tier = tier
         reading = replace(reading, stage="escalated", model_used=tier)
         yield (
             "escalated",
@@ -715,6 +716,10 @@ async def run_turn(
     response: Any = None
     first_token_s: float | None = None
     used_local = False
+    # (asked_for, actually_used) for every non-streamed answer this turn. The
+    # final frame reports from this, so a tier swap cannot pass silently.
+    model_substitutions: list[tuple[str, str]] = []
+    used_tier: str = ""
     # Distinguishes "the stream broke" from "the stream worked and the model
     # had nothing to say". Only the first justifies a blocking retry; the
     # second is the model answering, and re-asking costs a duplicate of the
@@ -790,6 +795,7 @@ async def run_turn(
         try:
             llm_obj = await asyncio.to_thread(get_model_gateway().llm, model=local)
             answer = await asyncio.wait_for(asyncio.to_thread(llm_obj.chat, messages), timeout=TURN_TIMEOUT_S)
+            _note_actual_model(answer, local, model_substitutions)
         except Exception as exc:  # noqa: BLE001
             log.exception("chat failed")
             yield "error", {"error": f"{type(exc).__name__}: {exc}"}
@@ -937,13 +943,38 @@ async def run_turn(
         yield "error", {"error": "nothing came back from any model — try again in a moment"}
         return
 
+    # Who actually answered, and whether that is who was asked.
+    #
+    # A tier can be swapped underneath this function -- an unrecognised model
+    # name falls back to the local one -- and the answer still arrives
+    # confident and unmarked. Reporting the answering model is not a nicety:
+    # without it there is no way to tell a real answer from one produced by a
+    # model nobody chose.
+    actually_used = model_substitutions[-1][1] if model_substitutions else (used_tier or local)
+    substituted = bool(model_substitutions) and actually_used != (used_tier or local)
+
     yield "final", {
         "ok": True,
         "content": final_text,
         "elapsed_s": round(time.monotonic() - started, 2),
         "first_token_s": first_token_s,
         "truncated": not used_local,
+        "model_used": actually_used,
+        "model_substituted": substituted,
     }
+
+
+def _note_actual_model(answer, asked_for: str, sink: list[tuple[str, str]]) -> None:
+    """Record which model really produced a non-streamed answer.
+
+    The provider layer may route somewhere other than where it was pointed --
+    an unknown model name resolves to the local one -- and that decision was
+    previously unrecoverable from the response. The response now carries it.
+    """
+    got = getattr(answer, "model", "") or ""
+    if not got:
+        got = asked_for
+    sink.append((asked_for, got))
 
 
 def sse(frame: Frame) -> str:

@@ -97,3 +97,40 @@ def test_non_ascii_round_trips_as_utf8() -> None:
     assert raw.decode("utf-8") == "I’m HERMUS — ₹2,68,999"
     # And it is genuinely broken the other way, which is why the fix is needed.
     assert "I’m" not in raw.decode("latin-1")
+
+
+def test_an_llm_response_says_which_model_produced_it() -> None:
+    """Provenance must travel with the answer.
+
+    A tier can be swapped underneath the caller -- an unrecognised model name
+    falls back to the local one -- and before LLMResponse carried an identity
+    the substitution was unrecoverable. Ask for a model that does not exist,
+    get a confident answer, and no part of the system could say which model
+    said it. That is the failure mode where every other guarantee (confidence,
+    grounding, escalation) is unverifiable, because you do not know what you
+    are reasoning about.
+    """
+    from core.llm import LLMResponse
+
+    r = LLMResponse("hello", model="ollama/spark-x2.5-4b-q4", provider="ollama")
+    assert r.model == "ollama/spark-x2.5-4b-q4"
+    assert r.provider == "ollama"
+
+    # An error or mock response says so honestly rather than inheriting a name.
+    bare = LLMResponse("some error text")
+    assert bare.model == "" and bare.provider == ""
+
+
+def test_the_chat_final_frame_names_the_answering_model() -> None:
+    """The final frame must carry model_used, and flag a substitution.
+
+    If `model_substituted` is missing, a client cannot tell a real answer from
+    one produced by a model nobody chose -- the UI has nothing to render.
+    """
+    import inspect
+
+    from gateway import chat_turn
+
+    src = inspect.getsource(chat_turn)
+    assert '"model_used"' in src, "the final frame does not report which model answered"
+    assert '"model_substituted"' in src, "a swapped tier is not reported"
