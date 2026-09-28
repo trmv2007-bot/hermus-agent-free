@@ -20,6 +20,7 @@ import { LAUNCHER_KINDS } from "../state/launcher";
 import { ComputerPanel, EvidencePanel, LogsPanel, MemoryPanel, ModelPanel, MissionPanel, TelemetryPanel, TerminalPanel, WorkerPanel } from "./panels";
 import { ChatPanel } from "./ChatPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { ModelsPanel } from "./ModelsPanel";
 import { VoicePanel } from "./VoicePanel";
 
 export interface SurfaceComponent {
@@ -34,11 +35,11 @@ export const RENDERERS: Record<LauncherKind, SurfaceComponent> = {
   mission: MissionPanel,
   evidence: EvidencePanel,
   worker: WorkerPanel,
-  model: ModelPanel,
   telemetry: TelemetryPanel,
   logs: LogsPanel,
   // The diagnostics drawer became this. /control still exists and is still the
   // escape hatch, but the surface you open to change something is this.
+  model: ModelSurface,
   diagnostics: SettingsPanel,
   computer: ComputerPanel,
   memory: MemoryPanel,
@@ -63,6 +64,24 @@ export function UnbuiltPanel({ kind }: { kind: SurfaceKind }) {
         <span>No endpoint backs this surface, so there is nothing here to read. It is not offered in the launcher.</span>
         <em>PRODUCT.md §4: not implemented must not be dressed up as a pending feature.</em>
       </p>
+    </div>
+  );
+}
+
+/**
+ * The Model surface answers two questions that were previously split apart:
+ * "what is answering right now" and "what could I put on this machine".
+ *
+ * Status alone left the second question unanswerable -- you could see which
+ * roles were loaded and had no way to add a vision model without editing .env.
+ * The chooser alone would show options without saying what is already running,
+ * which is the question you have first.
+ */
+function ModelSurface() {
+  return (
+    <div className="surface-stack">
+      <ModelPanel />
+      <ModelsPanel />
     </div>
   );
 }

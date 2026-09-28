@@ -1969,3 +1969,60 @@ button.ghost {
 .chat-send:disabled { opacity: .4; cursor: not-allowed; }
 .chat-stop { border-color: #fb7185aa; background: #fb718518; color: #fb7185; }
 @keyframes chat-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+/* --- Models surface: what this machine is, and what fits on it ------------
+   The spec block sits above the table on purpose. A ranked list whose
+   arithmetic is hidden is a list you cannot disagree with, and the whole
+   value of showing free-VRAM separately from total is lost if you cannot
+   see which number produced the ranking. */
+
+.surface-stack { display: flex; flex-direction: column; gap: 1rem; height: 100%; overflow-y: auto; }
+
+.models-panel { padding: 0.9rem; font-size: 0.85rem; }
+.models-specs h2 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.models-specs dl { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.9rem; margin: 0; }
+.models-specs dl > div { display: contents; }
+.models-specs dt { color: var(--muted-foreground, #888); }
+.models-specs dd { margin: 0; }
+.models-source, .models-note { margin: 0.5rem 0 0; font-size: 0.75rem; opacity: 0.7; }
+.models-note { color: #d8a657; }
+
+.models-reason {
+  margin: 0.8rem 0; padding: 0.55rem 0.7rem;
+  border-left: 2px solid var(--accent, #6aa9ff);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.models-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.models-table th {
+  text-align: left; font-weight: 500; opacity: 0.6;
+  border-bottom: 1px solid var(--border, #333); padding: 0.3rem 0.4rem;
+}
+.models-table td { padding: 0.45rem 0.4rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); vertical-align: top; }
+.models-table tr.recommended { background: rgba(106, 169, 255, 0.07); }
+.models-table tr.no-fit td { opacity: 0.45; }
+.models-name { display: flex; align-items: center; gap: 0.4rem; font-weight: 500; }
+.models-trade { font-size: 0.72rem; opacity: 0.6; margin-top: 0.15rem; }
+.badge {
+  font-size: 0.65rem; padding: 0.05rem 0.35rem; border-radius: 3px;
+  background: var(--accent, #6aa9ff); color: #06101f; font-weight: 600;
+}
+.badge.ok { background: #3fa66a; color: #04150c; }
+.dim { opacity: 0.4; }
+.ok { color: #6fd08c; }
+.warn { color: #d8a657; }
+.no-fit { color: #d97b7b; }
+
+button.pull {
+  background: var(--accent, #6aa9ff); color: #06101f; border: 0;
+  border-radius: 4px; padding: 0.3rem 0.6rem; font-size: 0.75rem;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+button.pull:disabled { opacity: 0.5; cursor: default; }
+
+.models-progress {
+  margin: 0.7rem 0 0; padding: 0.5rem; font-size: 0.7rem;
+  background: rgba(0, 0, 0, 0.35); border-radius: 4px;
+  white-space: pre-wrap; max-height: 8rem; overflow-y: auto;
+}
+.models-done { margin-top: 0.7rem; padding: 0.5rem 0.7rem; color: #6fd08c; font-size: 0.8rem; }

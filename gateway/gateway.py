@@ -655,6 +655,7 @@ from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_settings import router as _settings_router  # noqa: E402
+from gateway.routes_models import router as _models_router  # noqa: E402
 from gateway.routes_chat import router as _chat_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
@@ -678,6 +679,7 @@ app.include_router(_voice_router, dependencies=_gate_control)
 # Settings edits .env and chat runs the agent: both are control-plane and both
 # are gated exactly like every other router here.
 app.include_router(_settings_router, dependencies=_gate_control)
+app.include_router(_models_router, dependencies=_gate_control)
 app.include_router(_chat_router, dependencies=_gate_control)
 app.include_router(_engine_router, dependencies=_gate_control)
 app.include_router(_canonical_router, dependencies=_gate_control)

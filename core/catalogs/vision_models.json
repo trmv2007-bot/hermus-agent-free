@@ -1,0 +1,90 @@
+{
+  "_comment": "Vision model catalog. Data, not code, so adding a model is an edit here and never a change to routing. Every entry was checked against the Ollama registry before being listed -- the `verified` field records the size actually reported by the registry manifest, not an estimate. Sizes are the download size on disk, which for Ollama is the quantised runtime size.",
+  "_budget_note": "required_vram_gb is NOT the download size. It is download size + projector + the vision encoder's activation buffer at full screen + a KV reserve. A vision model that fits its weights and then OOMs the first time it is pointed at a 1920x1080 screenshot is the single most common way a local VLM disappoints, so the number is deliberately pessimistic.",
+  "models": [
+    {
+      "id": "qwen3-vl:4b",
+      "display": "Qwen3-VL 4B",
+      "verified": true,
+      "download_gb": 3.30,
+      "vision_buffer_gb": 1.5,
+      "kv_reserve_gb": 1.0,
+      "required_vram_gb": 5.8,
+      "quality": 4,
+      "speed": 4,
+      "strengths": "Best text-in-image quality here -- reads screenshots, code in images, tables, small UI text",
+      "tradeoffs": "Heaviest of the good options; needs ~5.8 GB free",
+      "ollama": "qwen3-vl:4b"
+    },
+    {
+      "id": "qwen3-vl:2b",
+      "display": "Qwen3-VL 2B",
+      "verified": true,
+      "download_gb": 1.89,
+      "vision_buffer_gb": 1.1,
+      "kv_reserve_gb": 0.8,
+      "required_vram_gb": 3.8,
+      "quality": 3,
+      "speed": 5,
+      "strengths": "Smallest model that still reads text in images reliably",
+      "tradeoffs": "Weaker on dense or cluttered screens",
+      "ollama": "qwen3-vl:2b"
+    },
+    {
+      "id": "qwen2.5vl:3b",
+      "display": "Qwen2.5-VL 3B",
+      "verified": true,
+      "download_gb": 3.20,
+      "vision_buffer_gb": 1.4,
+      "kv_reserve_gb": 0.9,
+      "required_vram_gb": 5.5,
+      "quality": 3,
+      "speed": 4,
+      "strengths": "Solid general screenshots, lighter than the 4B",
+      "tradeoffs": "Older than Qwen3-VL",
+      "ollama": "qwen2.5vl:3b"
+    },
+    {
+      "id": "gemma3:4b",
+      "display": "Gemma 3 4B",
+      "verified": true,
+      "download_gb": 3.34,
+      "vision_buffer_gb": 1.4,
+      "kv_reserve_gb": 0.9,
+      "required_vram_gb": 5.6,
+      "quality": 3,
+      "speed": 4,
+      "strengths": "Good at describing scenes, natural captions",
+      "tradeoffs": "Noticeably weaker at reading text in an image than Qwen3-VL",
+      "ollama": "gemma3:4b"
+    },
+    {
+      "id": "llava:7b",
+      "display": "LLaVA 7B",
+      "verified": true,
+      "download_gb": 4.73,
+      "vision_buffer_gb": 1.6,
+      "kv_reserve_gb": 1.0,
+      "required_vram_gb": 7.3,
+      "quality": 2,
+      "speed": 3,
+      "strengths": "The classic, well documented",
+      "tradeoffs": "Dated. Will not fit most 8 GB cards once the vision buffer is counted",
+      "ollama": "llava:7b"
+    },
+    {
+      "id": "moondream",
+      "display": "Moondream",
+      "verified": true,
+      "download_gb": 1.74,
+      "vision_buffer_gb": 0.9,
+      "kv_reserve_gb": 0.7,
+      "required_vram_gb": 3.3,
+      "quality": 2,
+      "speed": 5,
+      "strengths": "Tiny and quick",
+      "tradeoffs": "Poor OCR -- it will not reliably read text in a screenshot",
+      "ollama": "moondream:latest"
+    }
+  ]
+}
