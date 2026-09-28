@@ -8,6 +8,8 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSound } from "./audio/useSound";
+import { isMuted, setMuted, stopAllLoops, play } from "./audio/sounds";
 import { connectStream, STREAMS, type LinkState } from "./realtime/connection";
 import { stowedSurfaces, useWorkspace, visibleSurfaces } from "./state/workspace-store";
 import { GRID_STEP } from "./state/surfaces";
@@ -64,6 +66,17 @@ function WorkspaceShell() {
   const setViewport = useWorkspace((state) => state.setViewport);
   const stage = useRef<HTMLElement>(null);
   const dock = useRef<HTMLElement>(null);
+  useSound();
+  const [soundOn, setSoundOn] = useState(() => !isMuted());
+  const toggleSound = useCallback(() => {
+    // Stop whatever is sustaining before flipping the switch, so muting does
+    // not leave a hum running under a muted master.
+    const next = !isMuted();
+    setMuted(next);
+    if (next) stopAllLoops();
+    setSoundOn(!next);
+    if (!next) play("toggle");
+  }, []);
   const link = useLiveLink();
   const clicks = useRef<number[]>([]);
   const linkLabel = useMemo(() => Object.entries(link).map(([name, state]) => `${name}: ${state}`), [link]);
@@ -212,6 +225,15 @@ function WorkspaceShell() {
           </button>
           <button type="button" className="ghost" onClick={toggleImmersive}>
             full hud
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={toggleSound}
+            aria-pressed={soundOn}
+            title={soundOn ? "Sound on — click to mute" : "Sound muted — click to unmute"}
+          >
+            {soundOn ? "sound on" : "muted"}
           </button>
         </footer>
 
