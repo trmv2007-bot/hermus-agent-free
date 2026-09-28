@@ -24,10 +24,22 @@ from .video_writer import VideoWriter
 
 
 class OllamaVisionModel:
-    """Adapter around the existing free local ``tools.vision`` integration."""
+    """Adapter around the existing free local ``tools.vision`` integration.
 
-    def __init__(self, model: str = "llava:7b"):
-        self.model = model
+    No model is named here. This used to default to ``llava:7b``, a model that
+    is not installed on this machine, so every screen-understanding path
+    (screen_watch, screen_verify, screen_analyze, screen_understand) was wired
+    to something that could not run -- and it failed with "model not found"
+    rather than "no vision model installed", which points at the wrong fix.
+
+    With no model configured, the model is resolved at call time from whatever
+    the local runtime actually reports as vision-capable. Install a multimodal
+    local model and this picks it up with no edit here.
+    """
+
+    def __init__(self, model: str | None = None):
+        # None means "whatever this machine can actually see with".
+        self.model = model or None
 
     def available(self) -> dict[str, Any]:
         from tools.vision import vision_available_models
@@ -37,9 +49,21 @@ class OllamaVisionModel:
         return {
             "available": bool(models),
             "models": models,
+            # Report the model in play, so a caller can see which one was chosen
+            # rather than assuming a default.
+            "model": self.model or (models[0] if models else None),
             "error": status.get("error"),
             "suggestion": status.get("suggestion"),
         }
+
+    def _resolve(self) -> str | None:
+        """The model to call, resolved now rather than at construction."""
+        if self.model:
+            return self.model
+        from tools.vision import vision_available_models
+
+        models = vision_available_models().get("vision_models") or []
+        return models[0] if models else None
 
     def __call__(self, image: Any, prompt: str) -> dict[str, Any]:
         from tools.vision import vision_analyze
@@ -50,7 +74,7 @@ class OllamaVisionModel:
                 return {"success": False, "error": "could not encode selected frame"}
             temporary.write(data)
             temporary.flush()
-            return vision_analyze(temporary.name, prompt=prompt, model=self.model)
+            return vision_analyze(temporary.name, prompt=prompt, model=self._resolve())
 
 
 class VideoAnalyzer:
@@ -63,7 +87,7 @@ class VideoAnalyzer:
         self.event_detector = event_detector or EventDetector()
 
     @classmethod
-    def with_ollama(cls, model: str = "llava:7b", **kwargs: Any) -> VideoAnalyzer:
+    def with_ollama(cls, model: str | None = None, **kwargs: Any) -> VideoAnalyzer:
         return cls(vision_model=OllamaVisionModel(model), **kwargs)
 
     @staticmethod

@@ -393,7 +393,7 @@ def plan_vision_route(
     tools: Iterable[str] = (),
     tiers: Optional[list[str]] = None,
     ollama_base_url: str = "http://localhost:11434",
-    trust_local: bool = False,
+    trust_local: bool | None = None,
 ) -> VisionRoute:
     """Decide where a vision turn goes, cheapest usable first.
 
@@ -402,9 +402,16 @@ def plan_vision_route(
     Not "a local model is configured", not "the local tier is free", not "4B
     models are usually fine at vision". A capability flag, read at runtime.
 
-    ``trust_local`` exists so the decision is testable and overridable, and it
-    defaults to False because the measured default on this box is that the
-    local tier cannot see at all.
+    No model is named anywhere in this decision. There is no "the vision model
+    is X" and no provider allow-list that decides local. The question is asked
+    of the machine, at call time: does any locally installed model advertise
+    ``vision``? If one does, it wins, because it is the cheapest tier that can
+    actually do the job. Install a multimodal local model and this starts using
+    it with no code change, no config edit, and no redeploy.
+
+    ``trust_local`` is an override for tests and for a deliberate opt-out. It
+    defaults to None, meaning "decide from the capability list" -- it is not a
+    policy switch that has to be flipped when the hardware changes.
     """
     names = {str(t) for t in tools or ()}
     wants = needs_vision(text, names)
@@ -423,7 +430,9 @@ def plan_vision_route(
         "probe_errors": support.get("error", ""),
     }
 
-    if trust_local and local_vision:
+    # None means: trust the machine's own answer. Anything else is an override.
+    use_local = bool(local_vision) if trust_local is None else (trust_local and bool(local_vision))
+    if use_local:
         return VisionRoute(
             needs_vision=True,
             plan="local",

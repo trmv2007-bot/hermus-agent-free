@@ -24,6 +24,16 @@ def test_skip_validation_returns_skipped_without_checks():
 
 
 def test_validation_reports_all_four_checks(monkeypatch):
+    """All four checks, independent of whether the machine happens to be busy.
+
+    This called the validator with the port check live, so it passed or failed
+    depending on whether something was listening on 8000 -- including a
+    gateway the developer had deliberately started. A test that reports the
+    state of a shared port is not testing the validator.
+
+    The port itself has its own test below, which asserts the argument that
+    was dialled.
+    """
     # Force a non-ollama model so the Ollama probe is not required to pass.
     import core.config as config_module
 
@@ -31,7 +41,7 @@ def test_validation_reports_all_four_checks(monkeypatch):
     # Do not inherit another test module singleton mutation; this check owns
     # the healthy default budget explicitly.
     monkeypatch.setattr(config_module.config, "max_tool_steps", 32, raising=False)
-    results = bootstrap.validate_critical_config()
+    results = bootstrap.validate_critical_config(check_port=False)
     names = {c["name"] for c in results["checks"]}
     assert names == {"max_tool_steps", "directories_writable", "gateway_port_free"}
     # Every check carries an actionable message.
