@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { onRoomEvent } from "../realtime/room-events";
 
 interface Turn {
   id: string;
@@ -33,6 +34,21 @@ interface Turn {
   streaming?: boolean;
   /** A failure, rendered inside the bubble rather than swallowed. */
   error?: string;
+  /**
+   * An unsolicited line from the ambient loop, rather than a reply to
+   * something the user asked.
+   *
+   * It is carried on the turn rather than kept in a separate list because a
+   * separate list is a second transcript with its own ordering problems: a
+   * proactive note and a reply are the same kind of thing (the assistant said
+   * it) and belong in the same sequence, in the order they actually happened.
+   *
+   * The reason is kept for the tooltip. The whole argument for letting the
+   * assistant speak first is that it can say *why* it thought this was worth
+   * interrupting for, and a distinction the user cannot inspect is a
+   * distinction the user has to take on faith.
+   */
+  unsolicited?: { rule: string; reason: string };
 }
 
 let counter = 0;
@@ -58,6 +74,42 @@ export function ChatPanel() {
     () => () => {
       abortRef.current?.abort();
     },
+    [],
+  );
+
+  // An unsolicited line, arriving on the room stream with nobody having asked
+  // for it. Subscribing here rather than opening a second socket is the point
+  // of `onRoomEvent`: `connectStream` already fans every frame through it.
+  //
+  // The functional update matters. `send` also appends turns, and by the time
+  // an ambient line lands a turn may be mid-flight; a stale-closure append
+  // would silently drop it, and a dropped proactive line is the one bug in
+  // this feature that a user would experience as "it never actually says
+  // anything".
+  useEffect(
+    () =>
+      onRoomEvent("hermus_spoke", (event) => {
+        const data = (event.data ?? {}) as {
+          text?: string;
+          rule?: string;
+          reason?: string;
+          id?: string;
+        };
+        const text = typeof data.text === "string" ? data.text.trim() : "";
+        // An empty proactive bubble is worse than none: it is a speech the
+        // user cannot dismiss and cannot read, and it would defeat the panel's
+        // existing rule that a turn with no text means something went wrong.
+        if (!text) return;
+        setTurns((prev) => [
+          ...prev,
+          {
+            id: data.id ?? nextId(),
+            role: "hermus",
+            text,
+            unsolicited: { rule: data.rule ?? "unknown", reason: data.reason ?? "" },
+          },
+        ]);
+      }),
     [],
   );
 
@@ -188,8 +240,24 @@ export function ChatPanel() {
           </p>
         )}
         {turns.map((turn) => (
-          <div className={`chat-turn chat-${turn.role}`} key={turn.id}>
-            <span className="chat-who">{turn.role === "you" ? "you" : "hermus"}</span>
+          <div
+            className={`chat-turn chat-${turn.role}${turn.unsolicited ? " chat-unsolicited" : ""}`}
+            key={turn.id}
+            // The reason is the explanation for speaking without being asked, so
+            // it belongs where it can be read without being shouted. A title
+            // attribute is the right weight for it: present, inspectable, and
+            // invisible to anyone who is not looking for it.
+            title={turn.unsolicited ? turn.unsolicited.reason : undefined}
+            data-rule={turn.unsolicited?.rule}
+          >
+            <span className="chat-who">
+              {turn.role === "you" ? "you" : "hermus"}
+              {/* Says *that* it was unprompted. A different colour alone does
+                  not survive a high-contrast mode or a colourblind reader,
+                  and "why did it say that with no reason" is the question this
+                  label exists to pre-empt. */}
+              {turn.unsolicited && <em className="chat-unasked"> · unprompted</em>}
+            </span>
             <div className="chat-bubble">
               {turn.text}
               {turn.streaming && !turn.text && <span className="chat-waiting">…</span>}

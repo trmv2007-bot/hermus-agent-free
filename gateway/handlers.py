@@ -27,6 +27,12 @@ from typing import Any
 from core.config import config
 from core.log import get_logger
 
+# The conversation turn lives in one place so the streaming endpoint and the
+# queued job cannot drift into two different answers to the same question.
+# Imported at module scope: it is a leaf module (stdlib + lazy core imports),
+# so there is no cycle through gateway.gateway.
+from gateway.chat_turn import run_turn
+
 logger = get_logger(__name__)
 
 
@@ -325,6 +331,116 @@ def make_swe_develop_handler(agent_getter: Callable[..., Any] | None = None):
     return swe_develop
 
 
+def make_chat_turn_handler() -> Callable[[Any], dict[str, Any]]:
+    """A conversational turn as a queued job: submit, get an id, walk away.
+
+    Why this is not ``agent.chat``
+    -------------------------------
+    ``agent.chat`` runs a 188-tool ReAct loop. It belongs on its own thread
+    with its own lifecycle, and it is what the action endpoints are for. This
+    is a plain chat completion — the same one ``/api/v1/chat`` streams — so it
+    can share one implementation instead of a second conversation path that
+    would drift.
+
+    Why it is a *conversation* and not an agent, in a queue handler
+    --------------------------------------------------------------
+    The rule that keeps getting broken: never call ``HermusAgent.chat()`` from
+    a request handler. A thread cannot yield minutes of Python bytecode, the
+    GIL stays held, and the event loop in this same interpreter stops being
+    scheduled — that wedge took the whole gateway down once, not just chat.
+    Queueing does not fix it either, because a queue worker is still a thread
+    in this process. Conversation is a direct model call, which spends its
+    life on a socket and releases the GIL the whole time. Long work that really
+    needs tools goes to ``runtime.turn``.
+
+    How progress reaches a user who has walked away
+    ------------------------------------------------
+    ``run_turn`` is an async generator of frames. This handler drives it and
+    publishes each frame onto the run bus, which ``/stream/run/{run_id}`` and
+    ``/jobs/{id}/events`` already stream *with replay* — so a client that
+    connects late, or reconnects, still sees the whole answer. That is the
+    difference between a background job and a fire-and-forget POST.
+    """
+
+    def chat_turn(ctx) -> dict[str, Any]:
+        import asyncio
+
+        payload = dict(ctx.payload or {})
+        text = str(payload.get("text") or payload.get("message") or "").strip()
+        if not text:
+            # A structured error, not an exception: the queue would otherwise
+            # burn a retry on input that will never become valid.
+            return {"error": "text required"}
+
+        started = time.time()
+        emit = ctx.emit
+        # Mirrored so a client replaying the run can rebuild the answer from
+        # the same deltas the live stream carried, rather than needing a second
+        # transcript to stay in sync with the first.
+        collected: list[str] = []
+        counters = {"delta": 0}
+
+        async def drive() -> tuple[str, dict[str, Any] | None]:
+            final: dict[str, Any] | None = None
+            error: dict[str, Any] | None = None
+            async for event, data in run_turn(
+                text=text,
+                history=payload.get("history"),
+                system=payload.get("system"),
+                model=payload.get("model"),
+                max_tokens=payload.get("max_tokens"),
+                want_stream=payload.get("stream", True) is not False,
+            ):
+                if ctx.should_cancel():
+                    # Cooperative: stop at the next frame boundary rather than
+                    # being abandoned in a thread that outlives the request.
+                    emit("cancelled", {"reason": "cancelled at the next step boundary"})
+                    return "", None
+                if event == "delta":
+                    piece = data.get("text") or ""
+                    if piece:
+                        collected.append(piece)
+                        counters["delta"] += 1
+                if event == "final":
+                    final = data
+                elif event == "error":
+                    error = data
+                # One publish per frame. The bus is thread-safe and never
+                # blocks, so this is safe from the worker's own event loop.
+                emit(event, data)
+            return (final or {}).get("content", ""), final or error
+
+        content, terminal = asyncio.run(drive())
+
+        answer = str(content or "".join(collected) or "").strip()
+        if not answer:
+            message = str((terminal or {}).get("error") or "the model answered with no text")
+            # Still a *structured* result: the job succeeded at being honest
+            # about having no answer, and the client renders the reason.
+            return {
+                "error": message,
+                "run_id": ctx.run_id,
+                "job_id": ctx.id,
+                "deltas": counters["delta"],
+                "elapsed_ms": int((time.time() - started) * 1000),
+            }
+
+        return {
+            "response": answer,
+            "text": answer,
+            "content": answer,
+            "run_id": ctx.run_id,
+            "job_id": ctx.id,
+            "deltas": counters["delta"],
+            "first_token_s": (terminal or {}).get("first_token_s"),
+            "elapsed_s": (terminal or {}).get("elapsed_s"),
+            "elapsed_ms": int((time.time() - started) * 1000),
+        }
+
+    chat_turn.__doc__ = "chat.turn: one conversational turn, streamed onto the run bus"
+    return chat_turn
+
+
 def make_research_handler():
     def research(ctx) -> dict[str, Any]:
         payload = dict(ctx.payload)
@@ -540,6 +656,10 @@ def register_handlers(queue, agent_getter: Callable[..., Any], *, overwrite: boo
         "agent.general": (make_agent_general_handler(), "named-agent general task through the universal runtime (role dispatch)"),
         "agent.computer": (make_agent_computer_handler(), "named-agent desktop/computer task (role dispatch)"),
         "agent.chat": (make_chat_handler(agent_getter), "run one agent turn (ReAct loop, streamed events)"),
+        "chat.turn": (
+            make_chat_turn_handler(),
+            "one conversational turn as a background job (streamed progress on the run bus, replayable)",
+        ),
         "agent.autonomous": (
             make_autonomous_handler(agent_getter),
             "goal through the universal mission runtime (plan→execute→verify→repair)",

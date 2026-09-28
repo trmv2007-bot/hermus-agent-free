@@ -14,6 +14,15 @@ the sentence describing it disappears on the next turn, with no code change.
 The other half is restraint. A short identity plus real numbers reads as
 competent; a paragraph of adjectives reads as a mascot. The prompt stays small
 on purpose.
+
+Where the character lives
+-------------------------
+Not here. Adjectives in a prompt do not change decisions, they change decoration:
+a model told to be "witty and confident" opens with "Great question!" just the
+same. So the behaviour lives in ``core/demeanour.py`` as a table of situations
+and the decisions that apply in each, and this file's job is only to render the
+part of it that holds every turn. The per-situation blocks are loaded on demand
+by ``describe_for`` when the caller knows what kind of turn this is.
 """
 
 from __future__ import annotations
@@ -21,6 +30,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from core.demeanour import BASE_RULES, Moment, stance_for
 from core.grounding import now_context
 
 DEFAULT_NAME = "HERMUS"
@@ -67,6 +77,9 @@ class Persona:
         Kept short on purpose: this is prepended to every turn, and a long
         persona is paid for in latency on each one.
         """
+        return self._identity() + "\n\n" + self._stance()
+
+    def _identity(self) -> str:
         abilities = (
             ", ".join(f"{label} ({len(names)})" for label, names in self.groups)
             or "nothing registered yet"
@@ -94,6 +107,26 @@ class Persona:
             "- Never claim a capability you were not just told you have.\n\n"
             "What you cannot do:\n" + "".join(f"- {line}\n" for line in LIMITS)
         )
+
+    def _stance(self) -> str:
+        """The rules that hold on every turn, whatever the turn is.
+
+        Four lines. The temptation is to write the whole character here, and it
+        is the one thing that would undo the work: a model handed twenty
+        personality rules applies them uniformly, which is the flatness this is
+        meant to fix. The rest lives in core.demeanour and is loaded per turn.
+        """
+        return "How you come across:\n" + "".join(f"- {rule}\n" for rule in BASE_RULES)
+
+    def describe_for(self, moment: Moment) -> str:
+        """The full prompt with the rules for one kind of turn.
+
+        What a caller uses when it knows the situation. Classifying the turn is
+        ``core.demeanour.classify``'s job, and it can take runtime signals the
+        words do not carry: a tool that raised, an answer that confessed
+        ignorance, a capability the registry does not have.
+        """
+        return self.describe() + "\n\n" + stance_for(moment, agent_name=self.name).render()
 
 
 def _master_name() -> str:

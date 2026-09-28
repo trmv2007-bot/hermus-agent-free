@@ -327,6 +327,27 @@ class Config(BaseSettings):
     presence_checkin_after_minutes: int = Field(default=240, validation_alias="HERMUS_PRESENCE_CHECKIN_AFTER_MINUTES")
     presence_proactive_checkins: EnvFlag = Field(default=False, validation_alias="HERMUS_PRESENCE_PROACTIVE_CHECKINS")
 
+    # ---- Ambient proactivity ---------------------------------------------
+    # The loop that watches for things worth saying and stays quiet otherwise.
+    # "Whether" is decided by core/intent.py; these only say how often to look
+    # and which hours are off-limits. Enabled by default because the judge
+    # rations the content: a bare tick with nothing to report says nothing, and
+    # a system that cannot speak up unprompted is a system the user has to
+    # interrogate. Set HERMUS_PROACTIVITY_ENABLED=0 for the previous behaviour.
+    proactivity_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_PROACTIVITY_ENABLED")
+    proactivity_interval_seconds: int = Field(default=20, validation_alias="HERMUS_PROACTIVITY_INTERVAL_SECONDS")
+    # Local-time window where only an interrupt may be spoken, "HH:MM-HH:MM",
+    # wrap-around supported. Empty disables the gate. Being woken at 3am to be
+    # told a mission finished is how an assistant becomes a nuisance.
+    proactivity_quiet_hours: str = Field(default="22:30-08:00", validation_alias="HERMUS_PROACTIVITY_QUIET_HOURS")
+    # The most unsolicited lines per tick. Two is already a conversation, and a
+    # conversation is something the user started.
+    proactivity_max_per_tick: int = Field(default=1, validation_alias="HERMUS_PROACTIVITY_MAX_PER_TICK")
+    # A job faster than this is not a long-running task and is not news.
+    proactivity_long_job_seconds: int = Field(default=120, validation_alias="HERMUS_PROACTIVITY_LONG_JOB_SECONDS")
+    # Free disk below this percentage is worth one interruption.
+    proactivity_disk_min_free_pct: float = Field(default=5.0, validation_alias="HERMUS_PROACTIVITY_DISK_MIN_FREE_PCT")
+
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"
     embedding_model: str = Field(default="nomic-embed-text", validation_alias="HERMUS_EMBED_MODEL")

@@ -356,6 +356,23 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"[Gateway] presence heartbeat failed to start: {e}")
 
+    # The ambient loop. Started after presence so the probes have a real
+    # presence state to read on their first tick, and stopped before the queue
+    # drains (see `loops` in the finally block) so nothing is delivered into a
+    # gateway that has already told its supervisor it is going away.
+    proactivity = None
+    if getattr(config, "proactivity_enabled", True):
+        try:
+            from core.proactivity import start_proactivity
+
+            proactivity = start_proactivity()
+            if proactivity is not None:
+                logger.info("[Gateway] ambient proactivity loop started")
+            else:
+                logger.info("[Gateway] ambient proactivity disabled")
+        except Exception as e:
+            logger.error(f"[Gateway] ambient proactivity failed to start: {e}")
+
     maintenance_task = None
     if getattr(config, "memory_sweep_minutes", 60) > 0:
         try:
@@ -387,6 +404,16 @@ async def lifespan(app: FastAPI):
         # route new traffic elsewhere), then give in-flight jobs a bounded
         # window to finish before the process tears itself down.
         _lifecycle.state.begin_drain("shutdown")
+        # The ambient loop stops first. It is a thread rather than an asyncio
+        # task, so it is not in `loops`, and it must be joined before the queue
+        # drains: a tick landing mid-drain would publish an utterance into a
+        # gateway that is already refusing new work, and the line would arrive
+        # after the user was told the system was going away.
+        if proactivity is not None:
+            try:
+                proactivity.stop()
+            except Exception as e:  # noqa: BLE001 - shutdown must not raise
+                logger.error(f"[Gateway] ambient proactivity failed to stop: {e}")
         loops = [
             ("agent-system-init", agent_system_task),
             ("presence", presence_task),

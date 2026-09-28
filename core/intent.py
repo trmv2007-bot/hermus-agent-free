@@ -543,7 +543,10 @@ def decide(
                 f"unreported for {gap_text}; silence here would read as not "
                 f"noticing"
             ),
-            line=f"{detail} failed. I stopped rather than continue on a bad result.",
+            # No claim of agency. Whatever went wrong, HERMUS did not "stop"
+            # anything -- a template that says it did is a lie told to the user
+            # in the exact moment they are relying on the report.
+            line=f"{detail} failed. Here is what I saw, not a guess.",
             rule="urgent",
         )
 

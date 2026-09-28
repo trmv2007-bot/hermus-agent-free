@@ -97,6 +97,58 @@ async def _stream_run(
         unsubscribe()
 
 
+#: The run id unsolicited utterances are published under. It is a real run on
+#: the shared :data:`run_bus`, which is what lets an ambient line reach every
+#: client already listening to run events (the WS duplex channel, the SSE
+#: stream, the CLI) without a second transport, a second auth path, or a
+#: second thing for the frontend to connect to.
+ROOM_RUN_ID = "room"
+
+# ------------------------------------------------------------------ speaking
+def speak_to_room(utterance: Any) -> dict[str, Any]:
+    """Publish one unsolicited utterance to the room.
+
+    Takes a :class:`core.proactivity.Utterance` (duck-typed, so this module
+    does not import the loop and the loop does not import the gateway at module
+    scope) and puts it on the shared run bus.
+
+    Three properties this has to keep, and the reason each is here rather than
+    in the caller:
+
+    * **It never raises.** The proactivity loop runs on a timer with nobody
+      watching it; an exception escaping into that thread would take the loop
+      down silently, which is the one failure a quiet-by-design feature cannot
+      afford.
+    * **It records the utterance as a presence moment.** An ambient line that
+      leaves no trace is indistinguishable from one that never happened when
+      someone asks the agent what it has been doing.
+    * **It is fire-and-forget.** No model call, no job, no tool. The line is
+      the whole product here; anything that ran a turn would be an action
+      taken without a request, which is the red line this feature sits next to.
+    """
+    payload = utterance.to_dict() if hasattr(utterance, "to_dict") else dict(utterance)
+    try:
+        run_bus.publish(ROOM_RUN_ID, "hermus_spoke", payload)
+    except Exception as e:  # noqa: BLE001 - ambient delivery is best effort
+        logger.error(f"[Proactivity] room publish failed: {e}")
+        return {"delivered": False, "error": str(e)}
+    try:
+        from core.presence import get_presence
+
+        get_presence().record_moment(
+            "spoke_unprompted",
+            str(payload.get("text") or "")[:400],
+            metadata={
+                "rule": str(payload.get("rule") or ""),
+                "urgency": str(payload.get("urgency") or ""),
+                "source": str(payload.get("source") or ""),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[Proactivity] presence moment skipped: {e}")
+    return {"delivered": True, "utterance_id": payload.get("utterance_id"), "run_id": ROOM_RUN_ID}
+
+
 def _ts() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -304,9 +356,9 @@ async def ws_agent(websocket: WebSocket):
 
     streams: dict[str, asyncio.Task] = {}
 
-    async def pump_events(run_id: str, source: str = "") -> None:
+    async def pump_events(run_id: str, source: str = "", max_seconds: float = 1800.0) -> None:
         try:
-            async for frame in _stream_run(run_bus, run_id, keepalive=20.0, max_seconds=1800.0):
+            async for frame in _stream_run(run_bus, run_id, keepalive=20.0, max_seconds=max_seconds):
                 # SSE frames → JSON messages for the socket
                 payload_line = None
                 for line in frame.splitlines():
@@ -324,6 +376,25 @@ async def ws_agent(websocket: WebSocket):
             raise
         except Exception as e:
             await send({"type": "stream_error", "run_id": run_id, "error": str(e)[:200]})
+
+        # Every connected client is attached to the room run for the life of the
+        # socket, not only while it has a job in flight.
+        #
+        # Without this the ambient loop would publish into a run nobody is
+        # subscribed to: `run_bus.publish` would succeed, the event would sit in
+        # that run's ring buffer, and the one feature whose entire product is "it
+        # says something when you did not ask" would be invisible. Attaching here
+        # rather than making the client send a subscribe frame is deliberate — a
+        # client that has to know a special run id exists in order to hear the
+        # assistant is a client that will forget to.
+        #
+        # The 30-minute default cap does not apply: a room is not a run that
+        # finishes, and a socket left open across a coffee break must still hear
+        # the assistant. The keepalives inside _stream_run keep the connection
+        # warm, so this is a long-lived subscriber and nothing else.
+        streams[ROOM_RUN_ID] = asyncio.create_task(
+            pump_events(ROOM_RUN_ID, source="room", max_seconds=86400.0)
+        )
 
     try:
         while True:
@@ -751,6 +822,61 @@ async def delegation_cancel(tree_id: str):
 @router.get("/runs")
 async def list_runs(limit: int = 30):
     return {"runs": run_bus.runs()[-limit:]}
+
+
+# ---- ambient proactivity ----------------------------------------------------
+@router.get("/proactivity/status")
+async def proactivity_status():
+    """Why the assistant has been quiet, in numbers and in words.
+
+    Exists because a system designed to be silent is indistinguishable from a
+    crashed one. Without this, "it never said anything" has two possible
+    causes and no way to tell them apart. The loop's own ``last_decision``
+    carries the judge's reason, so the answer is the policy's own reasoning
+    rather than a health-check guess.
+    """
+    from core.proactivity import get_proactivity
+
+    loop = get_proactivity()
+    if loop is None:
+        return {"running": False, "enabled": bool(getattr(config, "proactivity_enabled", True)), "reason": "loop not started"}
+    return await asyncio.to_thread(loop.status)
+
+
+@router.get("/proactivity/utterances")
+async def proactivity_utterances(limit: int = 20):
+    """What the assistant said unprompted, from the room run's own history.
+
+    Read back off the run bus rather than kept in a second list: the bus is
+    already the durable record for everything the room heard, and a parallel
+    history is a second thing to forget to write.
+    """
+    rows = [e for e in run_bus.history(ROOM_RUN_ID, limit=max(1, min(int(limit or 20), 200))) if e.get("type") == "hermus_spoke"]
+    return {"count": len(rows), "utterances": [e.get("data", {}) for e in reversed(rows)]}
+
+
+@router.get("/proactivity/tick")
+async def proactivity_tick():
+    """Run one tick now and report the decisions, without delivering them.
+
+    The dry-run half of the feature, and the reason it is an endpoint at all:
+    "would you have spoken?" is the question you need to ask while tuning
+    thresholds, and the only honest way to answer it is to run the real
+    decision function over the real probes and throw the result away.
+    """
+    from core.proactivity import get_proactivity
+
+    loop = get_proactivity()
+    if loop is None:
+        return {"ok": False, "error": "proactivity loop is not running"}
+    decided = await asyncio.to_thread(loop.consider)
+    return {
+        "ok": True,
+        "delivered": False,
+        "would_speak": len(decided),
+        "utterances": [u.to_dict() for u in decided],
+        "status": await asyncio.to_thread(loop.status),
+    }
 
 
 @router.get("/runs/{run_id}")

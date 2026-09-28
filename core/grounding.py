@@ -66,6 +66,15 @@ LOCAL_ABOUTTIONS = re.compile(
     re.I,
 )
 
+# Questions the clock answers exactly, for free, with no network. Anchored on
+# the topic noun so "current" elsewhere still searches normally.
+CLOCK_ANSWERS = re.compile(
+    r"\b(what|whats|what's)\b[^?]{0,24}\b(time|date|day|month|year|week)\b"
+    r"|\b(what time is it|what's the time|what is the time"
+    r"|what date is it|what's the date|today'?s date)\b",
+    re.I,
+)
+
 
 @dataclass(frozen=True)
 class Source:
@@ -296,9 +305,9 @@ def admits_ignorance(answer: str) -> bool:
 def is_searchable(question: str) -> bool:
     """Whether this turn is worth a network round trip.
 
-    Three checks, cheapest first: is it arithmetic or a greeting, is it about
-    this machine, and only then does it have to look like a question with an
-    answer that moves.
+    Four checks, cheapest first: is it arithmetic or a greeting, is it about
+    this machine, can the clock answer it, and only then does it have to look
+    like a question with an answer that moves.
     """
     q = normalize_text(question or "").strip()
     if not q:
@@ -306,6 +315,12 @@ def is_searchable(question: str) -> bool:
     if NOT_WORTH_SEARCHING.match(q):
         return False
     if LOCAL_ABOUTTIONS.search(q):
+        return False
+    if CLOCK_ANSWERS.match(q):
+        # "What time is it" matched WORTH_SEARCHING on the word "current" and
+        # cost a 20s DuckDuckGo round trip to learn what now_context() already
+        # knows exactly. The clock is local, exact and free; the web is slow
+        # and can be wrong. Route on the topic, not on the freshness adjective.
         return False
     return bool(WORTH_SEARCHING.search(q))
 

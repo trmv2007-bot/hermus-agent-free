@@ -8,6 +8,7 @@ Ollama /v1, LM Studio, vLLM, and any custom base_url.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import Any
@@ -22,6 +23,8 @@ from .providers import (
     resolve_endpoint,
 )
 from .token_counter import token_counter
+
+logger = logging.getLogger(__name__)
 
 
 class CompatResponse:
@@ -484,8 +487,20 @@ def stream_chat_completions(
     pending_calls: dict[int, dict[str, Any]] = {}
     usage_raw: dict[str, Any] = {}
     finish_reason = ""
+    # Characters the model spent thinking rather than answering. Surfaced in
+    # usage so a caller can see a turn that produced no answer *because the
+    # budget went to reasoning*, which is a different problem from a model
+    # that had nothing to say — and the fix for each is different.
+    reasoning_chars = 0
     started = time.time()
-    try:
+
+    def _read(body: dict[str, Any]) -> CompatResponse:
+        """One streaming pass over the provider. Returns the assembled response."""
+        # These two are *assigned* below, which makes them locals of this
+        # function unless declared nonlocal — and the first read of
+        # `finish_reason` happens before its first assignment, so without this
+        # the first chunk raises UnboundLocalError and the whole stream dies.
+        nonlocal usage_raw, finish_reason, reasoning_chars
         with requests.post(url, headers=headers, json=body, timeout=timeout, stream=True) as resp:
             if resp.status_code >= 400:
                 rate = _extract_rate_headers(dict(resp.headers))
@@ -494,7 +509,17 @@ def stream_chat_completions(
                     status_code=resp.status_code,
                     rate_limit=rate,
                 )
-            for raw_line in resp.iter_lines(decode_unicode=True):
+            # decode_unicode=True makes httpx pick the charset from the headers.
+            # An SSE response is "text/event-stream" with no charset parameter,
+            # so httpx falls back to latin-1 and every curly quote, em dash and
+            # rupee sign in the answer arrives as mojibake (0xe2 0x80 0x99 for
+            # U+2019). Take the bytes and decode them as UTF-8 ourselves.
+            for raw_line in resp.iter_lines():
+                if isinstance(raw_line, (bytes, bytearray)):
+                    try:
+                        raw_line = raw_line.decode("utf-8")
+                    except UnicodeDecodeError:
+                        raw_line = raw_line.decode("utf-8", "replace")
                 if not raw_line:
                     continue
                 line = raw_line.strip()
@@ -540,6 +565,31 @@ def stream_chat_completions(
                 if delta.get("reasoning_content"):
                     # expose chain-of-thought as deltas too (some providers)
                     pass
+                # Ollama's OpenAI-compatible surface names the thinking tokens
+                # `reasoning`, not `reasoning_content`, and emits them on the
+                # same delta as the answer. Nothing above looked for that
+                # spelling, so on this provider the model's entire thinking
+                # phase was invisible — and, worse, uncountable: the caller
+                # cannot tell "the model thought and then answered" from "the
+                # model burned the whole token budget thinking and never
+                # answered at all", and those two are worth very different
+                # amounts of the user's time.
+                #
+                # Counted, never rendered. A chat surface showing a model's
+                # scratchpad is showing the user the plumbing; but a model
+                # that spent 400 tokens thinking and produced no answer is
+                # exactly the case the gate needs to know about, and it used to
+                # be indistinguishable from a model that had nothing to say.
+                #
+                # Deliberately NOT appended to ``stream_logprobs``: these
+                # tokens carry no measured logprob, and a fabricated 0.0 would
+                # be read as log(1.0) — the *highest* possible confidence —
+                # quietly inverting the confidence bar it feeds.
+                for _key in ("reasoning", "reasoning_content"):
+                    _thought = delta.get(_key)
+                    if isinstance(_thought, str) and _thought:
+                        reasoning_chars += len(_thought)
+                        break
                 for tc in delta.get("tool_calls") or []:
                     idx = int(tc.get("index") or 0)
                     slot = pending_calls.setdefault(idx, {"id": "", "name": "", "arguments": ""})
@@ -551,7 +601,7 @@ def stream_chat_completions(
                     if isinstance(fn.get("arguments"), str):
                         slot["arguments"] += fn["arguments"]
 
-        tool_calls: list[dict] = []
+        tool_calls: list[dict[str, Any]] = []
         for idx in sorted(pending_calls):
             slot = pending_calls[idx]
             args = slot.get("arguments") or "{}"
@@ -576,6 +626,10 @@ def stream_chat_completions(
         usage["latency_ms"] = latency_ms
         usage["streamed"] = True
         usage["finish_reason"] = finish_reason
+        # 0 means the model did not think out loud; a large number with an
+        # empty `content` means it thought the whole budget away, which is a
+        # budget problem, not a silence problem.
+        usage["reasoning_chars"] = reasoning_chars
         return CompatResponse(
             content=content,
             tool_calls=tool_calls,
@@ -585,6 +639,29 @@ def stream_chat_completions(
             latency_ms=latency_ms,
             logprobs=stream_logprobs,
         )
+
+    try:
+        try:
+            return _read(body)
+        except CompatAPIError as exc:
+            # A provider that refuses `logprobs` must not cost us the stream.
+            #
+            # This default is `logprobs=True` so the confidence bar can judge
+            # a streamed answer, and that is worth having — but plenty of
+            # models reject the field outright: groq's gpt-oss-120b answers
+            # HTTP 400 "`logprobs` is not supported with this model", which
+            # turned an entire streaming call into a failure and pushed the
+            # turn onto the slow blocking path. An optional *diagnostic*
+            # parameter is not worth losing token delivery over, so drop it and
+            # try again. The cost of being wrong is one extra round trip; the
+            # cost of not doing this is the answer arriving as one blob.
+            if not logprobs or "logprob" not in str(exc).lower():
+                raise
+            retry_body = {k: v for k, v in body.items() if k not in ("logprobs", "top_logprobs")}
+            logger.warning(
+                "provider rejected logprobs while streaming (%s); retrying without them", str(exc)[:160]
+            )
+            return _read(retry_body)
     except CompatAPIError:
         raise
     except requests.exceptions.Timeout as e:

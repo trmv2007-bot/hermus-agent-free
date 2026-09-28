@@ -118,6 +118,16 @@ export function planForEvent(event: RuntimeEvent): PlanResult {
     };
   }
 
+  // An unsolicited line from the ambient loop. It is not a tray entry and not
+  // a surface: it is a thing the assistant said, and the transcript is where a
+  // thing the assistant said belongs. Falling through to the catch-all would
+  // file it as telemetry, which is exactly the "unreadable heartbeat" failure
+  // the ambient loop exists to avoid — and `reveal: false` is deliberate, since
+  // yanking the user out of full-HUD for a quiet note is worse than the note.
+  if (kind === "hermus_spoke") {
+    return { ops: [], tray: [], reveal: false };
+  }
+
   // Context, tool selection and step telemetry are readouts, not requests.
   return { ops: [], tray: [{ label: kind, detail: "", at }], reveal: false };
 }
