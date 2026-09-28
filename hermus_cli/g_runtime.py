@@ -97,7 +97,9 @@ def _run_doctor(args, ctx: CLIContext) -> None:
         if os.getenv("HERMUS_SKIP_VALIDATION", "").strip().lower() not in ("1", "true", "yes"):
             from bootstrap import validate_critical_config
 
-            validate_critical_config(skip_validation=False)
+            # This process is about to bind, so the port check is meaningful
+            # here and would only duplicate what the bind reports.
+            validate_critical_config(skip_validation=False, check_port=False)
     if getattr(args, "self_repair", False):
         # The Hermus doctor's patient is Hermus itself: runtime errors,
         # stuck runs/jobs, engine health — explained with a management plan.

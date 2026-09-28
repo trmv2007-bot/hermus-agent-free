@@ -94,21 +94,54 @@ Repository = "https://github.com/trmv2007-bot/hermus-agent-free"
 # here too - tests/test_packaging.py enforces that.
 [tool.setuptools]
 py-modules = ["bootstrap"]
-packages = [
-  "backends",
-  "core",
-  "gateway",
-  "hermus_cli",
-  "pentest",
-  "scheduler",
-  "subagents",
-  "tools",
-  "tui",
-]
+# Discovered, not listed.
+#
+# An explicit list of nine top-level directories ships nine directories and
+# none of their contents: setuptools does not recurse into a package just
+# because it is named. So the wheel contained core/ and gateway/ and nothing
+# under them, and `hermes` failed at import with
+# `No module named 'core.fleet'` -- 20 subpackages absent. It went unnoticed
+# because an editable install maps back into the working tree, and because the
+# packaging test only counted top-level directories without descending.
+#
+# find_namespace finds the subpackages; the excludes below are directories that
+# are not importable code and would only bloat the wheel.
 include-package-data = true
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "core*",
+  "gateway*",
+  "backends*",
+  "hermus_cli*",
+  "pentest*",
+  "scheduler*",
+  "subagents*",
+  "tools*",
+  "tui*",
+]
+exclude = [
+  "data*",
+  "models*",
+  "skills*",
+  "frontend*",
+  "tests*",
+  "scripts*",
+  "docs*",
+  "node_modules*",
+  "*.egg-info*",
+]
+
 [tool.setuptools.package-data]
-"*" = ["*.md", "*.html", "*.css", "*.js", "*.json", "*.j2", "*.jinja"]
+# Recursive. The previous globs were one level deep, so the wheel shipped a
+# single static file out of seventeen and the control room 404'd its own CSS
+# and fonts. ** never matches across directories.
+"*" = [
+  "*.md", "*.html", "*.css", "*.js", "*.json", "*.j2", "*.jinja",
+  "**/*.md", "**/*.html", "**/*.css", "**/*.js", "**/*.json", "**/*.j2", "**/*.jinja",
+  "static/**/*", "templates/**/*",
+]
 
 [tool.ruff]
 # Hermus requires Python 3.10+ (see README); declaring it lets ruff apply

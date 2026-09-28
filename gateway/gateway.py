@@ -297,7 +297,9 @@ async def lifespan(app: FastAPI):
     if os.getenv("HERMUS_SKIP_VALIDATION", "").lower() not in ("1", "true", "yes"):
         try:
             from bootstrap import validate_critical_config
-            validate_critical_config(skip_validation=False)
+            # Uvicorn has already bound the socket by the time the lifespan
+            # runs; a successful lifespan is the proof the port was free.
+            validate_critical_config(skip_validation=False, check_port=False)
             logger.info("[Gateway] Critical config validation passed")
         except SystemExit:
             logger.error("[Gateway] Critical config validation failed - gateway will not start")

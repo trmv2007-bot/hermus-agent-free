@@ -580,14 +580,14 @@ def doctor() -> dict[str, Any]:
     }
 
 
-def validate_critical_config(*, skip_validation: bool = False) -> dict[str, Any]:
+def validate_critical_config(*, skip_validation: bool = False, check_port: bool = True) -> dict[str, Any]:
     """Validate critical runtime configuration.
 
     Checks:
     - Ollama reachable when model=ollama/*
     - max_tool_steps >= 8
     - Required directories writable
-    - Port 8000 free for gateway
+    - The configured gateway port is free (skippable: the server may already hold it)
 
     Returns a dict with validation results. Raises SystemExit on failure
     unless skip_validation is True.
@@ -667,17 +667,38 @@ def validate_critical_config(*, skip_validation: bool = False) -> dict[str, Any]
     except Exception as exc:
         add_check("directories_writable", False, f"Directory check failed: {exc}", {"error": str(exc)})
 
-    # 4. Check port 8000 free
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
-            result = s.connect_ex(("127.0.0.1", 8000))
-            if result == 0:
-                add_check("port_8000_free", False, "Port 8000 is already in use", {"port": 8000})
+    # 4. Is the port we are actually going to bind free?
+    #
+    # This used to probe a literal 8000 and hard-exit when it was busy, which
+    # made it worse than useless: `uvicorn gateway.gateway:app --port 8077` died
+    # in three seconds with no output because something unrelated held 8000. A
+    # check that fires on a port you never asked for is not a safety check, it
+    # is an outage. Measured: gateway refused to start on a verified-free 8077.
+    #
+    # Two corrections. It reads the configured port, not a constant. And it is
+    # skipped when the process is already listening -- under uvicorn the bind
+    # has happened by the time this runs, so a successful lifespan IS the proof
+    # the port was free, and a failed one never gets here at all.
+    if check_port:
+        try:
+            from core.config import config
+
+            wanted = int(getattr(config, "gateway_port", 8000) or 8000)
+        except Exception:
+            wanted = 8000
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
+                busy = sock.connect_ex(("127.0.0.1", wanted)) == 0
+            if busy:
+                add_check("gateway_port_free", False, f"Port {wanted} is already in use", {"port": wanted})
+                errors.append(f"gateway_port_free: port {wanted} is already in use")
             else:
-                add_check("port_8000_free", True, "Port 8000 is free")
-    except Exception as exc:
-        add_check("port_8000_free", False, f"Port check failed: {exc}", {"error": str(exc)})
+                add_check("gateway_port_free", True, f"Port {wanted} is free", {"port": wanted})
+        except Exception as exc:
+            add_check("gateway_port_free", False, f"Port check failed: {exc}", {"error": str(exc)})
+    else:
+        add_check("gateway_port_free", True, "Already bound by the serving process")
 
     results["ok"] = len(errors) == 0
     results["errors"] = errors

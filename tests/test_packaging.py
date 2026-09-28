@@ -85,14 +85,39 @@ def test_declared_dependencies_cover_requirements_runtime():
 
 
 def test_every_top_level_package_is_declared():
+    """Every importable top-level package must reach the wheel.
+
+    This used to compare the on-disk directories against a literal
+    `packages = [...]` list, and it was green while the wheel was missing 20 of
+    its 29 packages. Two blind spots in one assertion: setuptools does not
+    recurse into a package merely because it is named, so an exact list of nine
+    top-level names ships nine directories and none of their contents; and
+    `p.is_dir()` on a flapping C: volume is not a reliable answer either.
+
+    The invariant that actually matters is coverage: is every top-level package
+    matched by an include pattern? tests/test_wheel_contents.py then checks the
+    built artefact, because a correct-looking declaration still has to produce
+    a correct wheel.
+    """
+    import fnmatch
+
     data = _pyproject()
-    declared = set(data["tool"]["setuptools"]["packages"])
+    setuptools_cfg = data["tool"]["setuptools"]
+    find = setuptools_cfg.get("packages", {}).get("find")
+    assert find is not None, (
+        r"no [tool.setuptools.packages.find]; a literal package list does not "
+        r"ship subpackages and `hermes` will die on `No module named 'core.fleet'`"
+    )
+
+    patterns = find.get("include", [])
     on_disk = {p.name for p in ROOT.iterdir()
                if p.is_dir() and (p / "__init__.py").exists() and not p.name.startswith(".")}
-    assert on_disk == declared, (
-        f"packages list is stale: missing={sorted(on_disk - declared)} "
-        f"extra={sorted(declared - on_disk)}"
-    )
+
+    uncovered = {
+        name for name in on_disk
+        if not any(fnmatch.fnmatch(name, pat.rstrip("*")) for pat in patterns)
+    }
+    assert not uncovered, f"top-level packages no include pattern covers: {sorted(uncovered)}"
 
 
 def test_version_file_matches_pyproject():
