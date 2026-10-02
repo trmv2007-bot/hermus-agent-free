@@ -21,7 +21,7 @@ not replace them.
 | 12 | Specialist agent ecosystem | Delegation + capability contracts | ✅ Complete |
 | 13 | Multimodal intelligence | Vision + documents + browser | ✅ Complete |
 | 14 | Natural conversation + interruption | Voice + runtime steering | ✅ Complete |
-| 15 | Personal Operating System layer | World Model + agents + integrations | Planned |
+| 15 | Personal Operating System layer | World Model + agents + integrations | ✅ Complete |
 | 16 | Self-improving agent | Verified outcomes + skills | Planned |
 | 17 | Distributed HERMUS | Shared identity + memory + device workers | Planned |
 
@@ -103,3 +103,13 @@ A phase is complete only when:
 - failures are observable and recoverable where appropriate;
 - persistence/safety boundaries have regression coverage; and
 - the Control Room / gateway can report its state from real backend evidence.
+
+
+## Phase 15 — Personal Operating System
+
+Completed. HERMUS now provides a durable Personal OS control plane for tasks,
+priorities, areas, project context and personal briefings, while aggregating
+schedules, proactive automations and World Model state. Task execution routes
+through the canonical JobQueue/runtime path.
+
+See docs/PHASE_15_PERSONAL_OS.md.
