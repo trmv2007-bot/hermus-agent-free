@@ -8,6 +8,7 @@ known environment without teaching the executive about individual adapters.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .connectors import ConnectorRegistry, connector_registry, register_builtin_connectors
@@ -44,7 +45,14 @@ class PerceptionCoordinator:
             {"connectors": [item.get("connector") for item in refreshed], "fact_count": len(snapshot.get("facts", []))},
             source="perception",
         )
-        return {"refreshed": refreshed, "statuses": self.registry.statuses(), "world": snapshot}
+        # Runtime context is part of the perception contract so the executive
+        # layer can reason about the machine that produced the snapshot.
+        runtime = {
+            "cpu_cores": max(1, int(os.cpu_count() or 1)),
+            "platform": os.name,
+            "workspace_root": str(workspace_root) if workspace_root else None,
+        }
+        return {"refreshed": refreshed, "statuses": self.registry.statuses(), "world": snapshot, "runtime": runtime}
 
 
 perception = PerceptionCoordinator()
