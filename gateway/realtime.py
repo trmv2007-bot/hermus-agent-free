@@ -1739,7 +1739,7 @@ async def reliability_checkpoints(run_id: str = ""):
     from core.reliability import reliability
     if run_id:
         return {"checkpoint": reliability.checkpoints.latest(run_id)}
-    return {"checkpoints": [asdict(x) for x in list(reliability.checkpoints.items.values())[-100:]]}
+    return {"checkpoints": [x.__dict__ for x in list(reliability.checkpoints.items.values())[-100:]]}
 
 @router.post("/reliability/checkpoints")
 async def reliability_checkpoint(payload: dict[str, Any] = None):
