@@ -31,6 +31,14 @@ class ExecutiveLoop:
             observed["world_awareness"] = self.awareness.refresh(workspace_root=workspace_root)
         except Exception as exc:
             self.world.emit("world_awareness_error", {"error": str(exc)[:300]}, source="executive.perception")
+        # Keep the perception contract explicit: callers can tell which runtime
+        # produced the snapshot without importing the executive implementation.
+        observed["runtime"] = {
+            "platform": platform,
+            "user_id": user_id,
+            "workspace_root": str(workspace_root) if workspace_root else None,
+            "source": "executive.perception",
+        }
         self.world.observe(
             "session",
             "identity",
