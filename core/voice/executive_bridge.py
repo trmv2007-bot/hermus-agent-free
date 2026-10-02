@@ -28,10 +28,22 @@ class VoiceExecutiveBridge:
         if self.speaker is not None:
             text = self._response_text(result)
             if text:
-                self.speaker(text)
-                self.presence.record_output(session_id)
-                spoken = True
+                generation = self.presence.begin_output(session_id)
+                if self.presence.output_allowed(session_id, generation):
+                    self.speaker(text)
+                    if self.presence.output_allowed(session_id, generation):
+                        self.presence.record_output(session_id)
+                        spoken = True
         return VoiceTurnResult(session_id, transcript, result=result, spoken=spoken)
+
+    def interrupt_output(self, session_id: str) -> dict[str, Any]:
+        session = self.presence.interrupt_output(session_id)
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "output_generation": session.output_generation,
+            "action": "voice_output_interrupt",
+        }
 
     @staticmethod
     def _response_text(result: Any) -> str:
