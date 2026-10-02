@@ -61,3 +61,10 @@ A stop is not considered complete because a module exists. It is complete when:
 7. Expose executive/world state through the existing gateway and Control Room.
 8. Add learning from verified outcomes and failed/repair trajectories.
 9. Run end-to-end tests across every user-facing entry point.
+
+## Phase 6 — Runtime Reliability & Observability
+
+Completed. The autonomy boundary now provides stable run correlation, lifecycle
+health snapshots, event counting/timing, and structured failure classification
+without introducing a second execution engine. See
+`docs/PHASE_6_RUNTIME_RELIABILITY.md`.
