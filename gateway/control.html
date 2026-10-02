@@ -498,6 +498,15 @@
       </section>
 
       <section class="full">
+        <h2>&#9881; Personal Profile & Integrations</h2>
+        <div class="dashboard-command-grid">
+          <div><h3>Profile</h3><div id="profileControl"><div class="note">Loading…</div></div></div>
+          <div><h3>Integrations</h3><div class="feed" id="integrationControl"><div class="note">Loading…</div></div></div>
+          <div><h3>Voice Streams</h3><div class="feed" id="voiceStreamControl"><div class="note">Loading…</div></div></div>
+        </div>
+      </section>
+
+      <section class="full">
         <h2>&#128269; HERMUS Search</h2>
         <div class="bar">
           <input id="controlSearchQuery" placeholder="Search tasks, nodes, runs, memories, proposals…" />
@@ -1600,6 +1609,7 @@ window.addEventListener('load', () => {
   setInterval(refreshDashboardLayout, 5000);
   setInterval(refreshDistributed, 5000);
   setInterval(refreshCommandCenter, 5000);
+  setInterval(refreshProductionControls, 5000);
   setInterval(updateVRAMMonitor, 2000);
 
   // Initial updates
@@ -1610,6 +1620,7 @@ window.addEventListener('load', () => {
   refreshDashboardLayout();
   refreshDistributed();
   refreshCommandCenter();
+  refreshProductionControls();
   updateVRAMMonitor();
 
   document.getElementById('dashboardRefresh')?.addEventListener('click', refreshDashboardLayout);
@@ -1686,6 +1697,21 @@ async function searchControlRoom() {
     const hits=rows.filter(x=>x.join(' ').toLowerCase().includes(q)).slice(0,50);
     out.innerHTML=hits.length?hits.map(x=>'<div style="padding:7px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x[0])+'</strong> · '+escv(x[1])+'</div>').join(''):'<div class="note">No matching live records.</div>';
   } catch(e){out.innerHTML='<div class="note">Search unavailable.</div>';}
+}
+
+async function refreshProductionControls() {
+  const escv = window.esc || (v => String(v ?? '').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+  const [p,i,v]=await Promise.all([
+    fetch('/personal-profile').then(r=>r.json()).catch(()=>({})),
+    fetch('/integrations').then(r=>r.json()).catch(()=>({integrations:[]})),
+    fetch('/voice/streams').then(r=>r.json()).catch(()=>({streams:[]}))
+  ]);
+  const pe=document.getElementById('profileControl');
+  if(pe) pe.innerHTML='<div><strong>'+escv(p.assistant_name||'HERMUS')+'</strong> · '+escv(p.style||'concise')+'</div><div class="note">'+escv(p.language||'en')+' · '+escv(p.name||'profile not personalized')+'</div>';
+  const ie=document.getElementById('integrationControl');
+  if(ie) ie.innerHTML=(i.integrations||[]).map(x=>'<div style="padding:5px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x.name)+'</strong> · '+escv(x.status)+'</div>').join('')||'<div class="note">No integrations.</div>';
+  const ve=document.getElementById('voiceStreamControl');
+  if(ve) ve.innerHTML=(v.streams||[]).slice(-8).map(x=>'<div style="padding:5px 0;border-bottom:1px dashed #1c2534">'+escv(x.session_id)+' · '+escv(x.state)+' · '+escv(x.chunks)+' chunks</div>').join('')||'<div class="note">No active voice streams.</div>';
 }
 </script>
 </body>
