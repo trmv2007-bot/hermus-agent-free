@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from .agent_delegation import agent_delegator
 from .executive import ExecutiveBrain, executive_brain
 from .executive_memory import ExecutiveMemory, executive_memory
 from .executive_runtime import execute_with_executive
@@ -12,12 +13,13 @@ from .world_model import WorldModel, world_model
 
 
 class ExecutiveLoop:
-    """Coordinate perception, planning, execution, verification and learning."""
+    """Coordinate perception, planning, delegation, execution, verification and learning."""
 
-    def __init__(self, *, brain=None, world=None, memory=None) -> None:
+    def __init__(self, *, brain=None, world=None, memory=None, delegator=None) -> None:
         self.brain = brain or executive_brain
         self.world = world or world_model
         self.memory = memory or executive_memory
+        self.delegator = delegator or agent_delegator
 
     def perceive(self, *, platform: str = "api", user_id: str = "anonymous") -> dict[str, Any]:
         profile = self.world.refresh_runtime(source="executive.perception", permission_scope="system.read")
@@ -33,6 +35,14 @@ class ExecutiveLoop:
         project = kwargs.get("project")
         prior_memory = self.memory.recall_for_goal(text, project=project, limit=8)
         self.brain.observe("memory_context_loaded", {"count": len(prior_memory)})
+
+        delegation = self.delegator.build_plan(text)
+        self.brain.observe("specialist_team_selected", {"roles": delegation.selected_roles})
+        self.world.emit(
+            "delegation_planned",
+            {"roles": delegation.selected_roles, "dag": delegation.dag.to_dict()},
+            source="executive.delegation",
+        )
         self.world.emit("request_started", {"text": text[:500], "platform": platform, "user_id": user_id}, source="executive.loop")
 
         def emit(kind: str, data: dict[str, Any] | None = None) -> None:
@@ -44,7 +54,17 @@ class ExecutiveLoop:
                 except Exception:
                     pass
 
-        result = execute_with_executive(text, brain=self.brain, platform=platform, user_id=user_id, on_event=emit, **kwargs)
+        # The delegation DAG is planning metadata. The canonical runtime remains
+        # the only component permitted to execute agents/tools.
+        result = execute_with_executive(
+            text,
+            brain=self.brain,
+            platform=platform,
+            user_id=user_id,
+            on_event=emit,
+            delegation=delegation.to_dict(),
+            **kwargs,
+        )
         state = str(result.get("state") or result.get("status") or "unknown")
         verified = result.get("verified")
         goal_id = (result.get("executive") or {}).get("goal_id")
@@ -59,6 +79,7 @@ class ExecutiveLoop:
                 self.brain.observe("memory_write_failed", {"error": str(exc)[:300]})
 
         result = dict(result)
+        result["delegation"] = delegation.to_dict()
         result["world"] = {"state": state, "snapshot": self.world.snapshot()}
         result["executive_memory"] = {"recalled": len(prior_memory)}
         return result
