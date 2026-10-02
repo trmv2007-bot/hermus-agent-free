@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 13 — Multimodal Intelligence**.
+The roadmap has progressed through **Phase 14 — Natural Conversation + Interruption**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -107,6 +107,19 @@ HERMUS can now turn visual and document observations into structured evidence:
 
 Visual evidence can inform planning and verification without bypassing existing safety, approval or permission controls.
 
+### Phase 14 — Natural Conversation + Interruption
+
+HERMUS now supports conversational control over long-running work:
+- Bounded conversation sessions and follow-up context
+- Session-to-run correlation for queued and WebSocket work
+- Mid-run steering and redirect instructions
+- Cooperative interruption/cancellation through the canonical RunBus/runtime
+- Background completion/error/cancellation notifications
+- WebSocket steer / redirect controls
+- Voice output interruption generations and /voice/interrupt
+- Existing SSE/WS progress events remain the source of live run state
+
+See docs/PHASE_14_NATURAL_CONVERSATION.md and the master roadmap.
 ### Phase 8 + 9 highlights
 
 **Phase 8 — Scheduling & Time Awareness**
