@@ -1033,6 +1033,56 @@ async def automation_rule_delete(rule_id: str):
     return {"deleted": True, "rule_id": rule_id}
 
 
+
+@router.get("/schedules")
+async def schedules_list():
+    from scheduler.cron import cron_manager
+    return {"scheduler": cron_manager.status(), "schedules": cron_manager.list_jobs()}
+
+
+@router.post("/schedules")
+async def schedule_create(payload: dict[str, Any] = None):
+    payload = payload or {}
+    natural = str(payload.get("schedule") or payload.get("natural") or payload.get("when") or "")
+    task = str(payload.get("task") or payload.get("text") or "")
+    if not natural or not task:
+        return JSONResponse({"error": "schedule and task are required"}, status_code=400)
+    try:
+        from scheduler.cron import cron_manager
+        job = cron_manager.add_job(
+            natural,
+            task=task,
+            platform=str(payload.get("platform") or "api"),
+            user_id=str(payload.get("user_id") or "default"),
+            timezone=payload.get("timezone"),
+            enabled=bool(payload.get("enabled", True)),
+            priority=str(payload.get("priority") or "normal"),
+            max_runs=(int(payload["max_runs"]) if payload.get("max_runs") not in (None, "") else None),
+            respect_quiet_hours=bool(payload.get("respect_quiet_hours", False)),
+            quiet_hours=tuple(payload["quiet_hours"]) if payload.get("quiet_hours") else None,
+        )
+        return job
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/schedules/{schedule_id}/enable")
+async def schedule_enable(schedule_id: str, payload: dict[str, Any] = None):
+    from scheduler.cron import cron_manager
+    enabled = bool((payload or {}).get("enabled", True))
+    if not cron_manager.set_enabled(schedule_id, enabled):
+        return JSONResponse({"error": "schedule not found"}, status_code=404)
+    return {"schedule_id": schedule_id, "enabled": enabled}
+
+
+@router.delete("/schedules/{schedule_id}")
+async def schedule_delete(schedule_id: str):
+    from scheduler.cron import cron_manager
+    if not cron_manager.remove_job(schedule_id):
+        return JSONResponse({"error": "schedule not found"}, status_code=404)
+    return {"deleted": True, "schedule_id": schedule_id}
+
+
 @router.get("/runtime/issues")
 async def runtime_issues(limit: int = 100):
     """Recent structured runtime issues (component/operation/error/context).
