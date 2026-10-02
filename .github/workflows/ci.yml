@@ -7,9 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # CI uses the canonical settings and a disposable home so permission,
-      # approval, sandbox and memory stores cannot leak between runs/tests.
-      HERMUS_HOME: ${{ runner.temp }}/hermus-home
+      # Keep CI state disposable and independent from a developer machine.
+      HERMUS_HOME: /tmp/hermus-ci-home
       HERMUS_SANDBOX: local
       HERMUS_SANDBOX_NETWORK: "false"
       HERMUS_ASK_POLICY: allow
