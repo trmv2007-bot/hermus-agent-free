@@ -9,29 +9,44 @@ from .agent_delegation import agent_delegator
 from .executive import ExecutiveBrain, executive_brain
 from .executive_memory import ExecutiveMemory, executive_memory
 from .executive_runtime import execute_with_executive
+from .perception import PerceptionCoordinator, perception
 from .world_model import WorldModel, world_model
 
 
 class ExecutiveLoop:
     """Coordinate perception, planning, delegation, execution, verification and learning."""
 
-    def __init__(self, *, brain=None, world=None, memory=None, delegator=None) -> None:
+    def __init__(self, *, brain=None, world=None, memory=None, delegator=None, perception_coordinator=None) -> None:
         self.brain = brain or executive_brain
         self.world = world or world_model
         self.memory = memory or executive_memory
         self.delegator = delegator or agent_delegator
+        self.perception = perception_coordinator or perception
+        if self.perception.world is not self.world:
+            self.perception = PerceptionCoordinator(registry=self.perception.registry, world=self.world)
 
-    def perceive(self, *, platform: str = "api", user_id: str = "anonymous") -> dict[str, Any]:
-        profile = self.world.refresh_runtime(source="executive.perception", permission_scope="system.read")
-        self.world.observe("session", "identity", {"platform": platform, "user_id": user_id}, source="executive.perception", permission_scope="session.read")
-        self.brain.observe("world_snapshot_refreshed", {"platform": platform, "user_id": user_id})
-        return {"runtime": profile, "world": self.world.snapshot()}
+    def perceive(self, *, platform: str = "api", user_id: str = "anonymous", workspace_root=None) -> dict[str, Any]:
+        sensed = self.perception.refresh(workspace_root=workspace_root)
+        self.world.observe(
+            "session",
+            "identity",
+            {"platform": platform, "user_id": user_id},
+            source="executive.perception",
+            permission_scope="session.read",
+        )
+        self.brain.observe("world_snapshot_refreshed", {
+            "platform": platform,
+            "user_id": user_id,
+            "connectors": [item.get("connector") for item in sensed.get("refreshed", [])],
+            "fact_count": len(sensed.get("world", {}).get("facts", [])),
+        })
+        return sensed
 
     def execute(self, text: str, *, platform: str = "api", user_id: str = "anonymous", on_event: Callable | None = None, **kwargs: Any) -> dict[str, Any]:
         text = str(text or "").strip()
         if not text:
             raise ValueError("text must not be empty")
-        self.perceive(platform=platform, user_id=user_id)
+        self.perceive(platform=platform, user_id=user_id, workspace_root=kwargs.get("workspace_root"))
         project = kwargs.get("project")
         prior_memory = self.memory.recall_for_goal(text, project=project, limit=8)
         self.brain.observe("memory_context_loaded", {"count": len(prior_memory)})
@@ -54,8 +69,6 @@ class ExecutiveLoop:
                 except Exception:
                     pass
 
-        # The delegation DAG is planning metadata. The canonical runtime remains
-        # the only component permitted to execute agents/tools.
         result = execute_with_executive(
             text,
             brain=self.brain,
