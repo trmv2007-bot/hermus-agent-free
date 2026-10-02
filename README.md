@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 15 — Personal Operating System**.
+The roadmap has progressed through **Phase 16 — Self-Improving Agent**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -132,6 +132,19 @@ HERMUS now has a unified personal control plane:
 - Gateway endpoints for task and briefing management
 
 See `docs/PHASE_15_PERSONAL_OS.md` and the master roadmap.
+### Phase 16 — Self-Improving Agent
+
+HERMUS now turns reflection into governed self-improvement:
+- Reflection-derived improvement proposals
+- Deterministic EvolutionPolicy assessment
+- Allow / review / deny change decisions
+- Protected control-plane enforcement
+- Append-only evolution proposal history
+- Existing SkillForge verification, repeatability and quarantine remain active
+- Lessons and reflection continue feeding future behavior
+- Control Room/API visibility into self-improvement state
+
+See `docs/PHASE_16_SELF_IMPROVING_AGENT.md` and the master roadmap.
 ### Phase 8 + 9 highlights
 
 **Phase 8 — Scheduling & Time Awareness**
