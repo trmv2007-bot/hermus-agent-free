@@ -339,6 +339,7 @@
     font-size: 12px;
     color: #8b98a9;
   }
+.dashboard-command-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.dashboard-command-grid>div{min-width:0}.dashboard-command-grid .feed{min-height:100px}@media(max-width:900px){.dashboard-command-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -404,6 +405,10 @@
         <h2>&#127760; Distributed HERMUS Control Plane</h2>
         <div class="cells" id="distributedSummary"><div class="note">Loading distributed state...</div></div>
         <div class="hint">Live projection of registered HERMUS nodes, health and distributed assignments.</div>
+      </section>
+      <section class="full">
+        <h2>&#128506; Live Node Topology</h2>
+        <div class="agents-visualization" id="distributedTopology"></div>
       </section>
       <section class="full">
         <h2>HERMUS Nodes</h2>
@@ -476,6 +481,29 @@
         </div>
         <div class="hint">This workspace is shared with Hermus. Panel changes are persisted and appear in the agent's dashboard context.</div>
         <div class="dashboard-workspace-grid" id="dashboardWorkspace"><div class="note">Loading shared dashboard layout...</div></div>
+      </section>
+
+      <section class="full">
+        <h2>&#9889; HERMUS Command Center</h2>
+        <div class="bar">
+          <button class="ghost" onclick="refreshCommandCenter()">Refresh</button>
+          <span id="commandCenterStatus" class="pill">live</span>
+        </div>
+        <div class="cells" id="commandCenterKPIs"><div class="note">Loading command center…</div></div>
+        <div class="dashboard-command-grid">
+          <div><h3>Attention</h3><div class="feed" id="attentionCenter"></div></div>
+          <div><h3>Current Focus</h3><div class="feed" id="focusCenter"></div></div>
+          <div><h3>Active Runs</h3><div class="feed" id="activeRunsCenter"></div></div>
+        </div>
+      </section>
+
+      <section class="full">
+        <h2>&#128269; HERMUS Search</h2>
+        <div class="bar">
+          <input id="controlSearchQuery" placeholder="Search tasks, nodes, runs, memories, proposals…" />
+          <button id="controlSearchBtn" class="ghost">Search</button>
+        </div>
+        <div class="feed" id="controlSearchResults"><div class="note">Search across the live Control Room sources.</div></div>
       </section>
 
       <section class="full">
@@ -1557,6 +1585,7 @@ window.addEventListener('load', () => {
   setInterval(refreshOrchestrations, 5000);
   setInterval(refreshDashboardLayout, 5000);
   setInterval(refreshDistributed, 5000);
+  setInterval(refreshCommandCenter, 5000);
   setInterval(updateVRAMMonitor, 2000);
 
   // Initial updates
@@ -1566,11 +1595,14 @@ window.addEventListener('load', () => {
   refreshOrchestrations();
   refreshDashboardLayout();
   refreshDistributed();
+  refreshCommandCenter();
   updateVRAMMonitor();
 
   document.getElementById('dashboardRefresh')?.addEventListener('click', refreshDashboardLayout);
   document.getElementById('dashboardAddPanel')?.addEventListener('click', addDashboardPanel);
   document.getElementById('dashboardReset')?.addEventListener('click', resetDashboardLayout);
+  document.getElementById('controlSearchBtn')?.addEventListener('click', searchControlRoom);
+  document.getElementById('controlSearchQuery')?.addEventListener('keydown', e => { if(e.key === 'Enter') searchControlRoom(); });
 
   showToast('HERMUS JARVIS Control Room loaded!', 'ok');
 });
@@ -1593,6 +1625,54 @@ window.startOrchestration = startOrchestration;
 window.refreshDashboardLayout = refreshDashboardLayout;
 window.refreshDistributed = refreshDistributed;
 window.addDashboardPanel = addDashboardPanel;
+
+async function refreshCommandCenter() {
+  const set = (id, html) => { const e=document.getElementById(id); if(e) e.innerHTML=html; };
+  const escv = window.esc || (v => String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+  try {
+    const [health, personal, distributed, self] = await Promise.all([
+      fetch('/api/v1/system/health').then(r=>r.json()).catch(()=>({})),
+      fetch('/personal-os/briefing').then(r=>r.json()).catch(()=>({})),
+      fetch('/distributed/status').then(r=>r.json()).catch(()=>({})),
+      fetch('/self-improvement/status').then(r=>r.json()).catch(()=>({}))
+    ]);
+    const kpis=[
+      ['System', health.status || health.state || 'unknown'],
+      ['Nodes', String(distributed.online ?? 0) + '/' + String(distributed.node_count ?? 0) + ' online'],
+      ['Tasks', String(personal.open_tasks ?? personal.pending_tasks ?? personal.task_count ?? '—')],
+      ['Self-improvement', self.status || self.state || 'ready']
+    ];
+    set('commandCenterKPIs', kpis.map(([a,b])=>'<div class="kpi"><div class="v">'+escv(b)+'</div><div class="l">'+escv(a)+'</div></div>').join(''));
+    set('attentionCenter', [
+      distributed.stale ? '<div>⚠ '+escv(distributed.stale)+' stale distributed node(s)</div>' : '<div>✓ No stale nodes</div>',
+      distributed.emergency_stop ? '<div>🛑 Emergency stop ACTIVE</div>' : '<div>✓ Emergency stop clear</div>'
+    ].join(''));
+    const focus=personal.focus || personal.current_focus || personal.briefing || 'No current focus reported.';
+    set('focusCenter','<div>'+escv(typeof focus==='string'?focus:JSON.stringify(focus))+'</div>');
+    set('activeRunsCenter','<div class="note">Use Jobs/Missions and event replay for detailed active-run state.</div>');
+    const s=document.getElementById('commandCenterStatus'); if(s) s.textContent='updated '+new Date().toLocaleTimeString();
+  } catch(e) {
+    const s=document.getElementById('commandCenterStatus'); if(s) s.textContent='degraded';
+  }
+}
+async function searchControlRoom() {
+  const q=(document.getElementById('controlSearchQuery')?.value || '').trim().toLowerCase();
+  const out=document.getElementById('controlSearchResults'); if(!out) return;
+  if(!q){out.innerHTML='<div class="note">Enter a search term.</div>';return;}
+  try {
+    const [nodes, tasks, proposals] = await Promise.all([
+      fetch('/distributed/nodes').then(r=>r.json()).catch(()=>({nodes:[]})),
+      fetch('/personal-os/tasks').then(r=>r.json()).catch(()=>({tasks:[]})),
+      fetch('/self-improvement/proposals?limit=50').then(r=>r.json()).catch(()=>({proposals:[]})),
+    ]);
+    const rows=[];
+    (nodes.nodes||[]).forEach(x=>rows.push(['Node',x.name||x.id,JSON.stringify(x)]));
+    (tasks.tasks||[]).forEach(x=>rows.push(['Task',x.title||x.id,JSON.stringify(x)]));
+    (proposals.proposals||[]).forEach(x=>rows.push(['Proposal',x.title||x.id||x.summary,JSON.stringify(x)]));
+    const hits=rows.filter(x=>x.join(' ').toLowerCase().includes(q)).slice(0,50);
+    out.innerHTML=hits.length?hits.map(x=>'<div style="padding:7px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x[0])+'</strong> · '+escv(x[1])+'</div>').join(''):'<div class="note">No matching live records.</div>';
+  } catch(e){out.innerHTML='<div class="note">Search unavailable.</div>';}
+}
 </script>
 </body>
 </html>
