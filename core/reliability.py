@@ -252,6 +252,23 @@ class RecoverySnapshotStore:
         _atomic_json(target / "manifest.json", manifest)
         return manifest
 
+    def restore(self, snapshot_id: str, target_dir: str | Path) -> dict[str, Any]:
+        check = self.verify(snapshot_id)
+        if not check.get("valid"):
+            return {"success": False, "error": "snapshot_integrity_failed", **check}
+        target = Path(target_dir).expanduser().resolve()
+        target.mkdir(parents=True, exist_ok=True)
+        source = (self.root / str(snapshot_id)).resolve()
+        restored = []
+        manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+        for row in manifest.get("files", []):
+            dst = (target / row["name"]).resolve()
+            if target not in dst.parents and dst != target:
+                return {"success": False, "error": "unsafe_restore_path"}
+            shutil.copy2(source / row["name"], dst)
+            restored.append(str(dst))
+        return {"success": True, "snapshot_id": str(snapshot_id), "restored": restored}
+
     def verify(self, snapshot_id: str) -> dict[str, Any]:
         target = self.root / str(snapshot_id)
         manifest_path = target / "manifest.json"
