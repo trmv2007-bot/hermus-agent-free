@@ -63,8 +63,14 @@ class ConnectorRegistry:
 def register_builtin_connectors(
     registry: ConnectorRegistry | None = None, *, workspace_root: Path | None = None
 ) -> ConnectorRegistry:
-    """Register local, no-login connectors; nothing is enabled implicitly."""
+    """Register local, no-login connectors; nothing is enabled implicitly.
+
+    Lightweight embedding/test registries that only expose ``statuses`` are
+    treated as read-only; built-ins are only registered on full registries.
+    """
     target = registry or connector_registry
+    if not hasattr(target, "get") or not hasattr(target, "register"):
+        return target
     if target.get("runtime") is None:
         target.register(RuntimeConnector(target.context))
     if target.get("filesystem") is None:
