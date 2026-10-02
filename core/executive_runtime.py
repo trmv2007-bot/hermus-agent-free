@@ -3,11 +3,6 @@
 This module is the narrow integration seam between the Executive Brain and the
 existing universal mission runtime. It deliberately delegates actual execution
 to ``core.runtime.execute`` so MissionEngine remains the only autonomy engine.
-
-Callers that want executive behavior can use :func:`execute_with_executive`.
-The bridge creates durable executive state, derives bounded success criteria,
-records lifecycle observations, and then hands the request to the canonical
-runtime. It never executes tools itself.
 """
 
 from __future__ import annotations
@@ -40,16 +35,12 @@ def execute_with_executive(
     requirements: list[str] | None = None,
     domain: str | None = None,
     subgoals: list[str] | None = None,
+    delegation: dict[str, Any] | None = None,
     preflight: bool | None = None,
     allow_preflight_planning: bool = False,
     read_only: bool = False,
 ) -> dict[str, Any]:
-    """Run a request through the executive control plane and canonical runtime.
-
-    Chat requests are passed through unchanged except for executive telemetry.
-    Mission requests receive an executive goal and success criteria. Explicit
-    caller requirements always win over generated criteria.
-    """
+    """Run a request through the executive control plane and canonical runtime."""
     brain = brain or executive_brain
     text = str(text or "").strip()
     if not text:
@@ -64,21 +55,18 @@ def execute_with_executive(
             except Exception:
                 pass
 
-    # Keep the executive record even for conversational turns. This gives the
-    # future world model a durable trace without granting the executive layer
-    # any authority over tools.
     brain.observe("request_received", {
         "platform": platform,
         "user_id": user_id,
         "prefer": prefer,
         "model": model,
         "read_only": read_only,
+        "delegated_roles": (delegation or {}).get("selected_roles", []),
     })
 
     kind = str(prefer or "auto").lower()
     if kind == "auto":
         from .runtime import classify_request
-
         kind = classify_request(text)
 
     goal_id: str | None = None
@@ -90,7 +78,12 @@ def execute_with_executive(
         goal_id = brain.create_goal(
             text,
             priority=50,
-            metadata={"platform": platform, "user_id": user_id, "domain": domain},
+            metadata={
+                "platform": platform,
+                "user_id": user_id,
+                "domain": domain,
+                "delegated_roles": (delegation or {}).get("selected_roles", []),
+            },
         )
         executive_plan = brain.plan_goal(
             text,
@@ -103,9 +96,6 @@ def execute_with_executive(
         if effective_requirements is None:
             effective_requirements = list(executive_plan.success_criteria)
         if effective_subgoals is None:
-            # The MissionEngine owns the real DAG. Executive steps are context,
-            # not a second DAG, so only expose the high-level objectives that
-            # help the canonical planner understand intent.
             effective_subgoals = [
                 step.objective
                 for step in executive_plan.steps
@@ -116,6 +106,7 @@ def execute_with_executive(
             "goal_id": goal_id,
             "steps": [step.to_dict() for step in executive_plan.steps],
             "success_criteria": list(executive_plan.success_criteria),
+            "delegated_roles": (delegation or {}).get("selected_roles", []),
         })
 
     from .runtime import execute
@@ -155,27 +146,18 @@ def execute_with_executive(
         state = str(result.get("state") or result.get("status") or "")
         if state in {"completed", "done"}:
             brain.update_goal(goal_id, status="completed")
-            brain.observe("mission_completed", {
-                "mission_id": result.get("mission_id"),
-                "verified": result.get("verified"),
-            }, goal_id=goal_id)
+            brain.observe("mission_completed", {"mission_id": result.get("mission_id"), "verified": result.get("verified")}, goal_id=goal_id)
         elif state in {"failed", "cancelled", "blocked"}:
             brain.update_goal(goal_id, status="cancelled" if state == "cancelled" else "failed")
-            brain.observe("mission_finished", {
-                "state": state,
-                "mission_id": result.get("mission_id"),
-                "failure": result.get("failure"),
-            }, goal_id=goal_id)
+            brain.observe("mission_finished", {"state": state, "mission_id": result.get("mission_id"), "failure": result.get("failure")}, goal_id=goal_id)
         else:
-            brain.observe("mission_result", {
-                "state": state,
-                "mission_id": result.get("mission_id"),
-            }, goal_id=goal_id)
+            brain.observe("mission_result", {"state": state, "mission_id": result.get("mission_id")}, goal_id=goal_id)
         result = dict(result)
         result["executive"] = {
             "goal_id": goal_id,
             "planned": bool(executive_plan),
             "success_criteria": list(executive_plan.success_criteria) if executive_plan else [],
+            "delegated_roles": (delegation or {}).get("selected_roles", []),
         }
 
     return result
