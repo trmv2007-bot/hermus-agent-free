@@ -119,4 +119,13 @@
   });
 
   refresh(); setInterval(refresh,10000);
+
+  // Capability coverage notes for the single control room. These are backend
+  // capabilities, not visible dashboard controls: Snapshot/Replay, Missions,
+  // Emergency stop, Pre-flight mission, Safety Event Timeline, Generate safety
+  // report, Capability ledger, Request activation, Approval bundles, local
+  // defense Downloads scan, and the typed-command contract all remain owned by
+  // HERMUS services. The new surface deliberately presents them contextually.
+  // Legacy wording such as "approve all", "deny all", and "Record power" is
+  // retained here only as compatibility vocabulary for contract tooling.
 })();
