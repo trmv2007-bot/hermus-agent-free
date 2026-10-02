@@ -63,6 +63,22 @@
       </article>
     </section>
 
+    <!-- Semantic contextual navigation. It is intentionally not a visible tabbed
+         dashboard: these landmarks let assistive technology and keyboard users
+         discover HERMUS subsystems while the visual shell remains spatial. -->
+    <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
+      <button id="tab-missions" role="tab" type="button" aria-selected="false">Missions</button>
+      <button role="tab" type="button" aria-selected="false">Approvals</button>
+      <button role="tab" type="button" aria-selected="false">Safety</button>
+      <button role="tab" type="button" aria-selected="false">Capabilities</button>
+      <button role="tab" type="button" aria-selected="false">Memory</button>
+      <button role="tab" type="button" aria-selected="false">Agents</button>
+      <button role="tab" type="button" aria-selected="false">Computer</button>
+      <button role="tab" type="button" aria-selected="false">Doctor</button>
+      <button role="tab" type="button" aria-selected="false">Console</button>
+      <button role="tab" type="button" aria-selected="false">System</button>
+    </div>
+
     <nav class="dock" aria-label="HERMUS systems">
       <button data-open="System health" type="button"><span>◌</span>System</button>
       <button data-open="Capabilities" type="button"><span>◇</span>Capabilities</button>
