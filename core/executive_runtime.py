@@ -67,9 +67,22 @@ def execute_with_executive(
 
     goal_id: str | None = None
     executive_plan = None
+    long_horizon_plan = None
     effective_requirements = requirements
     effective_subgoals = list(subgoals) if subgoals is not None else None
 
+    if kind == "mission" and not read_only:
+        try:
+            from .long_horizon import long_horizon_planner
+
+            long_horizon_plan = long_horizon_planner.build(
+                text,
+                success_criteria=requirements,
+                subgoals=subgoals,
+            )
+            brain.observe("long_horizon_plan_ready", long_horizon_plan.to_dict())
+        except Exception as exc:
+            brain.observe("long_horizon_plan_error", {"error": str(exc)[:300]})
     if kind == "mission" and not read_only:
         goal_id = brain.create_goal(
             text,
@@ -157,12 +170,15 @@ def execute_with_executive(
         else:
             brain.observe("mission_result", {"state": state, "mission_id": result.get("mission_id")}, goal_id=goal_id)
         result = dict(result)
+        if long_horizon_plan is not None:
+            result["long_horizon_plan"] = long_horizon_plan.to_dict()
         result["executive"] = {
             "goal_id": goal_id,
             "planned": bool(executive_plan),
             "success_criteria": list(executive_plan.success_criteria) if executive_plan else [],
             "delegated_roles": roles,
             "subgoals": effective_subgoals or [],
+            "long_horizon_plan": long_horizon_plan.to_dict() if long_horizon_plan else None,
         }
 
     return result
