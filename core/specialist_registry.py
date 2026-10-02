@@ -6,7 +6,7 @@ owned by the existing delegation and Mission Runtime layers.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -45,19 +45,22 @@ class SpecialistRegistry:
         return [asdict(item) for item in self._contracts.values()]
 
     def validate_selection(self, roles: list[str]) -> dict[str, Any]:
-        roles = list(dict.fromkeys(str(role) for role in roles))
-        unknown = [role for role in roles if role not in self._contracts]
-        if len(roles) > self.max_active:
+        raw = [str(role) for role in roles]
+        duplicates = sorted({role for role in raw if raw.count(role) > 1})
+        if duplicates:
+            return {"ok": False, "reason": "duplicate_specialist", "duplicates": duplicates, "roles": raw}
+        unknown = [role for role in raw if role not in self._contracts]
+        if len(raw) > self.max_active:
             return {"ok": False, "reason": "max_active_specialists_exceeded", "unknown": unknown}
         if unknown:
             return {"ok": False, "reason": "unknown_specialist", "unknown": unknown}
-        return {"ok": True, "roles": roles}
+        return {"ok": True, "roles": raw}
 
     def contracts_for(self, roles: list[str]) -> list[dict[str, Any]]:
         validation = self.validate_selection(roles)
         if not validation["ok"]:
             raise ValueError(validation["reason"])
-        return [asdict(self._contracts[role]) for role in dict.fromkeys(roles)]
+        return [asdict(self._contracts[role]) for role in roles]
 
 
 specialist_registry = SpecialistRegistry()
