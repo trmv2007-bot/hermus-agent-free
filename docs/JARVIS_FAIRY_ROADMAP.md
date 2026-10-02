@@ -1,77 +1,86 @@
-# HERMUS capability build map
+# ⚡ HERMUS — Master Capability Build Map
 
-This roadmap is the implementation order for evolving HERMUS toward a persistent,
-agentic assistant. Each stop has a dependency boundary; later stops should not
-bypass earlier safety/runtime layers.
+This roadmap is the implementation order for evolving HERMUS from a reactive
+agent into a persistent, proactive personal AI. Later phases build on earlier
+execution, verification, memory, observability and safety boundaries; they do
+not replace them.
 
-| Stop | Capability | Depends on | Status |
+| Phase | Capability | Depends on | Status |
 |---|---|---|---|
-| 1 | Canonical execution runtime | MissionEngine | Existing |
-| 2 | Executive Brain | Runtime | Built |
-| 3 | Executive/runtime handoff | Executive + Runtime | Built |
-| 4 | World Model + perception | Executive | Built / expanding |
-| 5 | Unified executive lifecycle loop | 2–4 | Built / expanding |
-| 6 | Persistent memory integration | World Model | Next |
-| 7 | Specialist-agent delegation | Mission DAG | Next |
-| 8 | Observation adapters | World Model | Next |
-| 9 | Browser/computer control | Observation + safety | Planned |
-| 10 | Voice and interruption | Runtime + channels | Planned |
-| 11 | Live Control Room | Runtime events + World Model | Planned |
-| 12 | Skill/lesson learning | Memory + verification | Planned |
-| 13 | End-to-end hardening | All previous stops | Planned |
+| 1 | Verified computer-control execution loop | Computer + safety | ✅ Complete |
+| 2 | Voice presence + executive integration | Runtime + voice | ✅ Complete |
+| 3 | Control Room / system observability | Runtime events + state | ✅ Complete |
+| 4 | Learning, memory and reusable skills | Memory + verification | ✅ Complete |
+| 5 | End-to-end autonomy facade + safety hardening | Executive + runtime | ✅ Complete |
+| 6 | Runtime reliability + observability | Autonomy facade + EventBus | ✅ Complete |
+| 7 | Proactive event-driven automation | EventBus + JobQueue | ✅ Complete |
+| 8 | Scheduling + time awareness | Automation + JobQueue | ✅ Complete |
+| 9 | Persistent personal context | MemoryFacade + session history | ✅ Complete |
+| 10 | World awareness / live World Model | Observation adapters + state | 🚧 Next |
+| 11 | Advanced long-horizon planning | World Model + missions | Planned |
+| 12 | Specialist agent ecosystem | Delegation + capability contracts | Planned |
+| 13 | Multimodal intelligence | Vision + documents + browser | Planned |
+| 14 | Natural conversation + interruption | Voice + runtime steering | Planned |
+| 15 | Personal Operating System layer | World Model + agents + integrations | Planned |
+| 16 | Self-improving agent | Verified outcomes + skills | Planned |
+| 17 | Distributed HERMUS | Shared identity + memory + device workers | Planned |
 
-## Stop 5: executive lifecycle
+## Architectural invariants
 
-The current implementation composes three existing boundaries:
+HERMUS keeps these rules across every phase:
 
-```text
-perceive
-  -> ExecutiveBrain
-  -> bounded handoff
-  -> core.runtime.execute
-  -> MissionEngine
-  -> runtime events
-  -> WorldModel
-  -> executive reconciliation
-```
+1. Mission Runtime remains the canonical execution lifecycle.
+2. Tool execution goes through the canonical ToolGateway.
+3. Model selection/completion goes through ModelGateway.
+4. Memory writes go through MemoryFacade.
+5. EventBus is the canonical event authority.
+6. Proactive and scheduled work enters the same queue/runtime path as normal work.
+7. Verification is required before claiming successful completion.
+8. Approval, red-line, sandbox and emergency-stop controls remain authoritative.
+9. Self-improvement cannot silently weaken protected safety controls.
+10. New subsystems should add capability, not create competing execution engines.
 
-`core/executive_loop.py` is the coordinator. It does not execute tools and does
-not replace MissionEngine. This is intentional: the executive layer can plan
-and remember, while the canonical runtime remains responsible for execution,
-approvals, sandboxing, verification, cancellation, and repair.
+## Phase 8 — Scheduling & Time Awareness
+
+Completed. HERMUS gained durable, timezone-aware one-shot and recurring
+schedules, natural-language schedule parsing, restart restoration, enable /
+disable lifecycle, run limits, optional quiet-hour deferral, next/last-run
+tracking, and canonical JobQueue submission.
+
+See docs/PHASE_8_SCHEDULING.md.
+
+## Phase 9 — Persistent Personal Context
+
+Completed. HERMUS gained a structured context layer for explicit preferences,
+goals, project records and current focus. Each turn can combine that durable
+profile with relevant typed memories and recent session history.
+
+The context layer is built on MemoryFacade rather than creating a competing
+memory writer, and explicit personal facts are captured only from recognizable
+user statements.
+
+See docs/PHASE_9_PERSONAL_CONTEXT.md.
+
+## Phase 10 — World Awareness / Live World Model
+
+Next implementation target:
+
+- filesystem observations
+- browser state
+- running-app/service state
+- repository/workspace state
+- calendar/task state
+- freshness timestamps and confidence
+- change events
+- reconciled snapshots
+- explicit provenance for every observation
 
 ## Completion rule
 
-A stop is not considered complete because a module exists. It is complete when:
+A phase is complete only when:
 
-1. the capability has a stable interface;
-2. at least one real runtime path uses it;
-3. failures are observable and recoverable where appropriate;
-4. tests cover persistence and safety boundaries; and
-5. the Control Room/CLI can explain its state without inventing facts.
-
-## Next implementation order
-
-1. Connect the World Model to mission lifecycle events.
-2. Add persistent episodic/semantic/procedural memory adapters.
-3. Make agent delegation consume explicit capability contracts.
-4. Add observation providers for filesystem, browser and service state.
-5. Add computer-control actions only behind existing approval/sandbox gates.
-6. Add voice as another interface to the same runtime rather than a separate brain.
-7. Expose executive/world state through the existing gateway and Control Room.
-8. Add learning from verified outcomes and failed/repair trajectories.
-9. Run end-to-end tests across every user-facing entry point.
-
-## Phase 6 — Runtime Reliability & Observability
-
-Completed. The autonomy boundary now provides stable run correlation, lifecycle
-health snapshots, event counting/timing, and structured failure classification
-without introducing a second execution engine. See
-`docs/PHASE_6_RUNTIME_RELIABILITY.md`.
-
-## Phase 7 — Proactive Automation
-
-Completed. HERMUS now has a disabled-by-default, durable event-driven automation
-boundary with cooldowns, fire limits, explicit action allowlisting, canonical
-EventBus wiring, JobQueue submission, and Control Room/API management endpoints.
-See `docs/PHASE_7_PROACTIVE_AUTOMATION.md`.
+- it has a stable interface;
+- at least one real runtime path uses it;
+- failures are observable and recoverable where appropriate;
+- persistence/safety boundaries have regression coverage; and
+- the Control Room / gateway can report its state from real backend evidence.
