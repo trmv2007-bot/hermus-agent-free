@@ -3,9 +3,22 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
-# Always invoke the interpreter selected by setup/bootstrap. Falling back to
-# ambient Python is only for the first bootstrap invocation before .venv exists;
-# bootstrap then re-execs itself inside the new environment.
+# Setup/repair uses the live bootstrap wrapper so dependency, browser and
+# optional-package downloads remain visible instead of appearing frozen.
+if [ "${1:-}" = "bootstrap" ] && [ -f "$ROOT/bootstrap_live.py" ]; then
+  shift
+  if [ -x "$ROOT/.venv/bin/python" ]; then
+    exec "$ROOT/.venv/bin/python" "$ROOT/bootstrap_live.py" "$@"
+  elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+    exec "$ROOT/.venv/Scripts/python.exe" "$ROOT/bootstrap_live.py" "$@"
+  elif command -v python3 >/dev/null 2>&1; then
+    exec python3 "$ROOT/bootstrap_live.py" "$@"
+  else
+    exec python "$ROOT/bootstrap_live.py" "$@"
+  fi
+fi
+
+# Normal HERMUS commands use the project venv whenever it exists.
 if [ -x "$ROOT/.venv/bin/python" ]; then
   exec "$ROOT/.venv/bin/python" "$ROOT/hermus.py" "$@"
 elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
