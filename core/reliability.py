@@ -343,6 +343,20 @@ class ReliabilitySupervisor:
             "checkpoint_count": len(self.checkpoints.items),
         }
 
+    def rollback_after_verification_failure(self, checkpoint_id: str, *, reason: str = "verification_failed") -> dict[str, Any]:
+        if get_emergency_stop().active():
+            return {"success": False, "error": "emergency_stop_active"}
+        try:
+            from .rollback import rollback_manager
+            result = rollback_manager.restore(str(checkpoint_id))
+        except Exception as exc:
+            result = {"success": False, "error": str(exc)}
+        if result.get("success"):
+            self.incidents.create("automatic_rollback", f"{reason}: restored {checkpoint_id}", severity="warning")
+        else:
+            self.incidents.create("rollback_failed", f"{reason}: {result.get('error', 'unknown')}", severity="critical")
+        return result
+
     def status(self) -> dict[str, Any]:
         return self.health() | {"incidents": self.incidents.list(25), "latest_checkpoints": list(self.checkpoints.items)[-25:]}
 
