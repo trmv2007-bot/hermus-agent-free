@@ -1083,6 +1083,60 @@ async def schedule_delete(schedule_id: str):
     return {"deleted": True, "schedule_id": schedule_id}
 
 
+
+@router.get("/personal-context")
+async def personal_context_get(query: str = "", project: str | None = None, limit: int = 5):
+    from core.personal_context import personal_context
+    return personal_context.snapshot(query=query, project=project, limit=max(1, min(20, int(limit)))).as_dict()
+
+
+@router.post("/personal-context/preference")
+async def personal_context_preference(payload: dict[str, Any] = None):
+    payload = payload or {}
+    key = str(payload.get("key") or "")
+    if not key:
+        return JSONResponse({"error": "key is required"}, status_code=400)
+    from core.personal_context import personal_context
+    return personal_context.remember_preference(
+        key,
+        payload.get("value"),
+        project=payload.get("project"),
+        session_id=payload.get("session_id"),
+    )
+
+
+@router.post("/personal-context/goal")
+async def personal_context_goal(payload: dict[str, Any] = None):
+    payload = payload or {}
+    title = str(payload.get("title") or "")
+    if not title:
+        return JSONResponse({"error": "title is required"}, status_code=400)
+    from core.personal_context import personal_context
+    return personal_context.add_goal(
+        title,
+        priority=str(payload.get("priority") or "normal"),
+        status=str(payload.get("status") or "active"),
+        project=payload.get("project"),
+        deadline=payload.get("deadline"),
+    )
+
+
+@router.post("/personal-context/focus")
+async def personal_context_focus(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.personal_context import personal_context
+    return personal_context.set_focus(str(payload.get("focus") or ""), project=payload.get("project"))
+
+
+@router.post("/personal-context/project")
+async def personal_context_project(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.personal_context import personal_context
+    name = str(payload.get("name") or "")
+    details = {k: v for k, v in payload.items() if k != "name"}
+    return personal_context.upsert_project(name, **details)
+
+
 @router.get("/runtime/issues")
 async def runtime_issues(limit: int = 100):
     """Recent structured runtime issues (component/operation/error/context).
