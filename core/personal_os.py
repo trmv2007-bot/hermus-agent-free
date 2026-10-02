@@ -149,8 +149,8 @@ class PersonalOS:
         from .personal_context import personal_context
         from scheduler.cron import cron_manager
         try:
-            from core.proactive import proactive
-            automations = proactive.list_rules()
+            from core.proactive_runtime import automation
+            automations = automation.list_rules()
         except Exception:
             automations = []
         try:
