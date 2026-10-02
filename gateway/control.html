@@ -1502,7 +1502,21 @@ function refreshDistributed() {
           ' · Capabilities: ' + esc((node.capabilities || []).join(', ') || 'none') + '</span>';
         nodes.appendChild(row);
       });
-      if (!nodes.children.length) nodes.innerHTML = '<div class="note">No distributed nodes registered.</div>';
+      if (!nodes.children.length) nodes.innerHTML = '<div class="note">No distributed nodes registered.</div>';      const topo = document.getElementById('distributedTopology');
+      if (topo) {
+        topo.innerHTML = '';
+        (data.nodes || []).forEach((node, index) => {
+          const el = document.createElement('div');
+          el.className = 'agent-node ' + (node.status === 'online' ? 'running' : 'idle');
+          el.style.left = (15 + (index % 5) * 18) + '%';
+          el.style.top = (35 + Math.floor(index / 5) * 30) + '%';
+          el.textContent = (node.name || node.id).slice(0, 2).toUpperCase();
+          el.title = (node.name || node.id) + '\nStatus: ' + (node.status || 'unknown') + '\nCapabilities: ' + ((node.capabilities || []).join(', ') || 'none');
+          topo.appendChild(el);
+        });
+        if (!topo.children.length) topo.innerHTML = '<div class="note">No nodes registered — topology will appear when a node connects.</div>';
+      }
+
 
       assignments.innerHTML = '';
       (data.assignments || []).slice().reverse().forEach(item => {
