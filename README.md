@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 7 — Proactive Automation**.
+The roadmap has progressed through **Phase 9 — Persistent Personal Context**.
 
 | Phase | Capability | Status |
 |---|---|---|
