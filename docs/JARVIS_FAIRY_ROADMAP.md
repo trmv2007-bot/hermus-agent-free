@@ -20,7 +20,7 @@ not replace them.
 | 11 | Advanced long-horizon planning | World Model + missions | ✅ Complete |
 | 12 | Specialist agent ecosystem | Delegation + capability contracts | ✅ Complete |
 | 13 | Multimodal intelligence | Vision + documents + browser | ✅ Complete |
-| 14 | Natural conversation + interruption | Voice + runtime steering | 🚧 Next |
+| 14 | Natural conversation + interruption | Voice + runtime steering | ✅ Complete |
 | 15 | Personal Operating System layer | World Model + agents + integrations | Planned |
 | 16 | Self-improving agent | Verified outcomes + skills | Planned |
 | 17 | Distributed HERMUS | Shared identity + memory + device workers | Planned |
@@ -87,11 +87,13 @@ See docs/PHASE_13_MULTIMODAL_INTELLIGENCE.md.
 
 ## Phase 14 — Natural Conversation + Interruption
 
-Next implementation target:
-- conversational activation and follow-up context
-- interrupt/cancel/change instructions mid-run
-- voice output interruption
-- background notifications and conversational progress
+Completed. HERMUS now has bounded conversation sessions, explicit session/run
+correlation, mid-run steering and interruption through RunBus, background
+notifications, WebSocket steering controls, and voice output interruption
+generation state. Existing Mission Runtime, verification and safety controls
+remain authoritative.
+
+See docs/PHASE_14_NATURAL_CONVERSATION.md.
 ## Completion rule
 
 A phase is complete only when:
