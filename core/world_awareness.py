@@ -54,41 +54,23 @@ class WorldAwareness:
         if include_processes:
             facts.extend(self._process_facts())
 
-        # Connector refreshes already wrote their facts; local facts are ingested
-        # here so every observation shares the same provenance/freshness contract.
         self.world.ingest("world-awareness", facts, permission_scope="system.read")
 
         snapshot = self.world.snapshot()
-        digest = _digest(snapshot["facts"])
+        # Change detection is based on the fresh observations, not the durable
+        # world store (which intentionally retains historical facts/events).
+        digest = _digest(facts)
         changed = self._last_digest is not None and digest != self._last_digest
         self._last_digest = digest
 
-        self.world.observe(
-            "world",
-            "last_refresh_at",
-            _now(),
-            source="world-awareness",
-            confidence=1.0,
-            permission_scope="system.read",
-        )
-        self.world.observe(
-            "world",
-            "observation_digest",
-            digest,
-            source="world-awareness",
-            confidence=1.0,
-            permission_scope="system.read",
-        )
-        self.world.emit(
-            "world_reconciled",
-            {
-                "changed": changed,
-                "fact_count": len(snapshot["facts"]),
-                "connector_count": len(connector_results),
-                "source": "world-awareness",
-            },
-            source="world-awareness",
-        )
+        self.world.observe("world", "last_refresh_at", _now(), source="world-awareness", confidence=1.0, permission_scope="system.read")
+        self.world.observe("world", "observation_digest", digest, source="world-awareness", confidence=1.0, permission_scope="system.read")
+        self.world.emit("world_reconciled", {
+            "changed": changed,
+            "fact_count": len(snapshot["facts"]),
+            "connector_count": len(connector_results),
+            "source": "world-awareness",
+        }, source="world-awareness")
         snapshot = self.world.snapshot()
         snapshot["awareness"] = {
             "refreshed_at": _now(),
@@ -121,33 +103,17 @@ class WorldAwareness:
 
     @staticmethod
     def _browser_facts() -> list[dict[str, Any]]:
-        """Observe an already-running HERMUS browser without launching one."""
         try:
             from tools import browser as browser_module
         except Exception:
             return []
         page = getattr(browser_module, "_page", None)
         if page is None:
-            return [{
-                "subject": "browser",
-                "predicate": "state",
-                "value": {"active": False, "reason": "no_active_session"},
-                "confidence": 1.0,
-            }]
+            return [{"subject": "browser", "predicate": "state", "value": {"active": False, "reason": "no_active_session"}, "confidence": 1.0}]
         try:
-            return [{
-                "subject": "browser",
-                "predicate": "state",
-                "value": {"active": True, "url": str(page.url), "title": str(page.title())[:500]},
-                "confidence": 0.95,
-            }]
+            return [{"subject": "browser", "predicate": "state", "value": {"active": True, "url": str(page.url), "title": str(page.title())[:500]}, "confidence": 0.95}]
         except Exception as exc:
-            return [{
-                "subject": "browser",
-                "predicate": "state",
-                "value": {"active": True, "state_error": str(exc)[:200]},
-                "confidence": 0.5,
-            }]
+            return [{"subject": "browser", "predicate": "state", "value": {"active": True, "state_error": str(exc)[:200]}, "confidence": 0.5}]
 
     @staticmethod
     def _git_facts(root: Path) -> list[dict[str, Any]]:
@@ -164,9 +130,14 @@ class WorldAwareness:
                 result = subprocess.run(command, cwd=str(root), capture_output=True, text=True, timeout=5, check=False)
                 if result.returncode != 0:
                     continue
-                value = result.stdout.strip()
+                value = result.stdout
                 if predicate == "status":
-                    value = {"clean": not bool(value), "changed_paths": value.splitlines()[:100]}
+                    # Preserve porcelain's two-character status prefix; callers
+                    # use it to distinguish staged vs worktree changes.
+                    lines = value.splitlines()
+                    value = {"clean": not bool(value.strip()), "changed_paths": lines[:100]}
+                else:
+                    value = value.strip()
                 facts.append({"subject": "workspace.git", "predicate": predicate, "value": value, "confidence": 1.0})
             except (OSError, subprocess.SubprocessError):
                 continue
@@ -188,12 +159,7 @@ class WorldAwareness:
         except Exception:
             return []
         rows.sort(key=lambda item: (str(item["name"]).lower(), int(item["pid"] or 0)))
-        return [{
-            "subject": "runtime",
-            "predicate": "processes",
-            "value": rows[:200],
-            "confidence": 0.95,
-        }]
+        return [{"subject": "runtime", "predicate": "processes", "value": rows[:200], "confidence": 0.95}]
 
 
 world_awareness = WorldAwareness()
