@@ -1709,9 +1709,15 @@ async function refreshProductionControls() {
   const pe=document.getElementById('profileControl');
   if(pe) pe.innerHTML='<div><strong>'+escv(p.assistant_name||'HERMUS')+'</strong> · '+escv(p.style||'concise')+'</div><div class="note">'+escv(p.language||'en')+' · '+escv(p.name||'profile not personalized')+'</div>';
   const ie=document.getElementById('integrationControl');
-  if(ie) ie.innerHTML=(i.integrations||[]).map(x=>'<div style="padding:5px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x.name)+'</strong> · '+escv(x.status)+'</div>').join('')||'<div class="note">No integrations.</div>';
+  if(ie) ie.innerHTML=(i.integrations||[]).map(x=>'<div style="padding:5px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x.name)+'</strong> · '+escv(x.status)+' <button class="ghost" style="float:right" onclick="toggleIntegration(\''+escv(x.id)+'\','+(x.enabled?'false':'true')+')">'+(x.enabled?'Disable':'Enable')+'</button></div>').join('')||'<div class="note">No integrations.</div>';
   const ve=document.getElementById('voiceStreamControl');
   if(ve) ve.innerHTML=(v.streams||[]).slice(-8).map(x=>'<div style="padding:5px 0;border-bottom:1px dashed #1c2534">'+escv(x.session_id)+' · '+escv(x.state)+' · '+escv(x.chunks)+' chunks</div>').join('')||'<div class="note">No active voice streams.</div>';
+}
+
+async function toggleIntegration(id, enabled) {
+  const r=await fetch('/integrations/'+encodeURIComponent(id)+'/enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+  if(!r.ok){alert('Integration change rejected');return;}
+  refreshProductionControls();
 }
 </script>
 </body>
