@@ -329,6 +329,14 @@ class SelfImprovement:
 
             fixes_result = self.fix_itself_in_background(improvements, task_id=task_id)
 
+            # Phase 16: turn reflection into governed, auditable improvement proposals.
+            try:
+                from core.self_improvement_controller import self_improvement_controller
+                governance = self_improvement_controller.record_reflection(reflection, improvements)
+                self.current_reflection["governance"] = governance
+            except Exception as e:
+                logger.error(f"[Self-Improvement] governance proposal failed: {e}")
+
             # Counsel System (Phase 2): reflection mistakes also become constitution
             # amendments so the council upgrades itself from yesterday's errors.
             try:
