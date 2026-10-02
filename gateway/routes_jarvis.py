@@ -1,42 +1,36 @@
 """Read-only control-plane data and honest Navigator operations for JARVIS.
 
 This router deliberately aggregates existing runtime registries rather than
-inventing dashboard state.  No secret values are returned.
+inventing dashboard state. No secret values are returned.
 """
-
 from __future__ import annotations
-
 import asyncio
 import ipaddress
 import socket
 import time
 from urllib.parse import urlparse
-
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from core.orchestrator import orchestrator
+from core.run_events import run_bus
 
 router = APIRouter()
 _STARTED = time.monotonic()
 
-
 def _active_count(rows: list[dict]) -> int:
     return sum(1 for row in rows if row.get("status") in {"queued", "running"})
 
-
 @router.get("/api/jarvis/status")
 async def jarvis_status():
-    """One factual snapshot used by the JARVIS status/telemetry panels."""
     from core.agent_manager import agent_manager
     from core.artifact_manager import artifact_manager
     from core.computer.resources import get_resource_monitor
     from core.config import config
     from core.model_capabilities import mission_capability_gate
     from core.providers import list_providers
-    from core.run_events import run_bus
     from core.tool_registry import tool_registry
     from gateway.channels import get_channel_status, get_discord_token, get_telegram_token
     from gateway.queue import job_queue
-
     queue = job_queue.status()
     jobs = job_queue.list_jobs(limit=100)
     runs = run_bus.runs()[-100:]
@@ -48,37 +42,21 @@ async def jarvis_status():
     capability = await asyncio.to_thread(mission_capability_gate, model_ref)
     telemetry = await asyncio.to_thread(get_resource_monitor().sample)
     providers = list_providers()
-
     return {
         "gateway": {"reachable": True, "version": "2.2-free-architecture", "uptime_seconds": int(time.monotonic() - _STARTED)},
         "queue": queue,
-        "counts": {
-            "active_jobs": _active_count(jobs),
-            "active_runs": _active_count(runs),
-            "tools": int(tools.get("count", len(tools.get("tools", [])))),
-            "agents": len(agents),
-            "artifacts": len(artifacts),
-        },
-        "runs": runs,
-        "jobs": jobs,
-        "channels": {
-            "runtime": channels,
-            "telegram_configured": bool(get_telegram_token()),
-            "discord_configured": bool(get_discord_token()),
-        },
+        "counts": {"active_jobs": _active_count(jobs), "active_runs": _active_count(runs), "tools": int(tools.get("count", len(tools.get("tools", [])))), "agents": len(agents), "artifacts": len(artifacts)},
+        "runs": runs, "jobs": jobs,
+        "channels": {"runtime": channels, "telegram_configured": bool(get_telegram_token()), "discord_configured": bool(get_discord_token())},
         "model": capability.to_dict() if hasattr(capability, "to_dict") else capability,
-        "providers": providers,
-        "telemetry": telemetry,
+        "providers": providers, "telemetry": telemetry,
     }
-
 
 def _validate_public_url(value: str) -> tuple[str | None, str | None]:
     try:
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             return None, "Only absolute http:// or https:// URLs are supported"
-        # Browser retrieval is server-side. Refuse loopback/private/link-local
-        # targets so this UI cannot be used as an SSRF primitive.
         for info in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)):
             ip = ipaddress.ip_address(info[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
@@ -87,30 +65,50 @@ def _validate_public_url(value: str) -> tuple[str | None, str | None]:
     except Exception as exc:
         return None, f"URL validation failed: {exc}"
 
-
 @router.post("/navigator/fetch")
 async def navigator_fetch(payload: dict | None = None):
-    """Perform a real Playwright navigation and extract visible body text."""
     payload = payload or {}
     url, error = await asyncio.to_thread(_validate_public_url, str(payload.get("url") or "").strip())
     if error:
         return JSONResponse({"success": False, "error": error}, status_code=400)
-
     from tools.browser import browser_extract, browser_navigate
-
     result = await asyncio.to_thread(browser_navigate, url)
     if not result.get("success"):
         return JSONResponse(result, status_code=503)
     extracted = await asyncio.to_thread(browser_extract, "body")
     if not extracted.get("success"):
-        return JSONResponse(
-            {**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502
-        )
-    return {
-        "success": True,
-        "url": result.get("url", url),
-        "title": result.get("title") or "",
-        "content_length": result.get("content_length"),
-        "text": str(extracted.get("text") or "")[:20000],
-        "retrieval": "playwright",
-    }
+        return JSONResponse({**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502)
+    return {"success": True, "url": result.get("url", url), "title": result.get("title") or "", "content_length": result.get("content_length"), "text": str(extracted.get("text") or "")[:20000], "retrieval": "playwright"}
+
+# Nexus facade: the UI consumes these instead of learning the shape of every
+# subsystem. Execution still goes through the existing queue and run bus.
+@router.get("/api/nexus/state")
+async def nexus_state(user_id: str = "default"):
+    return orchestrator.state(user_id=user_id)
+
+@router.post("/api/nexus/command")
+async def nexus_command(payload: dict | None = None):
+    payload = payload or {}
+    result = orchestrator.submit(str(payload.get("text") or ""), user_id=str(payload.get("user_id") or "default"), session_id=str(payload.get("session_id") or "") or None, mode=str(payload.get("mode") or "chat"), prefer=str(payload.get("prefer") or "") or None, priority=int(payload.get("priority") or 0))
+    return JSONResponse(result.to_dict(), status_code=202 if result.accepted else 400)
+
+@router.post("/api/nexus/runs/{run_id}/cancel")
+async def nexus_cancel(run_id: str):
+    ok = orchestrator.cancel(run_id)
+    return JSONResponse({"ok": ok, "run_id": run_id}, status_code=200 if ok else 404)
+
+@router.post("/api/nexus/runs/{run_id}/steer")
+async def nexus_steer(run_id: str, payload: dict | None = None):
+    payload = payload or {}
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "text is required"}, status_code=400)
+    ok = orchestrator.steer(run_id, text)
+    return JSONResponse({"ok": ok, "run_id": run_id}, status_code=200 if ok else 404)
+
+@router.get("/api/nexus/runs/{run_id}")
+async def nexus_run(run_id: str, after: int = 0):
+    run = run_bus.get(run_id)
+    if run is None:
+        return JSONResponse({"error": "run not found", "run_id": run_id}, status_code=404)
+    return {"run": run.to_dict(), "events": run_bus.history(run_id, after=after)}
