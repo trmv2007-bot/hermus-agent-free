@@ -986,6 +986,53 @@ async def swe_run_api(payload: dict[str, Any] = None):
     return res.to_dict()
 
 
+@router.get("/automation/rules")
+async def automation_rules():
+    from core.proactive_runtime import automation, wire_proactive_automation
+    wire_proactive_automation()
+    return {"rules": automation.list_rules()}
+
+
+@router.post("/automation/rules")
+async def automation_rule_create(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.proactive_runtime import automation, wire_proactive_automation
+    wire_proactive_automation()
+    try:
+        rule = automation.add_rule(
+            name=str(payload.get("name") or "automation"),
+            event_type=str(payload.get("event_type") or ""),
+            action_type=str(payload.get("action_type") or "runtime.turn"),
+            task=str(payload.get("task") or ""),
+            enabled=bool(payload.get("enabled", False)),
+            cooldown_seconds=float(payload.get("cooldown_seconds", 60)),
+            max_fires=(int(payload["max_fires"]) if payload.get("max_fires") not in (None, "") else None),
+            filters=payload.get("filters") or {},
+        )
+        return rule.as_dict()
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/automation/rules/{rule_id}/enable")
+async def automation_rule_enable(rule_id: str, payload: dict[str, Any] = None):
+    from core.proactive_runtime import automation, wire_proactive_automation
+    wire_proactive_automation()
+    enabled = bool((payload or {}).get("enabled", True))
+    if not automation.set_enabled(rule_id, enabled):
+        return JSONResponse({"error": "rule not found"}, status_code=404)
+    return {"rule_id": rule_id, "enabled": enabled}
+
+
+@router.delete("/automation/rules/{rule_id}")
+async def automation_rule_delete(rule_id: str):
+    from core.proactive_runtime import automation, wire_proactive_automation
+    wire_proactive_automation()
+    if not automation.remove_rule(rule_id):
+        return JSONResponse({"error": "rule not found"}, status_code=404)
+    return {"deleted": True, "rule_id": rule_id}
+
+
 @router.get("/runtime/issues")
 async def runtime_issues(limit: int = 100):
     """Recent structured runtime issues (component/operation/error/context).
