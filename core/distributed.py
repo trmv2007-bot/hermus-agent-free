@@ -168,12 +168,12 @@ class DistributedCoordinator:
         for row in data.get("nodes", []) if isinstance(data, dict) else []:
             if isinstance(row, dict) and row.get("id"):
                 self.nodes[row["id"]] = HermusNode(**{k: row[k] for k in
-                    ("id", "name", "capabilities", "endpoint", "status", "last_heartbeat", "metadata")
+                    ("id", "name", "capabilities", "endpoint", "status", "last_heartbeat", "metadata", "lease_until", "fencing_token")
                     if k in row})
         for row in data.get("assignments", []) if isinstance(data, dict) else []:
             if isinstance(row, dict) and row.get("id"):
                 self.assignments[row["id"]] = DistributedAssignment(**{k: row[k] for k in
-                    ("id", "job_id", "node_id", "capability", "status", "created_at", "reason")
+                    ("id", "job_id", "node_id", "capability", "status", "created_at", "reason", "lease_until", "fencing_token")
                     if k in row})
 
     def _save(self) -> None:
