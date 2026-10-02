@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 9 — Persistent Personal Context**.
+The roadmap has progressed through **Phase 10 — World Awareness / Live World Model**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -69,6 +69,7 @@ The roadmap has progressed through **Phase 9 — Persistent Personal Context**.
 | **7** | Proactive, event-driven automation | ✅ Complete |
 | **8** | Scheduling + time awareness | ✅ Complete |
 | **9** | Persistent personal context | ✅ Complete |
+| **10** | World awareness / live World Model | ✅ Complete |
 
 ### Phase 7 highlights
 
@@ -313,6 +314,7 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [docs/PHASE_7_PROACTIVE_AUTOMATION.md](docs/PHASE_7_PROACTIVE_AUTOMATION.md) | Proactive automation architecture |
 | [docs/PHASE_8_SCHEDULING.md](docs/PHASE_8_SCHEDULING.md) | Scheduling and time awareness |
 | [docs/PHASE_9_PERSONAL_CONTEXT.md](docs/PHASE_9_PERSONAL_CONTEXT.md) | Persistent personal context |
+| [docs/PHASE_10_WORLD_AWARENESS.md](docs/PHASE_10_WORLD_AWARENESS.md) | World awareness and live World Model |
 | [docs/JARVIS_FAIRY_ROADMAP.md](docs/JARVIS_FAIRY_ROADMAP.md) | Long-term HERMUS roadmap |
 
 ---
