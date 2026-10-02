@@ -113,3 +113,14 @@ schedules, proactive automations and World Model state. Task execution routes
 through the canonical JobQueue/runtime path.
 
 See docs/PHASE_15_PERSONAL_OS.md.
+
+
+## Phase 16 — Self-Improving Agent
+
+Completed. Reflection now feeds a governed improvement controller that creates
+auditable proposals, evaluates them with the deterministic EvolutionPolicy,
+and separates allowed development work from review-required or denied changes.
+Existing SkillForge verification/repeatability, lessons and quarantine remain
+part of the learning loop.
+
+See docs/PHASE_16_SELF_IMPROVING_AGENT.md.
