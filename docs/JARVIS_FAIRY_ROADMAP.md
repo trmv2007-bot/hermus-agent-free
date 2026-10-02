@@ -124,3 +124,12 @@ Existing SkillForge verification/repeatability, lessons and quarantine remain
 part of the learning loop.
 
 See docs/PHASE_16_SELF_IMPROVING_AGENT.md.
+
+
+## Phase 17 — Distributed HERMUS
+
+Completed. HERMUS now has a durable distributed coordination foundation with
+explicit node registration, capability routing, heartbeat/stale detection,
+assignments, emergency-stop-aware dispatch, and gateway visibility.
+
+See docs/PHASE_17_DISTRIBUTED_HERMUS.md.
