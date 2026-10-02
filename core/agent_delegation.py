@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .agent_dag import AgentDAG
+from .specialist_registry import SpecialistRegistry, specialist_registry
 
 
 @dataclass(frozen=True)
@@ -50,9 +51,15 @@ class DelegationPlan:
 class AgentDelegator:
     """Select a bounded specialist team without directly executing agents."""
 
-    def __init__(self, specialists: tuple[SpecialistProfile, ...] = DEFAULT_SPECIALISTS, max_agents: int = 7) -> None:
+    def __init__(
+        self,
+        specialists: tuple[SpecialistProfile, ...] = DEFAULT_SPECIALISTS,
+        max_agents: int = 7,
+        registry: SpecialistRegistry | None = None,
+    ) -> None:
         self.specialists = {item.role: item for item in specialists}
         self.max_agents = max(1, max_agents)
+        self.registry = registry or specialist_registry
 
     @staticmethod
     def _signals(task: str) -> set[str]:
@@ -91,7 +98,11 @@ class AgentDelegator:
         if not roles:
             roles = ["researcher", "verifier"]
         deduped = list(dict.fromkeys(roles))
-        return deduped[: self.max_agents]
+        selected = deduped[: self.max_agents]
+        validation = self.registry.validate_selection(selected)
+        if not validation["ok"]:
+            raise ValueError(f"invalid specialist selection: {validation['reason']}")
+        return selected
 
     def build_plan(self, task: str) -> DelegationPlan:
         task = str(task or "").strip()
@@ -109,11 +120,21 @@ class AgentDelegator:
             dependencies = [previous] if previous else []
             # Review/security can run after implementation in the standard chain;
             # this plan remains intentionally conservative and deterministic.
+            contract = self.registry.get(role)
             dag.add_node(
                 node_id,
                 role,
                 f"{profile.description} for mission: {task}",
                 dependencies=dependencies,
+                inputs={
+                    "capabilities": list(contract.capabilities) if contract else list(profile.capabilities),
+                    "inputs": list(contract.inputs) if contract else [],
+                    "outputs": list(contract.outputs) if contract else ["evidence"],
+                    "requires_verification": contract.requires_verification if contract else True,
+                    "max_steps": contract.max_steps if contract else 12,
+                    "permissions": list(contract.permissions) if contract else [],
+                },
+                max_retries=2,
             )
             rationale[role] = profile.description
             previous = node_id
