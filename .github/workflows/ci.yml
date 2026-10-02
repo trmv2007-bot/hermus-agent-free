@@ -7,7 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      HERMUS_SANDBOX_MODE: local
+      # Config uses HERMUS_SANDBOX; keep CI deterministic and avoid Docker-only
+      # assumptions on hosted runners. HERMUS_SANDBOX_MODE is not a config key.
+      HERMUS_SANDBOX: local
       HERMUS_SANDBOX_NETWORK: "false"
     steps:
       - uses: actions/checkout@v4
