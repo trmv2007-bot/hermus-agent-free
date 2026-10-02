@@ -45,6 +45,28 @@ cd hermus-agent-free
 ---
 
 ## 🧠 What is HERMUS?
+## 🚧 Build Status
+
+| Phase | Capability | Status |
+|---:|---|:---:|
+| 1 | Verified Computer-Control Execution | ✅ Complete |
+| 2 | Voice Presence + Executive Integration | ✅ Complete |
+| 3 | Control Room / System Observability | ✅ Complete |
+| 4 | Learning, Memory + Reusable Skills | ✅ Complete |
+| 5 | End-to-End Autonomy + Safety Hardening | ✅ Complete |
+| 6 | Runtime Reliability + Observability | ✅ Complete |
+| 7 | Proactive Event-Driven Automation | ✅ Complete |
+| 8 | Scheduling + Time Awareness | ✅ Complete |
+| 9 | Persistent Personal Context | ✅ Complete |
+| 10 | Live World Awareness | ✅ Complete |
+| 11 | Advanced Long-Horizon Planning | ✅ Complete |
+| 12 | Specialist Agent Ecosystem | ✅ Complete |
+| 13 | Multimodal Intelligence | ✅ Complete |
+| 14 | Natural Conversation + Interruption | ✅ Complete |
+| 15 | Personal Operating System | ✅ Complete |
+| 16 | Self-Improving Agent | ✅ Complete |
+| 17 | Distributed HERMUS | ✅ Complete |
+
 
 **HERMUS** is being built as a general-purpose personal AI agent: a persistent system that can understand objectives, plan work, delegate to specialist capabilities, operate tools, verify results, recover from failures, remember what it learns, and safely become more useful over time.
 
@@ -132,52 +154,6 @@ HERMUS now has a unified personal control plane:
 - Gateway endpoints for task and briefing management
 
 See `docs/PHASE_15_PERSONAL_OS.md` and the master roadmap.
-### Phase 16 — Self-Improving Agent
-
-HERMUS now turns reflection into governed self-improvement:
-- Reflection-derived improvement proposals
-- Deterministic EvolutionPolicy assessment
-- Allow / review / deny change decisions
-- Protected control-plane enforcement
-- Append-only evolution proposal history
-- Existing SkillForge verification, repeatability and quarantine remain active
-- Lessons and reflection continue feeding future behavior
-- Control Room/API visibility into self-improvement state
-
-See `docs/PHASE_16_SELF_IMPROVING_AGENT.md` and the master roadmap.
-### Phase 17 — Distributed HERMUS
-
-HERMUS now has a distributed coordination foundation:
-- Explicit authorized node registry
-- Node capabilities and heartbeat/freshness tracking
-- Capability-aware work assignment
-- Durable assignment state
-- Emergency-stop-aware routing
-- Gateway visibility and node management
-- Safety boundaries preserved on every node
-
-See `docs/PHASE_17_DISTRIBUTED_HERMUS.md` and the master roadmap.
-
-### Phase 8 + 9 highlights
-
-**Phase 8 — Scheduling & Time Awareness**
-- One-shot reminders and delayed tasks
-- Recurring natural-language schedules
-- Timezone-aware scheduling
-- Restart restoration of enabled schedules
-- Enable/disable/delete controls
-- Optional run limits and quiet-hour deferral
-- Queue-based execution through the canonical runtime
-
-**Phase 9 — Persistent Personal Context**
-- Explicit preferences and personal facts
-- Persistent goals and project records
-- Current-focus tracking
-- Relevant-memory + recent-session context snapshots
-- Bounded context injection into agent turns
-- Context updates through the canonical MemoryFacade
-
----
 
 ## ✨ Features
 
