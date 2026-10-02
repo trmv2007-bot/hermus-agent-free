@@ -27,3 +27,15 @@ def test_muted_session_does_not_execute():
     )
     result = bridge.handle_transcript("s1", "do it")
     assert result.result["ok"] is False
+
+
+
+def test_voice_output_interrupt_invalidates_generation():
+    presence = VoicePresence()
+    bridge = VoiceExecutiveBridge(presence, lambda _: {"answer": "hello"}, speaker=lambda _: None)
+    presence.start("s1")
+    generation = presence.begin_output("s1")
+    result = bridge.interrupt_output("s1")
+    assert result["action"] == "voice_output_interrupt"
+    assert result["output_generation"] > generation
+    assert presence.output_allowed("s1", generation) is False
