@@ -1,171 +1,393 @@
-"""Scheduler - Built-in cron with natural language, free APScheduler"""
+"""Phase 8 scheduler: durable, timezone-aware one-shot and recurring tasks.
+
+The scheduler owns when work should be submitted. It does not execute tools
+itself: scheduled work is handed to the canonical JobQueue so approvals, red
+lines, sandboxing, verification and runtime observability remain authoritative.
+"""
+from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
-
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.date import DateTrigger
     APSCHEDULER_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
+    BackgroundScheduler = CronTrigger = DateTrigger = None
     APSCHEDULER_AVAILABLE = False
 
-from core.agent import HermusAgent
 from core.config import config
 from core.log import get_logger
 
 logger = get_logger(__name__)
 
+_TIME_RE = re.compile(r"(?<!\d)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.I)
+_IN_RE = re.compile(r"^in\s+(\d+)\s+(minute|minutes|hour|hours|day|days)\s*$", re.I)
+_CRON_RE = re.compile(r"^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$")
+
+
+def _now() -> datetime:
+    return datetime.now().astimezone()
+
+
+def _parse_time(text: str) -> tuple[int, int] | None:
+    match = _TIME_RE.search(text)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    ampm = (match.group(3) or "").lower()
+    if minute > 59:
+        return None
+    if ampm == "pm" and hour < 12:
+        hour += 12
+    if ampm == "am" and hour == 12:
+        hour = 0
+    if hour > 23:
+        return None
+    return hour, minute
+
+
+def _recurring_cron(text: str) -> str | None:
+    low = re.sub(r"\s+", " ", text.strip().lower())
+    raw = low.removeprefix("cron:").strip()
+    if _CRON_RE.fullmatch(raw):
+        return raw
+    if low in {"every minute", "every minute on the minute"}:
+        return "* * * * *"
+    match = re.fullmatch(r"every (\d+) minutes?", low)
+    if match:
+        return f"*/{max(1, int(match.group(1)))} * * * *"
+    if low in {"every hour", "hourly"}:
+        return "0 * * * *"
+    match = re.fullmatch(r"every (\d+) hours?", low)
+    if match:
+        return f"0 */{max(1, int(match.group(1)))} * * *"
+    weekdays = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+    clock = _parse_time(low)
+    if "every weekday" in low:
+        hour, minute = clock or (9, 0)
+        return f"{minute} {hour} * * 0-4"
+    for day, dow in weekdays.items():
+        if f"every {day}" in low:
+            hour, minute = clock or (9, 0)
+            return f"{minute} {hour} * * {dow}"
+    if any(x in low for x in ("every day", "daily", "each day")):
+        hour, minute = clock or (9, 0)
+        return f"{minute} {hour} * * *"
+    return None
+
+
+def _one_shot(text: str, now: datetime) -> datetime | None:
+    low = re.sub(r"\s+", " ", text.strip().lower())
+    match = _IN_RE.match(low)
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2)
+        if unit.startswith("minute"):
+            return now + timedelta(minutes=amount)
+        if unit.startswith("hour"):
+            return now + timedelta(hours=amount)
+        return now + timedelta(days=amount)
+    clock = _parse_time(low)
+    if "tomorrow" in low:
+        target = now + timedelta(days=1)
+        hour, minute = clock or (9, 0)
+        return target.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if clock and not any(x in low for x in ("every ", "daily", "each ")):
+        hour, minute = clock
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return target
+    return None
+
 
 class CronManager:
-    """Free cron scheduler with natural language parsing"""
+    """Durable scheduler compatible with the existing cron CLI."""
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str | None = None, *, timezone: str | None = None, start: bool = True):
         self.db_path = Path(db_path or config.resolve_path("data/cron_jobs.json"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.db_path.exists():
-            self.db_path.write_text("[]")
+        self.timezone = str(timezone or getattr(config, "timezone", "") or "UTC")
+        try:
+            self.tz = ZoneInfo(self.timezone)
+        except Exception:
+            self.timezone = "UTC"
+            self.tz = ZoneInfo("UTC")
+        self._lock = threading.RLock()
+        self._jobs: dict[str, dict[str, Any]] = {}
         self.scheduler = None
-        if APSCHEDULER_AVAILABLE:
-            self.scheduler = BackgroundScheduler()
-            self.scheduler.start()
+        self._load()
+        if APSCHEDULER_AVAILABLE and start:
+            try:
+                self.scheduler = BackgroundScheduler(timezone=self.tz)
+                self.scheduler.start()
+                self._restore_enabled_jobs()
+            except Exception as exc:
+                logger.error(f"[Scheduler] failed to start: {exc}")
+                self.scheduler = None
+
+    def parse(self, text: str, *, now: datetime | None = None) -> dict[str, Any]:
+        now = (now or _now()).astimezone(self.tz)
+        cron = _recurring_cron(text)
+        if cron:
+            return {"schedule_type": "cron", "cron": cron, "run_at": None}
+        run_at = _one_shot(text, now)
+        if run_at:
+            return {"schedule_type": "date", "cron": None, "run_at": run_at.astimezone(self.tz).isoformat()}
+        return {"schedule_type": "cron", "cron": "0 9 * * *", "run_at": None}
 
     def _parse_natural_language(self, text: str) -> str:
-        """Parse natural language to cron via simple rules + LLM fallback - free"""
-        text_lower = text.lower()
+        return str(self.parse(text).get("cron") or "0 9 * * *")
 
-        # Simple rule-based parser for common patterns - free, no paid API
-        if "every day at 9am" in text_lower or "daily at 9am" in text_lower or "daily 9am" in text_lower:
-            return "0 9 * * *"
-        if "every day at 8am" in text_lower:
-            return "0 8 * * *"
-        if "every monday" in text_lower and "8am" in text_lower:
-            return "0 8 * * 1"
-        if "every hour" in text_lower:
-            return "0 * * * *"
-        if "every minute" in text_lower:
-            return "* * * * *"
-
-        # Try extract time like "at 9am" or "at 14:30"
-        time_match = re.search(r"at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text_lower)
-        if time_match:
-            hour = int(time_match.group(1))
-            minute = int(time_match.group(2) or 0)
-            ampm = time_match.group(3)
-            if ampm == "pm" and hour < 12:
-                hour += 12
-            if ampm == "am" and hour == 12:
-                hour = 0
-            return f"{minute} {hour} * * *"
-
-        # Fallback: try LLM to parse to cron (free via Ollama)
+    def add_job(
+        self,
+        natural_text: str,
+        task: str | None = None,
+        platform: str = "cli",
+        user_id: str = "default",
+        *,
+        timezone: str | None = None,
+        enabled: bool = True,
+        priority: str = "normal",
+        max_runs: int | None = None,
+        respect_quiet_hours: bool = False,
+        quiet_hours: tuple[int, int] | None = None,
+    ) -> dict[str, Any]:
+        tz_name = str(timezone or self.timezone)
         try:
-            from core.models import get_model_gateway
-
-            messages = [
-                {
-                    "role": "system",
-                    "content": "Convert natural language schedule to cron expression. Only return cron, no explanation. Example: 'daily at 9am' -> '0 9 * * *'",
-                },
-                {"role": "user", "content": text},
-            ]
-            resp = get_model_gateway().chat(messages)
-            # Extract cron-like pattern
-            cron_match = re.search(r"(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)", resp.content)
-            if cron_match:
-                return cron_match.group(0)
+            ZoneInfo(tz_name)
         except Exception:
-            pass
-
-        # Default daily 9am
-        return "0 9 * * *"
-
-    def add_job(self, natural_text: str, task: str = None, platform: str = "cli", user_id: str = "default") -> dict:
-        """Add cron job from natural language"""
-        cron_expr = self._parse_natural_language(natural_text)
-        # If task not provided, use natural_text as task
-        task_text = task or natural_text
-
+            raise ValueError(f"invalid timezone: {tz_name}")
+        parsed = self.parse(natural_text, now=datetime.now(ZoneInfo(tz_name)))
+        task_text = str(task or natural_text).strip()
+        if not task_text:
+            raise ValueError("task is required")
+        if max_runs is not None and int(max_runs) < 1:
+            raise ValueError("max_runs must be >= 1")
         job = {
-            "id": f"cron_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            "natural": natural_text,
-            "cron": cron_expr,
+            "id": f"cron_{uuid4().hex[:14]}",
+            "natural": str(natural_text).strip(),
+            "schedule_type": parsed["schedule_type"],
+            "cron": parsed.get("cron"),
+            "run_at": parsed.get("run_at"),
             "task": task_text,
-            "platform": platform,
-            "user_id": user_id,
-            "created": datetime.now().isoformat(),
-            "enabled": True,
+            "platform": str(platform or "cli"),
+            "user_id": str(user_id or "default"),
+            "timezone": tz_name,
+            "priority": str(priority or "normal"),
+            "enabled": bool(enabled),
+            "max_runs": int(max_runs) if max_runs is not None else None,
+            "run_count": 0,
+            "last_run_at": None,
+            "last_error": None,
+            "last_job_id": None,
+            "last_run_id": None,
+            "respect_quiet_hours": bool(respect_quiet_hours),
+            "quiet_hours": list(quiet_hours) if quiet_hours else None,
+            "created": datetime.now(ZoneInfo(tz_name)).isoformat(),
+            "next_run_at": None,
         }
+        with self._lock:
+            self._jobs[job["id"]] = job
+            self._save()
+            self._schedule(job)
+        return dict(job)
 
-        # Save to file
-        try:
-            jobs = json.loads(self.db_path.read_text())
-        except (OSError, ValueError):
-            jobs = []
-        jobs.append(job)
-        self.db_path.write_text(json.dumps(jobs, indent=2))
-
-        # Schedule via APScheduler if available
-        if self.scheduler:
-            try:
-                # Parse cron 5 fields
-                minute, hour, day, month, dow = cron_expr.split()
-                self.scheduler.add_job(
-                    self._execute_job,
-                    "cron",
-                    minute=minute,
-                    hour=hour,
-                    day=day,
-                    month=month,
-                    day_of_week=dow,
-                    args=[job],
-                    id=job["id"],
-                )
-            except Exception as e:
-                logger.error(f"APScheduler failed to add job: {e} - but saved to file")
-
-        return job
-
-    def _execute_job(self, job: dict):
-        """Execute cron job - delivers to platform"""
-        logger.info(f"[Cron] Executing job {job['id']}: {job['task']} -> {job['platform']}:{job['user_id']}")
-        try:
-            # Scheduled tasks run on the universal mission runtime (same core
-            # as /command, the queue and the CLI): goal-like tasks get the
-            # full mission lifecycle, chat stays a chat turn.
-            from core.runtime import execute as runtime_execute
-
-            agent = HermusAgent(session_id=f"cron_{job['id']}")
-            result = runtime_execute(job["task"], agent=agent, prefer="auto")
-            # In free version, delivery is via gateway - for now just log
-            # Real gateway would send via Telegram/Discord API
-            logger.info(f"[Cron] Result for {job['platform']}:{job['user_id']}: {result['response'][:200]}")
-
-            # If platform is telegram/discord and token set, could send via API here (free)
-        except Exception as e:
-            logger.error(f"[Cron] Job {job['id']} failed: {e}")
-
-    def list_jobs(self) -> list[dict]:
-        try:
-            return json.loads(self.db_path.read_text())
-        except (OSError, ValueError):
-            return []
+    def set_enabled(self, job_id: str, enabled: bool) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            job["enabled"] = bool(enabled)
+            if job["enabled"]:
+                self._schedule(job)
+            elif self.scheduler:
+                try:
+                    self.scheduler.remove_job(job_id)
+                except Exception:
+                    pass
+            self._save()
+            return True
 
     def remove_job(self, job_id: str) -> bool:
-        try:
-            jobs = json.loads(self.db_path.read_text())
-            jobs = [j for j in jobs if j["id"] != job_id]
-            self.db_path.write_text(json.dumps(jobs, indent=2))
+        with self._lock:
+            if job_id not in self._jobs:
+                return False
+            del self._jobs[job_id]
             if self.scheduler:
                 try:
                     self.scheduler.remove_job(job_id)
                 except Exception:
                     pass
+            self._save()
             return True
-        except Exception:
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(job) for job in self._jobs.values()]
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "available": APSCHEDULER_AVAILABLE,
+                "running": bool(self.scheduler),
+                "timezone": self.timezone,
+                "jobs": len(self._jobs),
+                "enabled_jobs": sum(1 for j in self._jobs.values() if j.get("enabled")),
+            }
+
+    def _in_quiet_hours(self, job: dict[str, Any], when: datetime) -> bool:
+        window = job.get("quiet_hours")
+        if not job.get("respect_quiet_hours") or not window:
             return False
+        start, end = int(window[0]), int(window[1])
+        return (start <= when.hour < end) if start <= end else (when.hour >= start or when.hour < end)
+
+    def _execute_job(self, job: dict[str, Any]) -> None:
+        with self._lock:
+            current = self._jobs.get(job["id"])
+            if current is None or not current.get("enabled"):
+                return
+            if current.get("max_runs") is not None and current.get("run_count", 0) >= int(current["max_runs"]):
+                current["enabled"] = False
+                self._save()
+                return
+            tz = ZoneInfo(current.get("timezone") or self.timezone)
+            now = datetime.now(tz)
+            if self._in_quiet_hours(current, now):
+                current["last_error"] = "deferred_by_quiet_hours"
+                self._save()
+                return
+        try:
+            from gateway.queue import job_queue
+            payload = {
+                "text": current["task"],
+                "task": current["task"],
+                "platform": current["platform"],
+                "user_id": current["user_id"],
+                "schedule_id": current["id"],
+                "scheduled": True,
+                "priority": current["priority"],
+                "trigger": {"type": "schedule", "schedule_id": current["id"], "natural": current["natural"]},
+            }
+            queued = job_queue.submit("runtime.turn", payload, session_key=f"schedule:{current['user_id']}")
+            with self._lock:
+                latest = self._jobs.get(current["id"])
+                if latest:
+                    latest["run_count"] = int(latest.get("run_count", 0)) + 1
+                    latest["last_run_at"] = now.isoformat()
+                    latest["last_error"] = None
+                    latest["last_job_id"] = queued.id
+                    latest["last_run_id"] = queued.run_id
+                    if latest.get("max_runs") is not None and latest["run_count"] >= int(latest["max_runs"]):
+                        latest["enabled"] = False
+                    self._save()
+                    if not latest["enabled"] and self.scheduler:
+                        try:
+                            self.scheduler.remove_job(latest["id"])
+                        except Exception:
+                            pass
+        except Exception as exc:
+            with self._lock:
+                latest = self._jobs.get(current["id"])
+                if latest:
+                    latest["last_error"] = str(exc)[:300]
+                    self._save()
+            logger.error(f"[Scheduler] enqueue failed for {current['id']}: {exc}")
+
+    def _schedule(self, job: dict[str, Any]) -> None:
+        if not self.scheduler or not job.get("enabled"):
+            return
+        try:
+            try:
+                self.scheduler.remove_job(job["id"])
+            except Exception:
+                pass
+            tz = ZoneInfo(job.get("timezone") or self.timezone)
+            if job.get("schedule_type") == "date":
+                trigger = DateTrigger(run_date=datetime.fromisoformat(job["run_at"]).astimezone(tz), timezone=tz)
+            else:
+                parts = str(job.get("cron") or "0 9 * * *").split()
+                if len(parts) != 5:
+                    raise ValueError("cron must contain five fields")
+                trigger = CronTrigger(
+                    minute=parts[0], hour=parts[1], day=parts[2], month=parts[3],
+                    day_of_week=parts[4], timezone=tz,
+                )
+            aps_job = self.scheduler.add_job(
+                self._execute_job,
+                trigger=trigger,
+                args=[job],
+                id=job["id"],
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+                misfire_grace_time=120,
+            )
+            next_run = getattr(aps_job, "next_run_time", None)
+            job["next_run_at"] = next_run.isoformat() if next_run else None
+            self._save()
+        except Exception as exc:
+            job["last_error"] = f"schedule_error: {exc}"[:300]
+            self._save()
+            logger.error(f"[Scheduler] failed to schedule {job.get('id')}: {exc}")
+
+    def _restore_enabled_jobs(self) -> None:
+        for job in list(self._jobs.values()):
+            if job.get("enabled"):
+                self._schedule(job)
+
+    def _load(self) -> None:
+        try:
+            rows = json.loads(self.db_path.read_text())
+        except (OSError, ValueError):
+            rows = []
+        if not isinstance(rows, list):
+            rows = []
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("id") or not row.get("task"):
+                continue
+            row.setdefault("schedule_type", "cron")
+            row.setdefault("cron", "0 9 * * *")
+            row.setdefault("run_at", None)
+            row.setdefault("timezone", self.timezone)
+            row.setdefault("enabled", True)
+            row.setdefault("priority", "normal")
+            row.setdefault("max_runs", None)
+            row.setdefault("run_count", 0)
+            row.setdefault("last_run_at", None)
+            row.setdefault("last_error", None)
+            row.setdefault("last_job_id", None)
+            row.setdefault("last_run_id", None)
+            row.setdefault("respect_quiet_hours", False)
+            row.setdefault("quiet_hours", None)
+            row.setdefault("created", _now().isoformat())
+            row.setdefault("next_run_at", None)
+            self._jobs[str(row["id"])] = row
+
+    def _save(self) -> None:
+        try:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.db_path.with_suffix(self.db_path.suffix + ".tmp")
+            tmp.write_text(json.dumps(list(self._jobs.values()), indent=2, default=str))
+            tmp.replace(self.db_path)
+        except OSError:
+            pass
 
 
 cron_manager = CronManager()
+
+__all__ = ["CronManager", "cron_manager", "APSCHEDULER_AVAILABLE"]
