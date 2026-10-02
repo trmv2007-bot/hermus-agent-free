@@ -1229,6 +1229,66 @@ async def long_horizon_plan(payload: dict[str, Any] = None):
     return plan.to_dict()
 
 
+@router.get("/distributed/status")
+async def distributed_status():
+    from core.distributed import distributed
+    return distributed.status()
+
+
+@router.get("/distributed/nodes")
+async def distributed_nodes():
+    from core.distributed import distributed
+    return {"nodes": distributed.list_nodes()}
+
+
+@router.post("/distributed/nodes")
+async def distributed_register(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.distributed import distributed
+    return distributed.register_node(
+        payload.get("name") or "HERMUS node",
+        node_id=payload.get("node_id"),
+        capabilities=payload.get("capabilities") or [],
+        endpoint=payload.get("endpoint") or "",
+        metadata=payload.get("metadata") or {},
+    )
+
+
+@router.post("/distributed/nodes/{node_id}/heartbeat")
+async def distributed_heartbeat(node_id: str, payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.distributed import distributed
+    return distributed.heartbeat(
+        node_id,
+        status=payload.get("status") or "online",
+        capabilities=payload.get("capabilities"),
+    )
+
+
+@router.delete("/distributed/nodes/{node_id}")
+async def distributed_unregister(node_id: str):
+    from core.distributed import distributed
+    return {"success": distributed.unregister(node_id)}
+
+
+@router.post("/distributed/assign")
+async def distributed_assign(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.distributed import distributed
+    return distributed.assign(
+        payload.get("job_id") or "",
+        capability=payload.get("capability") or "",
+        node_id=payload.get("node_id"),
+    )
+
+
+@router.post("/distributed/assignments/{assignment_id}/complete")
+async def distributed_complete(assignment_id: str, payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.distributed import distributed
+    return distributed.complete_assignment(assignment_id, success=bool(payload.get("success")))
+
+
 @router.get("/self-improvement/status")
 async def self_improvement_status():
     from core.self_improvement import self_improvement
