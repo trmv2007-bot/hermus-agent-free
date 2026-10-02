@@ -1083,6 +1083,22 @@ async def multimodal_browser(payload: dict[str, Any] = None):
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+@router.get("/multimodal/status")
+async def multimodal_status():
+    from core.multimodal import multimodal
+    return {
+        "facts": [
+            fact.to_dict()
+            for fact in multimodal.world.query(subject="multimodal")
+        ],
+        "recent_events": [
+            event.to_dict()
+            for event in multimodal.world.recent_events(50)
+            if event.event_type == "multimodal_observation"
+        ],
+    }
+
+
 @router.get("/specialists")
 async def specialists():
     from core.specialist_registry import specialist_registry
