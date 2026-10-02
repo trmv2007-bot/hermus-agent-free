@@ -42,3 +42,23 @@ def test_multimodal_document_uses_canonical_document_ingest(tmp_path):
     result = layer.analyze_document(doc)
     assert result["success"] is True
     assert "Phase 13" in result["observation"]
+
+
+def test_multimodal_browser_records_visual_state(tmp_path, monkeypatch):
+    world = WorldModel()
+    layer = MultimodalIntelligence(world=world, workspace_root=tmp_path)
+    screenshot = tmp_path / "browser.png"
+
+    monkeypatch.setattr(
+        "tools.browser.browser_screenshot",
+        lambda path, full_page=False: (Path(path).write_bytes(b"pixels") or {"success": True, "path": path}),
+    )
+    monkeypatch.setattr(
+        "tools.vision.vision_analyze",
+        lambda path, prompt, model: {"success": True, "description": "Dashboard with mission status"},
+    )
+
+    result = layer.analyze_browser(path="browser.png")
+    assert result["success"] is True
+    assert result["modality"] == "browser_visual"
+    assert world.recent_events(1)[0].event_type == "multimodal_observation"
