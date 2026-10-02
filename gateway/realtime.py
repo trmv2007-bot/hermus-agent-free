@@ -1034,6 +1034,55 @@ async def automation_rule_delete(rule_id: str):
 
 
 
+@router.post("/multimodal/image")
+async def multimodal_image(payload: dict[str, Any] = None):
+    payload = payload or {}
+    path = str(payload.get("path") or "")
+    if not path:
+        return JSONResponse({"error": "path is required"}, status_code=400)
+    from core.multimodal import multimodal
+    try:
+        return multimodal.analyze_image(
+            path,
+            prompt=str(payload.get("prompt") or "Describe this image in detail"),
+            model=str(payload.get("model") or "llava:7b"),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/multimodal/document")
+async def multimodal_document(payload: dict[str, Any] = None):
+    payload = payload or {}
+    path = str(payload.get("path") or "")
+    if not path:
+        return JSONResponse({"error": "path is required"}, status_code=400)
+    from core.multimodal import multimodal
+    try:
+        return multimodal.analyze_document(
+            path,
+            prompt=str(payload.get("prompt") or "Describe the visual contents and important text"),
+            model=str(payload.get("model") or "llava:7b"),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/multimodal/browser")
+async def multimodal_browser(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.multimodal import multimodal
+    try:
+        return multimodal.analyze_browser(
+            path=str(payload.get("path") or "data/multimodal/browser.png"),
+            prompt=str(payload.get("prompt") or "Describe the current browser page, visible UI, text and important state"),
+            model=str(payload.get("model") or "llava:7b"),
+            full_page=bool(payload.get("full_page", False)),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
 @router.get("/specialists")
 async def specialists():
     from core.specialist_registry import specialist_registry
