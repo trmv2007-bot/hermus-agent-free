@@ -18,7 +18,7 @@
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
 <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/actions"><img src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&style=for-the-badge" alt="CI"></a>
-<a href="https://discord.gg/example"><img src="https://img.shields.io/discord/123456789.svg?style=for-the-badge&logo=discord&label=Community" alt="Discord"></a>
+
 </p>
 
 ---
@@ -41,6 +41,51 @@ cd hermus-agent-free
 
 ### 3️⃣ Open Control Room
 👉 **[http://localhost:8000/control](http://localhost:8000/control)**
+
+---
+
+## 🧠 What is HERMUS?
+
+**HERMUS** is being built as a general-purpose personal AI agent: a persistent system that can understand objectives, plan work, delegate to specialist capabilities, operate tools, verify results, recover from failures, remember what it learns, and safely become more useful over time.
+
+The architecture is inspired by the idea of a persistent personal assistant—a **Jarvis/Fairy-style operating layer** rather than a simple chatbot.
+
+> **Autonomy should mean more useful execution, not fewer safety controls.**
+
+---
+
+## 🚀 Current Build Status
+
+The roadmap has progressed through **Phase 7 — Proactive Automation**.
+
+| Phase | Capability | Status |
+|---|---|---|
+| **1** | Verified computer-control execution loop | ✅ Complete |
+| **2** | Voice presence + executive integration | ✅ Complete |
+| **3** | Control Room / system observability | ✅ Complete |
+| **4** | Learning, memory, reusable skills | ✅ Complete |
+| **5** | End-to-end autonomy + safety hardening | ✅ Complete |
+| **6** | Runtime reliability + observability | ✅ Complete |
+| **7** | Proactive, event-driven automation | ✅ Complete |
+
+### Phase 7 highlights
+
+HERMUS can now react to canonical system events using **explicit, persistent automation rules**.
+
+**Event → Rule → Eligibility → Job Queue → Mission Runtime → Safety/Approval → Execute → Verify → Learn**
+
+- Event-driven triggers
+- Persistent automation rules
+- Explicit enable/disable state
+- Event payload filtering
+- Cooldowns and optional fire limits
+- Safe action allowlisting
+- Queue-based execution
+- Canonical EventBus integration
+- Automation management API
+- Runtime correlation and auditability
+
+Proactive rules submit work to the existing runtime; they do not create a privileged execution path.
 
 ---
 
@@ -70,12 +115,34 @@ cd hermus-agent-free
 - **Voice** - Local speech-to-text and text-to-speech
 - **Computer Control** - Browser automation and system interaction
 
+### 🎤 Presence & Interaction
+
+- **Voice integration** — speech input/output connected to the executive lifecycle
+- **Computer control** — observe → act → verify → recover
+- **CLI** — direct terminal interaction
+- **Web Control Room** — live operational visibility
+- **Gateway APIs** — programmatic access to HERMUS capabilities
+
+### ⚙️ Proactive Intelligence
+
+- Event-driven automation
+- Persistent rules
+- Cooldowns and fire limits
+- Context/payload filters
+- Safe queue submission
+- Automation lifecycle management
+- Stable run correlation
+- Structured runtime failure classification
+
 ### 🛡️ Safety & Trust
 
 - **Red Line Policy** - Clear boundaries for autonomous actions
 - **Approval System** - Scoped grants for yellow-zone actions
 - **Emergency Brake** - Immediate stop capability
 - **Audit Logs** - Complete action tracking and review
+- **Verification** - completion is not treated as success without appropriate verification
+- **Capability Boundaries** - self-improvement cannot silently disable protected safety controls
+- **Proactive Safety** - automations use the existing queue/runtime instead of directly executing tools
 - **Sandboxing** - Multiple isolation backends (Docker, Podman, bubblewrap)
 
 ---
@@ -104,6 +171,36 @@ cd hermus-agent-free
 │                                                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## 🤖 Proactive Automation
+
+Automation rules are explicit and **disabled by default**.
+
+```
+Canonical Event
+      ↓
+Automation Rule
+      ↓
+Filter + Cooldown + Limits
+      ↓
+Job Queue
+      ↓
+Mission Runtime
+      ↓
+Approval + Red Lines
+      ↓
+Execute → Verify → Learn
+```
+
+The realtime gateway supports listing, creating, enabling/disabling and deleting automation rules.
+
+---
+
+## 📡 Runtime Observability
+
+Canonical autonomy runs can carry a stable `run_id` and structured health information including state, elapsed time, event count, completion, failure classification and retryability.
+
+---
 
 ### 🎨 Control Room Dashboard
 
@@ -191,6 +288,9 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [RED_LINES.md](RED_LINES.md) | Safety boundaries and red-line policy |
 | [AUTONOMY_BOUNDARIES.md](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
 | [CAPABILITY_LEDGER.md](CAPABILITY_LEDGER.md) | Visible ledger of powers and capabilities |
+| [docs/PHASE_6_RUNTIME_RELIABILITY.md](docs/PHASE_6_RUNTIME_RELIABILITY.md) | Runtime reliability and observability |
+| [docs/PHASE_7_PROACTIVE_AUTOMATION.md](docs/PHASE_7_PROACTIVE_AUTOMATION.md) | Proactive automation architecture |
+| [docs/JARVIS_FAIRY_ROADMAP.md](docs/JARVIS_FAIRY_ROADMAP.md) | Long-term HERMUS roadmap |
 
 ---
 
