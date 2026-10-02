@@ -76,84 +76,21 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ---
 
-## 🚀 Current Build Status
+## 🏭 Production & Real-World Integration
 
-The roadmap has progressed through **Phase 17 — Distributed HERMUS**.
+The Phase 1–17 architecture is complete. The next layer is production hardening and real-world deployment:
 
-| Phase | Capability | Status |
-|---|---|---|
-| **1** | Verified computer-control execution loop | ✅ Complete |
-| **2** | Voice presence + executive integration | ✅ Complete |
-| **3** | Control Room / system observability | ✅ Complete |
-| **4** | Learning, memory, reusable skills | ✅ Complete |
-| **5** | End-to-end autonomy + safety hardening | ✅ Complete |
-| **6** | Runtime reliability + observability | ✅ Complete |
-| **7** | Proactive, event-driven automation | ✅ Complete |
-| **8** | Scheduling + time awareness | ✅ Complete |
-| **9** | Persistent personal context | ✅ Complete |
-| **10** | World awareness / live World Model | ✅ Complete |
-| **11** | Advanced long-horizon planning | ✅ Complete |
-| **12** | Specialist agent ecosystem | ✅ Complete |
-| **13** | Multimodal intelligence | ✅ Complete |
+- Unified HERMUS Command Center with live attention, topology, integrations, profile and search
+- Authenticated, expiring distributed job envelopes
+- Explicit external-integration catalog for calendar, email, messaging, files, browser, smart-home and development
+- Voice stream lifecycle and interruption primitives
+- Durable explicit personal profile
+- Docker/Compose deployment and CI gates
+- Production smoke tests, linting and type checking
 
-### Phase 7 highlights
+The repository provides the common contracts and safety boundaries. Third-party accounts and provider-specific credentials must be supplied by the deployment; HERMUS never invents or stores those secrets in its integration registry.
 
-HERMUS can now react to canonical system events using **explicit, persistent automation rules**.
-
-**Event → Rule → Eligibility → Job Queue → Mission Runtime → Safety/Approval → Execute → Verify → Learn**
-
-- Event-driven triggers
-- Persistent automation rules
-- Explicit enable/disable state
-- Event payload filtering
-- Cooldowns and optional fire limits
-- Safe action allowlisting
-- Queue-based execution
-- Canonical EventBus integration
-- Automation management API
-- Runtime correlation and auditability
-
-Proactive rules submit work to the existing runtime; they do not create a privileged execution path.
-
-### Phase 13 — Multimodal Intelligence
-
-HERMUS can now turn visual and document observations into structured evidence:
-
-- Image analysis through the existing local vision/ModelGateway path
-- PDF and office-document understanding through canonical document ingestion
-- Browser screenshot + visual state analysis
-- Confidence, provenance, modality and artifact metadata
-- Multimodal evidence persisted in the World Model
-- Workspace-scoped multimodal file access
-- Multimodal status exposed to the Control Room/gateway
-
-Visual evidence can inform planning and verification without bypassing existing safety, approval or permission controls.
-
-### Phase 14 — Natural Conversation + Interruption
-
-HERMUS now supports conversational control over long-running work:
-- Bounded conversation sessions and follow-up context
-- Session-to-run correlation for queued and WebSocket work
-- Mid-run steering and redirect instructions
-- Cooperative interruption/cancellation through the canonical RunBus/runtime
-- Background completion/error/cancellation notifications
-- WebSocket steer / redirect controls
-- Voice output interruption generations and /voice/interrupt
-- Existing SSE/WS progress events remain the source of live run state
-
-See docs/PHASE_14_NATURAL_CONVERSATION.md and the master roadmap.
-### Phase 15 — Personal Operating System
-
-HERMUS now has a unified personal control plane:
-- Durable tasks with priorities, areas, projects, due dates and notes
-- Personal OS snapshots and generated briefings
-- Goals, projects and focus from persistent Personal Context
-- Schedules and proactive automations visible in one operating view
-- Live World Model state included in the operating snapshot
-- Task execution routed through JobQueue and the canonical runtime
-- Gateway endpoints for task and briefing management
-
-See `docs/PHASE_15_PERSONAL_OS.md` and the master roadmap.
+See docs/PRODUCTION_AND_REAL_WORLD_INTEGRATION.md.
 
 ## ✨ Features
 
