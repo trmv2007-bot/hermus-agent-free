@@ -19,8 +19,8 @@ not replace them.
 | 10 | World awareness / live World Model | Observation adapters + state | ✅ Complete |
 | 11 | Advanced long-horizon planning | World Model + missions | ✅ Complete |
 | 12 | Specialist agent ecosystem | Delegation + capability contracts | ✅ Complete |
-| 13 | Multimodal intelligence | Vision + documents + browser | 🚧 Next |
-| 14 | Natural conversation + interruption | Voice + runtime steering | Planned |
+| 13 | Multimodal intelligence | Vision + documents + browser | ✅ Complete |
+| 14 | Natural conversation + interruption | Voice + runtime steering | 🚧 Next |
 | 15 | Personal Operating System layer | World Model + agents + integrations | Planned |
 | 16 | Self-improving agent | Verified outcomes + skills | Planned |
 | 17 | Distributed HERMUS | Shared identity + memory + device workers | Planned |
@@ -81,11 +81,17 @@ See docs/PHASE_12_SPECIALIST_ECOSYSTEM.md.
 
 ## Phase 13 — Multimodal Intelligence
 
+Completed. HERMUS now unifies image analysis, document extraction and browser visual state into structured multimodal evidence with provenance, confidence and WorldModel visibility.
+
+See docs/PHASE_13_MULTIMODAL_INTELLIGENCE.md.
+
+## Phase 14 — Natural Conversation + Interruption
+
 Next implementation target:
-- screenshots and image observations
-- PDF/document understanding
-- visual browser state
-- multimodal evidence and verification
+- conversational activation and follow-up context
+- interrupt/cancel/change instructions mid-run
+- voice output interruption
+- background notifications and conversational progress
 ## Completion rule
 
 A phase is complete only when:
