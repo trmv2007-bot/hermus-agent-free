@@ -269,7 +269,18 @@ class CronManager:
             now = datetime.now(tz)
             if self._in_quiet_hours(current, now):
                 current["last_error"] = "deferred_by_quiet_hours"
+                if current.get("schedule_type") == "date" and current.get("quiet_hours"):
+                    start, end = int(current["quiet_hours"][0]), int(current["quiet_hours"][1])
+                    target = now.replace(hour=end, minute=0, second=0, microsecond=0)
+                    if start <= end:
+                        if target <= now:
+                            target += timedelta(days=1)
+                    elif now.hour >= start:
+                        target += timedelta(days=1)
+                    current["run_at"] = target.isoformat()
                 self._save()
+                if current.get("schedule_type") == "date":
+                    self._schedule(current)
                 return
         try:
             from gateway.queue import job_queue
@@ -292,7 +303,9 @@ class CronManager:
                     latest["last_error"] = None
                     latest["last_job_id"] = queued.id
                     latest["last_run_id"] = queued.run_id
-                    if latest.get("max_runs") is not None and latest["run_count"] >= int(latest["max_runs"]):
+                    if latest.get("schedule_type") == "date" or (
+                        latest.get("max_runs") is not None and latest["run_count"] >= int(latest["max_runs"])
+                    ):
                         latest["enabled"] = False
                     self._save()
                     if not latest["enabled"] and self.scheduler:
