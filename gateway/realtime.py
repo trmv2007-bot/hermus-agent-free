@@ -1034,6 +1034,27 @@ async def automation_rule_delete(rule_id: str):
 
 
 
+@router.get("/specialists")
+async def specialists():
+    from core.specialist_registry import specialist_registry
+    return {"specialists": specialist_registry.list(), "max_active": specialist_registry.max_active}
+
+
+@router.post("/plans/long-horizon")
+async def long_horizon_plan(payload: dict[str, Any] = None):
+    payload = payload or {}
+    goal = str(payload.get("goal") or payload.get("text") or "")
+    if not goal:
+        return JSONResponse({"error": "goal is required"}, status_code=400)
+    from core.long_horizon import long_horizon_planner
+    plan = long_horizon_planner.build(
+        goal,
+        success_criteria=payload.get("success_criteria"),
+        subgoals=payload.get("subgoals"),
+    )
+    return plan.to_dict()
+
+
 @router.get("/world")
 async def world_state():
     from core.world_awareness import world_awareness
