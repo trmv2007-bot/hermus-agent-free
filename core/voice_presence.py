@@ -15,6 +15,7 @@ class VoiceSession:
     last_input_at: float | None = None
     last_output_at: float | None = None
     turns: int = 0
+    output_generation: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -48,6 +49,20 @@ class VoicePresence:
         session.muted = bool(muted)
         return session
 
+    def interrupt_output(self, session_id: str) -> VoiceSession:
+        session = self._sessions.setdefault(session_id, VoiceSession(session_id=session_id))
+        session.output_generation += 1
+        session.last_output_at = None
+        return session
+
+    def output_allowed(self, session_id: str, generation: int) -> bool:
+        session = self._sessions.get(session_id)
+        return bool(session and session.active and not session.muted and session.output_generation == generation)
+
+    def begin_output(self, session_id: str) -> int:
+        session = self._sessions.setdefault(session_id, VoiceSession(session_id=session_id))
+        return session.output_generation
+
     def stop(self, session_id: str) -> bool:
         session = self._sessions.get(session_id)
         if session is None:
@@ -66,6 +81,7 @@ class VoicePresence:
                     "last_input_at": item.last_input_at,
                     "last_output_at": item.last_output_at,
                     "turns": item.turns,
+                    "output_generation": item.output_generation,
                     "metadata": item.metadata,
                 }
                 for item in rows
