@@ -16,7 +16,7 @@ not replace them.
 | 7 | Proactive event-driven automation | EventBus + JobQueue | ✅ Complete |
 | 8 | Scheduling + time awareness | Automation + JobQueue | ✅ Complete |
 | 9 | Persistent personal context | MemoryFacade + session history | ✅ Complete |
-| 10 | World awareness / live World Model | Observation adapters + state | 🚧 Next |
+| 10 | World awareness / live World Model | Observation adapters + state | ✅ Complete |
 | 11 | Advanced long-horizon planning | World Model + missions | Planned |
 | 12 | Specialist agent ecosystem | Delegation + capability contracts | Planned |
 | 13 | Multimodal intelligence | Vision + documents + browser | Planned |
@@ -63,17 +63,19 @@ See docs/PHASE_9_PERSONAL_CONTEXT.md.
 
 ## Phase 10 — World Awareness / Live World Model
 
+Completed. HERMUS now reconciles enabled observation connectors plus local Git, runtime process, and existing-browser state into the canonical WorldModel, with freshness, provenance, confidence, change detection and gateway visibility.
+
+See docs/PHASE_10_WORLD_AWARENESS.md.
+
+## Phase 11 — Advanced Long-Horizon Planning
+
 Next implementation target:
 
-- filesystem observations
-- browser state
-- running-app/service state
-- repository/workspace state
-- calendar/task state
-- freshness timestamps and confidence
-- change events
-- reconciled snapshots
-- explicit provenance for every observation
+- dependency-aware long-horizon mission plans
+- checkpoints and resumable progress
+- evidence-based replanning
+- bounded retries and recovery
+- explicit completion criteria
 
 ## Completion rule
 
