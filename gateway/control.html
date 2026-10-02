@@ -7,6 +7,7 @@
   <title>HERMUS — Nexus</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/nexus.css">
+  <style>.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}</style>
 </head>
 <body>
   <div class="space" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
@@ -63,9 +64,6 @@
       </article>
     </section>
 
-    <!-- Semantic contextual navigation. It is intentionally not a visible tabbed
-         dashboard: these landmarks let assistive technology and keyboard users
-         discover HERMUS subsystems while the visual shell remains spatial. -->
     <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
       <button id="tab-missions" role="tab" type="button" aria-selected="false">Missions</button>
       <button role="tab" type="button" aria-selected="false">Approvals</button>
