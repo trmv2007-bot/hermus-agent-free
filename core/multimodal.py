@@ -1,18 +1,19 @@
-"""Multimodal evidence layer for HERMUS."""
+"""Multimodal observation and evidence layer for HERMUS.
 
+This module unifies image, document and browser visual observations into a
+structured evidence contract. It delegates actual vision inference to the
+existing vision tool/ModelGateway and never executes arbitrary computer
+actions or grants new permissions.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import mimetypes
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-import mimetypes
 
+from .document_ingest import extract_document
 from .world_model import WorldModel, world_model
-
-try:
-    from .document_extract import extract_document
-except Exception:  # pragma: no cover
-    extract_document = None
 
 
 @dataclass
@@ -23,22 +24,12 @@ class MultimodalEvidence:
     success: bool
     observation: str = ""
     confidence: float = 0.0
-    model: str = ""
+    model: str | None = None
     artifacts: list[str] = field(default_factory=list)
     note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "source": self.source,
-            "modality": self.modality,
-            "target": self.target,
-            "success": self.success,
-            "observation": self.observation,
-            "confidence": self.confidence,
-            "model": self.model,
-            "artifacts": list(self.artifacts),
-            "note": self.note,
-        }
+        return asdict(self)
 
 
 class MultimodalIntelligence:
@@ -71,9 +62,15 @@ class MultimodalIntelligence:
 
         result = vision_analyze(str(target), prompt=prompt, model=model)
         evidence = MultimodalEvidence(
-            source="vision", modality="image", target=str(target), success=bool(result.get("success")),
-            observation=str(result.get("description") or ""), confidence=0.85 if result.get("success") else 0.0,
-            model=model, artifacts=[str(target)], note=result.get("error"),
+            source="vision",
+            modality="image",
+            target=str(target),
+            success=bool(result.get("success")),
+            observation=str(result.get("description") or ""),
+            confidence=0.85 if result.get("success") else 0.0,
+            model=model,
+            artifacts=[str(target)],
+            note=result.get("error"),
         )
         return self._record(evidence)
 
@@ -81,30 +78,41 @@ class MultimodalIntelligence:
                          model: str = "llava:7b") -> dict[str, Any]:
         target = self._safe_path(path)
         data = target.read_bytes()
-        if extract_document is None:
-            raise RuntimeError("document extraction is unavailable")
-        extracted = extract_document(target.name, data, mimetypes.guess_type(target.name)[0] or "")
+        extracted = extract_document(
+            target.name,
+            data,
+            mimetypes.guess_type(target.name)[0] or "",
+        )
         if target.suffix.lower() in self.IMAGE_EXTENSIONS:
             return self.analyze_image(target, prompt=prompt, model=model)
+
         evidence = MultimodalEvidence(
-            source="document_ingest", modality="document", target=str(target), success=bool(extracted.text),
-            observation=extracted.text or "", confidence=0.9 if extracted.text else 0.0,
-            artifacts=[str(target)], note=extracted.note,
+            source="document_ingest",
+            modality="document",
+            target=str(target),
+            success=bool(extracted.text),
+            observation=extracted.text or "",
+            confidence=0.9 if extracted.text else 0.0,
+            artifacts=[str(target)],
+            note=extracted.note,
         )
         return self._record(evidence)
 
     def analyze_browser(self, *, path: str = "data/multimodal/browser.png",
                         prompt: str = "Describe the current browser page, visible UI, text and important state",
                         model: str = "llava:7b", full_page: bool = False) -> dict[str, Any]:
-        # A browser screenshot is an output artifact, so it must not be required
-        # to exist before the screenshot provider has had a chance to create it.
+        # Browser screenshots are output artifacts; the target is expected to be
+        # absent before the screenshot provider creates it.
         target = self._safe_path(path, require_file=False)
         from tools.browser import browser_screenshot
 
         screenshot = browser_screenshot(str(target), full_page=full_page)
         if not screenshot.get("success"):
             evidence = MultimodalEvidence(
-                source="browser", modality="browser_visual", target=str(target), success=False,
+                source="browser",
+                modality="browser_visual",
+                target=str(target),
+                success=False,
                 note=screenshot.get("error"),
             )
             return self._record(evidence)
@@ -116,13 +124,24 @@ class MultimodalIntelligence:
 
     def _record(self, evidence: MultimodalEvidence) -> dict[str, Any]:
         payload = evidence.to_dict()
-        self.world.observe("multimodal", f"{evidence.modality}:{evidence.target}", payload,
-                           source=evidence.source, confidence=evidence.confidence,
-                           permission_scope="multimodal.read")
-        self.world.emit("multimodal_observation", {
-            "modality": evidence.modality, "target": evidence.target,
-            "success": evidence.success, "confidence": evidence.confidence,
-        }, source=evidence.source)
+        self.world.observe(
+            "multimodal",
+            f"{evidence.modality}:{evidence.target}",
+            payload,
+            source=evidence.source,
+            confidence=evidence.confidence,
+            permission_scope="multimodal.read",
+        )
+        self.world.emit(
+            "multimodal_observation",
+            {
+                "modality": evidence.modality,
+                "target": evidence.target,
+                "success": evidence.success,
+                "confidence": evidence.confidence,
+            },
+            source=evidence.source,
+        )
         return payload
 
 
