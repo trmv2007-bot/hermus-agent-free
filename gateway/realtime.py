@@ -1229,6 +1229,34 @@ async def long_horizon_plan(payload: dict[str, Any] = None):
     return plan.to_dict()
 
 
+@router.get("/self-improvement/status")
+async def self_improvement_status():
+    from core.self_improvement import self_improvement
+    from core.self_improvement_controller import self_improvement_controller
+    return {
+        "agent": self_improvement.get_status(),
+        "governance": self_improvement_controller.status(),
+    }
+
+
+@router.get("/self-improvement/proposals")
+async def self_improvement_proposals(limit: int = 20):
+    from core.self_improvement_controller import self_improvement_controller
+    return {"proposals": self_improvement_controller.history(limit)}
+
+
+@router.post("/self-improvement/reflect")
+async def self_improvement_reflect(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.self_improvement import self_improvement
+    trajectory = payload.get("trajectory")
+    result = self_improvement.run_idle_reflection(
+        trajectory=trajectory if isinstance(trajectory, list) else None,
+        force=bool(payload.get("force", True)),
+    )
+    return result
+
+
 @router.get("/personal-os")
 async def personal_os_snapshot(query: str = "", area: str | None = None, project: str | None = None):
     from core.personal_os import personal_os
