@@ -6,6 +6,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      HERMUS_SANDBOX_MODE: local
+      HERMUS_SANDBOX_NETWORK: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
