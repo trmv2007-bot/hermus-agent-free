@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 16 — Self-Improving Agent**.
+The roadmap has progressed through **Phase 17 — Distributed HERMUS**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -145,6 +145,19 @@ HERMUS now turns reflection into governed self-improvement:
 - Control Room/API visibility into self-improvement state
 
 See `docs/PHASE_16_SELF_IMPROVING_AGENT.md` and the master roadmap.
+### Phase 17 — Distributed HERMUS
+
+HERMUS now has a distributed coordination foundation:
+- Explicit authorized node registry
+- Node capabilities and heartbeat/freshness tracking
+- Capability-aware work assignment
+- Durable assignment state
+- Emergency-stop-aware routing
+- Gateway visibility and node management
+- Safety boundaries preserved on every node
+
+See `docs/PHASE_17_DISTRIBUTED_HERMUS.md` and the master roadmap.
+
 ### Phase 8 + 9 highlights
 
 **Phase 8 — Scheduling & Time Awareness**
