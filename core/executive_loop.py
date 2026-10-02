@@ -6,27 +6,25 @@ from collections.abc import Callable
 from typing import Any
 
 from .agent_delegation import agent_delegator
-from .executive import ExecutiveBrain, executive_brain
-from .executive_memory import ExecutiveMemory, executive_memory
+from .executive import executive_brain
+from .executive_memory import executive_memory
 from .executive_runtime import execute_with_executive
-from .perception import PerceptionCoordinator, perception
-from .world_model import WorldModel, world_model
+from .perception import perception
+from .world_model import world_model
 
 
 class ExecutiveLoop:
     """Coordinate perception, planning, delegation, execution, verification and learning."""
 
-    def __init__(self, *, brain=None, world=None, memory=None, delegator=None, perception_coordinator=None) -> None:
+    def __init__(self, *, brain=None, world=None, memory=None, delegator=None, perception_layer=None) -> None:
         self.brain = brain or executive_brain
         self.world = world or world_model
         self.memory = memory or executive_memory
         self.delegator = delegator or agent_delegator
-        self.perception = perception_coordinator or perception
-        if self.perception.world is not self.world:
-            self.perception = PerceptionCoordinator(registry=self.perception.registry, world=self.world)
+        self.perception = perception_layer or perception
 
     def perceive(self, *, platform: str = "api", user_id: str = "anonymous", workspace_root=None) -> dict[str, Any]:
-        sensed = self.perception.refresh(workspace_root=workspace_root)
+        observed = self.perception.refresh(workspace_root=workspace_root)
         self.world.observe(
             "session",
             "identity",
@@ -34,13 +32,8 @@ class ExecutiveLoop:
             source="executive.perception",
             permission_scope="session.read",
         )
-        self.brain.observe("world_snapshot_refreshed", {
-            "platform": platform,
-            "user_id": user_id,
-            "connectors": [item.get("connector") for item in sensed.get("refreshed", [])],
-            "fact_count": len(sensed.get("world", {}).get("facts", [])),
-        })
-        return sensed
+        self.brain.observe("world_snapshot_refreshed", {"platform": platform, "user_id": user_id})
+        return observed
 
     def execute(self, text: str, *, platform: str = "api", user_id: str = "anonymous", on_event: Callable | None = None, **kwargs: Any) -> dict[str, Any]:
         text = str(text or "").strip()
@@ -53,11 +46,7 @@ class ExecutiveLoop:
 
         delegation = self.delegator.build_plan(text)
         self.brain.observe("specialist_team_selected", {"roles": delegation.selected_roles})
-        self.world.emit(
-            "delegation_planned",
-            {"roles": delegation.selected_roles, "dag": delegation.dag.to_dict()},
-            source="executive.delegation",
-        )
+        self.world.emit("delegation_planned", {"roles": delegation.selected_roles, "dag": delegation.dag.to_dict()}, source="executive.delegation")
         self.world.emit("request_started", {"text": text[:500], "platform": platform, "user_id": user_id}, source="executive.loop")
 
         def emit(kind: str, data: dict[str, Any] | None = None) -> None:
