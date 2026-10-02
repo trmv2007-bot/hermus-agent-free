@@ -1,7 +1,8 @@
 """Read-only control-plane data and honest Navigator operations for JARVIS.
 
-This router deliberately aggregates existing runtime registries rather than
-inventing dashboard state. No secret values are returned.
+This router exposes the product-facing Nexus contract while retaining the
+existing runtime endpoints for compatibility. Nexus is the interaction layer;
+queue/run services remain the execution layer.
 """
 from __future__ import annotations
 import asyncio
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from core.orchestrator import orchestrator
+from core.nexus.service import nexus
 from core.run_events import run_bus
 
 router = APIRouter()
@@ -80,8 +82,9 @@ async def navigator_fetch(payload: dict | None = None):
         return JSONResponse({**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502)
     return {"success": True, "url": result.get("url", url), "title": result.get("title") or "", "content_length": result.get("content_length"), "text": str(extracted.get("text") or "")[:20000], "retrieval": "playwright"}
 
-# Nexus facade: the UI consumes these instead of learning the shape of every
-# subsystem. Execution still goes through the existing queue and run bus.
+# ---------------------------------------------------------------- Nexus API
+# The dashboard consumes this product-level contract. It does not need to know
+# how queues, agents, memory, approvals or tools are implemented internally.
 @router.get("/api/nexus/state")
 async def nexus_state(user_id: str = "default"):
     return orchestrator.state(user_id=user_id)
@@ -89,8 +92,23 @@ async def nexus_state(user_id: str = "default"):
 @router.post("/api/nexus/command")
 async def nexus_command(payload: dict | None = None):
     payload = payload or {}
-    result = orchestrator.submit(str(payload.get("text") or ""), user_id=str(payload.get("user_id") or "default"), session_id=str(payload.get("session_id") or "") or None, mode=str(payload.get("mode") or "chat"), prefer=str(payload.get("prefer") or "") or None, priority=int(payload.get("priority") or 0))
+    result = orchestrator.submit(
+        str(payload.get("text") or ""),
+        user_id=str(payload.get("user_id") or "default"),
+        session_id=str(payload.get("session_id") or "") or None,
+        platform=str(payload.get("channel") or payload.get("platform") or "nexus"),
+        mode=str(payload.get("mode") or "chat"),
+        prefer=str(payload.get("prefer") or "") or None,
+        priority=int(payload.get("priority") or 0),
+    )
     return JSONResponse(result.to_dict(), status_code=202 if result.accepted else 400)
+
+@router.get("/api/nexus/missions/{mission_id}")
+async def nexus_mission(mission_id: str):
+    mission = nexus.mission(mission_id)
+    if mission is None:
+        return JSONResponse({"error": "mission not found", "mission_id": mission_id}, status_code=404)
+    return {"mission": mission}
 
 @router.post("/api/nexus/runs/{run_id}/cancel")
 async def nexus_cancel(run_id: str):
