@@ -14,13 +14,15 @@ from .world_model import world_model
 def snapshot() -> dict[str, Any]:
     """Return explainable, bounded state; never invent operational facts."""
     world = world_model.snapshot()
-    brain = executive_brain.snapshot()
     return {
-        "executive": brain,
+        "executive": {
+            "active_goals": executive_brain.active_goals(limit=20),
+            "recent_events": executive_brain.recent_events(limit=50),
+        },
         "world": world,
         "memory": {
-            "available": True,
-            "backend": type(executive_memory.store).__name__ if getattr(executive_memory, "store", None) else None,
+            "available": bool(getattr(executive_memory, "memory", None)),
+            "backend": type(executive_memory.memory).__name__,
         },
         "perception": perception.refresh(include_disabled=True),
         "specialists": {
