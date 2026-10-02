@@ -1601,3 +1601,91 @@ def install(app, *, agent_getter: Callable[..., Any] | None = None) -> dict[str,
     app.include_router(router, dependencies=[Depends(_check_gateway_auth)])
     app.include_router(ws_router)
     return {"mounted": True}
+
+
+# ---------------------------------------------------------- production layers
+@router.get("/integrations")
+async def integrations_status():
+    from core.integrations import external_integrations
+    return external_integrations.status()
+
+@router.post("/integrations/{integration_id}/configure")
+async def integration_configure(integration_id: str, payload: dict[str, Any] | None = None):
+    from core.integrations import external_integrations
+    payload=payload or {}
+    try:
+        return external_integrations.configure(integration_id, enabled=bool(payload.get("enabled", True)), metadata=dict(payload.get("metadata") or {}))
+    except KeyError:
+        return JSONResponse({"error":"integration_not_found"}, status_code=404)
+
+@router.post("/integrations/{integration_id}/enable")
+async def integration_enable(integration_id: str, payload: dict[str, Any] | None = None):
+    from core.integrations import external_integrations
+    try:
+        return external_integrations.set_enabled(integration_id, bool((payload or {}).get("enabled", True)))
+    except KeyError:
+        return JSONResponse({"error":"integration_not_found"}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"error":str(exc)}, status_code=409)
+
+@router.get("/personal-profile")
+async def personal_profile_get():
+    from core.personal_profile import personal_profile
+    return personal_profile.snapshot()
+
+@router.patch("/personal-profile")
+async def personal_profile_update(payload: dict[str, Any] | None = None):
+    from core.personal_profile import personal_profile
+    return personal_profile.update(**(payload or {}))
+
+@router.post("/personal-profile/routines")
+async def personal_profile_routine(payload: dict[str, Any] | None = None):
+    from core.personal_profile import personal_profile
+    if not isinstance(payload, dict) or not payload:
+        return JSONResponse({"error":"routine payload required"}, status_code=400)
+    return personal_profile.add_routine(payload)
+
+@router.get("/voice/streams")
+async def voice_streams():
+    from core.voice_stream import voice_streams as manager
+    return manager.snapshot()
+
+@router.post("/voice/streams")
+async def voice_stream_start(payload: dict[str, Any] | None = None):
+    from core.voice_stream import voice_streams as manager
+    payload=payload or {}; session_id=str(payload.get("session_id") or "")
+    if not session_id: return JSONResponse({"error":"session_id required"}, status_code=400)
+    metadata=dict(payload.get("metadata") or {}); return manager.start(session_id, **metadata)
+
+@router.post("/voice/streams/{stream_id}/chunk")
+async def voice_stream_chunk(stream_id: str, payload: dict[str, Any] | None = None):
+    from core.voice_stream import voice_streams as manager
+    try: return manager.push(stream_id, int((payload or {}).get("bytes") or 0))
+    except KeyError: return JSONResponse({"error":"stream_not_found"}, status_code=404)
+    except ValueError as exc: return JSONResponse({"error":str(exc)}, status_code=409)
+
+@router.post("/voice/streams/{stream_id}/interrupt")
+async def voice_stream_interrupt(stream_id: str):
+    from core.voice_stream import voice_streams as manager
+    try: return manager.interrupt(stream_id)
+    except KeyError: return JSONResponse({"error":"stream_not_found"}, status_code=404)
+
+@router.post("/distributed/envelope")
+async def distributed_envelope(payload: dict[str, Any] | None = None):
+    import os
+    from core.distributed_transport import EnvelopeSigner, create_envelope
+    payload=payload or {}; secret=os.getenv("HERMUS_DISTRIBUTED_SECRET", "")
+    if not secret: return JSONResponse({"error":"HERMUS_DISTRIBUTED_SECRET_not_configured"}, status_code=503)
+    required=("source_node","target_node","job_id","kind")
+    if any(not str(payload.get(k) or "").strip() for k in required): return JSONResponse({"error":"source_node,target_node,job_id,kind required"}, status_code=400)
+    env=create_envelope(str(payload["source_node"]),str(payload["target_node"]),str(payload["job_id"]),str(payload["kind"]),dict(payload.get("payload") or {}),ttl_s=float(payload.get("ttl_s",300)))
+    return {"envelope":EnvelopeSigner(secret).sign(env).__dict__}
+
+@router.post("/distributed/envelope/verify")
+async def distributed_envelope_verify(payload: dict[str, Any] | None = None):
+    import os
+    from core.distributed_transport import EnvelopeSigner, JobEnvelope
+    secret=os.getenv("HERMUS_DISTRIBUTED_SECRET", "")
+    if not secret: return JSONResponse({"error":"HERMUS_DISTRIBUTED_SECRET_not_configured"}, status_code=503)
+    try: env=JobEnvelope(**dict((payload or {}).get("envelope") or {})); return {"valid":EnvelopeSigner(secret).verify(env)}
+    except (TypeError, KeyError) as exc: return JSONResponse({"error":str(exc)}, status_code=400)
