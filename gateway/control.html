@@ -1707,7 +1707,7 @@ async function refreshProductionControls() {
     fetch('/voice/streams').then(r=>r.json()).catch(()=>({streams:[]}))
   ]);
   const pe=document.getElementById('profileControl');
-  if(pe) pe.innerHTML='<div><strong>'+escv(p.assistant_name||'HERMUS')+'</strong> · '+escv(p.style||'concise')+'</div><div class="note">'+escv(p.language||'en')+' · '+escv(p.name||'profile not personalized')+'</div>';
+  if(pe) pe.innerHTML='<div><strong>'+escv(p.assistant_name||'HERMUS')+'</strong> · '+escv(p.style||'concise')+'</div><div class="note">'+escv(p.language||'en')+' · '+escv(p.name||'profile not personalized')+'</div><div class="bar" style="margin-top:8px"><input id="profileNameInput" placeholder="Your name" value="'+escv(p.name||'')+'"><select id="profileStyleInput"><option '+(p.style==='concise'?'selected':'')+'>concise</option><option '+(p.style==='direct'?'selected':'')+'>direct</option><option '+(p.style==='warm'?'selected':'')+'>warm</option><option '+(p.style==='formal'?'selected':'')+'>formal</option></select><button class="ghost" onclick="saveProfile()">Save</button></div>';
   const ie=document.getElementById('integrationControl');
   if(ie) ie.innerHTML=(i.integrations||[]).map(x=>'<div style="padding:5px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x.name)+'</strong> · '+escv(x.status)+' <button class="ghost" style="float:right" onclick="toggleIntegration(\''+escv(x.id)+'\','+(x.enabled?'false':'true')+')">'+(x.enabled?'Disable':'Enable')+'</button></div>').join('')||'<div class="note">No integrations.</div>';
   const ve=document.getElementById('voiceStreamControl');
@@ -1717,6 +1717,14 @@ async function refreshProductionControls() {
 async function toggleIntegration(id, enabled) {
   const r=await fetch('/integrations/'+encodeURIComponent(id)+'/enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
   if(!r.ok){alert('Integration change rejected');return;}
+  refreshProductionControls();
+}
+
+async function saveProfile() {
+  const name=document.getElementById('profileNameInput')?.value || '';
+  const style=document.getElementById('profileStyleInput')?.value || 'concise';
+  const r=await fetch('/personal-profile',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,style})});
+  if(!r.ok){alert('Profile update rejected');return;}
   refreshProductionControls();
 }
 </script>
