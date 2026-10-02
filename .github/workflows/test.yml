@@ -7,6 +7,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # CI must exercise the portable local sandbox path. Container/bwrap
+      # runtimes can see a different filesystem namespace from the hosted
+      # runner's Python installation and are not required for unit tests.
+      HERMUS_SANDBOX_MODE: local
+      HERMUS_SANDBOX_NETWORK: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
