@@ -1229,6 +1229,75 @@ async def long_horizon_plan(payload: dict[str, Any] = None):
     return plan.to_dict()
 
 
+@router.get("/personal-os")
+async def personal_os_snapshot(query: str = "", area: str | None = None, project: str | None = None):
+    from core.personal_os import personal_os
+    return personal_os.snapshot(query=query, area=area, project=project)
+
+
+@router.get("/personal-os/briefing")
+async def personal_os_briefing(query: str = "", area: str | None = None):
+    from core.personal_os import personal_os
+    return personal_os.briefing(query=query, area=area)
+
+
+@router.get("/personal-os/tasks")
+async def personal_os_tasks(status: str | None = None, area: str | None = None, project: str | None = None, limit: int = 100):
+    from core.personal_os import personal_os
+    return {"tasks": personal_os.list_tasks(status=status, area=area, project=project, limit=limit)}
+
+
+@router.post("/personal-os/tasks")
+async def personal_os_task_create(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.personal_os import personal_os
+    try:
+        return personal_os.add_task(
+            str(payload.get("title") or payload.get("text") or ""),
+            priority=str(payload.get("priority") or "normal"),
+            area=str(payload.get("area") or "general"),
+            project=payload.get("project"),
+            due=payload.get("due"),
+            notes=str(payload.get("notes") or ""),
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.patch("/personal-os/tasks/{task_id}")
+async def personal_os_task_update(task_id: str, payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.personal_os import personal_os
+    try:
+        return personal_os.update_task(task_id, **payload)
+    except KeyError:
+        return JSONResponse({"error": "task not found"}, status_code=404)
+
+
+@router.post("/personal-os/tasks/{task_id}/complete")
+async def personal_os_task_complete(task_id: str):
+    from core.personal_os import personal_os
+    try:
+        return personal_os.complete_task(task_id)
+    except KeyError:
+        return JSONResponse({"error": "task not found"}, status_code=404)
+
+
+@router.post("/personal-os/tasks/{task_id}/execute")
+async def personal_os_task_execute(task_id: str):
+    from core.personal_os import personal_os
+    result = personal_os.execute_task(task_id)
+    return JSONResponse(result, status_code=200 if result.get("success") else 400)
+
+
+@router.delete("/personal-os/tasks/{task_id}")
+async def personal_os_task_delete(task_id: str):
+    from core.personal_os import personal_os
+    if not personal_os.delete_task(task_id):
+        return JSONResponse({"error": "task not found"}, status_code=404)
+    return {"deleted": True, "task_id": task_id}
+
+
 @router.get("/world")
 async def world_state():
     from core.world_awareness import world_awareness
