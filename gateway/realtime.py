@@ -380,7 +380,7 @@ async def ws_agent(websocket: WebSocket):
         {
             "type": "hello",
             "protocol": "hermus.agent.v1",
-            "actions": ["chat", "autonomous", "cancel", "subscribe", "tool", "ping"],
+            "actions": ["chat", "autonomous", "cancel", "steer", "redirect", "subscribe", "tool", "ping"],
             "kinds": sorted(job_queue.handlers),
             "queue": {"workers": job_queue.workers, "enabled": job_queue.enabled},
             "sandbox": _safe(lambda: __import__("core.sandbox", fromlist=["sandbox"]).sandbox.status()["backend"]),
@@ -440,7 +440,18 @@ async def ws_agent(websocket: WebSocket):
                 except Exception as e:
                     await send({"type": "error", "error": str(e)[:300], "action": action})
                     continue
-                await send({"type": "ack", "job_id": job.id, "run_id": job.run_id, "kind": kind})
+                session_id = str(body.get("session_id") or msg.get("session_id") or "")
+                if session_id:
+                    from core.conversation import conversation_manager
+                    conversation_manager.get_or_create(
+                        session_id,
+                        user_id=str(body.get("user_id") or msg.get("user_id") or "guest"),
+                        platform=str(body.get("platform") or "ws"),
+                    )
+                    conversation_manager.attach_run(session_id, job.run_id)
+                    if body.get("text"):
+                        conversation_manager.add_turn(session_id, "user", str(body["text"]), run_id=job.run_id)
+                await send({"type": "ack", "job_id": job.id, "run_id": job.run_id, "kind": kind, "session_id": session_id or None})
                 streams[job.run_id] = asyncio.create_task(pump_events(job.run_id, source=job.id))
                 continue
 
@@ -465,6 +476,16 @@ async def ws_agent(websocket: WebSocket):
                 job_id = str(msg.get("job_id") or "")
                 res = jq.cancel(job_id) if job_id else jq.cancel(str(msg.get("run_id") or ""))
                 await send({"type": "cancel_result", "result": res})
+                continue
+
+            if action in ("steer", "redirect"):
+                run_id = str(msg.get("run_id") or "")
+                instruction = str(msg.get("instruction") or msg.get("text") or "").strip()
+                if not run_id or not instruction:
+                    await send({"type": "error", "error": "run_id and instruction required", "action": action})
+                    continue
+                ok = run_bus.steer(run_id, instruction)
+                await send({"type": "steer_result", "ok": ok, "run_id": run_id, "instruction": instruction[:500]})
                 continue
 
             if action == "tool":
