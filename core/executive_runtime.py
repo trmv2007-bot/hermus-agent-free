@@ -1,9 +1,4 @@
-"""Executive-to-runtime bridge for HERMUS.
-
-This module is the narrow integration seam between the Executive Brain and the
-existing universal mission runtime. It deliberately delegates actual execution
-to ``core.runtime.execute`` so MissionEngine remains the only autonomy engine.
-"""
+"""Executive-to-runtime bridge for HERMUS."""
 
 from __future__ import annotations
 
@@ -55,13 +50,14 @@ def execute_with_executive(
             except Exception:
                 pass
 
+    roles = list((delegation or {}).get("selected_roles", []))
     brain.observe("request_received", {
         "platform": platform,
         "user_id": user_id,
         "prefer": prefer,
         "model": model,
         "read_only": read_only,
-        "delegated_roles": (delegation or {}).get("selected_roles", []),
+        "delegated_roles": roles,
     })
 
     kind = str(prefer or "auto").lower()
@@ -72,7 +68,7 @@ def execute_with_executive(
     goal_id: str | None = None
     executive_plan = None
     effective_requirements = requirements
-    effective_subgoals = subgoals
+    effective_subgoals = list(subgoals) if subgoals is not None else None
 
     if kind == "mission" and not read_only:
         goal_id = brain.create_goal(
@@ -82,7 +78,7 @@ def execute_with_executive(
                 "platform": platform,
                 "user_id": user_id,
                 "domain": domain,
-                "delegated_roles": (delegation or {}).get("selected_roles", []),
+                "delegated_roles": roles,
             },
         )
         executive_plan = brain.plan_goal(
@@ -101,12 +97,20 @@ def execute_with_executive(
                 for step in executive_plan.steps
                 if step.id in {"execute", "verify", "repair"}
             ]
+        # The canonical MissionEngine consumes subgoals. Add delegation intent
+        # as explicit objectives so the runtime can account for the specialist
+        # team without giving this planning layer direct execution authority.
+        for role in roles:
+            objective = f"Specialist {role}: contribute to the mission and return evidence"
+            if objective not in effective_subgoals:
+                effective_subgoals.append(objective)
         brain.observe("executive_handoff", handoff, goal_id=goal_id)
         emit("executive_plan_ready", {
             "goal_id": goal_id,
             "steps": [step.to_dict() for step in executive_plan.steps],
             "success_criteria": list(executive_plan.success_criteria),
-            "delegated_roles": (delegation or {}).get("selected_roles", []),
+            "delegated_roles": roles,
+            "subgoals": effective_subgoals,
         })
 
     from .runtime import execute
@@ -157,7 +161,8 @@ def execute_with_executive(
             "goal_id": goal_id,
             "planned": bool(executive_plan),
             "success_criteria": list(executive_plan.success_criteria) if executive_plan else [],
-            "delegated_roles": (delegation or {}).get("selected_roles", []),
+            "delegated_roles": roles,
+            "subgoals": effective_subgoals or [],
         }
 
     return result
