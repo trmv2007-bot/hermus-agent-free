@@ -68,3 +68,10 @@ Completed. The autonomy boundary now provides stable run correlation, lifecycle
 health snapshots, event counting/timing, and structured failure classification
 without introducing a second execution engine. See
 `docs/PHASE_6_RUNTIME_RELIABILITY.md`.
+
+## Phase 7 — Proactive Automation
+
+Completed. HERMUS now has a disabled-by-default, durable event-driven automation
+boundary with cooldowns, fire limits, explicit action allowlisting, canonical
+EventBus wiring, JobQueue submission, and Control Room/API management endpoints.
+See `docs/PHASE_7_PROACTIVE_AUTOMATION.md`.
