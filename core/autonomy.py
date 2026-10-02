@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .executive_loop import ExecutiveLoop, executive_loop
+from .runtime_health import RunTracker, classify_failure
 
 
 @dataclass(frozen=True)
@@ -25,10 +26,49 @@ class AutonomyFacade:
     def __init__(self, loop: ExecutiveLoop | None = None) -> None:
         self.loop = loop or executive_loop
 
-    def run(self, text: str, *, on_event: Callable[[str, dict[str, Any]], None] | None = None, **kwargs: Any) -> AutonomyResult:
-        result = self.loop.execute(text, on_event=on_event, **kwargs)
+    def run(
+        self,
+        text: str,
+        *,
+        on_event: Callable[[str, dict[str, Any]], None] | None = None,
+        run_id: str | None = None,
+        **kwargs: Any,
+    ) -> AutonomyResult:
+        tracker = RunTracker(
+            run_id=run_id,
+            surface=kwargs.get("platform", "api"),
+            user_id=kwargs.get("user_id", "anonymous"),
+        )
+
+        def emit(event_type: str, payload: dict[str, Any] | None = None) -> None:
+            tracker.event()
+            enriched = dict(payload or {})
+            enriched.setdefault("run_id", tracker.run_id)
+            if on_event is not None:
+                try:
+                    on_event(event_type, enriched)
+                except Exception:
+                    # Observability is never allowed to interrupt execution.
+                    pass
+
+        result = self.loop.execute(text, on_event=emit, **kwargs)
+        if not isinstance(result, dict):
+            result = {"response": str(result or "")}
+
         state = str(result.get("state") or result.get("status") or "unknown")
         verified = result.get("verified")
+        failure_class, retryable = classify_failure(result)
+        health = tracker.finish(
+            state=state,
+            failure_class=failure_class,
+            retryable=retryable,
+        )
+
+        # Stable top-level correlation fields make the result usable by API,
+        # voice, Control Room, queue and CLI surfaces without parsing events.
+        result = dict(result)
+        result.setdefault("run_id", tracker.run_id)
+        result["run_health"] = health.as_dict()
         ok = state in {"completed", "done"} and verified is not False
         return AutonomyResult(
             ok=ok,
