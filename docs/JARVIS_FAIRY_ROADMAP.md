@@ -17,9 +17,9 @@ not replace them.
 | 8 | Scheduling + time awareness | Automation + JobQueue | ✅ Complete |
 | 9 | Persistent personal context | MemoryFacade + session history | ✅ Complete |
 | 10 | World awareness / live World Model | Observation adapters + state | ✅ Complete |
-| 11 | Advanced long-horizon planning | World Model + missions | Planned |
-| 12 | Specialist agent ecosystem | Delegation + capability contracts | Planned |
-| 13 | Multimodal intelligence | Vision + documents + browser | Planned |
+| 11 | Advanced long-horizon planning | World Model + missions | ✅ Complete |
+| 12 | Specialist agent ecosystem | Delegation + capability contracts | ✅ Complete |
+| 13 | Multimodal intelligence | Vision + documents + browser | 🚧 Next |
 | 14 | Natural conversation + interruption | Voice + runtime steering | Planned |
 | 15 | Personal Operating System layer | World Model + agents + integrations | Planned |
 | 16 | Self-improving agent | Verified outcomes + skills | Planned |
