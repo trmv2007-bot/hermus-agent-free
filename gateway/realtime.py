@@ -1689,3 +1689,95 @@ async def distributed_envelope_verify(payload: dict[str, Any] | None = None):
     if not secret: return JSONResponse({"error":"HERMUS_DISTRIBUTED_SECRET_not_configured"}, status_code=503)
     try: env=JobEnvelope(**dict((payload or {}).get("envelope") or {})); return {"valid":EnvelopeSigner(secret).verify(env)}
     except (TypeError, KeyError) as exc: return JSONResponse({"error":str(exc)}, status_code=400)
+
+
+# ------------------------------------------------------------------ reliability
+@router.get("/reliability/status")
+async def reliability_status():
+    from core.reliability import reliability
+    return reliability.status()
+
+@router.get("/reliability/health")
+async def reliability_health():
+    from core.reliability import reliability
+    return reliability.health()
+
+@router.get("/reliability/incidents")
+async def reliability_incidents(limit: int = 100):
+    from core.reliability import reliability
+    return {"incidents": reliability.incidents.list(limit)}
+
+@router.post("/reliability/incidents")
+async def reliability_create_incident(payload: dict[str, Any] = None):
+    from core.reliability import reliability
+    payload = payload or {}
+    return reliability.incidents.create(str(payload.get("kind") or "manual"), str(payload.get("message") or "incident"), severity=str(payload.get("severity") or "warning"))
+
+@router.post("/reliability/incidents/{incident_id}/resolve")
+async def reliability_resolve_incident(incident_id: str):
+    from core.reliability import reliability
+    return {"success": reliability.incidents.resolve(incident_id)}
+
+@router.get("/reliability/circuits")
+async def reliability_circuits():
+    from core.reliability import reliability
+    return {"circuits": [x.snapshot() for x in reliability.circuits.values()]}
+
+@router.post("/reliability/circuits/{name}/result")
+async def reliability_circuit_result(name: str, payload: dict[str, Any] = None):
+    from core.reliability import reliability
+    payload = payload or {}
+    circuit = reliability.circuit(name)
+    if bool(payload.get("success")):
+        circuit.success()
+    else:
+        circuit.failure()
+    return circuit.snapshot()
+
+@router.get("/reliability/checkpoints")
+async def reliability_checkpoints(run_id: str = ""):
+    from core.reliability import reliability
+    if run_id:
+        return {"checkpoint": reliability.checkpoints.latest(run_id)}
+    return {"checkpoints": [asdict(x) for x in list(reliability.checkpoints.items.values())[-100:]]}
+
+@router.post("/reliability/checkpoints")
+async def reliability_checkpoint(payload: dict[str, Any] = None):
+    from core.reliability import reliability
+    payload = payload or {}
+    return reliability.checkpoints.save(str(payload.get("run_id") or ""), str(payload.get("phase") or "unknown"), payload.get("state") or {}, verified=bool(payload.get("verified")))
+
+@router.post("/reliability/backup")
+async def reliability_backup():
+    from core.reliability import reliability
+    paths = [
+        config.resolve_path("data/personal_os.json"),
+        config.resolve_path("data/personal_profile.json"),
+        config.resolve_path("data/distributed_nodes.json"),
+        config.resolve_path("data/reliability/idempotency.json"),
+        config.resolve_path("data/reliability/checkpoints.json"),
+        config.resolve_path("data/reliability/incidents.json"),
+    ]
+    return reliability.snapshots.snapshot_paths(paths, label="hermus-state")
+
+@router.get("/reliability/backup/{snapshot_id}")
+async def reliability_verify_backup(snapshot_id: str):
+    from core.reliability import reliability
+    return reliability.snapshots.verify(snapshot_id)
+
+@router.post("/reliability/backup/{snapshot_id}/restore")
+async def reliability_restore_backup(snapshot_id: str):
+    from core.reliability import reliability
+    target = config.resolve_path("data/recovery_restore")
+    return reliability.snapshots.restore(snapshot_id, target)
+
+@router.post("/distributed/assignments/{assignment_id}/renew")
+async def distributed_renew_assignment(assignment_id: str, payload: dict[str, Any] = None):
+    from core.distributed import distributed
+    payload = payload or {}
+    return distributed.renew_assignment(assignment_id, node_id=str(payload.get("node_id") or ""), fencing_token=int(payload.get("fencing_token") or 0))
+
+@router.post("/distributed/assignments/{assignment_id}/failover")
+async def distributed_failover_assignment(assignment_id: str):
+    from core.distributed import distributed
+    return distributed.failover(assignment_id)
