@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 12 — Specialist Agent Ecosystem**.
+The roadmap has progressed through **Phase 13 — Multimodal Intelligence**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -72,6 +72,7 @@ The roadmap has progressed through **Phase 12 — Specialist Agent Ecosystem**.
 | **10** | World awareness / live World Model | ✅ Complete |
 | **11** | Advanced long-horizon planning | ✅ Complete |
 | **12** | Specialist agent ecosystem | ✅ Complete |
+| **13** | Multimodal intelligence | ✅ Complete |
 
 ### Phase 7 highlights
 
@@ -91,6 +92,20 @@ HERMUS can now react to canonical system events using **explicit, persistent aut
 - Runtime correlation and auditability
 
 Proactive rules submit work to the existing runtime; they do not create a privileged execution path.
+
+### Phase 13 — Multimodal Intelligence
+
+HERMUS can now turn visual and document observations into structured evidence:
+
+- Image analysis through the existing local vision/ModelGateway path
+- PDF and office-document understanding through canonical document ingestion
+- Browser screenshot + visual state analysis
+- Confidence, provenance, modality and artifact metadata
+- Multimodal evidence persisted in the World Model
+- Workspace-scoped multimodal file access
+- Multimodal status exposed to the Control Room/gateway
+
+Visual evidence can inform planning and verification without bypassing existing safety, approval or permission controls.
 
 ### Phase 8 + 9 highlights
 
@@ -319,6 +334,7 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [docs/PHASE_10_WORLD_AWARENESS.md](docs/PHASE_10_WORLD_AWARENESS.md) | World awareness and live World Model |
 | [docs/PHASE_11_LONG_HORIZON_PLANNING.md](docs/PHASE_11_LONG_HORIZON_PLANNING.md) | Long-horizon planning |
 | [docs/PHASE_12_SPECIALIST_ECOSYSTEM.md](docs/PHASE_12_SPECIALIST_ECOSYSTEM.md) | Specialist agent ecosystem |
+| [docs/PHASE_13_MULTIMODAL_INTELLIGENCE.md](docs/PHASE_13_MULTIMODAL_INTELLIGENCE.md) | Multimodal intelligence |
 | [docs/JARVIS_FAIRY_ROADMAP.md](docs/JARVIS_FAIRY_ROADMAP.md) | Long-term HERMUS roadmap |
 
 ---
