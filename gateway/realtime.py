@@ -259,6 +259,16 @@ async def stream_command(payload: dict[str, Any] = None, request: Request = None
         session_key=f"{payload.get('platform', 'api')}:{payload.get('user_id', 'anonymous')}",
         timeout=payload.get("timeout"),
     )
+    session_id = str(payload.get("session_id") or "")
+    if session_id:
+        from core.conversation import conversation_manager
+        conversation_manager.get_or_create(
+            session_id,
+            user_id=str(payload.get("user_id") or "anonymous"),
+            platform=str(payload.get("platform") or "api"),
+        )
+        conversation_manager.attach_run(session_id, job.run_id)
+        conversation_manager.add_turn(session_id, "user", text, run_id=job.run_id)
     return StreamingResponse(
         _stream_run(run_bus, job.run_id, request=request),
         media_type="text/event-stream",
