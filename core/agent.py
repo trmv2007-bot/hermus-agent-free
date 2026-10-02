@@ -237,6 +237,16 @@ class HermusAgent:
         user_model = memory.load_user_model()
         user_model_text = json.dumps(user_model, indent=2)[:1000] if user_model else "No user model yet."
 
+        personal_context_block = ""
+        try:
+            from .personal_context import personal_context
+
+            personal_context_block = "\nPersonal Context:\n" + personal_context.prompt_block(
+                query=user_message, project=self.project, limit=5, max_chars=5000
+            ) + "\n"
+        except Exception as exc:
+            record_issue("memory", "personal_context_prompt", exc, retryable=False, fallback="turn continues without personal context")
+
         skills = skill_manager.list_skills()
         skills_text = ", ".join([s["name"] for s in skills[:15]]) if skills else "No skills yet."
 
@@ -363,7 +373,7 @@ Curated Memory:
 
 User Model:
 {user_model_text}
-
+{personal_context_block}
 Available Skills:
 {skills_text}
 
@@ -539,6 +549,12 @@ Rules:
             routed = self._apply_router(user_message)
 
         memory.add_session_message(self.session_id, "user", user_message)
+        try:
+            from .personal_context import personal_context
+
+            personal_context.observe_turn(user_message, session_id=self.session_id, project=self.project)
+        except Exception as exc:
+            record_issue("memory", "personal_context_observe", exc, retryable=False, fallback="explicit context capture skipped this turn")
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
 
         # Lessons loop (Phase 3): user pushing back on a previous answer -> lesson
