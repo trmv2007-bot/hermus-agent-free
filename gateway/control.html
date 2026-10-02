@@ -395,6 +395,7 @@
   <button data-tab="safety" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1">&#128737; Safety</button>
   <button data-tab="systems" role="tab" id="tabbtn-systems" aria-controls="tab-systems" aria-selected="false" tabindex="-1">&#128736; Systems</button>
   <button data-tab="distributed" role="tab" id="tabbtn-distributed" aria-controls="tab-distributed" aria-selected="false" tabindex="-1">&#127760; Distributed</button>
+    <button class="tab-btn" data-tab="reliability" id="tabbtn-reliability" aria-controls="tab-reliability">🛡️ Reliability</button>
 </nav>
 
 <main>
@@ -926,6 +927,15 @@
 <script src="/static/console.js" defer></script>
 
 <!-- JARVIS Agent System JavaScript -->
+
+<div class="tab" id="tab-reliability" role="tabpanel" aria-labelledby="tabbtn-reliability">
+  <div class="section-title">Reliability & Recovery</div>
+  <div class="grid" id="reliabilitySummary"></div>
+  <div class="bar"><button class="ghost" onclick="createReliabilityBackup()">Create verified state snapshot</button><span id="reliabilityBackupStatus" class="note"></span></div>
+  <div class="card"><h3>Open Incidents</h3><div id="reliabilityIncidents" class="feed"></div></div>
+  <div class="card"><h3>Circuit Breakers</h3><div id="reliabilityCircuits" class="feed"></div></div>
+  <div class="card"><h3>Resources / Recovery</h3><div id="reliabilityResources" class="feed"></div></div>
+</div>
 <script>
 // Agent System State
 let agentSystem = {
@@ -1610,6 +1620,7 @@ window.addEventListener('load', () => {
   setInterval(refreshDistributed, 5000);
   setInterval(refreshCommandCenter, 5000);
   setInterval(refreshProductionControls, 5000);
+  setInterval(refreshReliability, 5000);
   setInterval(updateVRAMMonitor, 2000);
 
   // Initial updates
@@ -1621,6 +1632,7 @@ window.addEventListener('load', () => {
   refreshDistributed();
   refreshCommandCenter();
   refreshProductionControls();
+  refreshReliability();
   updateVRAMMonitor();
 
   document.getElementById('dashboardRefresh')?.addEventListener('click', refreshDashboardLayout);
@@ -1649,6 +1661,8 @@ window.refreshAgents = refreshAgents;
 window.startOrchestration = startOrchestration;
 window.refreshDashboardLayout = refreshDashboardLayout;
 window.refreshDistributed = refreshDistributed;
+window.refreshReliability = refreshReliability;
+window.createReliabilityBackup = createReliabilityBackup;
 window.addDashboardPanel = addDashboardPanel;
 
 async function refreshCommandCenter() {
@@ -1726,6 +1740,35 @@ async function saveProfile() {
   const r=await fetch('/personal-profile',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,style})});
   if(!r.ok){alert('Profile update rejected');return;}
   refreshProductionControls();
+}
+
+async function refreshReliability() {
+  try {
+    const [s,i,c,r] = await Promise.all([
+      fetch('/reliability/status').then(x=>x.json()),
+      fetch('/reliability/incidents?limit=25').then(x=>x.json()),
+      fetch('/reliability/circuits').then(x=>x.json()),
+      fetch('/reliability/health').then(x=>x.json())
+    ]);
+    const escv=window.esc || (v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+    const summary=document.getElementById('reliabilitySummary');
+    if(summary) summary.innerHTML=[
+      ['State',s.status||'unknown'],['Queue',String(s.queue?.running??0)+' running'],['Nodes',String(s.distributed?.online??0)+' online'],['Incidents',String(s.open_incidents??0)],['Disk',Math.round(Number(s.resources?.disk_free_ratio??0)*100)+'% free']
+    ].map(([a,b])=>'<div class="kpi"><div class="v">'+escv(b)+'</div><div class="l">'+escv(a)+'</div></div>').join('');
+    const ie=document.getElementById('reliabilityIncidents');
+    if(ie) ie.innerHTML=(i.incidents||[]).map(x=>'<div style="padding:7px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x.severity)+'</strong> · '+escv(x.kind)+' · '+escv(x.message)+' · '+escv(x.status)+'</div>').join('')||'<div class="note">No incidents.</div>';
+    const ce=document.getElementById('reliabilityCircuits');
+    if(ce) ce.innerHTML=(c.circuits||[]).map(x=>'<div style="padding:7px 0;border-bottom:1px dashed #1c2534"><strong>'+escv(x.name)+'</strong> · '+escv(x.state)+' · failures '+escv(x.failures)+'</div>').join('')||'<div class="note">No circuits registered.</div>';
+    const re=document.getElementById('reliabilityResources');
+    if(re) re.innerHTML='<div>Memory: '+escv(r.resources?.memory_percent ?? 'n/a')+'% · CPU: '+escv(r.resources?.cpu_percent ?? 'n/a')+'% · Degraded: '+escv(r.resources?.degraded?'yes':'no')+'</div><div class="note">Emergency stop: '+escv(r.emergency_stop?'ACTIVE':'clear')+' · checkpoints: '+escv(r.checkpoint_count??0)+'</div>';
+  } catch(e) {
+    const s=document.getElementById('reliabilityResources'); if(s) s.textContent='Reliability telemetry unavailable.';
+  }
+}
+async function createReliabilityBackup(){
+  const el=document.getElementById('reliabilityBackupStatus');
+  try { const r=await fetch('/reliability/backup',{method:'POST'}); const d=await r.json(); if(el) el.textContent=r.ok?'Snapshot '+(d.id||'created')+' ready for integrity verification.':'Backup failed'; }
+  catch(e){ if(el) el.textContent='Backup unavailable'; }
 }
 </script>
 </body>
