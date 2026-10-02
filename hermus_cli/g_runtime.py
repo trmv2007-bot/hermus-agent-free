@@ -9,6 +9,7 @@ gone.
 
 from __future__ import annotations
 
+import json
 from core.config import config
 
 def _configure_context(subparsers) -> None:
