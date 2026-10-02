@@ -546,7 +546,8 @@ COMMANDS: tuple[Command, ...] = (
         configure=_configure_engine,
         run=_run_engine,
     ),
-    Command(name="cron", help="Cron scheduler - natural language", configure=_configure_cron, run=_run_cron),
+    Command(name="cron", help="Scheduler - natural language + one-shot/recurring", configure=_configure_cron, run=_run_cron),
+    Command(name="context", help="Persistent personal context", configure=_configure_context, run=_run_context),
     Command(
         name="update",
         help="Update from GitHub - shows update in dashboard and CLI too - like hermes update",
