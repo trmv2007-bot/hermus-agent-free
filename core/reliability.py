@@ -358,7 +358,7 @@ class ReliabilitySupervisor:
         return result
 
     def status(self) -> dict[str, Any]:
-        return self.health() | {"incidents": self.incidents.list(25), "latest_checkpoints": list(self.checkpoints.items)[-25:]}
+        return self.health() | {"incidents": self.incidents.list(25), "latest_checkpoints": [asdict(x) for x in list(self.checkpoints.items.values())[-25:]]}
 
 
 reliability = ReliabilitySupervisor()
