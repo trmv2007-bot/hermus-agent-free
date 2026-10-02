@@ -1034,6 +1034,22 @@ async def automation_rule_delete(rule_id: str):
 
 
 
+@router.get("/world")
+async def world_state():
+    from core.world_awareness import world_awareness
+    return {"world": world_awareness.world.snapshot(), "awareness": world_awareness.status()}
+
+
+@router.post("/world/refresh")
+async def world_refresh(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.world_awareness import world_awareness
+    return world_awareness.refresh(
+        workspace_root=payload.get("workspace_root"),
+        include_processes=bool(payload.get("include_processes", True)),
+    )
+
+
 @router.get("/schedules")
 async def schedules_list():
     from scheduler.cron import cron_manager
