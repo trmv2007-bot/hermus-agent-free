@@ -69,14 +69,23 @@ See docs/PHASE_10_WORLD_AWARENESS.md.
 
 ## Phase 11 — Advanced Long-Horizon Planning
 
+Completed. HERMUS now generates dependency-aware, checkpointed long-horizon plans with explicit success criteria and structured replanning triggers. MissionEngine remains the canonical executor.
+
+See docs/PHASE_11_LONG_HORIZON_PLANNING.md.
+
+## Phase 12 — Specialist Agent Ecosystem
+
+Completed. HERMUS now exposes explicit specialist capability contracts covering capabilities, inputs, outputs, permissions, resource limits and verification requirements. Delegation plans carry those contracts into their DAG nodes.
+
+See docs/PHASE_12_SPECIALIST_ECOSYSTEM.md.
+
+## Phase 13 — Multimodal Intelligence
+
 Next implementation target:
-
-- dependency-aware long-horizon mission plans
-- checkpoints and resumable progress
-- evidence-based replanning
-- bounded retries and recovery
-- explicit completion criteria
-
+- screenshots and image observations
+- PDF/document understanding
+- visual browser state
+- multimodal evidence and verification
 ## Completion rule
 
 A phase is complete only when:
