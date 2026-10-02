@@ -11,20 +11,26 @@ from .executive_memory import executive_memory
 from .executive_runtime import execute_with_executive
 from .perception import perception
 from .world_model import world_model
+from .world_awareness import world_awareness
 
 
 class ExecutiveLoop:
     """Coordinate perception, planning, delegation, execution, verification and learning."""
 
-    def __init__(self, *, brain=None, world=None, memory=None, delegator=None, perception_layer=None) -> None:
+    def __init__(self, *, brain=None, world=None, memory=None, delegator=None, perception_layer=None, awareness_layer=None) -> None:
         self.brain = brain or executive_brain
         self.world = world or world_model
         self.memory = memory or executive_memory
         self.delegator = delegator or agent_delegator
         self.perception = perception_layer or perception
+        self.awareness = awareness_layer or world_awareness
 
     def perceive(self, *, platform: str = "api", user_id: str = "anonymous", workspace_root=None) -> dict[str, Any]:
         observed = self.perception.refresh(workspace_root=workspace_root)
+        try:
+            observed["world_awareness"] = self.awareness.refresh(workspace_root=workspace_root)
+        except Exception as exc:
+            self.world.emit("world_awareness_error", {"error": str(exc)[:300]}, source="executive.perception")
         self.world.observe(
             "session",
             "identity",
