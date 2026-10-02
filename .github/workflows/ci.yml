@@ -7,10 +7,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Config uses HERMUS_SANDBOX; keep CI deterministic and avoid Docker-only
-      # assumptions on hosted runners. HERMUS_SANDBOX_MODE is not a config key.
+      # CI uses the canonical settings and a disposable home so permission,
+      # approval, sandbox and memory stores cannot leak between runs/tests.
+      HERMUS_HOME: ${{ runner.temp }}/hermus-home
       HERMUS_SANDBOX: local
       HERMUS_SANDBOX_NETWORK: "false"
+      HERMUS_ASK_POLICY: allow
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
