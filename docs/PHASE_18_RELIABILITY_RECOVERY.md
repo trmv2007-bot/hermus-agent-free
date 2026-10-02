@@ -15,7 +15,7 @@ coordination layer. It does not introduce a competing executor.
 - integrity-checked recovery snapshots
 - resource/degraded-mode signals
 - emergency-stop-aware health state
-- distributed leases/fencing and duplicate-job protection
+- distributed recovery telemetry and safe failover integration points
 - Control Room reliability visibility
 - regression/failure-injection tests
 
