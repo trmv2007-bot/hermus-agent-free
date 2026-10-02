@@ -22,8 +22,9 @@ not replace them.
 | 13 | Multimodal intelligence | Vision + documents + browser | ✅ Complete |
 | 14 | Natural conversation + interruption | Voice + runtime steering | ✅ Complete |
 | 15 | Personal Operating System layer | World Model + agents + integrations | ✅ Complete |
-| 16 | Self-improving agent | Verified outcomes + skills | Planned |
-| 17 | Distributed HERMUS | Shared identity + memory + device workers | Planned |
+| 16 | Self-improving agent | Verified outcomes + skills | ✅ Complete |
+| 17 | Distributed HERMUS | Shared identity + memory + device workers | ✅ Complete |
+| 18 | Reliability & recovery | Queue + distributed control plane + state | ✅ Complete |
 
 ## Architectural invariants
 
@@ -133,3 +134,14 @@ explicit node registration, capability routing, heartbeat/stale detection,
 assignments, emergency-stop-aware dispatch, and gateway visibility.
 
 See docs/PHASE_17_DISTRIBUTED_HERMUS.md.
+
+
+## Phase 18 — Reliability & Recovery
+
+Completed. HERMUS now has a reliability control plane with bounded retry policy,
+circuit breakers, durable idempotency receipts, crash/resume checkpoints,
+incident tracking, integrity-checked state snapshots, resource/degraded-mode
+signals, and distributed lease/fencing support. Recovery remains subordinate to
+approval, red-line, sandbox, verification and emergency-stop controls.
+
+See docs/PHASE_18_RELIABILITY_RECOVERY.md.
