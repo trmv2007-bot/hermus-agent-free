@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 10 — World Awareness / Live World Model**.
+The roadmap has progressed through **Phase 12 — Specialist Agent Ecosystem**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -70,6 +70,8 @@ The roadmap has progressed through **Phase 10 — World Awareness / Live World M
 | **8** | Scheduling + time awareness | ✅ Complete |
 | **9** | Persistent personal context | ✅ Complete |
 | **10** | World awareness / live World Model | ✅ Complete |
+| **11** | Advanced long-horizon planning | ✅ Complete |
+| **12** | Specialist agent ecosystem | ✅ Complete |
 
 ### Phase 7 highlights
 
@@ -315,6 +317,8 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [docs/PHASE_8_SCHEDULING.md](docs/PHASE_8_SCHEDULING.md) | Scheduling and time awareness |
 | [docs/PHASE_9_PERSONAL_CONTEXT.md](docs/PHASE_9_PERSONAL_CONTEXT.md) | Persistent personal context |
 | [docs/PHASE_10_WORLD_AWARENESS.md](docs/PHASE_10_WORLD_AWARENESS.md) | World awareness and live World Model |
+| [docs/PHASE_11_LONG_HORIZON_PLANNING.md](docs/PHASE_11_LONG_HORIZON_PLANNING.md) | Long-horizon planning |
+| [docs/PHASE_12_SPECIALIST_ECOSYSTEM.md](docs/PHASE_12_SPECIALIST_ECOSYSTEM.md) | Specialist agent ecosystem |
 | [docs/JARVIS_FAIRY_ROADMAP.md](docs/JARVIS_FAIRY_ROADMAP.md) | Long-term HERMUS roadmap |
 
 ---
