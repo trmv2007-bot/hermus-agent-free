@@ -67,6 +67,8 @@ The roadmap has progressed through **Phase 7 — Proactive Automation**.
 | **5** | End-to-end autonomy + safety hardening | ✅ Complete |
 | **6** | Runtime reliability + observability | ✅ Complete |
 | **7** | Proactive, event-driven automation | ✅ Complete |
+| **8** | Scheduling + time awareness | ✅ Complete |
+| **9** | Persistent personal context | ✅ Complete |
 
 ### Phase 7 highlights
 
@@ -86,6 +88,25 @@ HERMUS can now react to canonical system events using **explicit, persistent aut
 - Runtime correlation and auditability
 
 Proactive rules submit work to the existing runtime; they do not create a privileged execution path.
+
+### Phase 8 + 9 highlights
+
+**Phase 8 — Scheduling & Time Awareness**
+- One-shot reminders and delayed tasks
+- Recurring natural-language schedules
+- Timezone-aware scheduling
+- Restart restoration of enabled schedules
+- Enable/disable/delete controls
+- Optional run limits and quiet-hour deferral
+- Queue-based execution through the canonical runtime
+
+**Phase 9 — Persistent Personal Context**
+- Explicit preferences and personal facts
+- Persistent goals and project records
+- Current-focus tracking
+- Relevant-memory + recent-session context snapshots
+- Bounded context injection into agent turns
+- Context updates through the canonical MemoryFacade
 
 ---
 
@@ -290,6 +311,8 @@ HERMUS_COUNSEL_MAX_MEMBERS=5
 | [CAPABILITY_LEDGER.md](CAPABILITY_LEDGER.md) | Visible ledger of powers and capabilities |
 | [docs/PHASE_6_RUNTIME_RELIABILITY.md](docs/PHASE_6_RUNTIME_RELIABILITY.md) | Runtime reliability and observability |
 | [docs/PHASE_7_PROACTIVE_AUTOMATION.md](docs/PHASE_7_PROACTIVE_AUTOMATION.md) | Proactive automation architecture |
+| [docs/PHASE_8_SCHEDULING.md](docs/PHASE_8_SCHEDULING.md) | Scheduling and time awareness |
+| [docs/PHASE_9_PERSONAL_CONTEXT.md](docs/PHASE_9_PERSONAL_CONTEXT.md) | Persistent personal context |
 | [docs/JARVIS_FAIRY_ROADMAP.md](docs/JARVIS_FAIRY_ROADMAP.md) | Long-term HERMUS roadmap |
 
 ---
