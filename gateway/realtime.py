@@ -137,11 +137,23 @@ async def submit_job(payload: dict[str, Any] = None):
         return JSONResponse({"error": str(e), "kinds": sorted(job_queue.handlers)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+    session_id = str(body.get("session_id") or payload.get("session_id") or "")
+    if session_id:
+        from core.conversation import conversation_manager
+        conversation_manager.get_or_create(
+            session_id,
+            user_id=str(body.get("user_id") or "anonymous"),
+            platform=str(body.get("platform") or "api"),
+        )
+        conversation_manager.attach_run(session_id, job.run_id)
+        if body.get("text"):
+            conversation_manager.add_turn(session_id, "user", str(body["text"]), run_id=job.run_id)
     return {
         "job_id": job.id,
         "run_id": job.run_id,
         "status": job.status,
         "kind": job.kind,
+        "session_id": session_id or None,
         "status_url": f"/jobs/{job.id}",
         "events_url": f"/jobs/{job.id}/events",
         "stream_url": f"/stream/run/{job.run_id}",
@@ -258,6 +270,72 @@ async def stream_command(payload: dict[str, Any] = None, request: Request = None
             "X-Hermus-Run": job.run_id,
         },
     )
+
+
+@router.post("/conversation/session")
+async def conversation_session(payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.conversation import conversation_manager
+    session = conversation_manager.get_or_create(
+        payload.get("session_id"),
+        user_id=str(payload.get("user_id") or "anonymous"),
+        platform=str(payload.get("platform") or "api"),
+    )
+    return session.snapshot()
+
+
+@router.get("/conversation/{session_id}")
+async def conversation_get(session_id: str, limit: int = 12):
+    from core.conversation import conversation_manager
+    snap = conversation_manager.snapshot(session_id)
+    snap["context"] = conversation_manager.context(session_id, limit=limit)
+    return snap
+
+
+@router.post("/conversation/{session_id}/steer")
+async def conversation_steer(session_id: str, payload: dict[str, Any] = None):
+    payload = payload or {}
+    instruction = str(payload.get("instruction") or payload.get("text") or "").strip()
+    if not instruction:
+        return JSONResponse({"error": "instruction is required"}, status_code=400)
+    from core.conversation import conversation_manager
+    return conversation_manager.steer(session_id, instruction)
+
+
+@router.post("/conversation/{session_id}/interrupt")
+async def conversation_interrupt(session_id: str, payload: dict[str, Any] = None):
+    payload = payload or {}
+    from core.conversation import conversation_manager
+    return conversation_manager.interrupt(session_id, reason=str(payload.get("reason") or "user_interrupt"))
+
+
+@router.get("/conversation/{session_id}/notifications")
+async def conversation_notifications(session_id: str, consume: bool = False):
+    from core.conversation import conversation_manager
+    return {
+        "session_id": session_id,
+        "notifications": conversation_manager.notifications(session_id, consume=consume),
+    }
+
+
+@router.post("/runs/{run_id}/steer")
+async def run_steer(run_id: str, payload: dict[str, Any] = None):
+    payload = payload or {}
+    instruction = str(payload.get("instruction") or payload.get("text") or "").strip()
+    if not instruction:
+        return JSONResponse({"error": "instruction is required"}, status_code=400)
+    from core.run_events import run_bus
+    if not run_bus.steer(run_id, instruction):
+        return JSONResponse({"error": "run not found or instruction rejected", "run_id": run_id}, status_code=404)
+    return {"ok": True, "run_id": run_id, "action": "steer"}
+
+
+@router.post("/runs/{run_id}/interrupt")
+async def run_interrupt(run_id: str):
+    from core.run_events import run_bus
+    if not run_bus.cancel(run_id):
+        return JSONResponse({"error": "run not found", "run_id": run_id}, status_code=404)
+    return {"ok": True, "run_id": run_id, "action": "interrupt"}
 
 
 @router.get("/queue/status")
