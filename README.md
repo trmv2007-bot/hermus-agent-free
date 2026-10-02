@@ -56,7 +56,7 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ## 🚀 Current Build Status
 
-The roadmap has progressed through **Phase 14 — Natural Conversation + Interruption**.
+The roadmap has progressed through **Phase 15 — Personal Operating System**.
 
 | Phase | Capability | Status |
 |---|---|---|
@@ -120,6 +120,18 @@ HERMUS now supports conversational control over long-running work:
 - Existing SSE/WS progress events remain the source of live run state
 
 See docs/PHASE_14_NATURAL_CONVERSATION.md and the master roadmap.
+### Phase 15 — Personal Operating System
+
+HERMUS now has a unified personal control plane:
+- Durable tasks with priorities, areas, projects, due dates and notes
+- Personal OS snapshots and generated briefings
+- Goals, projects and focus from persistent Personal Context
+- Schedules and proactive automations visible in one operating view
+- Live World Model state included in the operating snapshot
+- Task execution routed through JobQueue and the canonical runtime
+- Gateway endpoints for task and briefing management
+
+See `docs/PHASE_15_PERSONAL_OS.md` and the master roadmap.
 ### Phase 8 + 9 highlights
 
 **Phase 8 — Scheduling & Time Awareness**
