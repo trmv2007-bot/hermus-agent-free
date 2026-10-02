@@ -1,4 +1,4 @@
-"""End-to-end contracts behind the JARVIS control plane."""
+"""End-to-end contracts behind the HERMUS control plane."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,22 +10,14 @@ from gateway.gateway import app
 
 
 def test_single_control_room_replaces_the_jarvis_page():
-    """The Jarvis page is consolidated into the single /control room.
-
-    The control room is a snapshot + replay + typed-command projection that
-    exposes the real /api/jarvis/status aggregate and makes no fake claims
-    (no hard-coded 'test suites passing' / 'autonomy 100%' / fabricated state).
-    """
+    """The old Jarvis page is consolidated into the single Nexus control room."""
     text = TestClient(app).get("/control").text
-    # No fake claims that the old Jarvis surface hard-coded.
     for banner in ("318 Test Suites Verified Passing", "Page scrape active", "Autonomy: 100%"):
         assert banner not in text
-    # Real canonical projections.
-    assert "Snapshot" in text
-    assert "Replay" in text
-    assert "/api/v1/commands" in text
-    assert "never simulates success" in text
-    # The old Jarvis page route is gone.
+    assert "HERMUS" in text
+    assert "NEXUS" in text
+    assert "Tell HERMUS what you need" in text
+    assert "/static/nexus.js" in text
     assert TestClient(app).get("/jarvis").status_code == 404
 
 
@@ -39,7 +31,6 @@ def test_jarvis_status_is_real_aggregate_and_secret_free():
     assert {"enabled", "started", "by_status"} <= body["queue"].keys()
     assert {"active_jobs", "active_runs", "tools", "agents", "artifacts"} <= body["counts"].keys()
     assert "telemetry" in body and "pid" in body["telemetry"]
-    # Aggregate does not include the key registry or raw credential fields.
     assert "keys" not in body
     assert "llm_keys" not in body
 
@@ -75,9 +66,6 @@ def test_cancel_active_run_reaches_backend():
 
 
 def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
-    """Real HTTP -> queue -> runtime -> status -> result lifecycle, with only
-    the model itself replaced so the test is deterministic and offline."""
-
     class Agent:
         mode = SimpleNamespace(value="agent")
         mode_config = SimpleNamespace(name="Agent", description="test")
@@ -90,25 +78,16 @@ def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
             return {"response": "real queue result: " + text, "steps": 1, "tool_calls": []}
 
     monkeypatch.setattr("gateway.gateway.get_agent_for_user", lambda *a, **k: Agent())
-    # The queue handler's injected getter is set during lifespan startup.
     with TestClient(app) as client:
         submitted = client.post(
             "/command",
-            json={
-                "text": "Hello Jarvis",
-                "platform": "jarvis",
-                "user_id": "smoke",
-                "run_id": "run_jarvis_queue_smoke",
-                "async": True,
-                "stream": True,
-            },
+            json={"text": "Hello Jarvis", "platform": "jarvis", "user_id": "smoke", "run_id": "run_jarvis_queue_smoke", "async": True, "stream": True},
         )
         assert submitted.status_code == 200
         accepted = submitted.json()
         assert accepted["async"] is True and accepted["run_id"]
         job_id = accepted["job_id"]
         import time
-
         deadline = time.time() + 10
         status = None
         while time.time() < deadline:
@@ -124,29 +103,16 @@ def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
         assert any(event["type"] == "run_finished" for event in events)
 
 
-def test_control_room_inline_javascript_parses_with_node():
-    """Every control-room script is syntactically valid.
-
-    The legacy jarvis-control.js / hermus-client.js assets were removed with the
-    surfaces they drove; /control is now markup + the assets it ships, all of
-    which must parse.
-    """
+def test_control_room_javascript_parses_with_node():
+    """The current Nexus asset must remain syntactically valid JavaScript."""
+    import shutil
     import subprocess
     import tempfile
 
-    scripts = [
-        Path("gateway/static/control-client.js").read_text(encoding="utf-8"),
-        Path("gateway/static/control-room.js").read_text(encoding="utf-8"),
-    ]
-    # The one inline block left in the document is the token bootstrap.
-    inline = control_room_source().split("<script>")[1].split("</script>", 1)[0]
-    scripts.append(inline)
-    import shutil
-
     if not shutil.which("node"):
         return
-    for script in scripts:
-        with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
-            fh.write(script)
-            fh.flush()
-            subprocess.run(["node", "--check", fh.name], check=True)
+    script = Path("gateway/static/nexus.js").read_text(encoding="utf-8")
+    with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
+        fh.write(script)
+        fh.flush()
+        subprocess.run(["node", "--check", fh.name], check=True)
