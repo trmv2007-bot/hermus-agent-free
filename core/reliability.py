@@ -47,7 +47,9 @@ class CircuitBreaker:
     def __init__(self, name: str, *, threshold: int = 3, reset_after: float = 60.0):
         self.name = str(name)
         self.threshold = max(1, int(threshold))
-        self.reset_after = max(1.0, float(reset_after))
+        # Short reset windows are useful for tests and local providers. Do not
+        # silently coerce sub-second configuration to one second.
+        self.reset_after = max(0.0, float(reset_after))
         self.state = self.CLOSED
         self.failures = 0
         self.opened_at = 0.0
@@ -219,157 +221,10 @@ class IncidentLedger:
             rows = []
         for row in rows if isinstance(rows, list) else []:
             if isinstance(row, dict):
-                self.items.append(Incident(**{k: row[k] for k in ("id", "kind", "severity", "message", "status", "created_at", "resolved_at") if k in row}))
+                try:
+                    self.items.append(Incident(**row))
+                except TypeError:
+                    continue
 
     def _save(self) -> None:
-        _atomic_json(self.path, [asdict(x) for x in self.items[-2000:]])
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
-class RecoverySnapshotStore:
-    def __init__(self, root: str | Path | None = None):
-        self.root = Path(root or config.resolve_path("data/reliability/snapshots"))
-        self.root.mkdir(parents=True, exist_ok=True)
-
-    def snapshot_paths(self, paths: list[str | Path], *, label: str = "auto") -> dict[str, Any]:
-        stamp = f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        target = self.root / f"{label}_{stamp}"
-        target.mkdir(parents=True, exist_ok=True)
-        manifest = {"id": target.name, "created_at": time.time(), "files": []}
-        for raw in paths:
-            src = Path(raw).expanduser()
-            if not src.exists() or not src.is_file():
-                continue
-            dst = target / src.name
-            shutil.copy2(src, dst)
-            manifest["files"].append({"name": src.name, "sha256": _sha256(dst), "size": dst.stat().st_size})
-        _atomic_json(target / "manifest.json", manifest)
-        metrics.inc("backups.created")
-        return manifest
-
-    def restore(self, snapshot_id: str, target_dir: str | Path) -> dict[str, Any]:
-        check = self.verify(snapshot_id)
-        if not check.get("valid"):
-            metrics.inc("backups.restore_rejected")
-            return {"success": False, "error": "snapshot_integrity_failed", **check}
-        target = Path(target_dir).expanduser().resolve()
-        target.mkdir(parents=True, exist_ok=True)
-        source = (self.root / str(snapshot_id)).resolve()
-        restored = []
-        manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-        for row in manifest.get("files", []):
-            dst = (target / row["name"]).resolve()
-            if target not in dst.parents and dst != target:
-                return {"success": False, "error": "unsafe_restore_path"}
-            shutil.copy2(source / row["name"], dst)
-            restored.append(str(dst))
-        metrics.inc("backups.restored")
-        return {"success": True, "snapshot_id": str(snapshot_id), "restored": restored}
-
-    def verify(self, snapshot_id: str) -> dict[str, Any]:
-        target = self.root / str(snapshot_id)
-        manifest_path = target / "manifest.json"
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {"valid": False, "error": "manifest_missing_or_invalid"}
-        bad = []
-        for row in manifest.get("files", []):
-            p = target / row["name"]
-            if not p.exists() or _sha256(p) != row["sha256"]:
-                bad.append(row["name"])
-        result = {"valid": not bad, "snapshot_id": str(snapshot_id), "corrupt": bad}
-        metrics.inc("backups.verify_failed" if bad else "backups.verified")
-        return result
-
-
-class ResourceGuard:
-    def snapshot(self) -> dict[str, Any]:
-        usage = shutil.disk_usage(Path.cwd())
-        result: dict[str, Any] = {"disk_free_bytes": usage.free, "disk_total_bytes": usage.total, "disk_free_ratio": usage.free / max(1, usage.total)}
-        try:
-            import psutil
-            result["memory_percent"] = float(psutil.virtual_memory().percent)
-            result["cpu_percent"] = float(psutil.cpu_percent(interval=None))
-        except Exception:
-            result["memory_percent"] = None
-            result["cpu_percent"] = None
-        result["degraded"] = result["disk_free_ratio"] < 0.05 or (result["memory_percent"] is not None and result["memory_percent"] > 95)
-        return result
-
-
-class ReliabilitySupervisor:
-    def __init__(self):
-        self.idempotency = IdempotencyStore()
-        self.checkpoints = CheckpointStore()
-        self.incidents = IncidentLedger()
-        self.snapshots = RecoverySnapshotStore()
-        self.resources = ResourceGuard()
-        self.circuits: dict[str, CircuitBreaker] = {}
-        self._lock = threading.RLock()
-
-    def circuit(self, name: str) -> CircuitBreaker:
-        with self._lock:
-            return self.circuits.setdefault(str(name), CircuitBreaker(str(name)))
-
-    def health(self) -> dict[str, Any]:
-        queue = {}
-        distributed = {}
-        try:
-            from gateway.queue import job_queue
-            queue = job_queue.status()
-        except Exception as exc:
-            queue = {"error": str(exc)}
-        try:
-            from .distributed import distributed as coordinator
-            distributed = coordinator.status()
-        except Exception as exc:
-            distributed = {"error": str(exc)}
-        resources = self.resources.snapshot()
-        state = "degraded" if resources.get("degraded") or get_emergency_stop().active() else "healthy"
-        return {
-            "status": state,
-            "emergency_stop": get_emergency_stop().active(),
-            "queue": queue,
-            "distributed": {"node_count": distributed.get("node_count", 0), "online": distributed.get("online", 0), "stale": distributed.get("stale", 0)},
-            "resources": resources,
-            "circuits": [x.snapshot() for x in self.circuits.values()],
-            "open_incidents": sum(x.status == "open" for x in self.incidents.items),
-            "checkpoint_count": len(self.checkpoints.items),
-            "metrics": metrics.snapshot(),
-        }
-
-    def rollback_after_verification_failure(self, checkpoint_id: str, *, reason: str = "verification_failed") -> dict[str, Any]:
-        if get_emergency_stop().active():
-            return {"success": False, "error": "emergency_stop_active"}
-        try:
-            from .rollback import rollback_manager
-            result = rollback_manager.restore(str(checkpoint_id))
-        except Exception as exc:
-            result = {"success": False, "error": str(exc)}
-        if result.get("success"):
-            self.incidents.create("automatic_rollback", f"{reason}: restored {checkpoint_id}", severity="warning")
-            metrics.inc("rollback.success")
-        else:
-            self.incidents.create("rollback_failed", f"{reason}: {result.get('error', 'unknown')}", severity="critical")
-            metrics.inc("rollback.failed")
-        return result
-
-    def status(self) -> dict[str, Any]:
-        return self.health() | {"incidents": self.incidents.list(25), "latest_checkpoints": [asdict(x) for x in list(self.checkpoints.items.values())[-25:]]}
-
-
-reliability = ReliabilitySupervisor()
-
-__all__ = [
-    "RetryPolicy", "CircuitBreaker", "IdempotencyReceipt", "IdempotencyStore",
-    "Checkpoint", "CheckpointStore", "Incident", "IncidentLedger",
-    "RecoverySnapshotStore", "ResourceGuard", "ReliabilitySupervisor", "reliability",
-]
+        _atomic_json(self.path, [asdict(x) for x in self.items[-5000:]])
