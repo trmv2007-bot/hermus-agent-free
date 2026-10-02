@@ -50,6 +50,7 @@ class WorldAwareness:
 
         facts: list[dict[str, Any]] = []
         facts.extend(self._git_facts(root))
+        facts.extend(self._browser_facts())
         if include_processes:
             facts.extend(self._process_facts())
 
@@ -114,9 +115,39 @@ class WorldAwareness:
             "age_seconds": age_seconds,
             "fact_count": len(snapshot["facts"]),
             "event_count": len(snapshot["recent_events"]),
-            "observation_digest": (self.world.get("world", "observation_digest") or type("_F", (), {"value": None})()).value,
+            "observation_digest": (self.world.get("world", "observation_digest").value if self.world.get("world", "observation_digest") is not None else None),
             "connectors": self.registry.statuses(),
         }
+
+    @staticmethod
+    def _browser_facts() -> list[dict[str, Any]]:
+        """Observe an already-running HERMUS browser without launching one."""
+        try:
+            from tools import browser as browser_module
+        except Exception:
+            return []
+        page = getattr(browser_module, "_page", None)
+        if page is None:
+            return [{
+                "subject": "browser",
+                "predicate": "state",
+                "value": {"active": False, "reason": "no_active_session"},
+                "confidence": 1.0,
+            }]
+        try:
+            return [{
+                "subject": "browser",
+                "predicate": "state",
+                "value": {"active": True, "url": str(page.url), "title": str(page.title())[:500]},
+                "confidence": 0.95,
+            }]
+        except Exception as exc:
+            return [{
+                "subject": "browser",
+                "predicate": "state",
+                "value": {"active": True, "state_error": str(exc)[:200]},
+                "confidence": 0.5,
+            }]
 
     @staticmethod
     def _git_facts(root: Path) -> list[dict[str, Any]]:
