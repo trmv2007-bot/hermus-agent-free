@@ -1,6 +1,5 @@
 (() => {
   const $ = (s) => document.querySelector(s);
-  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
   if (token) localStorage.setItem('hermus_gateway_token', token);
   const state = { online:false, busy:false };
@@ -25,6 +24,8 @@
     host.prepend(row); while(host.children.length>7)host.lastElementChild.remove();
   }
 
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
   function setState(label, detail='') {
     $('#coreState').textContent=label;
     $('#coreDetail').textContent=detail;
@@ -32,7 +33,8 @@
   }
 
   function renderCapabilities(entries) {
-    const list=$('#capabilities'); list.innerHTML='';
+    const list=$('#capabilities'); if(!list)return;
+    list.innerHTML='';
     Object.entries(entries && typeof entries==='object'?entries:{}).slice(0,10).forEach(([name,value])=>{
       const ok=typeof value==='object' ? (value.available ?? value.ready ?? value.ok) : !!value;
       const row=document.createElement('div'); row.className='cap';
@@ -45,22 +47,19 @@
   async function refresh() {
     const started=performance.now();
     try {
-      const [projection, caps] = await Promise.all([
-        api('/api/nexus/state'),
+      // The UI consumes generic HERMUS transport surfaces. It does not own or
+      // define a dashboard-specific backend state API.
+      const [health, caps] = await Promise.all([
+        api('/api/v1/system/health'),
         api('/api/v1/system/capabilities')
       ]);
       state.online=true;
       $('#stateLabel').textContent='ONLINE'; $('#stateDot').className='state-dot';
-      const health = projection.health || {};
-      const healthy = Object.values(health).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
-      const running = Array.isArray(projection.active_jobs) ? projection.active_jobs.length : 0;
-      $('#healthValue').textContent = running ? `${running} active` : (healthy ? `${healthy} systems ready` : 'READY');
+      const healthEntries = health && typeof health === 'object' ? health : {};
+      const healthy = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
+      $('#healthValue').textContent = healthy ? `${healthy} systems ready` : 'READY';
       renderCapabilities(caps.capabilities || caps);
-      if (!state.busy) {
-        const presence=projection.presence || {};
-        const detail=presence.state || (running ? 'mission activity detected' : 'awaiting your command');
-        setState(running ? 'WORKING' : 'READY', detail);
-      }
+      if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
     } catch (e) {
       state.online=false;
@@ -75,12 +74,17 @@
     const command=(value ?? input.value).trim();
     if(!command) return;
     input.value=''; state.busy=true;
-    setState('WORKING','orchestrating your request');
+    setState('WORKING','processing your request');
     addEvent(`Command · ${command}`);
     try {
-      const result=await api('/api/nexus/command',{method:'POST',body:JSON.stringify({text:command,source:'nexus'})});
+      // Generic job intake is the transport. HERMUS itself decides whether the
+      // intent becomes chat, a mission, tool work, or another execution mode.
+      const result=await api('/jobs',{method:'POST',body:JSON.stringify({
+        kind:'runtime.turn',
+        payload:{text:command,platform:'web',mode:'chat',stream:true}
+      })});
       const id=result.run_id || result.job_id;
-      addEvent(`Mission accepted${id ? ` · ${id}` : ''}`);
+      addEvent(`Request accepted${id ? ` · ${id}` : ''}`);
       setState('WORKING',id ? `run ${id}` : 'request accepted');
     } catch(e) {
       addEvent(e.message,'error');
@@ -95,7 +99,6 @@
     const paths={
       'System health':'/api/v1/system/health',
       'Capabilities':'/api/v1/system/capabilities',
-      'Dashboard state':'/api/nexus/state',
       'Console manifest':'/api/v1/console/manifest'
     };
     const path=paths[name];
