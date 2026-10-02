@@ -78,3 +78,25 @@ def test_scheduler_can_limit_runs_and_disable_after_last_run(monkeypatch, tmp_pa
     current = manager.list_jobs()[0]
     assert current["run_count"] == 1
     assert current["enabled"] is False
+
+
+def test_one_shot_disables_after_successful_enqueue(monkeypatch, tmp_path):
+    class FakeJob:
+        id = "job_once"
+        run_id = "run_once"
+
+    class FakeQueue:
+        def submit(self, kind, payload, **kwargs):
+            return FakeJob()
+
+    import gateway.queue as queue_module
+    monkeypatch.setattr(queue_module, "job_queue", FakeQueue())
+
+    manager = CronManager(str(tmp_path / "schedules.json"), timezone="UTC", start=False)
+    job = manager.add_job("in 10 minutes", task="send reminder")
+    manager._execute_job(job)
+
+    current = manager.list_jobs()[0]
+    assert current["run_count"] == 1
+    assert current["enabled"] is False
+    assert current["last_job_id"] == "job_once"
