@@ -20,9 +20,12 @@ from .evolution import ChangeDecision, ChangeProposal, EvolutionLedger, Evolutio
 class SelfImprovementController:
     def __init__(self, ledger_path: str | Path | None = None):
         self.policy = EvolutionPolicy()
-        self.ledger = EvolutionLedger(Path(ledger_path or config.resolve_path("data/evolution_ledger.jsonl")))
+        resolved_ledger = Path(ledger_path or config.resolve_path("data/evolution_ledger.jsonl"))
+        self.ledger = EvolutionLedger(resolved_ledger)
         self._lock = threading.RLock()
-        self._history_path = Path(config.resolve_path("data/self_improvement_controller.json"))
+        # Test and embedded instances must be isolated.  Keep controller history
+        # beside the supplied ledger rather than silently sharing global state.
+        self._history_path = resolved_ledger.with_name("self_improvement_controller.json")
         self._history_path.parent.mkdir(parents=True, exist_ok=True)
 
     def propose(self, *, title: str, description: str, files: list[str],
