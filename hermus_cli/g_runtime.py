@@ -11,6 +11,54 @@ from __future__ import annotations
 
 from core.config import config
 
+def _configure_context(subparsers) -> None:
+    parser = subparsers.add_parser("context", help="Persistent personal context")
+    sub = parser.add_subparsers(dest="context_action")
+    get_parser = sub.add_parser("get", help="Show personal context")
+    get_parser.add_argument("--query", default="")
+    get_parser.add_argument("--project", default=None)
+    pref = sub.add_parser("preference", help="Remember an explicit preference")
+    pref.add_argument("key")
+    pref.add_argument("value")
+    goal = sub.add_parser("goal", help="Add or update a personal goal")
+    goal.add_argument("title")
+    goal.add_argument("--priority", default="normal")
+    goal.add_argument("--status", default="active")
+    goal.add_argument("--project", default=None)
+    goal.add_argument("--deadline", default=None)
+    focus = sub.add_parser("focus", help="Set current focus")
+    focus.add_argument("focus")
+    focus.add_argument("--project", default=None)
+    project = sub.add_parser("project", help="Add or update a project record")
+    project.add_argument("name")
+    project.add_argument("--language", default=None)
+    project.add_argument("--description", default=None)
+
+
+def _run_context(args, ctx: CLIContext) -> None:
+    import json as _json
+
+    from core.personal_context import personal_context
+
+    if args.context_action == "get":
+        print(_json.dumps(personal_context.snapshot(query=args.query, project=args.project).as_dict(), indent=2, default=str))
+    elif args.context_action == "preference":
+        print(_json.dumps(personal_context.remember_preference(args.key, args.value), indent=2, default=str))
+    elif args.context_action == "goal":
+        print(_json.dumps(personal_context.add_goal(
+            args.title, priority=args.priority, status=args.status, project=args.project, deadline=args.deadline
+        ), indent=2, default=str))
+    elif args.context_action == "focus":
+        print(_json.dumps(personal_context.set_focus(args.focus, project=args.project), indent=2, default=str))
+    elif args.context_action == "project":
+        print(_json.dumps(personal_context.upsert_project(
+            args.name, language=args.language, description=args.description
+        ), indent=2, default=str))
+    else:
+        no_action(ctx, "context")
+
+
+
 from ._common import CLIContext
 from ._spec import Command, no_action
 
@@ -199,15 +247,23 @@ def _run_engine(args, ctx: CLIContext) -> None:
 
 
 def _configure_cron(subparsers) -> None:
-    cron_parser = subparsers.add_parser("cron", help="Cron scheduler - natural language")
+    cron_parser = subparsers.add_parser("cron", help="Scheduler - natural language + one-shot/recurring")
     cron_sub = cron_parser.add_subparsers(dest="cron_action")
-    cron_add = cron_sub.add_parser("add", help="Add cron job from natural language")
-    cron_add.add_argument("text", help="Natural language schedule: 'daily at 9am send report'")
+    cron_add = cron_sub.add_parser("add", help="Add a scheduled task")
+    cron_add.add_argument("text", help="Schedule, e.g. 'tomorrow at 9am' or 'every weekday at 9am'")
     cron_add.add_argument("--task", help="Task to execute (defaults to text)")
     cron_add.add_argument("--platform", default="cli")
     cron_add.add_argument("--user-id", default="default")
-    cron_sub.add_parser("list", help="List cron jobs")
-    cron_remove = cron_sub.add_parser("remove", help="Remove cron job")
+    cron_add.add_argument("--timezone", default=None, help="IANA timezone, e.g. Asia/Kolkata")
+    cron_add.add_argument("--max-runs", type=int, default=None)
+    cron_add.add_argument("--quiet-start", type=int, default=None, help="Quiet-hour start, 0-23")
+    cron_add.add_argument("--quiet-end", type=int, default=None, help="Quiet-hour end, 0-23")
+    cron_sub.add_parser("list", help="List scheduled jobs")
+    cron_sub.add_parser("status", help="Show scheduler status")
+    cron_enable = cron_sub.add_parser("enable", help="Enable/disable a schedule")
+    cron_enable.add_argument("job_id")
+    cron_enable.add_argument("--off", action="store_true")
+    cron_remove = cron_sub.add_parser("remove", help="Remove a schedule")
     cron_remove.add_argument("job_id")
 
 
@@ -215,13 +271,34 @@ def _run_cron(args, ctx: CLIContext) -> None:
     from scheduler.cron import cron_manager
 
     if args.cron_action == "add":
-        job = cron_manager.add_job(args.text, task=args.task, platform=args.platform, user_id=args.user_id)
-        print(f"Cron job added: {job['id']} - {job['cron']} - {job['task']}")
+        quiet = None
+        if args.quiet_start is not None or args.quiet_end is not None:
+            if args.quiet_start is None or args.quiet_end is None:
+                print("quiet-start and quiet-end must be provided together")
+                raise SystemExit(2)
+            quiet = (args.quiet_start, args.quiet_end)
+        job = cron_manager.add_job(
+            args.text,
+            task=args.task,
+            platform=args.platform,
+            user_id=args.user_id,
+            timezone=args.timezone,
+            max_runs=args.max_runs,
+            respect_quiet_hours=quiet is not None,
+            quiet_hours=quiet,
+        )
+        next_run = job.get("next_run_at") or "-"
+        print(f"Scheduled: {job['id']} | type={job['schedule_type']} | next={next_run} | task={job['task']}")
     elif args.cron_action == "list":
         jobs = cron_manager.list_jobs()
-        print(f"Cron jobs ({len(jobs)}):")
+        print(f"Schedules ({len(jobs)}):")
         for j in jobs:
-            print(f" - {j['id']}: {j['cron']} - {j['natural']} -> {j['platform']}:{j['user_id']}")
+            print(f" - {j['id']}: {j.get('schedule_type')} | {j.get('cron') or j.get('run_at')} | enabled={j.get('enabled')}")
+    elif args.cron_action == "status":
+        print(json.dumps(cron_manager.status(), indent=2, default=str))
+    elif args.cron_action == "enable":
+        ok = cron_manager.set_enabled(args.job_id, not args.off)
+        print(f"Schedule {args.job_id}: {ok}")
     elif args.cron_action == "remove":
         ok = cron_manager.remove_job(args.job_id)
         print(f"Removed {args.job_id}: {ok}")
