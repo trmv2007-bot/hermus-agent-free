@@ -625,3 +625,65 @@ def maybe_self_heal(result: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         pass
     return result
+
+
+# Explicit external-service catalog (kept separate from the legacy tool-registration
+# helpers above so existing integrations remain backwards compatible).
+import threading as _integration_threading
+import time as _integration_time
+from dataclasses import asdict as _integration_asdict, dataclass as _integration_dataclass, field as _integration_field
+
+@_integration_dataclass
+class ExternalIntegration:
+    id: str
+    name: str
+    category: str
+    capabilities: list[str] = _integration_field(default_factory=list)
+    enabled: bool = False
+    configured: bool = False
+    status: str = "unconfigured"
+    last_check: float | None = None
+    metadata: dict[str, Any] = _integration_field(default_factory=dict)
+    def snapshot(self) -> dict[str, Any]:
+        return _integration_asdict(self)
+
+class ExternalIntegrationRegistry:
+    def __init__(self) -> None:
+        self._lock = _integration_threading.RLock()
+        self._items: dict[str, ExternalIntegration] = {}
+        for row in (("calendar","Calendar","productivity",["read","create","update"]),
+                    ("email","Email","communication",["read","draft","send"]),
+                    ("messaging","Messaging","communication",["read","send"]),
+                    ("files","Files","storage",["read","write","search"]),
+                    ("browser","Browser","web",["navigate","observe","interact"]),
+                    ("smart_home","Smart Home","devices",["observe","control"]),
+                    ("development","Development","engineering",["repo","build","test","deploy"])):
+            self.register(*row)
+    def register(self, integration_id: str, name: str, category: str, capabilities: list[str]) -> dict[str, Any]:
+        with self._lock:
+            x=ExternalIntegration(str(integration_id),str(name),str(category),sorted(set(capabilities)))
+            self._items[x.id]=x
+            return x.snapshot()
+    def configure(self, integration_id: str, *, enabled: bool=True, metadata: dict[str, Any]|None=None) -> dict[str, Any]:
+        with self._lock:
+            x=self._items[str(integration_id)]; x.configured=True; x.enabled=bool(enabled)
+            x.status="ready" if enabled else "disabled"; x.last_check=_integration_time.time()
+            if metadata:
+                x.metadata.update({str(k):v for k,v in metadata.items() if k not in {"token","secret","password","api_key"}})
+            return x.snapshot()
+    def set_enabled(self, integration_id: str, enabled: bool) -> dict[str, Any]:
+        with self._lock:
+            x=self._items[str(integration_id)]
+            if enabled and not x.configured: raise ValueError("integration is not configured")
+            x.enabled=bool(enabled); x.status="ready" if enabled else "disabled"; return x.snapshot()
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock: return [x.snapshot() for x in self._items.values()]
+    def status(self) -> dict[str, Any]:
+        rows=self.list(); return {"integrations":rows,"configured":sum(x["configured"] for x in rows),"enabled":sum(x["enabled"] for x in rows)}
+    def health(self, integration_id: str) -> dict[str, Any]:
+        with self._lock:
+            x=self._items[str(integration_id)]; x.last_check=_integration_time.time()
+            x.status="ready" if x.configured and x.enabled else ("disabled" if x.configured else "unconfigured")
+            return x.snapshot()
+
+external_integrations=ExternalIntegrationRegistry()
