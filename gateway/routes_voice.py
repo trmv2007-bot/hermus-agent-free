@@ -379,6 +379,31 @@ async def voice_command(
     )
 
 
+@router.post("/voice/interrupt")
+async def voice_interrupt(payload: dict | None = None):
+    """Signal client playback to stop and invalidate the current voice output."""
+    payload = payload or {}
+    session_id = str(payload.get("session_id") or "")
+    if not session_id:
+        return JSONResponse({"success": False, "error": "session_id is required"}, status_code=400)
+    from core.voice_presence import voice_presence
+    session = voice_presence.interrupt_output(session_id)
+    try:
+        from core.run_events import run_bus
+        run_id = str(payload.get("run_id") or "")
+        if run_id:
+            run_bus.cancel(run_id)
+    except Exception:
+        pass
+    return {
+        "success": True,
+        "session_id": session_id,
+        "output_generation": session.output_generation,
+        "action": "voice_output_interrupt",
+        "client_action": "stop_current_audio",
+    }
+
+
 @router.post("/voice/say")
 async def voice_say(payload: dict | None = None):
     """Typed input, spoken response. Same ack-then-queue flow without the mic."""
