@@ -1,8 +1,8 @@
 """Compatibility entry point for HERMUS interaction orchestration.
 
-The canonical backend boundary is ``core.hermus_engine``.  This small facade
-keeps existing integrations stable while they migrate away from UI-specific
-Nexus concepts.
+The canonical backend boundary is ``core.hermus_engine``. This facade keeps
+existing integrations stable while they migrate away from UI-specific Nexus
+concepts.
 """
 from __future__ import annotations
 
@@ -34,7 +34,17 @@ class HERMUSOrchestrator:
     """Compatibility facade over the canonical HERMUS engine."""
 
     def state(self, *, user_id: str = "default") -> dict[str, Any]:
-        return engine.snapshot(user_id=user_id)
+        snapshot = engine.snapshot(user_id=user_id)
+        execution = snapshot.get("execution", {})
+        # Keep the historical shape for integrations that have not migrated
+        # yet. The source of truth is still the engine snapshot above.
+        return {
+            **snapshot,
+            "runs": execution.get("runs", []),
+            "queue": execution.get("queue", {}),
+            "active_jobs": execution.get("active", []),
+            "recent_jobs": execution.get("recent", []),
+        }
 
     def submit(
         self,
