@@ -353,14 +353,14 @@ def _configure_computer(subparsers) -> None:
     computer_sub.add_parser("status", help="Show the computer control center")
     computer_target = computer_sub.add_parser("target", help="Vision-driven find-on-screen for a UI element")
     computer_target.add_argument("target", nargs="+")
-    computer_target.add_argument("--model", default="llava:7b")
+    computer_target.add_argument("--model", default=None)
     computer_click = computer_sub.add_parser("click", help="Vision-driven click: locate a UI element, then click it")
     computer_click.add_argument("target", nargs="+")
-    computer_click.add_argument("--model", default="llava:7b")
+    computer_click.add_argument("--model", default=None)
     computer_wait = computer_sub.add_parser("wait", help="Wait until a visual condition is true")
     computer_wait.add_argument("condition", nargs="+")
     computer_wait.add_argument("--timeout", type=float, default=60.0)
-    computer_wait.add_argument("--model", default="llava:7b")
+    computer_wait.add_argument("--model", default=None)
     computer_sub.add_parser("skills", help="List learned computer skills")
 
 
@@ -517,14 +517,14 @@ def _configure_screen(subparsers) -> None:
     screen_analyze.add_argument("--sample-fps", type=float, default=2.0)
     screen_analyze.add_argument("--max-seconds", type=float, default=3600.0)
     screen_analyze.add_argument("--max-events", type=int, default=12)
-    screen_analyze.add_argument("--model", default="llava:7b")
+    screen_analyze.add_argument("--model", default=None)
     screen_analyze.add_argument("--no-vision", action="store_true", help="Detect changes without running a vision model")
 
     screen_watch = screen_sub.add_parser("watch", help="Wait until a visual condition becomes true")
     screen_watch.add_argument("condition")
     screen_watch.add_argument("--timeout", type=float, default=60.0)
     screen_watch.add_argument("--fps", type=float, default=2.0)
-    screen_watch.add_argument("--model", default="llava:7b")
+    screen_watch.add_argument("--model", default=None)
 
 
 def _run_screen(args, ctx: CLIContext) -> None:
