@@ -123,6 +123,28 @@ jobs:
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           await page.waitForTimeout(300);
 
+          // First-run setup is a real guided configuration flow, not a static onboarding screen.
+          if(!(await page.locator('#setupWizard').evaluate(el=>el.classList.contains('open')))) throw new Error('Setup wizard did not auto-open on first run');
+          if((await page.locator('#wizardBody').innerText()).trim().length===0) throw new Error('Setup wizard opened blank');
+          await page.locator('[data-wizard-next]').click();
+          await page.waitForTimeout(80);
+          if(!(await page.locator('#wizardProgress .active').count())) throw new Error('Wizard did not advance');
+          await page.locator('[data-wizard-recheck]').click();
+          await page.waitForTimeout(30);
+          await page.locator('[data-wizard-next]').click();
+          await page.waitForTimeout(30);
+          await page.locator('[data-wizard-free]').click();
+          await page.waitForTimeout(30);
+          await page.locator('[data-wizard-next]').click();
+          await page.locator('[data-wizard-next]').click();
+          await page.waitForTimeout(30);
+          await page.locator('[data-wizard-next]').click();
+          await page.waitForTimeout(30);
+          await page.locator('[data-wizard-next]').click();
+          if(!(await page.locator('#wizardBody').innerText()).includes('HERMUS is ready')) throw new Error('Wizard finish step missing');
+          await page.locator('[data-wizard-next]').click();
+          if(await page.locator('#setupWizard').evaluate(el=>el.classList.contains('open'))) throw new Error('Wizard did not close on finish');
+
           // The top command input is a real command form, not a palette trigger.
           await page.locator('#commandbarInput').click();
           if(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))) throw new Error('Command input click opened palette');
