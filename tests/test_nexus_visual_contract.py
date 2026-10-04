@@ -9,10 +9,21 @@ def test_nexus_visible_interactions_have_wiring():
     css = (ROOT / "gateway/static/nexus.css").read_text(encoding="utf-8")
 
     required_ids = [
-        "send", "voiceButton", "modelRefresh", "modelSave",
-        "hermusLogo", "workshopClose", "workshopRefresh", "workshopSave",
-        "workshopAsk", "workshopMissionOpen", "workshopSend",
-        "paletteClose", "paletteInput", "personalSpaceOpen", "personalSpaceOpenDock",
+        "send",
+        "voiceButton",
+        "modelRefresh",
+        "modelSave",
+        "hermusLogo",
+        "workshopClose",
+        "workshopRefresh",
+        "workshopSave",
+        "workshopAsk",
+        "workshopMissionOpen",
+        "workshopSend",
+        "paletteClose",
+        "paletteInput",
+        "personalSpaceOpen",
+        "personalSpaceOpenDock",
     ]
     for control_id in required_ids:
         assert f'id="{control_id}"' in html, control_id
