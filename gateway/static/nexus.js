@@ -39,7 +39,9 @@
     host.prepend(row); while(host.children.length>7)host.lastElementChild.remove();
   }
   function setState(label, detail='') {
-    $('#coreState').textContent=label; $('#coreDetail').textContent=detail;
+    const stateEl=$('#coreState'); const detailEl=$('#coreDetail');
+    if(stateEl) stateEl.textContent=label;
+    if(detailEl) detailEl.textContent=detail;
     document.body.dataset.state=label.toLowerCase().replace(/\s+/g,'-');
   }
   function renderCapabilities(entries) {
