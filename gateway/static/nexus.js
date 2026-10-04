@@ -783,7 +783,7 @@
     const item=e.target.closest('[data-workshop-path]');
     if(item && item.dataset.workshopType==='file') openWorkshopFile(item.dataset.workshopPath);
   });
-  $('#workshopAsk')?.addEventListener('click',()=>requestAnimationFrame(()=>$('#command')?.focus()));
+  $('#workshopAsk')?.addEventListener('click',()=>requestAnimationFrame(()=>$('#workshopCommand')?.focus()));
   $('#workshopMissionOpen')?.addEventListener('click',()=>{
     if(state.mission) {
       const mission=state.missionData||{};
