@@ -13,6 +13,7 @@ from typing import Any
 from core.log import get_logger
 
 from .config import config
+from .engineering_contract import HERMUS_ENGINEERING_CONTRACT
 from .memory import memory
 from .modes import AgentMode, get_mode_config
 from .run_events import record_issue
@@ -423,6 +424,10 @@ Periodic Nudges:
 {presence_block}
 {persona_block}
 {dashboard_block}
+
+Permanent HERMUS Engineering Contract:
+{HERMUS_ENGINEERING_CONTRACT}
+
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
 - After tools return, continue reasoning; call more tools if needed
