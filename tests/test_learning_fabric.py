@@ -21,7 +21,6 @@ class _Episodes:
 def test_learning_fabric_returns_one_projection(monkeypatch):
     import core.learning_fabric as mod
     monkeypatch.setattr(mod, "_now", lambda: "now")
-    monkeypatch.setattr(mod, "__builtins__", mod.__builtins__, raising=False)
     monkeypatch.setattr("core.skill_forge.skill_forge", _Forge())
     monkeypatch.setattr("core.reasoning.lessons.lessons_store", _Lessons())
     monkeypatch.setattr("core.computer.get_episode_store", lambda: _Episodes())
