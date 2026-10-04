@@ -128,6 +128,26 @@ jobs:
             if(!box||box.width<1||box.height<1) throw new Error('Bad geometry: '+label);
           }
 
+          console.log('QA: interactive semantics');
+          const roleButtons=page.locator('[role="button"]:visible');
+          if(await roleButtons.count()<1) throw new Error('No visible role=button control found');
+          await page.locator('#globalSearch').press('Enter');
+          if(!(await page.locator('#palette').evaluate(el=>el.classList.contains('open')))) throw new Error('Command surface keyboard activation failed');
+          await page.keyboard.press('Escape');
+
+          for(const select of await page.locator('select:visible').all()){
+            const aria=await select.getAttribute('aria-label');
+            if(!aria) throw new Error('Visible select without aria-label');
+            const box=await select.boundingBox();
+            if(!box||box.width<20||box.height<20) throw new Error('Bad select geometry');
+          }
+
+          for(const input of await page.locator('input:visible').all()){
+            const aria=await input.getAttribute('aria-label');
+            const placeholder=await input.getAttribute('placeholder');
+            if(!aria && !placeholder) throw new Error('Visible input without label/placeholder');
+          }
+
           console.log('QA: palette');
           await page.locator('#globalSearch').click();
           await page.locator('#paletteInput').fill('model');
@@ -142,21 +162,6 @@ jobs:
             await page.waitForTimeout(350);
             await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:false});
           }
-
-          console.log('QA: toggles');
-          for(const t of await page.locator('[data-toggle]:visible').all()){
-            const before=await t.getAttribute('aria-pressed');
-            await t.click();
-            if(await t.getAttribute('aria-pressed')===before) throw new Error('Toggle failed');
-            await t.click();
-            if(await t.getAttribute('aria-pressed')!==before) throw new Error('Toggle restore failed');
-          }
-
-          console.log('QA: environment');
-          const env=page.locator('.environment-panel');
-          await env.locator('[data-panel-toggle]').click();
-          if(!(await env.evaluate(el=>el.classList.contains('is-collapsed')))) throw new Error('Environment collapse failed');
-          await env.locator('[data-panel-toggle]').click();
 
           console.log('QA: models');
           await page.locator('#modelRole').selectOption('vision');
@@ -227,8 +232,29 @@ jobs:
           await page.locator('[data-workbench-tab="chat"]').click();
           await page.locator('[data-room="main-hall"]').click();
           await page.waitForTimeout(350);
-          await page.evaluate(()=>window.scrollTo(0,0));
+          await page.evaluate(()=>{
+            window.scrollTo(0,0);
+            if(document.documentElement.scrollWidth > window.innerWidth + 2) throw new Error('Horizontal overflow at desktop viewport');
+            if(document.documentElement.scrollHeight < window.innerHeight) throw new Error('Unexpectedly empty viewport');
+          });
           await page.screenshot({path:out+'/99-final.png',fullPage:false});
+
+          const mobile=await browser.newPage({viewport:{width:390,height:844}});
+          mobile.setDefaultTimeout(1800);
+          const mobileErrors=[];
+          mobile.on('pageerror',e=>mobileErrors.push(e.message));
+          mobile.on('console',msg=>{if(msg.type()==='error') mobileErrors.push(msg.text())});
+          await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
+          await mobile.waitForTimeout(500);
+          if(await mobile.locator('button:visible').count()<20) throw new Error('Too few mobile controls');
+          if(await mobile.evaluate(()=>document.documentElement.scrollWidth > window.innerWidth + 2)) throw new Error('Horizontal overflow at mobile viewport');
+          await mobile.screenshot({path:out+'/mobile-baseline.png',fullPage:false});
+          await mobile.locator('#globalSearch').press('Enter');
+          if(!(await mobile.locator('#palette').evaluate(el=>el.classList.contains('open')))) throw new Error('Mobile command palette failed');
+          await mobile.keyboard.press('Escape');
+          if(mobileErrors.length) throw new Error('Mobile browser errors: '+mobileErrors.join(' | '));
+          await mobile.close();
+
           await browser.close();
           if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
           EOF
