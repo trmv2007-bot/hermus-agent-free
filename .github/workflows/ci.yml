@@ -139,6 +139,7 @@ jobs:
           for(const v of ['chat','ide','browser','terminal','image','video','notes']){
             await page.locator('[data-workbench-tab="'+v+'"]').click();
             if(!(await page.locator('[data-workbench-view="'+v+'"]').evaluate(el=>el.classList.contains('active')))) throw new Error('Workbench view failed: '+v);
+            await page.waitForTimeout(350);
             await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:false});
           }
 
@@ -215,6 +216,10 @@ jobs:
             await page.waitForTimeout(50);
           }
 
+          await page.locator('[data-workbench-tab="chat"]').click();
+          await page.locator('[data-room="main-hall"]').click();
+          await page.waitForTimeout(350);
+          await page.evaluate(()=>window.scrollTo(0,0));
           await page.screenshot({path:out+'/99-final.png',fullPage:false});
           await browser.close();
           if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
