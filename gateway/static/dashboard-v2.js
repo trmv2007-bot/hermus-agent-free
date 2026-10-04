@@ -346,6 +346,7 @@
     let connected = false;
     let current = 'Thinking…';
     let terminalSeen = false;
+    let streamedText = '';
 
     const add = (item) => {
       const last = items[items.length - 1];
@@ -377,7 +378,8 @@
       if (type === 'llm_delta') {
         connected = true;
         terminalSeen = true;
-        current = 'Thinking… · model connected';
+        streamedText += String(d.text || '');
+        current = 'Typing… · model connected';
         return;
       }
       if (type === 'tool_call') {
@@ -455,7 +457,99 @@
     });
 
     if (!connected && terminalSeen) connected = true;
-    return {items:items.slice(-10), model, connected, current};
+    return {items:items.slice(-10), model, connected, current, streamedText};
+  }
+
+  function splitTableRow(line) {
+    const raw=String(line||'').trim().replace(/^\|/,'').replace(/\|$/,'');
+    const cells=[]; let buf=''; let escaped=false;
+    for(const ch of raw){
+      if(ch==='|'&&!escaped){cells.push(buf.trim().replace(/\\\|/g,'|'));buf='';}
+      else buf+=ch;
+      escaped=(ch==='\\'&&!escaped);
+      if(ch!=='\\')escaped=false;
+    }
+    cells.push(buf.trim().replace(/\\\|/g,'|'));
+    return cells;
+  }
+
+  function inlineMarkdown(value) {
+    let s=esc(value);
+    const stash=[];
+    const hold=html=>{const key='@@MD'+stash.length+'@@';stash.push(html);return key;};
+    s=s.replace(/\`([^\n\`]+)\`/g,(_,v)=>hold('<code>'+v+'</code>'));
+    s=s.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+    s=s.replace(/__([^_\n]+)__/g,'<strong>$1</strong>');
+    s=s.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
+    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,(_,label,url)=>hold('<a href="'+url.replace(/"/g,'&quot;')+'" target="_blank" rel="noreferrer noopener">'+label+'</a>'));
+    return s.replace(/@@MD(\d+)@@/g,(_,i)=>stash[Number(i)]||'');
+  }
+
+  function renderMarkdown(markdown) {
+    const fence=String.fromCharCode(96).repeat(3);
+    const source=String(markdown??'').replace(/\r\n?/g,'\n');
+    if(!source.trim())return '';
+    const lines=source.split('\n'),out=[];let i=0,inCode=false,codeLang='',code=[];
+    const flushCode=()=>{
+      if(!inCode)return;
+      out.push('<pre class="md-code"><code data-lang="'+esc(codeLang)+'">'+esc(code.join('\n'))+'</code></pre>');
+      inCode=false;codeLang='';code=[];
+    };
+    const isTableSep=line=>{
+      const cells=splitTableRow(line);
+      return cells.length>=2&&cells.every(x=>/^:?-{3,}:?$/.test(x.replace(/\s/g,'')));
+    };
+    while(i<lines.length){
+      const line=lines[i];
+      if(inCode){
+        if(line.trim().startsWith(fence)){flushCode();i++;continue;}
+        code.push(line);i++;continue;
+      }
+      if(line.trim().startsWith(fence)){
+        inCode=true;codeLang=line.trim().slice(fence.length).trim();i++;continue;
+      }
+      if(!line.trim()){i++;continue;}
+      const heading=line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if(heading){const n=heading[1].length;out.push('<h'+n+'>'+inlineMarkdown(heading[2])+'</h'+n+'>');i++;continue;}
+      if(/^\s*(?:---+|\*\s*\*\s*\*|___+)\s*$/.test(line)){out.push('<hr>');i++;continue;}
+      if(/^\s*>/.test(line)){
+        const rows=[];while(i<lines.length&&/^\s*>/.test(lines[i])){rows.push(lines[i].replace(/^\s*>\s?/,'').trim());i++;}
+        out.push('<blockquote>'+rows.map(inlineMarkdown).join('<br>')+'</blockquote>');continue;
+      }
+      if(i+1<lines.length&&line.includes('|')&&isTableSep(lines[i+1])){
+        const headers=splitTableRow(line);i+=2;const rows=[];
+        while(i<lines.length&&lines[i].trim()&&lines[i].includes('|')){rows.push(splitTableRow(lines[i]));i++;}
+        out.push('<div class="md-table-wrap"><table><thead><tr>'+
+          headers.map(h=>'<th>'+inlineMarkdown(h)+'</th>').join('')+
+          '</tr></thead><tbody>'+
+          rows.map(r=>'<tr>'+headers.map((_,idx)=>'<td>'+inlineMarkdown(r[idx]??'')+'</td>').join('')+'</tr>').join('')+
+          '</tbody></table></div>');continue;
+      }
+      const ul=line.match(/^\s*[-*+]\s+(.+)$/);
+      if(ul){
+        const rows=[];while(i<lines.length){const m=lines[i].match(/^\s*[-*+]\s+(.+)$/);if(!m)break;rows.push('<li>'+inlineMarkdown(m[1])+'</li>');i++;}
+        out.push('<ul>'+rows.join('')+'</ul>');continue;
+      }
+      const ol=line.match(/^\s*\d+[.)]\s+(.+)$/);
+      if(ol){
+        const rows=[];while(i<lines.length){const m=lines[i].match(/^\s*\d+[.)]\s+(.+)$/);if(!m)break;rows.push('<li>'+inlineMarkdown(m[1])+'</li>');i++;}
+        out.push('<ol>'+rows.join('')+'</ol>');continue;
+      }
+      const para=[];while(i<lines.length&&lines[i].trim()){
+        const next=lines[i];
+        if(para.length&&(/^\s*#{1,6}\s+/.test(next)||/^\s*(?:[-*+]\s+|\d+[.)]\s+|>)/.test(next)))break;
+        if(para.length&&i+1<lines.length&&next.includes('|')&&isTableSep(lines[i+1]))break;
+        para.push(next);i++;
+      }
+      out.push('<p>'+para.map(inlineMarkdown).join('<br>')+'</p>');
+    }
+    flushCode();
+    return out.join('');
+  }
+
+  function chatStreamUrl(runId) {
+    const suffix=token?'&token='+encodeURIComponent(token):'';
+    return '/stream/run/'+encodeURIComponent(runId)+'?after=0'+suffix;
   }
 
   async function sendCommand(command) {
@@ -518,145 +612,123 @@
   }
 
   function trackRun(runId) {
-    if (!runId || state.runPollers.has(runId)) return;
-    state.activeRun = runId;
-    let tries = 0;
-    let streamedText = '';
-    let finalMessageShown = false;
+    if(!runId||state.runPollers.has(runId))return;
+    state.activeRun=runId;
+    let finalMessageShown=false;
+    let eventLog=[];
+    const seen=new Set();
+    let source=null;
+    let fallbackTimer=null;
+    let fallbackTries=0;
 
-    const updateStatus = (text, status = 'thinking') => {
-      const pending = state.messages.find(m => m.runId === runId && m.pending);
-      if (!pending || finalMessageShown) return;
-      pending.text = text;
-      pending.status = status;
+    const pendingMessage=()=>state.messages.find(m=>m.runId===runId&&m.pending);
+
+    const sync=()=>{
+      const pending=pendingMessage();
+      if(!pending||finalMessageShown)return;
+      const summary=summarizeRunActivity(eventLog);
+      pending.activity=summary.items;
+      pending.model=summary.model||pending.model||'';
+      pending.streamingText=summary.streamedText||'';
+      pending.text=summary.current||'Thinking…';
+      pending.status=summary.current==='Model unavailable'?'error':(summary.connected?'connected':'thinking');
       renderChat();
     };
 
-    const syncActivity = (events) => {
-      const pending = state.messages.find(m => m.runId === runId && m.pending);
-      if (!pending || finalMessageShown) return;
-      const summary = summarizeRunActivity(events);
-      pending.activity = summary.items;
-      pending.model = summary.model || pending.model || '';
-      pending.text = summary.current || 'Thinking…';
-      pending.status = summary.current === 'Model unavailable' ? 'error' : (summary.connected ? 'connected' : 'thinking');
-      renderChat();
-    };
-
-    const showAnswer = (value, status = 'done') => {
-      const answer = String(value || '').trim();
-      if (!answer || finalMessageShown) return;
-      finalMessageShown = true;
-      const clipped = answer.slice(0, 12000);
-      const pending = state.messages.find(m => m.runId === runId && m.pending);
-      if (pending) {
-        pending.text = clipped;
-        pending.pending = false;
-        pending.status = status;
-      } else if (!state.messages.some(m => m.runId === runId && m.text === clipped)) {
+    const showAnswer=(value,status='done')=>{
+      const answer=String(value||'').trim();
+      if(!answer||finalMessageShown)return;
+      finalMessageShown=true;
+      const clipped=answer.slice(0,12000);
+      const pending=pendingMessage();
+      if(pending){
+        pending.text=clipped;
+        pending.pending=false;
+        pending.status=status;
+        pending.streamingText='';
+      }else if(!state.messages.some(m=>m.runId===runId&&m.text===clipped)){
         state.messages.push({who:'jarvis',text:clipped,time:'Now',runId});
       }
       renderChat();
     };
 
-    const tick = async () => {
-      tries++;
-      const d = await safe('/runs/'+encodeURIComponent(runId)+'?limit=200');
-      if (failed(d)) {
-        if (tries > 8) stop();
-        return;
-      }
-
-      const status = String(d.status || d.state || d.stage || '').toLowerCase();
-      const events = Array.isArray(d.events) ? d.events : [];
-      syncActivity(events);
-
-      // Prefer the authoritative final agent response. The previous client
-      // searched newest-first across lifecycle events, so run_finished won over
-      // agent_response and the user literally saw "run_finished".
-      const responses = events.filter(e => String(e.type || '') === 'agent_response');
-      const latestResponse = responses.length ? responses[responses.length - 1] : null;
-      if (latestResponse) {
-        const payload = latestResponse.data || {};
-        showAnswer(payload.text || payload.response || payload.summary || '');
-      } else {
-        // Streamed deltas prove the selected model is actively responding.
-        // Keep those tokens out of the transcript; show a single thinking state
-        // until the authoritative final response arrives.
-        for (const e of events) {
-          if (String(e.type || '') !== 'llm_delta') continue;
-          const delta = String((e.data || {}).text || '').trim();
-          if (delta) streamedText += (streamedText ? ' ' : '') + delta;
+    const consume=e=>{
+      if(!e)return;
+      const eventId=e.id===undefined||e.id===null?'local-'+eventLog.length:String(e.id);
+      if(seen.has(eventId))return;
+      seen.add(eventId);
+      eventLog.push(e);
+      const type=String(e.type||'').toLowerCase(),d=e.data||{};
+      if(type==='agent_response')showAnswer(d.text||d.response||d.summary||'');
+      else if(type==='run_error'||type==='mission_error')showAnswer('Model unavailable · '+String(d.error||d.message||'runtime error'),'error');
+      else if(!finalMessageShown)sync();
+      if(type==='run_finished'||type==='mission_finished'||type==='__closed__'){
+        if(!finalMessageShown){
+          if(['error','failed'].includes(String(d.status||'').toLowerCase()))showAnswer('Model unavailable · HERMUS could not complete this request','error');
+          else showAnswer('HERMUS completed the request but returned no response','error');
         }
-        if (streamedText) updateStatus('Thinking… · model connected', 'connected');
+        stop();
       }
-
-      // Terminal errors should be visible, but lifecycle completion itself is
-      // not a user-facing assistant message.
-      if (!finalMessageShown) {
-        const errorEvent = events.slice().reverse().find(e => ['run_error','mission_error'].includes(String(e.type || '')));
-        if (errorEvent) {
-          const payload = errorEvent.data || {};
-          showAnswer('Model unavailable · '+String(payload.error || payload.message || 'runtime error'), 'error');
-        }
-      }
-
-      // A completed run can carry the canonical final answer even if a response
-      // event was lost by a reconnect or an older worker.
-      if (!finalMessageShown && d.result) {
-        showAnswer(d.result.response || d.result.final_answer || d.result.answer || '');
-      }
-
-      const terminal = ['finished','completed','success','failed','error','cancelled','canceled','stopped'].includes(status);
-      if (terminal && !finalMessageShown) {
-        if (['failed','error'].includes(status)) {
-          showAnswer('Model unavailable · HERMUS could not complete this request', 'error');
-        } else if (['cancelled','canceled','stopped'].includes(status)) {
-          showAnswer('HERMUS stopped this request', 'error');
-        } else {
-          showAnswer('HERMUS completed the request but returned no response', 'error');
-        }
-      }
-      if (terminal || d.finished === true || tries >= 80) stop();
-      else refreshOverview();
     };
 
-    const timer = setInterval(tick, 1800);
-    state.runPollers.set(runId,{timer,stop:()=>clearInterval(timer)});
-    tick();
+    const startPolling=()=>{
+      if(fallbackTimer||finalMessageShown)return;
+      fallbackTimer=setInterval(async()=>{
+        fallbackTries++;
+        const d=await safe('/runs/'+encodeURIComponent(runId)+'?limit=500');
+        if(failed(d)){if(fallbackTries>10)stop();return;}
+        for(const e of (Array.isArray(d.events)?d.events:[]))consume(e);
+        if(d.result&&!finalMessageShown)showAnswer(d.result.response||d.result.final_answer||d.result.answer||'');
+      },700);
+    };
 
-    function stop() {
-      const x = state.runPollers.get(runId);
-      if (x) { clearInterval(x.timer); state.runPollers.delete(runId); }
-      if (state.activeRun === runId) state.activeRun = null;
+    const stop=()=>{
+      if(fallbackTimer){clearInterval(fallbackTimer);fallbackTimer=null;}
+      if(source){try{source.close()}catch{}source=null;}
+      const x=state.runPollers.get(runId);
+      if(x)state.runPollers.delete(runId);
+      if(state.activeRun===runId)state.activeRun=null;
       refreshOverview();
+    };
+
+    try{
+      source=new EventSource(chatStreamUrl(runId));
+      state.runPollers.set(runId,{source,stop});
+      source.onmessage=message=>{try{consume(JSON.parse(message.data));}catch{}};
+      source.onerror=()=>{startPolling();};
+      setTimeout(()=>{if(!eventLog.length)startPolling();},1200);
+    }catch{
+      state.runPollers.set(runId,{source:null,stop});
+      startPolling();
     }
   }
 
+
   function renderChat() {
-    const host = qs('#chatMessages'); if (!host) return;
-    host.innerHTML = state.messages.slice(-30).map(m => {
-      const classes = ['msg'];
-      if (m.who === 'user') classes.push('user');
-      if (m.pending) classes.push('pending');
-      if (m.status) classes.push('status-'+String(m.status).replace(/[^a-z0-9_-]/gi,''));
-      const activity = Array.isArray(m.activity) && m.activity.length
-        ? '<div class="live-activity" aria-label="Live agent activity">'+m.activity.map(a =>
-            '<div class="activity-item '+esc(a.state||'done')+'">'+
-              '<span class="activity-icon">'+esc(a.icon||'·')+'</span>'+
-              '<span class="activity-detail">'+esc(a.detail||'Working')+'</span>'+
-              (a.meta ? '<span class="activity-meta">'+esc(a.meta)+'</span>' : '')+
-            '</div>'
+    const host=qs('#chatMessages');if(!host)return;
+    host.innerHTML=state.messages.slice(-30).map(m=>{
+      const classes=['msg'];
+      if(m.who==='user')classes.push('user');
+      if(m.pending)classes.push('pending');
+      if(m.status)classes.push('status-'+String(m.status).replace(/[^a-z0-9_-]/gi,''));
+      const activity=Array.isArray(m.activity)&&m.activity.length
+        ? '<div class="live-activity" aria-label="Live agent activity">'+m.activity.map(a=>
+            '<div class="activity-item '+esc(a.state||'done')+'"><span class="activity-icon">'+esc(a.icon||'·')+
+            '</span><span class="activity-detail">'+esc(a.detail||'Working')+'</span>'+
+            (a.meta?'<span class="activity-meta">'+esc(a.meta)+'</span>':'')+'</div>'
           ).join('')+'</div>'
         : '';
-      const liveLabel = m.pending
+      const liveLabel=m.pending
         ? '<div class="live-status" role="status" aria-live="polite"><span class="live-pulse"></span>'+esc(m.text)+'</div>'
         : '';
-      const body = m.pending ? '' : '<span class="msg-text">'+esc(m.text)+'</span>';
+      const stream=m.pending&&m.streamingText
+        ? '<div class="msg-stream" aria-label="Live assistant response">'+renderMarkdown(m.streamingText)+'<span class="stream-cursor" aria-hidden="true">▌</span></div>'
+        : '';
+      const body=m.pending?'':'<div class="msg-text">'+renderMarkdown(m.text)+'</div>';
       return '<div class="'+classes.join(' ')+'"><span class="msg-meta">'+
-        (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span>'+liveLabel+body+activity+'</div>';
+        (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span>'+liveLabel+stream+body+activity+'</div>';
     }).join('');
-    host.scrollTop = host.scrollHeight;
+    host.scrollTop=host.scrollHeight;
   }
 
   async function refreshOverview() {
