@@ -298,6 +298,7 @@ class ModelGateway:
         api_key: str | None = None,
         base_url: str | None = None,
         temperature: float | None = None,
+        role: str = "default",
     ):
         """Build the concrete completion object for a model via the canonical path.
 
@@ -306,6 +307,14 @@ class ModelGateway:
         never constructs a provider client or picks a provider/model itself. A test
         seam (``llm_builder``) can inject a deterministic stub.
         """
+        if model is None:
+            selected_provider, selected_model = self.resolve_model(role=role, provider=provider)
+            if selected_model:
+                model = selected_model
+                provider = selected_provider or provider
+        elif provider is None and "/" in str(model):
+            provider, model = str(model).split("/", 1)
+
         if self._llm_builder is not None:
             return self._llm_builder(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
         from .. import llm  # type: ignore
