@@ -23,12 +23,24 @@ class _Brain:
         return [{"title": "Ship HERMUS"}]
 
 
+class _ModelGateway:
+    def selected_models(self):
+        return {"selections": {"default": "auto"}}
+
+
+class _World:
+    def status(self):
+        return {"fresh": True}
+
+
 def test_context_fabric_builds_bounded_packet(monkeypatch):
     import core.context_fabric as mod
 
     monkeypatch.setattr(mod, "memory", _Memory())
     monkeypatch.setattr(mod, "presence_kernel", _Presence())
     monkeypatch.setattr(mod, "executive_brain", _Brain())
+    monkeypatch.setattr(mod, "world_awareness", _World())
+    monkeypatch.setattr(mod, "get_model_gateway", lambda: _ModelGateway())
 
     packet = ContextFabric().build("fix workshop", project="demo")
     assert packet["version"] == 1
