@@ -774,6 +774,18 @@ async def nexus_css():
     return _serve_control_asset("nexus.css", "text/css; charset=utf-8")
 
 
+@app.get("/static/dashboard-v2.js")
+async def dashboard_v2_js():
+    """Current HERMUS product dashboard client."""
+    return _serve_control_asset("dashboard-v2.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/dashboard-v2.css")
+async def dashboard_v2_css():
+    """Current HERMUS product dashboard stylesheet."""
+    return _serve_control_asset("dashboard-v2.css", "text/css; charset=utf-8")
+
+
 @app.get("/static/personal-space.js")
 async def personal_space_js():
     """Personal Space dashboard client."""
