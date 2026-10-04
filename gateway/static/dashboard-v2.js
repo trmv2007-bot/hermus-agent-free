@@ -335,31 +335,74 @@
     if (!runId || state.runPollers.has(runId)) return;
     state.activeRun = runId;
     let tries = 0;
+    let streamedText = '';
+    let finalMessageShown = false;
+
+    const showAnswer = (value) => {
+      const answer = String(value || '').trim();
+      if (!answer || finalMessageShown) return;
+      finalMessageShown = true;
+      const clipped = answer.slice(0, 12000);
+      if (!state.messages.some(m => m.runId === runId && m.text === clipped)) {
+        state.messages.push({who:'jarvis',text:clipped,time:'Run '+runId.slice(0,8),runId});
+        renderChat();
+      }
+    };
+
     const tick = async () => {
       tries++;
-      const d = await safe('/runs/'+encodeURIComponent(runId)+'?limit=40');
+      const d = await safe('/runs/'+encodeURIComponent(runId)+'?limit=200');
       if (failed(d)) {
         if (tries > 8) stop();
         return;
       }
+
       const status = String(d.status || d.state || d.stage || '').toLowerCase();
       const events = Array.isArray(d.events) ? d.events : [];
-      const useful = events.slice().reverse().find(e => /agent_response|run_finished|session_finished|error|failed|completed/i.test(String(e.type||'')));
-      if (useful) {
-        const payload = useful.data || useful.payload || useful;
-        const text = payload?.text || payload?.response || payload?.summary || useful.type;
-        if (text && !state.messages.some(m => m.runId === runId && m.text === String(text).slice(0,1000))) {
-          state.messages.push({who:'jarvis',text:String(text).slice(0,1000),time:'Run '+runId.slice(0,8),runId});
-          renderChat();
+
+      // Prefer the authoritative final agent response. The previous client
+      // searched newest-first across lifecycle events, so run_finished won over
+      // agent_response and the user literally saw "run_finished".
+      const responses = events.filter(e => String(e.type || '') === 'agent_response');
+      const latestResponse = responses.length ? responses[responses.length - 1] : null;
+      if (latestResponse) {
+        const payload = latestResponse.data || {};
+        showAnswer(payload.text || payload.response || payload.summary || '');
+      } else {
+        // Reconstruct a response from streamed LLM deltas when available.
+        for (const e of events) {
+          if (String(e.type || '') !== 'llm_delta') continue;
+          const delta = String((e.data || {}).text || '').trim();
+          if (delta) streamedText += (streamedText ? ' ' : '') + delta;
+        }
+        if (streamedText) showAnswer(streamedText);
+      }
+
+      // Terminal errors should be visible, but lifecycle completion itself is
+      // not a user-facing assistant message.
+      if (!finalMessageShown) {
+        const errorEvent = events.slice().reverse().find(e => ['run_error','mission_error'].includes(String(e.type || '')));
+        if (errorEvent) {
+          const payload = errorEvent.data || {};
+          showAnswer('HERMUS could not complete this request · '+String(payload.error || payload.message || 'runtime error'));
         }
       }
+
+      // A completed run can carry the canonical final answer even if a response
+      // event was lost by a reconnect or an older worker.
+      if (!finalMessageShown && d.result) {
+        showAnswer(d.result.response || d.result.final_answer || d.result.answer || '');
+      }
+
       const terminal = ['finished','completed','success','failed','error','cancelled','canceled','stopped'].includes(status);
-      if (terminal || (d.finished === true) || tries >= 80) stop();
+      if (terminal || d.finished === true || tries >= 80) stop();
       else refreshOverview();
     };
+
     const timer = setInterval(tick, 1800);
     state.runPollers.set(runId,{timer,stop:()=>clearInterval(timer)});
     tick();
+
     function stop() {
       const x = state.runPollers.get(runId);
       if (x) { clearInterval(x.timer); state.runPollers.delete(runId); }
