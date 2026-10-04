@@ -1,4 +1,7 @@
 name: HERMUS CI
+permissions:
+  contents: write
+
 on:
   push:
   pull_request:
