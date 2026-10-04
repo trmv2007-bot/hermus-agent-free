@@ -969,12 +969,12 @@ class SkillForge:
 
         probe = (
             "import importlib.util,sys,json;"
-            f"spec=importlib.util.spec_from_file_location('sk', r'{py}');"
+            "spec=importlib.util.spec_from_file_location('sk', 'skill.py');"
             "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
             "steps=m.plan();r=m.run(task='validate', execute=False);"
             "print(json.dumps({'ok':bool(r.get('success')),'steps':len(steps)}))"
         )
-        rc, out, err = self._probe(probe, timeout=timeout)
+        rc, out, err = self._probe(probe, timeout=timeout, cwd=skill_dir)
         report["checks"].append(
             {"name": "import+entrypoint", "ok": rc == 0 and '"ok": true' in out, "detail": (out or err)[:400]}
         )
@@ -983,12 +983,13 @@ class SkillForge:
         report["valid"] = all(c["ok"] for c in report["checks"])
         return report
 
-    def _probe(self, code: str, timeout: int = 25) -> tuple[int, str, str]:
+    def _probe(self, code: str, timeout: int = 25, cwd: Path | None = None) -> tuple[int, str, str]:
         """Execute a validation snippet under resource limits (sandbox if present)."""
+        probe_cwd = str(cwd or self.skills_dir.parent)
         try:
             from .sandbox import sandbox
 
-            res = sandbox.run_python(code, timeout=timeout, purpose="skill-validation")
+            res = sandbox.run_python(code, timeout=timeout, cwd=probe_cwd, purpose="skill-validation")
             return int(res.get("returncode", 1)), str(res.get("stdout", "")), str(res.get("stderr", ""))
         except Exception:
             pass
@@ -998,7 +999,7 @@ class SkillForge:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=str(self.skills_dir.parent),
+                cwd=probe_cwd,
             )
             return proc.returncode, proc.stdout, proc.stderr
         except Exception as e:
