@@ -187,6 +187,7 @@
     'Safety preflight': ['/safety/preflight'],
     'Capability registry': ['/capabilities/registry'],
     'Devices': ['/devices'],
+    'Routines': ['/routines'],
   };
 
   // Canonical HERMUS action registry. These routes are backend capabilities;
@@ -419,6 +420,29 @@
 
   const originalOpen = open;
   open = async function(name){
+    if(name === 'Routines'){
+      try{
+        const data=await api('/routines');
+        const rows=Array.isArray(data.routines)?data.routines:[];
+        $('#modalTitle').textContent='Routines';
+        $('#modalLog').textContent=rows.length
+          ? rows.map(r=>[
+              String(r.enabled?'ON ':'OFF ') + String(r.name||r.id||'routine'),
+              'trigger='+String(r.event_type||''),
+              'action='+String(r.action_type||''),
+              'task='+String(r.task||'').slice(0,220),
+              'cooldown='+String(r.cooldown_seconds||0)+'s'
+            ].join('\n')).join('\n\n')
+          : 'No routines configured.';
+        $('#overlay').classList.add('open');
+        $('#overlay').setAttribute('aria-hidden','false');
+      }catch(e){
+        $('#modalTitle').textContent='Routines';
+        $('#modalLog').textContent='Routine discovery unavailable: '+e.message;
+        $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
+      }
+      return;
+    }
     if(name === 'Models'){
       await refreshModels(true);
       $('#modalTitle').textContent='Models';
