@@ -345,3 +345,12 @@ body:after{
   border-color:rgba(103,232,255,.24);
   background:linear-gradient(180deg,rgba(4,14,27,.94),rgba(2,9,18,.96));
 }
+
+
+/* Remove the false second-core impression in the hero floor glow. */
+.jarvis-home .stage-scene:after{
+  inset:58% -12% -18%;
+  background:radial-gradient(ellipse at 50% 48%,rgba(42,154,255,.09),rgba(42,154,255,.025) 38%,transparent 72%);
+  filter:blur(16px);
+  opacity:.9;
+}
