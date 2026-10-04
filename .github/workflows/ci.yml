@@ -99,17 +99,18 @@ jobs:
               return route.fulfill({status:200,contentType:'text/event-stream',headers:{'Cache-Control':'no-cache'},body});
             }
             if(p==='/runs/qa-run') return route.fulfill(json({
-              status:'finished',finished:true,
+              run:{run_id:'qa-run',status:'finished',finished:true,result:{response:'## QA complete\\n\\n| Check | Result |\\n|---|---|\\n| Streaming | PASS |\\n| Markdown table | PASS |'}},
               events:[
                 {id:1,type:'turn_started',data:{step:0,model:'local/qwen3:4b',stream:true}},
                 {id:2,type:'step_started',data:{step:1,of:2}},
-                {id:3,type:'llm_delta',data:{step:1,text:'thinking'}},
-                {id:4,type:'tool_call',data:{step:1,tool:'terminal',args:{command:'pytest tests/'}}},
-                {id:5,type:'tool_result',data:{step:1,tool:'terminal',ms:42,error:false,preview:'32 passed'}},
-                {id:6,type:'step_started',data:{step:2,of:2}},
-                {id:7,type:'verification',data:{step:2,verified:true}},
-                {id:8,type:'agent_response',data:{text:'QA run complete.'}},
-                {id:9,type:'run_finished',data:{status:'finished'}}
+                {id:3,type:'llm_delta',data:{step:1,text:'Hello\\n\\n'}},
+                {id:4,type:'llm_delta',data:{step:1,text:'live'}},
+                {id:5,type:'tool_call',data:{step:1,tool:'terminal',args:{command:'pytest tests/'}}},
+                {id:6,type:'tool_result',data:{step:1,tool:'terminal',ms:42,error:false,preview:'32 passed'}},
+                {id:7,type:'step_started',data:{step:2,of:2}},
+                {id:8,type:'verification',data:{step:2,verified:true}},
+                {id:9,type:'agent_response',data:{text:'## QA complete\\n\\n| Check | Result |\\n|---|---|\\n| Streaming | PASS |\\n| Markdown table | PASS |'}},
+                {id:10,type:'run_finished',data:{status:'finished'}}
               ]
             }));
             if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true},storage:{ok:true}}));
