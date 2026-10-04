@@ -454,32 +454,73 @@
   }
 
   async function loadModels() {
-    const [cat,sel] = await Promise.all([safe('/models/catalog?probe=false&refresh=false'),safe('/models/selected')]);
-    state.modelCatalog=Array.isArray(cat?.models)?cat.models:[];
-    state.selectedModels=sel?.selections||{};
-    const role=qs('#modelRoleInput'), deployment=qs('#modelDeploymentInput');
-    if(role&&deployment){
-      const current=state.selectedModels[role.value]||'auto';
-      deployment.innerHTML='<option value="auto">AUTO · best available</option>'+
-        state.modelCatalog.map(m=>'<option value="'+esc(m.ref)+'">'+esc(m.name||m.id||m.ref)+'</option>').join('');
-      if([...deployment.options].some(o=>o.value===current)) deployment.value=current;
-    }
-    const selected=deployment?.value;
-    const cap = selected && selected !== 'auto' ? await safe('/models/capabilities?model='+encodeURIComponent(selected)) : null;
-    const capNote=qs('#modelCapabilityNote');
-    if(capNote){
-      capNote.textContent = cap && !failed(cap) ? ('Capabilities · tools '+valueSummary(cap.tools)+' · vision '+valueSummary(cap.vision)+' · computer '+valueSummary(cap.computer_control || cap.computer)) :
-        (cap && failed(cap) ? 'Capability probe unavailable · routing can still use live catalog data.' : 'Model capabilities update when a deployment is selected.');
-    }
-    const host=qs('#modelsHost');if(!host)return;
-    if(failed(cat)){host.innerHTML=errorCard(errText(cat));return;}
-    host.innerHTML='<div class="model-grid">'+(state.modelCatalog.length?state.modelCatalog.map(m=>{
-      const live=m.source==='live', reach=m.reachable!==false;
-      return '<article class="model-card"><div class="model-top"><div><div class="model-name">'+esc(m.name||m.id||m.ref)+'</div><div class="meta">'+esc(m.provider||'provider')+' · '+esc(m.ref||m.id||'model')+'</div></div>'+
-      badge(reach?(live?'LIVE':'CACHED'):'OFFLINE',reach?(live?'good':'bad'))+'</div><div class="meta" style="margin-top:10px">Tools: '+esc(m.capabilities?.tools||'unknown')+' · Vision: '+esc(m.capabilities?.vision||'unknown')+' · Context: '+esc(m.context_length||m.context||'unknown')+'</div></article>';
-    }).join(''):'<div class="state-card"><strong>No deployments discovered.</strong><p>Open Runtime to verify the engine, or Providers & Keys to configure a backend.</p></div>')+'</div>';
-  }
+    const [cat, sel] = await Promise.all([
+      safe('/models/catalog?probe=false&refresh=false'),
+      safe('/models/selected')
+    ]);
+    state.modelCatalog = Array.isArray(cat?.models) ? cat.models : [];
+    state.selectedModels = sel?.selections || {};
 
+    const role = qs('#modelRoleInput');
+    const deployment = qs('#modelDeploymentInput');
+    if (role && deployment) {
+      const current = state.selectedModels[role.value] || 'auto';
+      deployment.innerHTML =
+        '<option value="auto">AUTO · best available</option>' +
+        state.modelCatalog.map((m) =>
+          '<option value="' + esc(m.ref) + '"' +
+          (m.ref === current ? ' selected' : '') + '>' +
+          esc(m.name || m.id || m.ref) +
+          '</option>'
+        ).join('');
+      deployment.value = [...deployment.options].some((o) => o.value === current) ? current : 'auto';
+    }
+
+    const selected = deployment?.value || 'auto';
+    const cap = selected !== 'auto'
+      ? await safe('/models/capabilities?model=' + encodeURIComponent(selected))
+      : null;
+    const capNote = qs('#modelCapabilityNote');
+    if (capNote) {
+      capNote.textContent = cap && !failed(cap)
+        ? 'Capabilities · tools ' + valueSummary(cap.tools) +
+          ' · vision ' + valueSummary(cap.vision) +
+          ' · computer ' + valueSummary(cap.computer_control || cap.computer)
+        : cap && failed(cap)
+          ? 'Capability probe unavailable · routing can still use live catalog data.'
+          : 'Model capabilities update when a deployment is selected.';
+    }
+
+    const host = qs('#modelsHost');
+    if (!host) return;
+    if (failed(cat)) {
+      host.innerHTML = errorCard(errText(cat));
+      return;
+    }
+
+    const cards = state.modelCatalog.map((m) => {
+      const live = m.source === 'live';
+      const reachable = m.reachable !== false;
+      const status = !reachable ? 'OFFLINE' : live ? 'LIVE' : 'CACHED';
+      const statusKind = !reachable ? 'bad' : live ? 'good' : '';
+      return '<article class="model-card">' +
+        '<div class="model-top"><div>' +
+        '<div class="model-name">' + esc(m.name || m.id || m.ref) + '</div>' +
+        '<div class="meta">' + esc(m.provider || 'provider') + ' · ' +
+          esc(m.ref || m.id || 'model') + '</div>' +
+        '</div>' + badge(status, statusKind) + '</div>' +
+        '<div class="meta" style="margin-top:10px">' +
+          'Tools: ' + esc(m.capabilities?.tools || 'unknown') +
+          ' · Vision: ' + esc(m.capabilities?.vision || 'unknown') +
+          ' · Context: ' + esc(m.context_length || m.context || 'unknown') +
+        '</div></article>';
+    }).join('');
+
+    host.innerHTML = '<div class="model-grid">' +
+      (cards || '<div class="state-card"><strong>No deployments discovered.</strong>' +
+       '<p>Open Runtime to verify the engine, or Providers & Keys to configure a backend.</p></div>') +
+      '</div>';
+  }
   async function saveModel() {
     const role=qs('#modelRoleInput')?.value||'default', model=qs('#modelDeploymentInput')?.value||'auto';
     try {
