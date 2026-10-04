@@ -81,6 +81,7 @@ jobs:
           const json=(body)=>({status:200,contentType:'application/json',body:JSON.stringify(body)});
           await page.route('**/*',async route=>{
             const u=new URL(route.request().url()), m=route.request().method(), p=u.pathname;
+            if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa'}));
             if(!/^(\/api\/|\/models\/|\/workshop\/|\/context|\/presence\/|\/focus|\/learning|\/routines|\/devices|\/personal-space)/.test(p)) return route.continue();
             if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true}}));
             if(p==='/api/v1/system/capabilities') return route.fulfill(json({capabilities:{web_search:true,osint_tools:true,world_model:true,workshop:true,media:true}}));
