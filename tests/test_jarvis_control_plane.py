@@ -14,9 +14,11 @@ def test_single_control_room_replaces_the_jarvis_page():
     for banner in ("318 Test Suites Verified Passing", "Page scrape active", "Autonomy: 100%"):
         assert banner not in text
     assert "HERMUS" in text
-    assert "NEXUS" in text
+    assert "HERMUS" in text
     assert "Tell HERMUS what you need" in text
-    assert "/static/nexus.js" in text
+    assert "/static/dashboard-v2.js" in text
+    assert "/static/dashboard-v2.css" in text
+    assert "setupWizard" in text
     assert TestClient(app).get("/jarvis").status_code == 404
 
 
@@ -111,14 +113,14 @@ def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
 
 
 def test_control_room_javascript_parses_with_node():
-    """The current Nexus asset must remain syntactically valid JavaScript."""
+    """The canonical dashboard asset must remain syntactically valid JavaScript."""
     import shutil
     import subprocess
     import tempfile
 
     if not shutil.which("node"):
         return
-    script = Path("gateway/static/nexus.js").read_text(encoding="utf-8")
+    script = Path("gateway/static/dashboard-v2.js").read_text(encoding="utf-8")
     with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
         fh.write(script)
         fh.flush()
