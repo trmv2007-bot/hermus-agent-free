@@ -617,9 +617,7 @@
     let finalMessageShown=false;
     let eventLog=[];
     const seen=new Set();
-    let source=null;
-    let fallbackTimer=null;
-    let fallbackTries=0;
+    let tries=0;
 
     const pendingMessage=()=>state.messages.find(m=>m.runId===runId&&m.pending);
 
@@ -639,8 +637,8 @@
       const answer=String(value||'').trim();
       if(!answer||finalMessageShown)return;
       finalMessageShown=true;
-      const clipped=answer.slice(0,12000);
       const pending=pendingMessage();
+      const clipped=answer.slice(0,12000);
       if(pending){
         pending.text=clipped;
         pending.pending=false;
@@ -652,67 +650,76 @@
       renderChat();
     };
 
-    const consume=e=>{
-      if(!e)return;
-      const eventId=e.id===undefined||e.id===null?'local-'+eventLog.length:String(e.id);
-      if(seen.has(eventId))return;
-      seen.add(eventId);
-      eventLog.push(e);
-      const type=String(e.type||'').toLowerCase(),d=e.data||{};
-      if(type==='agent_response')showAnswer(d.text||d.response||d.summary||'');
-      else if(type==='run_error'||type==='mission_error')showAnswer('Model unavailable · '+String(d.error||d.message||'runtime error'),'error');
-      else if(!finalMessageShown)sync();
-      if(type==='run_finished'||type==='mission_finished'||type==='__closed__'){
-        if(!finalMessageShown){
-          if(['error','failed'].includes(String(d.status||'').toLowerCase()))showAnswer('Model unavailable · HERMUS could not complete this request','error');
-          else showAnswer('HERMUS completed the request but returned no response','error');
-        }
-        stop();
-      }
-    };
-
-    const startPolling=()=>{
-      if(fallbackTimer||finalMessageShown)return;
-      fallbackTimer=setInterval(async()=>{
-        fallbackTries++;
-        const d=await safe('/runs/'+encodeURIComponent(runId)+'?limit=500');
-        if(failed(d)){if(fallbackTries>10)stop();return;}
-        for(const e of (Array.isArray(d.events)?d.events:[]))consume(e);
-        if(d.result&&!finalMessageShown)showAnswer(d.result.response||d.result.final_answer||d.result.answer||'');
-      },700);
-    };
-
     const stop=()=>{
-      if(fallbackTimer){clearInterval(fallbackTimer);fallbackTimer=null;}
-      if(source){try{source.close()}catch{}source=null;}
       const x=state.runPollers.get(runId);
-      if(x)state.runPollers.delete(runId);
+      if(x){clearTimeout(x.timer);state.runPollers.delete(runId);}
       if(state.activeRun===runId)state.activeRun=null;
       refreshOverview();
     };
 
-    try{
-      source=new EventSource(chatStreamUrl(runId));
-      state.runPollers.set(runId,{source,stop});
-      const streamEvents=[
-        'run_started','turn_started','mission_runtime_started','step_started','step_observed',
-        'llm_delta','llm_finished','tool_call','tool_result','tools_expanded','memory','skill',
-        'skill_harvest_started','skill_created','subagent','approval_required','verification',
-        'steer','steer_applied','steer_consumed','model_capability_warning','job_status',
-        'runtime_issue','agent_response','run_error','mission_error','run_finished','mission_finished','log',
-        'cancel_requested'
-      ];
-      for(const name of streamEvents){
-        source.addEventListener(name,message=>{try{consume(JSON.parse(message.data));}catch{}});
+    const tick=async()=>{
+      tries++;
+      const d=await safe('/runs/'+encodeURIComponent(runId)+'?limit=500');
+      if(failed(d)){
+        if(tries>12){
+          const pending=pendingMessage();
+          if(pending&&!finalMessageShown){
+            pending.text='Run status unavailable · reconnecting…';
+            pending.status='error';
+            renderChat();
+          }
+          stop();
+        }else{
+          const x=state.runPollers.get(runId);
+          if(x)x.timer=setTimeout(tick,800);
+        }
+        return;
       }
-      source.onerror=()=>{startPolling();};
-      setTimeout(()=>{if(!eventLog.length)startPolling();},1200);
-    }catch{
-      state.runPollers.set(runId,{source:null,stop});
-      startPolling();
-    }
-  }
 
+      const events=Array.isArray(d.events)?d.events:[];
+      eventLog=events;
+      sync();
+
+      const responses=events.filter(e=>String(e.type||'')==='agent_response');
+      const latestResponse=responses.length?responses[responses.length-1]:null;
+      if(latestResponse){
+        const payload=latestResponse.data||{};
+        showAnswer(payload.text||payload.response||payload.summary||'');
+      }
+
+      if(!finalMessageShown){
+        const errorEvent=events.slice().reverse().find(e=>['run_error','mission_error'].includes(String(e.type||'')));
+        if(errorEvent){
+          const payload=errorEvent.data||{};
+          showAnswer('Model unavailable · '+String(payload.error||payload.message||'runtime error'),'error');
+        }
+      }
+
+      if(!finalMessageShown&&d.result){
+        showAnswer(d.result.response||d.result.final_answer||d.result.answer||'');
+      }
+
+      const status=String(d.status||d.state||'').toLowerCase();
+      const terminal=['finished','completed','success','failed','error','cancelled','canceled','stopped'].includes(status);
+      if(terminal||d.finished===true){
+        if(!finalMessageShown){
+          showAnswer(['failed','error'].includes(status)
+            ?'Model unavailable · HERMUS could not complete this request'
+            :(['cancelled','canceled','stopped'].includes(status)
+              ?'HERMUS stopped this request'
+              :'HERMUS completed the request but returned no response'),'error');
+        }
+        stop();
+        return;
+      }
+
+      const x=state.runPollers.get(runId);
+      if(x)x.timer=setTimeout(tick,400);
+    };
+
+    state.runPollers.set(runId,{timer:null,stop});
+    tick();
+  }
 
   function renderChat() {
     const host=qs('#chatMessages');if(!host)return;
