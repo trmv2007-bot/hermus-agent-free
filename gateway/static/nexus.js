@@ -454,6 +454,22 @@
 
   const originalOpen = open;
   open = async function(name){
+    if(name === 'Focus' || name === 'Learning'){
+      try{
+        const endpoint=name==='Focus' ? '/focus' : '/learning?limit=6';
+        const data=await api(endpoint);
+        $('#modalTitle').textContent=name;
+        $('#modalLog').textContent=JSON.stringify(data,null,2);
+        $('#overlay').classList.add('open');
+        $('#overlay').setAttribute('aria-hidden','false');
+      }catch(e){
+        $('#modalTitle').textContent=name;
+        $('#modalLog').textContent=name+' unavailable: '+e.message;
+        $('#overlay').classList.add('open');
+        $('#overlay').setAttribute('aria-hidden','false');
+      }
+      return;
+    }
     if(name === 'Routines'){
       try{
         const data=await api('/routines');
