@@ -698,6 +698,7 @@ def execute(
     mode: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    session_id: str | None = None,
     prefer: str = "auto",
     on_event: Callable[..., None] | None = None,
     stream: bool = False,
@@ -787,6 +788,7 @@ def execute(
         mode=mode,
         api_key=api_key,
         base_url=base_url,
+        session_id=session_id,
     )
 
     if kind == "chat" or resolved_agent is None:
