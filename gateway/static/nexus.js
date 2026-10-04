@@ -144,7 +144,7 @@
   window.HermusNexus = { api, sendCommand, contextualAction, actions, state };
 
   const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);
-  const modelState = { catalog:null, selected:null, inFlight:false };
+  const modelState = { catalog:null, selected:null, health:null, inFlight:false };
 
   function currentModelRole(){
     const select=$('#modelRole');
@@ -193,7 +193,13 @@
       const live=models.filter(row=>row.source==='live').length;
       const providers=new Set(models.map(row=>row.provider)).size;
       const reachable=models.filter(row=>row.reachable!==false).length;
-      meta.textContent=models.length + ' selectable · ' + live + ' live · ' + providers + ' provider(s) · ' + reachable + ' reachable · role ' + role;
+      const health=(modelState.health && modelState.health.models) || {};
+      const activeStats=Object.entries(health).filter(([ref])=>models.some(row=>row.ref===ref));
+      const avg=activeStats.length
+        ? Math.round(activeStats.reduce((sum,[,v])=>sum+Number(v.avg_latency_ms||0),0)/activeStats.length)
+        : null;
+      meta.textContent=models.length + ' selectable · ' + live + ' live · ' + providers + ' provider(s) · ' + reachable + ' reachable · ' +
+        (avg !== null ? ('avg ' + avg + 'ms · ') : '') + 'role ' + role;
       fleet.innerHTML=models.slice(0,9).map(row=>{
         const reach=row.reachable===false ? 'offline' : (row.source==='live' ? 'live' : 'cached');
         const caps=Object.entries(row.capabilities||{}).filter(([,v])=>v==='yes').slice(0,3).map(([k])=>k).join(' · ');
@@ -216,10 +222,12 @@
       const query=probe ? '?probe=true&refresh=true' : '?probe=false&refresh=false';
       const results=await Promise.all([
         api('/models/catalog' + query),
-        api('/models/selected')
+        api('/models/selected'),
+        api('/models/health')
       ]);
       modelState.catalog=results[0];
       modelState.selected=results[1];
+      modelState.health=results[2];
       renderModelSelect();
       addEvent('Model catalog · ' + String(modelState.catalog.count || 0) + ' deployment(s) discovered');
     }catch(e){
