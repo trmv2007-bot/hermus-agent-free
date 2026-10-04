@@ -676,6 +676,7 @@
         return;
       }
 
+      const runState=d.run||d;
       const events=Array.isArray(d.events)?d.events:[];
       eventLog=events;
       sync();
@@ -695,11 +696,12 @@
         }
       }
 
-      if(!finalMessageShown&&d.result){
-        showAnswer(d.result.response||d.result.final_answer||d.result.answer||'');
+      if(!finalMessageShown&&runState.result){
+        const result=runState.result;
+        showAnswer(result.response||result.final_answer||result.answer||'');
       }
 
-      const status=String(d.status||d.state||'').toLowerCase();
+      const status=String(runState.status||runState.state||'').toLowerCase();
       const terminal=['finished','completed','success','failed','error','cancelled','canceled','stopped'].includes(status);
       if(terminal||d.finished===true){
         if(!finalMessageShown){
