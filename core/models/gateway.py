@@ -387,7 +387,7 @@ class ModelGateway:
     ) -> str:
         """Vision completion (image -> text) through the canonical boundary.
 
-        Resolves the model (default the free-local Ollama LLaVA path), builds the
+        Resolves the configured/selected vision-capable deployment dynamically, builds the
         provider client via ``llm()`` so the caller never constructs one, sends
         the image, records a typed outcome, and returns the text. On failure it
         raises a :class:`ModelGatewayError` carrying a structured ``failure_class``
