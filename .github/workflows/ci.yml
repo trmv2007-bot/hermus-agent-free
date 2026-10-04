@@ -151,12 +151,22 @@ jobs:
           // Control Center: every section must activate and render real controls/state.
           await page.locator('[data-view="settings"]').first().click();
           const tabs=await page.locator('[data-settings-tab]').evaluateAll(es=>es.map(e=>e.dataset.settingsTab));
+          if(await page.locator('[data-settings-tab]').first().getAttribute('role')!=='tab') throw new Error('Control Center tabs missing role=tab');
           for(const tab of tabs){
             await page.locator('[data-settings-tab="'+tab+'"]').click();
             await page.waitForTimeout(50);
             if(!(await page.locator('[data-settings-tab="'+tab+'"]').evaluate(el=>el.classList.contains('active')))) throw new Error('Settings tab failed: '+tab);
+            if((await page.locator('[data-settings-tab="'+tab+'"]').getAttribute('aria-selected'))!=='true') throw new Error('Settings tab selection state failed: '+tab);
             if(!(await page.locator('#settingsHost').innerText()).trim()) throw new Error('Settings tab blank: '+tab);
           }
+          await page.locator('[data-settings-tab="general"]').click();
+          await page.locator('#settingsSearch').fill('voice');
+          const visibleVoice=await page.locator('[data-settings-tab="voice"]').isVisible();
+          const visibleModels=await page.locator('[data-settings-tab="models"]').isVisible();
+          if(!visibleVoice || visibleModels) throw new Error('Control Center settings search failed');
+          await page.locator('#settingsSearch').fill('');
+          await page.locator('[data-settings-tab="general"]').press('ArrowRight');
+          if((await page.locator('[data-settings-tab="models"]').getAttribute('aria-selected'))!=='true') throw new Error('Control Center arrow-key tab navigation failed');
           await page.locator('[data-settings-tab="providers"]').click();
           await page.locator('#keyProvider').fill('ollama');
           await page.locator('[data-key-add]').click();
