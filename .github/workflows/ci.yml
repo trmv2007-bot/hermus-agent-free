@@ -213,6 +213,8 @@ jobs:
           if(!activityTexts.some(t=>t.includes('Model · local/qwen3:4b'))) throw new Error('Live model activity missing');
           if(!activityTexts.some(t=>t.includes('Running terminal'))) throw new Error('Live tool activity missing');
           if(!activityTexts.some(t=>t.includes('Checking the result'))) throw new Error('Verification activity missing');
+          const transcript=await page.locator('.msg').allTextContents();
+          console.log('CHAT QA TRANSCRIPT:',JSON.stringify(transcript));
           if(!(await page.locator('.msg-text').filter({hasText:'QA complete'}).count())) throw new Error('Final assistant response missing');
           if(await page.locator('.msg-text table').count()!==1) throw new Error('Markdown table did not render as a table');
           if(await page.locator('.live-activity .activity-detail').count()<3) throw new Error('Live activity feed did not render');
