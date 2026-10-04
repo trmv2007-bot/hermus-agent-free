@@ -126,20 +126,52 @@ class ModelRouter:
         return min(5, max(1, score))
 
     def _available_workers(self) -> list[dict[str, Any]]:
-        workers: list[dict[str, Any]] = []
+        """Build candidates from the canonical ModelGateway catalog first."""
+        try:
+            from .models import get_model_gateway
+
+            catalog = get_model_gateway().catalog(probe=False, refresh=False)
+            rows = catalog.get("models") or []
+            workers = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                ref = str(row.get("ref") or "")
+                provider, _, model = ref.partition("/")
+                provider = provider or str(row.get("provider") or "")
+                model = model or str(row.get("id") or "")
+                if not provider or not model:
+                    continue
+                workers.append({
+                    "provider": provider,
+                    "model": model,
+                    "name": row.get("provider_name") or provider,
+                    "base_url": row.get("base_url"),
+                    "source": row.get("source"),
+                    "reachable": row.get("reachable"),
+                    "healthy": row.get("healthy"),
+                    "latency_ms": row.get("latency_ms"),
+                    "context_window": row.get("context_window") or row.get("context_tokens") or 0,
+                    "capabilities": dict(row.get("capabilities") or {}),
+                })
+            if workers:
+                return workers[:32]
+        except Exception:
+            pass
+
         try:
             from .model_fleet import _available_workers
-
-            workers = _available_workers(limit=32)
+            return _available_workers(limit=32)
         except Exception:
-            workers = []
-        return workers
+            return []
 
     def _score_worker(
         self, w: dict[str, Any], task_type: str, needs_tools: bool, wants_vision: bool, context_tokens: int
     ) -> tuple[float, str]:
         provider = (w.get("provider") or "").lower()
         model = (w.get("model") or "").lower()
+        capabilities = w.get("capabilities") or {}
+        source = str(w.get("source") or "").lower()
         profile = TASK_PROFILES.get(task_type, TASK_PROFILES["chat"])
         keywords = profile["keywords"]
         score = 0.0
@@ -149,6 +181,28 @@ class ModelRouter:
         order = {"ollama": 0, "groq": 1, "huggingface": 2, "hf": 2, "openrouter": 3, "mock": 0}
         score += (6 - order.get(provider, 4)) * 1.0
         reasons.append(f"provider={provider}")
+
+        # Capability evidence is authoritative; unknown is not treated as support.
+        if needs_tools:
+            cap = capabilities.get("tools")
+            if cap in ("no", False):
+                return -100.0, "tools-unsupported"
+            score += 8.0 if cap in ("yes", True) else -2.0
+            reasons.append("tools-confirmed" if cap in ("yes", True) else "tools-unknown")
+        if wants_vision:
+            cap = capabilities.get("vision")
+            if cap in ("no", False):
+                return -100.0, "vision-unsupported"
+            score += 8.0 if cap in ("yes", True) else -2.0
+            reasons.append("vision-confirmed" if cap in ("yes", True) else "vision-unknown")
+        if task_type in ("reasoning", "research", "critic", "verifier") and capabilities.get("reasoning") in ("yes", True):
+            score += 4.0
+            reasons.append("reasoning-confirmed")
+        if w.get("reachable") is False or w.get("healthy") is False:
+            return -100.0, "unreachable"
+        if source in ("local", "runtime", "ollama", "env-local"):
+            score += 1.5
+            reasons.append("local-preferred")
 
         # model keyword match
         if any(k in model for k in keywords):
@@ -190,10 +244,7 @@ class ModelRouter:
             score -= 8.0
             reasons.append("context-too-small")
 
-        # tool-calling: prefer providers known for reliable tools when needed
-        if needs_tools and provider in ("ollama", "groq", "openrouter"):
-            score += 1.0
-            reasons.append("tools-ok")
+        # Tool capability is scored from catalog evidence above; provider names are not proof.
 
         return score, ",".join(reasons)
 
