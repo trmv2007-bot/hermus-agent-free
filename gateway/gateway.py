@@ -292,6 +292,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
     presence_task = None
     ambient_task = None
+    personal_space_task = None
     if getattr(config, "presence_enabled", True):
         try:
             from core.presence_kernel import presence_kernel
@@ -302,6 +303,14 @@ async def lifespan(app: FastAPI):
             ambient_task = asyncio.create_task(ambient_loop.run())
         except Exception as e:
             logger.error(f"[Gateway] ambient presence failed to start: {type(e).__name__}: {e}")
+
+    if getattr(config, "personal_space_enabled", True):
+        try:
+            from core.personal_space import personal_space
+
+            personal_space_task = asyncio.create_task(personal_space.run())
+        except Exception as e:
+            logger.error(f"[Gateway] Personal Space failed to start: {type(e).__name__}: {e}")
 
     maintenance_task = None
     if getattr(config, "memory_sweep_minutes", 60) > 0:
@@ -332,6 +341,14 @@ async def lifespan(app: FastAPI):
             presence_task.cancel()
         if ambient_task and not ambient_task.done():
             ambient_task.cancel()
+        if personal_space_task and not personal_space_task.done():
+            personal_space_task.cancel()
+        try:
+            from core.personal_space import personal_space
+
+            personal_space.stop()
+        except Exception:
+            pass
         try:
             from core.presence_kernel import presence_kernel
             presence_kernel.stop()
@@ -534,6 +551,7 @@ from gateway.routes_devices import router as _devices_router  # noqa: E402
 from gateway.routes_learning import router as _learning_router  # noqa: E402
 from gateway.routes_routines import router as _routines_router  # noqa: E402
 from gateway.routes_focus import router as _focus_router  # noqa: E402
+from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -566,6 +584,7 @@ app.include_router(_devices_router, dependencies=_gate_control)
 app.include_router(_learning_router, dependencies=_gate_control)
 app.include_router(_routines_router, dependencies=_gate_control)
 app.include_router(_focus_router, dependencies=_gate_control)
+app.include_router(_personal_space_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -670,6 +689,8 @@ async def api_status():
             "profiles_personas",
             "durable_identity_presence_heartbeat",
             "ongoing_goals_safe_checkins",
+            "bounded_autonomous_curiosity",
+            "personal_space_proposals",
             "local_engine_routing_npu_gpu",
             "nollama_openvino_engine",
             "hermus_doctor_self_repair",

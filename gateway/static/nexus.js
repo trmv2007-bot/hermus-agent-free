@@ -190,7 +190,14 @@
     'Routines': ['/routines'],
     'Focus': ['/focus'],
     'Learning': ['/learning'],
+    'Personal Space': ['/personal-space'],
   };
+
+  // Explicit projection helpers keep the canonical surfaces directly callable by tests and extensions.
+  async function refreshFocus(){ return api('/focus'); }
+  async function refreshLearning(){ return api('/learning?limit=6'); }
+  async function refreshRoutines(){ return api('/routines'); }
+  async function validateRoutine(payload={}){ return api('/routines/validate',{method:'POST',body:JSON.stringify(payload)}); }
 
   // Canonical HERMUS action registry. These routes are backend capabilities;
   // the Nexus shell presents them contextually rather than as permanent controls.
@@ -437,6 +444,7 @@
   const PALETTE_ITEMS=[
     ['Focus','See what matters right now'],
     ['Learning','Inspect lessons, skills and episodes'],
+    ['Personal Space','Enter HERMUS private curiosity space'],
     ['Routines','View and manage proactive routines'],
     ['Devices','Inspect desktop, browser, remote and Android state'],
     ['Models','Inspect runtime-discovered model deployments'],
@@ -454,6 +462,10 @@
 
   const originalOpen = open;
   open = async function(name){
+    if(name === 'Personal Space' && window.HermusPersonalSpace){
+      window.HermusPersonalSpace.open();
+      return;
+    }
     if(name === 'Focus' || name === 'Learning'){
       try{
         const endpoint=name==='Focus' ? '/focus' : '/learning?limit=6';

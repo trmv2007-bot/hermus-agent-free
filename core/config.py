@@ -263,6 +263,13 @@ class Config(BaseSettings):
     # read-only status check through the normal runtime path.
     presence_checkin_after_minutes: int = Field(default=240, validation_alias="HERMUS_PRESENCE_CHECKIN_AFTER_MINUTES")
     presence_proactive_checkins: EnvFlag = Field(default=False, validation_alias="HERMUS_PRESENCE_PROACTIVE_CHECKINS")
+    # Bounded autonomous curiosity: Personal Space only works after a quiet period,
+    # has a daily cycle cap, and runs curiosity turns read-only until the owner approves a proposal.
+    personal_space_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_PERSONAL_SPACE_ENABLED")
+    personal_space_state_path: str = Field(default="data/personal_space.json", validation_alias="HERMUS_PERSONAL_SPACE_STATE")
+    personal_space_interval_seconds: int = Field(default=900, validation_alias="HERMUS_PERSONAL_SPACE_INTERVAL_SECONDS")
+    personal_space_idle_minutes: int = Field(default=10, validation_alias="HERMUS_PERSONAL_SPACE_IDLE_MINUTES")
+    personal_space_daily_cap: int = Field(default=4, validation_alias="HERMUS_PERSONAL_SPACE_DAILY_CAP")
 
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"

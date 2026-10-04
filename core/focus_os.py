@@ -9,12 +9,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+# Lazy dependency seams keep imports cycle-safe while allowing focused runtime tests
+# to replace the canonical providers without being overwritten by local imports.
+personal_os = None
+presence_kernel = None
+device_fabric = None
+learning_fabric = None
+
+
 class FocusOS:
     def snapshot(self, *, query: str = "", area: str | None = None) -> dict[str, Any]:
-        from .personal_os import personal_os
-        from .presence_kernel import presence_kernel
-        from .device_fabric import device_fabric
-        from .learning_fabric import learning_fabric
+        global personal_os, presence_kernel, device_fabric, learning_fabric
+        if personal_os is None:
+            from .personal_os import personal_os as _personal_os
+            personal_os = _personal_os
+        if presence_kernel is None:
+            from .presence_kernel import presence_kernel as _presence_kernel
+            presence_kernel = _presence_kernel
+        if device_fabric is None:
+            from .device_fabric import device_fabric as _device_fabric
+            device_fabric = _device_fabric
+        if learning_fabric is None:
+            from .learning_fabric import learning_fabric as _learning_fabric
+            learning_fabric = _learning_fabric
 
         personal = personal_os.briefing(query=query, area=area)
 

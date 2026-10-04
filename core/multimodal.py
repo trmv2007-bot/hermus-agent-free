@@ -107,6 +107,12 @@ class MultimodalIntelligence:
         from tools.browser import browser_screenshot
 
         screenshot = browser_screenshot(str(target), full_page=full_page)
+        if not isinstance(screenshot, dict):
+            screenshot = {
+                "success": target.is_file(),
+                "path": str(target),
+                "error": None if target.is_file() else "browser screenshot provider returned an invalid result",
+            }
         if not screenshot.get("success"):
             evidence = MultimodalEvidence(
                 source="browser",

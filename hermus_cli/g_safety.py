@@ -225,7 +225,10 @@ def _run_powers(args, ctx: CLIContext) -> None:
 
         registry = get_capability_registry()
         if args.powers_action == "registry":
-            for rec in registry.list():
+            rows = registry.list()
+            if not rows:
+                print("No capability readiness/activation records registered yet.")
+            for rec in rows:
                 print(
                     f" - {rec.get('name')} | status={rec.get('status')} | category={rec.get('category')} | activation={rec.get('activation_request_id')}"
                 )

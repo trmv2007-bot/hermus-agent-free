@@ -826,7 +826,14 @@ class HermusDoctor:
             # working with "anything" configured.
             fb = self._configured_doctor_fallback()
             if fb:
-                return get_model_gateway().llm(model=fb[0]), fb[0]
+                llm = get_model_gateway().llm(model=fb[0])
+                # Preserve the canonical provider/model reference on the concrete
+                # client for diagnostics and legacy doctor integrations.
+                try:
+                    llm.model = fb[0]
+                except Exception:
+                    pass
+                return llm, fb[0]
         return get_model_gateway().llm(model=ref), ref
 
     def triage(
