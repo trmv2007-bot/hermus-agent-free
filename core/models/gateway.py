@@ -352,18 +352,23 @@ class ModelGateway:
         try:
             resp = llm_obj.chat(messages, tools=tools)
         except Exception as exc:
-            self._record_outcome(getattr(llm_obj, "provider", provider or "unknown"), self._failed_result(exc, trace_id))
+            actual_provider = getattr(llm_obj, "provider", provider or "unknown")
+            actual_model = getattr(llm_obj, "model_name", model or "")
+            failed = self._failed_result(exc, trace_id)
+            failed.provider = actual_provider
+            failed.model = actual_model
+            self._record_outcome(actual_provider, failed)
             raise ModelGatewayError(
                 str(exc),
                 failure_class=self._classify_failure(exc),
-                provider=getattr(llm_obj, "provider", provider or "unknown"),
-                model=getattr(llm_obj, "model_name", model or ""),
+                provider=actual_provider,
+                model=actual_model,
             ) from exc
         self._record_outcome(
             getattr(llm_obj, "provider", provider or "unknown"),
             ModelGatewayResult(
-                provider=provider or "unknown",
-                model=model or "",
+                provider=getattr(llm_obj, "provider", provider or "unknown"),
+                model=getattr(llm_obj, "model_name", model or ""),
                 ok=True,
                 latency_ms=int((time.time() - started) * 1000),
                 content=resp.content,
