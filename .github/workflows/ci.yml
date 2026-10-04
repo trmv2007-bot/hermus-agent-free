@@ -111,7 +111,7 @@ jobs:
 
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           console.log('QA: baseline');
-          await page.screenshot({path:out+'/00-baseline.png',fullPage:true});
+          await page.screenshot({path:out+'/00-baseline.png',fullPage:false});
 
           const visibleButtons=page.locator('button:visible');
           const count=await visibleButtons.count();
