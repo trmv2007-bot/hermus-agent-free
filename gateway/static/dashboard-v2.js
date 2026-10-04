@@ -1725,6 +1725,15 @@
   qs('#overviewCommandForm')?.addEventListener('submit',e=>{e.preventDefault();const i=qs('#overviewCommand');if(i)sendCommand(i.value);if(i)i.value='';});
   qs('#paletteInput')?.addEventListener('input',renderPalette);
   document.addEventListener('input',e=>{if(e.target?.id==='chatFontSizeRange')setChatFontSize(e.target.value)},false);
+  document.addEventListener('change',e=>{
+    if(e.target?.id!=='chatModelSelect')return;
+    const model=e.target.value||'auto';
+    state.settings.chat_model=model;
+    localStorage.setItem('hermus_dashboard_settings',JSON.stringify(state.settings));
+    const result=qs('#chatModelResult');
+    if(result)result.textContent=model==='auto'?'Using default role routing.':'Chat is pinned to '+model+'.';
+    toast('Chat model updated');
+  },false);
 
   qs('#paletteInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'){const first=qs('[data-palette-view]');if(first)first.click();}});
   qs('#chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}});
