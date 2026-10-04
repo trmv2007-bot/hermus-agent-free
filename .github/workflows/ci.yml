@@ -18,7 +18,11 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
+      - run: python -m compileall -q core gateway tools hermus_cli scheduler
       - run: python -m pytest tests/ -q --ignore=tests/eval
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m mypy core/log.py core/errors.py
+
+      - name: JavaScript syntax
+        run: node --check gateway/static/nexus.js
