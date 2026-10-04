@@ -436,12 +436,23 @@ def plan(hw: HardwareSnapshot | None = None, mode: str | None = None) -> dict[st
     hw = hw or cached_hardware()
     mode = (mode or getattr(config, "local_engine_mode", "auto") or "auto").strip().lower()
 
-    npu_model = getattr(config, "nollama_npu_model", "") or "openvino/qwen3-8b-int4-cw-ov"
-    gpu_model = getattr(config, "nollama_gpu_model", "") or "openvino/minicpm5-1b-int4-g128-ov"
-    vision_model = getattr(config, "nollama_vision_model", "") or "openvino/qwen3-vl-8b-instruct-int8-ov"
-    doctor_model = getattr(config, "doctor_model", "") or gpu_model
-    ollama_model = getattr(config, "ollama_default_model", "") or "llama3.1:8b"
-    ollama_vision = getattr(config, "ollama_vision_model", "") or "llava:7b"
+    def _dynamic_model(role: str, provider: str, required: list[str] | None = None) -> str:
+        try:
+            from .models import get_model_gateway
+
+            _provider, _model = get_model_gateway().resolve_model(role, required=required, provider=provider)
+            return str(_model or "")
+        except Exception:
+            return ""
+
+    # Dynamic discovery is primary. Configured model fields are an explicit
+    # operator fallback for offline bootstrap, not the dashboard model source.
+    npu_model = _dynamic_model(ROLE_BACKGROUND, ENGINE_NOLLAMA) or getattr(config, "nollama_npu_model", "")
+    gpu_model = _dynamic_model(ROLE_REASONING, ENGINE_NOLLAMA) or getattr(config, "nollama_gpu_model", "")
+    vision_model = _dynamic_model(ROLE_VISION, ENGINE_NOLLAMA, ["vision"]) or getattr(config, "nollama_vision_model", "")
+    doctor_model = _dynamic_model(ROLE_DOCTOR, ENGINE_NOLLAMA) or getattr(config, "doctor_model", "") or gpu_model
+    ollama_model = _dynamic_model(ROLE_REASONING, ENGINE_OLLAMA) or getattr(config, "ollama_default_model", "")
+    ollama_vision = _dynamic_model(ROLE_VISION, ENGINE_OLLAMA, ["vision"]) or getattr(config, "ollama_vision_model", "")
 
     notes: list[str] = []
     has_npu, has_gpu = hw.has_npu, hw.has_gpu
@@ -506,7 +517,7 @@ def plan(hw: HardwareSnapshot | None = None, mode: str | None = None) -> dict[st
                 ENGINE_OLLAMA,
                 "GPU",
                 ollama_vision,
-                "Ollama serves LLaVA on NVIDIA/AMD GPUs",
+                "Ollama exposes a dynamically discovered vision-capable deployment on NVIDIA/AMD GPUs",
             )
         else:
             roles[ROLE_REASONING] = _role(
@@ -521,7 +532,7 @@ def plan(hw: HardwareSnapshot | None = None, mode: str | None = None) -> dict[st
                 ENGINE_NOLLAMA,
                 "GPU",
                 vision_model,
-                "Ollama has no Intel path for local vision models",
+                "Intel local vision uses the dynamically selected NoLlama vision deployment",
             )
         notes.append(
             "Pipelined: the NPU keeps continuous background work (voice, embeddings, "
@@ -612,16 +623,14 @@ def plan(hw: HardwareSnapshot | None = None, mode: str | None = None) -> dict[st
             nollama_catalog = {}
 
         def _nollama_cpu_model(role: str) -> str:
-            row = (nollama_catalog or {}).get("minicpm")
-            if row is None or role not in (row.get("roles") or []):
-                row = None
-                # Prefer the most relevant installed CPU model for this role.
-                try:
-                    from .nollama import nollama_manager as _nm
+            # Select from installed local deployments rather than assuming a
+            # particular model family.
+            try:
+                from .nollama import nollama_manager as _nm
 
-                    row = _nm.best_installed_model("CPU", (role,))
-                except Exception:
-                    row = None
+                row = _nm.best_installed_model("CPU", (role,))
+            except Exception:
+                row = None
             if not row:
                 return ""
             return str(row.get("repo") or "").split("/")[-1] or row.get("path")
