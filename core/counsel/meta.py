@@ -97,7 +97,8 @@ class MetaCounsel:
             from ..models import get_model_gateway
 
             resp = get_model_gateway().chat(
-                [{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}], model=config.model
+                [{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}],
+                role="reasoning",
             )
             proposed = self._parse_amendments(resp.content or "")
         except Exception as e:
