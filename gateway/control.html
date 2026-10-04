@@ -34,7 +34,7 @@
       <div class="sidebar-main">
         <div class="sidebar-label">WORKSPACE</div>
         <button class="side-item active" type="button" data-open="Dashboard state"><span class="side-icon">⌂</span><span>Overview</span></button>
-        <button class="side-item" type="button" data-command="Start a new chat"><span class="side-icon">◌</span><span>Chat</span></button>
+        <button class="side-item" type="button" data-workbench-target="chat"><span class="side-icon">◌</span><span>Chat</span></button>
         <button class="side-item" type="button" data-workshop-open><span class="side-icon">⌁</span><span>Workshop</span></button>
         <button class="side-item" type="button" data-open="Agents"><span class="side-icon">✥</span><span>Agents</span></button>
         <button class="side-item" type="button" data-open="Models"><span class="side-icon">◉</span><span>Models</span></button>
@@ -45,10 +45,10 @@
       </div>
       <div class="sidebar-secondary">
         <div class="sidebar-label">TOOLS</div>
-        <button class="side-item" type="button" data-open="Devices"><span class="side-icon">◎</span><span>Browser</span></button>
-        <button class="side-item" type="button" data-command="Open the terminal"><span class="side-icon">›_</span><span>Terminal</span></button>
-        <button class="side-item" type="button" data-command="Open image generation"><span class="side-icon">▣</span><span>Image Lab</span></button>
-        <button class="side-item" type="button" data-command="Open video generation"><span class="side-icon">▶</span><span>Video Studio</span></button>
+        <button class="side-item" type="button" data-workbench-target="browser"><span class="side-icon">◎</span><span>Browser</span></button>
+        <button class="side-item" type="button" data-workbench-target="terminal"><span class="side-icon">›_</span><span>Terminal</span></button>
+        <button class="side-item" type="button" data-workbench-target="image"><span class="side-icon">▣</span><span>Image Lab</span></button>
+        <button class="side-item" type="button" data-workbench-target="video"><span class="side-icon">▶</span><span>Video Studio</span></button>
         <button class="side-item" type="button" data-workshop-open><span class="side-icon">◇</span><span>3D Space</span></button>
       </div>
       <div class="sidebar-footer">
@@ -276,11 +276,11 @@
         <div class="workbench-view-stage" id="workbenchViewStage" aria-live="polite">
           <section class="workbench-view active" data-workbench-view="chat"><div class="view-hero"><span class="eyebrow">CHAT</span><h3>Talk to HERMUS</h3><p>Route a live turn without leaving the overview.</p></div></section>
           <section class="workbench-view" data-workbench-view="ide"><div class="view-hero"><span class="eyebrow">IDE</span><h3>Build in Workshop</h3><p>Open the deep editor when the task becomes code.</p><button class="button" type="button" data-workshop-open>OPEN WORKSHOP ↗</button></div></section>
-          <section class="workbench-view" data-workbench-view="browser"><div class="view-hero"><span class="eyebrow">BROWSER</span><h3>Visual web context</h3><p>Inspect and route browser work through the HERMUS computer layer.</p><button class="button" type="button" data-open="Devices">OPEN BROWSER CONTEXT</button></div></section>
-          <section class="workbench-view" data-workbench-view="terminal"><div class="view-hero"><span class="eyebrow">TERMINAL</span><h3>Command workspace</h3><p>Run a terminal task through the command gateway.</p><button class="button" type="button" data-command="Open the terminal">OPEN TERMINAL ↗</button></div></section>
-          <section class="workbench-view" data-workbench-view="image"><div class="view-hero"><span class="eyebrow">IMAGE</span><h3>Create visuals</h3><p>Start a visual concept and keep it attached to the current workspace.</p><button class="button" type="button" data-command="Open image generation">START IMAGE GENERATION ↗</button></div></section>
-          <section class="workbench-view" data-workbench-view="video"><div class="view-hero"><span class="eyebrow">VIDEO</span><h3>Plan motion</h3><p>Open the media tools and keep generation in context.</p><button class="button" type="button" data-command="Open video generation">OPEN VIDEO TOOLS ↗</button></div></section>
-          <section class="workbench-view" data-workbench-view="notes"><div class="view-hero"><span class="eyebrow">NOTES</span><h3>Knowledge workspace</h3><p>Keep notes, research and lessons close to active work.</p><button class="button" type="button" data-open="Learning">OPEN KNOWLEDGE ↗</button></div></section>
+          <section class="workbench-view" data-workbench-view="browser"><div class="view-hero"><span class="eyebrow">BROWSER</span><h3>Visual web context</h3><p>Fetch a public page through the HERMUS browser layer and keep the result in this workspace.</p><div class="workbench-inline-form"><input id="browserUrl" placeholder="https://example.com" aria-label="Browser URL"><button id="browserOpen" class="button primary" type="button">OPEN PAGE ↗</button></div><div id="browserResult" class="workbench-result">No page loaded.</div></div></section>
+          <section class="workbench-view" data-workbench-view="terminal"><div class="view-hero"><span class="eyebrow">TERMINAL</span><h3>Command workspace</h3><p>Send a terminal task to HERMUS and follow execution from the mission rail.</p><div class="workbench-inline-form"><input id="terminalCommand" placeholder="Run a safe terminal task…" aria-label="Terminal task"><button id="terminalRun" class="button primary" type="button">RUN ↗</button></div><div id="terminalResult" class="workbench-result">Ready.</div></div></section>
+          <section class="workbench-view" data-workbench-view="image"><div class="view-hero"><span class="eyebrow">IMAGE</span><h3>Create visuals</h3><p>Turn a prompt into a media request without leaving HERMUS.</p><div class="workbench-inline-form"><input id="imagePrompt" placeholder="Describe the image…" aria-label="Image generation prompt"><button id="imageRun" class="button primary" type="button">GENERATE ↗</button></div><div id="imageResult" class="workbench-result">No generation started.</div></div></section>
+          <section class="workbench-view" data-workbench-view="video"><div class="view-hero"><span class="eyebrow">VIDEO</span><h3>Plan motion</h3><p>Build a motion concept and send it to the media pipeline.</p><div class="workbench-inline-form"><input id="videoPrompt" placeholder="Describe the shot or sequence…" aria-label="Video generation prompt"><button id="videoRun" class="button primary" type="button">GENERATE ↗</button></div><div id="videoResult" class="workbench-result">No generation started.</div></div></section>
+          <section class="workbench-view" data-workbench-view="notes"><div class="view-hero"><span class="eyebrow">NOTES</span><h3>Knowledge workspace</h3><p>Write a durable note into HERMUS memory without leaving the workspace.</p><div class="workbench-inline-form workbench-note-form"><textarea id="noteContent" placeholder="Write a project note…" aria-label="Project note"></textarea><button id="noteSave" class="button primary" type="button">SAVE NOTE ↗</button></div><div id="noteResult" class="workbench-result">No note saved.</div></div></section>
         </div>
         <div class="workbench-body">
           <aside class="conversation-list">
