@@ -530,6 +530,7 @@ from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_workshop import router as _workshop_router  # noqa: E402
 from gateway.routes_context import router as _context_router  # noqa: E402
 from gateway.routes_teach import router as _teach_router  # noqa: E402
+from gateway.routes_devices import router as _devices_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -558,6 +559,7 @@ app.include_router(_agents_router, dependencies=_gate_control)
 app.include_router(_workshop_router, dependencies=_gate_control)
 app.include_router(_context_router, dependencies=_gate_control)
 app.include_router(_teach_router, dependencies=_gate_control)
+app.include_router(_devices_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
