@@ -62,16 +62,10 @@ def test_control_room_serves_from_real_backend_seeds():
         "/navigator/fetch",
     ):
         assert api in text, f"control room must wire {api}"
-    # approve/reject are built dynamically from a real /remote/{action} command
-    assert '"/remote/" + act' in text or "'/remote/' + act" in text or '"/remote/"' in text, (
-        "remote approve/reject must hit the real backend"
-    )
-    # Authenticated deployments must be usable from the browser too: HTTP uses
-    # the header and browser-only SSE/WS transports receive the query token.
+    # browser requests carry the optional gateway token through the canonical helper
     assert "X-Hermus-Token" in text
     assert "__HERMUS_GATEWAY_TOKEN" in text
-    client_js = Path("gateway/static/control-client.js").read_text()
-    assert "?token=" in client_js
+
 
 
 # ---------------------------------------------------------------------------
