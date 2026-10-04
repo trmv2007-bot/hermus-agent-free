@@ -953,8 +953,9 @@
     if(failed(m)){host.innerHTML=missionForm+errorCard(errText(m));return;}
     const missionHtml='<div class="card"><div class="card-head"><div><strong>MISSIONS</strong><small>Recoverable execution history</small></div><span class="badge">'+missions.length+' TOTAL</span></div><div class="card-body list">'+(missions.length?missions.map(x=>{
       const st=String(x.state||x.status||'unknown').toLowerCase(), recover=['failed','blocked','interrupted'].includes(st);
-      return '<div class="row"><div class="row-main"><strong>'+esc(x.goal||x.title||x.id||'Mission')+'</strong><small>'+esc(st)+(x.id?' · '+esc(x.id):'')+'</small></div><div class="row-actions">'+
-      (recover?'<button class="btn primary" type="button" data-mission-resume="'+esc(x.id)+'">RESUME</button>':'')+
+      const restart=st==='failed';
+      return '<div class="row"><div class="row-main"><strong>'+esc(x.goal||x.title||x.id||'Mission')+'</strong><small>'+esc(st)+(x.id?' · '+esc(x.id):'')+(restart?' · explicit restart allowed':'')+'</small></div><div class="row-actions">'+
+      (recover?'<button class="btn primary" type="button" data-mission-resume="'+esc(x.id)+'" data-mission-restart="'+String(restart)+'">'+(restart?'RESTART & RESUME':'RESUME')+'</button>':'')+
       (x.id?'<button class="btn" type="button" data-mission-open="'+esc(x.id)+'">INSPECT</button>':'')+
       (!recover?badge(st):'')+'</div></div>';
     }).join(''):'<div class="empty">No missions yet.</div>')+'</div></div>';
@@ -1619,7 +1620,16 @@
     if(e.target.closest('[data-tool-use]')){const n=e.target.closest('[data-tool-use]').dataset.toolUse;openView('chat');setTimeout(()=>sendCommand('Use the "'+n+'" tool for the current task.'),0);return;}
     if(e.target.closest('[data-mission-new]')){openView('missions');setTimeout(()=>qs('#missionGoal')?.focus(),0);return;}
     if(e.target.closest('[data-mission-create]')){await createMission();return;}
-    if(e.target.closest('[data-mission-resume]')){const id=e.target.closest('[data-mission-resume]').dataset.missionResume;try{await api('/missions/'+encodeURIComponent(id)+'/resume',{method:'POST',body:'{}'});toast('Mission resume requested');loadMissions()}catch(err){toast(err.message,true)}return;}
+    if(e.target.closest('[data-mission-resume]')){
+      const b=e.target.closest('[data-mission-resume]'),id=b.dataset.missionResume,restart=b.dataset.missionRestart==='true';
+      try{
+        const out=await api('/missions/'+encodeURIComponent(id)+'/resume?restart_failed='+String(restart),{method:'POST',body:JSON.stringify({restart_failed:restart,extra_steps:restart?8:undefined})});
+        toast(restart?'Failed mission restarted':'Mission resumed');
+        loadMissions();
+        if(out?.mission_id||id)trackRun(String(out.run_id||out.mission_id||id));
+      }catch(err){toast('Mission resume failed · '+err.message,true);loadMissions()}
+      return;
+    }
     if(e.target.closest('[data-mission-open]')){const id=e.target.closest('[data-mission-open]').dataset.missionOpen;const d=await safe('/missions/'+encodeURIComponent(id));const box=qs('#missionDetailHost');if(box)box.innerHTML=failed(d)?errorCard(errText(d)):'<div class="card" style="margin-top:12px"><div class="card-head"><div><strong>MISSION DETAIL</strong><small>'+esc(id)+'</small></div></div><div class="card-body">'+renderCollectionSummary(d,'No mission detail.')+'</div></div>';return;}
     if(e.target.closest('[data-routine-new]')){routineForm();return;}
     if(e.target.closest('[data-routine-save]')){await submitRoutine(false);return;}
