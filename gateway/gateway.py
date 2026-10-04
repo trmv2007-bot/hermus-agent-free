@@ -291,11 +291,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
     presence_task = None
+    ambient_task = None
     if getattr(config, "presence_enabled", True):
         try:
+            from core.presence_kernel import presence_kernel
+            from core.ambient_loop import ambient_loop
+
+            presence_kernel.start()
             presence_task = asyncio.create_task(_presence_heartbeat_loop())
+            ambient_task = asyncio.create_task(ambient_loop.run())
         except Exception as e:
-            logger.error(f"[Gateway] presence heartbeat failed to start: {e}")
+            logger.error(f"[Gateway] ambient presence failed to start: {type(e).__name__}: {e}")
 
     maintenance_task = None
     if getattr(config, "memory_sweep_minutes", 60) > 0:
@@ -324,6 +330,13 @@ async def lifespan(app: FastAPI):
         _lifecycle.state.begin_drain("shutdown")
         if presence_task and not presence_task.done():
             presence_task.cancel()
+        if ambient_task and not ambient_task.done():
+            ambient_task.cancel()
+        try:
+            from core.presence_kernel import presence_kernel
+            presence_kernel.stop()
+        except Exception:
+            pass
         if maintenance_task and not maintenance_task.done():
             maintenance_task.cancel()
         if watchdog_task and not watchdog_task.done():
