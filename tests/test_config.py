@@ -12,7 +12,9 @@ import pytest
 def test_singleton_exposes_all_settings():
     from core.config import Config, config
 
-    assert len(Config.model_fields) == 179
+    assert len(Config.model_fields) == 184
+    assert {"personal_space_enabled", "personal_space_state_path", "personal_space_interval_seconds",
+            "personal_space_idle_minutes", "personal_space_daily_cap"} <= set(Config.model_fields)
     assert config.model
     assert isinstance(config.nollama_port, int)
     assert isinstance(config.presence_enabled, bool)
