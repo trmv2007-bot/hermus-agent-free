@@ -40,7 +40,6 @@ jobs:
       - run: python -m mypy core/log.py core/errors.py
       - name: JavaScript syntax
         run: |
-          node --check gateway/static/nexus.js
           node --check gateway/static/dashboard-v2.js
 
   ui-qa:
