@@ -256,7 +256,7 @@
   }
 
   async function boot() {
-    if (!document.querySelector('#consolePanels')) return;
+    if (!document.querySelector('#consolePanels') || !document.querySelector('#consoleFilter')) return;
     bind();
     if (!(await loadManifest())) return;
     syncGroups();
