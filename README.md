@@ -86,7 +86,7 @@ Linux / macOS / Termux:
 
 ### Start HERMUS
 
-    ./hermus start
+    ./hermus gateway start
 
 Open **http://localhost:8000/control** for the Control Room.
 ## 🧠 What is HERMUS?
