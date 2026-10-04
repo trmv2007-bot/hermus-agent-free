@@ -205,12 +205,8 @@ class ModelGateway:
             if p and name:
                 return p, name
 
-        from ..config import config
-        configured = str(getattr(config, "model", "") or "")
-        if configured:
-            p, name = split(configured)
-            if p and name and (provider is None or p == provider):
-                return p, name
+        # No hard-coded model is a valid runtime fallback. If discovery is
+        # empty, fail honestly instead of silently selecting an arbitrary model.
         return None, None
 
 
