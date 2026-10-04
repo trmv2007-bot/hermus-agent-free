@@ -138,7 +138,7 @@ class ModelGateway:
         """Raw credential bundles available to the runtime."""
         return self._resolver_mod().discover_runtime_bundles(include_local=True)
 
-    def catalog(self, *, probe: bool = false, refresh: bool = false) -> dict[str, Any]:
+    def catalog(self, *, probe: bool = False, refresh: bool = False) -> dict[str, Any]:
         """Return the secret-free runtime model catalog used by the UI."""
         from .model_catalog import model_catalog
 
