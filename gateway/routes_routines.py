@@ -53,6 +53,7 @@ async def routine_delete(routine_id: str):
     return {"success": True, "routine_id": routine_id, "deleted": True}
 
 
+# Canonical endpoint: /routines/validate
 @router.post("/validate")
 async def routine_validate(payload: dict | None = None):
     """Validate a routine definition without saving or executing it."""
