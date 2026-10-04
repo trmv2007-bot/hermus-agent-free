@@ -17,7 +17,7 @@
       <span><strong>HERMUS</strong><small>NEXUS</small></span>
     </a>
     <div class="system-state"><span id="stateDot" class="state-dot"></span><span id="stateLabel">CONNECTING</span></div>
-    <button class="quiet-button" data-open="System health" type="button">SYSTEM</button>
+    <div class="nexus-top-controls"><span id="modelPill" class="model-pill">MODEL · AUTO</span><button class="quiet-button" data-open="System health" type="button">SYSTEM</button></div>
   </header>
 
   <main class="nexus">
@@ -61,6 +61,32 @@
       <article class="surface systems-surface">
         <div class="surface-head"><span>SYSTEMS</span><button data-open="Capabilities" type="button">ALL</button></div>
         <div id="capabilities" class="capabilities"><div class="empty-event">Discovering capabilities…</div></div>
+      </article>
+
+      <article class="surface model-surface">
+        <div class="surface-head"><span>MODEL CORE</span><button id="modelRefresh" type="button">SYNC</button></div>
+        <div class="model-toolbar">
+          <label>ROLE<select id="modelRole" aria-label="HERMUS model role">
+            <option value="default">Default</option>
+            <option value="reasoning">Reasoning</option>
+            <option value="vision">Vision</option>
+            <option value="coding">Coding</option>
+            <option value="background">Background</option>
+            <option value="doctor">Doctor</option>
+            <option value="voice">Voice</option>
+          </select></label>
+          <label>DEPLOYMENT<select id="modelSelect" aria-label="Select HERMUS model deployment">
+            <option value="">Discovering…</option>
+          </select></label>
+          <button id="modelSave" class="model-save" type="button">USE</button>
+        </div>
+        <div id="modelMeta" class="model-meta">Runtime-discovered models appear here. API keys never leave the server.</div>
+        <div id="modelFleet" class="model-fleet"><div class="empty-event">Discovering model deployments…</div></div>
+      </article>
+
+      <article class="surface attention-surface">
+        <div class="surface-head"><span>FAIRY ATTENTION</span><b id="attentionStatus">LIVE</b></div>
+        <div id="attention" class="attention-list"><div class="empty-event">Reading your operational context…</div></div>
       </article>
     </section>
 
