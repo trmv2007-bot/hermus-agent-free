@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .contracts import Actor, CommandSource, CommandStatus, EventEnvelope, EventType
+from .contracts import EventEnvelope
+from .contracts.events import Actor, CommandSource, CommandStatus, EventType
 from .events import get_bus
 
 
