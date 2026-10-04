@@ -82,18 +82,34 @@ jobs:
               return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run'}));
             }
             if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run',id:'qa-id',task_id:'qa-task'}));
+            if(p==='/stream/run/qa-run') {
+              const events=[
+                {id:1,run_id:'qa-run',type:'turn_started',data:{step:0,model:'local/qwen3:4b',stream:true}},
+                {id:2,run_id:'qa-run',type:'step_started',data:{step:1,of:2}},
+                {id:3,run_id:'qa-run',type:'llm_delta',data:{step:1,text:'## '}},
+                {id:4,run_id:'qa-run',type:'llm_delta',data:{step:1,text:'Live answer\\n\\n'}},
+                {id:5,run_id:'qa-run',type:'tool_call',data:{step:1,tool:'terminal',args:{command:'pytest tests/'}}},
+                {id:6,run_id:'qa-run',type:'tool_result',data:{step:1,tool:'terminal',ms:42,error:false,preview:'32 passed'}},
+                {id:7,run_id:'qa-run',type:'step_started',data:{step:2,of:2}},
+                {id:8,run_id:'qa-run',type:'verification',data:{step:2,verified:true}},
+                {id:9,run_id:'qa-run',type:'agent_response',data:{text:'## QA complete\\n\\n| Check | Result |\\n|---|---|\\n| Streaming | PASS |\\n| Markdown table | PASS |'}},
+                {id:10,run_id:'qa-run',type:'run_finished',data:{status:'finished'}}
+              ];
+              const body='retry: 1500\\n\\n'+events.map(e=>'id: '+e.id+'\\ndata: '+JSON.stringify(e)+'\\n\\n').join('');
+              return route.fulfill({status:200,contentType:'text/event-stream',headers:{'Cache-Control':'no-cache'},body});
+            }
             if(p==='/runs/qa-run') return route.fulfill(json({
               status:'finished',finished:true,
               events:[
-                {type:'turn_started',data:{step:0,model:'local/qwen3:4b',stream:true}},
-                {type:'step_started',data:{step:1,of:2}},
-                {type:'llm_delta',data:{step:1,text:'thinking'}},
-                {type:'tool_call',data:{step:1,tool:'terminal',args:{command:'pytest tests/'} }},
-                {type:'tool_result',data:{step:1,tool:'terminal',ms:42,error:false,preview:'32 passed'}},
-                {type:'step_started',data:{step:2,of:2}},
-                {type:'verification',data:{step:2,verified:true}},
-                {type:'agent_response',data:{text:'QA run complete.'}},
-                {type:'run_finished',data:{status:'finished'}}
+                {id:1,type:'turn_started',data:{step:0,model:'local/qwen3:4b',stream:true}},
+                {id:2,type:'step_started',data:{step:1,of:2}},
+                {id:3,type:'llm_delta',data:{step:1,text:'thinking'}},
+                {id:4,type:'tool_call',data:{step:1,tool:'terminal',args:{command:'pytest tests/'}}},
+                {id:5,type:'tool_result',data:{step:1,tool:'terminal',ms:42,error:false,preview:'32 passed'}},
+                {id:6,type:'step_started',data:{step:2,of:2}},
+                {id:7,type:'verification',data:{step:2,verified:true}},
+                {id:8,type:'agent_response',data:{text:'QA run complete.'}},
+                {id:9,type:'run_finished',data:{status:'finished'}}
               ]
             }));
             if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true},storage:{ok:true}}));
@@ -196,7 +212,11 @@ jobs:
           if(!activityTexts.some(t=>t.includes('Model · local/qwen3:4b'))) throw new Error('Live model activity missing');
           if(!activityTexts.some(t=>t.includes('Running terminal'))) throw new Error('Live tool activity missing');
           if(!activityTexts.some(t=>t.includes('Checking the result'))) throw new Error('Verification activity missing');
-          if(!(await page.locator('.msg-text').filter({hasText:'QA run complete.'}).count())) throw new Error('Final assistant response missing');
+          if(!(await page.locator('.msg-text').filter({hasText:'QA complete'}).count())) throw new Error('Final assistant response missing');
+          if(await page.locator('.msg-text table').count()!==1) throw new Error('Markdown table did not render as a table');
+          if(await page.locator('.live-activity .activity-detail').count()<3) throw new Error('Live activity feed did not render');
+          if(await page.locator('.msg-stream .stream-cursor').count()>0) throw new Error('Streaming cursor remained after final response');
+          if(lastJobPayload?.payload?.model!=='local/qwen3:4b') throw new Error('Chat model selection was not sent with the job');
           if(lastJobPayload?.payload?.model!=='local/qwen3:4b') throw new Error('Chat model selection was not sent with the job');
 
           await page.locator('#commandFocus').click();
