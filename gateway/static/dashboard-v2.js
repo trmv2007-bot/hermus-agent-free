@@ -873,6 +873,7 @@
         const idx=tabs.indexOf(b);
         const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(idx+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
         tabs[next].focus();
+        openSettingsTab(tabs[next].dataset.settingsTab);
       });
     });
     if(panel){panel.setAttribute('role','tabpanel');panel.setAttribute('tabindex','-1');}
