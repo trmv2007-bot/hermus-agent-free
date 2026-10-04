@@ -33,6 +33,25 @@ async def presence_status(user_id: str | None = None):
     return get_presence().snapshot(user_id=user_id)
 
 
+@router.get("/kernel")
+async def presence_kernel_snapshot(user_id: str = "default", include_events: bool = True):
+    """Unified live presence projection for the HERMUS control surface."""
+    from core.presence_kernel import presence_kernel
+
+    return presence_kernel.snapshot(
+        user_id=str(user_id or "default"),
+        include_events=bool(include_events),
+    )
+
+
+@router.get("/kernel/events")
+async def presence_kernel_events(cursor: int = 0, limit: int = 60):
+    """Replay canonical events after a client cursor for lightweight live updates."""
+    from core.presence_kernel import presence_kernel
+
+    return presence_kernel.events_since(cursor=cursor, limit=limit)
+
+
 @router.get("/identity")
 async def presence_identity():
     from core.presence import get_presence
