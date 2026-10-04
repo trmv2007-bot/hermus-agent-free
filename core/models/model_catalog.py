@@ -112,11 +112,15 @@ class ModelCatalog:
                 else:
                     probe_info = {**info, "source": "stored" if known else "unavailable"}
 
+            try:
+                provider_name = get_provider(provider).get("name") or provider
+            except Exception:
+                provider_name = provider
             pstatus = provider_status.setdefault(
                 provider,
                 {
                     "provider": provider,
-                    "name": get_provider(provider).get("name") or provider,
+                    "name": provider_name,
                     "configured": True,
                     "sources": [],
                     "reachable": None,
