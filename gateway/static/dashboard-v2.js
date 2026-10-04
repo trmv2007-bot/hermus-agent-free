@@ -465,9 +465,14 @@
     const deployment = qs('#modelDeploymentInput');
     if (role && deployment) {
       const current = state.selectedModels[role.value] || 'auto';
+      const search=(qs('#modelSearch')?.value||'').trim().toLowerCase();
+      const visibleModels=state.modelCatalog.filter(m=>{
+        if(!search) return true;
+        return [m.name,m.id,m.ref,m.provider,m.provider_name].filter(Boolean).join(' ').toLowerCase().includes(search);
+      });
       deployment.innerHTML =
         '<option value="auto">AUTO · best available</option>' +
-        state.modelCatalog.map((m) =>
+        visibleModels.map((m) =>
           '<option value="' + esc(m.ref) + '"' +
           (m.ref === current ? ' selected' : '') + '>' +
           esc(m.name || m.id || m.ref) +
@@ -498,31 +503,46 @@
       return;
     }
 
-    const cards = state.modelCatalog.map((m) => {
-      const live = m.source === 'live';
-      const reachable = m.reachable !== false;
-      const status = !reachable ? 'OFFLINE' : live ? 'LIVE' : 'CACHED';
-      const statusKind = !reachable ? 'bad' : live ? 'good' : '';
-      const selectedForRole = (state.selectedModels[qs('#modelRoleInput')?.value || 'default'] || 'auto') === m.ref;
-      return '<article class="model-card">' +
-        '<div class="model-top"><div>' +
-        '<div class="model-name">' + esc(m.name || m.id || m.ref) + '</div>' +
-        '<div class="meta">' + esc(m.provider || 'provider') + ' · ' +
-          esc(m.ref || m.id || 'model') + '</div>' +
-        '</div>' + badge(status, statusKind) + '</div>' +
-        '<div class="meta" style="margin-top:10px">' +
-          'Tools: ' + esc(m.capabilities?.tools || 'unknown') +
-          ' · Vision: ' + esc(m.capabilities?.vision || 'unknown') +
-          ' · Context: ' + esc(m.context_length || m.context || 'unknown') +
-        '</div><div class="actions" style="margin-top:12px">' +
-        '<button class="btn '+(selectedForRole?'':'primary')+'" type="button" data-model-pick="'+esc(m.ref)+'">'+
-        (selectedForRole?'SELECTED FOR ROLE':'SELECT FOR ROLE')+'</button></div></article>';
-    }).join('');
+    const renderModelCards = () => {
+      const query=(qs('#modelSearch')?.value||'').trim().toLowerCase();
+      const filtered=state.modelCatalog.filter(m=>{
+        if(!query) return true;
+        const hay=[
+          m.name,m.id,m.ref,m.provider,m.provider_name,m.owned_by,
+          m.capability_notes?.join?.(' '),
+          m.capabilities ? Object.entries(m.capabilities).map(([k,v])=>k+' '+v).join(' ') : ''
+        ].filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(query);
+      });
+      const cards=filtered.map((m)=>{
+        const live=m.source==='live';
+        const reachable=m.reachable!==false;
+        const status=!reachable?'OFFLINE':live?'LIVE':'CACHED';
+        const statusKind=!reachable?'bad':live?'good':'';
+        const selectedForRole=(state.selectedModels[qs('#modelRoleInput')?.value||'default']||'auto')===m.ref;
+        return '<article class="model-card">'+
+          '<div class="model-top"><div>'+
+          '<div class="model-name">'+esc(m.name||m.id||m.ref)+'</div>'+
+          '<div class="meta">'+esc(m.provider||'provider')+' · '+esc(m.ref||m.id||'model')+
+          '</div></div>'+badge(status,statusKind)+'</div>'+
+          '<div class="meta" style="margin-top:10px">Tools: '+esc(m.capabilities?.tools||'unknown')+
+          ' · Vision: '+esc(m.capabilities?.vision||'unknown')+
+          ' · Context: '+esc(m.context_length||m.context||'unknown')+
+          '</div><div class="actions" style="margin-top:12px">'+
+          '<button class="btn '+(selectedForRole?'':'primary')+'" type="button" data-model-pick="'+esc(m.ref)+'">'+
+          (selectedForRole?'SELECTED FOR ROLE':'SELECT FOR ROLE')+'</button></div></article>';
+      }).join('');
+      const count=filtered.length;
+      qs('#modelResultCount').textContent=query?(count+' matching deployment'+(count===1?'':'s')):state.modelCatalog.length+' deployment'+(state.modelCatalog.length===1?'':'s');
+      qs('#modelCardsHost').innerHTML=cards||'<div class="state-card"><strong>No matching deployments.</strong><p>Try a provider, model name, or capability.</p></div>';
+    };
 
-    host.innerHTML = '<div class="model-grid">' +
-      (cards || '<div class="state-card"><strong>No deployments discovered.</strong>' +
-       '<p>Open Runtime to verify the engine, or Providers & Keys to configure a backend.</p></div>') +
-      '</div>';
+    host.innerHTML='<div class="card" style="margin-bottom:12px"><div class="card-body"><div class="toolbar">'+
+      '<label class="field grow">SEARCH MODELS<input id="modelSearch" type="search" placeholder="Search model name, provider, capability…" aria-label="Search models"></label>'+
+      '<span id="modelResultCount" class="compact-result"></span></div></div></div>'+
+      '<div id="modelCardsHost"></div>';
+    qs('#modelSearch').addEventListener('input',renderModelCards);
+    renderModelCards();
   }
   async function saveModel() {
     const role=qs('#modelRoleInput')?.value||'default', model=qs('#modelDeploymentInput')?.value||'auto';
