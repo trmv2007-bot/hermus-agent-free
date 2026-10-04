@@ -333,6 +333,14 @@ jobs:
           await page.locator('[data-view="terminal"]').first().click();
           await page.locator('#terminalInput').fill('echo QA');
           await page.locator('[data-tool-run="terminal"]').click();
+          // Media request from the normal Chat path must bypass mission classification
+          // and call the dedicated media backend.
+          await page.locator('[data-view="chat"]').first().click();
+          await page.locator('#commandbarInput').fill('Create an image: QA character');
+          await page.locator('#commandbarForm').press('Enter');
+          await page.waitForTimeout(80);
+          if(!(await page.locator('.chat-media img').count())) throw new Error('Chat image generation did not render media artifact');
+
           await page.locator('[data-view="image"]').first().click();
           await page.locator('#imageInput').fill('QA concept');
           await page.locator('[data-tool-run="image"]').click();
