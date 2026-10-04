@@ -187,6 +187,7 @@
     'Safety preflight': ['/safety/preflight'],
     'Capability registry': ['/capabilities/registry'],
     'Devices': ['/devices'],
+    'Agents': ['/api/v1/agents/list'],
     'Routines': ['/routines'],
     'Focus': ['/focus'],
     'Learning': ['/learning'],
@@ -775,4 +776,81 @@
   window.HermusNexus.saveModelSelection = saveModelSelection;
   window.HermusNexus.refreshAttention = refreshAttention;
 
+})();
+
+
+/* JARVIS workspace UI bindings: visual shell + live agent roster. */
+(() => {
+  const root = document;
+  const q = (s) => root.querySelector(s);
+  const api = (path, options = {}) => window.HermusNexus?.api
+    ? window.HermusNexus.api(path, options)
+    : Promise.reject(new Error('HERMUS Nexus is not ready'));
+
+  async function refreshAgentRoster() {
+    const host = q('#agentList');
+    if (!host) return;
+    try {
+      const data = await api('/api/v1/agents/list');
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      if (!agents.length) {
+        host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">✥</span><div><strong>No active subagents</strong><small>Agents appear here when spawned</small></div><i></i></div>';
+        return;
+      }
+      host.innerHTML = agents.slice(0, 8).map((a) => {
+        const name = String(a.name || a.role || 'Agent');
+        const role = String(a.role || 'general').replace(/_/g, ' ');
+        const state = String(a.state || 'idle').replace(/_/g, ' ');
+        const live = !['stopped','error','failed','dead'].includes(String(a.state || '').toLowerCase());
+        return '<div class="agent-row">'
+          + '<span class="agent-avatar">✥</span>'
+          + '<div><strong>' + escJarvis(name) + '</strong><small>' + escJarvis(role + ' · ' + state) + '</small></div>'
+          + '<i style="background:' + (live ? 'var(--jarvis-good)' : '#536b80') + ';box-shadow:' + (live ? '0 0 9px var(--jarvis-good)' : 'none') + '"></i>'
+          + '</div>';
+      }).join('');
+    } catch (e) {
+      host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">!</span><div><strong>Agent roster unavailable</strong><small>Check HERMUS system state</small></div><i></i></div>';
+    }
+  }
+
+  function escJarvis(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function syncGreeting() {
+    const el = q('#heroGreeting');
+    if (!el) return;
+    const hour = new Date().getHours();
+    el.textContent = hour < 5 ? 'Good night.' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
+  }
+
+  root.addEventListener('click', (event) => {
+    const workshop = event.target.closest('[data-workshop-open]');
+    if (workshop) {
+      event.preventDefault();
+      const close = q('#overlay');
+      if (close) { close.classList.remove('open'); close.setAttribute('aria-hidden', 'true'); }
+      const host = q('#workshop');
+      if (host) {
+        host.classList.add('open');
+        host.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('workshop-mode');
+        window.HermusNexus?.refreshWorkshop?.();
+      }
+    }
+
+    if (event.target.closest('#globalSearch')) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key:'p', ctrlKey:true }));
+    }
+
+    if (event.target.closest('[data-close-workbench]')) {
+      q('#workshop')?.classList.remove('open');
+      q('#workshop')?.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('workshop-mode');
+    }
+  });
+
+  syncGreeting();
+  refreshAgentRoster();
+  setInterval(refreshAgentRoster, 15000);
 })();
