@@ -23,7 +23,7 @@ def _vision_error(exc: Exception, model: str | None) -> dict:
     if fc == FailureClass.MODEL_UNAVAILABLE.value:
         return {
             "success": False,
-            "error": f"Selected vision model is unavailable: {model or 'dynamic selection'} — run \'ollama pull {model or '<model>'}\' to install it.",
+            "error": f"Selected vision model is unavailable (model not found): {model or 'dynamic selection'} — run \'ollama pull {model or '<model>'}\' to install it.",
         }
     if fc in (FailureClass.NETWORK.value, FailureClass.PROVIDER_UNAVAILABLE.value):
         return {

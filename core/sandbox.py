@@ -548,7 +548,9 @@ class Sandbox:
             if chosen in ("docker", "podman"):
                 res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id, env, input_text, reason)
             elif chosen == "bwrap":
-                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason)
+                res = self._run_bwrap(
+                    command, pol, workdir, sandbox_id, env, input_text, reason, allow_dangerous=allow_dangerous
+                )
             elif chosen == "off":
                 res = self._run_raw(command, pol, workdir, sandbox_id, env, input_text, reason)
             else:
@@ -816,9 +818,14 @@ class Sandbox:
         env: dict[str, str] | None,
         input_text: str | None,
         reason: str,
+        *,
+        allow_dangerous: bool = False,
     ) -> SandboxResult:
         """bubblewrap jail: read-only /, writable scratch, no network, clean env."""
         exec_cwd = self._exec_cwd(pol, workdir)
+        # An explicit dangerous override is still audited and policy-gated; make
+        # host /tmp visible so trusted commands using absolute temp paths can run.
+        tmp_mount = ["--bind", "/tmp", "/tmp"] if allow_dangerous else ["--tmpfs", "/tmp"]
         argv = [
             self.probe.binary("bwrap") or "bwrap",
             "--ro-bind",
@@ -828,8 +835,7 @@ class Sandbox:
             "/dev",
             "--proc",
             "/proc",
-            "--tmpfs",
-            "/tmp",
+            *tmp_mount,
             "--bind",
             str(workdir),
             str(workdir),

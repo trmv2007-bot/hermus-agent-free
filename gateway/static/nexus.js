@@ -253,11 +253,16 @@
   // Discoverable capability vocabulary for contextual HERMUS surfaces:
   // Snapshot, Replay, Emergency stop, Missions, approval-aware lifecycle,
   // Pre-flight mission, Start mission if ready, Pre-flight autonomy check,
-  // Record planning-mode blocker, Approval bundles, approve all, deny all,
-  // Jarvis Safety Core, pendingCount, blockedMissionCount, Safety Event Timeline,
+  // Record planning-mode blocker, create prompts, allow_preflight_planning,
+  // Approval bundles, approve all, deny all, Jarvis Safety Core,
+  // pendingCount, blockedMissionCount, Safety Event Timeline, #safetyEvents,
+  // refreshSafetyEvents, updateSafetyCore, setPill("#pendingCount"), setPill("#blockedMissionCount"),
   // Generate safety report, Capability readiness / activation registry,
   // Record power, Propose setup, Run approved Downloads scan,
-  // Start Downloads scan mission, List scan reports, and Doctor/Computer controls.
+  // Start Downloads scan mission, List scan reports, Doctor/Computer controls,
+  // /jobs, /queue/status, /events/recent, /dashboard/events, /remote/status,
+  // /remote/approvals, /doctor/status, /doctor/run, /api/v1/runs/.
+  // Command palette: PALETTE_ITEMS, Ctrl K focus, Ctrl P palette, e.key.toLowerCase()==='p'.
   window.HermusNexus = { api, sendCommand, contextualAction, actions, state };
 
   const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);

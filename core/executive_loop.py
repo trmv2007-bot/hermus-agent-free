@@ -48,6 +48,15 @@ class ExecutiveLoop:
             source="executive.perception",
             permission_scope="session.read",
         )
+        runtime_profile = observed.get("runtime") or {}
+        if runtime_profile.get("platform"):
+            self.world.observe(
+                "runtime",
+                "platform",
+                runtime_profile["platform"],
+                source="executive.perception",
+                permission_scope="system.read",
+            )
         self.brain.observe("world_snapshot_refreshed", {"platform": platform, "user_id": user_id})
         return observed
 

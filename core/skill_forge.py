@@ -967,9 +967,12 @@ class SkillForge:
         except Exception as e:
             return {**report, "valid": False, "error": f"skill.py does not compile: {e}"}
 
+        project_root = json.dumps(str(Path(__file__).resolve().parents[1]))
+        skill_path = json.dumps(str(py.resolve()))
         probe = (
             "import importlib.util,sys,json;"
-            "spec=importlib.util.spec_from_file_location('sk', 'skill.py');"
+            f"sys.path.insert(0,{project_root});"
+            f"spec=importlib.util.spec_from_file_location('sk',{skill_path});"
             "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
             "steps=m.plan();r=m.run(task='validate', execute=False);"
             "print(json.dumps({'ok':bool(r.get('success')),'steps':len(steps)}))"
@@ -1209,6 +1212,16 @@ class SkillForge:
             }
 
         result = self.install(cand)
+        if result.get("installed"):
+            try:
+                reg = self._registry()
+                entry = (reg.get("skills") or {}).get(cand.name)
+                if entry is not None:
+                    entry["runs"] = max(int(entry.get("runs") or 0), observed)
+                    entry["successes"] = max(int(entry.get("successes") or 0), observed)
+                    self._save_registry(reg)
+            except Exception:
+                pass
         result["evaluation"] = evaluation.to_dict()
         result["proof"] = proof.to_dict()
         result["repeatability"] = {"signature": signature, "observed": observed, "required": min_repeats}
