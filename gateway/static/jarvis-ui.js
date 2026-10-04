@@ -150,6 +150,15 @@
       return;
     }
 
+    const workspaceTarget = event.target.closest?.("[data-workbench-target]");
+    if (workspaceTarget) {
+      event.preventDefault();
+      event.stopPropagation();
+      switchWorkbench(workspaceTarget.dataset.workbenchTarget);
+      flash("Workspace · " + (MOCKS.workbench[workspaceTarget.dataset.workbenchTarget] || workspaceTarget.dataset.workbenchTarget));
+      return;
+    }
+
     const tab = event.target.closest?.("[data-workbench-tab]");
     if (tab) {
       event.preventDefault();
