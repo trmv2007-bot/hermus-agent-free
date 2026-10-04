@@ -436,6 +436,15 @@
       }
 
       const terminal = ['finished','completed','success','failed','error','cancelled','canceled','stopped'].includes(status);
+      if (terminal && !finalMessageShown) {
+        if (['failed','error'].includes(status)) {
+          showAnswer('Model unavailable · HERMUS could not complete this request', 'error');
+        } else if (['cancelled','canceled','stopped'].includes(status)) {
+          showAnswer('HERMUS stopped this request', 'error');
+        } else {
+          showAnswer('HERMUS completed the request but returned no response', 'error');
+        }
+      }
       if (terminal || d.finished === true || tries >= 80) stop();
       else refreshOverview();
     };
@@ -454,10 +463,14 @@
 
   function renderChat() {
     const host = qs('#chatMessages'); if (!host) return;
-    host.innerHTML = state.messages.slice(-30).map(m =>
-      '<div class="msg '+(m.who==='user'?'user':'')+'"><span class="msg-meta">'+
-      (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span>'+esc(m.text)+'</div>'
-    ).join('');
+    host.innerHTML = state.messages.slice(-30).map(m => {
+      const classes = ['msg'];
+      if (m.who === 'user') classes.push('user');
+      if (m.pending) classes.push('pending');
+      if (m.status) classes.push('status-'+String(m.status).replace(/[^a-z0-9_-]/gi,''));
+      return '<div class="'+classes.join(' ')+'"><span class="msg-meta">'+
+        (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span><span class="msg-text">'+esc(m.text)+'</span></div>';
+    }).join('');
     host.scrollTop = host.scrollHeight;
   }
 
