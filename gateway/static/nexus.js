@@ -188,6 +188,8 @@
     'Capability registry': ['/capabilities/registry'],
     'Devices': ['/devices'],
     'Routines': ['/routines'],
+    'Focus': ['/focus'],
+    'Learning': ['/learning'],
   };
 
   // Canonical HERMUS action registry. These routes are backend capabilities;
@@ -224,6 +226,13 @@
     } catch(e) { $('#modalLog').textContent=e.message; }
   }
 
+  $('#paletteInput')?.addEventListener('input',renderPalette);
+  $('#paletteClose')?.addEventListener('click',()=>showPalette(false));
+  $('#palette')?.addEventListener('click',e=>{
+    const item=e.target.closest('[data-palette-open]');
+    if(item){showPalette(false);open(item.dataset.paletteOpen);}
+  });
+
   document.addEventListener('click', e => {
     const nav=e.target.closest('[data-open]'); if(nav)open(nav.dataset.open);
     const suggestion=e.target.closest('[data-command]'); if(suggestion)sendCommand(suggestion.dataset.command);
@@ -231,7 +240,7 @@
     if(e.target.closest('#send'))sendCommand();
   });
   $('#command')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendCommand();}});
-  window.addEventListener('keydown',e=>{if(e.key==='Escape'){$('#overlay')?.classList.remove('open');$('#overlay')?.setAttribute('aria-hidden','true');}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#command')?.focus();}});
+  window.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#palette')?.classList.contains('open')){showPalette(false);}else{$('#overlay')?.classList.remove('open');$('#overlay')?.setAttribute('aria-hidden','true');}}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#command')?.focus();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='p'){e.preventDefault();showPalette(true);}});
   refresh(); setInterval(refresh,10000);
 
   // Discoverable capability vocabulary for contextual HERMUS surfaces:
@@ -417,6 +426,31 @@
   $('#modelSelect')?.addEventListener('change', renderModelSelect);
   $('#modelRefresh')?.addEventListener('click',()=>refreshModels(true));
   $('#modelSave')?.addEventListener('click',saveModelSelection);
+
+  function showPalette(open=true){
+    const host=$('#palette'); if(!host)return;
+    host.classList.toggle('open',open);
+    host.setAttribute('aria-hidden',open?'false':'true');
+    if(open){ renderPalette(); setTimeout(()=>$('#paletteInput')?.focus(),0); }
+  }
+
+  const PALETTE_ITEMS=[
+    ['Focus','See what matters right now'],
+    ['Learning','Inspect lessons, skills and episodes'],
+    ['Routines','View and manage proactive routines'],
+    ['Devices','Inspect desktop, browser, remote and Android state'],
+    ['Models','Inspect runtime-discovered model deployments'],
+    ['Capabilities','Inspect available capabilities'],
+    ['System health','Inspect live system health'],
+    ['Console manifest','Open the full subsystem console'],
+    ['Dashboard state','Inspect runtime state'],
+  ];
+  function renderPalette(){
+    const input=$('#paletteInput'); const host=$('#paletteList'); if(!host)return;
+    const q=String(input?.value||'').toLowerCase();
+    const items=PALETTE_ITEMS.filter(([name,desc])=>(name+' '+desc).toLowerCase().includes(q));
+    host.innerHTML=items.length?items.map(([name,desc],i)=>'<button class="palette-item" data-palette-open="'+esc(name)+'"><b>'+esc(name)+'</b><span>'+esc(desc)+'</span><kbd>'+String(i+1)+'</kbd></button>').join(''):'<div class="empty-event">No HERMUS surface found.</div>';
+  }
 
   const originalOpen = open;
   open = async function(name){
