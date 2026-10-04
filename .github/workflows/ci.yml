@@ -176,11 +176,15 @@ jobs:
           await page.locator('#personalSpaceOpenDock').click();
           await page.locator('#overlay').waitFor({state:'visible'});
           if(!(await page.locator('#personalSpaceActions').count())) throw new Error('Personal Space actions missing');
+          await page.waitForTimeout(250);
+          await page.screenshot({path:out+'/personal-space-open.png',fullPage:false});
           await page.locator('#overlay [data-close]').click();
 
           console.log('QA: workshop');
           await page.locator('[data-workshop-open]').first().click();
           await page.locator('#workshop').waitFor({state:'visible'});
+          await page.waitForTimeout(250);
+          await page.screenshot({path:out+'/workshop-open.png',fullPage:false});
           await page.locator('#workshopRefresh').click();
           await page.locator('[data-workshop-project="demo-app"]').click();
           await page.locator('[data-workshop-path="app.py"]').click();
@@ -216,6 +220,10 @@ jobs:
             await page.waitForTimeout(50);
           }
 
+          if(await page.locator('#workshop.open').count()){
+            await page.locator('#workshopClose').click();
+            await page.waitForTimeout(250);
+          }
           await page.locator('[data-workbench-tab="chat"]').click();
           await page.locator('[data-room="main-hall"]').click();
           await page.waitForTimeout(350);
