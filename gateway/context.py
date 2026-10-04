@@ -25,11 +25,15 @@ def get_agent_for_user(
     mode: str = "agent",
     api_key: str = None,
     base_url: str = None,
+    session_id: str = None,
 ) -> HermusAgent:
-    # Keep web sessions unpinned so the canonical ModelGateway can honor
-    # the dashboard selection and dynamic runtime catalog. Use the currently
-    # resolved deployment in the cache key so a model change gets a new agent.
-    cache_model = model
+    # One browser/conversation session owns one persistent agent instance.
+    # Do not resolve a fresh model on every message: that can create a new agent
+    # and appear to "reset" the selected model/session.
+    requested_model = str(model or "").strip() or None
+    requested_session = str(session_id or "").strip() or None
+
+    cache_model = requested_model
     if not cache_model:
         try:
             from core.models import get_model_gateway
@@ -39,15 +43,39 @@ def get_agent_for_user(
         except Exception:
             cache_model = "auto"
 
-    key = f"{platform}:{user_id}:{mode}:{cache_model}:{base_url or ''}"
-    if key not in AGENTS:
-        AGENTS[key] = HermusAgent(
-            model=model,
-            session_id=f"{platform}_{user_id}_{os.urandom(4).hex()}",
+    if requested_session:
+        key = f"{platform}:{user_id}:{mode}:session:{requested_session}"
+    else:
+        key = f"{platform}:{user_id}:{mode}:model:{cache_model}:{base_url or ''}"
+
+    agent = AGENTS.get(key)
+    if agent is None:
+        agent = HermusAgent(
+            model=requested_model,
+            session_id=requested_session or f"{platform}_{user_id}_{os.urandom(4).hex()}",
             mode=mode,
             api_key=api_key,
             base_url=base_url,
         )
+        AGENTS[key] = agent
+    elif requested_model and str(getattr(agent, "model_name", "")) != requested_model:
+        # A deliberate Chat Settings change should change the model without
+        # creating a brand-new conversation identity. Keep the agent/session
+        # object and its trajectory, replace only the concrete LLM binding.
+        try:
+            from core.models import get_model_gateway
+
+            agent.llm = get_model_gateway().llm(model=requested_model, api_key=api_key, base_url=base_url)
+            agent.model_name = requested_model
+            agent._model_pinned = True
+            logger_msg = f"[Gateway] session model changed -> {requested_model}"
+            from core.log import get_logger
+            get_logger(__name__).info(logger_msg)
+        except Exception:
+            # If the new model cannot be built, preserve the current working
+            # binding rather than silently resetting the session to a fallback.
+            pass
+
     # The presence layer is user-aware for local continuity notes. Keep the
     # identity global to this self-hosted instance, but associate active turns
     # with the session owner so the dashboard can explain who is being served.
