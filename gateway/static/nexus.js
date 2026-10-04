@@ -54,11 +54,36 @@
     if (!list.children.length) list.innerHTML='<div class="empty-event">No capability data reported</div>';
   }
 
+  function syncJarvisStatus(online, healthy) {
+    const label=$('#jarvisStatusLabel');
+    const badge=$('#jarvisStatusBadge');
+    const topLabel=$('#stateLabel');
+    const dot=$('#stateDot');
+    if(online){
+      if(topLabel) topLabel.textContent='ONLINE';
+      if(dot) dot.className='state-dot';
+      if(label) label.textContent='ONLINE';
+      if(badge){
+        badge.textContent=healthy ? 'HEALTHY' : 'DEGRADED';
+        badge.classList.toggle('warn', !healthy);
+      }
+    } else {
+      if(topLabel) topLabel.textContent='OFFLINE';
+      if(dot) dot.className='state-dot bad';
+      if(label) label.textContent='OFFLINE';
+      if(badge){
+        badge.textContent='OFFLINE';
+        badge.classList.remove('warn');
+      }
+    }
+  }
+
   async function refresh() {
     const started=performance.now();
     try {
       const [health, caps] = await Promise.all([api('/api/v1/system/health'), api('/api/v1/system/capabilities')]);
-      state.online=true; $('#stateLabel').textContent='ONLINE'; $('#stateDot').className='state-dot';
+      state.online=true;
+      syncJarvisStatus(true, Object.values(health||{}).some(v=>v && (v.ok===true || v.running===true || v.installed===true)));
       const healthEntries = health && typeof health === 'object' ? health : {};
       const healthy = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
       if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthy ? `${healthy} systems ready` : 'READY'; }
@@ -66,7 +91,7 @@
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
     } catch (e) {
-      state.online=false; $('#stateLabel').textContent='OFFLINE'; $('#stateDot').className='state-dot bad'; const mission=$('#missionStatus'); if(mission&&!state.missionLive) mission.textContent='OFFLINE';
+      state.online=false; syncJarvisStatus(false, false); const mission=$('#missionStatus'); if(mission&&!state.missionLive) mission.textContent='OFFLINE';
       setState('DISCONNECTED','gateway unavailable'); addEvent(e.message,'error');
     }
   }
