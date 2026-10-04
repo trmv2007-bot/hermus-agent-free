@@ -358,3 +358,10 @@ body:after{
 
 /* The hero already has a dedicated HERMUS core; keep the floor atmospheric, never spherical. */
 .jarvis-home .stage-scene:after{display:none}
+
+
+/* The holographic platform is an outline, not a second light source. */
+.jarvis-home .stage-platform{
+  background:rgba(2,8,16,.12);
+  box-shadow:0 0 42px rgba(47,157,255,.1),inset 0 0 18px rgba(103,232,255,.025);
+}
