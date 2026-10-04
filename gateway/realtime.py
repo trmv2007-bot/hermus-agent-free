@@ -1154,7 +1154,7 @@ async def multimodal_image(payload: dict[str, Any] = None):
         return multimodal.analyze_image(
             path,
             prompt=str(payload.get("prompt") or "Describe this image in detail"),
-            model=str(payload.get("model") or "llava:7b"),
+            model=payload.get("model") or None,
         )
     except (FileNotFoundError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1171,7 +1171,7 @@ async def multimodal_document(payload: dict[str, Any] = None):
         return multimodal.analyze_document(
             path,
             prompt=str(payload.get("prompt") or "Describe the visual contents and important text"),
-            model=str(payload.get("model") or "llava:7b"),
+            model=payload.get("model") or None,
         )
     except (FileNotFoundError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1185,7 +1185,7 @@ async def multimodal_browser(payload: dict[str, Any] = None):
         return multimodal.analyze_browser(
             path=str(payload.get("path") or "data/multimodal/browser.png"),
             prompt=str(payload.get("prompt") or "Describe the current browser page, visible UI, text and important state"),
-            model=str(payload.get("model") or "llava:7b"),
+            model=payload.get("model") or None,
             full_page=bool(payload.get("full_page", False)),
         )
     except (FileNotFoundError, ValueError) as exc:
