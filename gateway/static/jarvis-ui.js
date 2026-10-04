@@ -69,7 +69,9 @@
       const active = tab.dataset.workbenchTab === view;
       tab.classList.toggle("active", active);
       tab.setAttribute("aria-selected", String(active));
-      if (active) tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      if (active) {
+        tab.parentElement?.scrollTo({ left: Math.max(0, tab.offsetLeft - 10), behavior: "smooth" });
+      }
     });
     views.forEach(panel => panel.classList.toggle("active", panel.dataset.workbenchView === view));
     pulse(q("#workbenchViewStage"));
