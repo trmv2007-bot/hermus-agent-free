@@ -258,7 +258,9 @@ jobs:
           if(!visibleVoice || visibleModels) throw new Error('Control Center settings search failed');
           await page.locator('#settingsSearch').fill('');
           await page.locator('[data-settings-tab="general"]').press('ArrowRight');
-          if((await page.locator('[data-settings-tab="models"]').getAttribute('aria-selected'))!=='true') throw new Error('Control Center arrow-key tab navigation failed');
+          if((await page.locator('[data-settings-tab="chat"]').getAttribute('aria-selected'))!=='true') throw new Error('Control Center arrow-key navigation skipped Chat tab');
+          await page.locator('[data-settings-tab="chat"]').press('ArrowRight');
+          if((await page.locator('[data-settings-tab="models"]').getAttribute('aria-selected'))!=='true') throw new Error('Control Center arrow-key navigation failed');
           await page.locator('[data-settings-tab="providers"]').click();
           await page.locator('#keyProvider').fill('ollama');
           await page.locator('[data-key-add]').click();
