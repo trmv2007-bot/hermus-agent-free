@@ -298,6 +298,166 @@
     qs('[data-settings-tab="'+tab+'"]')?.focus({preventScroll:true});
   }
 
+  function toolProgress(tool, args = {}) {
+    const name = String(tool || 'tool').trim() || 'tool';
+    const a = args && typeof args === 'object' ? args : {};
+    const key = name.toLowerCase();
+    const pick = (...keys) => {
+      for (const k of keys) {
+        const v = a[k];
+        if (v !== undefined && v !== null && String(v).trim()) return String(v);
+      }
+      return '';
+    };
+    let preview = pick('command','cmd','query','url','path','file','file_path','name','goal','task','text');
+    if (!preview && key.includes('terminal')) preview = pick('input','script');
+    preview = preview.replace(/(?:api[_-]?key|token|password|secret|credential)\s*[:=]\s*[^\s,;]+/ig, '$1=••••');
+    preview = preview.replace(/\s+/g, ' ').trim();
+    if (preview.length > 140) preview = preview.slice(0, 140) + '…';
+
+    if (key.includes('terminal') || key === 'shell' || key.includes('execute')) {
+      return preview ? 'Running terminal · ' + preview : 'Running terminal';
+    }
+    if (key.includes('search') || key.includes('web')) {
+      return preview ? 'Searching the web · ' + preview : 'Searching the web';
+    }
+    if (key.includes('read') || key.includes('file')) {
+      return preview ? 'Reading workspace · ' + preview : 'Reading workspace';
+    }
+    if (key.includes('write') || key.includes('edit') || key.includes('patch')) {
+      return preview ? 'Editing workspace · ' + preview : 'Editing workspace';
+    }
+    if (key.includes('git')) {
+      return preview ? 'Working with Git · ' + preview : 'Working with Git';
+    }
+    if (key.includes('computer') || key.includes('browser')) {
+      return preview ? 'Operating computer · ' + preview : 'Operating computer';
+    }
+    if (key.includes('delegate') || key.includes('agent')) {
+      return preview ? 'Delegating work · ' + preview : 'Delegating work';
+    }
+    return preview ? 'Running ' + name + ' · ' + preview : 'Running ' + name;
+  }
+
+  function summarizeRunActivity(events) {
+    const items = [];
+    const openTools = new Map();
+    let model = '';
+    let connected = false;
+    let current = 'Thinking…';
+    let terminalSeen = false;
+
+    const add = (item) => {
+      const last = items[items.length - 1];
+      if (last && last.key === item.key && last.state === item.state && last.detail === item.detail) return;
+      items.push(item);
+    };
+
+    (Array.isArray(events) ? events : []).forEach((e, index) => {
+      const type = String(e?.type || '').toLowerCase();
+      const d = e?.data && typeof e.data === 'object' ? e.data : {};
+      const step = d.step ? 'Step ' + d.step : '';
+
+      if (type === 'turn_started') {
+        model = String(d.model || '');
+        if (model) current = 'Connecting to ' + model;
+        add({key:'turn',icon:'◌',detail:model ? 'Model · '+model : 'Connecting to model',state:'done',meta:''});
+        return;
+      }
+      if (type === 'mission_runtime_started') {
+        current = 'Planning…';
+        add({key:'mission-'+index,icon:'◆',detail:'Planning the task',state:'done',meta:step});
+        return;
+      }
+      if (type === 'step_started') {
+        current = 'Thinking…' + (d.of ? ' · step '+d.step+'/'+d.of : '');
+        add({key:'step-'+String(d.step||index),icon:'◌',detail:current,state:'done',meta:''});
+        return;
+      }
+      if (type === 'llm_delta') {
+        connected = true;
+        terminalSeen = true;
+        current = 'Thinking… · model connected';
+        return;
+      }
+      if (type === 'tool_call') {
+        connected = true;
+        terminalSeen = true;
+        const tool = String(d.tool || 'tool');
+        const detail = toolProgress(tool, d.args || {});
+        const key = 'tool-'+String(d.step||0)+'-'+tool+'-'+index;
+        const toolItem = {key,icon:'●',detail,state:'running',meta:step,tool};
+        items.push(toolItem);
+        openTools.set(String(tool)+'|'+String(d.step||0), toolItem);
+        current = detail;
+        return;
+      }
+      if (type === 'tool_result') {
+        connected = true;
+        terminalSeen = true;
+        const tool = String(d.tool || 'tool');
+        const sig = String(tool)+'|'+String(d.step||0);
+        const item = openTools.get(sig);
+        if (item) {
+          item.state = d.error ? 'error' : 'done';
+          item.icon = d.error ? '!' : '✓';
+          item.meta = d.error ? ((d.ms ? d.ms+'ms' : '') || 'failed') : (d.ms ? d.ms+'ms' : 'done');
+          openTools.delete(sig);
+        } else {
+          add({key:'result-'+index,icon:d.error?'!':'✓',detail:(d.error?'Tool failed · ':'Completed ')+tool,state:d.error?'error':'done',meta:d.ms ? d.ms+'ms' : ''});
+        }
+        current = d.error ? 'Tool failed · continuing…' : 'Thinking…';
+        return;
+      }
+      if (type === 'tools_expanded') {
+        add({key:'expand-'+index,icon:'+',detail:'Expanding available tools',state:'done',meta:d.tools_available ? d.tools_available+' tools' : ''});
+        current = 'Thinking…';
+        return;
+      }
+      if (type === 'verification') {
+        add({key:'verify-'+index,icon:'✓',detail:'Checking the result',state:d.verified === false ? 'error' : 'done',meta:d.verified === false ? 'needs attention' : 'verified'});
+        current = 'Verifying…';
+        return;
+      }
+      if (type === 'approval_required') {
+        add({key:'approval-'+index,icon:'!',detail:'Waiting for your approval',state:'running',meta:String(d.tool || 'sensitive action')});
+        current = 'Waiting for approval…';
+        return;
+      }
+      if (type === 'skill_harvest_started') {
+        add({key:'skill-'+index,icon:'✦',detail:'Learning from the completed work',state:'done',meta:''});
+        current = 'Finishing…';
+        return;
+      }
+      if (type === 'skill_created') {
+        add({key:'skill-created-'+index,icon:'✦',detail:'Reusable skill created',state:'done',meta:String(d.name || '')});
+        return;
+      }
+      if (type === 'steer_applied') {
+        add({key:'steer-'+index,icon:'↳',detail:'Applying your latest instruction',state:'done',meta:d.count ? String(d.count)+' update(s)' : ''});
+        current = 'Thinking…';
+        return;
+      }
+      if (type === 'model_capability_warning') {
+        const recommended = String(d.recommended_model || '');
+        add({key:'capability-'+index,icon:'!',detail:'Model capability check',state:'error',meta:recommended ? 'Try '+recommended : 'compatibility warning'});
+        current = 'Adjusting model/tool plan…';
+        return;
+      }
+      if (type === 'run_error' || type === 'mission_error') {
+        add({key:'error-'+index,icon:'!',detail:'Execution failed',state:'error',meta:String(d.error || d.message || 'runtime error').slice(0,160)});
+        current = 'Model unavailable';
+        return;
+      }
+      if (type === 'run_finished' || type === 'mission_finished') {
+        current = 'Finishing…';
+      }
+    });
+
+    if (!connected && terminalSeen) connected = true;
+    return {items:items.slice(-10), model, connected, current};
+  }
+
   async function sendCommand(command) {
     const text = String(command || '').trim();
     if (!text) return;
@@ -372,6 +532,17 @@
       renderChat();
     };
 
+    const syncActivity = (events) => {
+      const pending = state.messages.find(m => m.runId === runId && m.pending);
+      if (!pending || finalMessageShown) return;
+      const summary = summarizeRunActivity(events);
+      pending.activity = summary.items;
+      pending.model = summary.model || pending.model || '';
+      pending.text = summary.current || 'Thinking…';
+      pending.status = summary.current === 'Model unavailable' ? 'error' : (summary.connected ? 'connected' : 'thinking');
+      renderChat();
+    };
+
     const showAnswer = (value, status = 'done') => {
       const answer = String(value || '').trim();
       if (!answer || finalMessageShown) return;
@@ -398,6 +569,7 @@
 
       const status = String(d.status || d.state || d.stage || '').toLowerCase();
       const events = Array.isArray(d.events) ? d.events : [];
+      syncActivity(events);
 
       // Prefer the authoritative final agent response. The previous client
       // searched newest-first across lifecycle events, so run_finished won over
@@ -468,8 +640,21 @@
       if (m.who === 'user') classes.push('user');
       if (m.pending) classes.push('pending');
       if (m.status) classes.push('status-'+String(m.status).replace(/[^a-z0-9_-]/gi,''));
+      const activity = Array.isArray(m.activity) && m.activity.length
+        ? '<div class="live-activity" aria-label="Live agent activity">'+m.activity.map(a =>
+            '<div class="activity-item '+esc(a.state||'done')+'">'+
+              '<span class="activity-icon">'+esc(a.icon||'·')+'</span>'+
+              '<span class="activity-detail">'+esc(a.detail||'Working')+'</span>'+
+              (a.meta ? '<span class="activity-meta">'+esc(a.meta)+'</span>' : '')+
+            '</div>'
+          ).join('')+'</div>'
+        : '';
+      const liveLabel = m.pending
+        ? '<div class="live-status" role="status" aria-live="polite"><span class="live-pulse"></span>'+esc(m.text)+'</div>'
+        : '';
+      const body = m.pending ? '' : '<span class="msg-text">'+esc(m.text)+'</span>';
       return '<div class="'+classes.join(' ')+'"><span class="msg-meta">'+
-        (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span><span class="msg-text">'+esc(m.text)+'</span></div>';
+        (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span>'+liveLabel+body+activity+'</div>';
     }).join('');
     host.scrollTop = host.scrollHeight;
   }
