@@ -65,7 +65,7 @@ jobs:
         run: |
           mkdir -p /tmp/hermus-ui/static
           cp gateway/control.html /tmp/hermus-ui/control.html
-          cp gateway/static/* /tmp/hermus-ui/static/
+          cp -r gateway/static/. /tmp/hermus-ui/static/
           python -m http.server 4173 --directory /tmp/hermus-ui >/tmp/hermus-ui-server.log 2>&1 &
           cat >/tmp/jarvis-ui-qa.mjs <<'EOF'
           import {chromium} from 'playwright';
