@@ -4,9 +4,9 @@
 
 HERMUS should feel like one personal operating environment, not a collection of admin panels.
 
-JARVIS is the reference for an integrated operating layer: system/device awareness, natural-language control, continuous situational information, and autonomous operation around a user. Marvel's own material describes Iron Man's technology as integrating environmental information, telecommunications, and AI capable of piloting the armor to safety. (See Marvel source: turn658310search2.)
+JARVIS is the reference for an integrated operating layer: system/device awareness, natural-language control, continuous situational information, and autonomous operation around a user. Marvel's own material describes Iron Man's technology as integrating environmental information, telecommunications, and AI capable of piloting the armor to safety. ([Marvel: Iron Man technology](https://www.marvel.com/characters/iron-man-tony-stark/in-comics))
 
-FAIRY is the reference for proactive personal assistance: she is framed as a general-purpose AI for navigation, data processing, life management, automatic reporting, and assistance with repetitive work. The game has also expanded Fairy Auto Explore, including Quick Explore and broader commission coverage, reinforcing the idea that the assistant should remove routine work rather than merely answer questions. (See sources: turn482005search2, turn482005search6, turn482005search15.)
+FAIRY is the reference for proactive personal assistance: she is framed as a general-purpose AI for navigation, data processing, life management, automatic reporting, and assistance with repetitive work. The game has also expanded Fairy Auto Explore, including Quick Explore and broader commission coverage, reinforcing the idea that the assistant should remove routine work rather than merely answer questions. ([FAIRY overview](https://zenless-zone-zero.fandom.com/wiki/New_Resident); [HoYoLAB V2.0](https://www.hoyolab.com/article/38986773); [V2.0 details](https://zenless-zone-zero.fandom.com/wiki/Version/2.0))
 
 ## Environment priorities
 
