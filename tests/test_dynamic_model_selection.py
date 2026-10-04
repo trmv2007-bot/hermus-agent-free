@@ -209,3 +209,71 @@ def test_explicit_agent_model_stays_pinned_across_turns(monkeypatch):
     assert result["reason"] == "agent.model_pinned"
     assert agent.model_name == "fake/pinned-model"
     assert called["router"] is False
+
+
+def test_web_chat_session_reuses_same_agent_instance(monkeypatch):
+    import gateway.context as context_mod
+
+    class FakeAgent:
+        instances = []
+        def __init__(self, model=None, session_id=None, mode=None, api_key=None, base_url=None):
+            self.model_name = model or "fake/first"
+            self.llm = type("LLM", (), {"provider": "fake"})()
+            self.session_id = session_id
+            self._model_pinned = model is not None
+            FakeAgent.instances.append(self)
+
+    class FakeGateway:
+        calls = 0
+        def resolve_model(self, role="default"):
+            FakeGateway.calls += 1
+            return ("fake", "first" if FakeGateway.calls == 1 else "different")
+
+    monkeypatch.setattr(context_mod, "HermusAgent", FakeAgent)
+    context_mod.AGENTS.clear()
+
+    import core.models as models_mod
+    monkeypatch.setattr(models_mod, "get_model_gateway", lambda: FakeGateway())
+
+    first = context_mod.get_agent_for_user(
+        "web", "default", model=None, mode="chat", session_id="stable-session"
+    )
+    second = context_mod.get_agent_for_user(
+        "web", "default", model=None, mode="chat", session_id="stable-session"
+    )
+
+    assert first is second
+    assert len(FakeAgent.instances) == 1
+    assert first.session_id == "stable-session"
+    assert first.model_name == "fake/first"
+
+
+def test_chat_session_changes_model_only_when_user_requests_it(monkeypatch):
+    import gateway.context as context_mod
+
+    class FakeAgent:
+        def __init__(self, model=None, session_id=None, mode=None, api_key=None, base_url=None):
+            self.model_name = model or "fake/first"
+            self.llm = type("LLM", (), {"provider": "fake"})()
+            self.session_id = session_id
+            self._model_pinned = model is not None
+
+    class FakeGateway:
+        def llm(self, model=None, api_key=None, base_url=None):
+            llm = type("LLM", (), {"provider": "fake"})()
+            llm.model_name = model
+            return llm
+
+    monkeypatch.setattr(context_mod, "HermusAgent", FakeAgent)
+    import core.models as models_mod
+    monkeypatch.setattr(models_mod, "get_model_gateway", lambda: FakeGateway())
+    context_mod.AGENTS.clear()
+
+    first = context_mod.get_agent_for_user("web", "default", model="fake/one", mode="chat", session_id="stable")
+    same = context_mod.get_agent_for_user("web", "default", model="fake/one", mode="chat", session_id="stable")
+    changed = context_mod.get_agent_for_user("web", "default", model="fake/two", mode="chat", session_id="stable")
+
+    assert first is same
+    assert changed is first
+    assert changed.model_name == "fake/two"
+    assert changed._model_pinned is True
