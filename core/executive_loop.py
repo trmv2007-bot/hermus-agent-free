@@ -33,7 +33,9 @@ class ExecutiveLoop:
             self.world.emit("world_awareness_error", {"error": str(exc)[:300]}, source="executive.perception")
         # Keep the perception contract explicit: callers can tell which runtime
         # produced the snapshot without importing the executive implementation.
+        prior_runtime = dict(observed.get("runtime") or {})
         observed["runtime"] = {
+            **prior_runtime,
             "platform": platform,
             "user_id": user_id,
             "workspace_root": str(workspace_root) if workspace_root else None,
