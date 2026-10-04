@@ -85,6 +85,28 @@ def _entry(root: Path, path: Path) -> dict[str, Any]:
 @router.get("/snapshot")
 async def workshop_snapshot(project: str | None = None):
     from core.world_awareness import world_awareness
+    from core.workspace import workspace
+
+    requested = str(project or "").strip()
+    try:
+        projects = workspace.list_projects()
+    except Exception:
+        projects = []
+
+    # A product UI needs a valid empty state. Opening Workshop before a project
+    # exists/has been selected must not look like a broken route.
+    if not requested and not (workspace.current_project() or workspace.active_project()):
+        return {
+            "success": True,
+            "project": None,
+            "root": None,
+            "tree": [],
+            "truncated": False,
+            "skipped": 0,
+            "projects": projects,
+            "current": None,
+            "world": world_awareness.status(),
+        }
 
     try:
         root = _workspace_root(project)
@@ -107,14 +129,6 @@ async def workshop_snapshot(project: str | None = None):
             skipped += 1
 
     world = world_awareness.status()
-    projects = []
-    try:
-        from core.workspace import workspace
-
-        projects = workspace.list_projects()
-    except Exception:
-        projects = []
-
     return {
         "success": True,
         "project": root.name,
