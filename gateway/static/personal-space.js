@@ -10,7 +10,11 @@
     const r=await fetch(path,{...options,headers});
     const text=await r.text(); let data={};
     try{ data=text?JSON.parse(text):{} }catch{ data={message:text}; }
-    if(!r.ok) throw new Error(data.message||data.detail||data.error||('HTTP '+r.status));
+    if(!r.ok){
+      const raw=String(data.message||data.detail||data.error||'').trim();
+      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || text.trim().startsWith('<!');
+      throw new Error(htmlError ? 'Personal Space is temporarily unavailable.' : (raw||('HTTP '+r.status)));
+    }
     return data;
   }
 
@@ -58,7 +62,14 @@
   async function refresh(){
     try{ render(await api('/personal-space?limit=6')); }
     catch(e){
-      const detail=$('#personalSpaceDetail'); if(detail) detail.textContent='Personal Space unavailable: '+e.message;
+      const status=$('#personalSpaceStatus');
+      const headline=$('#personalSpaceHeadline');
+      const detail=$('#personalSpaceDetail');
+      const proposal=$('#personalSpaceProposal');
+      if(status) status.textContent='UNAVAILABLE';
+      if(headline) headline.textContent='Personal Space is taking a pause.';
+      if(detail) detail.textContent='Reconnect to inspect its latest curiosity state. Your main workspace is unaffected.';
+      if(proposal) proposal.innerHTML='<span>No proposal can be shown right now.</span>';
     }
   }
 
