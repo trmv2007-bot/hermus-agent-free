@@ -2,7 +2,17 @@
   const $ = (s) => document.querySelector(s);
   const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
   if (token) localStorage.setItem('hermus_gateway_token', token);
-  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, workshop:false, workshopProject:null, workshopFile:null, workshopDirty:false, _kernelEvents:new Set() };
+  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, workshop:false, workshopProject:null, workshopFile:null, workshopDirty:false, sessionId:localStorage.getItem('hermus_session_id')||'', mediaRecorder:null, voiceChunks:[], voiceActive:false, _kernelEvents:new Set() };
+
+  async function ensureSession(){
+    if(state.sessionId) return state.sessionId;
+    try{
+      const data=await api('/conversation/session',{method:'POST',body:JSON.stringify({user_id:'default',platform:'web'})});
+      state.sessionId=String(data.session_id||'');
+      if(state.sessionId) localStorage.setItem('hermus_session_id',state.sessionId);
+    }catch{}
+    return state.sessionId;
+  }
 
   async function api(path, options={}) {
     const headers = new Headers(options.headers || {});
@@ -150,13 +160,13 @@
     const input=$('#command'); const command=(value ?? input.value).trim(); if(!command)return;
     input.value=''; missionReset(); state.busy=true; setState('WORKING','processing your request'); addEvent(`Command · ${command}`);
     try {
-      const result=await api('/api/v1/commands',{method:'POST',body:JSON.stringify({command,text:command,platform:'web',mode:'chat',stream:true})});
+      const result=await api('/api/v1/commands',{method:'POST',body:JSON.stringify({command,text:command,platform:'web',mode:'chat',stream:true,session_id:await ensureSession(),user_id:'default'})});
       const id=result.run_id || result.mission_id; state.mission=id || null;
       addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
       if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
     } catch(e) {
       try {
-        const result=await api('/jobs',{method:'POST',body:JSON.stringify({kind:'runtime.turn',payload:{text:command,platform:'web',mode:'chat',stream:true}})});
+        const result=await api('/jobs',{method:'POST',body:JSON.stringify({kind:'runtime.turn',payload:{text:command,platform:'web',mode:'chat',stream:true,session_id:await ensureSession(),user_id:'default'}})});
         const id=result.run_id || result.mission_id; state.mission=id || null; addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
         if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
       } catch (fallback) { state.busy=false; state.missionLive=false; addEvent(fallback.message,'error'); setState('ATTENTION',fallback.message); }
@@ -427,6 +437,61 @@
   refreshKernel();
   setInterval(()=>refreshModels(false),30000);
   setInterval(refreshKernel,2500);
+
+  // -------------------------------------------------------------- CONVERSATION + VOICE
+  async function startVoice(){
+    if(state.voiceActive) return stopVoice();
+    if(!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder){
+      addEvent('Voice input is unavailable in this browser','error'); return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const rec=new MediaRecorder(stream);
+      state.mediaRecorder=rec; state.voiceChunks=[]; state.voiceActive=true;
+      const btn=$('#voiceButton'); if(btn) btn.textContent='■';
+      rec.ondataavailable=e=>{if(e.data.size) state.voiceChunks.push(e.data);};
+      rec.onstop=async()=>{
+        stream.getTracks().forEach(t=>t.stop());
+        state.voiceActive=false; if(btn) btn.textContent='◎';
+        const blob=new Blob(state.voiceChunks,{type:rec.mimeType||'audio/webm'});
+        await sendVoiceBlob(blob);
+      };
+      rec.start();
+      addEvent('Listening…');
+      setState('LISTENING','speak your request');
+    }catch(e){
+      state.voiceActive=false; addEvent('Microphone · '+e.message,'error');
+    }
+  }
+
+  function stopVoice(){
+    try{state.mediaRecorder?.stop();}catch{}
+    state.mediaRecorder=null;
+  }
+
+  async function sendVoiceBlob(blob){
+    try{
+      await ensureSession();
+      const query='?session_id='+encodeURIComponent(state.sessionId||'')+'&user_id=default';
+      const r=await fetch('/voice/command'+query,{
+        method:'POST',
+        headers:{'Content-Type':blob.type||'audio/webm',...(token?{'X-Hermus-Token':token}:{})},
+        body:blob
+      });
+      const data=await r.json();
+      if(!r.ok) throw new Error(data.error||data.message||('HTTP '+r.status));
+      if(data.ack?.audio_url){
+        try{await new Audio(data.ack.audio_url).play();}catch{}
+      }
+      const runId=data.run_id;
+      state.mission=runId||state.mission;
+      addEvent('Voice request accepted');
+      if(runId) connectRun(runId);
+    }catch(e){
+      addEvent('Voice · '+e.message,'error');
+      setState('ATTENTION',e.message);
+    }
+  }
 
   // -------------------------------------------------------------- WORKSHOP
   function setWorkshop(open){
