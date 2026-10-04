@@ -707,6 +707,15 @@
       renderWorkshopTree(snap.tree);
       renderWorkshopContext();
       renderWorkshopMission();
+      if(!state.workshopProject){
+        $('#workshopContext').innerHTML='<div class="empty-event">Select a workspace project to load live context.</div>';
+        $('#workshopMission').innerHTML='<div class="empty-event">No project selected.</div>';
+        $('#workshopFileName').textContent='No file selected';
+        $('#workshopEditor').disabled=true;
+        $('#workshopEditor').value='';
+        $('#workshopSave').disabled=true;
+        return;
+      }
       const query=state.workshopFile ? state.workshopFile.split('/').pop() : state.workshopProject;
       const ctx=await api('/context?project='+encodeURIComponent(state.workshopProject||'')+'&query='+encodeURIComponent(query||'')+'&user_id=default&memory_limit=4');
       renderWorkshopContext(ctx);
