@@ -762,6 +762,36 @@ async def control_console_js():
     return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
 
 
+@app.get("/static/nexus.js")
+async def nexus_js():
+    """Nexus/JARVIS dashboard client."""
+    return _serve_control_asset("nexus.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/nexus.css")
+async def nexus_css():
+    """Nexus/JARVIS dashboard stylesheet."""
+    return _serve_control_asset("nexus.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/personal-space.js")
+async def personal_space_js():
+    """Personal Space dashboard client."""
+    return _serve_control_asset("personal-space.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/jarvis-ui.js")
+async def jarvis_ui_js():
+    """JARVIS workspace UI interaction layer."""
+    return _serve_control_asset("jarvis-ui.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/assets/favicon.svg")
+async def control_favicon():
+    """HERMUS control-room favicon."""
+    return _serve_control_asset("assets/favicon.svg", "image/svg+xml")
+
+
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache stats - for optimization dashboard"""
