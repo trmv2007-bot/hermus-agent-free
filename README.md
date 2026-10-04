@@ -17,62 +17,78 @@
 
 ## 🚀 Quick Start
 
-HERMUS now has a **fresh-machine installer by default**. It detects the host, checks required tooling, creates an isolated project `.venv`, installs dependencies, and runs the canonical Doctor/bootstrap verification.
+### One-shot full install
 
-### Windows — easiest path
+HERMUS ships one canonical installer path per platform. The installer obtains the repository, creates the project-local Python environment, installs the required runtime dependencies, installs supported optional integrations, installs the browser runtime used by the web subsystem where supported, initializes the runtime layout, and runs the Doctor/live verification.
 
-After installing Git (or with Git available through your normal Windows setup):
+It is safe to re-run. It does not delete HERMUS memory, projects, workspace data, logs, credentials or model files.
 
-```powershell
- git clone https://github.com/trmv2007-bot/hermus-agent-free.git
- cd hermus-agent-free
- .\setup.cmd
-```
+It does not download AI model weights or create provider credentials. Local models and hosted-provider keys remain operator-configured.
 
-You can also run:
+#### Windows 10/11
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1
-```
+Run this from PowerShell:
 
-The Windows installer uses `winget` when available to install missing Git, Python 3.12 and Node.js LTS. Node/npm are only required by the installer when a JavaScript package manifest exists. Bun is optional and is not installed just because it is available elsewhere.
+    $p = Join-Path $env:TEMP "hermus-install.ps1"
+    Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.ps1" -OutFile $p
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p
 
-### Linux / WSL / macOS / Termux
+The Windows bootstrap uses winget when available to install missing Git, Python and Node.js LTS. The Node runtime is only required when a JavaScript package manifest is present.
 
-```bash
-git clone https://github.com/trmv2007-bot/hermus-agent-free.git
-cd hermus-agent-free
-./setup.sh
-```
+#### Linux / WSL
 
-On Linux, the installer can install missing host Python/venv/Git/curl/build tooling using the detected package manager. HERMUS then uses a project-local `.venv` rather than system `pip`.
+Run:
+
+    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
+    bash /tmp/hermus-install.sh
+
+The Linux installer supports the package-manager families already handled by setup.sh (apt, dnf, yum, pacman and apk).
+
+#### macOS
+
+Run:
+
+    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
+    bash /tmp/hermus-install.sh
+
+macOS uses the canonical setup.sh flow and Homebrew when required host tooling is missing.
+
+#### Android / Termux
+
+Run:
+
+    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
+    bash /tmp/hermus-install.sh
+
+Termux uses pkg for required host packages. Desktop Chromium/Playwright support is intentionally not forced on Termux.
+
+### Already cloned the repository?
+
+Windows:
+
+    .\setup.cmd
+
+Linux / macOS / Termux:
+
+    ./setup.sh
 
 ### Verify or repair
 
-```bash
-# Windows
-.\setup.cmd -VerifyOnly
-.\setup.cmd -Repair
+Windows:
 
-# Linux/macOS/Termux
-./setup.sh --verify-only
-./setup.sh --repair
-```
+    .\setup.cmd -VerifyOnly
+    .\setup.cmd -Repair
 
-### Start the Gateway
+Linux / macOS / Termux:
 
-```bash
-./hermus-gateway
-```
+    ./setup.sh --verify-only
+    ./setup.sh --repair
 
-On Windows, use the corresponding project launcher/PowerShell entry point provided by the repository after setup.
+### Start HERMUS
 
-### Open Control Room
+    ./hermus start
 
-**http://localhost:8000/control**
-
----
-
+Open **http://localhost:8000/control** for the Control Room.
 ## 🧠 What is HERMUS?
 
 **HERMUS** is a general-purpose personal AI agent: a persistent system that can understand objectives, plan work, delegate to specialist capabilities, operate tools, verify results, recover from failures, remember what it learns, and safely become more useful over time.
