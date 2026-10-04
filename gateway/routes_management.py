@@ -101,6 +101,47 @@ async def keys_add(payload: dict):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+@router.post("/keys/test")
+async def keys_test(payload: dict):
+    """Test one stored AI key without exposing the credential."""
+    try:
+        from core.multi_key import multi_key_manager
+        from core.response_tester import response_tester
+
+        provider = str(payload.get("provider") or "").strip().lower()
+        key_name = str(payload.get("name") or payload.get("key_name") or "").strip()
+        model = str(payload.get("model") or "").strip() or None
+        if not provider or not key_name:
+            return JSONResponse({"success": False, "error": "provider and key name are required"}, status_code=400)
+
+        entry = multi_key_manager.get_entry(provider, key_name)
+        if not entry:
+            return JSONResponse({"success": False, "error": "stored key not found"}, status_code=404)
+
+        api_key = str(entry.get("key") or "")
+        if not api_key and provider not in ("ollama", "lmstudio"):
+            return JSONResponse({"success": False, "error": "stored key has no credential"}, status_code=400)
+
+        result = response_tester.test_llm_key(
+            provider,
+            api_key,
+            model=model or entry.get("default_model"),
+            base_url=entry.get("base_url"),
+            prompt=str(payload.get("prompt") or "Reply with exactly: HERMUS API key test OK."),
+            timeout=min(30, max(5, int(payload.get("timeout") or 20))),
+        )
+        # Never send the actual secret back to the browser.
+        result.pop("api_key_full", None)
+        result["key_name"] = entry.get("name") or key_name
+        result["working"] = bool(result.get("success"))
+        result["status"] = "working" if result["working"] else (
+            "rate_limited" if "rate" in str(result.get("error") or "").lower() or "429" in str(result.get("error") or "") else "failed"
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"success": False, "working": False, "status": "failed", "error": str(e)}, status_code=500)
+
+
 @router.post("/keys/remove")
 async def keys_remove(payload: dict):
     """Remove API key via Settings"""
