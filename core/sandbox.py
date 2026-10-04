@@ -584,7 +584,16 @@ class Sandbox:
         """Run a Python snippet under the same boundary (used by skill validation)."""
         kw.setdefault("purpose", "python")
         quoted = shlex.quote(code)
-        return self.run(f"{shlex.quote(sys.executable or 'python3')} -c {quoted}", **kw)
+        requested_backend = str(kw.get("backend") or "").lower()
+        policy = kw.get("policy") or {}
+        probe_policy = replace(self.policy, **policy) if isinstance(policy, dict) else self.policy
+        chosen, _ = self._resolve_backend(probe_policy)
+        if requested_backend:
+            chosen = requested_backend
+        # Container images have their own interpreter; never pass the host runner's
+        # absolute Python path into the container namespace.
+        executable = "python3" if chosen in ("docker", "podman") else (sys.executable or "python3")
+        return self.run(f"{shlex.quote(executable)} -c {quoted}", **kw)
 
     def run_wasm(self, module_path: str, *, args: Sequence[str] = (), timeout: int = 20) -> dict[str, Any]:
         """Optional WASI path: run a .wasm module with wasmtime (strictly isolated, no fs/net)."""
