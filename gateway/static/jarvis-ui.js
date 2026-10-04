@@ -196,3 +196,5 @@
 
   window.HermusUI = { switchWorkbench, setRoom, hideWorkbench, showWorkbench, setToggle, mocks:MOCKS };
 })();
+
+// UI QA trigger: browser pass validates every visible control and state.
