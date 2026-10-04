@@ -136,6 +136,28 @@ jobs:
             if(p==='/workshop/snapshot') return route.fulfill(json({success:true,current:'demo-app',project:'demo-app',projects:[{name:'demo-app'},{name:'hermus-core'}],tree:[{name:'app.py',path:'app.py',type:'file',size:12},{name:'src',path:'src',type:'directory'}]}));
             if(p==='/context') return route.fulfill(json({project:'demo-app',summary:{state:'idle'},attention:[],goals:[{title:'Ship dashboard'}],memory:[{content:'QA note'}]}));
             if(p==='/workshop/file'&&m==='GET') return route.fulfill(json({path:'app.py',content:'print(1)\n',size:9,editable:true}));
+            if(p==='/workshop/file'&&m==='PUT') return route.fulfill(json({success:true,changed:true,path:'app.py',size:8}));
+            if(p==='/missions/m1/resume'){
+              return route.fulfill(json({success:true,mission_id:'m1',run_id:'qa-resume',state:'continuing',status:'running'}));
+            }
+            if(p==='/personal-os') return route.fulfill(json({
+              focus:'Ship dashboard',
+              goals:[{id:'g1',title:'Ship dashboard',status:'active'}],
+              projects:[{name:'demo-app'}],
+              tasks:[{id:'t1',title:'Review QA',status:'open',priority:'high',project:'demo-app'}],
+              open_task_count:1,schedules:[],automations:[],relevant_memories:[]
+            }));
+            if(p==='/personal-os/briefing') return route.fulfill(json({
+              focus:'Ship dashboard',priority_tasks:[{title:'Review QA'}],due_tasks:[],active_goals:[{title:'Ship dashboard'}],
+              open_task_count:1,schedule_count:0,automation_count:0,world:{}
+            }));
+            if(p.startsWith('/personal-os/tasks')&&m==='POST') return route.fulfill(json({success:true,task:{id:'t2',title:'Added'}}));
+            if(p.startsWith('/personal-os/tasks/')&&m==='PATCH') return route.fulfill(json({success:true,task:{id:'t1',status:'done'}}));
+            if(p==='/media/status') return route.fulfill(json({available:true,image_generation:true,video_generation:true,video_workflow_configured:true}));
+            if(p==='/media/gallery/image') return route.fulfill(json({success:true,kind:'image',items:[{name:'QA image',url:'/media/file/image/qa.png',size:10,modified:0}]}));
+            if(p==='/media/gallery/video') return route.fulfill(json({success:true,kind:'video',items:[{name:'QA video',url:'/media/file/video/qa.mp4',size:10,modified:0}]}));
+            if(p==='/media/generate'&&m==='POST') return route.fulfill(json({success:true,kind:'image',name:'QA image',url:'/media/file/image/qa.png'}));
+            if(p==='/media/chat'&&m==='POST') return route.fulfill(json({success:true,kind:'image',response:'Use a cinematic composition.'}));
             if(p==='/routines') return route.fulfill(json({routines:[{id:'r1',name:'Daily review',enabled:true,event_type:'schedule',action_type:'runtime.turn'}]}));
             if(p==='/missions') return route.fulfill(json({missions:[{id:'m1',goal:'Review workspace',state:'blocked'}]}));
             if(p==='/personal-space') return route.fulfill(json({status:'proposal_ready',idle_for_seconds:120,daily_cycles:1,daily_cap:3,proposals:[{id:'p1',status:'pending',title:'Useful discovery',summary:'QA proposal'}]}));
@@ -276,6 +298,7 @@ jobs:
           await page.locator('[data-mission-create]').click().catch(()=>{});
           await page.locator('#missionGoal').fill('Review workspace');
           await page.locator('[data-mission-create]').click();
+          await page.locator('[data-mission-resume="m1"]').click();
           await page.locator('[data-routine-new]').click();
           await page.locator('#routineName').fill('QA routine');
           await page.locator('#routineEvent').fill('schedule');
@@ -284,6 +307,11 @@ jobs:
 
           await page.locator('[data-view="personal"]').first().click();
           if(!(await page.locator('[data-personal-run]').count())) throw new Error('Personal Space controls missing');
+          if(!(await page.locator('#personalTaskInput').count())) throw new Error('Personal Space task controls missing');
+          if(!(await page.locator('.personal').count()) && !(await page.locator('#personalHost').innerText()).includes('WHAT I AM WATCHING')) throw new Error('Personal Space context missing');
+          await page.locator('#personalTaskInput').fill('QA task');
+          await page.locator('[data-personal-task-add]').click();
+          await page.locator('[data-personal-task-done="t1"]').click();
 
           await page.locator('[data-view="build"]').first().click();
           await page.locator('[data-build-new]').click();
@@ -293,6 +321,8 @@ jobs:
           await page.locator('[data-file="app.py"]').click();
           await page.locator('#buildEditor').fill('print(2)');
           await page.locator('#buildSave').click();
+          await page.waitForTimeout(30);
+          if(!(await page.locator('#buildDirty').textContent()).includes('SAVED')) throw new Error('Workshop editor save failed');
 
           await page.locator('[data-view="browser"]').first().click();
           await page.locator('#browserUrl').fill('https://example.com');
@@ -306,9 +336,12 @@ jobs:
           await page.locator('[data-view="image"]').first().click();
           await page.locator('#imageInput').fill('QA concept');
           await page.locator('[data-tool-run="image"]').click();
+          await page.locator('[data-media-chat="image"]').click();
+          if(!(await page.locator('#imageGallery img').count())) throw new Error('Image gallery did not render');
           await page.locator('[data-view="video"]').first().click();
           await page.locator('#videoInput').fill('QA shot');
           await page.locator('[data-tool-run="video"]').click();
+          if(!(await page.locator('#videoGallery video').count())) throw new Error('Video gallery did not render');
 
           await page.locator('[data-view="computer"]').first().click();
           await page.locator('#computerTask').fill('Inspect desktop');
