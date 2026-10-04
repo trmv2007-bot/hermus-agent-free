@@ -110,6 +110,14 @@ async def models_select(payload: dict):
         return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
 
 
+@router.get("/models/health")
+async def models_health():
+    """Provider circuits plus per-model runtime telemetry."""
+    from core.models import get_model_gateway
+
+    return get_model_gateway().health()
+
+
 @router.post("/models/refresh")
 async def models_refresh():
     """Force a live model catalog refresh."""
