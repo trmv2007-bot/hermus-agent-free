@@ -114,6 +114,18 @@ class PresenceKernel:
             self._unsubscribe = lambda: bus.unsubscribe(subscriber)
         return self
 
+    def stop(self) -> None:
+        """Detach the canonical EventBus subscription without changing state."""
+        with self._lock:
+            unsubscribe = self._unsubscribe
+            self._unsubscribe = None
+            self._subscriber = None
+        if unsubscribe is not None:
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+
     # ---------------------------------------------------------------- events
     def _on_event(self, event: Any) -> None:
         try:
