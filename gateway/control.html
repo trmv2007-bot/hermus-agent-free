@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="dark">
   <title>HERMUS — AI Operating Environment</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
-  <link rel="stylesheet" href="/static/dashboard-v2.css?v=20261004b">
+  <link rel="stylesheet" href="/static/dashboard-v2.css?v=20261004c">
 </head>
 <body>
 <div class="app">
@@ -16,15 +16,15 @@
       <span class="brand-mark"><i></i></span>
       <span class="brand-copy"><strong>HERMUS</strong><small>AI OPERATING ENVIRONMENT</small></span>
     </a>
-    <div class="commandbar" id="topCommand" role="button" tabindex="0" aria-label="Open command palette">
-      <span>⌕</span>
-      <input id="commandbarInput" placeholder="Ask HERMUS or press Ctrl K…" aria-label="Command HERMUS">
-      <kbd>Ctrl K</kbd>
-    </div>
+    <form class="commandbar" id="commandbarForm" aria-label="Command HERMUS">
+      <span aria-hidden="true">⌕</span>
+      <input id="commandbarInput" placeholder="Ask HERMUS anything…" aria-label="Command HERMUS">
+      <kbd>Enter</kbd>
+      <button id="commandFocus" class="command-palette-btn" type="button" aria-label="Open command palette">⌘</button>
+    </form>
     <div class="top-actions">
-      <div class="system-chip"><span id="topStatusDot" class="status-dot"></span><div><b id="topStatusLabel">CONNECTING</b><small id="topStatusSub">HERMUS CORE</small></div></div>
-      <button class="icon-btn" id="commandFocus" type="button" aria-label="Open command palette">⌘</button>
-      <button class="icon-btn" type="button" data-view="settings" aria-label="Open settings">⚙</button>
+      <div class="system-chip" aria-live="polite"><span id="topStatusDot" class="status-dot"></span><div><b id="topStatusLabel">CONNECTING</b><small id="topStatusSub">HERMUS CORE</small></div></div>
+      <button class="icon-btn" type="button" data-view="settings" aria-label="Open Control Center">⚙</button>
     </div>
   </header>
 
@@ -37,8 +37,8 @@
         <button class="nav-item" type="button" data-view="build"><span class="nav-icon">⌁</span><span>Workshop</span></button>
         <button class="nav-item" type="button" data-view="agents"><span class="nav-icon">✥</span><span>Agents</span></button>
         <button class="nav-item" type="button" data-view="models"><span class="nav-icon">◉</span><span>Models</span></button>
-        <button class="nav-item" type="button" data-view="tools"><span class="nav-icon">⌘</span><span>Tools</span></button>
         <button class="nav-item" type="button" data-view="missions"><span class="nav-icon">⟳</span><span>Missions</span></button>
+        <button class="nav-item" type="button" data-view="computer"><span class="nav-icon">▦</span><span>Computer</span></button>
       </div>
       <div class="nav-group">
         <div class="nav-label">KNOWLEDGE</div>
@@ -47,29 +47,30 @@
       </div>
       <div class="nav-group">
         <div class="nav-label">TOOLS</div>
+        <button class="nav-item" type="button" data-view="tools"><span class="nav-icon">⌘</span><span>Tools</span></button>
         <button class="nav-item" type="button" data-view="browser"><span class="nav-icon">◎</span><span>Browser</span></button>
         <button class="nav-item" type="button" data-view="terminal"><span class="nav-icon">›_</span><span>Terminal</span></button>
         <button class="nav-item" type="button" data-view="image"><span class="nav-icon">▣</span><span>Image Lab</span></button>
         <button class="nav-item" type="button" data-view="video"><span class="nav-icon">▶</span><span>Video Studio</span></button>
-        <button class="nav-item" type="button" data-view="space"><span class="nav-icon">◇</span><span>3D Space</span></button>
+        <button class="nav-item" type="button" data-view="space"><span class="nav-icon">◇</span><span>Space</span></button>
       </div>
       <div class="sidebar-foot">
         <div class="core-row"><span>Gateway</span><b id="overviewHealth">CHECKING</b></div>
         <div class="core-row"><span>Environment</span><b>READY</b></div>
-        <button class="nav-item" type="button" data-view="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
+        <button class="nav-item" type="button" data-view="settings"><span class="nav-icon">⚙</span><span>Control Center</span></button>
       </div>
     </aside>
 
     <main class="main" aria-live="polite">
       <section class="view active" id="view-overview">
-        <div class="view-head"><div><div class="eyebrow">HERMUS NEXUS</div><h1>Your command center.</h1><p>One place to see what matters, launch work and move into deeper workspaces.</p></div><div class="actions"><button class="btn" data-view="settings">SYSTEM</button><button class="btn primary" data-view="chat">NEW TASK ↗</button></div></div>
+        <div class="view-head"><div><div class="eyebrow">HERMUS NEXUS</div><h1>Your command center.</h1><p>One place to see what matters, launch work and move into deeper workspaces.</p></div><div class="actions"><button class="btn" data-view="settings">CONTROL CENTER</button><button class="btn primary" data-view="chat">NEW TASK ↗</button></div></div>
         <div class="hero">
           <article class="card hero-main">
             <div class="eyebrow">JARVIS PRESENCE</div>
             <h2>Ready for whatever comes next.</h2>
             <p>Research, coding, automation, browser work, media and system control all start from the same command surface.</p>
-            <div class="hero-command"><span>›</span><input id="overviewCommand" placeholder="Tell HERMUS what you need…" aria-label="Overview command"><button class="btn primary" type="button" data-overview-send>RUN</button></div>
-            <div class="hero-quick"><button class="quick" data-command="Research the latest AI news">Research</button><button class="quick" data-command="Review my current project">Analyze</button><button class="quick" data-view="build">Build</button><button class="quick" data-view="browser">Browse</button><button class="quick" data-view="image">Create</button></div>
+            <form class="hero-command" id="overviewCommandForm"><span aria-hidden="true">›</span><input id="overviewCommand" placeholder="Tell HERMUS what you need…" aria-label="Overview command"><button class="btn primary" type="submit">RUN</button></form>
+            <div class="hero-quick"><button class="quick" type="button" data-command="Research the latest AI news">Research</button><button class="quick" type="button" data-command="Review my current project">Analyze</button><button class="quick" type="button" data-view="build">Build</button><button class="quick" type="button" data-view="browser">Browse</button><button class="quick" type="button" data-view="image">Create</button></div>
           </article>
           <article class="card orb-card" aria-label="JARVIS visual state">
             <div class="orb-status"><span class="status-dot"></span><span>JARVIS ONLINE</span></div>
@@ -83,49 +84,49 @@
           <div class="stat"><span>ATTENTION</span><b id="statAttention">—</b><small>items needing review</small></div>
         </div>
         <div class="grid cols-2">
-          <article class="card"><div class="card-head"><div><strong>WHAT NEEDS ATTENTION</strong><small>Live from the presence kernel</small></div><button class="btn" data-view="missions">OPEN CONTROL</button></div><div id="overviewAttention" class="card-body list"><div class="empty">Checking current attention…</div></div></article>
-          <article class="card"><div class="card-head"><div><strong>WHO IS WORKING</strong><small>Current agent fleet</small></div><button class="btn" data-view="agents">MANAGE</button></div><div id="overviewAgents" class="card-body list"><div class="empty">Discovering agents…</div></div></article>
-          <article class="card"><div class="card-head"><div><strong>RECENT ACTIVITY</strong><small>Execution signals</small></div><button class="btn" data-view="chat">OPEN CHAT</button></div><div id="overviewActivity" class="card-body list"><div class="empty">No recent activity.</div></div></article>
-          <article class="card"><div class="card-head"><div><strong>GO DEEPER</strong><small>Dedicated product workspaces</small></div></div><div class="card-body grid cols-2"><button class="btn" data-view="models">MODEL HUB</button><button class="btn" data-view="tools">TOOL FABRIC</button><button class="btn" data-view="knowledge">KNOWLEDGE</button><button class="btn" data-view="personal">PERSONAL SPACE</button><button class="btn" data-view="space">3D SPACE</button><button class="btn" data-view="settings">SYSTEM HEALTH</button></div></article>
+          <article class="card"><div class="card-head"><div><strong>WHAT NEEDS ATTENTION</strong><small>Live from the presence kernel</small></div><button class="btn" type="button" data-view="settings" data-settings-tab-target="safety">OPEN CONTROL</button></div><div id="overviewAttention" class="card-body list"><div class="empty">Checking current attention…</div></div></article>
+          <article class="card"><div class="card-head"><div><strong>WHO IS WORKING</strong><small>Current agent fleet</small></div><button class="btn" type="button" data-view="agents">MANAGE</button></div><div id="overviewAgents" class="card-body list"><div class="empty">Discovering agents…</div></div></article>
+          <article class="card"><div class="card-head"><div><strong>RECENT ACTIVITY</strong><small>Execution signals</small></div><button class="btn" type="button" data-view="missions">OPEN WORK</button></div><div id="overviewActivity" class="card-body list"><div class="empty">No recent activity.</div></div></article>
+          <article class="card"><div class="card-head"><div><strong>GO DEEPER</strong><small>Dedicated product workspaces</small></div></div><div class="card-body grid cols-2"><button class="btn" type="button" data-view="models">MODEL HUB</button><button class="btn" type="button" data-view="tools">TOOL FABRIC</button><button class="btn" type="button" data-view="knowledge">KNOWLEDGE</button><button class="btn" type="button" data-view="computer">COMPUTER</button><button class="btn" type="button" data-view="personal">PERSONAL SPACE</button><button class="btn" type="button" data-view="settings">CONTROL CENTER</button></div></article>
         </div>
       </section>
 
       <section class="view" id="view-chat">
-        <div class="view-head"><div><div class="eyebrow">CONVERSATION</div><h1>Chat with HERMUS.</h1><p>Long-running tasks remain visible in the same environment instead of disappearing into another screen.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">CONVERSATION</div><h1>Chat with HERMUS.</h1><p>Requests become tracked runs instead of disappearing after “sent”.</p></div></div>
         <div class="chat-layout">
-          <aside class="chat-history"><button type="button"><b>Current session</b><small>Live HERMUS conversation</small></button><button type="button" data-command="Research the latest AI papers">AI research<small>Recent request</small></button><button type="button" data-command="Review the current system architecture">Architecture review<small>Recent request</small></button><button type="button" data-command="Find useful improvements for HERMUS">HERMUS improvements<small>Personal Space</small></button></aside>
-          <section class="chat-main"><div id="chatMessages" class="messages"></div><div class="compose"><textarea id="chatInput" placeholder="Tell HERMUS what you want to accomplish…"></textarea><div class="actions"><button class="btn" id="voiceToggle" type="button">VOICE</button><button class="btn primary" id="chatSend" type="button">SEND ↗</button></div></div></section>
+          <aside class="chat-history"><button type="button" class="session-current" id="currentSessionBtn"><b>Current session</b><small>Live HERMUS conversation</small></button><button type="button" data-command="Research the latest AI papers"><b>AI research</b><small>Start a research run</small></button><button type="button" data-command="Review the current system architecture"><b>Architecture review</b><small>Start an analysis run</small></button><button type="button" data-command="Find useful improvements for HERMUS"><b>HERMUS improvements</b><small>Personal Space idea</small></button></aside>
+          <section class="chat-main"><div id="chatMessages" class="messages"></div><div class="compose"><textarea id="chatInput" placeholder="Tell HERMUS what you want to accomplish…" aria-label="Chat message"></textarea><div class="actions"><button class="btn" id="voiceToggle" type="button">VOICE</button><button class="btn primary" id="chatSend" type="button">SEND ↗</button></div></div></section>
         </div>
       </section>
 
       <section class="view" id="view-build">
-        <div class="view-head"><div><div class="eyebrow">WORKSHOP</div><h1>Build, inspect, edit.</h1><p>Workspace files, context and HERMUS remain together.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">WORKSHOP</div><h1>Build, inspect, edit.</h1><p>Workspace files, context, projects and HERMUS stay together.</p></div></div>
         <div id="buildHost"></div>
       </section>
 
       <section class="view" id="view-agents">
-        <div class="view-head"><div><div class="eyebrow">AGENT FABRIC</div><h1>Persistent agents.</h1><p>Start, stop and hand work to specialist workers.</p></div><div class="actions"><button class="btn" data-command="Create a new specialist agent">PROPOSE AGENT</button><button class="btn primary" data-view="chat">CHAT</button></div></div>
+        <div class="view-head"><div><div class="eyebrow">AGENT FABRIC</div><h1>Persistent agents.</h1><p>Register specialists, start or stop them and hand work over deliberately.</p></div><div class="actions"><button class="btn primary" type="button" data-agent-new>NEW AGENT</button><button class="btn" type="button" data-view="chat">CHAT</button></div></div>
         <div id="agentsHost"></div>
       </section>
 
       <section class="view" id="view-models">
-        <div class="view-head"><div><div class="eyebrow">MODEL HUB</div><h1>Route intelligence deliberately.</h1><p>Choose a role, select a deployment and see live availability.</p></div></div>
-        <div class="card" style="margin-bottom:12px"><div class="card-body"><div class="toolbar"><label class="field">ROLE<select id="modelRoleInput" aria-label="Model role"><option value="default">Default</option><option value="reasoning">Reasoning</option><option value="vision">Vision</option><option value="coding">Coding</option><option value="background">Background</option><option value="doctor">Doctor</option><option value="voice">Voice</option></select></label><label class="field grow">DEPLOYMENT<select id="modelDeploymentInput" aria-label="Model deployment"><option value="auto">AUTO · best available</option></select></label><button class="btn primary" data-model-save>USE SELECTION</button><button class="btn" data-model-refresh>SYNC</button></div></div></div>
+        <div class="view-head"><div><div class="eyebrow">MODEL HUB</div><h1>Route intelligence deliberately.</h1><p>Choose a role, select a deployment and see live availability.</p></div><div class="actions"><button class="btn" type="button" data-view="settings" data-settings-tab-target="providers">PROVIDERS</button><button class="btn" type="button" data-view="settings" data-settings-tab-target="runtime">RUNTIME</button></div></div>
+        <div class="card" style="margin-bottom:12px"><div class="card-body"><div class="toolbar"><label class="field">ROLE<select id="modelRoleInput" aria-label="Model role"><option value="default">Default</option><option value="reasoning">Reasoning</option><option value="vision">Vision</option><option value="coding">Coding</option><option value="background">Background</option><option value="doctor">Doctor</option><option value="voice">Voice</option></select></label><label class="field grow">DEPLOYMENT<select id="modelDeploymentInput" aria-label="Model deployment"><option value="auto">AUTO · best available</option></select></label><button class="btn primary" type="button" data-model-save>USE SELECTION</button><button class="btn" type="button" data-model-refresh>SYNC</button></div><div id="modelCapabilityNote" class="result compact-result">Model capabilities update when a deployment is selected.</div></div></div>
         <div id="modelsHost"></div>
       </section>
 
       <section class="view" id="view-tools">
-        <div class="view-head"><div><div class="eyebrow">CAPABILITY FABRIC</div><h1>Tools you can actually use.</h1><p>Inspect a capability, then move into the workspace that performs the work.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">CAPABILITY FABRIC</div><h1>Tools you can actually use.</h1><p>Inspect capabilities, route them into a real workspace, or ask HERMUS to use them.</p></div></div>
         <div id="toolsHost"></div>
       </section>
 
       <section class="view" id="view-missions">
-        <div class="view-head"><div><div class="eyebrow">CONTROL PLANE</div><h1>Missions & automation.</h1><p>Execution history, routines and recovery in one place.</p></div><div class="actions"><button class="btn primary" data-view="chat">NEW MISSION ↗</button></div></div>
+        <div class="view-head"><div><div class="eyebrow">CONTROL PLANE</div><h1>Missions & automation.</h1><p>Start work with preflight, recover interrupted runs, and manage routines.</p></div><div class="actions"><button class="btn primary" type="button" data-mission-new>NEW MISSION</button><button class="btn" type="button" data-view="settings" data-settings-tab-target="safety">APPROVALS</button></div></div>
         <div id="missionsHost"></div>
       </section>
 
       <section class="view" id="view-knowledge">
-        <div class="view-head"><div><div class="eyebrow">MEMORY FABRIC</div><h1>Knowledge that stays useful.</h1><p>Save durable context and review what HERMUS has retained.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">MEMORY FABRIC</div><h1>Knowledge that stays useful.</h1><p>Save durable context and see the learning systems that support it.</p></div><div class="actions"><button class="btn" type="button" data-view="settings" data-settings-tab-target="memory">MEMORY SYSTEM</button></div></div>
         <div id="knowledgeHost"></div>
       </section>
 
@@ -135,17 +136,17 @@
       </section>
 
       <section class="view" id="view-browser">
-        <div class="view-head"><div><div class="eyebrow">BROWSER</div><h1>Live web context.</h1><p>Fetch a public page and bring the result into the HERMUS workflow.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">BROWSER</div><h1>Live web context.</h1><p>Fetch a public page through the browser boundary, inspect the result, and hand it to HERMUS.</p></div></div>
         <div id="browserHost"></div>
       </section>
 
       <section class="view" id="view-terminal">
-        <div class="view-head"><div><div class="eyebrow">TERMINAL</div><h1>Command workspace.</h1><p>Send a terminal request to HERMUS and keep execution in view.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">TERMINAL</div><h1>Command workspace.</h1><p>Send a terminal request through the agent runtime and keep the run visible.</p></div></div>
         <div id="terminalHost"></div>
       </section>
 
       <section class="view" id="view-image">
-        <div class="view-head"><div><div class="eyebrow">IMAGE LAB</div><h1>Create visuals.</h1><p>Start an image request without leaving the HERMUS operating environment.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">IMAGE LAB</div><h1>Create visuals.</h1><p>Submit media work through HERMUS and track it like any other run.</p></div></div>
         <div id="imageHost"></div>
       </section>
 
@@ -154,24 +155,46 @@
         <div id="videoHost"></div>
       </section>
 
+      <section class="view" id="view-computer">
+        <div class="view-head"><div><div class="eyebrow">COMPUTER</div><h1>Operate the desktop safely.</h1><p>Plan in dry-run mode, opt into execution, pause or stop work, and keep the computer state visible.</p></div><div class="actions"><button class="btn" type="button" data-view="settings" data-settings-tab-target="computer">COMPUTER SETTINGS</button></div></div>
+        <div id="computerHost"></div>
+      </section>
+
       <section class="view" id="view-space">
-        <div class="view-head"><div><div class="eyebrow">ENVIRONMENT</div><h1>Your 3D command space.</h1><p>Use rooms as spatial shortcuts into the actual HERMUS workspaces.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">ENVIRONMENT</div><h1>Your spatial command space.</h1><p>Use rooms as direct shortcuts into the actual HERMUS workspaces.</p></div><div class="actions"><button class="btn" type="button" data-view="overview">MAIN HALL</button></div></div>
         <div class="scene">
           <div class="scene-grid"></div><div class="scene-ring"></div><div class="scene-core"></div>
+          <div class="space-caption"><span class="badge good">LIVE NAVIGATOR</span><strong>HERMUS SPACE</strong><small>Spatial navigation only. Operational state stays in the real workspaces.</small></div>
           <div class="room-buttons">
             <button class="room-button active" type="button" data-view="overview"><strong>MAIN HALL</strong><small>Command center and live operational state.</small></button>
             <button class="room-button" type="button" data-view="build"><strong>IDE LAB</strong><small>Code and workspace editing.</small></button>
             <button class="room-button" type="button" data-view="models"><strong>MODEL LAB</strong><small>Deployments and routing.</small></button>
             <button class="room-button" type="button" data-view="image"><strong>MEDIA STUDIO</strong><small>Images and video pipeline.</small></button>
-            <button class="room-button" type="button" data-view="missions"><strong>CONTROL ROOM</strong><small>Missions, routines and health.</small></button>
+            <button class="room-button" type="button" data-view="missions"><strong>CONTROL ROOM</strong><small>Missions, routines and approvals.</small></button>
             <button class="room-button" type="button" data-view="personal"><strong>PERSONAL SPACE</strong><small>Curiosity, proposals and memory.</small></button>
           </div>
         </div>
       </section>
 
       <section class="view" id="view-settings">
-        <div class="view-head"><div><div class="eyebrow">SYSTEM</div><h1>Settings & health.</h1><p>Dashboard behavior stays local; core health comes from the live gateway.</p></div></div>
-        <div id="settingsHost"></div>
+        <div class="view-head"><div><div class="eyebrow">CONTROL CENTER</div><h1>HERMUS configuration.</h1><p>One place to inspect and operate the real runtime: models, providers, permissions, voice, computer control, memory, integrations and updates.</p></div></div>
+        <div class="settings-frame">
+          <nav class="settings-nav" id="settingsTabs" aria-label="Control Center sections">
+            <button class="settings-tab active" type="button" data-settings-tab="general">General</button>
+            <button class="settings-tab" type="button" data-settings-tab="models">Models</button>
+            <button class="settings-tab" type="button" data-settings-tab="providers">Providers & Keys</button>
+            <button class="settings-tab" type="button" data-settings-tab="agents">Agents</button>
+            <button class="settings-tab" type="button" data-settings-tab="safety">Safety & Approvals</button>
+            <button class="settings-tab" type="button" data-settings-tab="voice">Voice</button>
+            <button class="settings-tab" type="button" data-settings-tab="computer">Computer</button>
+            <button class="settings-tab" type="button" data-settings-tab="memory">Memory</button>
+            <button class="settings-tab" type="button" data-settings-tab="workspace">Workspace</button>
+            <button class="settings-tab" type="button" data-settings-tab="integrations">Integrations</button>
+            <button class="settings-tab" type="button" data-settings-tab="runtime">Runtime & Doctor</button>
+            <button class="settings-tab" type="button" data-settings-tab="updates">Updates</button>
+          </nav>
+          <section id="settingsHost"></section>
+        </div>
       </section>
     </main>
   </div>
@@ -180,11 +203,11 @@
 <div id="commandPalette" class="command-palette" aria-hidden="true">
   <section class="palette" role="dialog" aria-modal="true" aria-labelledby="paletteTitle">
     <div class="palette-head"><span id="paletteTitle">HERMUS COMMAND</span><button id="paletteClose" type="button" aria-label="Close command palette">×</button></div>
-    <input id="paletteInput" placeholder="Search a workspace…" aria-label="Search HERMUS workspaces">
+    <input id="paletteInput" placeholder="Find a workspace or control section…" aria-label="Search HERMUS workspaces">
     <div id="paletteList" class="palette-list"></div>
   </section>
 </div>
 
-<script src="/static/dashboard-v2.js?v=20261004b" defer></script>
+<script src="/static/dashboard-v2.js?v=20261004c" defer></script>
 </body>
 </html>
