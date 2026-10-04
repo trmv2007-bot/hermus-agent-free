@@ -432,6 +432,7 @@ class PersonalSpace:
         return rows[-max(1, min(50, int(limit))):][::-1]
 
     def approve(self, proposal_id: str) -> dict[str, Any]:
+        self.note_user_activity()
         with self._lock:
             proposal = self._find_proposal(proposal_id)
             if proposal is None:
@@ -483,6 +484,7 @@ class PersonalSpace:
         return {"success": True, "proposal": dict(proposal or {}), "job_id": job.id, "run_id": job.run_id}
 
     def dismiss(self, proposal_id: str) -> dict[str, Any]:
+        self.note_user_activity()
         with self._lock:
             proposal = self._find_proposal(proposal_id)
             if proposal is None:
