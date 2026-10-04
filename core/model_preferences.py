@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .model_catalog import model_catalog
+from .models.model_catalog import model_catalog
 
 
 class ModelPreferences:
