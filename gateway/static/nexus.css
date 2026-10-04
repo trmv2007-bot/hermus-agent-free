@@ -2,7 +2,7 @@
   --bg:#06080d;--bg2:#0a0d13;--surface:#0c1017;--surface2:#11161e;--line:#1a222d;
   --line-strong:#243141;--text:#e8edf4;--muted:#8390a0;--faint:#53606f;--accent:#79d7ff;
   --accent-soft:rgba(121,215,255,.10);--accent-strong:rgba(121,215,255,.22);
-  --good:#74e5a0;--warn:#f4c86f;--bad:#ff7f91;--shadow:0 20px 60px rgba(0,0,0,.35);
+  --good:#74e5a0;--jarvis-good:#74e5a0;--warn:#f4c86f;--bad:#ff7f91;--shadow:0 20px 60px rgba(0,0,0,.35);
   --r:12px
 }
 *{box-sizing:border-box}
@@ -70,3 +70,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .topbar{height:58px}.top-command{height:36px}.top-command kbd,.top-actions .top-action:last-child{display:none}.brand-copy strong{font-size:11px}.app-shell{min-height:calc(100vh - 58px)}.sidebar-left{display:block}.sidebar-main,.sidebar-secondary{grid-template-columns:1fr 1fr}.sidebar-footer{margin-top:16px}.hero-title-row{display:block}.hero-title-row .status-badge{margin-top:10px}.hero-title-row h2{font-size:21px}.hero-content{padding:18px}.orb-panel{padding:12px}.dashboard-grid .agents-surface,.dashboard-grid .model-surface,.dashboard-grid .intelligence-surface,.dashboard-grid .personal-surface,.dashboard-grid .system-surface{grid-column:span 12}.room-list{grid-template-columns:1fr 1fr}.workbench-tabs{overflow:auto}.workbench-tab{padding:8px 9px}.workbench-body{grid-template-columns:1fr}.conversation-list{display:none}.workshop-grid{grid-template-columns:1fr}.project-pane,.context-pane{display:none}.workshop.open{grid-template-rows:58px minmax(0,1fr) 50px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+
+.model-fleet{display:flex;flex-wrap:wrap;gap:6px}.model-chip{display:inline-flex;align-items:center;padding:5px 7px;border:1px solid var(--line);background:rgba(255,255,255,.018);border-radius:6px;color:#748492;font-size:7px;line-height:1.2}.model-chip.live{border-color:rgba(116,229,160,.16);color:#91caaa;background:rgba(116,229,160,.035)}
+.proposal-box strong{display:block;font-size:8px;color:#c9d7e0;font-weight:520}.proposal-box small{display:block;margin-top:2px;color:#71808e;font-size:7px}
+.personal-space-actions{display:flex;gap:7px;padding:0 16px 14px;flex-wrap:wrap}.personal-space-action{height:32px;padding:0 10px;border:1px solid var(--line-strong);background:rgba(255,255,255,.025);border-radius:7px;color:#8da0ad;font-size:8px;letter-spacing:.06em;cursor:pointer}.personal-space-action:hover{color:#edfaff;border-color:#344555}.personal-space-action.primary{border-color:rgba(121,215,255,.26);background:rgba(121,215,255,.08);color:#d8f7ff}
