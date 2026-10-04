@@ -488,6 +488,13 @@ class Sandbox:
         sandbox_id = f"sbx_{uuid.uuid4().hex[:10]}"
         chosen, reason = self._resolve_backend(pol)
 
+        # Explicit dangerous overrides remain audited and resource-limited,
+        # but use the hardened local backend so trusted absolute host paths
+        # (including /tmp) remain reachable.
+        if allow_dangerous and chosen in ("docker", "podman", "bwrap"):
+            chosen = "local"
+            reason = f"{reason}; explicit dangerous override → hardened local backend"
+
         denied = scan_command(command, pol.deny_patterns)
         if denied and not allow_dangerous:
             self._audit(
