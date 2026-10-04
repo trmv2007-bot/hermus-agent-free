@@ -28,6 +28,8 @@ class HermusNode:
     status: str = "online"
     last_heartbeat: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
+    lease_until: float = 0.0
+    fencing_token: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -42,6 +44,8 @@ class DistributedAssignment:
     status: str = "assigned"
     created_at: float = field(default_factory=time.time)
     reason: str = ""
+    lease_until: float = 0.0
+    fencing_token: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -122,23 +126,73 @@ class DistributedCoordinator:
                 return {"success": False, "error": "no_healthy_node_with_capability", "capability": capability}
             if capability and capability not in node.capabilities:
                 return {"success": False, "error": "node_lacks_capability"}
+            existing = next((a for a in self.assignments.values() if a.job_id == str(job_id) and a.status in ("assigned", "running")), None)
+            if existing:
+                return {"success": True, "assignment": existing.to_dict(), "deduplicated": True}
+            node.fencing_token += 1
+            lease_until = time.time() + self.heartbeat_timeout
+            node.lease_until = lease_until
             assignment = DistributedAssignment(
                 id=f"assign_{uuid.uuid4().hex[:12]}",
                 job_id=str(job_id),
                 node_id=node.id,
                 capability=str(capability or ""),
                 reason="explicit node" if node_id else "capability routing",
+                lease_until=lease_until,
+                fencing_token=node.fencing_token,
             )
             self.assignments[assignment.id] = assignment
             self._save()
             return {"success": True, "assignment": assignment.to_dict(), "node": node.to_dict()}
 
-    def complete_assignment(self, assignment_id: str, *, success: bool) -> dict[str, Any]:
+    def renew_assignment(self, assignment_id: str, *, node_id: str, fencing_token: int) -> dict[str, Any]:
+        with self._lock:
+            assignment = self.assignments.get(str(assignment_id))
+            node = self.nodes.get(str(node_id))
+            if not assignment or not node:
+                return {"success": False, "error": "assignment_or_node_not_found"}
+            if assignment.node_id != node.id or assignment.fencing_token != int(fencing_token):
+                return {"success": False, "error": "stale_fencing_token"}
+            if assignment.status not in ("assigned", "running"):
+                return {"success": False, "error": "assignment_not_active"}
+            lease = time.time() + self.heartbeat_timeout
+            assignment.status = "running"
+            assignment.lease_until = lease
+            node.lease_until = lease
+            self._save()
+            return {"success": True, "assignment": assignment.to_dict()}
+
+    def failover(self, assignment_id: str) -> dict[str, Any]:
+        if get_emergency_stop().active():
+            return {"success": False, "error": "emergency_stop_active"}
+        self._mark_stale()
+        with self._lock:
+            assignment = self.assignments.get(str(assignment_id))
+            if not assignment:
+                return {"success": False, "error": "assignment_not_found"}
+            if assignment.lease_until > time.time():
+                return {"success": False, "error": "lease_still_active"}
+            node = self._select(assignment.capability)
+            if not node:
+                return {"success": False, "error": "no_failover_node"}
+            node.fencing_token += 1
+            assignment.node_id = node.id
+            assignment.fencing_token = node.fencing_token
+            assignment.lease_until = time.time() + self.heartbeat_timeout
+            assignment.status = "assigned"
+            assignment.reason = "safe lease failover"
+            self._save()
+            return {"success": True, "assignment": assignment.to_dict(), "node": node.to_dict()}
+
+    def complete_assignment(self, assignment_id: str, *, success: bool, node_id: str | None = None, fencing_token: int | None = None) -> dict[str, Any]:
         with self._lock:
             assignment = self.assignments.get(str(assignment_id))
             if assignment is None:
                 return {"success": False, "error": "assignment_not_found"}
+            if node_id is not None and (assignment.node_id != str(node_id) or assignment.fencing_token != int(fencing_token or 0)):
+                return {"success": False, "error": "stale_fencing_token"}
             assignment.status = "succeeded" if success else "failed"
+            assignment.lease_until = 0.0
             self._save()
             return {"success": True, "assignment": assignment.to_dict()}
 
