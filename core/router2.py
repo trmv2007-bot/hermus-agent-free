@@ -283,6 +283,8 @@ class ModelRouter:
             if needs_tools and not self._supports_tools(provider):
                 continue
             s, reason = self._score_worker(w, task_type, needs_tools, wants_vision, context_tokens)
+            if s <= -90.0:
+                continue
             ranked.append({**w, "score": round(s, 2), "reason": reason, "task_type": task_type})
         ranked.sort(key=lambda x: x["score"], reverse=True)
         return ranked
