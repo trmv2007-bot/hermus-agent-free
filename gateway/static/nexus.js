@@ -186,6 +186,7 @@
     'Safety report': ['/safety/report?format=markdown'],
     'Safety preflight': ['/safety/preflight'],
     'Capability registry': ['/capabilities/registry'],
+    'Devices': ['/devices'],
   };
 
   // Canonical HERMUS action registry. These routes are backend capabilities;
