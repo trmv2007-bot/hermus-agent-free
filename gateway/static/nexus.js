@@ -755,13 +755,25 @@
     }
   }
 
-  // Three clicks on the HERMUS mark opens the second workspace.
+  // Three clicks on the HERMUS mark opens the second JARVIS workspace.
+  function setJarvisWorkspace(open){
+    const host=$('#jarvisWorkspace');
+    if(!host)return;
+    host.classList.toggle('open',!!open);
+    host.setAttribute('aria-hidden',open?'false':'true');
+    document.body.classList.toggle('jarvis-workspace-mode',!!open);
+    if(open) $('#jwCommand')?.focus();
+  }
   let logoClicks=0, logoTimer=null;
   $('#hermusLogo')?.addEventListener('click',()=>{
     logoClicks++;
     clearTimeout(logoTimer);
     logoTimer=setTimeout(()=>{logoClicks=0;},1300);
-    if(logoClicks>=3){logoClicks=0;setWorkshop(true);}
+    if(logoClicks>=3){logoClicks=0;setJarvisWorkspace(true);}
+  });
+  document.addEventListener('click',e=>{
+    if(e.target.closest('[data-jarvis-close]'))setJarvisWorkspace(false);
+    if(e.target.closest('[data-deep-workshop]')){setJarvisWorkspace(false);setWorkshop(true);}
   });
   $('#workshopClose')?.addEventListener('click',()=>setWorkshop(false));
   $('#workshopRefresh')?.addEventListener('click',refreshWorkshop);
