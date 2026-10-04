@@ -461,22 +461,27 @@
     }).join('') : '<div class="empty-event">No workspace projects.</div>';
   }
 
-  function renderWorkshopContext(){
+  function renderWorkshopContext(ctx=null){
     const host=$('#workshopContext');
     if(!host) return;
-    const k=state.kernel||{};
-    const world=(k.world&&k.world.facts)||{};
-    const summary=(k.summary)||{};
+    ctx=ctx||null;
+    const k=ctx?.presence||state.kernel||{};
+    const world=(ctx?.presence?.world?.facts || ctx?.world?.facts || k.world?.facts)||{};
+    const summary=(ctx?.summary || k.summary)||{};
     const rows=[
       ['STATE',String(summary.state||'idle')],
-      ['ATTENTION',String(summary.attention_count||0)+' active'],
-      ['WORKSPACE',state.workshopProject||'none'],
+      ['ATTENTION',String((ctx?.attention||k.attention||[]).length)+' active'],
+      ['WORKSPACE',ctx?.project||state.workshopProject||'none'],
       ['GIT',String(world['workspace.git.branch']?.value||'unknown')],
       ['GIT STATUS',JSON.stringify(world['workspace.git.status']?.value||{})],
       ['BROWSER',world['browser.state']?.value ? JSON.stringify(world['browser.state'].value):'not connected'],
       ['WORLD',world['world.last_refresh_at']?.value||'unknown']
     ];
-    host.innerHTML=rows.map(([label,value])=>'<div class="context-row"><label>'+esc(label)+'</label><span>'+esc(value)+'</span></div>').join('');
+    const memories=Array.isArray(ctx?.memory)?ctx.memory.slice(0,4):[];
+    const memoryRows=memories.map((m,i)=>['MEMORY '+(i+1),String(m.content||m.text||m.value||'').slice(0,220)]);
+    const goals=Array.isArray(ctx?.goals)?ctx.goals.slice(0,3):[];
+    const goalRows=goals.map((g,i)=>['GOAL '+(i+1),String(g.title||g.goal||'').slice(0,160)]);
+    host.innerHTML=rows.concat(goalRows,memoryRows).map(([label,value])=>'<div class="context-row"><label>'+esc(label)+'</label><span>'+esc(value)+'</span></div>').join('');
   }
 
   function renderWorkshopMission(){
@@ -505,6 +510,9 @@
       renderWorkshopTree(snap.tree);
       renderWorkshopContext();
       renderWorkshopMission();
+      const query=state.workshopFile ? state.workshopFile.split('/').pop() : state.workshopProject;
+      const ctx=await api('/context?project='+encodeURIComponent(state.workshopProject||'')+'&query='+encodeURIComponent(query||'')+'&user_id=default&memory_limit=4');
+      renderWorkshopContext(ctx);
     }catch(e){
       const tree=$('#workshopTree'); if(tree) tree.innerHTML='<div class="empty-event">'+esc(e.message)+'</div>';
     }
