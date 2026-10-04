@@ -394,6 +394,7 @@ def _resolve_agent(
     mode: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    session_id: str | None = None,
 ) -> Any:
     if agent is not None:
         return agent
@@ -405,12 +406,13 @@ def _resolve_agent(
             mode=mode or "agent",
             api_key=api_key,
             base_url=base_url,
+            session_id=session_id,
         )
         if resolved is not None:
             return resolved
     from .agent import HermusAgent
 
-    return HermusAgent(model=model, mode=mode or "agent", api_key=api_key, base_url=base_url)
+    return HermusAgent(model=model, session_id=session_id, mode=mode or "agent", api_key=api_key, base_url=base_url)
 
 
 def _chat_with_compat(
