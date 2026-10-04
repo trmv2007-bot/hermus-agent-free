@@ -194,20 +194,28 @@ async def workshop_file_write(payload: dict[str, Any] | None = None):
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    from core.tools import gateway_result_dict, get_tool_gateway
+    # The Workshop editor is an explicit user action against a path already
+    # confined to the active project. Keep the safety boundary here (workspace
+    # root + size + text-file check) instead of routing the interactive editor
+    # through a tool permission that can leave the UI permanently waiting for an
+    # unrelated approval request.
+    if target.suffix.lower() not in _TEXT_EXTENSIONS and target.name not in {".gitignore", ".env.example"}:
+        return JSONResponse({"success": False, "error": "workshop can only edit supported text files"}, status_code=415)
 
-    result = get_tool_gateway().execute(
-        "file_write",
-        {
-            "path": str(target),
-            "content": content,
-        },
-        actor="user",
-    )
-    data = gateway_result_dict(result)
-    if result.ok:
-        return {"success": True, "path": str(target.relative_to(root)).replace("\\", "/"), "result": data}
-    return JSONResponse({"success": False, **data}, status_code=409)
+    try:
+        current = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
+        if target.exists() and current == content:
+            return {"success": True, "changed": False, "path": str(target.relative_to(root)).replace("\\", "/"), "size": len(content.encode("utf-8"))}
+        target.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+
+    return {
+        "success": True,
+        "changed": True,
+        "path": str(target.relative_to(root)).replace("\\", "/"),
+        "size": len(content.encode("utf-8")),
+    }
 
 
 @router.post("/project/use")
