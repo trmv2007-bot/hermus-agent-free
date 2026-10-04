@@ -208,6 +208,7 @@ jobs:
           await page.locator('#commandbarForm').press('Enter');
           await page.waitForTimeout(120);
           if(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))) throw new Error('Command Enter opened palette');
+          await page.waitForFunction(() => document.querySelectorAll('.live-activity .activity-detail').length >= 3, {timeout:2500});
           const activityTexts=await page.locator('.live-activity .activity-detail').allTextContents();
           if(!activityTexts.some(t=>t.includes('Model · local/qwen3:4b'))) throw new Error('Live model activity missing');
           if(!activityTexts.some(t=>t.includes('Running terminal'))) throw new Error('Live tool activity missing');
