@@ -17,7 +17,7 @@
       <span><strong>HERMUS</strong><small>NEXUS · Your AI · Your World</small></span>
     </a>
     <nav class="primary-nav" aria-label="HERMUS workspace">
-      <button class="nav-item active" type="button" data-open="Dashboard state">⌂ <span>Home</span></button>
+      <button class="nav-item" type="button" data-open="Dashboard state">⌂ <span>Home</span></button>
       <button class="nav-item active-glow" type="button" data-workshop-open>◈ <span>JARVIS Workspace</span><b>3D</b></button>
       <button class="nav-item" type="button" data-open="Agents">✥ <span>Agents</span></button>
       <button class="nav-item" type="button" data-open="Capabilities">⌘ <span>Tools</span></button>
@@ -114,11 +114,11 @@
         </article>
 
         <article class="hud-panel jarvis-mode">
-          <div class="panel-head"><div><span class="panel-kicker">JARVIS MODE</span><strong>Multi-agent control room</strong></div><button type="button" data-workshop-open>EXIT ↗</button></div>
-          <div class="toggle-row"><span>◈ Orb Control</span><i class="toggle on"></i></div>
-          <div class="toggle-row"><span>◉ Voice Mode</span><i class="toggle on"></i></div>
-          <div class="toggle-row"><span>◎ Screen Awareness</span><i class="toggle"></i></div>
-          <div class="toggle-row"><span>✥ Auto Agents</span><i class="toggle on"></i></div>
+          <div class="panel-head"><div><span class="panel-kicker">JARVIS MODE</span><strong>Multi-agent control room</strong></div><button type="button" data-workshop-open>WORKSHOP ↗</button></div>
+          <button class="toggle-row" type="button" data-toggle="orb-control" aria-pressed="true"><span>◈ Orb Control</span><i class="toggle on"></i></button>
+          <button class="toggle-row" type="button" data-toggle="voice-mode" aria-pressed="true"><span>◉ Voice Mode</span><i class="toggle on"></i></button>
+          <button class="toggle-row" type="button" data-toggle="screen-awareness" aria-pressed="false"><span>◎ Screen Awareness</span><i class="toggle"></i></button>
+          <button class="toggle-row" type="button" data-toggle="auto-agents" aria-pressed="true"><span>✥ Auto Agents</span><i class="toggle on"></i></button>
         </article>
       </section>
 
@@ -150,31 +150,55 @@
         </article>
 
         <article class="hud-panel environment-panel">
-          <div class="panel-head"><div><span class="panel-kicker">3D ENVIRONMENT</span><strong>Workspace spaces</strong></div><button type="button" data-workshop-open>HIDE</button></div>
-          <div class="room-preview">
+          <div class="panel-head"><div><span class="panel-kicker">3D ENVIRONMENT</span><strong>Workspace spaces</strong></div><button type="button" data-panel-toggle="environment-panel" aria-expanded="true">HIDE</button></div>
+          <div class="room-preview" id="roomPreview">
             <div class="room-grid"></div><div class="room-core"></div>
+            <div class="room-preview-copy"><span class="panel-kicker">ACTIVE SPACE</span><strong id="roomPreviewTitle">MAIN HALL</strong><small id="roomPreviewDetail">Central HERMUS command space · live workspace routing</small></div>
           </div>
           <div class="room-list">
-            <button class="room active" data-workshop-open type="button">◈ <span>Main Hall</span></button>
-            <button class="room" data-command="Open the IDE workspace" type="button">⌁ <span>IDE Lab</span></button>
-            <button class="room" data-open="Models" type="button">◉ <span>Model Lab</span></button>
-            <button class="room" data-command="Open media tools" type="button">▣ <span>Media Studio</span></button>
-            <button class="room" data-open="System health" type="button">◫ <span>Control Room</span></button>
-            <button class="room" data-open="Personal Space" type="button">✦ <span>Personal Space</span></button>
+            <button class="room active" data-room="main-hall" data-workshop-open type="button">◈ <span>Main Hall</span></button>
+            <button class="room" data-room="ide-lab" data-workshop-open type="button">⌁ <span>IDE Lab</span></button>
+            <button class="room" data-room="model-lab" data-open="Models" type="button">◉ <span>Model Lab</span></button>
+            <button class="room" data-room="media-studio" data-command="Open media tools" type="button">▣ <span>Media Studio</span></button>
+            <button class="room" data-room="control-room" data-open="System health" type="button">◫ <span>Control Room</span></button>
+            <button class="room" data-room="personal-space" data-open="Personal Space" type="button">✦ <span>Personal Space</span></button>
           </div>
         </article>
       </section>
 
       <section class="bottom-workbench">
         <div class="workbench-tabs" role="tablist" aria-label="Workspace tools">
-          <button class="workbench-tab active" type="button" data-command="Open chat">◌ Chat</button>
-          <button class="workbench-tab" type="button" data-workshop-open>⌁ IDE</button>
-          <button class="workbench-tab" type="button" data-open="Devices">◎ Browser</button>
-          <button class="workbench-tab" type="button" data-command="Open the terminal">›_ Terminal</button>
-          <button class="workbench-tab" type="button" data-command="Open image generation">▣ Image Generation</button>
-          <button class="workbench-tab" type="button" data-command="Open video generation">▶ Video Generation</button>
-          <button class="workbench-tab" type="button" data-open="Learning">▤ Notes</button>
-          <span class="workbench-spacer"></span><button type="button" data-open="System health">⚙</button><button type="button" data-close-workbench>×</button>
+          <button class="workbench-tab active" role="tab" aria-selected="true" type="button" data-workbench-tab="chat">◌ Chat</button>
+          <button class="workbench-tab" role="tab" aria-selected="false" type="button" data-workbench-tab="ide">⌁ IDE</button>
+          <button class="workbench-tab" role="tab" aria-selected="false" type="button" data-workbench-tab="browser">◎ Browser</button>
+          <button class="workbench-tab" role="tab" aria-selected="false" type="button" data-workbench-tab="terminal">›_ Terminal</button>
+          <button class="workbench-tab" role="tab" aria-selected="false" type="button" data-workbench-tab="image">▣ Image Generation</button>
+          <button class="workbench-tab" role="tab" aria-selected="false" type="button" data-workbench-tab="video">▶ Video Generation</button>
+          <button class="workbench-tab" role="tab" aria-selected="false" type="button" data-workbench-tab="notes">▤ Notes</button>
+          <span class="workbench-spacer"></span><button type="button" data-open="System health">⚙</button><button id="workbenchClose" type="button" data-close-workbench aria-label="Hide workbench">×</button>
+        </div>
+        <div class="workbench-view-stage" id="workbenchViewStage" aria-live="polite">
+          <section class="workbench-view active" data-workbench-view="chat">
+            <div class="view-hero"><span class="eyebrow">CHAT CONSOLE</span><h3>Talk to HERMUS</h3><p>Use the command rail below, or pick a quick action to begin a live turn.</p></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="ide">
+            <div class="view-hero"><span class="eyebrow">IDE LAB</span><h3>Build inside Workshop</h3><p>Open the deep workshop when you need files, context, mission state and a live editor.</p><button type="button" class="workbench-mock-action" data-workshop-open>OPEN WORKSHOP ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="browser">
+            <div class="view-hero"><span class="eyebrow">BROWSER</span><h3>Visual web workspace</h3><p>Preview browser context, inspect the current page, and route a task to HERMUS.</p><button type="button" class="workbench-mock-action" data-open="Devices">OPEN BROWSER CONTEXT</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="terminal">
+            <div class="view-hero"><span class="eyebrow">TERMINAL</span><h3>Command workspace</h3><p>Run a terminal task through the command gateway without leaving the HERMUS shell.</p><button type="button" class="workbench-mock-action" data-command="Open the terminal">OPEN TERMINAL ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="image">
+            <div class="view-hero"><span class="eyebrow">IMAGE LAB</span><h3>Generate visual concepts</h3><p>Send a prompt into the media pipeline and keep the result attached to the current workspace.</p><button type="button" class="workbench-mock-action" data-command="Open image generation">START IMAGE GENERATION ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="video">
+            <div class="view-hero"><span class="eyebrow">VIDEO STUDIO</span><h3>Plan and generate motion</h3><p>Build a shot concept, route it to the media tools, and keep the timeline in context.</p><button type="button" class="workbench-mock-action" data-command="Open video generation">OPEN VIDEO TOOLS ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="notes">
+            <div class="view-hero"><span class="eyebrow">KNOWLEDGE</span><h3>Notes & learning</h3><p>Keep project notes, lessons and saved research close to the mission context.</p><button type="button" class="workbench-mock-action" data-open="Learning">OPEN KNOWLEDGE ↗</button></div>
+          </section>
         </div>
         <div class="workbench-body">
           <aside class="conversation-list">
@@ -317,6 +341,8 @@
     </section>
   </div>
 
+  <button id="workbenchRestore" class="workbench-restore" type="button" aria-label="Show workbench">◌ OPEN WORKBENCH</button>
+
   <div id="overlay" class="overlay" aria-hidden="true">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <header><div><span class="eyebrow">HERMUS</span><h2 id="modalTitle">System</h2></div><button data-close type="button">×</button></header>
@@ -327,6 +353,7 @@
   <script src="/static/nexus.js" defer></script>
   <script src="/static/console.js" defer></script>
   <script src="/static/personal-space.js" defer></script>
+  <script src="/static/jarvis-ui.js" defer></script>
   <script>
     function resolveBundle(payload={}) { return window.HermusNexus?.api('/permissions/bundles/resolve',{method:'POST',body:JSON.stringify(payload)}); }
     function approveRetry(id) { return window.HermusNexus?.api('/permissions/pending/resolve',{method:'POST',body:JSON.stringify({prompt_id:id,decision:'approve',retry:true})}); }
