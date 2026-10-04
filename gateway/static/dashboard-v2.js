@@ -557,6 +557,27 @@
     if (!text) return;
 
     state.messages.push({who:'user',text,time:'Now'});
+
+    // Media creation is a first-class workspace operation, not a mission.
+    // Keep "Create an image/video…" from falling into the generic mission
+    // classifier when a dedicated media backend is available.
+    const mediaMatch=text.match(/^create\s+(an?\s+)?(image|video)\s*:\s*(.+)$/is);
+    if(mediaMatch){
+      const kind=String(mediaMatch[2]).toLowerCase(),prompt=String(mediaMatch[3]||'').trim();
+      const pending={who:'jarvis',text:'Generating '+kind+'…',time:'Now',pending:true,status:'thinking',mediaPending:true};
+      state.messages.push(pending); renderChat();
+      try{
+        const d=await api('/media/generate',{method:'POST',body:JSON.stringify({kind,prompt})});
+        if(!d.success)throw new Error(d.error||'generation unavailable');
+        pending.pending=false; pending.status='done'; pending.media={kind,url:d.url,name:d.name||prompt};
+        pending.text=kind==='image'?'Image generated.':'Video generated.';
+        renderChat(); toast(kind.toUpperCase()+' generated');
+        return d;
+      }catch(e){
+        pending.pending=false; pending.status='error'; pending.text='Media unavailable · '+e.message; renderChat(); toast(e.message,true);
+        return null;
+      }
+    }
     const statusMessage = {
       who:'jarvis',
       text:'Connecting to model…',
@@ -743,7 +764,12 @@
       const stream=m.pending&&m.streamingText
         ? '<div class="msg-stream" aria-label="Live assistant response">'+renderMarkdown(m.streamingText)+'<span class="stream-cursor" aria-hidden="true">▌</span></div>'
         : '';
-      const body=m.pending?'':'<div class="msg-text">'+renderMarkdown(m.text)+'</div>';
+      const media = m.media
+        ? (m.media.kind==='image'
+          ? '<figure class="chat-media"><img src="'+esc(m.media.url)+'" alt="'+esc(m.media.name||'Generated image')+'"><figcaption>'+esc(m.media.name||'Generated image')+'</figcaption></figure>'
+          : '<figure class="chat-media"><video controls preload="metadata" src="'+esc(m.media.url)+'"></video><figcaption>'+esc(m.media.name||'Generated video')+'</figcaption></figure>')
+        : '';
+      const body=m.pending?'':'<div class="msg-text">'+renderMarkdown(m.text)+'</div>'+media;
       return '<div class="'+classes.join(' ')+'"><span class="msg-meta">'+
         (m.who==='user'?'YOU':'JARVIS')+' · '+esc(m.time)+'</span>'+liveLabel+stream+body+activity+'</div>';
     }).join('');
@@ -1016,17 +1042,45 @@
   }
 
   async function loadPersonal() {
-    const data=await safe('/personal-space?limit=8');
+    const [data,os,brief]=await Promise.all([safe('/personal-space?limit=8'),safe('/personal-os'),safe('/personal-os/briefing')]);
     const proposal=Array.isArray(data?.proposals)?data.proposals.find(x=>x.status==='pending')||data.proposals[0]:null;
     const host=qs('#personalHost');if(!host)return;
     if(failed(data)){host.innerHTML=errorCard(errText(data));return;}
-    host.innerHTML='<div class="grid cols-2"><div class="card"><div class="card-head"><div><strong>HERMUS PRIVATE SPACE</strong><small>Bounded curiosity · approval required</small></div>'+
-      badge(data?.status||'READY',(data?.status||'').includes('proposal')?'warn':'good')+'</div><div class="card-body"><div class="stat-strip" style="margin:0 0 12px">'+
-      stat('IDLE',Math.round(Number(data?.idle_for_seconds||0)/60)+'m','time available')+
-      stat('TODAY',String(data?.daily_cycles??0),'/ '+String(data?.daily_cap??3)+' cycles')+'</div><div class="actions"><button class="btn primary" type="button" data-personal-run>THINK NOW</button><button class="btn" type="button" data-personal-refresh>REFRESH</button></div></div></div>'+
-      '<div class="card"><div class="card-head"><div><strong>PROPOSAL</strong><small>Nothing becomes an action without you.</small></div></div><div class="card-body">'+
-      (proposal?'<h3 style="margin:0 0 5px;font-size:12px">'+esc(proposal.title||'Discovery')+'</h3><p class="muted" style="font-size:9px;line-height:1.5">'+esc(proposal.summary||proposal.why||'A useful discovery is waiting.')+'</p><div class="actions" style="margin-top:12px"><button class="btn primary" type="button" data-proposal="approve" data-proposal-id="'+esc(proposal.id)+'">APPROVE</button><button class="btn danger" type="button" data-proposal="dismiss" data-proposal-id="'+esc(proposal.id)+'">DISMISS</button></div>':'<div class="empty">No proposal waiting for approval.</div>')+'</div></div></div>';
+    const tasks=Array.isArray(os?.tasks)?os.tasks:[],open=tasks.filter(t=>!['done','completed'].includes(String(t.status||'').toLowerCase())).slice(0,8);
+    const goals=Array.isArray(os?.goals)?os.goals.slice(0,6):[];
+    const cycles=Array.isArray(data?.history)?data.history.slice(-6).reverse():[];
+    host.innerHTML=
+      '<div class="grid cols-2">'+
+        '<div class="card"><div class="card-head"><div><strong>HERMUS PRIVATE SPACE</strong><small>Bounded curiosity · idle work · approval required</small></div>'+badge(data?.status||'READY',(data?.status||'').includes('proposal')?'warn':'good')+'</div>'+
+        '<div class="card-body"><div class="stat-strip" style="margin:0 0 12px">'+
+        stat('IDLE',Math.round(Number(data?.idle_for_seconds||0)/60)+'m','time available')+
+        stat('TODAY',String(data?.daily_cycles??0),'/ '+String(data?.daily_cap??3)+' cycles')+
+        stat('PROPOSALS',String(data?.pending_proposals??0),'awaiting you')+
+        stat('OPEN TASKS',String(os?.open_task_count??0),'personal OS')+
+        '</div><div class="actions"><button class="btn primary" type="button" data-personal-run>THINK NOW</button><button class="btn" type="button" data-personal-refresh>REFRESH</button><button class="btn" type="button" data-view="chat">OPEN CHAT</button></div></div></div>'+
+        '<div class="card"><div class="card-head"><div><strong>WHAT I AM WATCHING</strong><small>Current focus, goals and useful context.</small></div></div><div class="card-body list">'+
+          '<div class="row"><div class="row-main"><strong>FOCUS</strong><small>'+esc(os?.focus||'No active focus')+'</small></div></div>'+
+          (goals.map(g=>'<div class="row"><div class="row-main"><strong>'+esc(g.title||g.goal||'Goal')+'</strong><small>'+esc(g.status||'active')+'</small></div></div>').join('')||'<div class="empty">No active goals. HERMUS will stay curious without inventing priorities.</div>')+
+        '</div></div></div>'+
+      '<div class="grid cols-2" style="margin-top:12px">'+
+        '<div class="card"><div class="card-head"><div><strong>NEXT PERSONAL WORK</strong><small>Tasks you have actually given HERMUS.</small></div></div><div class="card-body list">'+
+          (open.map(t=>'<div class="row"><div class="row-main"><strong>'+esc(t.title)+'</strong><small>'+esc(t.priority||'normal')+(t.project?' · '+esc(t.project):'')+'</small></div><button class="btn" type="button" data-personal-task-done="'+esc(t.id)+'">DONE</button></div>').join('')||'<div class="empty">No open personal tasks.</div>')+
+          '<div class="toolbar" style="margin-top:10px"><input id="personalTaskInput" placeholder="Add a personal task…"><button class="btn primary" type="button" data-personal-task-add>ADD</button></div>'+
+        '</div></div>'+
+        '<div class="card"><div class="card-head"><div><strong>PERSONAL ACTIVITY</strong><small>Curiosity cycles and recent results.</small></div><span class="badge">'+esc(String(cycles.length))+' CYCLES</span></div><div class="card-body list">'+
+          (cycles.map(x=>'<div class="row"><div class="row-main"><strong>'+esc(x.status||'cycle')+'</strong><small>'+esc(x.started_at?new Date(Number(x.started_at)*1000).toLocaleString():'recent')+'</small></div></div>').join('')||'<div class="empty">No curiosity cycles yet. THINK NOW starts one bounded pass.</div>')+
+        '</div></div></div>'+
+      '<div class="card" style="margin-top:12px"><div class="card-head"><div><strong>PROPOSAL</strong><small>Nothing becomes an action without you.</small></div></div><div class="card-body">'+
+        (proposal?'<h3 style="margin:0 0 5px;font-size:12px">'+esc(proposal.title||'Discovery')+'</h3><p class="muted" style="font-size:9px;line-height:1.5">'+esc(proposal.summary||proposal.why||'A useful discovery is waiting.')+'</p><div class="actions" style="margin-top:12px"><button class="btn primary" type="button" data-proposal="approve" data-proposal-id="'+esc(proposal.id)+'">APPROVE</button><button class="btn danger" type="button" data-proposal="dismiss" data-proposal-id="'+esc(proposal.id)+'">DISMISS</button></div>':'<div class="empty">No proposal waiting for approval.</div>')+
+      '</div></div>'+
+      '<div class="card" style="margin-top:12px"><div class="card-head"><div><strong>BRIEFING</strong><small>What matters right now.</small></div></div><div class="card-body context">'+
+        '<div class="context-row"><b>PRIORITY TASKS</b><span>'+esc(String((brief?.priority_tasks||[]).length))+'</span></div>'+
+        '<div class="context-row"><b>ACTIVE GOALS</b><span>'+esc(String((brief?.active_goals||[]).length))+'</span></div>'+
+        '<div class="context-row"><b>SCHEDULES</b><span>'+esc(String(brief?.schedule_count??0))+'</span></div>'+
+        '<div class="context-row"><b>AUTOMATIONS</b><span>'+esc(String(brief?.automation_count??0))+'</span></div>'+
+      '</div></div>';
   }
+
 
   async function loadBrowser() {
     const host=qs('#browserHost');if(!host)return;
@@ -1695,6 +1749,16 @@
     if(e.target.closest('[data-knowledge-save]')){const text=qs('#knowledgeNote')?.value.trim();if(text){try{await api('/memory2/remember',{method:'POST',body:JSON.stringify({kind:'semantic',content:text,importance:5,project:state.project||null})});qs('#knowledgeNote').value='';qs('#knowledgeResult').textContent='Saved to HERMUS memory.';toast('Knowledge saved')}catch(err){toast(err.message,true)}}return;}
     if(e.target.closest('[data-personal-run]')){try{await api('/personal-space/run',{method:'POST',body:'{}'});toast('HERMUS curiosity cycle started');loadPersonal()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-personal-refresh]')){loadPersonal();return;}
+    if(e.target.closest('[data-personal-task-add]')){
+      const input=qs('#personalTaskInput'),title=String(input?.value||'').trim();if(!title)return;
+      try{await api('/personal-os/tasks',{method:'POST',body:JSON.stringify({title,project:state.project||null})});toast('Personal task added');loadPersonal();}catch(err){toast(err.message,true)}
+      return;
+    }
+    if(e.target.closest('[data-personal-task-done]')){
+      const id=e.target.closest('[data-personal-task-done]').dataset.personalTaskDone;
+      try{await api('/personal-os/tasks/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({status:'done'})});toast('Personal task completed');loadPersonal();}catch(err){toast(err.message,true)}
+      return;
+    }
     if(e.target.closest('[data-proposal]')){const b=e.target.closest('[data-proposal]'),action=b.dataset.proposal,id=b.dataset.proposalId;try{await api('/personal-space/proposals/'+encodeURIComponent(id)+'/'+(action==='approve'?'approve':'dismiss'),{method:'POST',body:'{}'});toast('Proposal '+action+'d');loadPersonal()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-browser-open]')){await browserOpen();return;}
     if(e.target.closest('[data-browser-analyze]')){const d=state.browserPage;if(!d){toast('Fetch a page first',true);return;}await sendCommand('Analyze this browser result and explain the important findings: '+String(d.content||d.text||'').slice(0,7000));return;}
