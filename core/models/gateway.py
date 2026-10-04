@@ -103,6 +103,7 @@ class ModelGateway:
         self._lock = threading.RLock()
         # In-process circuit breaker / rate state keyed by provider.
         self._circuit: dict[str, dict[str, Any]] = {}
+        self._model_stats: dict[str, dict[str, Any]] = {}
         # Deterministic fallback ordering guards against infinite fallback loops.
         self._fallback_visited: dict[str, int] = {}
         self._fallback_max_depth = 5
@@ -888,10 +889,30 @@ class ModelGateway:
                 if st["failures"] >= 3 and st["opened_at"] is None:
                     st["opened_at"] = time.time()
 
+            if result.model:
+                key = f"{provider}/{result.model}"
+                metric = self._model_stats.setdefault(
+                    key,
+                    {"calls": 0, "successes": 0, "failures": 0, "latency_ms_total": 0, "last_used": None},
+                )
+                metric["calls"] += 1
+                metric["successes"] += 1 if result.ok else 0
+                metric["failures"] += 0 if result.ok else 1
+                metric["latency_ms_total"] += int(result.latency_ms or 0)
+                metric["last_used"] = time.time()
+
     def health(self) -> dict[str, Any]:
-        """Expose circuit-breaker / rate state for the dashboard (no fabrication)."""
+        """Expose provider circuits and per-model runtime telemetry."""
         with self._lock:
-            return {p: dict(v) for p, v in self._circuit.items()}
+            models = {}
+            for ref, metric in self._model_stats.items():
+                calls = max(1, int(metric["calls"]))
+                models[ref] = {
+                    **metric,
+                    "success_rate": round(metric["successes"] / calls, 4),
+                    "avg_latency_ms": round(metric["latency_ms_total"] / calls, 1),
+                }
+            return {"providers": {p: dict(v) for p, v in self._circuit.items()}, "models": models}
 
 
 _gateway: ModelGateway | None = None
