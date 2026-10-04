@@ -181,7 +181,9 @@
   }, true);
 
   q("#workshopAsk")?.addEventListener("click", () => {
-    requestAnimationFrame(() => q("#workshopCommand")?.focus());
+    const input = q("#workshopCommand");
+    input?.focus({ preventScroll: true });
+    setTimeout(() => input?.focus({ preventScroll: true }), 0);
   }, true);
 
   qa("[data-toggle]").forEach(button => setToggle(button, button.getAttribute("aria-pressed") === "true"));
