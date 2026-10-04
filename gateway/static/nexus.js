@@ -142,4 +142,167 @@
   // Record power, Propose setup, Run approved Downloads scan,
   // Start Downloads scan mission, List scan reports, and Doctor/Computer controls.
   window.HermusNexus = { api, sendCommand, contextualAction, actions, state };
+
+  const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);
+  const modelState = { catalog:null, selected:null, inFlight:false };
+
+  function currentModelRole(){
+    const select=$('#modelRole');
+    return select && MODEL_ROLES.has(select.value) ? select.value : 'default';
+  }
+
+  function roleFilter(row, role){
+    const caps=row.capabilities || {};
+    if(role==='vision') return caps.vision !== 'no';
+    if(role==='default' || role==='reasoning' || role==='coding') return caps.tools !== 'no';
+    return true;
+  }
+
+  function modelLabel(row){
+    return (row.provider_name || row.provider || 'provider') + ' / ' + (row.id || row.ref || 'unknown');
+  }
+
+  function renderModelSelect(){
+    const role=currentModelRole();
+    const select=$('#modelSelect');
+    const meta=$('#modelMeta');
+    const fleet=$('#modelFleet');
+    const pill=$('#modelPill');
+    if(!select || !meta || !fleet) return;
+
+    const catalog=modelState.catalog || {};
+    const selections=(modelState.selected && modelState.selected.selections) || {};
+    const configured=selections[role] || 'auto';
+    const models=(catalog.models || []).filter(row=>roleFilter(row,role));
+
+    select.innerHTML='';
+    const auto=document.createElement('option');
+    auto.value='auto';
+    auto.textContent='AUTO · best available';
+    select.appendChild(auto);
+
+    models.forEach(row=>{
+      const option=document.createElement('option');
+      option.value=row.ref;
+      option.textContent=modelLabel(row) + (row.reachable===false ? ' · offline' : '');
+      select.appendChild(option);
+    });
+    select.value=models.some(row=>row.ref===configured) ? configured : 'auto';
+
+    if(models.length){
+      const live=models.filter(row=>row.source==='live').length;
+      meta.textContent=models.length + ' selectable · ' + live + ' live discovered · role ' + role;
+      fleet.innerHTML=models.slice(0,9).map(row=>{
+        const reach=row.reachable===false ? 'offline' : (row.source==='live' ? 'live' : 'cached');
+        const caps=Object.entries(row.capabilities||{}).filter(([,v])=>v==='yes').slice(0,3).map(([k])=>k).join(' · ');
+        return '<span class="model-chip ' + (row.source==='live' ? 'live' : '') + '" title="' +
+          esc((row.capability_notes||[]).join('; ')) + '">' + esc((row.provider||'provider') + '/' + (row.id||'model')) +
+          ' · ' + esc(reach) + (caps ? ' · ' + esc(caps) : '') + '</span>';
+      }).join('');
+    } else {
+      meta.textContent='No compatible deployments discovered for this role.';
+      fleet.innerHTML='<div class="empty-event">Configure a provider or local runtime, then press SYNC.</div>';
+    }
+
+    if(pill) pill.textContent='MODEL · ' + (select.value==='auto' ? 'AUTO' : select.value).toUpperCase();
+  }
+
+  async function refreshModels(probe){
+    if(modelState.inFlight) return;
+    modelState.inFlight=true;
+    try{
+      const query=probe ? '?probe=true&refresh=true' : '?probe=false&refresh=false';
+      const results=await Promise.all([
+        api('/api/v1/models/catalog' + query),
+        api('/api/v1/models/selected')
+      ]);
+      modelState.catalog=results[0];
+      modelState.selected=results[1];
+      renderModelSelect();
+      addEvent('Model catalog · ' + String(modelState.catalog.count || 0) + ' deployment(s) discovered');
+    }catch(e){
+      const meta=$('#modelMeta');
+      if(meta) meta.textContent='Model discovery unavailable: ' + e.message;
+      const pill=$('#modelPill');
+      if(pill) pill.textContent='MODEL · UNAVAILABLE';
+    }finally{
+      modelState.inFlight=false;
+    }
+  }
+
+  async function saveModelSelection(){
+    const role=currentModelRole();
+    const select=$('#modelSelect');
+    if(!select) return;
+    try{
+      const result=await api('/api/v1/models/select',{
+        method:'POST',
+        body:JSON.stringify({role:role,model:select.value || 'auto'})
+      });
+      modelState.selected=result;
+      renderModelSelect();
+      addEvent('Model ' + role + ' · ' + (select.value || 'auto') + ' selected');
+      setState('READY','model · ' + (select.value || 'auto'));
+    }catch(e){
+      addEvent('Model selection rejected · ' + e.message,'error');
+      setState('ATTENTION',e.message);
+    }
+  }
+
+  async function refreshAttention(){
+    const host=$('#attention');
+    if(!host) return;
+    try{
+      const results=await Promise.all([
+        api('/personal-os/briefing'),
+        api('/distributed/status'),
+        api('/reliability/status'),
+        api('/self-improvement/status')
+      ]);
+      const personal=results[0]||{}, distributed=results[1]||{}, reliability=results[2]||{}, self=results[3]||{};
+      const rows=[];
+      rows.push(distributed.emergency_stop ? ['bad','Emergency stop is ACTIVE'] : ['','Emergency brake clear']);
+      rows.push(Number(distributed.stale||0) ? ['warn',String(distributed.stale)+' distributed node(s) need attention'] : ['','Distributed fleet healthy']);
+      const incidents=Number(reliability.open_incidents ?? reliability.incidents_open ?? 0);
+      rows.push(incidents ? ['warn',String(incidents)+' open reliability incident(s)'] : ['','No open reliability incidents']);
+      const tasks=Number(personal.open_tasks ?? personal.pending_tasks ?? 0);
+      rows.push(tasks ? ['',String(tasks)+' personal task(s) remain open'] : ['','No open-task signal reported']);
+      rows.push(['','Self-improvement · ' + (self.status || self.state || 'ready')]);
+      host.innerHTML=rows.map(([kind,text])=>'<div class="attention-item '+kind+'"><i></i><span>'+esc(text)+'</span></div>').join('');
+    }catch(e){
+      host.innerHTML='<div class="empty-event">Attention feed unavailable — issue a command to inspect the system.</div>';
+    }
+  }
+
+  $('#modelRole')?.addEventListener('change', renderModelSelect);
+  $('#modelSelect')?.addEventListener('change', renderModelSelect);
+  $('#modelRefresh')?.addEventListener('click',()=>refreshModels(true));
+  $('#modelSave')?.addEventListener('click',saveModelSelection);
+
+  const originalOpen = open;
+  open = async function(name){
+    if(name === 'Models'){
+      await refreshModels(true);
+      $('#modalTitle').textContent='Models';
+      $('#modalLog').textContent=JSON.stringify({
+        count:(modelState.catalog||{}).count || 0,
+        models:(modelState.catalog||{}).models || [],
+        selected:(modelState.selected||{}).selections || {}
+      },null,2);
+      $('#overlay').classList.add('open');
+      $('#overlay').setAttribute('aria-hidden','false');
+      return;
+    }
+    return originalOpen(name);
+  };
+
+  refreshModels(false);
+  refreshAttention();
+  setInterval(()=>refreshModels(false),30000);
+  setInterval(refreshAttention,15000);
+
+  window.HermusNexus.refreshModels = refreshModels;
+  window.HermusNexus.saveModelSelection = saveModelSelection;
+  window.HermusNexus.refreshAttention = refreshAttention;
+
 })();
