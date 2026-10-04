@@ -561,6 +561,7 @@
     state.mediaRecorder=null;
   }
 
+  $('#voiceButton')?.addEventListener('click',startVoice);
   async function sendVoiceBlob(blob){
     try{
       await ensureSession();
