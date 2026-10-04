@@ -265,7 +265,7 @@
   </main>
 
   <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
-    <button id="tabbtn-overview" role="tab" aria-controls="tab-overview" aria-selected="true" tabindex="0" type="button">Overview</button>
+    <button id="tabbtn-overview" role="tab" aria-controls="tab-overview" aria-selected="false" tabindex="-1" type="button">Overview</button>
     <button id="tabbtn-missions" role="tab" aria-controls="tab-missions" aria-selected="false" tabindex="-1" type="button">Missions</button>
     <button id="tabbtn-approvals" role="tab" aria-controls="tab-approvals" aria-selected="false" tabindex="-1" type="button">Approvals</button>
     <button id="tabbtn-safety" role="tab" aria-controls="tab-safety" aria-selected="false" tabindex="-1" type="button">Safety</button>
@@ -368,7 +368,7 @@
     function startMission(payload={}) { return window.HermusNexus?.api('/missions',{method:'POST',body:JSON.stringify(payload)}); }
     function createMissionPrompts(payload={}) { return window.HermusNexus?.api('/safety/preflight/approvals',{method:'POST',body:JSON.stringify(payload)}); }
     function remoteAction(act,payload={}) { return window.HermusNexus?.api('/remote/' + act,{method:'POST',body:JSON.stringify(payload)}); }
-    function runComputerTask(task) { return window.HermusNexus?.api('/computer/run',{method:'POST',body:JSON.stringify({ task: task })}); }
+    function runComputerTask(task) { return window.HermusNexus?.api('/computer/run',{method:'POST',body: JSON.stringify({ task: task })}); }
     function setPill(selector,value) { const node=document.querySelector(selector); if(node) node.textContent=String(value ?? 0); }
     function refreshSafetyEvents() { return window.HermusNexus?.api('/safety/events?limit=80'); }
     function updateSafetyCore() { return Promise.all([window.HermusNexus?.api('/permissions/pending'),window.HermusNexus?.api('/safety/events?limit=80')]).then(([pending,events])=>{setPill("#pendingCount",pending?.count ?? pending?.pending?.length ?? 0);setPill("#blockedMissionCount",events?.blockedMissionCount ?? 0);return {pending,events};}); }
