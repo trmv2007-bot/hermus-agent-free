@@ -52,7 +52,6 @@ class AmbientLoop:
         self.refresh = refresh
         self._last_fingerprint: str | None = None
         self._running = False
-        self._lock = asyncio.Lock()
 
     @staticmethod
     def interval_seconds(default: int = 30) -> int:
