@@ -424,7 +424,7 @@ def register_architecture_tools(registry) -> None:
         condition: str,
         timeout: float = 60.0,
         stable_matches: int = 1,
-        model: str = "llava:7b",
+        model: str | None = None,
     ) -> dict[str, Any]:
         from .computer import ScreenWatcher, VideoAnalyzer
 
@@ -548,7 +548,7 @@ def register_architecture_tools(registry) -> None:
             {
                 "action_id": {"type": "string"},
                 "use_vision": {"type": "boolean", "default": False},
-                "model": {"type": "string", "default": "llava:7b"},
+                "model": {"type": "string", "description": "Optional provider/model; omit for automatic vision selection."},
                 "remember": {"type": "boolean", "default": False},
             },
             ["action_id"],
