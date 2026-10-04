@@ -214,12 +214,23 @@ class HermusAgent:
     def _apply_router(self, user_message: str) -> dict | None:
         """Model Router 2.0: swap the LLM to the best available model for this turn.
 
-        Returns the selection dict on success, or None when routing is skipped
-        (mock provider, no workers, or same model).
+        An explicitly selected/pinned model is authoritative for the lifetime of
+        this agent session. Auto routing may choose a different model only when
+        the agent was created without an explicit model selection.
         """
         try:
             if getattr(self.llm, "provider", "") == "mock":
                 return None
+
+            # Dashboard/API callers can pin a deployment. Do not let the
+            # per-turn router silently replace it on the next message.
+            if self._model_pinned:
+                return {
+                    "success": True,
+                    "model": self.model_name,
+                    "task_type": "explicit_model",
+                    "reason": "agent.model_pinned",
+                }
             from .model_preferences import model_preferences
             from .models import get_model_gateway
             from .router2 import router2
