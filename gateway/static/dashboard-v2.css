@@ -63,3 +63,5 @@ button{cursor:pointer}.hidden{display:none!important}.eyebrow{font-size:8px;lett
 body.compact-mode .main{padding-top:15px}.compact-mode .view-head{margin-bottom:11px}.compact-mode .card-head{padding:11px 12px 9px}.compact-mode .card-body{padding:11px 12px}.compact-mode .row{padding:8px 9px}.compact-mode .nav-item{height:34px}
 body.motion-off *{animation:none!important;transition:none!important}.motion-off .orb,.motion-off .orb:before{box-shadow:none}
 @media(max-width:720px){.settings-frame{grid-template-columns:1fr}.settings-nav{position:static;display:flex;overflow:auto}.settings-tab{min-width:max-content}.shortcut-grid{grid-template-columns:1fr}.policy-zones{grid-template-columns:1fr}.space-caption{left:12px;top:12px}}
+
+.settings-nav-head{display:grid;gap:8px;padding:4px 2px 8px}.settings-nav-head strong{font-size:8px;letter-spacing:.1em;color:#9aaab7}.settings-nav-head input{width:100%;height:32px;border:1px solid var(--line2);border-radius:7px;background:#080d13;color:#e8f0f5;padding:0 9px;font-size:8px}.settings-nav-head input::placeholder{color:#52616f}.settings-tab[hidden]{display:none!important}
