@@ -225,7 +225,19 @@ class HermusAgent:
             if getattr(self.llm, "provider", "") == "mock":
                 return None
             from .models import get_model_gateway
+            from .model_preferences import model_preferences
             from .router2 import router2
+
+            # An explicit dashboard choice is authoritative. Auto mode may use
+            # the router, but the router must never silently override a user's
+            # selected deployment.
+            if model_preferences.get("default"):
+                return {
+                    "success": True,
+                    "model": self.model_name,
+                    "task_type": "explicit_preference",
+                    "reason": "dashboard.selection",
+                }
 
             sel = router2.select(user_message)
             if not sel.get("success"):
