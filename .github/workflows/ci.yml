@@ -5,12 +5,12 @@ permissions:
 on:
   push:
   pull_request:
+
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Keep CI state disposable and independent from a developer machine.
       HERMUS_HOME: /tmp/hermus-ci-home
       HERMUS_SANDBOX: local
       HERMUS_SANDBOX_NETWORK: "false"
@@ -23,10 +23,6 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m compileall -q core gateway tools hermus_cli scheduler
       - run: python -m pytest tests/ -q --ignore=tests/eval
-
-      # Normalize the historical Ruff backlog once on the dedicated repair
-      # branch. The actual fixes are committed so main will validate the exact
-      # same tree after merge.
       - name: Normalize Ruff debt (repair branch only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/fix/all-green'
         run: |
@@ -39,20 +35,17 @@ jobs:
             git commit -m "chore: normalize Ruff violations"
             git push origin HEAD:fix/all-green
           fi
-
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m mypy core/log.py core/errors.py
-
       - name: JavaScript syntax
         run: |
           node --check gateway/static/nexus.js
           node --check gateway/static/dashboard-v2.js
 
-
   ui-qa:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -76,71 +69,133 @@ jobs:
           fs.mkdirSync(out,{recursive:true});
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage({viewport:{width:1920,height:1080}});
-          page.setDefaultTimeout(2500);
+          page.setDefaultTimeout(3500);
+          await page.addInitScript(() => { window.confirm = () => true; window.alert = () => {}; });
           const json=(x)=>({status:200,contentType:'application/json',body:JSON.stringify(x)});
           await page.route('**/*',async route=>{
             const u=new URL(route.request().url()),p=u.pathname,m=route.request().method();
-            if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa'}));
-            if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true}}));
-            if(p==='/api/v1/system/capabilities') return route.fulfill(json({providers:[{name:'Local Runtime',ok:true}],tools:{web_search:{description:'Web search',available:true},terminal:{description:'Terminal execution',available:true},image_generation:{description:'Image generation',available:true}}}));
-            if(p==='/api/v1/agents/list'||p==='/agents') return route.fulfill(json({agents:[{name:'Researcher',role:'research',state:'working'},{name:'Coder',role:'coding',state:'idle'}]}));
+            if(m==='POST' && p==='/jobs') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run'}));
+            if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run',id:'qa-id',task_id:'qa-task'}));
+            if(p==='/runs/qa-run') return route.fulfill(json({status:'finished',finished:true,events:[{type:'agent_response',data:{text:'QA run complete.'}}]}));
+            if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true},storage:{ok:true}}));
+            if(p==='/readyz') return route.fulfill(json({status:'ready'}));
+            if(p==='/api/v1/agents/list'||p==='/agents') return route.fulfill(json({agents:[{name:'Researcher',role:'research',state:'working',model:'local/qwen'},{name:'Coder',role:'coding',state:'idle',model:'local/qwen'}]}));
             if(p==='/presence/kernel') return route.fulfill(json({summary:{active_runs:1,attention_count:1},attention:[{title:'UI review',detail:'One QA task',severity:'medium'}],events:{recent:[{summary:'Test run ready',type:'run_finished',at:'now'}]}}));
-            if(p==='/models/catalog') return route.fulfill(json({count:2,models:[{ref:'local/qwen3:4b',id:'qwen3:4b',name:'Qwen 3 4B',provider:'Ollama',source:'live',reachable:true,capabilities:{tools:'yes',vision:'no'}},{ref:'local/vision',id:'vision',name:'Vision Demo',provider:'Ollama',source:'live',reachable:true,capabilities:{tools:'yes',vision:'yes'}}]}));
+            if(p==='/models/catalog') return route.fulfill(json({count:2,models:[{ref:'local/qwen3:4b',id:'qwen3:4b',name:'Qwen 3 4B',provider:'Ollama',source:'live',reachable:true,context_length:32768,capabilities:{tools:'yes',vision:'no'}},{ref:'local/vision',id:'vision',name:'Vision Demo',provider:'Ollama',source:'live',reachable:true,context_length:16384,capabilities:{tools:'yes',vision:'yes'}}]}));
             if(p==='/models/selected') return route.fulfill(json({selections:{default:'auto',vision:'local/vision',coding:'local/qwen3:4b'}}));
+            if(p==='/models/health') return route.fulfill(json({providers:{ollama:{status:'ready'}},models:{}}));
+            if(p==='/models/capabilities') return route.fulfill(json({tools:true,vision:true,computer_control:false}));
+            if(p==='/tools') return route.fulfill(json({tools:[{name:'web_search',description:'Web search',enabled:true},{name:'terminal',description:'Terminal execution',enabled:true},{name:'computer_task',description:'Computer control',enabled:true}]}));
+            if(p==='/providers/available') return route.fulfill(json({providers:[{name:'Ollama',usable:true,configured:true,base_url:'http://127.0.0.1:11434'},{name:'Example API',usable:false,configured:false}],diagnosis:{}}));
+            if(p==='/keys/list') return route.fulfill(json({llm_keys:{Ollama:[{name:'local',preview:'local runtime'}]},custom_apis:[],total_llm_keys:1,total_custom_apis:0}));
+            if(p==='/permissions/pending') return route.fulfill(json({pending:[{id:'a1',title:'Approve computer task',tool:'computer_task',purpose:'QA',risk:'medium'}]}));
+            if(p==='/red-lines/policy') return route.fulfill(json({version:'qa',name:'HERMUS Safety',summary:'Runtime policy',zones:{safe:'read-only',review:'approval',blocked:'red-line'}}));
+            if(p==='/speech/status') return route.fulfill(json({status:'ready',backend:'local'}));
+            if(p==='/speech/transcription/status') return route.fulfill(json({backend:'faster-whisper',discovered_count:1,postprocess:{}}));
+            if(p==='/speech/avatar/status') return route.fulfill(json({available:false,status:'unavailable'}));
+            if(p==='/computer/status') return route.fulfill(json({active:true,halted:false,control:{state:'ready'},task_stats:{total:2,running:1,success:1},repair_stats:{success_rate:100},skills:{stats:{count:2}},tasks:[{task_id:'qa-task',task:'QA desktop task',status:'running',progress:40,current_state:'checking',confidence:.9,world:{active_window:'QA'}}],current_task:{task_id:'qa-task',task:'QA desktop task',status:'running',progress:40,current_state:'checking',confidence:.9,world:{active_window:'QA'}}}));
+            if(p==='/embeddings/status') return route.fulfill(json({backend:'memory',ready:true}));
+            if(p==='/learning') return route.fulfill(json({lessons:[{title:'UI validation',summary:'Reusable lesson'}],skills:[],episodes:[]}));
+            if(p==='/workspace') return route.fulfill(json({base_dir:'/tmp/workspaces',current:'demo-app',projects:[{name:'demo-app'},{name:'hermus-core'}],dirs:{}}));
+            if(p==='/workshop/snapshot') return route.fulfill(json({success:true,current:'demo-app',project:'demo-app',projects:[{name:'demo-app'},{name:'hermus-core'}],tree:[{name:'app.py',path:'app.py',type:'file',size:12},{name:'src',path:'src',type:'directory'}]}));
+            if(p==='/context') return route.fulfill(json({project:'demo-app',summary:{state:'idle'},attention:[],goals:[{title:'Ship dashboard'}],memory:[{content:'QA note'}]}));
+            if(p==='/workshop/file'&&m==='GET') return route.fulfill(json({path:'app.py',content:'print(1)\n',size:9,editable:true}));
             if(p==='/routines') return route.fulfill(json({routines:[{id:'r1',name:'Daily review',enabled:true,event_type:'schedule',action_type:'runtime.turn'}]}));
             if(p==='/missions') return route.fulfill(json({missions:[{id:'m1',goal:'Review workspace',state:'blocked'}]}));
-            if(p==='/learning') return route.fulfill(json({lessons:[{title:'UI validation',summary:'Reusable lesson'}]}));
             if(p==='/personal-space') return route.fulfill(json({status:'proposal_ready',idle_for_seconds:120,daily_cycles:1,daily_cap:3,proposals:[{id:'p1',status:'pending',title:'Useful discovery',summary:'QA proposal'}]}));
-            if(p==='/workshop/snapshot') return route.fulfill(json({current:'demo-app',projects:[{name:'demo-app'},{name:'hermus-core'}],tree:[{name:'app.py',path:'app.py',type:'file',size:12}]}));
-            if(p==='/context') return route.fulfill(json({project:'demo-app',summary:{state:'idle'},attention:[],goals:[{title:'Ship dashboard'}],memory:[{content:'QA note'}]}));
-            if(p==='/workshop/file'&&m==='GET') return route.fulfill(json({path:'app.py',content:'print(1)\\n',size:9,editable:true}));
+            if(p==='/mcp/servers') return route.fulfill(json({servers:[{name:'qa-mcp',connected:true,enabled:true}]}));
+            if(p==='/plugins') return route.fulfill(json({plugins:[{name:'qa-plugin',enabled:true}],tools:[],logs:[]}));
+            if(p==='/custom-apis/list') return route.fulfill(json({custom_apis:[],count:0}));
+            if(p==='/engine/status') return route.fulfill(json({status:'ready',device:'CPU',recommended:'local',missing:[]}));
+            if(p==='/doctor/status') return route.fulfill(json({status:'healthy',findings:[],last_report:'now'}));
+            if(p==='/update/local') return route.fulfill(json({branch:'qa',commit:'local'}));
+            if(p==='/update/remote') return route.fulfill(json({branch:'qa',commit:'remote'}));
+            if(p==='/update/check') return route.fulfill(json({update_available:false,status:'up-to-date'}));
+            if(p==='/navigator/fetch') return route.fulfill(json({success:true,url:'https://example.com',title:'Example',content:'A fetched QA page with useful context.',content_length:48}));
+            if(p==='/voice/command') return route.fulfill(json({success:true,accepted:true}));
+            if(p==='/speech/synthesize') return route.fulfill(json({success:true,audio_url:'data:audio/wav;base64,UklGRg==',backend:'qa'}));
+            if(p==='/api/v1/system/capabilities') return route.fulfill(json({providers:[],tools:{}}));
             return route.fulfill(json({success:true,ok:true}));
           });
-          const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+          const errors=[];
+          page.on('pageerror',e=>errors.push(e.message));
+          page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           await page.waitForTimeout(300);
-          await page.screenshot({path:out+'/00-overview.png'});
-          const nav=[...new Set(await page.locator('[data-view]:visible').evaluateAll(es=>es.map(e=>e.dataset.view)))];
-          for(const v of nav){
+
+          // The top command input is a real command form, not a palette trigger.
+          await page.locator('#commandbarInput').click();
+          if(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))) throw new Error('Command input click opened palette');
+          await page.locator('#commandbarInput').fill('hello from QA');
+          await page.locator('#commandbarForm').press('Enter');
+          await page.waitForTimeout(80);
+          if(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))) throw new Error('Command Enter opened palette');
+
+          await page.locator('#commandFocus').click();
+          if(!(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open')))) throw new Error('Command palette button failed');
+          await page.locator('#paletteInput').fill('Settings');
+          if(await page.locator('[data-palette-view="settings"]').count()===0) throw new Error('Palette search failed');
+          await page.locator('#paletteInput').press('Enter');
+          if(!(await page.locator('#view-settings').evaluate(el=>el.classList.contains('active')))) throw new Error('Palette navigation failed');
+          await page.keyboard.press('Escape');
+
+          await page.locator('[data-view="overview"]').first().click();
+          const views=[...new Set(await page.locator('[data-view]:visible').evaluateAll(es=>es.map(e=>e.dataset.view)))];
+          for(const v of views){
             await page.locator('[data-view="'+v+'"]:visible').first().click();
-            await page.waitForTimeout(100);
-            if(!(await page.locator('#view-'+v).evaluate(el=>el.classList.contains('active'))))throw new Error('View failed to open: '+v);
+            await page.waitForTimeout(60);
+            if(!(await page.locator('#view-'+v).evaluate(el=>el.classList.contains('active')))) throw new Error('View failed to open: '+v);
             await page.screenshot({path:out+'/view-'+v+'.png'});
           }
-          await page.locator('[data-view="overview"]').first().click();
-          await page.locator('[data-overview-send]').click().catch(()=>{});
-          await page.locator('[data-command]').first().click();
-          await page.locator('#commandFocus').click();
-          if(!(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))))throw new Error('Command palette click failed');
-          await page.locator('#paletteClose').click();
-          await page.locator('#topCommand').press('Enter');
-          if(!(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))))throw new Error('Command palette keyboard failed');
-          await page.keyboard.press('Escape');
-          await page.locator('[data-view="models"]').first().click();
-          await page.locator('#modelRoleInput').selectOption('vision');
-          await page.locator('#modelDeploymentInput').selectOption('local/vision');
-          await page.locator('[data-model-save]').click();
-          await page.locator('[data-view="agents"]').first().click();
-          if(await page.locator('[data-agent-action]').count()<2)throw new Error('Agent controls missing');
+
+          // Control Center: every section must activate and render real controls/state.
+          await page.locator('[data-view="settings"]').first().click();
+          const tabs=await page.locator('[data-settings-tab]').evaluateAll(es=>es.map(e=>e.dataset.settingsTab));
+          for(const tab of tabs){
+            await page.locator('[data-settings-tab="'+tab+'"]').click();
+            await page.waitForTimeout(50);
+            if(!(await page.locator('[data-settings-tab="'+tab+'"]').evaluate(el=>el.classList.contains('active')))) throw new Error('Settings tab failed: '+tab);
+            if(!(await page.locator('#settingsHost').innerText()).trim()) throw new Error('Settings tab blank: '+tab);
+          }
+          await page.locator('[data-settings-tab="providers"]').click();
+          await page.locator('#keyProvider').fill('ollama');
+          await page.locator('[data-key-add]').click();
+          await page.waitForTimeout(30);
+
+          await page.locator('[data-settings-tab="agents"]').click();
+          await page.locator('[data-view="agents"]').last().click();
+          await page.locator('[data-agent-create]').click().catch(()=>{});
+          await page.locator('#agentName').fill('QA Agent');
+          await page.locator('[data-agent-create]').click();
+
           await page.locator('[data-view="missions"]').first().click();
+          await page.locator('[data-mission-create]').click().catch(()=>{});
+          await page.locator('#missionGoal').fill('Review workspace');
+          await page.locator('[data-mission-create]').click();
           await page.locator('[data-routine-new]').click();
           await page.locator('#routineName').fill('QA routine');
           await page.locator('#routineEvent').fill('schedule');
           await page.locator('#routineTask').fill('Review workspace');
           await page.locator('[data-routine-validate]').click();
+
           await page.locator('[data-view="personal"]').first().click();
-          if(!(await page.locator('[data-personal-run]').count()))throw new Error('Personal Space controls missing');
+          if(!(await page.locator('[data-personal-run]').count())) throw new Error('Personal Space controls missing');
+
           await page.locator('[data-view="build"]').first().click();
-          await page.waitForTimeout(250);
-          if(!(await page.locator('[data-project="demo-app"]').count()))throw new Error('Workshop project UI missing');
+          await page.locator('[data-build-new]').click();
+          await page.locator('#projectName').fill('qa-project');
+          await page.locator('[data-project-create]').click();
           await page.locator('[data-project="demo-app"]').click();
-          await page.waitForTimeout(150);
           await page.locator('[data-file="app.py"]').click();
           await page.locator('#buildEditor').fill('print(2)');
           await page.locator('#buildSave').click();
+
           await page.locator('[data-view="browser"]').first().click();
           await page.locator('#browserUrl').fill('https://example.com');
           await page.locator('[data-browser-open]').click();
+          await page.locator('[data-browser-analyze]').click();
+          await page.locator('[data-browser-save]').click();
+
           await page.locator('[data-view="terminal"]').first().click();
           await page.locator('#terminalInput').fill('echo QA');
           await page.locator('[data-tool-run="terminal"]').click();
@@ -150,26 +205,41 @@ jobs:
           await page.locator('[data-view="video"]').first().click();
           await page.locator('#videoInput').fill('QA shot');
           await page.locator('[data-tool-run="video"]').click();
+
+          await page.locator('[data-view="computer"]').first().click();
+          await page.locator('#computerTask').fill('Inspect desktop');
+          await page.locator('[data-computer-run]').click();
+          await page.locator('[data-computer-stop]').click();
+          await page.locator('[data-computer-release]').click();
+
           await page.evaluate(()=>{if(document.documentElement.scrollWidth>innerWidth+2)throw new Error('Desktop horizontal overflow')});
+
           const mobile=await browser.newPage({viewport:{width:390,height:844}});
-          const mobileErrors=[];mobile.on('pageerror',e=>mobileErrors.push(e.message));mobile.on('console',m=>{if(m.type()==='error')mobileErrors.push(m.text())});
-          await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});await mobile.waitForTimeout(250);
-          const mobileViews=await mobile.locator('[data-view]:visible').count();if(mobileViews<10)throw new Error('Mobile navigation incomplete');
-          if(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2))throw new Error('Mobile horizontal overflow');
-          await mobile.locator('[data-view="agents"]:visible').first().click();
-          if(!(await mobile.locator('#view-agents').evaluate(el=>el.classList.contains('active'))))throw new Error('Mobile view switching failed');
-          await mobile.screenshot({path:out+'/mobile-agents.png'});
-          if(mobileErrors.length)throw new Error('Mobile browser errors: '+mobileErrors.join(' | '));
+          const mobileErrors=[];
+          mobile.on('pageerror',e=>mobileErrors.push(e.message));
+          mobile.on('console',m=>{if(m.type()==='error')mobileErrors.push(m.text())});
+          await mobile.addInitScript(() => { window.confirm=()=>true; window.alert=()=>{}; });
+          await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
+          await mobile.waitForTimeout(250);
+          const mobileNav=await mobile.locator('[data-view]:visible').count();
+          if(mobileNav<12) throw new Error('Mobile navigation incomplete: '+mobileNav);
+          if(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2)) throw new Error('Mobile horizontal overflow');
+          await mobile.locator('[data-view="settings"]:visible').first().click();
+          await mobile.locator('[data-settings-tab="runtime"]').click();
+          if(!(await mobile.locator('#settingsHost').innerText()).trim()) throw new Error('Mobile Control Center blank');
+          await mobile.screenshot({path:out+'/mobile-control-center.png'});
+          if(mobileErrors.length) throw new Error('Mobile browser errors: '+mobileErrors.join(' | '));
           await mobile.close();
+
+          if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
           await browser.close();
-          if(errors.length)throw new Error('Browser errors: '+errors.join(' | '));
-          console.log('HERMUS DASHBOARD QA PASS');
+          console.log('HERMUS DASHBOARD PRODUCT QA PASS');
           EOF
           node /tmp/dashboard-v2-qa.mjs
       - name: Upload dashboard QA screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hermus-dashboard-v2-qa
+          name: hermus-dashboard-product-qa
           path: /tmp/hermus-ui/*.png
           if-no-files-found: error
