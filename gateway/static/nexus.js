@@ -193,6 +193,12 @@
     'Personal Space': ['/personal-space'],
   };
 
+  // Explicit projection helpers keep the canonical surfaces directly callable by tests and extensions.
+  async function refreshFocus(){ return api('/focus'); }
+  async function refreshLearning(){ return api('/learning?limit=6'); }
+  async function refreshRoutines(){ return api('/routines'); }
+  async function validateRoutine(payload={}){ return api('/routines/validate',{method:'POST',body:JSON.stringify(payload)}); }
+
   // Canonical HERMUS action registry. These routes are backend capabilities;
   // the Nexus shell presents them contextually rather than as permanent controls.
   const actions = {
