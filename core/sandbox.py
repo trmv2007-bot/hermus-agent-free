@@ -535,7 +535,7 @@ class Sandbox:
                 # Staged input means "work on these files": run with the scratch dir
                 # as cwd (the container path when a container backend is in play),
                 # otherwise the jail's default cwd would not see them at all.
-                base = mounted_cwd if chosen in ("docker", "podman") else str(workdir)
+                base = "/hermus" if chosen in ("docker", "podman") else str(workdir)
                 command = f"cd {shlex.quote(str(base))} && {command}"
 
         if not self._sem.acquire(timeout=max(1.0, pol.timeout)):
@@ -684,6 +684,7 @@ class Sandbox:
             args[3:3] = ["-e", f"{k}={v}"]
         limits = {
             "cpus": pol.cpus,
+            "cpu_seconds": pol.timeout,
             "memory_mb": pol.memory_mb,
             "pids": pol.pids,
             "disk_mb": pol.disk_mb,
