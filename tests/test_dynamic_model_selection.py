@@ -180,3 +180,32 @@ def test_model_gateway_uses_dashboard_selection_when_model_is_omitted(monkeypatc
     gateway.llm()
     assert built["provider"] == "fake"
     assert built["model"] == "selected-model"
+
+
+def test_explicit_agent_model_stays_pinned_across_turns(monkeypatch):
+    from types import SimpleNamespace
+
+    from core.agent import HermusAgent
+
+    agent = HermusAgent.__new__(HermusAgent)
+    agent._model_pinned = True
+    agent.model_name = "fake/pinned-model"
+    agent.llm = SimpleNamespace(provider="fake")
+    agent.mode = SimpleNamespace(value="agent")
+
+    called = {"router": False}
+
+    class FakeRouter:
+        def select(self, _text):
+            called["router"] = True
+            return {"success": True, "model": "fake/other-model"}
+
+    import core.router2 as router_mod
+    monkeypatch.setattr(router_mod, "router2", FakeRouter())
+
+    result = agent._apply_router("second message")
+
+    assert result["model"] == "fake/pinned-model"
+    assert result["reason"] == "agent.model_pinned"
+    assert agent.model_name == "fake/pinned-model"
+    assert called["router"] is False
