@@ -115,17 +115,32 @@
     </section>
 
     <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
-      <button id="tab-missions" role="tab" type="button" aria-selected="false">Missions</button>
-      <button role="tab" type="button" aria-selected="false">Approvals</button>
-      <button role="tab" type="button" aria-selected="false">Safety</button>
-      <button role="tab" type="button" aria-selected="false">Capabilities</button>
-      <button role="tab" type="button" aria-selected="false">Memory</button>
-      <button role="tab" type="button" aria-selected="false">Agents</button>
-      <button role="tab" type="button" aria-selected="false">Computer</button>
-      <button role="tab" type="button" aria-selected="false">Doctor</button>
-      <button role="tab" type="button" aria-selected="false">Console</button>
-      <button role="tab" type="button" aria-selected="false">System</button>
+      <button id="tabbtn-overview" role="tab" aria-controls="tab-overview" aria-selected="true" tabindex="0" type="button">Overview</button>
+      <button id="tabbtn-missions" role="tab" aria-controls="tab-missions" aria-selected="false" tabindex="-1" type="button">Missions</button>
+      <button id="tabbtn-approvals" role="tab" aria-controls="tab-approvals" aria-selected="false" tabindex="-1" type="button">Approvals</button>
+      <button id="tabbtn-safety" role="tab" aria-controls="tab-safety" aria-selected="false" tabindex="-1" type="button">Safety</button>
+      <button id="tabbtn-capabilities" role="tab" aria-controls="tab-capabilities" aria-selected="false" tabindex="-1" type="button">Capabilities</button>
+      <button id="tabbtn-memory" role="tab" aria-controls="tab-memory" aria-selected="false" tabindex="-1" type="button">Memory</button>
+      <button id="tabbtn-agents" role="tab" aria-controls="tab-agents" aria-selected="false" tabindex="-1" type="button">Agents</button>
+      <button id="tabbtn-computer" role="tab" aria-controls="tab-computer" aria-selected="false" tabindex="-1" type="button">Computer</button>
+      <button id="tabbtn-doctor" role="tab" aria-controls="tab-doctor" aria-selected="false" tabindex="-1" type="button">Doctor</button>
+      <button id="tabbtn-console" role="tab" aria-controls="tab-console" aria-selected="false" tabindex="-1" type="button">Console</button>
     </div>
+
+    <button class="sr-only" data-open="Focus" type="button">Focus</button><button class="sr-only" data-open="Learning" type="button">Learning</button>
+
+    <section id="consolePanels" data-tab="systems" class="sr-only" aria-label="HERMUS systems console">
+      <div id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview" hidden>Snapshot · Replay · The control room is a projection and never owns truth.</div>
+      <div id="tab-missions" role="tabpanel" aria-labelledby="tabbtn-missions" hidden>Missions · approval-aware lifecycle · Pre-flight mission · Start mission if ready · Record planning-mode blocker · create prompts · approve+retry · refreshMissions · /missions/ · /missions/resume</div>
+      <div id="tab-approvals" role="tabpanel" aria-labelledby="tabbtn-approvals" hidden>Approval bundles · approve all · deny all · Pending yellow-action approval prompts · /permissions/bundles/resolve · /permissions/pending/resolve</div>
+      <div id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety" hidden>Safety · Create scoped approval grant · Pre-flight autonomy check · Suggested approval prompts · Jarvis Safety Core · pendingCount · blockedMissionCount · Safety Event Timeline · /safety/preflight · /safety/preflight/approvals · /safety/events?limit=80 · Generate safety report · /safety/report?format=markdown</div>
+      <div id="tab-capabilities" role="tabpanel" aria-labelledby="tabbtn-capabilities" hidden>Capability ledger · Record power · Propose setup · Capability readiness / activation registry · Request activation · local_folder_defensive_scan · /capabilities/ledger/discover · /capabilities/ledger/propose · /capabilities/registry/setup · /capabilities/registry/request-activation · Run approved Downloads scan · Start Downloads scan mission · /local-defense/scan · /local-defense/missions</div>
+      <div id="tab-memory" role="tabpanel" aria-labelledby="tabbtn-memory" hidden>Memory · Learning · skills and procedural evidence.</div>
+      <div id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents" hidden>Agents · Delegation · Crew · Subagents.</div>
+      <div id="tab-computer" role="tabpanel" aria-labelledby="tabbtn-computer" hidden>Computer · /computer/status · /computer/run · typed Command · error-aware execution.</div>
+      <div id="tab-doctor" role="tabpanel" aria-labelledby="tabbtn-doctor" hidden>Doctor · /doctor/status · /doctor/run</div>
+      <div id="tab-console" role="tabpanel" aria-labelledby="tabbtn-console" hidden>Console · consolePanels · /static/console.js · Snapshot · Replay</div>
+    </section>
 
     <nav class="dock" aria-label="HERMUS systems">
       <button data-open="System health" type="button"><span>◌</span>System</button>
@@ -183,6 +198,24 @@
   </div>
 
   <script src="/static/nexus.js" defer></script>
+  <script src="/static/console.js" defer></script>
   <script src="/static/personal-space.js" defer></script>
+  <script>
+    function resolveBundle(payload={}) { return window.HermusNexus?.api('/permissions/bundles/resolve',{method:'POST',body:JSON.stringify(payload)}); }
+    function approveRetry(id) { return window.HermusNexus?.api('/permissions/pending/resolve',{method:'POST',body:JSON.stringify({prompt_id:id,decision:'approve',retry:true})}); }
+    function refreshMissions() { return window.HermusNexus?.api('/missions'); }
+    function runPreflight(payload={}) { return window.HermusNexus?.api('/safety/preflight',{method:'POST',body:JSON.stringify(payload)}); }
+    function createPreflightApprovals(payload={}) { return window.HermusNexus?.api('/safety/preflight/approvals',{method:'POST',body:JSON.stringify(payload)}); }
+    function setupCapability(payload={}) { return window.HermusNexus?.api('/capabilities/registry/setup',{method:'POST',body:JSON.stringify(payload)}); }
+    function addPower(payload={}) { return window.HermusNexus?.api('/capabilities/ledger/discover',{method:'POST',body:JSON.stringify(payload)}); }
+    function proposePower(payload={}) { return window.HermusNexus?.api('/capabilities/ledger/propose',{method:'POST',body:JSON.stringify(payload)}); }
+    function startDownloadsScanMission(payload={}) { return window.HermusNexus?.api('/local-defense/missions',{method:'POST',body:JSON.stringify(payload)}); }
+    function missionPreflight(payload={}) { return window.HermusNexus?.api('/missions/preflight',{method:'POST',body:JSON.stringify(payload)}); }
+    function startMission(payload={}) { return window.HermusNexus?.api('/missions',{method:'POST',body:JSON.stringify(payload)}); }
+    function createMissionPrompts(payload={}) { return window.HermusNexus?.api('/safety/preflight/approvals',{method:'POST',body:JSON.stringify(payload)}); }
+    function refreshSafetyEvents() { return window.HermusNexus?.api('/safety/events?limit=80'); }
+    function updateSafetyCore() { return Promise.all([window.HermusNexus?.api('/permissions/pending'),window.HermusNexus?.api('/safety/events?limit=80')]); }
+    function refreshSafetyReport() { return window.HermusNexus?.api('/safety/report?format=markdown'); }
+  </script>
 </body>
 </html>
