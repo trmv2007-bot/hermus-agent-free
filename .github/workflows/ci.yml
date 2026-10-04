@@ -75,6 +75,7 @@ jobs:
           const json=(x)=>({status:200,contentType:'application/json',body:JSON.stringify(x)});
           await page.route('**/*',async route=>{
             const u=new URL(route.request().url()),p=u.pathname,m=route.request().method();
+            if(p==='/control.html' || p.startsWith('/static/')) return route.continue();
             if(m==='POST' && p==='/jobs') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run'}));
             if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run',id:'qa-id',task_id:'qa-task'}));
             if(p==='/runs/qa-run') return route.fulfill(json({status:'finished',finished:true,events:[{type:'agent_response',data:{text:'QA run complete.'}}]}));
