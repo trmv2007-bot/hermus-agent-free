@@ -324,9 +324,12 @@
   }
 
   qs('#commandbarInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendCommand(e.currentTarget.value);e.currentTarget.value=''}})
+  qs('#overviewCommand')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendCommand(e.currentTarget.value);e.currentTarget.value=''}})
+  qs('[data-overview-send]')?.addEventListener('click',()=>{const i=qs('#overviewCommand');if(i)sendCommand(i.value);if(i)i.value=''})
   qs('#paletteInput')?.addEventListener('input',renderPalette)
   qs('#chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}})
   qs('#buildEditor')?.addEventListener('input',()=>{qs('#buildDirty').textContent='UNSAVED'})
+  qs('#topCommand')?.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openPalette()}})
   document.addEventListener('keydown',e=>{
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette()}
     if(e.key==='Escape')closePalette()
