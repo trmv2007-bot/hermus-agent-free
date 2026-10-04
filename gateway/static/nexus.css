@@ -354,3 +354,7 @@ body:after{
   filter:blur(16px);
   opacity:.9;
 }
+
+
+/* The hero already has a dedicated HERMUS core; keep the floor atmospheric, never spherical. */
+.jarvis-home .stage-scene:after{display:none}
