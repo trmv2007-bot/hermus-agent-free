@@ -141,8 +141,10 @@
       const active = b.dataset.settingsTab === tab;
       b.classList.toggle('active', active);
       b.setAttribute('aria-selected', active ? 'true' : 'false');
+      b.setAttribute('tabindex', active ? '0' : '-1');
     });
     renderSettingsTab(tab);
+    qs('[data-settings-tab="'+tab+'"]')?.focus({preventScroll:true});
   }
 
   async function sendCommand(command) {
