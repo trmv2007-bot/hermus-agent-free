@@ -1,8 +1,8 @@
 """Test helper for the production HERMUS control room.
 
-The production UI is intentionally a thin Nexus shell plus its dedicated
-Nexus assets.  This helper concatenates those real assets so contract tests do
-not depend on browser rendering or a particular bundler.
+The production UI is the canonical dashboard-v2 shell and its dedicated assets.
+This helper concatenates the real page and assets so contract tests do not depend
+on browser rendering or a particular bundler.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 _ASSETS = (
     "gateway/control.html",
-    "gateway/static/nexus.css",
-    "gateway/static/nexus.js",
+    "gateway/static/dashboard-v2.css",
+    "gateway/static/dashboard-v2.js",
 )
 
 
