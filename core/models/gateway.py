@@ -150,19 +150,19 @@ class ModelGateway:
 
         return model_preferences.snapshot()
 
-    def select_preference(self, role: str, model: str | None, *, validate: bool = true) -> dict[str, Any]:
+    def select_preference(self, role: str, model: str | None, *, validate: bool = True) -> dict[str, Any]:
         """Persist a user-selected model after canonical catalog validation."""
         from ..model_preferences import model_preferences
 
         result = model_preferences.set(role, model, validate=validate)
-        return {**result, "catalog": self.catalog(probe=false)}
+        return {**result, "catalog": self.catalog(probe=False)}
 
     def resolve_model(self, role: str = "default", *, required: list[str] | None = None, provider: str | None = None) -> tuple[str | None, str | None]:
         """Resolve a persisted model or dynamically choose a catalog deployment."""
         from ..model_preferences import model_preferences
 
         preferred = model_preferences.get(role)
-        rows = list(self.catalog(probe=false).get("models") or [])
+        rows = list(self.catalog(probe=False).get("models") or [])
 
         def split(ref: str) -> tuple[str, str]:
             p, _, name = str(ref).partition("/")
