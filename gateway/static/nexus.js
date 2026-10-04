@@ -278,6 +278,15 @@
     return '<div><span>'+esc(label)+'</span><b>'+esc(value)+'</b></div>';
   }
 
+  function humanValue(value){
+    if(value == null) return '—';
+    if(typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if(typeof value === 'number') return Number.isFinite(value) ? String(value) : '—';
+    if(Array.isArray(value)) return value.length ? value.map(v=>humanValue(v)).join(', ') : 'None';
+    if(typeof value === 'object') return Object.entries(value).slice(0,6).map(([k,v])=>k.replaceAll('_',' ')+': '+humanValue(v)).join(' · ') || '—';
+    return String(value);
+  }
+
   function renderHealth(data){
     const host=surfaceRoot(); if(!host)return;
     const caps=data?.capabilities||{};
@@ -378,7 +387,7 @@
     host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">DEVICE FABRIC</div><strong>Connected environments</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Devices"}',true)+'</div>'+
       '<div class="surface-grid-list">'+(entries.length?entries.map(([k,v])=>{
         const obj=v&&typeof v==='object'?v:null, ok=obj?.connected??obj?.ready??obj?.ok??true;
-        const detail=obj?Object.entries(obj).slice(0,4).map(([a,b])=>a+': '+String(b)).join(' · '):String(v);
+        const detail=obj?humanValue(obj):String(v);
         return '<article class="surface-card"><div class="surface-card-head"><div><h3>'+esc(k.replaceAll('_',' '))+'</h3><p>'+esc(detail)+'</p></div>'+badge(ok?'READY':'UNAVAILABLE',ok?'good':'warn')+'</div><div class="surface-actions">'+(k.toLowerCase().includes('browser')?actionButton('OPEN BROWSER','device-command',JSON.stringify({command:'Open browser context'}),true):'')+'</div></article>';
       }).join(''):'<div class="surface-empty">No device state reported.</div>')+'</div>';
   }
@@ -395,7 +404,7 @@
       '<article class="metric"><span>AGENTS</span><strong>'+esc(counts.agents||0)+'</strong><small>fleet</small></article>'+
       '</div>'+
       '<div class="surface-section"><header><strong>Recent execution</strong>'+badge(runs.length+' runs')+'</header><div class="surface-list">'+(runs.slice(-12).reverse().map(r=>'<div class="surface-row"><div class="surface-row-main"><strong>'+esc(r.label||r.run_id||'Run')+'</strong><small>'+esc(r.status||r.state||'unknown')+'</small></div>'+badge(r.status||'unknown')+'</div>').join('')||'<div class="surface-empty">No recent runs.</div>')+'</div></div>'+
-      '<div class="surface-section"><header><strong>Runtime telemetry</strong></header><div class="surface-card"><div class="surface-kv">'+Object.entries(telemetry||{}).slice(0,12).map(([k,v])=>kv(k,typeof v==='object'?JSON.stringify(v):String(v))).join('')+'</div></div></div>';
+      '<div class="surface-section"><header><strong>Runtime telemetry</strong></header><div class="surface-card"><div class="surface-kv">'+Object.entries(telemetry||{}).slice(0,12).map(([k,v])=>kv(k,humanValue(v))).join('')+'</div></div></div>';
   }
 
   function renderConsoleSurface(data){
@@ -837,6 +846,59 @@
     }
   }
 
+  // -------------------------------------------------------------- WORKBENCH TOOL SURFACES
+  function switchToolWorkspace(name){
+    if(window.HermusUI?.switchWorkbench) {
+      window.HermusUI.switchWorkbench(name);
+      return;
+    }
+    const tab=document.querySelector('[data-workbench-tab="'+name+'"]');
+    tab?.click();
+  }
+
+  async function runBrowserWorkspace(){
+    const input=$('#browserUrl'), result=$('#browserResult'), url=(input?.value||'').trim();
+    if(!url) return;
+    if(result) result.textContent='Loading page…';
+    try{
+      const data=await api('/navigator/fetch',{method:'POST',body:JSON.stringify({url})});
+      if(result) result.textContent=(data.title||data.url||'Page loaded')+' · '+String(data.content_length||0)+' chars';
+      addEvent('Browser · '+(data.title||data.url||'loaded'));
+    }catch(e){ if(result) result.textContent='Browser error · '+e.message; addEvent('Browser · '+e.message,'error'); }
+  }
+
+  function runMediaWorkspace(kind){
+    const input=$(kind==='image'?'#imagePrompt':'#videoPrompt'), result=$(kind==='image'?'#imageResult':'#videoResult'), prompt=(input?.value||'').trim();
+    if(!prompt) return;
+    if(result) result.textContent='Requesting HERMUS media pipeline…';
+    sendCommand((kind==='image'?'Create an image: ':'Create a video: ')+prompt);
+    if(result) result.textContent='Request sent · follow execution in Current Work.';
+  }
+
+  async function saveNoteWorkspace(){
+    const input=$('#noteContent'), result=$('#noteResult'), content=(input?.value||'').trim();
+    if(!content) return;
+    if(result) result.textContent='Saving note…';
+    try{
+      await api('/memory2/remember',{method:'POST',body:JSON.stringify({kind:'semantic',content,importance:5,project:state.workshopProject||null})});
+      if(result) result.textContent='Saved to HERMUS memory.';
+      input.value='';
+    }catch(e){ if(result) result.textContent='Save failed · '+e.message; }
+  }
+
+  $('#browserOpen')?.addEventListener('click',runBrowserWorkspace);
+  $('#browserUrl')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();runBrowserWorkspace();}});
+  $('#terminalRun')?.addEventListener('click',()=>{
+    const input=$('#terminalCommand'), result=$('#terminalResult'), command=(input?.value||'').trim();
+    if(!command)return;
+    if(result) result.textContent='Request sent · following execution in Current Work.';
+    sendCommand(command);
+  });
+  $('#terminalCommand')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#terminalRun')?.click();}});
+  $('#imageRun')?.addEventListener('click',()=>runMediaWorkspace('image'));
+  $('#videoRun')?.addEventListener('click',()=>runMediaWorkspace('video'));
+  $('#noteSave')?.addEventListener('click',saveNoteWorkspace);
+
   // -------------------------------------------------------------- WORKSHOP
   function setWorkshop(open){
     const host=$('#workshop');
@@ -882,8 +944,8 @@
       ['ATTENTION',String((ctx?.attention||k.attention||[]).length)+' active'],
       ['WORKSPACE',ctx?.project||state.workshopProject||'none'],
       ['GIT',String(world['workspace.git.branch']?.value||'unknown')],
-      ['GIT STATUS',JSON.stringify(world['workspace.git.status']?.value||{})],
-      ['BROWSER',world['browser.state']?.value ? JSON.stringify(world['browser.state'].value):'not connected'],
+      ['GIT STATUS',humanValue(world['workspace.git.status']?.value||{})],
+      ['BROWSER',world['browser.state']?.value ? humanValue(world['browser.state'].value):'not connected'],
       ['WORLD',world['world.last_refresh_at']?.value||'unknown']
     ];
     const memories=Array.isArray(ctx?.memory)?ctx.memory.slice(0,4):[];
