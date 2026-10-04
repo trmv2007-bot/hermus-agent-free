@@ -765,7 +765,8 @@
     if(open) $('#jwCommand')?.focus();
   }
   let logoClicks=0, logoTimer=null;
-  $('#hermusLogo')?.addEventListener('click',()=>{
+  $('#hermusLogo')?.addEventListener('click',e=>{
+    e.preventDefault();
     logoClicks++;
     clearTimeout(logoTimer);
     logoTimer=setTimeout(()=>{logoClicks=0;},1300);
