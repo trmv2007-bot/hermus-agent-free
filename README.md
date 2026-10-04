@@ -178,6 +178,8 @@ The **Control Room** at `http://localhost:8000/control` is the operational comma
 - **🔗 Remote** — External integrations
 - **🛡️ Safety** — Red lines, approvals and emergency controls
 - **🧰 Reliability** — Incidents, circuits, checkpoints, backups and recovery
+- **🧠 Model Core** — Runtime-discovered models, role selection and capability fit
+- **✨ Fairy Attention** — Proactive priorities, incidents, tasks and world signals
 - **⚙️ Systems** — Subsystem health
 
 ---
@@ -213,6 +215,7 @@ Third-party credentials are deployment-specific and must be supplied by the oper
 | `CAPABILITY_LEDGER.md` | Capability ledger |
 | `docs/PHASE_18_RELIABILITY_RECOVERY.md` | Reliability and recovery |
 | `docs/JARVIS_FAIRY_ROADMAP.md` | Long-term roadmap |
+| `docs/JARVIS_FAIRY_ENVIRONMENT.md` | JARVIS/Fairy environment direction and dynamic model policy |
 
 ---
 
