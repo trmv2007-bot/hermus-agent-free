@@ -79,6 +79,45 @@ async def embeddings_status():
     return embedding_store.backend_info()
 
 
+@router.get("/models/catalog")
+async def models_catalog(probe: bool = False, refresh: bool = False):
+    """Dynamic, secret-free model deployments discovered from configured backends."""
+    from core.models import get_model_gateway
+
+    return get_model_gateway().catalog(probe=probe, refresh=refresh)
+
+
+@router.get("/models/selected")
+async def models_selected():
+    """Persisted role-aware model selections."""
+    from core.models import get_model_gateway
+
+    return get_model_gateway().selected_models()
+
+
+@router.post("/models/select")
+async def models_select(payload: dict):
+    """Persist an explicit model choice or reset a role to Auto."""
+    from core.models import get_model_gateway
+
+    role = str(payload.get("role") or "default")
+    model = payload.get("model")
+    if model is None:
+        model = "auto"
+    try:
+        return get_model_gateway().select_preference(role, str(model))
+    except ValueError as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
+
+
+@router.post("/models/refresh")
+async def models_refresh():
+    """Force a live model catalog refresh."""
+    from core.models import get_model_gateway
+
+    return get_model_gateway().catalog(probe=True, refresh=True)
+
+
 @router.get("/providers")
 async def providers_list():
     from core.providers import list_providers
