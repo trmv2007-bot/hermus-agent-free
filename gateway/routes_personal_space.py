@@ -22,7 +22,9 @@ async def personal_space_snapshot(limit: int = 8):
 @router.post("/run")
 async def personal_space_run():
     """Run one bounded read-only curiosity pass now."""
-    result = _space().tick(force=True)
+    space = _space()
+    space.note_user_activity()
+    result = space.tick(force=True)
     status = str(result.get("status") or "")
     if status == "queue_error":
         return JSONResponse(result, status_code=503)
