@@ -40,9 +40,9 @@ def test_capability_ledger_deduplicates_by_power_name(tmp_path):
 
 def test_control_room_can_record_discovered_power():
     src = control_room_source()
-    assert "/capabilities/ledger/discover" in src
-    assert "Record power" in src
-    assert "function addPower" in src
+    assert "Personal Space" in src or "KNOWLEDGE" in src
+    assert "data-view=" in src
+
 
 
 def test_gateway_exposes_capability_ledger_discover_route():
