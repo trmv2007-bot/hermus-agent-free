@@ -57,7 +57,7 @@ def reflexion_in_loop(
     model: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Critique the draft, then revise it. 2 extra calls max."""
-    llm = get_model_gateway().llm(model=model or config.model)
+    llm = get_model_gateway().llm(model=model, role="reasoning")
     ev = _evidence_text(evidence)
     try:
         critique = _chat(
@@ -100,7 +100,7 @@ def self_consistency(
 
     def draft_one(seed: int) -> str:
         try:
-            llm = get_model_gateway().llm(model=model or config.model)  # fresh per thread (rotates keys)
+            llm = get_model_gateway().llm(model=model, role="reasoning")  # fresh per thread (rotates keys)
             return _chat(
                 llm,
                 (
