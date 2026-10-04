@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 from typing import Any
 
 from core.log import get_logger
@@ -253,7 +252,7 @@ class LocalFirstProvider:
 
             # Try pynvml
             try:
-                from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetName, nvmlDeviceGetMemoryInfo
+                from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlDeviceGetName, nvmlInit
 
                 nvmlInit()
                 handle = nvmlDeviceGetHandleByIndex(0)

@@ -158,7 +158,9 @@ class ModelGateway:
         result = model_preferences.set(role, model, validate=validate)
         return {**result, "catalog": self.catalog(probe=False)}
 
-    def resolve_model(self, role: str = "default", *, required: list[str] | None = None, provider: str | None = None) -> tuple[str | None, str | None]:
+    def resolve_model(
+        self, role: str = "default", *, required: list[str] | None = None, provider: str | None = None
+    ) -> tuple[str | None, str | None]:
         """Resolve a persisted model or dynamically choose a catalog deployment."""
         from .model_preferences import model_preferences
 
@@ -195,12 +197,14 @@ class ModelGateway:
                 candidates = exact
 
         if candidates:
-            candidates.sort(key=lambda r: (
-                0 if r.get("source") == "live" else 1,
-                -sum(1 for v in (r.get("capabilities") or {}).values() if v == "yes"),
-                str(r.get("provider") or ""),
-                str(r.get("id") or ""),
-            ))
+            candidates.sort(
+                key=lambda r: (
+                    0 if r.get("source") == "live" else 1,
+                    -sum(1 for v in (r.get("capabilities") or {}).values() if v == "yes"),
+                    str(r.get("provider") or ""),
+                    str(r.get("id") or ""),
+                )
+            )
             p, name = split(str(candidates[0].get("ref") or ""))
             if p and name:
                 return p, name
@@ -208,7 +212,6 @@ class ModelGateway:
         # No hard-coded model is a valid runtime fallback. If discovery is
         # empty, fail honestly instead of silently selecting an arbitrary model.
         return None, None
-
 
     # --------------------------------------------------------------------------
     def select(self, req: ModelRequirement) -> list[ModelSelection]:

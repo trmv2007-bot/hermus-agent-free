@@ -10,6 +10,7 @@ class _World:
 
 def test_device_fabric_degrades_honestly(monkeypatch):
     import core.device_fabric as mod
+
     monkeypatch.setattr(mod, "world_awareness", type("A", (), {"world": _World()})())
     out = DeviceFabric().snapshot()
     assert out["version"] == 1

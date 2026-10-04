@@ -3,6 +3,7 @@
 These are deliberately small and serialization-friendly. They describe what
 HERMUS is doing, not how an individual subsystem happens to implement it.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -37,7 +38,7 @@ class NexusCommand:
     priority: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def normalized(self) -> "NexusCommand":
+    def normalized(self) -> NexusCommand:
         return NexusCommand(
             text=self.text.strip(),
             user_id=self.user_id.strip() or "default",

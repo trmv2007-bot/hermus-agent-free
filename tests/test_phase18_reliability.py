@@ -1,4 +1,4 @@
-from core.reliability import CircuitBreaker, CheckpointStore, IdempotencyStore, RecoverySnapshotStore, RetryPolicy
+from core.reliability import CheckpointStore, CircuitBreaker, IdempotencyStore, RecoverySnapshotStore, RetryPolicy
 
 
 def test_retry_policy_backoff_is_bounded():
@@ -13,6 +13,7 @@ def test_circuit_breaker_opens_and_recovers():
     cb.failure()
     assert cb.allow() is False
     import time
+
     time.sleep(0.02)
     assert cb.allow() is True
     cb.success()

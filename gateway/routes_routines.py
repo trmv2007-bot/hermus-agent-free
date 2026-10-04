@@ -1,4 +1,5 @@
 """User-friendly routine control surface over the existing proactive automation owner."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -9,6 +10,7 @@ router = APIRouter(prefix="/routines", tags=["routines"])
 
 def _automation():
     from core.proactive_runtime import automation, wire_proactive_automation
+
     wire_proactive_automation()
     return automation
 
@@ -75,7 +77,12 @@ async def routine_validate(payload: dict | None = None):
             errors.append("cooldown_seconds must be >= 0")
     except (TypeError, ValueError):
         errors.append("cooldown_seconds must be numeric")
-    return {"valid": not errors, "errors": errors, "action_type": action, "safety": "existing automation + mission policy remains authoritative"}
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "action_type": action,
+        "safety": "existing automation + mission policy remains authoritative",
+    }
 
 
 __all__ = ["router"]

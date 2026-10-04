@@ -27,10 +27,7 @@ def snapshot() -> dict[str, Any]:
         "perception": perception.refresh(include_disabled=True),
         "specialists": {
             "max_agents": agent_delegator.max_agents,
-            "capabilities": {
-                role: list(profile.capabilities)
-                for role, profile in agent_delegator.specialists.items()
-            },
+            "capabilities": {role: list(profile.capabilities) for role, profile in agent_delegator.specialists.items()},
         },
     }
 

@@ -142,18 +142,20 @@ class ModelRouter:
                 model = model or str(row.get("id") or "")
                 if not provider or not model:
                     continue
-                workers.append({
-                    "provider": provider,
-                    "model": model,
-                    "name": row.get("provider_name") or provider,
-                    "base_url": row.get("base_url"),
-                    "source": row.get("source"),
-                    "reachable": row.get("reachable"),
-                    "healthy": row.get("healthy"),
-                    "latency_ms": row.get("latency_ms"),
-                    "context_window": row.get("context_window") or row.get("context_tokens") or 0,
-                    "capabilities": dict(row.get("capabilities") or {}),
-                })
+                workers.append(
+                    {
+                        "provider": provider,
+                        "model": model,
+                        "name": row.get("provider_name") or provider,
+                        "base_url": row.get("base_url"),
+                        "source": row.get("source"),
+                        "reachable": row.get("reachable"),
+                        "healthy": row.get("healthy"),
+                        "latency_ms": row.get("latency_ms"),
+                        "context_window": row.get("context_window") or row.get("context_tokens") or 0,
+                        "capabilities": dict(row.get("capabilities") or {}),
+                    }
+                )
             if workers:
                 try:
                     health_models = (get_model_gateway().health() or {}).get("models") or {}
@@ -172,6 +174,7 @@ class ModelRouter:
 
         try:
             from .model_fleet import _available_workers
+
             return _available_workers(limit=32)
         except Exception:
             return []

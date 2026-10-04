@@ -9,15 +9,40 @@ This module provides:
 - RTX 3050 Optimized: Smart VRAM and resource management
 """
 
-from .agent import Agent, AgentState, AgentConfig
-from .pool import AgentCapacityError, AgentPool, get_pool, init_pool, shutdown_pool, PoolConfig
-from .messaging import AgentMessage, MessageBus, get_bus, MessageType, MessagePriority
-from .specialization import AgentRole, Researcher, Coder, Verifier, Chair, Synthesizer, Critic, ToolRunner
-from .specialization import ROLE_DEFINITIONS, create_by_role, create_researcher, create_coder
-from .specialization import create_verifier, create_chair, create_critic, create_synthesizer, create_tool_runner
-from .collaboration import CollaborativeMission, AgentTeam, MissionStatus, TaskStatus, MissionTask
-from .collaboration import create_mission, get_mission, get_all_missions, start_mission
+from .agent import Agent, AgentConfig, AgentState
+from .collaboration import (
+    AgentTeam,
+    CollaborativeMission,
+    MissionStatus,
+    MissionTask,
+    TaskStatus,
+    create_mission,
+    get_all_missions,
+    get_mission,
+    start_mission,
+)
+from .messaging import AgentMessage, MessageBus, MessagePriority, MessageType, get_bus
 from .orchestrator import AgentOrchestrator, agent_orchestrator
+from .pool import AgentCapacityError, AgentPool, PoolConfig, get_pool, init_pool, shutdown_pool
+from .specialization import (
+    ROLE_DEFINITIONS,
+    AgentRole,
+    Chair,
+    Coder,
+    Critic,
+    Researcher,
+    Synthesizer,
+    ToolRunner,
+    Verifier,
+    create_by_role,
+    create_chair,
+    create_coder,
+    create_critic,
+    create_researcher,
+    create_synthesizer,
+    create_tool_runner,
+    create_verifier,
+)
 
 __all__ = [
     "Agent",

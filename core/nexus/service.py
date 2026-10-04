@@ -4,6 +4,7 @@ Nexus is no longer a backend architecture. The canonical interaction model is
 ``core.hermus_engine``. This adapter exists only so older imports continue to
 work while callers migrate to the engine.
 """
+
 from __future__ import annotations
 
 from typing import Any

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 
 def test_gateway_does_not_fallback_to_configured_model(monkeypatch):
-    from core.models.gateway import ModelGateway
     import core.models.model_catalog as catalog_mod
+    from core.models.gateway import ModelGateway
 
     monkeypatch.setattr(
         catalog_mod.model_catalog,

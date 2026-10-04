@@ -17,12 +17,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .events import get_bus
+from .executive import executive_brain
 from .presence import get_presence
 from .run_events import run_bus
 from .world_awareness import world_awareness
 from .world_model import world_model
-from .executive import executive_brain
-
 
 _MEANINGFUL = {
     "command.requested",
@@ -98,7 +97,7 @@ class PresenceKernel:
         self._last_meaningful_at: str | None = None
 
     # ---------------------------------------------------------------- wiring
-    def start(self) -> "PresenceKernel":
+    def start(self) -> PresenceKernel:
         bus = self._bus or get_bus()
         with self._lock:
             if self._bus is bus and self._unsubscribe is not None:
@@ -183,16 +182,14 @@ class PresenceKernel:
         ):
             state, detail = "waiting_approval", "approval required"
         elif any(word in combined for word in _ERROR_WORDS):
-            state, detail = "error", _text(
-                payload.get("error") or payload.get("message") or "runtime issue"
-            )
+            state, detail = "error", _text(payload.get("error") or payload.get("message") or "runtime issue")
         elif "verification" in combined:
             state, detail = "verifying", "checking the requested result"
         elif "learning" in combined or event_type.startswith("skill"):
             state, detail = "learning", "updating a reusable capability"
         elif any(word in combined for word in _START_WORDS):
-            state, detail = ("thinking", "interpreting the request") if "requested" in combined else (
-                "working", "working on the request"
+            state, detail = (
+                ("thinking", "interpreting the request") if "requested" in combined else ("working", "working on the request")
             )
         elif any(word in combined for word in _FINISHED_WORDS):
             state, detail = self._terminal_state()
@@ -219,10 +216,7 @@ class PresenceKernel:
 
     def _terminal_state(self) -> tuple[str, str]:
         try:
-            active = [
-                row for row in self.runs.runs()
-                if str(row.get("status") or "").lower() in {"queued", "running"}
-            ]
+            active = [row for row in self.runs.runs() if str(row.get("status") or "").lower() in {"queued", "running"}]
         except Exception:
             active = []
         return ("working", "another task is still active") if active else ("idle", "ready")
@@ -248,7 +242,13 @@ class PresenceKernel:
             from .emergency_stop import get_emergency_stop
 
             if get_emergency_stop().active():
-                add("emergency-stop", "critical", "Emergency stop is active", "Computer actions are blocked until the stop is cleared.", "safety")
+                add(
+                    "emergency-stop",
+                    "critical",
+                    "Emergency stop is active",
+                    "Computer actions are blocked until the stop is cleared.",
+                    "safety",
+                )
         except Exception:
             pass
 
@@ -257,16 +257,30 @@ class PresenceKernel:
 
             pending = permission_manager.pending() or []
             if pending:
-                add("approvals", "high", f"{len(pending)} approval request(s) waiting", "HERMUS is waiting for an explicit authorization decision.", "permissions")
+                add(
+                    "approvals",
+                    "high",
+                    f"{len(pending)} approval request(s) waiting",
+                    "HERMUS is waiting for an explicit authorization decision.",
+                    "permissions",
+                )
         except Exception:
             pass
 
         try:
             reliability = self._status("core.reliability.reliability", "status")
             incidents = reliability.get("incidents") if isinstance(reliability, dict) else []
-            open_incidents = [r for r in incidents if str((r or {}).get("status") or "open").lower() not in {"closed", "resolved"}]
+            open_incidents = [
+                r for r in incidents if str((r or {}).get("status") or "open").lower() not in {"closed", "resolved"}
+            ]
             if open_incidents:
-                add("reliability", "high", f"{len(open_incidents)} reliability incident(s) open", "Runtime recovery has unresolved incidents.", "reliability")
+                add(
+                    "reliability",
+                    "high",
+                    f"{len(open_incidents)} reliability incident(s) open",
+                    "Runtime recovery has unresolved incidents.",
+                    "reliability",
+                )
         except Exception:
             pass
 
@@ -274,7 +288,13 @@ class PresenceKernel:
             distributed = self._status("core.distributed.distributed", "status")
             stale = int(distributed.get("stale", 0) or 0) if isinstance(distributed, dict) else 0
             if stale:
-                add("distributed-stale", "medium", f"{stale} device/node(s) are stale", "A distributed HERMUS node has missed its freshness window.", "distributed")
+                add(
+                    "distributed-stale",
+                    "medium",
+                    f"{stale} device/node(s) are stale",
+                    "A distributed HERMUS node has missed its freshness window.",
+                    "distributed",
+                )
         except Exception:
             pass
 
@@ -296,7 +316,13 @@ class PresenceKernel:
             goals = self.executive.active_goals(limit=10)
             failed = [g for g in goals if str(g.get("status") or "").lower() == "failed"]
             if failed:
-                add("goal-failure", "high", f"{len(failed)} executive goal(s) failed", "A persistent goal needs review or replanning.", "executive")
+                add(
+                    "goal-failure",
+                    "high",
+                    f"{len(failed)} executive goal(s) failed",
+                    "A persistent goal needs review or replanning.",
+                    "executive",
+                )
         except Exception:
             pass
 
@@ -334,7 +360,13 @@ class PresenceKernel:
             if recent_world:
                 latest = recent_world[-1]
                 if latest.event_type in {"world_reconciled", "perception_refreshed"} and latest.data.get("changed"):
-                    add("world-changed", "low", "Your environment changed", "HERMUS detected a new workspace or runtime state change.", "world")
+                    add(
+                        "world-changed",
+                        "low",
+                        "Your environment changed",
+                        "HERMUS detected a new workspace or runtime state change.",
+                        "world",
+                    )
         except Exception:
             pass
 
@@ -423,9 +455,7 @@ class PresenceKernel:
 
         try:
             runs = self.runs.runs()
-            active_runs = [
-                row for row in runs if str(row.get("status") or "").lower() in {"queued", "running"}
-            ]
+            active_runs = [row for row in runs if str(row.get("status") or "").lower() in {"queued", "running"}]
         except Exception:
             active_runs = []
             runs = []

@@ -11,16 +11,12 @@ from typing import Any
 
 from .memory.store import MemoryFacade, get_memory
 
-
 _SENSITIVE = ("password", "token", "secret", "api_key", "credential", "private_key")
 
 
 def _clean(value: Any) -> Any:
     if isinstance(value, dict):
-        return {
-            str(k): "[REDACTED]" if any(s in str(k).lower() for s in _SENSITIVE) else _clean(v)
-            for k, v in value.items()
-        }
+        return {str(k): "[REDACTED]" if any(s in str(k).lower() for s in _SENSITIVE) else _clean(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_clean(v) for v in value[:50]]
     if isinstance(value, str):
@@ -35,7 +31,9 @@ class ExecutiveMemory:
         self.memory = memory or get_memory()
 
     def recall_for_goal(self, goal: str, *, project: str | None = None, limit: int = 8) -> list[dict[str, Any]]:
-        return self.memory.hybrid_recall(goal, project=project, kinds=["episodic", "semantic", "procedural", "project"], limit=limit)
+        return self.memory.hybrid_recall(
+            goal, project=project, kinds=["episodic", "semantic", "procedural", "project"], limit=limit
+        )
 
     def remember_outcome(
         self,
@@ -49,7 +47,9 @@ class ExecutiveMemory:
         payload = _clean(result or {})
         status = "verified" if verified else state
         content = f"Mission outcome: {goal}\nState: {status}\nEvidence: {payload}"
-        return self.memory.remember("episodic", content, project=project, metadata={"source": "executive", "state": state, "verified": verified})
+        return self.memory.remember(
+            "episodic", content, project=project, metadata={"source": "executive", "state": state, "verified": verified}
+        )
 
     def remember_lesson(self, *, goal: str, lesson: str, project: str | None = None) -> dict[str, Any]:
         return self.memory.remember(

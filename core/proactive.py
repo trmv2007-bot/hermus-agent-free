@@ -4,16 +4,17 @@ Proactive rules are explicit, durable, and opt-in. This layer reacts to
 canonical events and hands work to the existing queue/runtime; it never executes
 tools directly and never bypasses approval/red-line policy.
 """
+
 from __future__ import annotations
 
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
-
 
 ALLOWED_ACTIONS = {"runtime.turn", "agent.autonomous", "mission.start"}
 

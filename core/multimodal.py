@@ -5,6 +5,7 @@ structured evidence contract. It delegates actual vision inference to the
 existing vision tool/ModelGateway and never executes arbitrary computer
 actions or grants new permissions.
 """
+
 from __future__ import annotations
 
 import mimetypes
@@ -55,8 +56,9 @@ class MultimodalIntelligence:
         candidate.parent.mkdir(parents=True, exist_ok=True)
         return candidate
 
-    def analyze_image(self, path: str | Path, *, prompt: str = "Describe this image in detail",
-                      model: str | None = None) -> dict[str, Any]:
+    def analyze_image(
+        self, path: str | Path, *, prompt: str = "Describe this image in detail", model: str | None = None
+    ) -> dict[str, Any]:
         target = self._safe_path(path)
         from tools.vision import vision_analyze
 
@@ -74,8 +76,9 @@ class MultimodalIntelligence:
         )
         return self._record(evidence)
 
-    def analyze_document(self, path: str | Path, *, prompt: str = "Describe the visual contents and important text",
-                         model: str | None = None) -> dict[str, Any]:
+    def analyze_document(
+        self, path: str | Path, *, prompt: str = "Describe the visual contents and important text", model: str | None = None
+    ) -> dict[str, Any]:
         target = self._safe_path(path)
         data = target.read_bytes()
         extracted = extract_document(
@@ -98,9 +101,14 @@ class MultimodalIntelligence:
         )
         return self._record(evidence)
 
-    def analyze_browser(self, *, path: str = "data/multimodal/browser.png",
-                        prompt: str = "Describe the current browser page, visible UI, text and important state",
-                        model: str | None = None, full_page: bool = False) -> dict[str, Any]:
+    def analyze_browser(
+        self,
+        *,
+        path: str = "data/multimodal/browser.png",
+        prompt: str = "Describe the current browser page, visible UI, text and important state",
+        model: str | None = None,
+        full_page: bool = False,
+    ) -> dict[str, Any]:
         # Browser screenshots are output artifacts; the target is expected to be
         # absent before the screenshot provider creates it.
         target = self._safe_path(path, require_file=False)

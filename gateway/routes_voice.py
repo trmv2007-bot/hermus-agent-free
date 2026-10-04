@@ -387,9 +387,11 @@ async def voice_interrupt(payload: dict | None = None):
     if not session_id:
         return JSONResponse({"success": False, "error": "session_id is required"}, status_code=400)
     from core.voice_presence import voice_presence
+
     session = voice_presence.interrupt_output(session_id)
     try:
         from core.run_events import run_bus
+
         run_id = str(payload.get("run_id") or "")
         if run_id:
             run_bus.cancel(run_id)

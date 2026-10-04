@@ -1,4 +1,5 @@
 """Tests for discovery-first model selection and the Nexus model control surface."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -52,9 +53,9 @@ def test_catalog_only_contains_runtime_discovered_or_stored_models(monkeypatch):
 
 
 def test_model_selection_route_is_runtime_validated(monkeypatch):
-    from gateway.gateway import app
     import core.model_preferences as pref_mod
     import core.models.model_catalog as catalog_mod
+    from gateway.gateway import app
 
     monkeypatch.setattr(
         catalog_mod.model_catalog,
@@ -103,21 +104,24 @@ def test_control_room_has_discovery_driven_model_surface():
 
 def test_gateway_llm_uses_persisted_selection(monkeypatch):
     from types import SimpleNamespace
-    from core.models.gateway import ModelGateway
-    import core.models.model_catalog as catalog_mod
+
     import core.model_preferences as pref_mod
+    import core.models.model_catalog as catalog_mod
+    from core.models.gateway import ModelGateway
 
     class FakeCatalog:
         def list(self, **_kwargs):
             return {
-                "models": [{
-                    "ref": "fake/runtime-42",
-                    "provider": "fake",
-                    "id": "runtime-42",
-                    "source": "live",
-                    "reachable": True,
-                    "capabilities": {"tools": "yes"},
-                }]
+                "models": [
+                    {
+                        "ref": "fake/runtime-42",
+                        "provider": "fake",
+                        "id": "runtime-42",
+                        "source": "live",
+                        "reachable": True,
+                        "capabilities": {"tools": "yes"},
+                    }
+                ]
             }
 
     class FakePrefs:
@@ -140,22 +144,24 @@ def test_gateway_llm_uses_persisted_selection(monkeypatch):
 
 
 def test_model_gateway_uses_dashboard_selection_when_model_is_omitted(monkeypatch, tmp_path):
-    from core.models.gateway import ModelGateway
-    import core.models.model_catalog as catalog_mod
     import core.model_preferences as pref_mod
+    import core.models.model_catalog as catalog_mod
+    from core.models.gateway import ModelGateway
 
     monkeypatch.setattr(
         catalog_mod.model_catalog,
         "list",
         lambda **kwargs: {
-            "models": [{
-                "ref": "fake/selected-model",
-                "provider": "fake",
-                "id": "selected-model",
-                "capabilities": {"tools": "yes", "vision": "no"},
-                "source": "live",
-                "reachable": True,
-            }],
+            "models": [
+                {
+                    "ref": "fake/selected-model",
+                    "provider": "fake",
+                    "id": "selected-model",
+                    "capabilities": {"tools": "yes", "vision": "no"},
+                    "source": "live",
+                    "reachable": True,
+                }
+            ],
             "providers": [{"provider": "fake", "configured": True}],
             "count": 1,
         },

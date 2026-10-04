@@ -15,9 +15,9 @@ class FakeLoop:
 
 def test_autonomy_attaches_run_health_and_correlates_events():
     events = []
-    result = AutonomyFacade(
-        FakeLoop({"state": "completed", "mission_id": "m6", "verified": True})
-    ).run("finish it", run_id="run_fixed", on_event=lambda t, p: events.append((t, p)))
+    result = AutonomyFacade(FakeLoop({"state": "completed", "mission_id": "m6", "verified": True})).run(
+        "finish it", run_id="run_fixed", on_event=lambda t, p: events.append((t, p))
+    )
 
     assert result.ok is True
     assert result.result["run_id"] == "run_fixed"

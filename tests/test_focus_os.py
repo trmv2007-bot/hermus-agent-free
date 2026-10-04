@@ -11,6 +11,7 @@ def test_focus_os_prioritizes_attention(monkeypatch):
     class P:
         def briefing(self, **kwargs):
             return {"active_goals": [], "priority_tasks": [], "due_tasks": []}
+
     class K:
         def snapshot(self, **kwargs):
             return {
@@ -18,9 +19,11 @@ def test_focus_os_prioritizes_attention(monkeypatch):
                 "runtime": {"active_runs": []},
                 "world": {},
             }
+
     class D:
         def snapshot(self):
             return {"safety": {"emergency_stop": {"active": False}}}
+
     class L:
         def snapshot(self, **kwargs):
             return {"totals": {"skills": 1}}

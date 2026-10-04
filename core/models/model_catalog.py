@@ -13,9 +13,9 @@ import time
 from typing import Any
 
 from ..model_capabilities import negotiate
-from ..provider_resolver import discover_runtime_bundles
-from ..providers import PROVIDER_PRESETS, get_provider
 from ..openai_compat import list_models
+from ..provider_resolver import discover_runtime_bundles
+from ..providers import get_provider
 
 
 class ModelCatalog:
@@ -64,11 +64,7 @@ class ModelCatalog:
             return [], {"success": False, "error": f"{type(exc).__name__}: {exc}"}
 
         raw_models = result.get("models") if isinstance(result, dict) else []
-        models = [
-            item
-            for raw in (raw_models or [])
-            if (item := self._normalize_model(provider, raw)) is not None
-        ]
+        models = [item for raw in (raw_models or []) if (item := self._normalize_model(provider, raw)) is not None]
         return models, {
             "success": bool(result.get("success")) if isinstance(result, dict) else bool(models),
             "reachable": bool(result.get("success")) if isinstance(result, dict) else bool(models),

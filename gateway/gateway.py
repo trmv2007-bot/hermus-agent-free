@@ -295,8 +295,8 @@ async def lifespan(app: FastAPI):
     personal_space_task = None
     if getattr(config, "presence_enabled", True):
         try:
-            from core.presence_kernel import presence_kernel
             from core.ambient_loop import ambient_loop
+            from core.presence_kernel import presence_kernel
 
             presence_kernel.start()
             presence_task = asyncio.create_task(_presence_heartbeat_loop())
@@ -351,6 +351,7 @@ async def lifespan(app: FastAPI):
             pass
         try:
             from core.presence_kernel import presence_kernel
+
             presence_kernel.stop()
         except Exception:
             pass
@@ -526,32 +527,32 @@ _realtime.install(app)
 
 # Per-concern routers (extracted from this module; see gateway/routes_*.py).
 # Mounted after the realtime layer so its routes keep precedence.
-from gateway.routes_android import router as _android_router  # noqa: E402
 from gateway.routes_agents import router as _agents_router  # noqa: E402
+from gateway.routes_android import router as _android_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
 from gateway.routes_channels import router as _channels_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
 from gateway.routes_console import router as _console_router  # noqa: E402
+from gateway.routes_context import router as _context_router  # noqa: E402
 from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
+from gateway.routes_devices import router as _devices_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
+from gateway.routes_focus import router as _focus_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_learning import router as _learning_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
+from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
+from gateway.routes_routines import router as _routines_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
+from gateway.routes_teach import router as _teach_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_workshop import router as _workshop_router  # noqa: E402
-from gateway.routes_context import router as _context_router  # noqa: E402
-from gateway.routes_teach import router as _teach_router  # noqa: E402
-from gateway.routes_devices import router as _devices_router  # noqa: E402
-from gateway.routes_learning import router as _learning_router  # noqa: E402
-from gateway.routes_routines import router as _routines_router  # noqa: E402
-from gateway.routes_focus import router as _focus_router  # noqa: E402
-from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break

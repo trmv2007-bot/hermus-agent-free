@@ -4,6 +4,7 @@ Profiles are explicit contracts: capabilities, input/output expectations,
 risk and resource limits. The registry selects capabilities; execution remains
 owned by the existing delegation and Mission Runtime layers.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -27,9 +28,15 @@ DEFAULT_CONTRACTS = (
     SpecialistContract("architect", ("architecture", "design", "planning"), ("task", "findings"), ("design", "evidence")),
     SpecialistContract("coder", ("coding", "implementation", "tests"), ("task", "design"), ("changes", "test_results")),
     SpecialistContract("code_reviewer", ("review", "correctness", "maintainability"), ("changes",), ("review", "evidence")),
-    SpecialistContract("security_auditor", ("security", "threat_model", "audit"), ("changes",), ("audit", "evidence"), "elevated", 10),
-    SpecialistContract("integrator", ("integration", "build", "release"), ("changes", "test_results"), ("integration", "evidence")),
-    SpecialistContract("verifier", ("verification", "testing", "proof"), ("changes", "test_results"), ("verification", "evidence")),
+    SpecialistContract(
+        "security_auditor", ("security", "threat_model", "audit"), ("changes",), ("audit", "evidence"), "elevated", 10
+    ),
+    SpecialistContract(
+        "integrator", ("integration", "build", "release"), ("changes", "test_results"), ("integration", "evidence")
+    ),
+    SpecialistContract(
+        "verifier", ("verification", "testing", "proof"), ("changes", "test_results"), ("verification", "evidence")
+    ),
 )
 
 

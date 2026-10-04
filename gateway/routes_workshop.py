@@ -3,10 +3,10 @@
 This is a thin HTTP projection over the canonical Workspace + ToolGateway
 boundaries. It never becomes a second filesystem or execution owner.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-import re
 from typing import Any
 
 from fastapi import APIRouter
@@ -18,9 +18,28 @@ _MAX_TREE_FILES = 500
 _MAX_READ_BYTES = 200_000
 _MAX_WRITE_BYTES = 500_000
 _TEXT_EXTENSIONS = {
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".scss", ".json",
-    ".yaml", ".yml", ".toml", ".md", ".txt", ".sh", ".ps1", ".sql", ".xml",
-    ".ini", ".cfg", ".env.example", ".gitignore",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".html",
+    ".css",
+    ".scss",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".md",
+    ".txt",
+    ".sh",
+    ".ps1",
+    ".sql",
+    ".xml",
+    ".ini",
+    ".cfg",
+    ".env.example",
+    ".gitignore",
 }
 
 
@@ -91,6 +110,7 @@ async def workshop_snapshot(project: str | None = None):
     projects = []
     try:
         from core.workspace import workspace
+
         projects = workspace.list_projects()
     except Exception:
         projects = []
@@ -124,11 +144,14 @@ async def workshop_file(path: str, project: str | None = None):
     try:
         size = target.stat().st_size
         if size > _MAX_READ_BYTES:
-            return JSONResponse({
-                "success": False,
-                "error": f"file exceeds workshop read limit ({_MAX_READ_BYTES} bytes)",
-                "size": size,
-            }, status_code=413)
+            return JSONResponse(
+                {
+                    "success": False,
+                    "error": f"file exceeds workshop read limit ({_MAX_READ_BYTES} bytes)",
+                    "size": size,
+                },
+                status_code=413,
+            )
         data = target.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
@@ -157,7 +180,7 @@ async def workshop_file_write(payload: dict[str, Any] | None = None):
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    from core.tools import get_tool_gateway, gateway_result_dict
+    from core.tools import gateway_result_dict, get_tool_gateway
 
     result = get_tool_gateway().execute(
         "file_write",

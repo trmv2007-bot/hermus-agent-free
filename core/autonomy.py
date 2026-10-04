@@ -4,10 +4,12 @@ This is intentionally a thin orchestration boundary: ExecutiveLoop owns the
 lifecycle while this facade gives gateways one stable entry point and enforces
 a small, explicit result contract for observability and recovery.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .executive_loop import ExecutiveLoop, executive_loop
 from .runtime_health import RunTracker, classify_failure

@@ -26,6 +26,7 @@ def test_world_awareness_reconciles_git_and_tracks_freshness(tmp_path, monkeypat
                 "git rev-parse --abbrev-ref HEAD": "main\n",
                 "git status --porcelain": " M core/world.py\n",
             }[" ".join(command)]
+
         return Result()
 
     monkeypatch.setattr("core.world_awareness.subprocess.run", fake_run)

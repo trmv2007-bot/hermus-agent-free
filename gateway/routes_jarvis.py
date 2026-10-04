@@ -4,23 +4,29 @@ This router exposes the product-facing Nexus contract while retaining the
 existing runtime endpoints for compatibility. Nexus is the interaction layer;
 queue/run services remain the execution layer.
 """
+
 from __future__ import annotations
+
 import asyncio
 import ipaddress
 import socket
 import time
 from urllib.parse import urlparse
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from core.orchestrator import orchestrator
+
 from core.nexus.service import nexus
+from core.orchestrator import orchestrator
 from core.run_events import run_bus
 
 router = APIRouter()
 _STARTED = time.monotonic()
 
+
 def _active_count(rows: list[dict]) -> int:
     return sum(1 for row in rows if row.get("status") in {"queued", "running"})
+
 
 @router.get("/api/jarvis/status")
 async def jarvis_status():
@@ -33,6 +39,7 @@ async def jarvis_status():
     from core.tool_registry import tool_registry
     from gateway.channels import get_channel_status, get_discord_token, get_telegram_token
     from gateway.queue import job_queue
+
     queue = job_queue.status()
     jobs = job_queue.list_jobs(limit=100)
     runs = run_bus.runs()[-100:]
@@ -47,12 +54,25 @@ async def jarvis_status():
     return {
         "gateway": {"reachable": True, "version": "2.2-free-architecture", "uptime_seconds": int(time.monotonic() - _STARTED)},
         "queue": queue,
-        "counts": {"active_jobs": _active_count(jobs), "active_runs": _active_count(runs), "tools": int(tools.get("count", len(tools.get("tools", [])))), "agents": len(agents), "artifacts": len(artifacts)},
-        "runs": runs, "jobs": jobs,
-        "channels": {"runtime": channels, "telegram_configured": bool(get_telegram_token()), "discord_configured": bool(get_discord_token())},
+        "counts": {
+            "active_jobs": _active_count(jobs),
+            "active_runs": _active_count(runs),
+            "tools": int(tools.get("count", len(tools.get("tools", [])))),
+            "agents": len(agents),
+            "artifacts": len(artifacts),
+        },
+        "runs": runs,
+        "jobs": jobs,
+        "channels": {
+            "runtime": channels,
+            "telegram_configured": bool(get_telegram_token()),
+            "discord_configured": bool(get_discord_token()),
+        },
         "model": capability.to_dict() if hasattr(capability, "to_dict") else capability,
-        "providers": providers, "telemetry": telemetry,
+        "providers": providers,
+        "telemetry": telemetry,
     }
+
 
 def _validate_public_url(value: str) -> tuple[str | None, str | None]:
     try:
@@ -67,6 +87,7 @@ def _validate_public_url(value: str) -> tuple[str | None, str | None]:
     except Exception as exc:
         return None, f"URL validation failed: {exc}"
 
+
 @router.post("/navigator/fetch")
 async def navigator_fetch(payload: dict | None = None):
     payload = payload or {}
@@ -74,13 +95,24 @@ async def navigator_fetch(payload: dict | None = None):
     if error:
         return JSONResponse({"success": False, "error": error}, status_code=400)
     from tools.browser import browser_extract, browser_navigate
+
     result = await asyncio.to_thread(browser_navigate, url)
     if not result.get("success"):
         return JSONResponse(result, status_code=503)
     extracted = await asyncio.to_thread(browser_extract, "body")
     if not extracted.get("success"):
-        return JSONResponse({**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502)
-    return {"success": True, "url": result.get("url", url), "title": result.get("title") or "", "content_length": result.get("content_length"), "text": str(extracted.get("text") or "")[:20000], "retrieval": "playwright"}
+        return JSONResponse(
+            {**result, "success": False, "error": extracted.get("error", "Page loaded but extraction failed")}, status_code=502
+        )
+    return {
+        "success": True,
+        "url": result.get("url", url),
+        "title": result.get("title") or "",
+        "content_length": result.get("content_length"),
+        "text": str(extracted.get("text") or "")[:20000],
+        "retrieval": "playwright",
+    }
+
 
 # ---------------------------------------------------------------- Nexus API
 # The dashboard consumes this product-level contract. It does not need to know
@@ -88,6 +120,7 @@ async def navigator_fetch(payload: dict | None = None):
 @router.get("/api/nexus/state")
 async def nexus_state(user_id: str = "default"):
     return orchestrator.state(user_id=user_id)
+
 
 @router.post("/api/nexus/command")
 async def nexus_command(payload: dict | None = None):
@@ -103,6 +136,7 @@ async def nexus_command(payload: dict | None = None):
     )
     return JSONResponse(result.to_dict(), status_code=202 if result.accepted else 400)
 
+
 @router.get("/api/nexus/missions/{mission_id}")
 async def nexus_mission(mission_id: str):
     mission = nexus.mission(mission_id)
@@ -110,10 +144,12 @@ async def nexus_mission(mission_id: str):
         return JSONResponse({"error": "mission not found", "mission_id": mission_id}, status_code=404)
     return {"mission": mission}
 
+
 @router.post("/api/nexus/runs/{run_id}/cancel")
 async def nexus_cancel(run_id: str):
     ok = orchestrator.cancel(run_id)
     return JSONResponse({"ok": ok, "run_id": run_id}, status_code=200 if ok else 404)
+
 
 @router.post("/api/nexus/runs/{run_id}/steer")
 async def nexus_steer(run_id: str, payload: dict | None = None):
@@ -123,6 +159,7 @@ async def nexus_steer(run_id: str, payload: dict | None = None):
         return JSONResponse({"ok": False, "error": "text is required"}, status_code=400)
     ok = orchestrator.steer(run_id, text)
     return JSONResponse({"ok": ok, "run_id": run_id}, status_code=200 if ok else 404)
+
 
 @router.get("/api/nexus/runs/{run_id}")
 async def nexus_run(run_id: str, after: int = 0):

@@ -4,6 +4,7 @@ The scheduler owns when work should be submitted. It does not execute tools
 itself: scheduled work is handed to the canonical JobQueue so approvals, red
 lines, sandboxing, verification and runtime observability remain authoritative.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ try:
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.date import DateTrigger
+
     APSCHEDULER_AVAILABLE = True
 except ImportError:  # pragma: no cover
     BackgroundScheduler = CronTrigger = DateTrigger = None
@@ -72,8 +74,13 @@ def _recurring_cron(text: str) -> str | None:
     if match:
         return f"0 */{max(1, int(match.group(1)))} * * *"
     weekdays = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6,
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
     }
     clock = _parse_time(low)
     if "every weekday" in low:
@@ -284,6 +291,7 @@ class CronManager:
                 return
         try:
             from gateway.queue import job_queue
+
             payload = {
                 "text": current["task"],
                 "task": current["task"],
@@ -337,8 +345,12 @@ class CronManager:
                 if len(parts) != 5:
                     raise ValueError("cron must contain five fields")
                 trigger = CronTrigger(
-                    minute=parts[0], hour=parts[1], day=parts[2], month=parts[3],
-                    day_of_week=parts[4], timezone=tz,
+                    minute=parts[0],
+                    hour=parts[1],
+                    day=parts[2],
+                    month=parts[3],
+                    day_of_week=parts[4],
+                    timezone=tz,
                 )
             aps_job = self.scheduler.add_job(
                 self._execute_job,

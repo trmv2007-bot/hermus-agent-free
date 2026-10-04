@@ -7,7 +7,7 @@ side effects are deduplicated, and corrupted recovery state is rejected.
 
 import time
 
-from core.reliability import CircuitBreaker, CheckpointStore, IdempotencyStore, RecoverySnapshotStore
+from core.reliability import CheckpointStore, CircuitBreaker, IdempotencyStore, RecoverySnapshotStore
 
 
 def test_provider_failure_opens_circuit_and_recovers():

@@ -1,4 +1,5 @@
 """HTTP surface for HERMUS Personal Space."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

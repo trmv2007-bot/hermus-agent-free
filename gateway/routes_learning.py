@@ -9,6 +9,7 @@ router = APIRouter(prefix="/learning", tags=["learning"])
 @router.get("/")
 async def learning_snapshot(limit: int = 12):
     from core.learning_fabric import learning_fabric
+
     return learning_fabric.snapshot(limit=limit)
 
 

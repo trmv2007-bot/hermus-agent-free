@@ -4,6 +4,7 @@ This module is deliberately side-effect-light. It does not execute work or make
 policy decisions; it gives the canonical runtime a stable correlation/health
 record that gateways and the Control Room can consume.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

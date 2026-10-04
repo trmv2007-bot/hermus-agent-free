@@ -17,7 +17,6 @@ from typing import Any
 
 from .config import config
 
-
 TAB_DEFAULTS = (
     ("overview", "Overview"),
     ("agents", "Agents"),
@@ -77,7 +76,14 @@ class DashboardState:
         state["tabs"] = []
         for index, (tab_id, label) in enumerate(TAB_DEFAULTS):
             tab = dict(saved_tabs.get(tab_id) or {})
-            tab.update({"id": tab_id, "label": tab.get("label") or label, "visible": tab.get("visible", True), "order": tab.get("order", index)})
+            tab.update(
+                {
+                    "id": tab_id,
+                    "label": tab.get("label") or label,
+                    "visible": tab.get("visible", True),
+                    "order": tab.get("order", index),
+                }
+            )
             state["tabs"].append(tab)
         return state
 
@@ -192,7 +198,9 @@ class DashboardState:
             self._touch()
             return {"removed": panel_id, "revision": self._state["revision"]}
 
-    def update_tab(self, tab_id: str, label: str | None = None, visible: bool | None = None, order: int | None = None) -> dict[str, Any]:
+    def update_tab(
+        self, tab_id: str, label: str | None = None, visible: bool | None = None, order: int | None = None
+    ) -> dict[str, Any]:
         with self._lock:
             tab = next((item for item in self._state["tabs"] if item.get("id") == tab_id), None)
             if tab is None:

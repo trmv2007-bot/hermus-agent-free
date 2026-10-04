@@ -11,9 +11,7 @@ def test_observe_act_verify():
     executor = VerifiedComputerExecutor(
         Controller(),
         observer=lambda: next(states),
-        verifier=lambda before, after, action: {
-            "verified": before == "before" and after == "after"
-        },
+        verifier=lambda before, after, action: {"verified": before == "before" and after == "after"},
     )
     result = executor.execute("click", args={"x": 1, "y": 2})
     assert result["ok"] is True

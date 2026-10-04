@@ -555,9 +555,7 @@ class Sandbox:
             if chosen in ("docker", "podman"):
                 res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id, env, input_text, reason)
             elif chosen == "bwrap":
-                res = self._run_bwrap(
-                    command, pol, workdir, sandbox_id, env, input_text, reason, allow_dangerous=allow_dangerous
-                )
+                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason, allow_dangerous=allow_dangerous)
             elif chosen == "off":
                 res = self._run_raw(command, pol, workdir, sandbox_id, env, input_text, reason)
             else:
@@ -739,12 +737,17 @@ class Sandbox:
                 local_command = command
                 prefix = "cd /hermus && "
                 if local_command.startswith(prefix):
-                    local_command = f"cd {shlex.quote(str(workdir))} && " + local_command[len(prefix):]
+                    local_command = f"cd {shlex.quote(str(workdir))} && " + local_command[len(prefix) :]
                 workspace_prefix = "cd /workspace && "
                 if mounted_cwd and local_command.startswith(workspace_prefix):
-                    local_command = f"cd {shlex.quote(str(mounted_cwd))} && " + local_command[len(workspace_prefix):]
+                    local_command = f"cd {shlex.quote(str(mounted_cwd))} && " + local_command[len(workspace_prefix) :]
                 local = self._run_local(
-                    local_command, pol, workdir, sandbox_id, env, input_text,
+                    local_command,
+                    pol,
+                    workdir,
+                    sandbox_id,
+                    env,
+                    input_text,
                     f"{reason}; container image unavailable, hardened local fallback",
                 )
                 local.limits.setdefault("container_fallback", binary)

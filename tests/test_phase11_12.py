@@ -1,5 +1,5 @@
 from core.long_horizon import LongHorizonPlanner
-from core.specialist_registry import SpecialistRegistry, SpecialistContract
+from core.specialist_registry import SpecialistContract, SpecialistRegistry
 
 
 def test_long_horizon_plan_is_dependency_ordered_and_verifiable():
@@ -20,9 +20,7 @@ def test_long_horizon_replan_inserts_recovery_checkpoint():
 
 
 def test_specialist_registry_enforces_capability_contracts():
-    registry = SpecialistRegistry((
-        SpecialistContract("coder", ("coding",), ("task",), ("changes",), max_steps=8),
-    ), max_active=1)
+    registry = SpecialistRegistry((SpecialistContract("coder", ("coding",), ("task",), ("changes",), max_steps=8),), max_active=1)
     assert registry.validate_selection(["coder"])["ok"] is True
     assert registry.get("coder").requires_verification is True
     assert registry.validate_selection(["unknown"])["ok"] is False

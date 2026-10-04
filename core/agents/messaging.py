@@ -15,9 +15,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
 
 from core.log import get_logger
 
@@ -87,7 +85,7 @@ class AgentMessage:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AgentMessage":
+    def from_dict(cls, data: dict) -> AgentMessage:
         return cls(
             message_id=data.get("message_id", str(uuid.uuid4())),
             sender_id=data.get("sender_id"),
@@ -211,9 +209,7 @@ class MessageBus:
 
         return message
 
-    async def request(
-        self, sender_id: str, target_id: str, content: str, timeout: float = 30.0, **kwargs
-    ) -> Optional[AgentMessage]:
+    async def request(self, sender_id: str, target_id: str, content: str, timeout: float = 30.0, **kwargs) -> AgentMessage | None:
         """
         Send a request and wait for a response.
 
@@ -357,7 +353,7 @@ class MessageBus:
 
 
 # Global message bus instance
-_bus: Optional[MessageBus] = None
+_bus: MessageBus | None = None
 
 
 def get_bus() -> MessageBus:

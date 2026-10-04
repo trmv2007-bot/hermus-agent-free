@@ -5,6 +5,7 @@ proposals. It can prepare and evaluate changes automatically, but protected
 control-plane changes require independent review and no code is silently
 rewritten by this module.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,9 @@ class SelfImprovementController:
         self._history_path = resolved_ledger.with_name("self_improvement_controller.json")
         self._history_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def propose(self, *, title: str, description: str, files: list[str],
-                tests: list[str] | None = None, evidence: list[str] | None = None) -> dict[str, Any]:
+    def propose(
+        self, *, title: str, description: str, files: list[str], tests: list[str] | None = None, evidence: list[str] | None = None
+    ) -> dict[str, Any]:
         proposal = ChangeProposal(
             title=str(title)[:200],
             description=str(description)[:2000],
@@ -62,13 +64,15 @@ class SelfImprovementController:
             mistake = str(improvement.get("mistake") or "observed failure")
             fix = str(improvement.get("suggested_fix") or "")
             files = self._infer_files(mistake)
-            proposed.append(self.propose(
-                title=f"Improve recovery: {mistake[:100]}",
-                description=f"Observed: {mistake}. Suggested improvement: {fix[:700]}",
-                files=files,
-                tests=["add regression test for the observed failure", "run targeted test suite"],
-                evidence=[f"reflection_mistakes={len(mistakes)}"],
-            ))
+            proposed.append(
+                self.propose(
+                    title=f"Improve recovery: {mistake[:100]}",
+                    description=f"Observed: {mistake}. Suggested improvement: {fix[:700]}",
+                    files=files,
+                    tests=["add regression test for the observed failure", "run targeted test suite"],
+                    evidence=[f"reflection_mistakes={len(mistakes)}"],
+                )
+            )
         return {
             "mistakes": len(mistakes),
             "improvements": len(improvements),
@@ -101,7 +105,7 @@ class SelfImprovementController:
                 rows = [json.loads(line) for line in self._history_path.read_text().splitlines() if line.strip()]
             except (OSError, ValueError):
                 rows = []
-        return rows[-max(1, min(100, int(limit))):][::-1]
+        return rows[-max(1, min(100, int(limit))) :][::-1]
 
     def status(self) -> dict[str, Any]:
         rows = self.history(100)

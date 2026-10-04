@@ -7,6 +7,7 @@ state-change events only when attention meaningfully changes.
 
 No model calls, tools, missions, permissions or external actions originate here.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -67,11 +68,7 @@ class AmbientLoop:
         self.kernel.start()
 
         try:
-            world = (
-                self.refresh()
-                if self.refresh is not None
-                else self.awareness.refresh(include_processes=True)
-            )
+            world = self.refresh() if self.refresh is not None else self.awareness.refresh(include_processes=True)
         except Exception as exc:
             self._emit(
                 command="ambient.world_refresh_failed",

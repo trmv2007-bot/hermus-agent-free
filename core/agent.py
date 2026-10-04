@@ -48,11 +48,7 @@ class HermusAgent:
             self.model_name = model
         else:
             selected_provider, selected_model = gateway.resolve_model("default")
-            self.model_name = (
-                f"{selected_provider}/{selected_model}"
-                if selected_provider and selected_model
-                else config.model
-            )
+            self.model_name = f"{selected_provider}/{selected_model}" if selected_provider and selected_model else config.model
 
         # The canonical ModelGateway is the ONLY place a model client is built.
         self.llm = gateway.llm(model=self.model_name, api_key=api_key, base_url=base_url)
@@ -224,8 +220,8 @@ class HermusAgent:
         try:
             if getattr(self.llm, "provider", "") == "mock":
                 return None
-            from .models import get_model_gateway
             from .model_preferences import model_preferences
+            from .models import get_model_gateway
             from .router2 import router2
 
             # An explicit dashboard choice is authoritative. Auto mode may use
@@ -265,11 +261,15 @@ class HermusAgent:
         try:
             from .personal_context import personal_context
 
-            personal_context_block = "\nPersonal Context:\n" + personal_context.prompt_block(
-                query=user_message, project=self.project, limit=5, max_chars=5000
-            ) + "\n"
+            personal_context_block = (
+                "\nPersonal Context:\n"
+                + personal_context.prompt_block(query=user_message, project=self.project, limit=5, max_chars=5000)
+                + "\n"
+            )
         except Exception as exc:
-            record_issue("memory", "personal_context_prompt", exc, retryable=False, fallback="turn continues without personal context")
+            record_issue(
+                "memory", "personal_context_prompt", exc, retryable=False, fallback="turn continues without personal context"
+            )
 
         skills = skill_manager.list_skills()
         skills_text = ", ".join([s["name"] for s in skills[:15]]) if skills else "No skills yet."
@@ -367,18 +367,22 @@ class HermusAgent:
             from .dashboard_state import dashboard_state
 
             dashboard_snapshot = dashboard_state.snapshot()
-            dashboard_block = "\nShared Dashboard (the browser sees this same state):\n" + json.dumps(
-                {
-                    "revision": dashboard_snapshot.get("revision"),
-                    "updated_at": dashboard_snapshot.get("updated_at"),
-                    "tabs": dashboard_snapshot.get("tabs", []),
-                    "workspace_panels": dashboard_snapshot.get("panels", []),
-                    "system_panel_count": dashboard_snapshot.get("system_panel_count", 0),
-                    "system_panels": dashboard_snapshot.get("systems", []),
-                },
-                indent=2,
-                default=str,
-            )[:9000] + "\n"
+            dashboard_block = (
+                "\nShared Dashboard (the browser sees this same state):\n"
+                + json.dumps(
+                    {
+                        "revision": dashboard_snapshot.get("revision"),
+                        "updated_at": dashboard_snapshot.get("updated_at"),
+                        "tabs": dashboard_snapshot.get("tabs", []),
+                        "workspace_panels": dashboard_snapshot.get("panels", []),
+                        "system_panel_count": dashboard_snapshot.get("system_panel_count", 0),
+                        "system_panels": dashboard_snapshot.get("systems", []),
+                    },
+                    indent=2,
+                    default=str,
+                )[:9000]
+                + "\n"
+            )
         except Exception as exc:
             record_issue("dashboard", "state_prompt", exc, retryable=False, fallback="turn continues without dashboard state")
 
@@ -578,7 +582,9 @@ Rules:
 
             personal_context.observe_turn(user_message, session_id=self.session_id, project=self.project)
         except Exception as exc:
-            record_issue("memory", "personal_context_observe", exc, retryable=False, fallback="explicit context capture skipped this turn")
+            record_issue(
+                "memory", "personal_context_observe", exc, retryable=False, fallback="explicit context capture skipped this turn"
+            )
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
 
         # Lessons loop (Phase 3): user pushing back on a previous answer -> lesson

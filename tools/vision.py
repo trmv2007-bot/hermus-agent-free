@@ -1,4 +1,5 @@
 """Vision analysis tool routed through the canonical dynamic ModelGateway."""
+
 from __future__ import annotations
 
 import base64
@@ -23,12 +24,12 @@ def _vision_error(exc: Exception, model: str | None) -> dict:
     if fc == FailureClass.MODEL_UNAVAILABLE.value:
         return {
             "success": False,
-            "error": f"Selected vision model is unavailable (model not found): {model or 'dynamic selection'} — run \'ollama pull {model or '<model>'}\' to install it.",
+            "error": f"Selected vision model is unavailable (model not found): {model or 'dynamic selection'} — run 'ollama pull {model or '<model>'}' to install it.",
         }
     if fc in (FailureClass.NETWORK.value, FailureClass.PROVIDER_UNAVAILABLE.value):
         return {
             "success": False,
-            "error": f"Ollama not running or unreachable for {model or 'dynamic selection'}: {exc}. Start Ollama with \'ollama serve\'.",
+            "error": f"Ollama not running or unreachable for {model or 'dynamic selection'}: {exc}. Start Ollama with 'ollama serve'.",
         }
     return {"success": False, "error": f"Vision analyze failed: {exc}"}
 
@@ -62,9 +63,7 @@ def vision_analyze(
 
     selected = model
     try:
-        selected_provider, selected_model = get_model_gateway().resolve_model(
-            "vision", required=["vision"], provider=provider
-        )
+        selected_provider, selected_model = get_model_gateway().resolve_model("vision", required=["vision"], provider=provider)
         if not selected and selected_model:
             selected = f"{selected_provider}/{selected_model}"
     except Exception:

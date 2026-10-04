@@ -118,8 +118,7 @@ class AgentOrchestrator:
             agents = await self._ensure_team(record)
             record["agent_ids"] = [agent.agent_id for agent in agents]
             record["assignments"] = [
-                {"agent_id": agent.agent_id, "name": agent.config.name, "role": agent.role.value}
-                for agent in agents
+                {"agent_id": agent.agent_id, "name": agent.config.name, "role": agent.role.value} for agent in agents
             ]
             self._save(record)
 
@@ -175,10 +174,10 @@ class AgentOrchestrator:
 
             successful = [result for result in results if result.get("answer")]
             if successful:
-                synthesizer = next((agent for agent in agents if agent.role in {AgentRole.CHAIR, AgentRole.SYNTHESIZER}), agents[0])
-                packet = "\n\n".join(
-                    f"[{result['role']} / {result['name']}]\n{result['answer'][:6000]}" for result in successful
+                synthesizer = next(
+                    (agent for agent in agents if agent.role in {AgentRole.CHAIR, AgentRole.SYNTHESIZER}), agents[0]
                 )
+                packet = "\n\n".join(f"[{result['role']} / {result['name']}]\n{result['answer'][:6000]}" for result in successful)
                 final = await synthesizer.run_task(
                     f"You are the team lead. Synthesize the following specialist handoffs into one actionable answer for the user. "
                     f"Call out uncertainty and unresolved work.\n\nGoal: {goal}\n\nHandoffs:\n{packet}",

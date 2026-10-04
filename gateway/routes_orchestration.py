@@ -3,6 +3,7 @@
 These routes intentionally adapt existing queue/run/event subsystems instead of
 creating parallel execution paths. Legacy endpoints remain available.
 """
+
 from __future__ import annotations
 
 from typing import Any

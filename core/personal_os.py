@@ -4,6 +4,7 @@ Provides a durable personal control-plane view over goals, projects, tasks,
 routines, world state and scheduled/proactive work. It does not execute tools
 itself; execution is delegated to the canonical JobQueue/runtime.
 """
+
 from __future__ import annotations
 
 import json
@@ -135,6 +136,7 @@ class PersonalOS:
             }
         try:
             from gateway.queue import job_queue
+
             job = job_queue.submit(
                 "runtime.turn",
                 payload,
@@ -146,15 +148,19 @@ class PersonalOS:
             return {"success": False, "error": str(exc)[:300], "task": task.to_dict()}
 
     def snapshot(self, *, query: str = "", area: str | None = None, project: str | None = None) -> dict[str, Any]:
-        from .personal_context import personal_context
         from scheduler.cron import cron_manager
+
+        from .personal_context import personal_context
+
         try:
             from core.proactive_runtime import automation
+
             automations = automation.list_rules()
         except Exception:
             automations = []
         try:
             from .world_awareness import world_awareness
+
             world_status = world_awareness.status()
         except Exception as exc:
             world_status = {"error": str(exc)[:200]}

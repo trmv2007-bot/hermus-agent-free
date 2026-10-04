@@ -105,7 +105,9 @@ async def console_panels(
         async with limit:
             return await asyncio.to_thread(console.probe, panel_id)
 
-    results = await asyncio.gather(*(one(p.id) for p in (console.panels() if not selected else [console.get(i) for i in selected])))
+    results = await asyncio.gather(
+        *(one(p.id) for p in (console.panels() if not selected else [console.get(i) for i in selected]))
+    )
     ready = sum(1 for r in results if r["status"] == "ready")
     return {
         "count": len(results),

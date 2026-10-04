@@ -12,29 +12,23 @@ Provides REST API endpoints for:
 from __future__ import annotations
 
 import asyncio
-import json
-import time
 import uuid
-from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, HTTPException, Request
 
-from core.log import get_logger
 from core.agents import (
-    Agent,
     AgentCapacityError,
     AgentConfig,
     AgentRole,
     AgentState,
+    agent_orchestrator,
     get_pool,
     init_pool,
     shutdown_pool,
 )
-from core.agents.pool import PoolConfig
-from core.agents.messaging import MessageBus, MessageType, MessagePriority, get_bus
-from core.agents import agent_orchestrator
-from core.local_first import get_local_first, detect_and_configure
+from core.agents.messaging import MessagePriority, MessageType, get_bus
+from core.local_first import get_local_first
+from core.log import get_logger
 
 logger = get_logger(__name__)
 
@@ -150,7 +144,7 @@ async def list_agents(request: Request) -> dict:
 @router.post("/create")
 async def create_agent(request: Request, config: dict) -> dict:
     """Create a new agent with the given configuration.
-    
+
     Expected config fields:
     - name: str (optional)
     - role: str (optional, default: "general")
@@ -163,7 +157,7 @@ async def create_agent(request: Request, config: dict) -> dict:
     """
     try:
         pool = get_pool()
-        
+
         # Extract known fields
         name = config.get("name", f"Agent-{uuid.uuid4().hex[:8]}")
         role_str = config.get("role", "general")
@@ -176,7 +170,9 @@ async def create_agent(request: Request, config: dict) -> dict:
             provider = provider or selected_provider
             model = selected_model
         if not model:
-            raise HTTPException(status_code=400, detail="No discoverable model is available; configure a provider or choose a model in Nexus.")
+            raise HTTPException(
+                status_code=400, detail="No discoverable model is available; configure a provider or choose a model in Nexus."
+            )
         api_key = config.get("api_key")
         key_name = config.get("key_name")
         base_url = config.get("base_url")
@@ -203,13 +199,13 @@ async def create_agent(request: Request, config: dict) -> dict:
                     raise HTTPException(status_code=400, detail=stored.get("error") or "Could not store API key")
                 key_name = existing.get("name")
                 base_url = existing.get("base_url") or base_url
-        
+
         # Convert role string to AgentRole enum
         try:
             role = AgentRole(role_str)
         except ValueError:
             role = AgentRole.GENERAL
-        
+
         # Build agent config without passing api_key twice
         agent_config = AgentConfig(
             name=name,
@@ -222,10 +218,10 @@ async def create_agent(request: Request, config: dict) -> dict:
             idle_timeout=idle_timeout,
             max_concurrent=max_concurrent,
         )
-        
+
         # Create the agent
         agent = await pool.create_agent(config=agent_config)
-        
+
         return {
             "status": "ok",
             "agent": {
@@ -411,7 +407,7 @@ async def get_messages(request: Request, limit: int = 100) -> dict:
 @router.post("/message")
 async def send_message(request: Request, payload: dict) -> dict:
     """Send a message from one agent to another.
-    
+
     Expected payload:
     - sender_id: str (required)
     - target_id: str (required)
@@ -421,20 +417,17 @@ async def send_message(request: Request, payload: dict) -> dict:
     """
     try:
         bus = get_bus()
-        
+
         sender_id = payload.get("sender_id")
         target_id = payload.get("target_id")
         content = payload.get("content")
-        
+
         if not sender_id or not target_id or not content:
-            raise HTTPException(
-                status_code=400,
-                detail="sender_id, target_id, and content are required"
-            )
-        
+            raise HTTPException(status_code=400, detail="sender_id, target_id, and content are required")
+
         message_type = MessageType(payload.get("type", "text"))
         priority = MessagePriority[payload.get("priority", "normal").upper()]
-        
+
         message = await bus.send(
             sender_id=sender_id,
             target_id=target_id,
@@ -442,7 +435,7 @@ async def send_message(request: Request, payload: dict) -> dict:
             message_type=message_type,
             priority=priority,
         )
-        
+
         return {
             "status": "ok",
             "message": {
@@ -463,7 +456,7 @@ async def send_message(request: Request, payload: dict) -> dict:
 @router.post("/broadcast")
 async def broadcast_message(request: Request, payload: dict) -> dict:
     """Broadcast a message to all agents.
-    
+
     Expected payload:
     - content: str (required)
     - sender_id: str (optional, default: "system")
@@ -473,18 +466,18 @@ async def broadcast_message(request: Request, payload: dict) -> dict:
     try:
         bus = get_bus()
         pool = get_pool()
-        
+
         content = payload.get("content")
         if not content:
             raise HTTPException(status_code=400, detail="content is required")
-        
+
         sender_id = payload.get("sender_id", "system")
         message_type = MessageType(payload.get("type", "text"))
         priority = MessagePriority[payload.get("priority", "normal").upper()]
-        
+
         agents = pool.get_all_agents()
         count = 0
-        
+
         for agent in agents:
             await bus.send(
                 sender_id=sender_id,
@@ -494,7 +487,7 @@ async def broadcast_message(request: Request, payload: dict) -> dict:
                 priority=priority,
             )
             count += 1
-        
+
         return {
             "status": "ok",
             "message": f"Broadcast sent to {count} agents",
@@ -514,7 +507,7 @@ async def ping_agents(request: Request) -> dict:
         pool = get_pool()
         agents = pool.get_all_agents()
         results = {}
-        
+
         for agent in agents:
             try:
                 # Check if agent is responsive
@@ -526,7 +519,7 @@ async def ping_agents(request: Request) -> dict:
                 }
             except Exception:
                 results[agent.agent_id] = {"status": "error", "name": agent.name}
-        
+
         return {
             "status": "ok",
             "results": results,
@@ -563,23 +556,20 @@ async def list_api_keys(request: Request) -> dict:
 @router.post("/api-keys/add")
 async def add_api_key(request: Request, payload: dict) -> dict:
     """Add an API key for a provider.
-    
+
     Expected payload:
     - provider: str (required)
     - key: str (required)
     """
     try:
         pool = get_pool()
-        
+
         provider = payload.get("provider")
         key = payload.get("key")
-        
+
         if not provider or not key:
-            raise HTTPException(
-                status_code=400,
-                detail="provider and key are required"
-            )
-        
+            raise HTTPException(status_code=400, detail="provider and key are required")
+
         from core.multi_key import multi_key_manager
 
         stored = multi_key_manager.add_key(provider, key, auto_discover=False)
@@ -587,7 +577,7 @@ async def add_api_key(request: Request, payload: dict) -> dict:
             raise HTTPException(status_code=400, detail=stored.get("error") or "Could not store API key")
         pool.add_api_key(provider, key, name=stored.get("key_name"))
         key_id = stored.get("key_name")
-        
+
         return {
             "status": "ok",
             "message": f"API key added for {provider}",
@@ -604,33 +594,30 @@ async def add_api_key(request: Request, payload: dict) -> dict:
 @router.post("/api-keys/remove")
 async def remove_api_key(request: Request, payload: dict) -> dict:
     """Remove an API key.
-    
+
     Expected payload:
     - provider: str (required)
     - key_id: str (required)
     """
     try:
         pool = get_pool()
-        
+
         provider = payload.get("provider")
         key_id = payload.get("key_id")
-        
+
         if not provider or not key_id:
-            raise HTTPException(
-                status_code=400,
-                detail="provider and key_id are required"
-            )
-        
+            raise HTTPException(status_code=400, detail="provider and key_id are required")
+
         from core.multi_key import multi_key_manager
 
         result = multi_key_manager.remove_key(provider, key_id)
         if result.get("success"):
             pool.remove_api_key(provider, key_id)
         success = result.get("success", False)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Key not found")
-        
+
         return {
             "status": "ok",
             "message": f"API key {key_id} removed from {provider}",
@@ -653,12 +640,12 @@ async def get_vram_status(request: Request) -> dict:
     try:
         lfp = get_local_first()
         gpu_info = lfp.detect_gpu()
-        
+
         # Get VRAM usage
         vram_info = lfp.get_vram_usage()
         setup = lfp.get_recommended_setup()
         rtx = setup.get("rtx3050", {})
-        
+
         return {
             "status": "ok",
             "gpu": gpu_info,
