@@ -22,7 +22,11 @@
     const r = await fetch(path, {...options, headers});
     const text = await r.text(); let data={};
     try { data=text?JSON.parse(text):{} } catch { data={message:text}; }
-    if (!r.ok) throw new Error(data.message || data.detail || data.error || `HTTP ${r.status}`);
+    if (!r.ok) {
+      const raw=String(data.message || data.detail || data.error || '').trim();
+      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || text.trim().startsWith('<!');
+      throw new Error(htmlError ? `HERMUS service returned an unexpected page (HTTP ${r.status})` : (raw || `HTTP ${r.status}`));
+    }
     return data;
   }
 
@@ -35,7 +39,9 @@
     host.prepend(row); while(host.children.length>7)host.lastElementChild.remove();
   }
   function setState(label, detail='') {
-    $('#coreState').textContent=label; $('#coreDetail').textContent=detail;
+    const stateEl=$('#coreState'); const detailEl=$('#coreDetail');
+    if(stateEl) stateEl.textContent=label;
+    if(detailEl) detailEl.textContent=detail;
     document.body.dataset.state=label.toLowerCase().replace(/\s+/g,'-');
   }
   function renderCapabilities(entries) {
@@ -50,11 +56,36 @@
     if (!list.children.length) list.innerHTML='<div class="empty-event">No capability data reported</div>';
   }
 
+  function syncJarvisStatus(online, healthy) {
+    const label=$('#jarvisStatusLabel');
+    const badge=$('#jarvisStatusBadge');
+    const topLabel=$('#stateLabel');
+    const dot=$('#stateDot');
+    if(online){
+      if(topLabel) topLabel.textContent='ONLINE';
+      if(dot) dot.className='state-dot';
+      if(label) label.textContent='ONLINE';
+      if(badge){
+        badge.textContent=healthy ? 'HEALTHY' : 'DEGRADED';
+        badge.classList.toggle('warn', !healthy);
+      }
+    } else {
+      if(topLabel) topLabel.textContent='OFFLINE';
+      if(dot) dot.className='state-dot bad';
+      if(label) label.textContent='OFFLINE';
+      if(badge){
+        badge.textContent='OFFLINE';
+        badge.classList.remove('warn');
+      }
+    }
+  }
+
   async function refresh() {
     const started=performance.now();
     try {
       const [health, caps] = await Promise.all([api('/api/v1/system/health'), api('/api/v1/system/capabilities')]);
-      state.online=true; $('#stateLabel').textContent='ONLINE'; $('#stateDot').className='state-dot';
+      state.online=true;
+      syncJarvisStatus(true, Object.values(health||{}).some(v=>v && (v.ok===true || v.running===true || v.installed===true)));
       const healthEntries = health && typeof health === 'object' ? health : {};
       const healthy = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
       if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthy ? `${healthy} systems ready` : 'READY'; }
@@ -62,7 +93,7 @@
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
     } catch (e) {
-      state.online=false; $('#stateLabel').textContent='OFFLINE'; $('#stateDot').className='state-dot bad'; const mission=$('#missionStatus'); if(mission&&!state.missionLive) mission.textContent='OFFLINE';
+      state.online=false; syncJarvisStatus(false, false); const mission=$('#missionStatus'); if(mission&&!state.missionLive) mission.textContent='OFFLINE';
       setState('DISCONNECTED','gateway unavailable'); addEvent(e.message,'error');
     }
   }
@@ -187,6 +218,7 @@
     'Safety preflight': ['/safety/preflight'],
     'Capability registry': ['/capabilities/registry'],
     'Devices': ['/devices'],
+    'Agents': ['/api/v1/agents/list'],
     'Routines': ['/routines'],
     'Focus': ['/focus'],
     'Learning': ['/learning'],
@@ -354,9 +386,11 @@
       addEvent('Model catalog · ' + String(modelState.catalog.count || 0) + ' deployment(s) discovered');
     }catch(e){
       const meta=$('#modelMeta');
-      if(meta) meta.textContent='Model discovery unavailable: ' + e.message;
+      if(meta) meta.textContent='Model Hub is temporarily unavailable. The workspace is still ready.';
       const pill=$('#modelPill');
       if(pill) pill.textContent='MODEL · UNAVAILABLE';
+      const fleet=$('#modelFleet');
+      if(fleet) fleet.innerHTML='<div class="model-state unavailable"><span>RUNTIME UNAVAILABLE</span><small>Connect or restore the model runtime, then press SYNC.</small></div>';
     }finally{
       modelState.inFlight=false;
     }
@@ -561,7 +595,6 @@
     state.mediaRecorder=null;
   }
 
-  $('#voiceButton')?.addEventListener('click',startVoice);
   async function sendVoiceBlob(blob){
     try{
       await ensureSession();
@@ -750,7 +783,7 @@
     const item=e.target.closest('[data-workshop-path]');
     if(item && item.dataset.workshopType==='file') openWorkshopFile(item.dataset.workshopPath);
   });
-  $('#workshopAsk')?.addEventListener('click',()=>$('#command')?.focus());
+  $('#workshopAsk')?.addEventListener('click',()=>requestAnimationFrame(()=>$('#workshopCommand')?.focus()));
   $('#workshopMissionOpen')?.addEventListener('click',()=>{
     if(state.mission) {
       const mission=state.missionData||{};
@@ -776,4 +809,81 @@
   window.HermusNexus.saveModelSelection = saveModelSelection;
   window.HermusNexus.refreshAttention = refreshAttention;
 
+})();
+
+
+/* JARVIS workspace UI bindings: visual shell + live agent roster. */
+(() => {
+  const root = document;
+  const q = (s) => root.querySelector(s);
+  const api = (path, options = {}) => window.HermusNexus?.api
+    ? window.HermusNexus.api(path, options)
+    : Promise.reject(new Error('HERMUS Nexus is not ready'));
+
+  async function refreshAgentRoster() {
+    const host = q('#agentList');
+    if (!host) return;
+    try {
+      const data = await api('/api/v1/agents/list');
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      if (!agents.length) {
+        host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">✥</span><div><strong>No active subagents</strong><small>Agents appear here when spawned</small></div><i></i></div>';
+        return;
+      }
+      host.innerHTML = agents.slice(0, 8).map((a) => {
+        const name = String(a.name || a.role || 'Agent');
+        const role = String(a.role || 'general').replace(/_/g, ' ');
+        const state = String(a.state || 'idle').replace(/_/g, ' ');
+        const live = !['stopped','error','failed','dead'].includes(String(a.state || '').toLowerCase());
+        return '<div class="agent-row">'
+          + '<span class="agent-avatar">✥</span>'
+          + '<div><strong>' + escJarvis(name) + '</strong><small>' + escJarvis(role + ' · ' + state) + '</small></div>'
+          + '<i style="background:' + (live ? 'var(--jarvis-good)' : '#536b80') + ';box-shadow:' + (live ? '0 0 9px var(--jarvis-good)' : 'none') + '"></i>'
+          + '</div>';
+      }).join('');
+    } catch (e) {
+      host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">◌</span><div><strong>Agent roster is quiet</strong><small>No live agents are reporting right now</small></div><i></i></div>';
+    }
+  }
+
+  function escJarvis(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function syncGreeting() {
+    const el = q('#heroGreeting');
+    if (!el) return;
+    const hour = new Date().getHours();
+    el.textContent = hour < 5 ? 'Good night.' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
+  }
+
+  root.addEventListener('click', (event) => {
+    const workshop = event.target.closest('[data-workshop-open]');
+    if (workshop) {
+      event.preventDefault();
+      const close = q('#overlay');
+      if (close) { close.classList.remove('open'); close.setAttribute('aria-hidden', 'true'); }
+      const host = q('#workshop');
+      if (host) {
+        host.classList.add('open');
+        host.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('workshop-mode');
+        window.HermusNexus?.refreshWorkshop?.();
+      }
+    }
+
+    if (event.target.closest('#globalSearch')) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key:'p', ctrlKey:true }));
+    }
+
+    if (event.target.closest('[data-close-workbench]')) {
+      q('#workshop')?.classList.remove('open');
+      q('#workshop')?.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('workshop-mode');
+    }
+  });
+
+  syncGreeting();
+  refreshAgentRoster();
+  setInterval(refreshAgentRoster, 15000);
 })();
