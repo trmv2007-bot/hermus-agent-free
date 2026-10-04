@@ -84,8 +84,9 @@ def test_mission_promotes_approval_required_to_blocked_state():
 
 def test_control_room_exposes_mission_approval_resume_controls():
     src = control_room_source()
-    assert 'id="tab-missions"' in src
-    assert "approve+retry" in src
-    assert "/permissions/pending/resolve" in src
+    assert 'data-view="missions"' in src
+    assert 'data-mission-resume="' in src
     assert "/missions/" in src and "/resume" in src
-    assert "refreshMissions" in src
+    assert 'data-settings-tab="safety"' in src
+    assert 'data-approval="' in src
+
