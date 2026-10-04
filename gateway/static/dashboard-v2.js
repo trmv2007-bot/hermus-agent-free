@@ -301,9 +301,18 @@
   async function sendCommand(command) {
     const text = String(command || '').trim();
     if (!text) return;
+
     state.messages.push({who:'user',text,time:'Now'});
+    const statusMessage = {
+      who:'jarvis',
+      text:'Connecting to model…',
+      time:'Now',
+      pending:true,
+      status:'connecting'
+    };
+    state.messages.push(statusMessage);
     renderChat();
-    toast('Request sent to HERMUS');
+
     try {
       const session = localStorage.getItem('hermus_session_id') || '';
       const result = await api('/jobs', {
@@ -314,18 +323,35 @@
         })
       });
       if (result.session_id) localStorage.setItem('hermus_session_id', String(result.session_id));
+
       const run = result.run_id || result.mission_id;
-      state.messages.push({
-        who:'jarvis',
-        text: run ? 'Accepted · live execution started.' : 'Accepted · queued for HERMUS.',
-        time:'Now'
-      });
+      if (run) {
+        statusMessage.runId = String(run);
+        statusMessage.text = 'Thinking…';
+        statusMessage.status = 'thinking';
+        renderChat();
+        refreshOverview();
+        trackRun(String(run));
+        return run;
+      }
+
+      const answer = String(result.response || result.final_answer || result.answer || '').trim();
+      if (answer) {
+        statusMessage.text = answer.slice(0, 12000);
+        statusMessage.pending = false;
+        statusMessage.status = 'done';
+      } else {
+        statusMessage.text = 'HERMUS is working…';
+        statusMessage.pending = false;
+        statusMessage.status = 'working';
+      }
       renderChat();
       refreshOverview();
-      if (run) trackRun(String(run));
       return run;
     } catch (e) {
-      state.messages.push({who:'jarvis',text:'I could not send that request · '+e.message,time:'Now'});
+      statusMessage.text = 'Model unavailable · '+e.message;
+      statusMessage.pending = false;
+      statusMessage.status = 'error';
       renderChat();
       toast(e.message,true);
     }
@@ -338,15 +364,28 @@
     let streamedText = '';
     let finalMessageShown = false;
 
-    const showAnswer = (value) => {
+    const updateStatus = (text, status = 'thinking') => {
+      const pending = state.messages.find(m => m.runId === runId && m.pending);
+      if (!pending || finalMessageShown) return;
+      pending.text = text;
+      pending.status = status;
+      renderChat();
+    };
+
+    const showAnswer = (value, status = 'done') => {
       const answer = String(value || '').trim();
       if (!answer || finalMessageShown) return;
       finalMessageShown = true;
       const clipped = answer.slice(0, 12000);
-      if (!state.messages.some(m => m.runId === runId && m.text === clipped)) {
-        state.messages.push({who:'jarvis',text:clipped,time:'Run '+runId.slice(0,8),runId});
-        renderChat();
+      const pending = state.messages.find(m => m.runId === runId && m.pending);
+      if (pending) {
+        pending.text = clipped;
+        pending.pending = false;
+        pending.status = status;
+      } else if (!state.messages.some(m => m.runId === runId && m.text === clipped)) {
+        state.messages.push({who:'jarvis',text:clipped,time:'Now',runId});
       }
+      renderChat();
     };
 
     const tick = async () => {
@@ -369,13 +408,15 @@
         const payload = latestResponse.data || {};
         showAnswer(payload.text || payload.response || payload.summary || '');
       } else {
-        // Reconstruct a response from streamed LLM deltas when available.
+        // Streamed deltas prove the selected model is actively responding.
+        // Keep those tokens out of the transcript; show a single thinking state
+        // until the authoritative final response arrives.
         for (const e of events) {
           if (String(e.type || '') !== 'llm_delta') continue;
           const delta = String((e.data || {}).text || '').trim();
           if (delta) streamedText += (streamedText ? ' ' : '') + delta;
         }
-        if (streamedText) showAnswer(streamedText);
+        if (streamedText) updateStatus('Thinking… · model connected', 'connected');
       }
 
       // Terminal errors should be visible, but lifecycle completion itself is
@@ -384,7 +425,7 @@
         const errorEvent = events.slice().reverse().find(e => ['run_error','mission_error'].includes(String(e.type || '')));
         if (errorEvent) {
           const payload = errorEvent.data || {};
-          showAnswer('HERMUS could not complete this request · '+String(payload.error || payload.message || 'runtime error'));
+          showAnswer('Model unavailable · '+String(payload.error || payload.message || 'runtime error'), 'error');
         }
       }
 
