@@ -262,9 +262,8 @@ jobs:
           const mobileErrors=[];
           mobile.on('pageerror',e=>mobileErrors.push(e.message));
           mobile.on('console',m=>{if(m.type()==='error')mobileErrors.push(m.text())});
-          await mobile.goto('about:blank');
-          await mobile.evaluate(() => localStorage.setItem('hermus_setup_complete','1'));
           await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
+          await mobile.evaluate(() => localStorage.setItem('hermus_setup_complete','1'));
           await mobile.waitForTimeout(250);
           const mobileNav=await mobile.locator('[data-view]:visible').count();
           if(mobileNav<12) throw new Error('Mobile navigation incomplete: '+mobileNav);
