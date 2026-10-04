@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS executive_goals (
     goal_id TEXT PRIMARY KEY,
@@ -282,9 +281,13 @@ class ExecutiveBrain:
 
         steps: list[ExecutiveStep] = [
             ExecutiveStep("understand", "Inspect the current state and constraints relevant to the goal.", "planner", "analysis"),
-            ExecutiveStep("plan", "Create an executable plan with explicit expected outputs.", "architect", "analysis", ("understand",)),
+            ExecutiveStep(
+                "plan", "Create an executable plan with explicit expected outputs.", "architect", "analysis", ("understand",)
+            ),
             ExecutiveStep("execute", goal, "executor", "change", ("plan",)),
-            ExecutiveStep("verify", "Verify the requested result using objective evidence.", "verifier", "analysis", ("execute",)),
+            ExecutiveStep(
+                "verify", "Verify the requested result using objective evidence.", "verifier", "analysis", ("execute",)
+            ),
         ]
         if any(word in low for word in ("fix", "repair", "debug", "until", "test")):
             steps.append(

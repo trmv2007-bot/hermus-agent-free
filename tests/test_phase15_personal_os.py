@@ -35,6 +35,7 @@ def test_personal_os_execute_uses_canonical_queue(tmp_path, monkeypatch):
             return Job()
 
     import gateway.queue
+
     monkeypatch.setattr(gateway.queue, "job_queue", Queue())
     result = os_layer.execute_task(task["id"])
     assert result["success"] is True

@@ -78,12 +78,7 @@ def _live_routes() -> set[str]:
 
 def test_every_declared_endpoint_exists_in_the_gateway():
     known = _live_routes()
-    missing = [
-        (panel.id, endpoint)
-        for panel in console.panels()
-        for endpoint in panel.endpoints
-        if endpoint not in known
-    ]
+    missing = [(panel.id, endpoint) for panel in console.panels() for endpoint in panel.endpoints if endpoint not in known]
     assert not missing, f"panels advertise routes the gateway does not serve: {missing}"
 
 

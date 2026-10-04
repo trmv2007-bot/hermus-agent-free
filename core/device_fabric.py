@@ -4,6 +4,7 @@ Aggregates canonical desktop, remote-control, Android and browser/world state.
 This module is read-only; control remains owned by the existing computer/android
 subsystems and their safety gates.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,12 +23,14 @@ class DeviceFabric:
 
         try:
             from .emergency_stop import get_emergency_stop
+
             out["safety"] = {"emergency_stop": get_emergency_stop().state().to_dict()}
         except Exception:
             out["safety"] = {"emergency_stop": {"active": False, "state": "unknown"}}
 
         try:
-            from .computer import ControlCenter, ComputerActionController, emergency_stop
+            from .computer import ComputerActionController, ControlCenter, emergency_stop
+
             control = ControlCenter(ComputerActionController()).status()
             out["computer"] = {
                 "available": True,
@@ -39,12 +42,14 @@ class DeviceFabric:
 
         try:
             from .computer import remote_control
+
             out["remote"] = remote_control.snapshot()
         except Exception as exc:
             out["remote"] = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
 
         try:
             from .android.tool import get_android_tool
+
             capability = get_android_tool().capability()
             out["android"] = {"available": True, **capability}
         except Exception as exc:

@@ -4,6 +4,7 @@ A read-only aggregator for the handful of facts an interaction usually needs.
 It delegates to canonical owners: Workspace, Presence/Executive, WorldModel,
 MemoryFacade, ModelGateway and the existing attention projection.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

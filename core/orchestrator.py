@@ -4,6 +4,7 @@ The canonical backend boundary is ``core.hermus_engine``. This facade keeps
 existing integrations stable while they migrate away from UI-specific Nexus
 concepts.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

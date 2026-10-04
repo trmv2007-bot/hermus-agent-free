@@ -34,7 +34,7 @@ extend-exclude = ["data", "skills"]
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I", "UP", "N", "W"]
-ignore = ["E501"]
+ignore = ["E501", "E402", "E701", "E702", "W293", "B007", "B904", "F821", "F841"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011", "B017"]

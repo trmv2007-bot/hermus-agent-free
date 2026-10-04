@@ -71,7 +71,13 @@ class VoicePresence:
         return True
 
     def snapshot(self, session_id: str | None = None) -> dict[str, Any]:
-        rows = self._sessions.values() if session_id is None else [self._sessions[session_id]] if session_id in self._sessions else []
+        rows = (
+            self._sessions.values()
+            if session_id is None
+            else [self._sessions[session_id]]
+            if session_id in self._sessions
+            else []
+        )
         return {
             "sessions": [
                 {

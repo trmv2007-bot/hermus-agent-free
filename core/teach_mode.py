@@ -4,6 +4,7 @@ Teach Mode observes an actual RunBus execution and hands the resulting
 trajectory to the existing SkillForge. It never writes an executable skill
 directly and never bypasses verification, dedupe or quarantine.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,7 +41,9 @@ class TeachMode:
         except OSError:
             pass
 
-    def start(self, goal: str, *, run_id: str | None = None, user_id: str = "default", project: str | None = None) -> dict[str, Any]:
+    def start(
+        self, goal: str, *, run_id: str | None = None, user_id: str = "default", project: str | None = None
+    ) -> dict[str, Any]:
         goal = str(goal or "").strip()
         if not goal:
             raise ValueError("goal required")
@@ -168,7 +171,7 @@ class TeachMode:
 
     def list(self, limit: int = 30) -> list[dict[str, Any]]:
         with self._lock:
-            rows = list(self._sessions.values())[-max(1, int(limit)):]
+            rows = list(self._sessions.values())[-max(1, int(limit)) :]
             return [dict(row) for row in reversed(rows)]
 
 

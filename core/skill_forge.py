@@ -967,14 +967,20 @@ class SkillForge:
         except Exception as e:
             return {**report, "valid": False, "error": f"skill.py does not compile: {e}"}
 
+        project_root = json.dumps(str(Path(__file__).resolve().parents[1]))
         probe = (
             "import importlib.util,sys,json;"
-            "spec=importlib.util.spec_from_file_location('sk', 'skill.py');"
+            f"sys.path.insert(0,{project_root});"
+            "spec=importlib.util.spec_from_file_location('sk','skill.py');"
             "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
             "steps=m.plan();r=m.run(task='validate', execute=False);"
             "print(json.dumps({'ok':bool(r.get('success')),'steps':len(steps)}))"
         )
-        rc, out, err = self._probe(probe, timeout=timeout, cwd=skill_dir)
+        rc, out, err = self._probe(
+            probe,
+            timeout=timeout,
+            files={"skill.py": py.read_text(encoding="utf-8")},
+        )
         report["checks"].append(
             {"name": "import+entrypoint", "ok": rc == 0 and '"ok": true' in out, "detail": (out or err)[:400]}
         )
@@ -983,13 +989,25 @@ class SkillForge:
         report["valid"] = all(c["ok"] for c in report["checks"])
         return report
 
-    def _probe(self, code: str, timeout: int = 25, cwd: Path | None = None) -> tuple[int, str, str]:
+    def _probe(
+        self,
+        code: str,
+        timeout: int = 25,
+        cwd: Path | None = None,
+        files: dict[str, str] | None = None,
+    ) -> tuple[int, str, str]:
         """Execute a validation snippet under resource limits (sandbox if present)."""
         probe_cwd = str(cwd or self.skills_dir.parent)
         try:
             from .sandbox import sandbox
 
-            res = sandbox.run_python(code, timeout=timeout, cwd=probe_cwd, purpose="skill-validation")
+            res = sandbox.run_python(
+                code,
+                timeout=timeout,
+                cwd=probe_cwd if not files else None,
+                files=files,
+                purpose="skill-validation",
+            )
             return int(res.get("returncode", 1)), str(res.get("stdout", "")), str(res.get("stderr", ""))
         except Exception:
             pass
@@ -1209,6 +1227,16 @@ class SkillForge:
             }
 
         result = self.install(cand)
+        if result.get("installed"):
+            try:
+                reg = self._registry()
+                entry = (reg.get("skills") or {}).get(cand.name)
+                if entry is not None:
+                    entry["runs"] = max(int(entry.get("runs") or 0), observed)
+                    entry["successes"] = max(int(entry.get("successes") or 0), observed)
+                    self._save_registry(reg)
+            except Exception:
+                pass
         result["evaluation"] = evaluation.to_dict()
         result["proof"] = proof.to_dict()
         result["repeatability"] = {"signature": signature, "observed": observed, "required": min_repeats}

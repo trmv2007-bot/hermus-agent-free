@@ -3,7 +3,6 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from _control_room_source import control_room_source
 from fastapi.testclient import TestClient
 
 from gateway.gateway import app
@@ -81,13 +80,21 @@ def test_queue_command_can_be_observed_and_result_render_contract(monkeypatch):
     with TestClient(app) as client:
         submitted = client.post(
             "/command",
-            json={"text": "Hello Jarvis", "platform": "jarvis", "user_id": "smoke", "run_id": "run_jarvis_queue_smoke", "async": True, "stream": True},
+            json={
+                "text": "Hello Jarvis",
+                "platform": "jarvis",
+                "user_id": "smoke",
+                "run_id": "run_jarvis_queue_smoke",
+                "async": True,
+                "stream": True,
+            },
         )
         assert submitted.status_code == 200
         accepted = submitted.json()
         assert accepted["async"] is True and accepted["run_id"]
         job_id = accepted["job_id"]
         import time
+
         deadline = time.time() + 10
         status = None
         while time.time() < deadline:

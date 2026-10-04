@@ -5,6 +5,7 @@ dispatcher that selects a healthy node by declared capability. It coordinates
 jobs but never grants permissions: every node remains subject to its local
 approval, red-line, sandbox, verification and emergency-stop controls.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,9 +64,15 @@ class DistributedCoordinator:
         self.assignments: dict[str, DistributedAssignment] = {}
         self._load()
 
-    def register_node(self, name: str, *, node_id: str | None = None,
-                      capabilities: list[str] | None = None, endpoint: str = "",
-                      metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    def register_node(
+        self,
+        name: str,
+        *,
+        node_id: str | None = None,
+        capabilities: list[str] | None = None,
+        endpoint: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         node_id = str(node_id or f"node_{uuid.uuid4().hex[:12]}")
         with self._lock:
             existing = self.nodes.get(node_id)
@@ -80,8 +87,7 @@ class DistributedCoordinator:
             self._save()
             return node.to_dict()
 
-    def heartbeat(self, node_id: str, *, status: str = "online",
-                  capabilities: list[str] | None = None) -> dict[str, Any]:
+    def heartbeat(self, node_id: str, *, status: str = "online", capabilities: list[str] | None = None) -> dict[str, Any]:
         with self._lock:
             node = self.nodes.get(str(node_id))
             if node is None:
@@ -126,7 +132,9 @@ class DistributedCoordinator:
                 return {"success": False, "error": "no_healthy_node_with_capability", "capability": capability}
             if capability and capability not in node.capabilities:
                 return {"success": False, "error": "node_lacks_capability"}
-            existing = next((a for a in self.assignments.values() if a.job_id == str(job_id) and a.status in ("assigned", "running")), None)
+            existing = next(
+                (a for a in self.assignments.values() if a.job_id == str(job_id) and a.status in ("assigned", "running")), None
+            )
             if existing:
                 return {"success": True, "assignment": existing.to_dict(), "deduplicated": True}
             node.fencing_token += 1
@@ -184,12 +192,16 @@ class DistributedCoordinator:
             self._save()
             return {"success": True, "assignment": assignment.to_dict(), "node": node.to_dict()}
 
-    def complete_assignment(self, assignment_id: str, *, success: bool, node_id: str | None = None, fencing_token: int | None = None) -> dict[str, Any]:
+    def complete_assignment(
+        self, assignment_id: str, *, success: bool, node_id: str | None = None, fencing_token: int | None = None
+    ) -> dict[str, Any]:
         with self._lock:
             assignment = self.assignments.get(str(assignment_id))
             if assignment is None:
                 return {"success": False, "error": "assignment_not_found"}
-            if node_id is not None and (assignment.node_id != str(node_id) or assignment.fencing_token != int(fencing_token or 0)):
+            if node_id is not None and (
+                assignment.node_id != str(node_id) or assignment.fencing_token != int(fencing_token or 0)
+            ):
                 return {"success": False, "error": "stale_fencing_token"}
             assignment.status = "succeeded" if success else "failed"
             assignment.lease_until = 0.0
@@ -197,8 +209,7 @@ class DistributedCoordinator:
             return {"success": True, "assignment": assignment.to_dict()}
 
     def _select(self, capability: str) -> HermusNode | None:
-        candidates = [n for n in self.nodes.values() if n.status == "online" and
-                      (not capability or capability in n.capabilities)]
+        candidates = [n for n in self.nodes.values() if n.status == "online" and (not capability or capability in n.capabilities)]
         if not candidates:
             return None
         return max(candidates, key=lambda n: n.last_heartbeat)
@@ -221,14 +232,42 @@ class DistributedCoordinator:
             data = {}
         for row in data.get("nodes", []) if isinstance(data, dict) else []:
             if isinstance(row, dict) and row.get("id"):
-                self.nodes[row["id"]] = HermusNode(**{k: row[k] for k in
-                    ("id", "name", "capabilities", "endpoint", "status", "last_heartbeat", "metadata", "lease_until", "fencing_token")
-                    if k in row})
+                self.nodes[row["id"]] = HermusNode(
+                    **{
+                        k: row[k]
+                        for k in (
+                            "id",
+                            "name",
+                            "capabilities",
+                            "endpoint",
+                            "status",
+                            "last_heartbeat",
+                            "metadata",
+                            "lease_until",
+                            "fencing_token",
+                        )
+                        if k in row
+                    }
+                )
         for row in data.get("assignments", []) if isinstance(data, dict) else []:
             if isinstance(row, dict) and row.get("id"):
-                self.assignments[row["id"]] = DistributedAssignment(**{k: row[k] for k in
-                    ("id", "job_id", "node_id", "capability", "status", "created_at", "reason", "lease_until", "fencing_token")
-                    if k in row})
+                self.assignments[row["id"]] = DistributedAssignment(
+                    **{
+                        k: row[k]
+                        for k in (
+                            "id",
+                            "job_id",
+                            "node_id",
+                            "capability",
+                            "status",
+                            "created_at",
+                            "reason",
+                            "lease_until",
+                            "fencing_token",
+                        )
+                        if k in row
+                    }
+                )
 
     def _save(self) -> None:
         payload = {

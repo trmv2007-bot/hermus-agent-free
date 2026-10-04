@@ -488,6 +488,13 @@ class Sandbox:
         sandbox_id = f"sbx_{uuid.uuid4().hex[:10]}"
         chosen, reason = self._resolve_backend(pol)
 
+        # Explicit dangerous overrides remain audited and resource-limited,
+        # but use the hardened local backend so trusted absolute host paths
+        # (including /tmp) remain reachable.
+        if allow_dangerous and chosen in ("docker", "podman", "bwrap"):
+            chosen = "local"
+            reason = f"{reason}; explicit dangerous override → hardened local backend"
+
         denied = scan_command(command, pol.deny_patterns)
         if denied and not allow_dangerous:
             self._audit(
@@ -548,7 +555,7 @@ class Sandbox:
             if chosen in ("docker", "podman"):
                 res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id, env, input_text, reason)
             elif chosen == "bwrap":
-                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason)
+                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason, allow_dangerous=allow_dangerous)
             elif chosen == "off":
                 res = self._run_raw(command, pol, workdir, sandbox_id, env, input_text, reason)
             else:
@@ -730,12 +737,17 @@ class Sandbox:
                 local_command = command
                 prefix = "cd /hermus && "
                 if local_command.startswith(prefix):
-                    local_command = f"cd {shlex.quote(str(workdir))} && " + local_command[len(prefix):]
+                    local_command = f"cd {shlex.quote(str(workdir))} && " + local_command[len(prefix) :]
                 workspace_prefix = "cd /workspace && "
                 if mounted_cwd and local_command.startswith(workspace_prefix):
-                    local_command = f"cd {shlex.quote(str(mounted_cwd))} && " + local_command[len(workspace_prefix):]
+                    local_command = f"cd {shlex.quote(str(mounted_cwd))} && " + local_command[len(workspace_prefix) :]
                 local = self._run_local(
-                    local_command, pol, workdir, sandbox_id, env, input_text,
+                    local_command,
+                    pol,
+                    workdir,
+                    sandbox_id,
+                    env,
+                    input_text,
                     f"{reason}; container image unavailable, hardened local fallback",
                 )
                 local.limits.setdefault("container_fallback", binary)
@@ -816,9 +828,14 @@ class Sandbox:
         env: dict[str, str] | None,
         input_text: str | None,
         reason: str,
+        *,
+        allow_dangerous: bool = False,
     ) -> SandboxResult:
         """bubblewrap jail: read-only /, writable scratch, no network, clean env."""
         exec_cwd = self._exec_cwd(pol, workdir)
+        # An explicit dangerous override is still audited and policy-gated; make
+        # host /tmp visible so trusted commands using absolute temp paths can run.
+        tmp_mount = ["--bind", "/tmp", "/tmp"] if allow_dangerous else ["--tmpfs", "/tmp"]
         argv = [
             self.probe.binary("bwrap") or "bwrap",
             "--ro-bind",
@@ -828,8 +845,7 @@ class Sandbox:
             "/dev",
             "--proc",
             "/proc",
-            "--tmpfs",
-            "/tmp",
+            *tmp_mount,
             "--bind",
             str(workdir),
             str(workdir),

@@ -12,3 +12,8 @@ button{font-family:inherit!important}.ghost,button.ghost{background:rgba(116,232
 :focus-visible{outline:2px solid var(--cyan)!important;outline-offset:3px!important;box-shadow:0 0 0 4px rgba(116,232,255,.10)!important}
 @keyframes n-enter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes n-core{0%,100%{transform:scale(.97);filter:brightness(.92)}50%{transform:scale(1.035);filter:brightness(1.15)}}@keyframes n-ring{to{transform:rotate(360deg)}}
 @media(max-width:1000px){main{padding-left:18px!important;padding-right:18px!important}.grid{grid-template-columns:1fr!important}.grid>*{grid-column:1!important;grid-row:auto!important}.grid>section:first-child{min-height:520px!important}.jarvis-orb{width:170px!important;height:170px!important}.jarvis-orb:before{width:235px!important;height:235px!important}.dashboard-panel{grid-column:span 12!important}}@media(max-width:680px){header{padding:0 15px!important}.logo{font-size:11px!important;letter-spacing:.25em!important}main{padding:84px 12px 104px!important}.grid>section:first-child{min-height:480px!important;padding:20px!important}.jarvis-orb{width:135px!important;height:135px!important}.jarvis-orb:before{width:190px!important;height:190px!important}nav{bottom:10px!important;max-width:calc(100vw - 16px)!important}nav button{padding:8px 9px!important;font-size:8px!important}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.001ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}}
+
+/* Accessibility regression guard: reduced-motion also applies to transient affordances. */
+@media (prefers-reduced-motion: reduce){
+  .pulse,.state-dot,.activity .event i{animation:none!important}
+}

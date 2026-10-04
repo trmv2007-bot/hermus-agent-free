@@ -3,6 +3,7 @@
 Builds a resumable dependency graph and checkpoint contract above MissionEngine.
 It plans; MissionEngine remains the only execution lifecycle.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -26,9 +27,9 @@ class PlanStep:
 class LongHorizonPlan:
     goal: str
     steps: list[PlanStep]
-    replanning_triggers: list[str] = field(default_factory=lambda: [
-        "dependency_failed", "verification_failed", "world_changed", "new_constraint", "budget_pressure"
-    ])
+    replanning_triggers: list[str] = field(
+        default_factory=lambda: ["dependency_failed", "verification_failed", "world_changed", "new_constraint", "budget_pressure"]
+    )
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
@@ -43,8 +44,9 @@ class LongHorizonPlan:
 class LongHorizonPlanner:
     """Create bounded plans with explicit dependencies and completion criteria."""
 
-    def build(self, goal: str, *, success_criteria: list[str] | None = None,
-              subgoals: list[str] | None = None) -> LongHorizonPlan:
+    def build(
+        self, goal: str, *, success_criteria: list[str] | None = None, subgoals: list[str] | None = None
+    ) -> LongHorizonPlan:
         goal = str(goal or "").strip()
         if not goal:
             raise ValueError("goal must not be empty")
@@ -61,12 +63,14 @@ class LongHorizonPlanner:
         for index, objective in enumerate(objectives, 1):
             step_id = f"plan_step_{index}"
             step_criteria = criteria if index == len(objectives) else [f"Complete step {index}: {objective}"]
-            steps.append(PlanStep(
-                id=step_id,
-                objective=objective,
-                dependencies=[previous] if previous else [],
-                success_criteria=step_criteria,
-            ))
+            steps.append(
+                PlanStep(
+                    id=step_id,
+                    objective=objective,
+                    dependencies=[previous] if previous else [],
+                    success_criteria=step_criteria,
+                )
+            )
             previous = step_id
         return LongHorizonPlan(goal=goal, steps=steps)
 
@@ -85,8 +89,9 @@ class LongHorizonPlanner:
         return dag
 
     @staticmethod
-    def replan(plan: LongHorizonPlan, *, failed_step: str, reason: str,
-               replacement_objective: str | None = None) -> LongHorizonPlan:
+    def replan(
+        plan: LongHorizonPlan, *, failed_step: str, reason: str, replacement_objective: str | None = None
+    ) -> LongHorizonPlan:
         replacement = replacement_objective or f"Recover from {failed_step}: {reason}"
         steps = list(plan.steps)
         for step in steps:

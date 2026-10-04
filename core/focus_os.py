@@ -1,4 +1,5 @@
 """HERMUS Focus OS: a concise, read-only priority projection."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,15 +23,19 @@ class FocusOS:
         global personal_os, presence_kernel, device_fabric, learning_fabric
         if personal_os is None:
             from .personal_os import personal_os as _personal_os
+
             personal_os = _personal_os
         if presence_kernel is None:
             from .presence_kernel import presence_kernel as _presence_kernel
+
             presence_kernel = _presence_kernel
         if device_fabric is None:
             from .device_fabric import device_fabric as _device_fabric
+
             device_fabric = _device_fabric
         if learning_fabric is None:
             from .learning_fabric import learning_fabric as _learning_fabric
+
             learning_fabric = _learning_fabric
 
         personal = personal_os.briefing(query=query, area=area)
@@ -58,26 +63,32 @@ class FocusOS:
 
         priorities: list[dict[str, Any]] = []
         for item in attention[:4]:
-            priorities.append({
-                "kind": "attention",
-                "severity": item.get("severity", "info"),
-                "title": item.get("title", "Attention"),
-                "detail": item.get("detail", ""),
-            })
+            priorities.append(
+                {
+                    "kind": "attention",
+                    "severity": item.get("severity", "info"),
+                    "title": item.get("title", "Attention"),
+                    "detail": item.get("detail", ""),
+                }
+            )
         for item in priority_tasks[:3]:
-            priorities.append({
-                "kind": "task",
-                "severity": "high" if str(item.get("priority")).lower() in {"urgent", "high"} else "medium",
-                "title": item.get("title", ""),
-                "detail": item.get("due") or "",
-            })
+            priorities.append(
+                {
+                    "kind": "task",
+                    "severity": "high" if str(item.get("priority")).lower() in {"urgent", "high"} else "medium",
+                    "title": item.get("title", ""),
+                    "detail": item.get("due") or "",
+                }
+            )
         for item in active_goals[:3]:
-            priorities.append({
-                "kind": "goal",
-                "severity": "medium",
-                "title": item.get("title") or item.get("goal") or "",
-                "detail": item.get("status", "active"),
-            })
+            priorities.append(
+                {
+                    "kind": "goal",
+                    "severity": "medium",
+                    "title": item.get("title") or item.get("goal") or "",
+                    "detail": item.get("status", "active"),
+                }
+            )
 
         safety = (devices.get("safety") or {}).get("emergency_stop") or {}
         if safety.get("active"):

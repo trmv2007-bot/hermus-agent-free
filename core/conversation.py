@@ -4,6 +4,7 @@ Conversation sessions sit above the canonical runtime. They provide bounded
 follow-up context, active-run steering/cancellation, and durable notification
 metadata without creating a second execution engine.
 """
+
 from __future__ import annotations
 
 import threading
@@ -60,7 +61,9 @@ class ConversationManager:
         self._max_sessions = max(20, int(max_sessions))
         self._sink_remove = run_bus.add_sink(self._on_run_event)
 
-    def get_or_create(self, session_id: str | None = None, *, user_id: str = "anonymous", platform: str = "api") -> ConversationSession:
+    def get_or_create(
+        self, session_id: str | None = None, *, user_id: str = "anonymous", platform: str = "api"
+    ) -> ConversationSession:
         sid = str(session_id or "").strip() or f"conv_{uuid.uuid4().hex[:10]}"
         with self._lock:
             session = self._sessions.get(sid)
@@ -91,7 +94,7 @@ class ConversationManager:
     def context(self, session_id: str, *, limit: int = 12) -> list[dict[str, Any]]:
         session = self.get_or_create(session_id)
         with self._lock:
-            return [t.to_dict() for t in list(session.turns)[-max(1, min(30, int(limit))):]]
+            return [t.to_dict() for t in list(session.turns)[-max(1, min(30, int(limit))) :]]
 
     def attach_run(self, session_id: str, run_id: str) -> dict[str, Any]:
         session = self.get_or_create(session_id)
@@ -152,12 +155,14 @@ class ConversationManager:
                 if event.get("type") == "run_finished":
                     session.active_run_id = None
                 if event.get("type") in {"run_finished", "run_error", "cancel_requested"}:
-                    session.notifications.append({
-                        "run_id": run_id,
-                        "type": event.get("type"),
-                        "data": dict(data),
-                        "ts": event.get("ts"),
-                    })
+                    session.notifications.append(
+                        {
+                            "run_id": run_id,
+                            "type": event.get("type"),
+                            "data": dict(data),
+                            "ts": event.get("ts"),
+                        }
+                    )
                 session.updated_at = time.time()
 
 

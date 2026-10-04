@@ -13,6 +13,7 @@ def test_teach_mode_reconstructs_run(monkeypatch, tmp_path):
     bus.finish("run_teach", "finished", {"response": "The workflow completed successfully."})
 
     import core.teach_mode as mod
+
     monkeypatch.setattr(mod, "run_bus", bus)
 
     teach = TeachMode(tmp_path / "teach.json")

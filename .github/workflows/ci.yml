@@ -1,4 +1,7 @@
 name: HERMUS CI
+permissions:
+  contents: write
+
 on:
   push:
   pull_request:
@@ -20,6 +23,23 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m compileall -q core gateway tools hermus_cli scheduler
       - run: python -m pytest tests/ -q --ignore=tests/eval
+
+      # Normalize the historical Ruff backlog once on the dedicated repair
+      # branch. The actual fixes are committed so main will validate the exact
+      # same tree after merge.
+      - name: Normalize Ruff debt (repair branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/all-green'
+        run: |
+          python -m ruff check . --fix || true
+          python -m ruff format .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "chore: normalize Ruff violations"
+            git push origin HEAD:fix/all-green
+          fi
+
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m mypy core/log.py core/errors.py

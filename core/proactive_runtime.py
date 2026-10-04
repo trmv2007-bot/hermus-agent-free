@@ -1,4 +1,5 @@
 """Wire proactive automation to HERMUS's canonical EventBus and JobQueue."""
+
 from __future__ import annotations
 
 from typing import Any

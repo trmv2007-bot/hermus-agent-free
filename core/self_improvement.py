@@ -332,6 +332,7 @@ class SelfImprovement:
             # Phase 16: turn reflection into governed, auditable improvement proposals.
             try:
                 from core.self_improvement_controller import self_improvement_controller
+
                 governance = self_improvement_controller.record_reflection(reflection, improvements)
                 self.current_reflection["governance"] = governance
             except Exception as e:

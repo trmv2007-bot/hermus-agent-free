@@ -1,4 +1,5 @@
 """Contract tests for the product-level Nexus backend architecture."""
+
 from core.nexus.models import NexusCommand
 from core.nexus.service import NexusService
 

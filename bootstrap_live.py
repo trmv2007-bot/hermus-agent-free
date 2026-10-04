@@ -6,6 +6,7 @@ For interactive setup we wrap only download/install subprocesses so their output
 is streamed to the terminal while still returning a normal CompletedProcess to
 bootstrap.py.
 """
+
 from __future__ import annotations
 
 import os
@@ -25,8 +26,10 @@ def _is_install_command(cmd: Any) -> bool:
     joined = " ".join(parts)
     return (
         " -m pip " in f" {joined} "
-        or "playwright" in joined and " install" in joined
-        or "scrapling" in joined and " install" in joined
+        or "playwright" in joined
+        and " install" in joined
+        or "scrapling" in joined
+        and " install" in joined
     )
 
 
@@ -79,5 +82,5 @@ def _live_run(*popen_args: Any, **kwargs: Any) -> subprocess.CompletedProcess[st
 
 
 subprocess.run = _live_run  # type: ignore[assignment]
-sys.argv = [str((__import__("pathlib").Path(__file__).resolve().parent / "bootstrap.py")), *sys.argv[1:]]
+sys.argv = [str(__import__("pathlib").Path(__file__).resolve().parent / "bootstrap.py"), *sys.argv[1:]]
 runpy.run_path(sys.argv[0], run_name="__main__")

@@ -5,6 +5,7 @@ a competing execution engine. It provides retry policy, circuit breakers,
 idempotency receipts, durable checkpoints, incidents, integrity-checked
 snapshots and resource/readiness signals.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -70,8 +71,13 @@ class CircuitBreaker:
                 self.state, self.opened_at = self.OPEN, time.time()
 
     def snapshot(self) -> dict[str, Any]:
-        return {"name": self.name, "state": self.state, "failures": self.failures,
-                "threshold": self.threshold, "opened_at": self.opened_at}
+        return {
+            "name": self.name,
+            "state": self.state,
+            "failures": self.failures,
+            "threshold": self.threshold,
+            "opened_at": self.opened_at,
+        }
 
 
 @dataclass
@@ -124,7 +130,13 @@ class IdempotencyStore:
         if isinstance(rows, dict):
             for key, row in rows.items():
                 if isinstance(row, dict):
-                    self.receipts[key] = IdempotencyReceipt(key=key, operation=str(row.get("operation", "")), status=str(row.get("status", "unknown")), result=row.get("result"), created_at=float(row.get("created_at", time.time())))
+                    self.receipts[key] = IdempotencyReceipt(
+                        key=key,
+                        operation=str(row.get("operation", "")),
+                        status=str(row.get("status", "unknown")),
+                        result=row.get("result"),
+                        created_at=float(row.get("created_at", time.time())),
+                    )
 
     def _save(self) -> None:
         _atomic_json(self.path, {k: asdict(v) for k, v in list(self.receipts.items())[-5000:]})
@@ -164,9 +176,11 @@ class CheckpointStore:
             rows = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             rows = {}
-        for key, row in (rows.items() if isinstance(rows, dict) else []):
+        for key, row in rows.items() if isinstance(rows, dict) else []:
             if isinstance(row, dict):
-                self.items[key] = Checkpoint(**{k: row[k] for k in ("id", "run_id", "phase", "state", "created_at", "verified") if k in row})
+                self.items[key] = Checkpoint(
+                    **{k: row[k] for k in ("id", "run_id", "phase", "state", "created_at", "verified") if k in row}
+                )
 
     def _save(self) -> None:
         _atomic_json(self.path, {k: asdict(v) for k, v in list(self.items.items())[-5000:]})
@@ -210,7 +224,7 @@ class IncidentLedger:
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
-            return [asdict(x) for x in self.items[-max(1, int(limit)):]][::-1]
+            return [asdict(x) for x in self.items[-max(1, int(limit)) :]][::-1]
 
     def _load(self) -> None:
         try:
@@ -296,15 +310,22 @@ class RecoverySnapshotStore:
 class ResourceGuard:
     def snapshot(self) -> dict[str, Any]:
         usage = shutil.disk_usage(Path.cwd())
-        result: dict[str, Any] = {"disk_free_bytes": usage.free, "disk_total_bytes": usage.total, "disk_free_ratio": usage.free / max(1, usage.total)}
+        result: dict[str, Any] = {
+            "disk_free_bytes": usage.free,
+            "disk_total_bytes": usage.total,
+            "disk_free_ratio": usage.free / max(1, usage.total),
+        }
         try:
             import psutil
+
             result["memory_percent"] = float(psutil.virtual_memory().percent)
             result["cpu_percent"] = float(psutil.cpu_percent(interval=None))
         except Exception:
             result["memory_percent"] = None
             result["cpu_percent"] = None
-        result["degraded"] = result["disk_free_ratio"] < 0.05 or (result["memory_percent"] is not None and result["memory_percent"] > 95)
+        result["degraded"] = result["disk_free_ratio"] < 0.05 or (
+            result["memory_percent"] is not None and result["memory_percent"] > 95
+        )
         return result
 
 
@@ -327,11 +348,13 @@ class ReliabilitySupervisor:
         distributed = {}
         try:
             from gateway.queue import job_queue
+
             queue = job_queue.status()
         except Exception as exc:
             queue = {"error": str(exc)}
         try:
             from .distributed import distributed as coordinator
+
             distributed = coordinator.status()
         except Exception as exc:
             distributed = {"error": str(exc)}
@@ -341,7 +364,11 @@ class ReliabilitySupervisor:
             "status": state,
             "emergency_stop": get_emergency_stop().active(),
             "queue": queue,
-            "distributed": {"node_count": distributed.get("node_count", 0), "online": distributed.get("online", 0), "stale": distributed.get("stale", 0)},
+            "distributed": {
+                "node_count": distributed.get("node_count", 0),
+                "online": distributed.get("online", 0),
+                "stale": distributed.get("stale", 0),
+            },
             "resources": resources,
             "circuits": [x.snapshot() for x in self.circuits.values()],
             "open_incidents": sum(x.status == "open" for x in self.incidents.items),
@@ -354,6 +381,7 @@ class ReliabilitySupervisor:
             return {"success": False, "error": "emergency_stop_active"}
         try:
             from .rollback import rollback_manager
+
             result = rollback_manager.restore(str(checkpoint_id))
         except Exception as exc:
             result = {"success": False, "error": str(exc)}
@@ -366,13 +394,25 @@ class ReliabilitySupervisor:
         return result
 
     def status(self) -> dict[str, Any]:
-        return self.health() | {"incidents": self.incidents.list(25), "latest_checkpoints": [asdict(x) for x in list(self.checkpoints.items.values())[-25:]]}
+        return self.health() | {
+            "incidents": self.incidents.list(25),
+            "latest_checkpoints": [asdict(x) for x in list(self.checkpoints.items.values())[-25:]],
+        }
 
 
 reliability = ReliabilitySupervisor()
 
 __all__ = [
-    "RetryPolicy", "CircuitBreaker", "IdempotencyReceipt", "IdempotencyStore",
-    "Checkpoint", "CheckpointStore", "Incident", "IncidentLedger",
-    "RecoverySnapshotStore", "ResourceGuard", "ReliabilitySupervisor", "reliability",
+    "RetryPolicy",
+    "CircuitBreaker",
+    "IdempotencyReceipt",
+    "IdempotencyStore",
+    "Checkpoint",
+    "CheckpointStore",
+    "Incident",
+    "IncidentLedger",
+    "RecoverySnapshotStore",
+    "ResourceGuard",
+    "ReliabilitySupervisor",
+    "reliability",
 ]

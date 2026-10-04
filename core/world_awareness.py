@@ -4,6 +4,7 @@ This layer reconciles read-only observations into the canonical WorldModel.
 It adds freshness, provenance, change detection and a bounded host/workspace
 view without creating a second execution engine or granting new permissions.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -63,14 +64,22 @@ class WorldAwareness:
         changed = self._last_digest is not None and digest != self._last_digest
         self._last_digest = digest
 
-        self.world.observe("world", "last_refresh_at", _now(), source="world-awareness", confidence=1.0, permission_scope="system.read")
-        self.world.observe("world", "observation_digest", digest, source="world-awareness", confidence=1.0, permission_scope="system.read")
-        self.world.emit("world_reconciled", {
-            "changed": changed,
-            "fact_count": len(snapshot["facts"]),
-            "connector_count": len(connector_results),
-            "source": "world-awareness",
-        }, source="world-awareness")
+        self.world.observe(
+            "world", "last_refresh_at", _now(), source="world-awareness", confidence=1.0, permission_scope="system.read"
+        )
+        self.world.observe(
+            "world", "observation_digest", digest, source="world-awareness", confidence=1.0, permission_scope="system.read"
+        )
+        self.world.emit(
+            "world_reconciled",
+            {
+                "changed": changed,
+                "fact_count": len(snapshot["facts"]),
+                "connector_count": len(connector_results),
+                "source": "world-awareness",
+            },
+            source="world-awareness",
+        )
         snapshot = self.world.snapshot()
         snapshot["awareness"] = {
             "refreshed_at": _now(),
@@ -97,7 +106,11 @@ class WorldAwareness:
             "age_seconds": age_seconds,
             "fact_count": len(snapshot["facts"]),
             "event_count": len(snapshot["recent_events"]),
-            "observation_digest": (self.world.get("world", "observation_digest").value if self.world.get("world", "observation_digest") is not None else None),
+            "observation_digest": (
+                self.world.get("world", "observation_digest").value
+                if self.world.get("world", "observation_digest") is not None
+                else None
+            ),
             "connectors": self.registry.statuses(),
         }
 
@@ -109,11 +122,32 @@ class WorldAwareness:
             return []
         page = getattr(browser_module, "_page", None)
         if page is None:
-            return [{"subject": "browser", "predicate": "state", "value": {"active": False, "reason": "no_active_session"}, "confidence": 1.0}]
+            return [
+                {
+                    "subject": "browser",
+                    "predicate": "state",
+                    "value": {"active": False, "reason": "no_active_session"},
+                    "confidence": 1.0,
+                }
+            ]
         try:
-            return [{"subject": "browser", "predicate": "state", "value": {"active": True, "url": str(page.url), "title": str(page.title())[:500]}, "confidence": 0.95}]
+            return [
+                {
+                    "subject": "browser",
+                    "predicate": "state",
+                    "value": {"active": True, "url": str(page.url), "title": str(page.title())[:500]},
+                    "confidence": 0.95,
+                }
+            ]
         except Exception as exc:
-            return [{"subject": "browser", "predicate": "state", "value": {"active": True, "state_error": str(exc)[:200]}, "confidence": 0.5}]
+            return [
+                {
+                    "subject": "browser",
+                    "predicate": "state",
+                    "value": {"active": True, "state_error": str(exc)[:200]},
+                    "confidence": 0.5,
+                }
+            ]
 
     @staticmethod
     def _git_facts(root: Path) -> list[dict[str, Any]]:

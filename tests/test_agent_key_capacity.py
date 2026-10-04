@@ -26,10 +26,7 @@ def test_provider_keys_fill_two_agent_slots_before_advancing(tmp_path):
             ProviderKey("openrouter", "key-b", name="router-b", base_url="https://example.test/v1"),
         ]
         try:
-            agents = [
-                await pool.create_agent(provider="openrouter", model=f"model-{index}")
-                for index in range(4)
-            ]
+            agents = [await pool.create_agent(provider="openrouter", model=f"model-{index}") for index in range(4)]
             assert [agent.config.key_name for agent in agents] == [
                 "router-a",
                 "router-a",

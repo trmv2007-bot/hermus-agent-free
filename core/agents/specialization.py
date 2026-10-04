@@ -10,10 +10,10 @@ Each role has:
 
 from __future__ import annotations
 
-from typing import Any, Optional
-from enum import Enum
+from typing import Any
 
 from core.log import get_logger
+
 from .agent import Agent, AgentConfig, AgentRole
 
 logger = get_logger(__name__)

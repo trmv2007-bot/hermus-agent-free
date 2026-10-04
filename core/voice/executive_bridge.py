@@ -1,9 +1,13 @@
 """Bridge voice sessions into HERMUS's executive request lifecycle."""
+
 from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from core.voice_presence import VoicePresence
+
 
 @dataclass
 class VoiceTurnResult:
@@ -12,8 +16,11 @@ class VoiceTurnResult:
     result: Any = None
     spoken: bool = False
 
+
 class VoiceExecutiveBridge:
-    def __init__(self, presence: VoicePresence, executive_handler: Callable[[str], Any], speaker: Callable[[str], Any] | None = None):
+    def __init__(
+        self, presence: VoicePresence, executive_handler: Callable[[str], Any], speaker: Callable[[str], Any] | None = None
+    ):
         self.presence = presence
         self.executive_handler = executive_handler
         self.speaker = speaker
@@ -54,5 +61,6 @@ class VoiceExecutiveBridge:
                 if result.get(key):
                     return str(result[key])
         return ""
+
 
 __all__ = ["VoiceExecutiveBridge", "VoiceTurnResult"]

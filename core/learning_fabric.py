@@ -3,6 +3,7 @@
 Read-only view over the existing learning owners. This module does not create a
 second memory database, skill registry, episode store, or self-improvement loop.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ class LearningFabric:
 
         try:
             from .skill_forge import skill_forge
+
             out["skills"] = {
                 "stats": skill_forge.stats(),
                 "recent": list(skill_forge.index().get("skills", {}).items())[-limit:],
@@ -36,6 +38,7 @@ class LearningFabric:
 
         try:
             from .reasoning.lessons import lessons_store
+
             out["lessons"] = {
                 "stats": lessons_store.stats(),
                 "recent": lessons_store.recent(limit=limit),
@@ -45,6 +48,7 @@ class LearningFabric:
 
         try:
             from .computer import get_episode_store
+
             store = get_episode_store()
             out["episodes"] = {
                 "stats": store.stats(),
@@ -55,6 +59,7 @@ class LearningFabric:
 
         try:
             from .self_improvement import self_improvement
+
             history = self_improvement._load_history()
             out["self_improvement"] = {
                 "active": bool(self_improvement.is_reflecting),
@@ -66,12 +71,9 @@ class LearningFabric:
             out["self_improvement"] = {"error": f"{type(exc).__name__}: {exc}"}
 
         totals = {
-            "skills": out["skills"].get("stats", {}).get("registered_skills", 0)
-            if isinstance(out["skills"], dict) else 0,
-            "lessons": out["lessons"].get("stats", {}).get("total", 0)
-            if isinstance(out["lessons"], dict) else 0,
-            "episodes": out["episodes"].get("stats", {}).get("total", 0)
-            if isinstance(out["episodes"], dict) else 0,
+            "skills": out["skills"].get("stats", {}).get("registered_skills", 0) if isinstance(out["skills"], dict) else 0,
+            "lessons": out["lessons"].get("stats", {}).get("total", 0) if isinstance(out["lessons"], dict) else 0,
+            "episodes": out["episodes"].get("stats", {}).get("total", 0) if isinstance(out["episodes"], dict) else 0,
         }
         out["totals"] = totals
         return out

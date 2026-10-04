@@ -3,6 +3,7 @@
 The registry is intentionally local and bounded: it gives the Control Room and
 health endpoints stable counters without requiring a Prometheus deployment.
 """
+
 from __future__ import annotations
 
 import threading
@@ -29,13 +30,16 @@ class MetricRegistry:
 
     def timer(self, name: str):
         registry = self
+
         class _Timer:
             def __enter__(self):
                 self.started = time.perf_counter()
                 return self
+
             def __exit__(self, exc_type, exc, tb):
                 registry.observe(name, (time.perf_counter() - self.started) * 1000.0)
                 registry.inc(f"{name}.errors" if exc else f"{name}.success")
+
         return _Timer()
 
     def snapshot(self) -> dict[str, Any]:

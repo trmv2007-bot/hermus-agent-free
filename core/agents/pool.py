@@ -13,16 +13,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from core.log import get_logger
-from core.config import config
 from core.providers import PROVIDER_PRESETS
-from .agent import Agent, AgentConfig, AgentState, AgentRole
+
+from .agent import Agent, AgentConfig, AgentRole, AgentState
 
 logger = get_logger(__name__)
 
@@ -49,14 +48,12 @@ class PoolConfig:
     )
 
     @classmethod
-    def from_env(cls) -> "PoolConfig":
+    def from_env(cls) -> PoolConfig:
         """Load configuration from environment."""
         return cls(
             max_agents=int(os.environ.get("HERMUS_MAX_AGENTS", "100")),
             max_concurrent=int(os.environ.get("HERMUS_MAX_CONCURRENT", "10")),
-            max_agents_per_key=int(
-                os.environ.get("HERMUS_MAX_AGENTS_PER_KEY", os.environ.get("HERMUS_MAX_MODELS_PER_KEY", "2"))
-            ),
+            max_agents_per_key=int(os.environ.get("HERMUS_MAX_AGENTS_PER_KEY", os.environ.get("HERMUS_MAX_MODELS_PER_KEY", "2"))),
             idle_timeout=float(os.environ.get("HERMUS_AGENT_IDLE_TIMEOUT", "900")),
             cleanup_interval=float(os.environ.get("HERMUS_AGENT_CLEANUP_INTERVAL", "60")),
         )
@@ -194,10 +191,7 @@ class AgentPool:
             1
             for agent in self._agents.values()
             if agent.provider == provider
-            and (
-                (key_name and agent.config.key_name == key_name)
-                or (api_key and agent.config.api_key == api_key)
-            )
+            and ((key_name and agent.config.key_name == key_name) or (api_key and agent.config.api_key == api_key))
         )
 
     def _select_provider_key(
@@ -218,18 +212,14 @@ class AgentPool:
             if selected is None:
                 raise AgentCapacityError(f"Requested {provider} API key is not registered")
             if self._key_agent_count(provider, selected) >= self.config.max_agents_per_key:
-                raise AgentCapacityError(
-                    f"API key {selected.name} reached its {self.config.max_agents_per_key}-agent limit"
-                )
+                raise AgentCapacityError(f"API key {selected.name} reached its {self.config.max_agents_per_key}-agent limit")
             return selected
 
         for key in keys:
             if self._key_agent_count(provider, key) < self.config.max_agents_per_key:
                 return key
 
-        raise AgentCapacityError(
-            f"All {provider} API keys are full ({self.config.max_agents_per_key} agents per key)"
-        )
+        raise AgentCapacityError(f"All {provider} API keys are full ({self.config.max_agents_per_key} agents per key)")
 
     def get_key_usage(self, provider: str = None) -> dict[str, list[dict[str, Any]]]:
         """Return safe per-key assignment counts for the dashboard."""
@@ -449,14 +439,14 @@ class AgentPool:
                             ),
                             None,
                         )
-                        assigned = self._key_agent_count(provider, selected) if selected else self._direct_key_agent_count(
-                            provider, key_name=config.key_name, api_key=config.api_key
+                        assigned = (
+                            self._key_agent_count(provider, selected)
+                            if selected
+                            else self._direct_key_agent_count(provider, key_name=config.key_name, api_key=config.api_key)
                         )
                         if assigned >= self.config.max_agents_per_key:
                             label = selected.name if selected else (config.key_name or "provided key")
-                            raise AgentCapacityError(
-                                f"API key {label} reached its {self.config.max_agents_per_key}-agent limit"
-                            )
+                            raise AgentCapacityError(f"API key {label} reached its {self.config.max_agents_per_key}-agent limit")
                         if selected:
                             config.key_name = selected.name
                             config.base_url = config.base_url or selected.base_url
@@ -597,7 +587,7 @@ class AgentPool:
 
         return defaults.get(provider, "mistral:7b")
 
-    def get_agent(self, agent_id: str) -> Optional[Agent]:
+    def get_agent(self, agent_id: str) -> Agent | None:
         """Get an agent by ID."""
         return self._agents.get(agent_id)
 
@@ -790,7 +780,7 @@ class AgentPool:
 
 
 # Global pool instance
-_pool: Optional[AgentPool] = None
+_pool: AgentPool | None = None
 
 
 def get_pool() -> AgentPool:

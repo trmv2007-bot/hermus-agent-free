@@ -51,18 +51,22 @@ def execute_with_executive(
                 pass
 
     roles = list((delegation or {}).get("selected_roles", []))
-    brain.observe("request_received", {
-        "platform": platform,
-        "user_id": user_id,
-        "prefer": prefer,
-        "model": model,
-        "read_only": read_only,
-        "delegated_roles": roles,
-    })
+    brain.observe(
+        "request_received",
+        {
+            "platform": platform,
+            "user_id": user_id,
+            "prefer": prefer,
+            "model": model,
+            "read_only": read_only,
+            "delegated_roles": roles,
+        },
+    )
 
     kind = str(prefer or "auto").lower()
     if kind == "auto":
         from .runtime import classify_request
+
         kind = classify_request(text)
 
     goal_id: str | None = None
@@ -105,11 +109,7 @@ def execute_with_executive(
         if effective_requirements is None:
             effective_requirements = list(executive_plan.success_criteria)
         if effective_subgoals is None:
-            effective_subgoals = [
-                step.objective
-                for step in executive_plan.steps
-                if step.id in {"execute", "verify", "repair"}
-            ]
+            effective_subgoals = [step.objective for step in executive_plan.steps if step.id in {"execute", "verify", "repair"}]
         # The canonical MissionEngine consumes subgoals. Add delegation intent
         # as explicit objectives so the runtime can account for the specialist
         # team without giving this planning layer direct execution authority.
@@ -118,13 +118,16 @@ def execute_with_executive(
             if objective not in effective_subgoals:
                 effective_subgoals.append(objective)
         brain.observe("executive_handoff", handoff, goal_id=goal_id)
-        emit("executive_plan_ready", {
-            "goal_id": goal_id,
-            "steps": [step.to_dict() for step in executive_plan.steps],
-            "success_criteria": list(executive_plan.success_criteria),
-            "delegated_roles": roles,
-            "subgoals": effective_subgoals,
-        })
+        emit(
+            "executive_plan_ready",
+            {
+                "goal_id": goal_id,
+                "steps": [step.to_dict() for step in executive_plan.steps],
+                "success_criteria": list(executive_plan.success_criteria),
+                "delegated_roles": roles,
+                "subgoals": effective_subgoals,
+            },
+        )
 
     from .runtime import execute
 
@@ -163,10 +166,16 @@ def execute_with_executive(
         state = str(result.get("state") or result.get("status") or "")
         if state in {"completed", "done"}:
             brain.update_goal(goal_id, status="completed")
-            brain.observe("mission_completed", {"mission_id": result.get("mission_id"), "verified": result.get("verified")}, goal_id=goal_id)
+            brain.observe(
+                "mission_completed", {"mission_id": result.get("mission_id"), "verified": result.get("verified")}, goal_id=goal_id
+            )
         elif state in {"failed", "cancelled", "blocked"}:
             brain.update_goal(goal_id, status="cancelled" if state == "cancelled" else "failed")
-            brain.observe("mission_finished", {"state": state, "mission_id": result.get("mission_id"), "failure": result.get("failure")}, goal_id=goal_id)
+            brain.observe(
+                "mission_finished",
+                {"state": state, "mission_id": result.get("mission_id"), "failure": result.get("failure")},
+                goal_id=goal_id,
+            )
         else:
             brain.observe("mission_result", {"state": state, "mission_id": result.get("mission_id")}, goal_id=goal_id)
         result = dict(result)

@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from scheduler.cron import CronManager, _one_shot, _recurring_cron
+from scheduler.cron import CronManager, _one_shot
 
 
 def test_scheduler_parses_common_recurring_patterns():
@@ -46,6 +46,7 @@ def test_scheduler_enqueue_uses_canonical_queue(monkeypatch, tmp_path):
             return FakeJob()
 
     import gateway.queue as queue_module
+
     monkeypatch.setattr(queue_module, "job_queue", FakeQueue())
 
     manager = CronManager(str(tmp_path / "schedules.json"), timezone="UTC", start=False)
@@ -69,6 +70,7 @@ def test_scheduler_can_limit_runs_and_disable_after_last_run(monkeypatch, tmp_pa
             return FakeJob()
 
     import gateway.queue as queue_module
+
     monkeypatch.setattr(queue_module, "job_queue", FakeQueue())
 
     manager = CronManager(str(tmp_path / "schedules.json"), timezone="UTC", start=False)
@@ -90,6 +92,7 @@ def test_one_shot_disables_after_successful_enqueue(monkeypatch, tmp_path):
             return FakeJob()
 
     import gateway.queue as queue_module
+
     monkeypatch.setattr(queue_module, "job_queue", FakeQueue())
 
     manager = CronManager(str(tmp_path / "schedules.json"), timezone="UTC", start=False)

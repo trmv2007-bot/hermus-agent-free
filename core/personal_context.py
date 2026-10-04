@@ -5,6 +5,7 @@ goals, project facts and focus are persisted through MemoryFacade; the layer
 combines them with relevant typed memories and recent session history for each
 turn. It never infers personal facts from silence or hidden telemetry.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,6 +36,7 @@ class PersonalContext:
     def _memory(self):
         if self.memory is None:
             from .memory import memory
+
             self.memory = memory
         return self.memory
 
@@ -67,7 +69,9 @@ class PersonalContext:
             recent_sessions=recent,
         )
 
-    def remember_preference(self, key: str, value: Any, *, project: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+    def remember_preference(
+        self, key: str, value: Any, *, project: str | None = None, session_id: str | None = None
+    ) -> dict[str, Any]:
         key = str(key or "").strip()
         if not key:
             return {"success": False, "error": "preference key is required"}

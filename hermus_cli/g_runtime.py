@@ -10,7 +10,9 @@ gone.
 from __future__ import annotations
 
 import json
+
 from core.config import config
+
 
 def _configure_context(subparsers) -> None:
     parser = subparsers.add_parser("context", help="Persistent personal context")
@@ -46,18 +48,27 @@ def _run_context(args, ctx: CLIContext) -> None:
     elif args.context_action == "preference":
         print(_json.dumps(personal_context.remember_preference(args.key, args.value), indent=2, default=str))
     elif args.context_action == "goal":
-        print(_json.dumps(personal_context.add_goal(
-            args.title, priority=args.priority, status=args.status, project=args.project, deadline=args.deadline
-        ), indent=2, default=str))
+        print(
+            _json.dumps(
+                personal_context.add_goal(
+                    args.title, priority=args.priority, status=args.status, project=args.project, deadline=args.deadline
+                ),
+                indent=2,
+                default=str,
+            )
+        )
     elif args.context_action == "focus":
         print(_json.dumps(personal_context.set_focus(args.focus, project=args.project), indent=2, default=str))
     elif args.context_action == "project":
-        print(_json.dumps(personal_context.upsert_project(
-            args.name, language=args.language, description=args.description
-        ), indent=2, default=str))
+        print(
+            _json.dumps(
+                personal_context.upsert_project(args.name, language=args.language, description=args.description),
+                indent=2,
+                default=str,
+            )
+        )
     else:
         no_action(ctx, "context")
-
 
 
 from ._common import CLIContext

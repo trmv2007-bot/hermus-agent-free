@@ -5,6 +5,7 @@ intent, execution, conversation, capabilities and events instead of exposing
 UI-specific concepts.  Transport adapters (HTTP, WebSocket, CLI, voice) call
 this layer; the engine delegates execution to the existing queue/run bus.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -102,6 +103,7 @@ class HermusEngine:
     def capabilities(self) -> dict[str, Any]:
         try:
             from core.capabilities import capability_registry
+
             return capability_registry.snapshot()
         except Exception:
             return {}
@@ -110,6 +112,7 @@ class HermusEngine:
     def _presence(user_id: str) -> dict[str, Any]:
         try:
             from core.presence import get_presence
+
             return get_presence().snapshot(user_id=user_id)
         except Exception as exc:
             return {"state": "unknown", "error": f"{type(exc).__name__}: {exc}"}
@@ -118,6 +121,7 @@ class HermusEngine:
     def _agents() -> dict[str, Any]:
         try:
             from core.task_tracker import task_tracker
+
             return task_tracker.get_status()
         except Exception:
             return {}
@@ -127,11 +131,13 @@ class HermusEngine:
         checks: dict[str, Any] = {}
         try:
             from gateway.queue import job_queue
+
             checks["queue"] = {"ok": bool(job_queue.enabled), "running": bool(job_queue._started)}
         except Exception:
             checks["queue"] = {"ok": False}
         try:
             from core.nollama import nollama_manager
+
             checks["local_engine"] = {
                 "installed": bool(nollama_manager.installed()),
                 "running": bool(nollama_manager.running()),

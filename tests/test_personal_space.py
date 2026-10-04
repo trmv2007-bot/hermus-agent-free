@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import json
-import time
-
-from core.personal_space import PersonalSpace
-
 
 class FakeBus:
     def __init__(self):
@@ -14,6 +9,7 @@ class FakeBus:
         def register(cb):
             self.callbacks.append(cb)
             return cb
+
         return register
 
     def unsubscribe(self, cb):
@@ -67,7 +63,6 @@ def test_personal_space_waits_for_idle(monkeypatch, tmp_path):
 
 
 def test_personal_space_enqueues_read_only_curiosity(monkeypatch, tmp_path):
-    import core.personal_space as mod
 
     queue = FakeQueue()
     monkeypatch.setattr("gateway.queue.job_queue", queue, raising=False)

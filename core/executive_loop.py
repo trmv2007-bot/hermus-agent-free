@@ -10,14 +10,16 @@ from .executive import executive_brain
 from .executive_memory import executive_memory
 from .executive_runtime import execute_with_executive
 from .perception import perception
-from .world_model import world_model
 from .world_awareness import world_awareness
+from .world_model import world_model
 
 
 class ExecutiveLoop:
     """Coordinate perception, planning, delegation, execution, verification and learning."""
 
-    def __init__(self, *, brain=None, world=None, memory=None, delegator=None, perception_layer=None, awareness_layer=None) -> None:
+    def __init__(
+        self, *, brain=None, world=None, memory=None, delegator=None, perception_layer=None, awareness_layer=None
+    ) -> None:
         self.brain = brain or executive_brain
         self.world = world or world_model
         self.memory = memory or executive_memory
@@ -48,10 +50,21 @@ class ExecutiveLoop:
             source="executive.perception",
             permission_scope="session.read",
         )
+        runtime_profile = observed.get("runtime") or {}
+        if runtime_profile.get("platform"):
+            self.world.observe(
+                "runtime",
+                "platform",
+                runtime_profile["platform"],
+                source="executive.perception",
+                permission_scope="system.read",
+            )
         self.brain.observe("world_snapshot_refreshed", {"platform": platform, "user_id": user_id})
         return observed
 
-    def execute(self, text: str, *, platform: str = "api", user_id: str = "anonymous", on_event: Callable | None = None, **kwargs: Any) -> dict[str, Any]:
+    def execute(
+        self, text: str, *, platform: str = "api", user_id: str = "anonymous", on_event: Callable | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         text = str(text or "").strip()
         if not text:
             raise ValueError("text must not be empty")
@@ -62,8 +75,14 @@ class ExecutiveLoop:
 
         delegation = self.delegator.build_plan(text)
         self.brain.observe("specialist_team_selected", {"roles": delegation.selected_roles})
-        self.world.emit("delegation_planned", {"roles": delegation.selected_roles, "dag": delegation.dag.to_dict()}, source="executive.delegation")
-        self.world.emit("request_started", {"text": text[:500], "platform": platform, "user_id": user_id}, source="executive.loop")
+        self.world.emit(
+            "delegation_planned",
+            {"roles": delegation.selected_roles, "dag": delegation.dag.to_dict()},
+            source="executive.delegation",
+        )
+        self.world.emit(
+            "request_started", {"text": text[:500], "platform": platform, "user_id": user_id}, source="executive.loop"
+        )
 
         def emit(kind: str, data: dict[str, Any] | None = None) -> None:
             payload = dict(data or {})
@@ -86,7 +105,11 @@ class ExecutiveLoop:
         state = str(result.get("state") or result.get("status") or "unknown")
         verified = result.get("verified")
         goal_id = (result.get("executive") or {}).get("goal_id")
-        self.world.emit("request_finished", {"state": state, "mission_id": result.get("mission_id"), "goal_id": goal_id, "verified": verified}, source="executive.loop")
+        self.world.emit(
+            "request_finished",
+            {"state": state, "mission_id": result.get("mission_id"), "goal_id": goal_id, "verified": verified},
+            source="executive.loop",
+        )
         self.brain.observe("world_reconciled", {"state": state, "mission_id": result.get("mission_id")})
 
         if goal_id:

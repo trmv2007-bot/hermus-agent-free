@@ -51,7 +51,7 @@ def test_multimodal_browser_records_visual_state(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "tools.browser.browser_screenshot",
-        lambda path, full_page=False: (Path(path).write_bytes(b"pixels") or {"success": True, "path": path}),
+        lambda path, full_page=False: Path(path).write_bytes(b"pixels") or {"success": True, "path": path},
     )
     monkeypatch.setattr(
         "tools.vision.vision_analyze",

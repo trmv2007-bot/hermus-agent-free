@@ -8,6 +8,7 @@ The only background execution path is the canonical JobQueue -> runtime.turn
 with read_only=True. Anything worth changing is stored as a proposal and
 requires an explicit user approval before normal runtime execution is queued.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +23,6 @@ from uuid import uuid4
 from .contracts import EventEnvelope
 from .contracts.events import Actor, CommandSource, CommandStatus, EventType
 from .events import get_bus
-
 
 _FINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 _ACTIVE_STATUSES = {"queued", "running"}
@@ -103,7 +103,9 @@ class PersonalSpace:
         if not isinstance(raw, dict):
             return
         with self._lock:
-            self._state["last_user_activity"] = float(raw.get("last_user_activity", self._last_user_activity) or self._last_user_activity)
+            self._state["last_user_activity"] = float(
+                raw.get("last_user_activity", self._last_user_activity) or self._last_user_activity
+            )
             self._last_user_activity = self._state["last_user_activity"]
             self._state["current_job_id"] = raw.get("current_job_id")
             cycles = raw.get("cycles")
@@ -202,7 +204,11 @@ class PersonalSpace:
             result["personal"] = {}
         # Keep the prompt deliberately bounded. Personal Space must stay cheap.
         encoded = json.dumps(result, ensure_ascii=False, default=str)
-        return json.loads(encoded[:10000]) if len(encoded) <= 10000 else {"context_truncated": True, "focus": result.get("focus", {})}
+        return (
+            json.loads(encoded[:10000])
+            if len(encoded) <= 10000
+            else {"context_truncated": True, "focus": result.get("focus", {})}
+        )
 
     def _attention_blocks(self) -> tuple[bool, str]:
         try:
@@ -429,7 +435,7 @@ class PersonalSpace:
     def list_proposals(self, *, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
             rows = list(self._state.get("proposals", []))
-        return rows[-max(1, min(50, int(limit))):][::-1]
+        return rows[-max(1, min(50, int(limit))) :][::-1]
 
     def approve(self, proposal_id: str) -> dict[str, Any]:
         self.note_user_activity()
@@ -551,7 +557,9 @@ class PersonalSpace:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    self._emit("personal_space.loop_error", {"error": f"{type(exc).__name__}: {exc}"}, status=CommandStatus.FAILED.value)
+                    self._emit(
+                        "personal_space.loop_error", {"error": f"{type(exc).__name__}: {exc}"}, status=CommandStatus.FAILED.value
+                    )
                 await asyncio.sleep(interval)
                 _, interval, _, _ = self._settings()
         finally:
