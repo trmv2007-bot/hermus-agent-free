@@ -155,6 +155,17 @@ class ModelRouter:
                     "capabilities": dict(row.get("capabilities") or {}),
                 })
             if workers:
+                try:
+                    health_models = (get_model_gateway().health() or {}).get("models") or {}
+                    for worker in workers:
+                        ref = f"{worker.get('provider')}/{worker.get('model')}"
+                        stats = health_models.get(ref) or {}
+                        if stats:
+                            worker["success_rate"] = stats.get("success_rate")
+                            worker["avg_latency_ms"] = stats.get("avg_latency_ms")
+                            worker["quality_calls"] = stats.get("calls")
+                except Exception:
+                    pass
                 return workers[:32]
         except Exception:
             pass
@@ -221,7 +232,19 @@ class ModelRouter:
         if task_type in ("chat", "summary") and any(k in model for k in ("8b", "7b", "3b", "small", "mini")):
             score += 1.5
 
-        # historical reliability / failure tracking
+        # Historical model quality from the canonical ModelGateway.
+        quality_success = w.get("success_rate")
+        quality_latency = w.get("avg_latency_ms")
+        quality_calls = int(w.get("quality_calls") or 0)
+        if quality_success is not None and quality_calls >= 2:
+            success_rate = float(quality_success)
+            score += max(-6.0, min(6.0, (success_rate - 0.75) * 12.0))
+            reasons.append(f"quality={success_rate:.2f}")
+        if quality_latency is not None and quality_calls >= 2:
+            score -= min(float(quality_latency) / 3000.0, 2.0)
+            reasons.append(f"avg-latency={int(float(quality_latency))}ms")
+
+        # historical router reliability / failure tracking
         key = f"{provider}:{model}".lower()
         stats = self._provider_stats.get(key)
         if stats:
