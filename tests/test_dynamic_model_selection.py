@@ -277,3 +277,15 @@ def test_chat_session_changes_model_only_when_user_requests_it(monkeypatch):
     assert changed is first
     assert changed.model_name == "fake/two"
     assert changed._model_pinned is True
+
+
+def test_every_hermus_model_receives_persistent_engineering_contract():
+    from core.agent import HermusAgent
+
+    agent = HermusAgent(model="mock/mock", mode="agent")
+    prompt = agent._build_system_prompt("hello")
+
+    assert "HERMUS ENGINEERING CONTRACT — persistent across every model/provider" in prompt
+    assert "CAPABILITY ADVERTISED → ACTION PERFORMED → RESULT PROVEN" in prompt
+    assert "INSPECT → IMPLEMENT → TEST → RUN/RENDER → VERIFY → FIX → TEST AGAIN" in prompt
+    assert "do not make the user paste it into each conversation" in prompt
