@@ -55,6 +55,157 @@
     ['workspace','Workspace'],['integrations','Integrations'],['runtime','Runtime & Doctor'],['updates','Updates']
   ];
 
+  const setupSteps = [
+    {id:'welcome',label:'Welcome'},
+    {id:'check',label:'System check'},
+    {id:'provider',label:'AI provider'},
+    {id:'models',label:'Model routing'},
+    {id:'workspace',label:'Workspace'},
+    {id:'capabilities',label:'Capabilities'},
+    {id:'finish',label:'Finish'}
+  ];
+  const wizard = {step:0, data:{}, focus:null};
+
+  function openWizard(start=0) {
+    wizard.step=Math.max(0,Math.min(setupSteps.length-1,start));
+    wizard.focus=document.activeElement;
+    const el=qs('#setupWizard'); if(!el)return;
+    el.classList.add('open'); el.setAttribute('aria-hidden','false');
+    renderWizard();
+    setTimeout(()=>qs('[data-wizard-next]')?.focus(),0);
+  }
+  function closeWizard(completed=false) {
+    const el=qs('#setupWizard'); if(!el)return;
+    if(completed) localStorage.setItem('hermus_setup_complete','1');
+    el.classList.remove('open'); el.setAttribute('aria-hidden','true');
+    try{wizard.focus?.focus()}catch{}
+  }
+  function wizardStatuses(check) {
+    const rows=[
+      ['Gateway',!failed(check.ready),'HERMUS gateway readiness'],
+      ['Core health',!failed(check.health),'capability health'],
+      ['AI providers',!failed(check.providers)&&Array.isArray(check.providers?.providers)&&check.providers.providers.some(p=>p.usable||p.available||p.configured),'at least one usable provider'],
+      ['Models',!failed(check.models)&&Array.isArray(check.models?.models)&&check.models.models.length>0,'runtime-discovered models'],
+      ['Workspace',!failed(check.workspace)&&Array.isArray(check.workspace?.projects)&&check.workspace.projects.length>0,'at least one project'],
+      ['Voice',!failed(check.voice),'speech backend status'],
+      ['Computer',!failed(check.computer),'desktop-control subsystem status']
+    ];
+    return rows;
+  }
+  async function wizardCheck() {
+    const endpoints=[
+      ['ready','/readyz'],['health','/api/v1/system/health'],['providers','/providers/available'],
+      ['models','/models/catalog'],['workspace','/workspace'],['voice','/speech/status'],['computer','/computer/status']
+    ];
+    const vals=await Promise.all(endpoints.map(async([k,u])=>[k,await safe(u)]));
+    wizard.data.check=Object.fromEntries(vals);
+  }
+  function wizardProgress() {
+    const host=qs('#wizardProgress');if(!host)return;
+    host.innerHTML=setupSteps.map((s,i)=>'<div class="wizard-step '+(i<wizard.step?'done ':'')+(i===wizard.step?'active':'')+'"><span>'+(
+      i<wizard.step?'✓':String(i+1)
+    )+'</span><small>'+esc(s.label)+'</small></div>').join('');
+  }
+  function wizardStatusList(rows) {
+    return '<div class="wizard-status-list">'+rows.map(r=>'<div class="wizard-status"><div><strong>'+esc(r[0])+'</strong><small>'+esc(r[2])+'</small></div>'+badge(r[1]?'READY':'NEEDS ATTENTION',r[1]?'good':'warn')+'</div>').join('')+'</div>';
+  }
+  function renderWizard() {
+    const body=qs('#wizardBody'),next=qs('[data-wizard-next]'),back=qs('[data-wizard-back]'),later=qs('[data-wizard-later]');
+    if(!body)return;
+    wizardProgress();
+    back.disabled=wizard.step===0;
+    const s=setupSteps[wizard.step];
+    let html='';
+    if(s.id==='welcome'){
+      html='<div class="wizard-hero"><div class="wizard-orb"><i></i></div><div><div class="eyebrow">ONE GUIDED SETUP</div><h3>We configure the pieces. You stay in control.</h3><p>HERMUS will inspect what is already working, avoid asking for values it can discover itself, and only stop when a choice or credential actually needs you.</p></div></div>'+
+      '<div class="wizard-choice-grid"><div class="wizard-choice active"><strong>Safe automatic setup</strong><span>Discover existing providers, models and local resources. Apply only low-risk configuration.</span></div><div class="wizard-choice"><strong>Manual control</strong><span>Use the Control Center directly when you already know how you want HERMUS configured.</span></div></div>';
+      next.textContent='CHECK MY SYSTEM';
+    } else if(s.id==='check'){
+      const check=wizard.data.check||{};
+      const rows=wizardStatuses(check);
+      html='<div class="wizard-section-head"><div><div class="eyebrow">STEP 2</div><h3>What is already ready?</h3><p>HERMUS checks the live runtime before making setup decisions.</p></div><button class="btn" type="button" data-wizard-recheck>RECHECK</button></div>'+
+      (rows.length?wizardStatusList(rows):'<div class="empty">Checking…</div>')+
+      '<div class="wizard-note">Nothing is installed or changed by this check.</div>';
+      next.textContent=(rows.filter(r=>!r[1]&&['Gateway','Core health'].includes(r[0])).length)?'FIX CORE FIRST':'CONFIGURE AI';
+    } else if(s.id==='provider'){
+      const p=wizard.data.check?.providers;
+      const providers=Array.isArray(p?.providers)?p.providers:[];
+      html='<div class="wizard-section-head"><div><div class="eyebrow">STEP 3</div><h3>Choose where HERMUS gets intelligence.</h3><p>Use an existing local provider, connect an API, or discover free options.</p></div><button class="btn primary" type="button" data-wizard-free>DISCOVER FREE</button></div>'+
+      '<div class="wizard-provider-list">'+(providers.length?providers.map(x=>{
+        const ready=!!(x.usable??x.available??x.configured??x.ok);
+        return '<div class="wizard-provider"><div><strong>'+esc(x.name||x.id||x.provider||'Provider')+'</strong><small>'+esc(x.base_url||x.reason||x.detail||'Provider resolver')+'</small></div>'+badge(ready?'USABLE':'SETUP',ready?'good':'warn')+'</div>';
+      }).join(''):'<div class="empty">No provider information returned yet.</div>')+'</div>'+
+      '<div class="wizard-form-grid"><label class="field">PROVIDER<input id="wizardKeyProvider" placeholder="ollama"></label><label class="field">API KEY<input id="wizardKeyValue" type="password" placeholder="Only needed for API providers"></label><label class="field">BASE URL<input id="wizardKeyBaseUrl" placeholder="http://127.0.0.1:11434"></label><label class="field">DEFAULT MODEL<input id="wizardKeyModel" placeholder="optional"></label></div>'+
+      '<div class="actions"><button class="btn primary" type="button" data-wizard-add-provider>USE / ADD PROVIDER</button></div><div id="wizardProviderResult" class="result">HERMUS will not display stored credentials.</div>';
+      next.textContent='MODEL ROUTING';
+    } else if(s.id==='models'){
+      const cat=wizard.data.models||wizard.data.check?.models;
+      const models=Array.isArray(cat?.models)?cat.models:[];
+      const selected=state.selectedModels||{};
+      html='<div class="wizard-section-head"><div><div class="eyebrow">STEP 4</div><h3>Pick the brain for each kind of work.</h3><p>Auto is safe when you are unsure; explicit choices are persisted per role.</p></div><button class="btn" type="button" data-wizard-model-refresh>SYNC MODELS</button></div>'+
+      '<div class="wizard-model-grid">'+['default','reasoning','coding','vision','background'].map(role=>{
+        const cur=selected[role]||'auto';
+        return '<label class="field"><span>'+esc(role.toUpperCase())+'</span><select data-wizard-role="'+esc(role)+'"><option value="auto">AUTO · best available</option>'+
+          models.map(m=>'<option value="'+esc(m.ref)+'" '+(m.ref===cur?'selected':'')+'>'+esc(m.name||m.id||m.ref)+'</option>').join('')+'</select></label>';
+      }).join('')+'</div>'+
+      '<div class="wizard-note">'+(models.length?models.length+' live deployment(s) discovered.':'No live deployments yet. You can keep AUTO and configure a provider later.')+'</div>';
+      next.textContent='WORKSPACE';
+    } else if(s.id==='workspace'){
+      const ws=wizard.data.check?.workspace||{};
+      const projects=Array.isArray(ws.projects)?ws.projects:[];
+      html='<div class="wizard-section-head"><div><div class="eyebrow">STEP 5</div><h3>Give HERMUS a place to work.</h3><p>Projects are shared context for Workshop, memory and agent tasks.</p></div></div>'+
+      '<div class="wizard-current-workspace">'+
+      '<div><strong>Current</strong><span>'+esc(ws.current||'No project selected')+'</span></div><div><strong>Root</strong><span>'+esc(ws.base_dir||'Not reported')+'</span></div><div><strong>Projects</strong><span>'+esc(projects.length)+'</span></div></div>'+
+      '<div class="wizard-form-grid"><label class="field">NEW PROJECT<input id="wizardProjectName" placeholder="my-project"></label><label class="field full">DESCRIPTION<textarea id="wizardProjectDescription" placeholder="What should this workspace contain?"></textarea></label></div>'+
+      '<div class="actions"><button class="btn primary" type="button" data-wizard-create-project>CREATE PROJECT</button><button class="btn" type="button" data-view="build">OPEN WORKSHOP</button></div><div id="wizardWorkspaceResult" class="result">Existing projects are preserved.</div>';
+      next.textContent='CAPABILITIES';
+    } else if(s.id==='capabilities'){
+      const check=wizard.data.check||{};
+      const voice=check.voice,computer=check.computer;
+      html='<div class="wizard-section-head"><div><div class="eyebrow">STEP 6</div><h3>Optional capabilities.</h3><p>These are discovered and tested, not silently enabled.</p></div></div>'+
+      '<div class="wizard-cap-grid">'+
+      '<div class="wizard-cap"><div><strong>VOICE</strong><small>'+esc(valueSummary(voice?.status||voice?.backend||'unknown'))+'</small></div><button class="btn" type="button" data-wizard-voice-test>TEST</button></div>'+
+      '<div class="wizard-cap"><div><strong>COMPUTER CONTROL</strong><small>'+esc(computer?.halted?'HALTED':computer?.active?'AVAILABLE':'UNAVAILABLE')+'</small></div><button class="btn" type="button" data-wizard-computer>OPEN</button></div>'+
+      '<div class="wizard-cap"><div><strong>SAFETY</strong><small>Risky actions remain behind the permission system.</small></div><button class="btn" type="button" data-view="settings" data-settings-tab-target="safety">REVIEW</button></div>'+
+      '<div class="wizard-cap"><div><strong>INTEGRATIONS</strong><small>MCP and plugins are controlled from the runtime.</small></div><button class="btn" type="button" data-view="settings" data-settings-tab-target="integrations">REVIEW</button></div>'+
+      '</div>';
+      next.textContent='FINISH';
+    } else if(s.id==='finish'){
+      const check=wizard.data.check||{};
+      const rows=wizardStatuses(check);
+      const good=rows.filter(r=>r[1]).length;
+      html='<div class="wizard-finish"><div class="wizard-finish-mark">✓</div><div><div class="eyebrow">SETUP REVIEW</div><h3>HERMUS is ready to take over the rest.</h3><p>'+good+' of '+rows.length+' major subsystems are currently ready. Anything still missing is visible in Control Center, where HERMUS can keep helping you configure it.</p></div></div>'+
+      '<div class="wizard-next-grid"><button class="btn primary" type="button" data-view="chat">START A TASK</button><button class="btn" type="button" data-view="settings">OPEN CONTROL CENTER</button><button class="btn" type="button" data-view="models">OPEN MODEL HUB</button><button class="btn" type="button" data-view="build">OPEN WORKSHOP</button></div>';
+      next.textContent='DONE';
+    }
+    body.innerHTML=html;
+  }
+  async function wizardNext() {
+    const id=setupSteps[wizard.step].id;
+    if(id==='welcome'){
+      await wizardCheck(); wizard.step=1; renderWizard(); return;
+    }
+    if(id==='check'){
+      if(failed(wizard.data.check?.ready)&&failed(wizard.data.check?.health)){toast('HERMUS core is not reachable yet',true);return;}
+      wizard.step=2;renderWizard();return;
+    }
+    if(id==='provider'){
+      wizard.step=3;renderWizard();return;
+    }
+    if(id==='models'){
+      const selects=qsa('[data-wizard-role]');
+      for(const s of selects){
+        try{await api('/models/select',{method:'POST',body:JSON.stringify({role:s.dataset.wizardRole,model:s.value})});state.selectedModels[s.dataset.wizardRole]=s.value;}catch(e){toast('Model '+s.dataset.wizardRole+' · '+e.message,true);}
+      }
+      wizard.data.models=await safe('/models/catalog'); wizard.step=4; renderWizard(); return;
+    }
+    if(id==='workspace'){wizard.step=5;renderWizard();return;}
+    if(id==='capabilities'){await wizardCheck();wizard.step=6;renderWizard();return;}
+    if(id==='finish'){closeWizard(true);toast('HERMUS setup saved');return;}
+  }
+  async function wizardBack(){if(wizard.step>0){wizard.step--;renderWizard();}}
+
+
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
     headers.set('Accept','application/json');
@@ -847,6 +998,29 @@
       if(key==='settings'&&tab)openSettingsTab(tab);
       return;
     }
+    if(e.target.closest('[data-open-wizard]')){openWizard();return;}
+    if(e.target.closest('[data-wizard-close]')||e.target===qs('#setupWizard')){closeWizard();return;}
+    if(e.target.closest('[data-wizard-next]')){await wizardNext();return;}
+    if(e.target.closest('[data-wizard-back]')){wizardBack();return;}
+    if(e.target.closest('[data-wizard-later]')){closeWizard(false);return;}
+    if(e.target.closest('[data-wizard-recheck]')||e.target.closest('[data-wizard-model-refresh]')){await wizardCheck();renderWizard();return;}
+    if(e.target.closest('[data-wizard-free]')){try{await api('/keys/auto-provision-free',{method:'POST',body:'{}'});toast('Free provider discovery started');await wizardCheck();renderWizard();}catch(err){toast(err.message,true)}return;}
+    if(e.target.closest('[data-wizard-add-provider]')){try{
+      const provider=qs('#wizardKeyProvider')?.value.trim(),key=qs('#wizardKeyValue')?.value||'',base_url=qs('#wizardKeyBaseUrl')?.value.trim(),model=qs('#wizardKeyModel')?.value.trim();
+      if(!provider){toast('Provider is required',true);return;}
+      if(!key&&!['ollama','lmstudio'].includes(provider.toLowerCase())){toast('API key required for this provider',true);return;}
+      const out=await api('/keys/add',{method:'POST',body:JSON.stringify({provider,key,base_url:base_url||undefined,model:model||undefined,auto_discover:true})});
+      qs('#wizardProviderResult').textContent=out.success===false?'Provider setup failed · '+(out.error||'unknown'):'Provider configured. HERMUS will rediscover its models.';
+      await wizardCheck();toast('Provider configured');}catch(err){qs('#wizardProviderResult').textContent='Provider setup failed · '+err.message;toast(err.message,true)}return;}
+    if(e.target.closest('[data-wizard-create-project]')){try{
+      const name=qs('#wizardProjectName')?.value.trim();if(!name){toast('Project name required',true);return;}
+      const out=await api('/workspace/create',{method:'POST',body:JSON.stringify({name,description:qs('#wizardProjectDescription')?.value.trim()||''})});
+      qs('#wizardWorkspaceResult').textContent=out.success===false?'Project creation failed · '+(out.error||'unknown'):'Project created and ready.';
+      wizard.data.check.workspace=await safe('/workspace');toast('Workspace created');}catch(err){qs('#wizardWorkspaceResult').textContent='Project creation failed · '+err.message;toast(err.message,true)}return;}
+    if(e.target.closest('[data-wizard-voice-test]')){try{
+      const d=await api('/speech/synthesize',{method:'POST',body:JSON.stringify({text:'HERMUS voice setup is working.',session_id:localStorage.getItem('hermus_session_id')||'',user_id:'default'})});
+      toast(d.audio_url?'Voice test ready':'Voice backend responded');}catch(err){toast('Voice unavailable · '+err.message,true)}return;}
+    if(e.target.closest('[data-wizard-computer]')){closeWizard();openView('computer');return;}
     if(e.target.closest('[data-command]')){sendCommand(e.target.closest('[data-command]').dataset.command);return;}
     if(e.target.closest('#chatSend')){await sendChat();return;}
     if(e.target.closest('#voiceToggle')){toggleVoice();return;}
@@ -953,6 +1127,11 @@
   document.addEventListener('keydown',e=>{
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette();}
     trapPaletteFocus(e);
+    const wz=qs('#setupWizard');
+    if(wz?.classList.contains('open')){
+      if(e.key==='Escape'){e.preventDefault();closeWizard();return;}
+      if(e.key==='Enter'&&e.ctrlKey){e.preventDefault();wizardNext();return;}
+    }
     if(e.key==='Escape')closePalette();
   });
 
@@ -963,6 +1142,7 @@
     openView(views[hash]?hash:'overview',{history:false});
     await refreshOverview();
     renderChat();
+    if(localStorage.getItem('hermus_setup_complete')!=='1') setTimeout(()=>openWizard(),350);
   }
   boot();
 })();
