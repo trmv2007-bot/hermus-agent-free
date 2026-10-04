@@ -2,7 +2,7 @@
   const $ = (s) => document.querySelector(s);
   const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
   if (token) localStorage.setItem('hermus_gateway_token', token);
-  const state = { online:false, busy:false, mission:null };
+  const state = { online:false, busy:false, mission:null, kernel:null, _kernelEvents:new Set() };
 
   async function api(path, options={}) {
     const headers = new Headers(options.headers || {});
@@ -259,29 +259,57 @@
     }
   }
 
-  async function refreshAttention(){
+  function renderKernel(kernel){
+    if(!kernel) return;
+    state.kernel=kernel;
+    const summary=kernel.summary || {};
+    setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
+
+    const active=Number(summary.active_runs || 0);
+    const attentionCount=Number(summary.attention_count || 0);
+    const health=$('#healthValue');
+    if(health) health.textContent = active
+      ? (active + (active===1 ? ' active task' : ' active tasks'))
+      : (attentionCount ? (attentionCount + (attentionCount===1 ? ' attention item' : ' attention items')) : 'READY');
+
     const host=$('#attention');
-    if(!host) return;
-    try{
-      const results=await Promise.all([
-        api('/personal-os/briefing'),
-        api('/distributed/status'),
-        api('/reliability/status'),
-        api('/self-improvement/status')
-      ]);
-      const personal=results[0]||{}, distributed=results[1]||{}, reliability=results[2]||{}, self=results[3]||{};
-      const rows=[];
-      rows.push(distributed.emergency_stop ? ['bad','Emergency stop is ACTIVE'] : ['','Emergency brake clear']);
-      rows.push(Number(distributed.stale||0) ? ['warn',String(distributed.stale)+' distributed node(s) need attention'] : ['','Distributed fleet healthy']);
-      const incidents=Number(reliability.open_incidents ?? reliability.incidents_open ?? 0);
-      rows.push(incidents ? ['warn',String(incidents)+' open reliability incident(s)'] : ['','No open reliability incidents']);
-      const tasks=Number(personal.open_tasks ?? personal.pending_tasks ?? 0);
-      rows.push(tasks ? ['',String(tasks)+' personal task(s) remain open'] : ['','No open-task signal reported']);
-      rows.push(['','Self-improvement · ' + (self.status || self.state || 'ready')]);
-      host.innerHTML=rows.map(([kind,text])=>'<div class="attention-item '+kind+'"><i></i><span>'+esc(text)+'</span></div>').join('');
-    }catch(e){
-      host.innerHTML='<div class="empty-event">Attention feed unavailable — issue a command to inspect the system.</div>';
+    if(host){
+      const rows=Array.isArray(kernel.attention) ? kernel.attention.slice(0,8) : [];
+      host.innerHTML=rows.length
+        ? rows.map(item=>{
+            const sev=String(item.severity||'').toLowerCase();
+            const cls=sev==='critical' ? 'bad' : (sev==='high'||sev==='medium' ? 'warn' : '');
+            return '<div class="attention-item '+cls+'"><i></i><span><strong>'+esc(item.title||'Attention')+'</strong><small>'+esc(item.detail||'')+'</small></span></div>';
+          }).join('')
+        : '<div class="empty-event">'+esc(String((kernel.summary||{}).headline||'All systems ready'))+'</div>';
     }
+
+    const status=$('#attentionStatus');
+    if(status) status.textContent=attentionCount ? (attentionCount+' ACTIVE') : 'CLEAR';
+
+    const recent=(kernel.events && kernel.events.recent) || [];
+    recent.slice(-4).forEach(ev=>{
+      if(!ev || !ev.summary) return;
+      const key='kernel:'+String(ev.event_id||ev.at||ev.summary);
+      if(state._kernelEvents.has(key)) return;
+      state._kernelEvents.add(key);
+      while(state._kernelEvents.size>40) state._kernelEvents.delete(state._kernelEvents.values().next().value);
+      addEvent(ev.summary, String(ev.type||'').includes('error') ? 'error' : 'info');
+    });
+  }
+
+  async function refreshKernel(){
+    try{
+      return renderKernel(await api('/presence/kernel?user_id=default&include_events=true'));
+    }catch(e){
+      const host=$('#attention');
+      if(host) host.innerHTML='<div class="empty-event">Presence kernel unavailable — inspect system state.</div>';
+      return null;
+    }
+  }
+
+  async function refreshAttention(){
+    return refreshKernel();
   }
 
   $('#modelRole')?.addEventListener('change', renderModelSelect);
@@ -307,9 +335,9 @@
   };
 
   refreshModels(false);
-  refreshAttention();
+  refreshKernel();
   setInterval(()=>refreshModels(false),30000);
-  setInterval(refreshAttention,15000);
+  setInterval(refreshKernel,2500);
 
   window.HermusNexus.refreshModels = refreshModels;
   window.HermusNexus.saveModelSelection = saveModelSelection;
