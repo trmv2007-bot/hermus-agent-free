@@ -191,7 +191,9 @@
 
     if(models.length){
       const live=models.filter(row=>row.source==='live').length;
-      meta.textContent=models.length + ' selectable · ' + live + ' live discovered · role ' + role;
+      const providers=new Set(models.map(row=>row.provider)).size;
+      const reachable=models.filter(row=>row.reachable!==false).length;
+      meta.textContent=models.length + ' selectable · ' + live + ' live · ' + providers + ' provider(s) · ' + reachable + ' reachable · role ' + role;
       fleet.innerHTML=models.slice(0,9).map(row=>{
         const reach=row.reachable===false ? 'offline' : (row.source==='live' ? 'live' : 'cached');
         const caps=Object.entries(row.capabilities||{}).filter(([,v])=>v==='yes').slice(0,3).map(([k])=>k).join(' · ');
