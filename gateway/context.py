@@ -26,11 +26,20 @@ def get_agent_for_user(
     api_key: str = None,
     base_url: str = None,
 ) -> HermusAgent:
-    # The cache key includes model + base_url so switching the model or the
-    # custom URL/API in chat actually takes effect (previously a changed model
-    # was silently ignored because the cached agent kept the old one).
-    model = model or config.model
-    key = f"{platform}:{user_id}:{mode}:{model}:{base_url or ''}"
+    # Keep web sessions unpinned so the canonical ModelGateway can honor
+    # the dashboard selection and dynamic runtime catalog. Use the currently
+    # resolved deployment in the cache key so a model change gets a new agent.
+    cache_model = model
+    if not cache_model:
+        try:
+            from core.models import get_model_gateway
+
+            selected_provider, selected_model = get_model_gateway().resolve_model("default")
+            cache_model = f"{selected_provider}/{selected_model}" if selected_provider and selected_model else "auto"
+        except Exception:
+            cache_model = "auto"
+
+    key = f"{platform}:{user_id}:{mode}:{cache_model}:{base_url or ''}"
     if key not in AGENTS:
         AGENTS[key] = HermusAgent(
             model=model,
