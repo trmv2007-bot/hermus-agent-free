@@ -14,7 +14,7 @@ from typing import Any
 
 from ..model_capabilities import negotiate
 from ..provider_resolver import discover_runtime_bundles
-from ..providers import get_provider
+from ..providers import PROVIDER_PRESETS, get_provider
 from ..openai_compat import list_models
 
 
