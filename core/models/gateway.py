@@ -378,7 +378,7 @@ class ModelGateway:
         prompt: str,
         *,
         model: str | None = None,
-        provider: str = "ollama",
+        provider: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         temperature: float | None = None,
@@ -393,8 +393,23 @@ class ModelGateway:
         is not running). It never fabricates a description.
         """
 
-        model = model or "llava:7b"
-        llm_obj = self.llm(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
+        if model and "/" in str(model):
+            provider, model = str(model).split("/", 1)
+        if not model:
+            provider, model = self.resolve_model("vision", required=["vision"], provider=provider)
+        if not model or not provider:
+            raise ModelGatewayError(
+                "no dynamically discovered vision-capable model is available",
+                failure_class=FailureClass.CAPABILITY_MISMATCH.value,
+            )
+        llm_obj = self.llm(
+            model=model,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=temperature,
+            role="vision",
+        )
         started = time.time()
         try:
             resp = llm_obj.generate_image(prompt, image_base64)
