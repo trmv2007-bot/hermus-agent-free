@@ -138,7 +138,7 @@ jobs:
           for(const v of ['chat','ide','browser','terminal','image','video','notes']){
             await page.locator('[data-workbench-tab="'+v+'"]').click();
             if(!(await page.locator('[data-workbench-view="'+v+'"]').evaluate(el=>el.classList.contains('active')))) throw new Error('Workbench view failed: '+v);
-            await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:true});
+            await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:false});
           }
 
           console.log('QA: toggles');
@@ -185,7 +185,7 @@ jobs:
           await page.locator('#workshopEditor').fill('print(2)');
           await page.locator('#workshopSave').click();
           await page.locator('#workshopAsk').click(); await page.waitForTimeout(50);
-          if(!(await page.locator('#command').evaluate(el=>document.activeElement===el))) throw new Error('ASK did not focus command');
+          if(!(await page.locator('#workshopCommand').evaluate(el=>document.activeElement===el))) throw new Error('ASK did not focus Workshop command');
           await page.locator('#workshopCommand').fill('Review workspace');
           await page.locator('#workshopSend').click();
           await page.locator('#workshop').waitFor({state:'hidden'});
@@ -214,7 +214,7 @@ jobs:
             await page.waitForTimeout(50);
           }
 
-          await page.screenshot({path:out+'/99-final.png',fullPage:true});
+          await page.screenshot({path:out+'/99-final.png',fullPage:false});
           await browser.close();
           if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
           EOF
