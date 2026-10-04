@@ -53,7 +53,7 @@ def test_catalog_only_contains_runtime_discovered_or_stored_models(monkeypatch):
 
 def test_model_selection_route_is_runtime_validated(monkeypatch):
     from gateway.gateway import app
-    import core.models.model_preferences as pref_mod
+    import core.model_preferences as pref_mod
     import core.models.model_catalog as catalog_mod
 
     monkeypatch.setattr(
@@ -99,3 +99,41 @@ def test_control_room_has_discovery_driven_model_surface():
     assert "model-surface" in css
     assert "llava:7b" not in html
     assert "llama3.1:8b" not in html
+
+
+def test_gateway_llm_uses_persisted_selection(monkeypatch):
+    from types import SimpleNamespace
+    from core.models.gateway import ModelGateway
+    import core.models.model_catalog as catalog_mod
+    import core.model_preferences as pref_mod
+
+    class FakeCatalog:
+        def list(self, **_kwargs):
+            return {
+                "models": [{
+                    "ref": "fake/runtime-42",
+                    "provider": "fake",
+                    "id": "runtime-42",
+                    "source": "live",
+                    "reachable": True,
+                    "capabilities": {"tools": "yes"},
+                }]
+            }
+
+    class FakePrefs:
+        def get(self, role="default"):
+            return "fake/runtime-42"
+
+    seen = {}
+
+    def builder(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(catalog_mod, "model_catalog", FakeCatalog())
+    monkeypatch.setattr(pref_mod, "model_preferences", FakePrefs())
+
+    gateway = ModelGateway(llm_builder=builder)
+    gateway.llm()
+    assert seen["provider"] == "fake"
+    assert seen["model"] == "runtime-42"
