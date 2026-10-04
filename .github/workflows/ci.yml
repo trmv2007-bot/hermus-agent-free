@@ -133,18 +133,25 @@ jobs:
           await page.locator('[data-wizard-next]').click();
           await page.waitForTimeout(80);
           if(!(await page.locator('#wizardProgress .active').count())) throw new Error('Wizard did not advance');
+          const wizardIndex = () => [...document.querySelectorAll('#wizardProgress .wizard-step')]
+            .findIndex((el) => el.classList.contains('active'));
+          const nextWizardTo = async (expected) => {
+            await page.locator('[data-wizard-next]').click();
+            await page.waitForFunction(
+              (index) => [...document.querySelectorAll('#wizardProgress .wizard-step')]
+                .findIndex((el) => el.classList.contains('active')) === index,
+              expected
+            );
+          };
           await page.locator('[data-wizard-recheck]').click();
           await page.waitForTimeout(30);
-          await page.locator('[data-wizard-next]').click();
-          await page.waitForTimeout(30);
+          await nextWizardTo(2);
           await page.locator('[data-wizard-free]').click();
-          await page.waitForTimeout(30);
-          await page.locator('[data-wizard-next]').click();
-          await page.locator('[data-wizard-next]').click();
-          await page.waitForTimeout(30);
-          await page.locator('[data-wizard-next]').click();
-          await page.waitForTimeout(30);
-          await page.locator('[data-wizard-next]').click();
+          await page.waitForTimeout(60);
+          await nextWizardTo(3);
+          await nextWizardTo(4);
+          await nextWizardTo(5);
+          await nextWizardTo(6);
           if(!(await page.locator('#wizardBody').innerText()).includes('HERMUS is ready')) throw new Error('Wizard finish step missing');
           await page.locator('[data-wizard-next]').click();
           if(await page.locator('#setupWizard').evaluate(el=>el.classList.contains('open'))) throw new Error('Wizard did not close on finish');
