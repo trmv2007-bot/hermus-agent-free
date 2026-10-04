@@ -105,7 +105,7 @@ jobs:
 
           const errors=[];
           page.on('pageerror',e=>errors.push(e.message));
-          await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'networkidle'});
+          await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           await page.screenshot({path:out+'/00-baseline.png',fullPage:true});
 
           const buttons=page.locator('button:visible');
@@ -120,7 +120,7 @@ jobs:
 
           await page.locator('#globalSearch').click();
           await page.locator('#paletteInput').fill('model');
-          await page.locator('#paletteList button').first().click();
+          await page.locator('#paletteList button').first().click(); await page.waitForTimeout(120);
           await page.locator('#overlay [data-close]').click();
 
           for(const v of ['chat','ide','browser','terminal','image','video','notes']){
@@ -179,7 +179,7 @@ jobs:
             for(let i=0;i<n;i++){
               const el=loc.nth(i);
               await el.click().catch(()=>{});
-              await page.waitForTimeout(40);
+              await page.waitForTimeout(25);
               await page.locator('#overlay [data-close]').click().catch(()=>{});
               await page.locator('#workshopClose').click().catch(()=>{});
             }
