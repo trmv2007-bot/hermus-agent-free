@@ -80,12 +80,13 @@
     toast('Request sent to HERMUS');
     try{
       const session=localStorage.getItem('hermus_session_id')||'';
-      const result=await api('/api/v1/commands',{method:'POST',body:JSON.stringify({
-        command,text,platform:'web',mode:'chat',stream:true,session_id:session,user_id:'default'
+      const result=await api('/jobs',{method:'POST',body:JSON.stringify({
+        kind:'runtime.turn',
+        payload:{text,platform:'web',mode:'chat',stream:true,session_id:session||undefined,user_id:'default'}
       })});
       if(result.session_id)localStorage.setItem('hermus_session_id',String(result.session_id));
       const run=result.run_id||result.mission_id;
-      state.messages.push({who:'jarvis',text:run?'Accepted · live execution started.':'Accepted · HERMUS is processing the request.',time:'Now'});
+      state.messages.push({who:'jarvis',text:run?'Accepted · live execution started.':'Accepted · queued for HERMUS.',time:'Now'});
       renderChat(); refreshOverview();
       return run;
     }catch(e){
@@ -230,10 +231,19 @@
     await refreshBuild();
   }
   async function refreshBuild(){
-    const snap=await safe('/workshop/snapshot');if(!snap){qs('#buildProjects').innerHTML='<div class="empty">Workshop snapshot unavailable.</div>';return}
-    state.projects=Array.isArray(snap.projects)?snap.projects:[];state.project=snap.current||snap.project||state.project;
+    const ws=await safe('/workspace');
+    const hinted=state.project||ws?.current||null;
+    const query=hinted?'?project='+encodeURIComponent(hinted):'';
+    const snap=await safe('/workshop/snapshot'+query);
+    state.projects=Array.isArray(snap?.projects)?snap.projects:(Array.isArray(ws?.projects)?ws.projects:[]);
+    state.project=snap?.current||snap?.project||hinted||null;
     qs('#buildProjectTitle').textContent=state.project||'No project selected';
-    qs('#buildProjects').innerHTML=state.projects.length?state.projects.map(p=>'<button type="button" class="tree-item '+(p.name===state.project?'active':'')+'" data-project="'+esc(p.name)+'">◇ '+esc(p.name)+'</button>').join(''):'<div class="empty">No workspace projects.</div>';
+    qs('#buildProjects').innerHTML=state.projects.length?state.projects.map(p=>'<button type="button" class="tree-item '+(p.name===state.project?'active':'')+'" data-project="'+esc(p.name)+'">◇ '+esc(p.name)+'</button>').join(''):'<div class="empty">No workspace projects are available.</div>';
+    if(!snap){
+      qs('#buildProjects').insertAdjacentHTML('beforeend','<div class="empty">Select a project to load its files.</div>');
+      qs('#buildContext').innerHTML='<div class="empty">Select a workspace project to load live context.</div>';
+      return;
+    }
     const ctx=await safe('/context?project='+encodeURIComponent(state.project||'')+'&user_id=default&memory_limit=4');
     qs('#buildContext').innerHTML=[
       ['STATE',ctx?.summary?.state||'idle'],
