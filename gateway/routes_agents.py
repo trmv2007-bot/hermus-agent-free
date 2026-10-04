@@ -154,8 +154,8 @@ async def create_agent(request: Request, config: dict) -> dict:
     Expected config fields:
     - name: str (optional)
     - role: str (optional, default: "general")
-    - provider: str (optional, default: "ollama")
-    - model: str (optional, default: "mistral:7b")
+    - provider: str (optional; inferred from the runtime model catalog)
+    - model: str (optional; inferred from the runtime model catalog)
     - api_key: str (optional)
     - idle_timeout: float (optional, default: 900)
      - max_concurrent: int (optional, default: 1)
@@ -167,8 +167,16 @@ async def create_agent(request: Request, config: dict) -> dict:
         # Extract known fields
         name = config.get("name", f"Agent-{uuid.uuid4().hex[:8]}")
         role_str = config.get("role", "general")
-        provider = config.get("provider", "ollama")
-        model = config.get("model", "mistral:7b")
+        provider = config.get("provider")
+        model = config.get("model")
+        if not model:
+            from core.models import get_model_gateway
+
+            selected_provider, selected_model = get_model_gateway().resolve_model("default", provider=provider)
+            provider = provider or selected_provider
+            model = selected_model
+        if not model:
+            raise HTTPException(status_code=400, detail="No discoverable model is available; configure a provider or choose a model in Nexus.")
         api_key = config.get("api_key")
         key_name = config.get("key_name")
         base_url = config.get("base_url")
