@@ -22,7 +22,11 @@
     const r = await fetch(path, {...options, headers});
     const text = await r.text(); let data={};
     try { data=text?JSON.parse(text):{} } catch { data={message:text}; }
-    if (!r.ok) throw new Error(data.message || data.detail || data.error || `HTTP ${r.status}`);
+    if (!r.ok) {
+      const raw=String(data.message || data.detail || data.error || '').trim();
+      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || text.trim().startsWith('<!');
+      throw new Error(htmlError ? `HERMUS service returned an unexpected page (HTTP ${r.status})` : (raw || `HTTP ${r.status}`));
+    }
     return data;
   }
 
@@ -355,9 +359,11 @@
       addEvent('Model catalog · ' + String(modelState.catalog.count || 0) + ' deployment(s) discovered');
     }catch(e){
       const meta=$('#modelMeta');
-      if(meta) meta.textContent='Model discovery unavailable: ' + e.message;
+      if(meta) meta.textContent='Model Hub is temporarily unavailable. The workspace is still ready.';
       const pill=$('#modelPill');
       if(pill) pill.textContent='MODEL · UNAVAILABLE';
+      const fleet=$('#modelFleet');
+      if(fleet) fleet.innerHTML='<div class="model-state unavailable"><span>RUNTIME UNAVAILABLE</span><small>Connect or restore the model runtime, then press SYNC.</small></div>';
     }finally{
       modelState.inFlight=false;
     }
@@ -809,7 +815,7 @@
           + '</div>';
       }).join('');
     } catch (e) {
-      host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">!</span><div><strong>Agent roster unavailable</strong><small>Check HERMUS system state</small></div><i></i></div>';
+      host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">◌</span><div><strong>Agent roster is quiet</strong><small>No live agents are reporting right now</small></div><i></i></div>';
     }
   }
 
