@@ -179,9 +179,10 @@
       <section class="view" id="view-settings">
         <div class="view-head"><div><div class="eyebrow">CONTROL CENTER</div><h1>HERMUS configuration.</h1><p>One place to inspect and operate the real runtime: models, providers, permissions, voice, computer control, memory, integrations and updates.</p></div></div>
         <div class="settings-frame">
-          <nav class="settings-nav" id="settingsTabs" aria-label="Control Center sections">
-            <button class="settings-tab active" type="button" data-settings-tab="general">General</button>
-            <button class="settings-tab" type="button" data-settings-tab="models">Models</button>
+          <nav class="settings-nav" id="settingsTabs" role="tablist" aria-label="Control Center sections">
+    <div class="settings-nav-head"><strong>CONTROL CENTER</strong><input id="settingsSearch" type="search" placeholder="Filter settings…" aria-label="Filter Control Center settings"></div>
+            <button class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="settingsHost" type="button" data-settings-tab="general">General</button>
+            <button class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsHost" type="button" data-settings-tab="models">Models</button>
             <button class="settings-tab" type="button" data-settings-tab="providers">Providers & Keys</button>
             <button class="settings-tab" type="button" data-settings-tab="agents">Agents</button>
             <button class="settings-tab" type="button" data-settings-tab="safety">Safety & Approvals</button>
@@ -193,7 +194,7 @@
             <button class="settings-tab" type="button" data-settings-tab="runtime">Runtime & Doctor</button>
             <button class="settings-tab" type="button" data-settings-tab="updates">Updates</button>
           </nav>
-          <section id="settingsHost"></section>
+          <section id="settingsHost" role="tabpanel" aria-live="polite" tabindex="-1"></section>
         </div>
       </section>
     </main>
