@@ -3,154 +3,306 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#05070d">
-  <title>HERMUS — Nexus</title>
+  <meta name="theme-color" content="#020712">
+  <title>HERMUS — JARVIS Workspace</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/nexus.css">
-  <style>
-.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
-.personal-space-surface{grid-column:span 2;min-height:126px}
-.personal-space-copy{display:flex;flex-direction:column;gap:4px;margin-top:13px}
-.personal-space-copy strong{font-size:13px;font-weight:500;color:#c7d8e6}
-.personal-space-copy small{font-size:9px;color:#657b90}
-.personal-space-proposal{margin-top:10px;min-height:30px;padding:8px 10px;border:1px solid rgba(103,232,255,.08);border-radius:10px;background:rgba(103,232,255,.02);color:#8ea3b8;font-size:8px;line-height:1.45}
-.personal-space-proposal strong{display:block;color:#b9cbd9;font-size:9px;margin-bottom:3px}
-.personal-space-proposal small{display:block;color:#667c91}
-.personal-space-open{margin-top:9px;border:1px solid rgba(103,232,255,.18);background:rgba(103,232,255,.07);color:var(--cyan);border-radius:9px;padding:7px 10px;cursor:pointer;font-size:8px;letter-spacing:.13em}
-.personal-space-open:hover{background:rgba(103,232,255,.14)}
-.personal-space-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
-.personal-space-action{border:1px solid var(--line);background:rgba(255,255,255,.025);color:#8ca1b5;border-radius:9px;padding:8px 11px;cursor:pointer;font-size:8px;letter-spacing:.1em}
-.personal-space-action:hover{color:var(--ink);border-color:rgba(103,232,255,.35)}
-.personal-space-action.primary{color:var(--cyan);border-color:rgba(103,232,255,.22);background:rgba(103,232,255,.08)}
-@media(max-width:900px){.personal-space-surface{grid-column:1/-1}}
-</style>
 </head>
 <body>
   <div class="space" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+
   <header class="topbar">
-    <a class="brand" href="/control" aria-label="HERMUS Nexus">
-      <span class="brand-mark" id="hermusLogo" title="Workshop"><span></span></span>
-      <span><strong>HERMUS</strong><small>NEXUS</small></span>
+    <a class="brand" href="/control" aria-label="HERMUS Home">
+      <span class="brand-mark" id="hermusLogo" title="Triple-click for deep Workshop"><span></span></span>
+      <span><strong>HERMUS</strong><small>NEXUS · Your AI · Your World</small></span>
     </a>
-    <div class="system-state"><span id="stateDot" class="state-dot"></span><span id="stateLabel">CONNECTING</span></div>
-    <div class="nexus-top-controls"><span id="modelPill" class="model-pill">MODEL · AUTO</span><button class="quiet-button" data-open="System health" type="button">SYSTEM</button></div>
+    <nav class="primary-nav" aria-label="HERMUS workspace">
+      <button class="nav-item" type="button" data-open="Dashboard state">⌂ <span>Home</span></button>
+      <button class="nav-item active-glow" type="button" data-workshop-open>◈ <span>JARVIS Workspace</span><b>3D</b></button>
+      <button class="nav-item" type="button" data-open="Agents">✥ <span>Agents</span></button>
+      <button class="nav-item" type="button" data-open="Capabilities">⌘ <span>Tools</span></button>
+      <button class="nav-item" type="button" data-open="Models">◉ <span>Models</span></button>
+      <button class="nav-item" type="button" data-open="Learning">▤ <span>Knowledge</span></button>
+      <button class="nav-item" type="button" data-open="Routines">◒ <span>Missions</span></button>
+      <button class="nav-item" type="button" data-open="Personal Space">✦ <span>Personal Space</span></button>
+    </nav>
+    <div class="top-actions">
+      <div class="global-search" id="globalSearch" role="button" tabindex="0" aria-label="Open HERMUS command palette">
+        <span>⌕</span><span>Ask anything, run a tool, or give a command…</span><kbd>Ctrl + K</kbd>
+      </div>
+      <div class="presence-chip"><span id="stateDot" class="state-dot"></span><div><strong id="stateLabel">CONNECTING</strong><small>HERMUS CORE</small></div></div>
+      <button class="icon-button" data-open="System health" type="button" aria-label="System settings">⚙</button>
+    </div>
   </header>
 
-  <main class="nexus">
-    <section class="presence" aria-label="HERMUS presence">
-      <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div>
-      <div class="core-glow"></div>
-      <div class="core" id="jarvisOrb" aria-live="polite">
-        <div class="core-ring"></div><div class="core-ring ring-2"></div>
-        <div class="core-eye"><span></span></div>
+  <main class="nexus jarvis-home">
+    <aside class="sidebar-left">
+      <div class="sidebar-section">
+        <div class="sidebar-label">WORKSPACE</div>
+        <button class="side-item active" type="button" data-open="Dashboard state">⌂<span>Overview</span></button>
+        <button class="side-item" type="button" data-command="Start a new chat">◌<span>Chat</span></button>
+        <button class="side-item" type="button" data-workshop-open>⌁<span>IDE / Workshop</span></button>
+        <button class="side-item" type="button" data-command="Open the terminal">›_<span>Terminal</span></button>
+        <button class="side-item" type="button" data-open="Devices">◎<span>Browser</span></button>
+        <button class="side-item" type="button" data-command="Open image generation">▣<span>Image Lab</span></button>
+        <button class="side-item" type="button" data-command="Open video generation">▶<span>Video Studio</span></button>
+        <button class="side-item" type="button" data-open="Models">◉<span>Model Hub</span></button>
+        <button class="side-item" type="button" data-open="Routines">⟳<span>Automation</span></button>
+        <button class="side-item" type="button" data-workshop-open>◇<span>3D Space</span></button>
+        <button class="side-item" type="button" data-open="System health">⚙<span>Settings</span></button>
       </div>
-      <div class="presence-copy">
-        <div class="eyebrow">HERMUS CORE</div>
-        <h1 id="coreState">READY</h1>
-        <p id="coreDetail">awaiting your command</p>
-      </div>
-    </section>
 
-    <section class="command-zone">
-      <div class="command-shell">
-        <span class="command-prefix">›</span>
-        <input id="command" autocomplete="off" placeholder="Tell HERMUS what you need…" aria-label="Command HERMUS">
-        <button id="voiceButton" class="voice-button" type="button" aria-label="Speak to HERMUS">◎</button><button id="send" class="send" type="button" aria-label="Send command">↗</button>
-      </div>
-      <div class="hint"><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd><span>focus</span><span class="separator">·</span><span>Enter to execute</span><span class="separator">·</span><span>Voice</span></div>
-      <div class="suggestions" aria-label="Command suggestions">
-        <button data-command="Check system health" type="button">Check system health</button>
-        <button data-command="What capabilities are available?" type="button">Show capabilities</button>
-        <button data-command="Show my active missions" type="button">Active missions</button>
-      </div>
-    </section>
-
-    <section class="surface-grid">
-      <article class="surface mission-surface">
-        <div class="surface-head"><span>MISSION</span><b>LIVE</b></div>
-        <div class="mission-empty" id="missionPanel"><span class="pulse" id="missionPulse"></span><div><strong id="missionStatus">READY</strong><small id="missionDetail">HERMUS is standing by</small></div></div><div id="missionProgress" class="mission-meta">No active run</div>
-      </article>
-      <article class="surface activity-surface">
-        <div class="surface-head"><span>ACTIVITY</span><button data-open="Dashboard state" type="button">OPEN</button></div>
-        <div id="activity" class="activity"><div class="empty-event">No recent activity</div></div>
-      </article>
-      <article class="surface systems-surface">
-        <div class="surface-head"><span>SYSTEMS</span><button data-open="Capabilities" type="button">ALL</button></div>
-        <div id="capabilities" class="capabilities"><div class="empty-event">Discovering capabilities…</div></div>
-      </article>
-
-      <article class="surface model-surface">
-        <div class="surface-head"><span>MODEL CORE</span><button id="modelRefresh" type="button">SYNC</button></div>
-        <div class="model-toolbar">
-          <label>ROLE<select id="modelRole" aria-label="HERMUS model role">
-            <option value="default">Default</option>
-            <option value="reasoning">Reasoning</option>
-            <option value="vision">Vision</option>
-            <option value="coding">Coding</option>
-            <option value="background">Background</option>
-            <option value="doctor">Doctor</option>
-            <option value="voice">Voice</option>
-          </select></label>
-          <label>DEPLOYMENT<select id="modelSelect" aria-label="Select HERMUS model deployment">
-            <option value="">Discovering…</option>
-          </select></label>
-          <button id="modelSave" class="model-save" type="button">USE</button>
+      <div class="sidebar-section agents-mini">
+        <div class="sidebar-label">ACTIVE AGENTS <button data-open="Agents" type="button">MANAGE</button></div>
+        <div id="agentList" class="agent-list">
+          <div class="agent-row muted-row"><span class="agent-avatar">✥</span><div><strong>Discovering agents</strong><small>Connecting…</small></div><i></i></div>
         </div>
-        <div id="modelMeta" class="model-meta">Runtime-discovered models appear here. API keys never leave the server.</div>
-        <div id="modelFleet" class="model-fleet"><div class="empty-event">Discovering model deployments…</div></div>
-      </article>
+      </div>
 
-      <article class="surface attention-surface">
-        <div class="surface-head"><span>FAIRY ATTENTION</span><b id="attentionStatus">LIVE</b></div>
+      <div class="sidebar-section compact-health">
+        <div class="sidebar-label">SYSTEM STATUS <b class="good-text">LIVE</b></div>
+        <div class="health-row"><span>Gateway</span><b id="healthValue">CHECKING</b></div>
+        <div class="health-row"><span>Model Runtime</span><b>DISCOVERING</b></div>
+        <div class="health-row"><span>Personal Space</span><b>READY</b></div>
+      </div>
+    </aside>
+
+    <section class="workspace-column">
+      <section class="workspace-hero">
+        <div class="hero-copy">
+          <div class="eyebrow">JARVIS WORKSPACE</div>
+          <h1 id="heroGreeting">Good morning.</h1>
+          <h2>Think · Build · Explore · Automate</h2>
+          <p>One environment for your agents, tools, models, missions and private HERMUS space.</p>
+          <div class="hero-actions">
+            <button type="button" data-command="Research the latest AI news">◎ Research</button>
+            <button type="button" data-command="Analyze this project">⌁ Analyze</button>
+            <button type="button" data-workshop-open>◇ Build</button>
+            <button type="button" data-command="Create a visual concept">▣ Create</button>
+          </div>
+        </div>
+
+        <div class="stage-scene" aria-label="HERMUS holographic workspace">
+          <div class="stage-stars"></div>
+          <div class="stage-city city-a"></div><div class="stage-city city-b"></div><div class="stage-city city-c"></div>
+          <div class="stage-ring ring-x"></div><div class="stage-ring ring-y"></div>
+          <div class="stage-platform"><span></span></div>
+          <div class="core-glow"></div>
+          <div class="core jarvis-orb" id="jarvisOrb" aria-live="polite">
+            <div class="core-ring"></div><div class="core-ring ring-2"></div><div class="core-eye"><span></span></div>
+          </div>
+          <div class="orb-action action-research" data-command="Research the latest AI news"><span>⌕</span><small>Research</small></div>
+          <div class="orb-action action-code" data-workshop-open><span>&lt;/&gt;</span><small>Code</small></div>
+          <div class="orb-action action-create" data-command="Create a concept image"><span>▣</span><small>Create</small></div>
+          <div class="orb-action action-automate" data-open="Routines"><span>⟳</span><small>Automate</small></div>
+          <div class="orb-action action-analyze" data-command="Analyze the current system"><span>◫</span><small>Analyze</small></div>
+          <div class="orb-action action-deploy" data-command="Show deployment status"><span>⌁</span><small>Deploy</small></div>
+        </div>
+      </section>
+
+      <section class="panel-grid top-panels">
+        <article class="hud-panel live-tasks">
+          <div class="panel-head"><div><span class="panel-kicker">LIVE TASKS</span><strong>Mission stream</strong></div><button type="button" data-open="Dashboard state">VIEW ALL</button></div>
+          <div id="activity" class="task-list"><div class="empty-event">No recent activity</div></div>
+        </article>
+
+        <article class="hud-panel current-mission">
+          <div class="panel-head"><div><span class="panel-kicker">CURRENT MISSION</span><strong id="missionStatus">READY</strong></div><b class="status-badge">LIVE</b></div>
+          <div class="mission-title" id="missionDetail">HERMUS is standing by</div>
+          <div class="mission-bar"><span id="missionPulse"></span></div>
+          <div class="mission-meta" id="missionProgress">No active run</div>
+        </article>
+
+        <article class="hud-panel jarvis-mode">
+          <div class="panel-head"><div><span class="panel-kicker">JARVIS MODE</span><strong>Multi-agent control room</strong></div><button type="button" data-workshop-open>WORKSHOP ↗</button></div>
+          <button class="toggle-row" type="button" data-toggle="orb-control" aria-pressed="true"><span>◈ Orb Control</span><i class="toggle on"></i></button>
+          <button class="toggle-row" type="button" data-toggle="voice-mode" aria-pressed="true"><span>◉ Voice Mode</span><i class="toggle on"></i></button>
+          <button class="toggle-row" type="button" data-toggle="screen-awareness" aria-pressed="false"><span>◎ Screen Awareness</span><i class="toggle"></i></button>
+          <button class="toggle-row" type="button" data-toggle="auto-agents" aria-pressed="true"><span>✥ Auto Agents</span><i class="toggle on"></i></button>
+        </article>
+      </section>
+
+      <section class="panel-grid middle-panels">
+        <article class="hud-panel intelligence-panel">
+          <div class="panel-head"><div><span class="panel-kicker">GLOBAL INTELLIGENCE</span><strong>Live awareness</strong></div><button type="button" data-open="Capabilities">ALL</button></div>
+          <div id="capabilities" class="capability-stack"><div class="empty-event">Discovering capabilities…</div></div>
+          <div class="intelligence-actions">
+            <button type="button" data-command="Search the web and save the useful results">Live Search</button>
+            <button type="button" data-command="Start an OSINT research plan">OSINT Tools</button>
+            <button type="button" data-command="Show current system awareness">World Model</button>
+            <button type="button" data-open="Focus">Focus</button>
+          </div>
+        </article>
+
+        <article class="hud-panel model-hub-panel">
+          <div class="panel-head"><div><span class="panel-kicker">MODEL HUB</span><strong>Runtime-discovered</strong></div><button type="button" data-open="Models">MANAGE</button></div>
+          <div class="model-toolbar">
+            <label>ROLE<select id="modelRole" aria-label="HERMUS model role">
+              <option value="default">Default</option><option value="reasoning">Reasoning</option><option value="vision">Vision</option>
+              <option value="coding">Coding</option><option value="background">Background</option><option value="doctor">Doctor</option><option value="voice">Voice</option>
+            </select></label>
+            <label>DEPLOYMENT<select id="modelSelect" aria-label="Select HERMUS model deployment"><option value="">Discovering…</option></select></label>
+            <button id="modelSave" class="model-save" type="button">USE</button>
+          </div>
+          <div class="model-line"><span id="modelPill">MODEL · AUTO</span><small id="modelMeta">Runtime-discovered models appear here. API keys never leave the server.</small></div>
+          <div id="modelFleet" class="model-fleet"><div class="empty-event">Discovering model deployments…</div></div>
+          <button class="sync-link" id="modelRefresh" type="button">↻ SYNC</button>
+        </article>
+
+        <article class="hud-panel environment-panel">
+          <div class="panel-head"><div><span class="panel-kicker">3D ENVIRONMENT</span><strong>Workspace spaces</strong></div><button type="button" data-panel-toggle="environment-panel" aria-expanded="true">HIDE</button></div>
+          <div class="room-preview" id="roomPreview">
+            <div class="room-grid"></div><div class="room-core"></div>
+            <div class="room-preview-copy"><span class="panel-kicker">ACTIVE SPACE</span><strong id="roomPreviewTitle">MAIN HALL</strong><small id="roomPreviewDetail">Central HERMUS command space · live workspace routing</small></div>
+          </div>
+          <div class="room-list">
+            <button class="room active" data-room="main-hall" data-workshop-open type="button">◈ <span>Main Hall</span></button>
+            <button class="room" data-room="ide-lab" data-workshop-open type="button">⌁ <span>IDE Lab</span></button>
+            <button class="room" data-room="model-lab" data-open="Models" type="button">◉ <span>Model Lab</span></button>
+            <button class="room" data-room="media-studio" data-command="Open media tools" type="button">▣ <span>Media Studio</span></button>
+            <button class="room" data-room="control-room" data-open="System health" type="button">◫ <span>Control Room</span></button>
+            <button class="room" data-room="personal-space" data-open="Personal Space" type="button">✦ <span>Personal Space</span></button>
+          </div>
+        </article>
+      </section>
+
+      <section class="bottom-workbench">
+        <div class="workbench-tabs" role="tablist" aria-label="Workspace tools">
+          <button class="workbench-tab active" aria-selected="true" type="button" data-workbench-tab="chat">◌ Chat</button>
+          <button class="workbench-tab" aria-selected="false" type="button" data-workbench-tab="ide">⌁ IDE</button>
+          <button class="workbench-tab" aria-selected="false" type="button" data-workbench-tab="browser">◎ Browser</button>
+          <button class="workbench-tab" aria-selected="false" type="button" data-workbench-tab="terminal">›_ Terminal</button>
+          <button class="workbench-tab" aria-selected="false" type="button" data-workbench-tab="image">▣ Image Generation</button>
+          <button class="workbench-tab" aria-selected="false" type="button" data-workbench-tab="video">▶ Video Generation</button>
+          <button class="workbench-tab" aria-selected="false" type="button" data-workbench-tab="notes">▤ Notes</button>
+          <span class="workbench-spacer"></span><button type="button" data-open="System health">⚙</button><button id="workbenchClose" type="button" data-close-workbench aria-label="Hide workbench">×</button>
+        </div>
+        <div class="workbench-view-stage" id="workbenchViewStage" aria-live="polite">
+          <section class="workbench-view active" data-workbench-view="chat">
+            <div class="view-hero"><span class="eyebrow">CHAT CONSOLE</span><h3>Talk to HERMUS</h3><p>Use the command rail below, or pick a quick action to begin a live turn.</p></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="ide">
+            <div class="view-hero"><span class="eyebrow">IDE LAB</span><h3>Build inside Workshop</h3><p>Open the deep workshop when you need files, context, mission state and a live editor.</p><button type="button" class="workbench-mock-action" data-workshop-open>OPEN WORKSHOP ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="browser">
+            <div class="view-hero"><span class="eyebrow">BROWSER</span><h3>Visual web workspace</h3><p>Preview browser context, inspect the current page, and route a task to HERMUS.</p><button type="button" class="workbench-mock-action" data-open="Devices">OPEN BROWSER CONTEXT</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="terminal">
+            <div class="view-hero"><span class="eyebrow">TERMINAL</span><h3>Command workspace</h3><p>Run a terminal task through the command gateway without leaving the HERMUS shell.</p><button type="button" class="workbench-mock-action" data-command="Open the terminal">OPEN TERMINAL ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="image">
+            <div class="view-hero"><span class="eyebrow">IMAGE LAB</span><h3>Generate visual concepts</h3><p>Send a prompt into the media pipeline and keep the result attached to the current workspace.</p><button type="button" class="workbench-mock-action" data-command="Open image generation">START IMAGE GENERATION ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="video">
+            <div class="view-hero"><span class="eyebrow">VIDEO STUDIO</span><h3>Plan and generate motion</h3><p>Build a shot concept, route it to the media tools, and keep the timeline in context.</p><button type="button" class="workbench-mock-action" data-command="Open video generation">OPEN VIDEO TOOLS ↗</button></div>
+          </section>
+          <section class="workbench-view" data-workbench-view="notes">
+            <div class="view-hero"><span class="eyebrow">KNOWLEDGE</span><h3>Notes & learning</h3><p>Keep project notes, lessons and saved research close to the mission context.</p><button type="button" class="workbench-mock-action" data-open="Learning">OPEN KNOWLEDGE ↗</button></div>
+          </section>
+        </div>
+        <div class="workbench-body">
+          <aside class="conversation-list">
+            <div class="conv-head">RECENT</div>
+            <button type="button" data-command="Research the latest AI papers"><b>◌</b><span>AI research plan<small>Today</small></span>›</button>
+            <button type="button" data-command="Review the current system architecture"><b>⌁</b><span>System architecture<small>Yesterday</small></span>›</button>
+            <button type="button" data-command="Find useful improvements for HERMUS"><b>✦</b><span>HERMUS improvements<small>Personal Space</small></span>›</button>
+            <button type="button" data-open="Routines"><b>⟳</b><span>Automation review<small>Scheduled</small></span>›</button>
+          </aside>
+          <section class="chat-pane">
+            <div class="chat-greeting"><div class="mini-orb"></div><div><strong>JARVIS is online.</strong><span>Your AI workspace is ready. What would you like to do?</span></div></div>
+            <div class="chat-suggestions">
+              <button type="button" data-command="Research the latest AI news">Research</button>
+              <button type="button" data-command="Build a web component">Build</button>
+              <button type="button" data-command="Analyze my current project">Analyze</button>
+              <button type="button" data-command="Create an image or video concept">Create</button>
+            </div>
+            <div class="command-shell main-command">
+              <span class="command-prefix">›</span>
+              <input id="command" autocomplete="off" placeholder="Tell HERMUS what you need…" aria-label="Tell HERMUS what you need">
+              <button id="voiceButton" class="voice-button" type="button" aria-label="Speak to HERMUS">◎</button>
+              <button id="send" class="send" type="button" aria-label="Send command">↗</button>
+            </div>
+            <div class="hint"><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd><span>focus</span><span>·</span><span>Enter to execute</span><span>·</span><span>Voice</span></div>
+          </section>
+        </div>
+      </section>
+    </section>
+
+    <aside class="sidebar-right">
+      <article class="hud-panel attention-panel">
+        <div class="panel-head"><div><span class="panel-kicker">ATTENTION</span><strong id="attentionStatus">LIVE</strong></div><button type="button" data-open="Focus">FOCUS</button></div>
         <div id="attention" class="attention-list"><div class="empty-event">Reading your operational context…</div></div>
       </article>
 
-      <article class="surface personal-space-surface" id="personalSpaceSurface">
-        <div class="surface-head"><span>PERSONAL SPACE</span><b id="personalSpaceStatus">WAITING</b></div>
-        <div class="personal-space-copy"><strong id="personalSpaceHeadline">HERMUS has its own time.</strong><small id="personalSpaceDetail">Giving you space and waiting for a useful curiosity.</small></div>
-        <div id="personalSpaceProposal" class="personal-space-proposal"><span>No proposal waiting for you.</span></div>
-        <button id="personalSpaceOpen" class="personal-space-open" type="button">ENTER PERSONAL SPACE</button>
+      <article class="hud-panel memory-panel">
+        <div class="panel-head"><div><span class="panel-kicker">MEMORY & KNOWLEDGE</span><strong>Personal</strong></div><button type="button" data-open="Learning">VIEW ALL</button></div>
+        <button type="button" data-open="Learning"><span>▤ Project Ideas</span><b>OPEN</b></button>
+        <button type="button" data-open="Learning"><span>▤ Learning Notes</span><b>OPEN</b></button>
+        <button type="button" data-command="Show saved research results"><span>⌕ Research Results</span><b>SEARCH</b></button>
+        <button type="button" data-open="Focus"><span>◎ Personal Goals</span><b>FOCUS</b></button>
+        <button type="button" data-open="System health"><span>◫ System Notes</span><b>VIEW</b></button>
       </article>
 
-    </section>
+      <article class="hud-panel personal-space-card">
+        <div class="panel-head"><div><span class="panel-kicker">PERSONAL SPACE</span><strong id="personalSpaceStatus">WAITING</strong></div><button id="personalSpaceOpen" type="button">ENTER</button></div>
+        <strong id="personalSpaceHeadline">HERMUS has its own time.</strong>
+        <small id="personalSpaceDetail">Giving you space and waiting for a useful curiosity.</small>
+        <div id="personalSpaceProposal" class="personal-space-proposal"><span>No proposal waiting for you.</span></div>
+        <button id="personalSpaceOpenDock" class="personal-space-action primary" type="button">✦ OPEN PERSONAL SPACE</button>
+      </article>
 
-    <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
-      <button id="tabbtn-overview" role="tab" aria-controls="tab-overview" aria-selected="true" tabindex="0" type="button">Overview</button>
-      <button id="tabbtn-missions" role="tab" aria-controls="tab-missions" aria-selected="false" tabindex="-1" type="button">Missions</button>
-      <button id="tabbtn-approvals" role="tab" aria-controls="tab-approvals" aria-selected="false" tabindex="-1" type="button">Approvals</button>
-      <button id="tabbtn-safety" role="tab" aria-controls="tab-safety" aria-selected="false" tabindex="-1" type="button">Safety</button>
-      <button id="tabbtn-capabilities" role="tab" aria-controls="tab-capabilities" aria-selected="false" tabindex="-1" type="button">Capabilities</button>
-      <button id="tabbtn-memory" role="tab" aria-controls="tab-memory" aria-selected="false" tabindex="-1" type="button">Memory</button>
-      <button id="tabbtn-agents" role="tab" aria-controls="tab-agents" aria-selected="false" tabindex="-1" type="button">Agents</button>
-      <button id="tabbtn-computer" role="tab" aria-controls="tab-computer" aria-selected="false" tabindex="-1" type="button">Computer</button>
-      <button id="tabbtn-doctor" role="tab" aria-controls="tab-doctor" aria-selected="false" tabindex="-1" type="button">Doctor</button>
-      <button id="tabbtn-console" role="tab" aria-controls="tab-console" aria-selected="false" tabindex="-1" type="button">Console</button>
-    </div>
-
-    <button class="sr-only" data-open="Focus" type="button">Focus</button><button class="sr-only" data-open="Learning" type="button">Learning</button>
-
-    <section id="consolePanels" data-tab="systems" class="sr-only" aria-label="HERMUS systems console">
-      <div id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview" hidden>Snapshot · Replay · The control room is a projection and never owns truth.</div>
-      <div id="tab-missions" role="tabpanel" aria-labelledby="tabbtn-missions" hidden>Missions · approval-aware lifecycle · Pre-flight mission · Start mission if ready · Record planning-mode blocker · create prompts · allow_preflight_planning · approve+retry · refreshMissions · /missions/ · /missions/resume · /missions/preflight</div>
-      <div id="tab-approvals" role="tabpanel" aria-labelledby="tabbtn-approvals" hidden>Approval bundles · approve all · deny all · Pending yellow-action approval prompts · /permissions/bundles/resolve · /permissions/pending/resolve</div>
-      <div id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety" hidden>Safety · Create scoped approval grant · Pre-flight autonomy check · Suggested approval prompts · Create draft approval prompts · Jarvis Safety Core · pendingCount · blockedMissionCount · Safety Event Timeline · <div id="safetyEvents"></div> · /safety/preflight · /safety/preflight/approvals · /safety/events?limit=80 · Generate safety report · /safety/report?format=markdown</div>
-      <div id="tab-capabilities" role="tabpanel" aria-labelledby="tabbtn-capabilities" hidden>Capability ledger · Record power · Propose setup · Capability readiness / activation registry · Request activation · local_folder_defensive_scan · save_report:true · /capabilities/ledger/discover · /capabilities/ledger/propose · /capabilities/registry/setup · /capabilities/registry/request-activation · Run approved Downloads scan · Start Downloads scan mission · List scan reports · Allow Downloads malware scan · Propose Gmail delegated send · /local-defense/scan · /local-defense/missions</div>
-      <div id="tab-memory" role="tabpanel" aria-labelledby="tabbtn-memory" hidden>Memory · Learning · skills and procedural evidence.</div>
-      <div id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents" hidden>Agents · Delegation · Crew · Subagents.</div>
-      <div id="tab-computer" role="tabpanel" aria-labelledby="tabbtn-computer" hidden>Computer · /computer/status · /computer/run · typed Command · error-aware execution.</div>
-      <div id="tab-doctor" role="tabpanel" aria-labelledby="tabbtn-doctor" hidden>Doctor · /doctor/status · /doctor/run</div>
-      <div id="tab-console" role="tabpanel" aria-labelledby="tabbtn-console" hidden>Console · consolePanels · /static/console.js · Snapshot · Replay · /api/v1/runs/ · timeline · typed Command · never simulates success · never owns truth</div>
-      <div class="sr-only">Telemetry · /events/recent?limit= · /jobs · /queue/status · /dashboard/events · /remote/status · /remote/approvals · /remote/approve · /remote/reject · /remote/ · X-Hermus-Token · __HERMUS_GATEWAY_TOKEN</div>
-    </section>
-
-    <nav class="dock" aria-label="HERMUS systems">
-      <button data-open="System health" type="button"><span>◌</span>System</button>
-      <button data-open="Capabilities" type="button"><span>◇</span>Capabilities</button>
-      <button data-open="Dashboard state" type="button"><span>◈</span>State</button>
-      <button data-open="Models" type="button"><span>◎</span>Models</button>
-      <button data-open="Console manifest" type="button"><span>⌁</span>Console</button><button id="personalSpaceOpenDock" type="button"><span>✦</span>Personal Space</button><button data-open="Routines" type="button"><span>◒</span>Routines</button><button data-open="Devices" type="button"><span>◫</span>Devices</button>
-    </nav>
+      <article class="hud-panel system-status-card">
+        <div class="panel-head"><div><span class="panel-kicker">JARVIS STATUS</span><strong id="jarvisStatusLabel">CHECKING</strong></div><span id="jarvisStatusBadge" class="status-badge">CHECKING</span></div>
+        <div class="status-list">
+          <div><span>Multi-agent system</span><b class="good-text">ACTIVE</b></div>
+          <div><span>Tools & skills</span><b class="good-text">READY</b></div>
+          <div><span>Personal space</span><b class="good-text">READY</b></div>
+          <div><span>Autonomous tasks</span><b class="good-text">READY</b></div>
+          <div><span>Learning system</span><b class="good-text">ACTIVE</b></div>
+        </div>
+      </article>
+    </aside>
   </main>
+
+  <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
+    <button id="tabbtn-overview" role="tab" aria-controls="tab-overview" aria-selected="true" tabindex="0" type="button">Overview</button>
+    <button id="tabbtn-missions" role="tab" aria-controls="tab-missions" aria-selected="false" tabindex="-1" type="button">Missions</button>
+    <button id="tabbtn-approvals" role="tab" aria-controls="tab-approvals" aria-selected="false" tabindex="-1" type="button">Approvals</button>
+    <button id="tabbtn-safety" role="tab" aria-controls="tab-safety" aria-selected="false" tabindex="-1" type="button">Safety</button>
+    <button id="tabbtn-capabilities" role="tab" aria-controls="tab-capabilities" aria-selected="false" tabindex="-1" type="button">Capabilities</button>
+    <button id="tabbtn-memory" role="tab" aria-controls="tab-memory" aria-selected="false" tabindex="-1" type="button">Memory</button>
+    <button id="tabbtn-agents" role="tab" aria-controls="tab-agents" aria-selected="false" tabindex="-1" type="button">Agents</button>
+    <button id="tabbtn-computer" role="tab" aria-controls="tab-computer" aria-selected="false" tabindex="-1" type="button">Computer</button>
+    <button id="tabbtn-doctor" role="tab" aria-controls="tab-doctor" aria-selected="false" tabindex="-1" type="button">Doctor</button>
+    <button id="tabbtn-console" role="tab" aria-controls="tab-console" aria-selected="false" tabindex="-1" type="button">Console</button>
+  </div>
+  <button class="sr-only" data-open="Focus" type="button">Focus</button>
+  <button class="sr-only" data-open="Learning" type="button">Learning</button>
+
+  <section id="consolePanels" class="sr-only" data-tab="systems" aria-label="HERMUS systems console">
+    <div id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview" hidden>Snapshot · Replay · The control room is a projection and never owns truth.</div>
+    <div id="tab-missions" role="tabpanel" aria-labelledby="tabbtn-missions" hidden>Missions · approval-aware lifecycle · Pre-flight mission · Start mission if ready · Record planning-mode blocker · create prompts · allow_preflight_planning · approve+retry · refreshMissions · /missions/ · /missions/resume · /missions/preflight</div>
+    <div id="tab-approvals" role="tabpanel" aria-labelledby="tabbtn-approvals" hidden>Approval bundles · approve all · deny all · Pending yellow-action approval prompts · /permissions/bundles/resolve · /permissions/pending/resolve</div>
+    <div id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety" hidden>Safety · Create scoped approval grant · Pre-flight autonomy check · Suggested approval prompts · Create draft approval prompts · Jarvis Safety Core · pendingCount · blockedMissionCount · Safety Event Timeline · <div id="safetyEvents"></div> · /safety/preflight · /safety/preflight/approvals · /safety/events?limit=80 · Generate safety report · /safety/report?format=markdown</div>
+    <div id="tab-capabilities" role="tabpanel" aria-labelledby="tabbtn-capabilities" hidden>Capability ledger · Record power · Propose setup · Capability readiness / activation registry · Request activation · local_folder_defensive_scan · save_report:true · /capabilities/ledger/discover · /capabilities/ledger/propose · /capabilities/registry/setup · /capabilities/registry/request-activation · Run approved Downloads scan · Start Downloads scan mission · List scan reports · Allow Downloads malware scan · Propose Gmail delegated send · /local-defense/scan · /local-defense/missions</div>
+    <div id="tab-memory" role="tabpanel" aria-labelledby="tabbtn-memory" hidden>Memory · Learning · skills and procedural evidence.</div>
+    <div id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents" hidden>Agents · Delegation · Crew · Subagents.</div>
+    <div id="tab-computer" role="tabpanel" aria-labelledby="tabbtn-computer" hidden>Computer · /computer/status · /computer/run · typed Command · error-aware execution.</div>
+    <div id="tab-doctor" role="tabpanel" aria-labelledby="tabbtn-doctor" hidden>Doctor · /doctor/status · /doctor/run</div>
+    <div id="tab-console" role="tabpanel" aria-labelledby="tabbtn-console" hidden>Console · consolePanels · /static/console.js · Snapshot · Replay · /api/v1/runs/ · timeline · typed Command · never simulates success · never owns truth</div>
+    <div class="sr-only">Telemetry · /events/recent?limit= · /jobs · /queue/status · /dashboard/events · /remote/status · /remote/approvals · /remote/approve · /remote/reject · /remote/ · X-Hermus-Token · __HERMUS_GATEWAY_TOKEN</div>
+  </section>
+
+  <nav class="dock" aria-label="HERMUS systems">
+    <button data-open="System health" type="button"><span>◌</span>System</button>
+    <button data-open="Capabilities" type="button"><span>◇</span>Capabilities</button>
+    <button data-open="Dashboard state" type="button"><span>◈</span>State</button>
+    <button data-open="Models" type="button"><span>◎</span>Models</button>
+    <button data-open="Console manifest" type="button"><span>⌁</span>Console</button>
+    <button id="personalSpaceOpenDockLegacy" data-open="Personal Space" type="button"><span>✦</span>Personal Space</button>
+    <button data-open="Routines" type="button"><span>◒</span>Routines</button>
+    <button data-open="Devices" type="button"><span>◫</span>Devices</button>
+  </nav>
 
   <div id="workshop" class="workshop" aria-hidden="true">
     <header class="workshop-top">
@@ -177,9 +329,7 @@
       </aside>
     </div>
     <footer class="workshop-command">
-      <span class="command-prefix">›</span>
-      <input id="workshopCommand" autocomplete="off" placeholder="Work on this project with HERMUS…">
-      <button id="workshopSend" type="button">↗</button>
+      <span class="command-prefix">›</span><input id="workshopCommand" autocomplete="off" placeholder="Work on this project with HERMUS…"><button id="workshopSend" type="button">↗</button>
     </footer>
   </div>
 
@@ -191,6 +341,8 @@
     </section>
   </div>
 
+  <button id="workbenchRestore" class="workbench-restore" type="button" aria-label="Show workbench">◌ OPEN WORKBENCH</button>
+
   <div id="overlay" class="overlay" aria-hidden="true">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <header><div><span class="eyebrow">HERMUS</span><h2 id="modalTitle">System</h2></div><button data-close type="button">×</button></header>
@@ -198,10 +350,10 @@
     </section>
   </div>
 
-  <script src="/static/nexus-mock.js" defer></script>
   <script src="/static/nexus.js" defer></script>
   <script src="/static/console.js" defer></script>
   <script src="/static/personal-space.js" defer></script>
+  <script src="/static/jarvis-ui.js" defer></script>
   <script>
     function resolveBundle(payload={}) { return window.HermusNexus?.api('/permissions/bundles/resolve',{method:'POST',body:JSON.stringify(payload)}); }
     function approveRetry(id) { return window.HermusNexus?.api('/permissions/pending/resolve',{method:'POST',body:JSON.stringify({prompt_id:id,decision:'approve',retry:true})}); }
@@ -215,8 +367,8 @@
     function missionPreflight(payload={}) { return window.HermusNexus?.api('/missions/preflight',{method:'POST',body:JSON.stringify(payload)}); }
     function startMission(payload={}) { return window.HermusNexus?.api('/missions',{method:'POST',body:JSON.stringify(payload)}); }
     function createMissionPrompts(payload={}) { return window.HermusNexus?.api('/safety/preflight/approvals',{method:'POST',body:JSON.stringify(payload)}); }
-    function remoteAction(act,payload={}) { return window.HermusNexus?.api("/remote/" + act,{method:"POST",body:JSON.stringify(payload)}); }
-    function runComputerTask(task) { return window.HermusNexus?.api('/computer/run',{method:'POST',body: JSON.stringify({ task: task })}); }
+    function remoteAction(act,payload={}) { return window.HermusNexus?.api('/remote/' + act,{method:'POST',body:JSON.stringify(payload)}); }
+    function runComputerTask(task) { return window.HermusNexus?.api('/computer/run',{method:'POST',body:JSON.stringify({ task: task })}); }
     function setPill(selector,value) { const node=document.querySelector(selector); if(node) node.textContent=String(value ?? 0); }
     function refreshSafetyEvents() { return window.HermusNexus?.api('/safety/events?limit=80'); }
     function updateSafetyCore() { return Promise.all([window.HermusNexus?.api('/permissions/pending'),window.HermusNexus?.api('/safety/events?limit=80')]).then(([pending,events])=>{setPill("#pendingCount",pending?.count ?? pending?.pending?.length ?? 0);setPill("#blockedMissionCount",events?.blockedMissionCount ?? 0);return {pending,events};}); }
