@@ -699,7 +699,7 @@
         'llm_delta','llm_finished','tool_call','tool_result','tools_expanded','memory','skill',
         'skill_harvest_started','skill_created','subagent','approval_required','verification',
         'steer','steer_applied','steer_consumed','model_capability_warning','job_status',
-        'runtime_issue','run_error','mission_error','run_finished','mission_finished','log',
+        'runtime_issue','agent_response','run_error','mission_error','run_finished','mission_finished','log',
         'cancel_requested'
       ];
       for(const name of streamEvents){
