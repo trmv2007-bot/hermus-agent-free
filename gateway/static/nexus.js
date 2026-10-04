@@ -190,6 +190,7 @@
     'Routines': ['/routines'],
     'Focus': ['/focus'],
     'Learning': ['/learning'],
+    'Personal Space': ['/personal-space'],
   };
 
   // Canonical HERMUS action registry. These routes are backend capabilities;
@@ -437,6 +438,7 @@
   const PALETTE_ITEMS=[
     ['Focus','See what matters right now'],
     ['Learning','Inspect lessons, skills and episodes'],
+    ['Personal Space','Enter HERMUS private curiosity space'],
     ['Routines','View and manage proactive routines'],
     ['Devices','Inspect desktop, browser, remote and Android state'],
     ['Models','Inspect runtime-discovered model deployments'],
@@ -454,6 +456,10 @@
 
   const originalOpen = open;
   open = async function(name){
+    if(name === 'Personal Space' && window.HermusPersonalSpace){
+      window.HermusPersonalSpace.open();
+      return;
+    }
     if(name === 'Focus' || name === 'Learning'){
       try{
         const endpoint=name==='Focus' ? '/focus' : '/learning?limit=6';
