@@ -126,6 +126,8 @@ Remaining deployment validation includes real worker nodes, provider authenticat
 
 See `docs/PRODUCTION_AND_REAL_WORLD_INTEGRATION.md` and `docs/PHASE_18_RELIABILITY_RECOVERY.md`.
 
+The Nexus Control Room also includes a discovery-driven **JARVIS × FAIRY model environment**: models are discovered from configured runtimes, selected by role or Auto mode, validated through the canonical ModelGateway, and never hardcoded into the dashboard. See `docs/JARVIS_FAIRY_ENVIRONMENT_SPEC.md`.
+
 ---
 
 ## ✨ Features
