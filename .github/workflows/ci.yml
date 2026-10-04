@@ -155,6 +155,36 @@ jobs:
           await page.locator('#paletteList button').first().click();
           await page.locator('#overlay [data-close]').click();
 
+          console.log('QA: structured product surfaces');
+          for (const name of ['System health','Capabilities','Agents','Focus','Learning','Devices','Dashboard state']) {
+            await page.locator('[data-open="'+name+'"]:visible').first().click().catch(()=>{});
+            await page.waitForTimeout(120);
+            if (!(await page.locator('#overlay').evaluate(el=>el.classList.contains('open')))) throw new Error('Surface failed to open: '+name);
+            if (await page.locator('#surfaceView .surface-loading').count() && await page.locator('#surfaceView .surface-loading').first().isVisible()) throw new Error('Surface stuck loading: '+name);
+            if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in '+name);
+            await page.screenshot({path:out+'/surface-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.png',fullPage:false});
+            await page.locator('#overlay [data-close]').click();
+          }
+
+          await page.locator('[data-open="Models"]:visible').first().click();
+          await page.waitForTimeout(250);
+          if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in Models');
+          await page.locator('#surfaceModelRole').selectOption('vision');
+          await page.locator('#surfaceModelSelect').selectOption('local/vision-demo');
+          await page.locator('[data-surface-action="models-save"]').click();
+          await page.locator('#overlay [data-close]').click();
+
+          await page.locator('[data-open="Routines"]:visible').first().click();
+          await page.waitForTimeout(250);
+          if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in Missions & Automation');
+          await page.locator('[data-surface-action="routine-new"]').click();
+          await page.locator('#routineName').fill('QA routine');
+          await page.locator('#routineEvent').fill('schedule');
+          await page.locator('#routineTask').fill('Review workspace');
+          await page.locator('[data-surface-action="routine-validate"]').click();
+          if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in routine validation');
+          await page.locator('#overlay [data-close]').click();
+
           console.log('QA: workbench slides');
           for(const v of ['chat','ide','browser','terminal','image','video','notes']){
             await page.locator('[data-workbench-tab="'+v+'"]').click();
@@ -200,6 +230,24 @@ jobs:
           await page.locator('#workshopCommand').fill('Review workspace');
           await page.locator('#workshopSend').click();
           await page.locator('#workshop').waitFor({state:'hidden'});
+
+          console.log('QA: tool workspaces');
+          await page.locator('[data-workbench-target="browser"]').click();
+          await page.locator('#browserUrl').fill('https://example.com');
+          await page.locator('#browserOpen').click();
+          await page.locator('[data-workbench-target="terminal"]').click();
+          await page.locator('#terminalCommand').fill('echo QA');
+          await page.locator('#terminalRun').click();
+          await page.locator('[data-workbench-target="image"]').click();
+          await page.locator('#imagePrompt').fill('QA concept');
+          await page.locator('#imageRun').click();
+          await page.locator('[data-workbench-target="video"]').click();
+          await page.locator('#videoPrompt').fill('QA shot');
+          await page.locator('#videoRun').click();
+          await page.locator('[data-workbench-target="notes"]').click();
+          await page.locator('#noteContent').fill('QA note');
+          await page.locator('#noteSave').click();
+          await page.locator('[data-workbench-target="chat"]').click();
 
           console.log('QA: workbench hide/restore and chat');
           await page.locator('[data-workbench-tab="chat"]').click();
