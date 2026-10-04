@@ -95,7 +95,7 @@
   async function wizardCheck() {
     const endpoints=[
       ['ready','/readyz'],['health','/api/v1/system/health'],['providers','/providers/available'],
-      ['models','/models/catalog'],['workspace','/workspace'],['voice','/speech/status'],['computer','/computer/status']
+      ['models','/models/catalog?probe=true&refresh=true'],['workspace','/workspace'],['voice','/speech/status'],['computer','/computer/status']
     ];
     const vals=await Promise.all(endpoints.map(async([k,u])=>[k,await safe(u)]));
     wizard.data.check=Object.fromEntries(vals);
@@ -503,6 +503,7 @@
       const reachable = m.reachable !== false;
       const status = !reachable ? 'OFFLINE' : live ? 'LIVE' : 'CACHED';
       const statusKind = !reachable ? 'bad' : live ? 'good' : '';
+      const selectedForRole = (state.selectedModels[qs('#modelRoleInput')?.value || 'default'] || 'auto') === m.ref;
       return '<article class="model-card">' +
         '<div class="model-top"><div>' +
         '<div class="model-name">' + esc(m.name || m.id || m.ref) + '</div>' +
@@ -513,7 +514,9 @@
           'Tools: ' + esc(m.capabilities?.tools || 'unknown') +
           ' · Vision: ' + esc(m.capabilities?.vision || 'unknown') +
           ' · Context: ' + esc(m.context_length || m.context || 'unknown') +
-        '</div></article>';
+        '</div><div class="actions" style="margin-top:12px">' +
+        '<button class="btn '+(selectedForRole?'':'primary')+'" type="button" data-model-pick="'+esc(m.ref)+'">'+
+        (selectedForRole?'SELECTED FOR ROLE':'SELECT FOR ROLE')+'</button></div></article>';
     }).join('');
 
     host.innerHTML = '<div class="model-grid">' +
@@ -1078,6 +1081,12 @@
     if(e.target.closest('[data-agent-new]')){openView('agents');setTimeout(()=>qs('#agentName')?.focus(),0);return;}
     if(e.target.closest('[data-agent-create]')){await createAgent();return;}
     if(e.target.closest('[data-model-save]')){await saveModel();return;}
+    if(e.target.closest('[data-model-pick]')){
+      const ref=e.target.closest('[data-model-pick]').dataset.modelPick;
+      const deployment=qs('#modelDeploymentInput');
+      if(deployment){deployment.value=ref;await saveModel();}
+      return;
+    }
     if(e.target.closest('[data-model-refresh]')){await loadModels({refresh:true,probe:true});toast('Models refreshed');return;}
     if(e.target.closest('[data-model-settings-sync]')){await loadSettings();toast('Model health synced');return;}
     if(e.target.closest('[data-tool-use]')){const n=e.target.closest('[data-tool-use]').dataset.toolUse;openView('chat');setTimeout(()=>sendCommand('Use the "'+n+'" tool for the current task.'),0);return;}
