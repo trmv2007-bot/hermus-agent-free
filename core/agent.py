@@ -37,13 +37,25 @@ class HermusAgent:
         api_key: str = None,
         base_url: str = None,
     ):
-        self.model_name = model or config.model
         self._model_pinned = model is not None
         from .models import get_model_gateway
 
-        # The canonical ModelGateway is the ONLY place a model client is built;
-        # it returns the concrete FreeLLM provider-call implementation.
-        self.llm = get_model_gateway().llm(model=self.model_name, api_key=api_key, base_url=base_url)
+        # Resolve an omitted model through the canonical runtime catalog and
+        # persisted dashboard preference. Config.model remains only a final
+        # bootstrap fallback when discovery is temporarily empty.
+        gateway = get_model_gateway()
+        if model:
+            self.model_name = model
+        else:
+            selected_provider, selected_model = gateway.resolve_model("default")
+            self.model_name = (
+                f"{selected_provider}/{selected_model}"
+                if selected_provider and selected_model
+                else config.model
+            )
+
+        # The canonical ModelGateway is the ONLY place a model client is built.
+        self.llm = gateway.llm(model=self.model_name, api_key=api_key, base_url=base_url)
         self.session_id = session_id or (f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}")
         self.trajectory: list[dict] = []
         self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
