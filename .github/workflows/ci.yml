@@ -189,7 +189,8 @@ jobs:
           await browser.close();
           if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
           EOF
-          node /tmp/jarvis-ui-qa.mjs
+          cp /tmp/jarvis-ui-qa.mjs ./jarvis-ui-qa.mjs
+          node ./jarvis-ui-qa.mjs
       - name: Upload JARVIS visual QA
         if: always()
         uses: actions/upload-artifact@v4
