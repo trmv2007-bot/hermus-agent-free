@@ -143,6 +143,14 @@
     </footer>
   </div>
 
+  <div id="palette" class="palette" aria-hidden="true">
+    <section class="palette-box" role="dialog" aria-modal="true" aria-labelledby="paletteTitle">
+      <div class="palette-head"><span id="paletteTitle">HERMUS COMMAND</span><button id="paletteClose" type="button">×</button></div>
+      <input id="paletteInput" autocomplete="off" placeholder="Search a HERMUS surface or action…" aria-label="Search HERMUS commands">
+      <div id="paletteList" class="palette-list"></div>
+    </section>
+  </div>
+
   <div id="overlay" class="overlay" aria-hidden="true">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <header><div><span class="eyebrow">HERMUS</span><h2 id="modalTitle">System</h2></div><button data-close type="button">×</button></header>
