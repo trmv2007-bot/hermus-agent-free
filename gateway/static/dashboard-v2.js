@@ -453,9 +453,9 @@
     } catch(e){qs('#agentCreateResult').textContent='Create failed · '+e.message;toast(e.message,true);}
   }
 
-  async function loadModels() {
+  async function loadModels({refresh=false,probe=false}={}) {
     const [cat, sel] = await Promise.all([
-      safe('/models/catalog?probe=false&refresh=false'),
+      safe('/models/catalog?probe='+String(!!probe)+'&refresh='+String(!!refresh)),
       safe('/models/selected')
     ]);
     state.modelCatalog = Array.isArray(cat?.models) ? cat.models : [];
@@ -959,13 +959,20 @@
     try{
       const out=await api('/keys/add',{method:'POST',body:JSON.stringify({provider,key:key||'',base_url:base_url||undefined,model:model||undefined,auto_discover:true})});
       qs('#keyResult').textContent=out.success===false?'Add failed · '+(out.error||'unknown'):'Provider key saved and discovery requested.';
-      qs('#keyValue').value='';toast('Provider saved');await loadSettings();
+      qs('#keyValue').value='';
+      toast('Provider saved');
+      await loadSettings();
+      await loadModels({refresh:true,probe:true});
     }catch(e){qs('#keyResult').textContent='Add failed · '+e.message;toast(e.message,true);}
   }
   async function removeKey(provider,id) {
     if(state.settings.confirm!==false && !confirm('Remove the configured '+provider+' credential "'+id+'"?'))return;
-    try{await api('/keys/remove',{method:'POST',body:JSON.stringify({provider,key:id,name:id})});toast('Provider removed');await loadSettings();}
-    catch(e){toast(e.message,true);}
+    try{
+      await api('/keys/remove',{method:'POST',body:JSON.stringify({provider,key:id,name:id})});
+      toast('Provider removed');
+      await loadSettings();
+      await loadModels({refresh:true,probe:false});
+    }catch(e){toast(e.message,true);}
   }
 
   function setSetting(name) {
@@ -1071,7 +1078,7 @@
     if(e.target.closest('[data-agent-new]')){openView('agents');setTimeout(()=>qs('#agentName')?.focus(),0);return;}
     if(e.target.closest('[data-agent-create]')){await createAgent();return;}
     if(e.target.closest('[data-model-save]')){await saveModel();return;}
-    if(e.target.closest('[data-model-refresh]')){await loadModels();toast('Models refreshed');return;}
+    if(e.target.closest('[data-model-refresh]')){await loadModels({refresh:true,probe:true});toast('Models refreshed');return;}
     if(e.target.closest('[data-model-settings-sync]')){await loadSettings();toast('Model health synced');return;}
     if(e.target.closest('[data-tool-use]')){const n=e.target.closest('[data-tool-use]').dataset.toolUse;openView('chat');setTimeout(()=>sendCommand('Use the "'+n+'" tool for the current task.'),0);return;}
     if(e.target.closest('[data-mission-new]')){openView('missions');setTimeout(()=>qs('#missionGoal')?.focus(),0);return;}
