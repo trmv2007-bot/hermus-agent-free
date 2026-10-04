@@ -182,3 +182,8 @@ than more hardcoded model lists:
 
 These follow-on items remain subordinate to the existing approval, red-line,
 sandbox, verification and emergency-stop controls.
+
+
+## Research-driven environment layer
+
+The HERMUS Nexus/Control Room now follows a FAIRY × JARVIS interaction target: proactive attention, operational context, mission visibility, safety state, and dynamic model selection in one environment. Model deployments are discovered from configured runtimes and capability evidence rather than hardcoded into the dashboard. See `docs/FAIRY_JARVIS_CONTROL_ENVIRONMENT.md`.
