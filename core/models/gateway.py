@@ -913,7 +913,10 @@ class ModelGateway:
                     "success_rate": round(metric["successes"] / calls, 4),
                     "avg_latency_ms": round(metric["latency_ms_total"] / calls, 1),
                 }
-            return {"providers": {p: dict(v) for p, v in self._circuit.items()}, "models": models}
+            providers = {p: dict(v) for p, v in self._circuit.items()}
+            # Keep canonical nested telemetry while exposing provider keys at the
+            # top level for older callers that consumed health()["provider"].
+            return {"providers": providers, "models": models, **providers}
 
 
 _gateway: ModelGateway | None = None
