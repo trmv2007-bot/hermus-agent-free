@@ -138,6 +138,81 @@ class ModelGateway:
         """Raw credential bundles available to the runtime."""
         return self._resolver_mod().discover_runtime_bundles(include_local=True)
 
+    def catalog(self, *, probe: bool = false, refresh: bool = false) -> dict[str, Any]:
+        """Return the secret-free runtime model catalog used by the UI."""
+        from .model_catalog import model_catalog
+
+        return model_catalog.list(probe=probe, refresh=refresh)
+
+    def selected_models(self) -> dict[str, Any]:
+        """Return persisted role selections without exposing credentials."""
+        from ..model_preferences import model_preferences
+
+        return model_preferences.snapshot()
+
+    def select_preference(self, role: str, model: str | None, *, validate: bool = true) -> dict[str, Any]:
+        """Persist a user-selected model after canonical catalog validation."""
+        from ..model_preferences import model_preferences
+
+        result = model_preferences.set(role, model, validate=validate)
+        return {**result, "catalog": self.catalog(probe=false)}
+
+    def resolve_model(self, role: str = "default", *, required: list[str] | None = None, provider: str | None = None) -> tuple[str | None, str | None]:
+        """Resolve a persisted model or dynamically choose a catalog deployment."""
+        from ..model_preferences import model_preferences
+
+        preferred = model_preferences.get(role)
+        rows = list(self.catalog(probe=false).get("models") or [])
+
+        def split(ref: str) -> tuple[str, str]:
+            p, _, name = str(ref).partition("/")
+            return p, name
+
+        if preferred:
+            p, name = split(preferred)
+            if p and name and (provider is None or p == provider):
+                row = next((r for r in rows if r.get("ref") == preferred), None)
+                caps = (row or {}).get("capabilities") or {}
+                if row is not None and not any(caps.get(req) == "no" for req in (required or [])):
+                    return p, name
+
+        candidates = []
+        for row in rows:
+            p = str(row.get("provider") or "")
+            if provider and p != provider:
+                continue
+            caps = row.get("capabilities") or {}
+            if any(caps.get(req) == "no" for req in (required or [])):
+                continue
+            if row.get("reachable") is False:
+                continue
+            candidates.append(row)
+
+        if required:
+            exact = [r for r in candidates if all((r.get("capabilities") or {}).get(req) == "yes" for req in required)]
+            if exact:
+                candidates = exact
+
+        if candidates:
+            candidates.sort(key=lambda r: (
+                0 if r.get("source") == "live" else 1,
+                -sum(1 for v in (r.get("capabilities") or {}).values() if v == "yes"),
+                str(r.get("provider") or ""),
+                str(r.get("id") or ""),
+            ))
+            p, name = split(str(candidates[0].get("ref") or ""))
+            if p and name:
+                return p, name
+
+        from ..config import config
+        configured = str(getattr(config, "model", "") or "")
+        if configured:
+            p, name = split(configured)
+            if p and name and (provider is None or p == provider):
+                return p, name
+        return None, None
+
+
     # --------------------------------------------------------------------------
     def select(self, req: ModelRequirement) -> list[ModelSelection]:
         """Score and return ranked candidate model selections for a requirement.
