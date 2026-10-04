@@ -7,7 +7,23 @@
   <title>HERMUS — Nexus</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/nexus.css">
-  <style>.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}</style>
+  <style>
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.personal-space-surface{grid-column:span 2;min-height:126px}
+.personal-space-copy{display:flex;flex-direction:column;gap:4px;margin-top:13px}
+.personal-space-copy strong{font-size:13px;font-weight:500;color:#c7d8e6}
+.personal-space-copy small{font-size:9px;color:#657b90}
+.personal-space-proposal{margin-top:10px;min-height:30px;padding:8px 10px;border:1px solid rgba(103,232,255,.08);border-radius:10px;background:rgba(103,232,255,.02);color:#8ea3b8;font-size:8px;line-height:1.45}
+.personal-space-proposal strong{display:block;color:#b9cbd9;font-size:9px;margin-bottom:3px}
+.personal-space-proposal small{display:block;color:#667c91}
+.personal-space-open{margin-top:9px;border:1px solid rgba(103,232,255,.18);background:rgba(103,232,255,.07);color:var(--cyan);border-radius:9px;padding:7px 10px;cursor:pointer;font-size:8px;letter-spacing:.13em}
+.personal-space-open:hover{background:rgba(103,232,255,.14)}
+.personal-space-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.personal-space-action{border:1px solid var(--line);background:rgba(255,255,255,.025);color:#8ca1b5;border-radius:9px;padding:8px 11px;cursor:pointer;font-size:8px;letter-spacing:.1em}
+.personal-space-action:hover{color:var(--ink);border-color:rgba(103,232,255,.35)}
+.personal-space-action.primary{color:var(--cyan);border-color:rgba(103,232,255,.22);background:rgba(103,232,255,.08)}
+@media(max-width:900px){.personal-space-surface{grid-column:1/-1}}
+</style>
 </head>
 <body>
   <div class="space" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
@@ -88,6 +104,14 @@
         <div class="surface-head"><span>FAIRY ATTENTION</span><b id="attentionStatus">LIVE</b></div>
         <div id="attention" class="attention-list"><div class="empty-event">Reading your operational context…</div></div>
       </article>
+
+      <article class="surface personal-space-surface" id="personalSpaceSurface">
+        <div class="surface-head"><span>PERSONAL SPACE</span><b id="personalSpaceStatus">WAITING</b></div>
+        <div class="personal-space-copy"><strong id="personalSpaceHeadline">HERMUS has its own time.</strong><small id="personalSpaceDetail">Giving you space and waiting for a useful curiosity.</small></div>
+        <div id="personalSpaceProposal" class="personal-space-proposal"><span>No proposal waiting for you.</span></div>
+        <button id="personalSpaceOpen" class="personal-space-open" type="button">ENTER PERSONAL SPACE</button>
+      </article>
+
     </section>
 
     <div class="sr-only" role="tablist" aria-label="HERMUS contextual surfaces">
@@ -108,7 +132,7 @@
       <button data-open="Capabilities" type="button"><span>◇</span>Capabilities</button>
       <button data-open="Dashboard state" type="button"><span>◈</span>State</button>
       <button data-open="Models" type="button"><span>◎</span>Models</button>
-      <button data-open="Console manifest" type="button"><span>⌁</span>Console</button><button data-open="Routines" type="button"><span>◒</span>Routines</button><button data-open="Devices" type="button"><span>◫</span>Devices</button>
+      <button data-open="Console manifest" type="button"><span>⌁</span>Console</button><button id="personalSpaceOpenDock" type="button"><span>✦</span>Personal Space</button><button data-open="Routines" type="button"><span>◒</span>Routines</button><button data-open="Devices" type="button"><span>◫</span>Devices</button>
     </nav>
   </main>
 
@@ -159,5 +183,6 @@
   </div>
 
   <script src="/static/nexus.js" defer></script>
+  <script src="/static/personal-space.js" defer></script>
 </body>
 </html>
