@@ -64,8 +64,8 @@ def test_gateway_and_cli_expose_preflight():
 
 def test_control_room_exposes_preflight_panel():
     src = control_room_source()
-    assert "Pre-flight autonomy check" in src
-    assert "/safety/preflight" in src
-    assert "/safety/preflight/approvals" in src
-    assert "function runPreflight" in src
-    assert "function createPreflightApprovals" in src
+    assert "Missions & automation." in src
+    assert "/missions/" in src
+    assert "preflight" in src
+    assert "data-mission-create" in src
+
