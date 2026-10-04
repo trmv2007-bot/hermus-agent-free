@@ -73,10 +73,14 @@ jobs:
           page.setDefaultTimeout(3500);
           await context.addInitScript(() => { window.confirm = () => true; window.alert = () => {}; });
           const json=(x)=>({status:200,contentType:'application/json',body:JSON.stringify(x)});
+          let lastJobPayload=null;
           const mockRoute=async route=>{
             const u=new URL(route.request().url()),p=u.pathname,m=route.request().method();
             if(p==='/control.html' || p.startsWith('/static/')) return route.continue();
-            if(m==='POST' && p==='/jobs') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run'}));
+            if(m==='POST' && p==='/jobs'){
+              try{lastJobPayload=JSON.parse(route.request().postData()||'{}')}catch{}
+              return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run'}));
+            }
             if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run',id:'qa-id',task_id:'qa-task'}));
             if(p==='/runs/qa-run') return route.fulfill(json({
               status:'finished',finished:true,
@@ -171,6 +175,16 @@ jobs:
           await page.locator('[data-wizard-next]').click();
           if(await page.locator('#setupWizard').evaluate(el=>el.classList.contains('open'))) throw new Error('Wizard did not close on finish');
 
+          // Chat settings: model selection and font size are real persistent controls.
+          await page.locator('[data-view="settings"]').first().click();
+          await page.locator('[data-settings-tab="chat"]').click();
+          if(!(await page.locator('#chatModelSelect').count())) throw new Error('Chat model selector missing');
+          if(!(await page.locator('#chatFontSizeRange').count())) throw new Error('Chat font size control missing');
+          await page.locator('#chatModelSelect').selectOption('local/qwen3:4b');
+          await page.locator('#chatFontSizeRange').fill('12');
+          if(await page.locator('#chatFontSizeValue').textContent()!=='12 PX') throw new Error('Chat font size did not update');
+          if(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--chat-font-size').trim())!=='12px') throw new Error('Chat font CSS variable not applied');
+
           // The top command input is a real command form, not a palette trigger.
           await page.locator('#commandbarInput').click();
           if(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))) throw new Error('Command input click opened palette');
@@ -183,6 +197,7 @@ jobs:
           if(!activityTexts.some(t=>t.includes('Running terminal'))) throw new Error('Live tool activity missing');
           if(!activityTexts.some(t=>t.includes('Checking the result'))) throw new Error('Verification activity missing');
           if(!(await page.locator('.msg-text').filter({hasText:'QA run complete.'}).count())) throw new Error('Final assistant response missing');
+          if(lastJobPayload?.payload?.model!=='local/qwen3:4b') throw new Error('Chat model selection was not sent with the job');
 
           await page.locator('#commandFocus').click();
           if(!(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open')))) throw new Error('Command palette button failed');
