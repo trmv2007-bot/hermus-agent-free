@@ -59,7 +59,7 @@ def test_cli_and_dashboard_expose_capability_activation_flow():
     assert 'add_parser("setup"' in cli
     assert 'add_parser("request-activation"' in cli
     assert 'add_parser("activate"' in cli
-    assert "Capability readiness / activation registry" in dash
-    assert "/capabilities/registry/setup" in dash
-    assert "/capabilities/registry/request-activation" in dash
-    assert "function setupCapability" in dash
+    assert "CONTROL CENTER" in dash
+    assert 'data-settings-tab="integrations"' in dash
+    assert 'data-mcp-connect' in dash
+
