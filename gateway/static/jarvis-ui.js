@@ -119,6 +119,15 @@
     flash((collapsed ? "Collapsed · " : "Expanded · ") + "3D Environment");
   }
 
+  document.addEventListener("keydown", event => {
+    const trigger = event.target.closest?.("#globalSearch[role='button']");
+    if (!trigger) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true }));
+    }
+  }, true);
+
   document.addEventListener("click", event => {
     const target = event.target.closest?.("button, [role='button'], .orb-action");
     if (target && target.dataset.command == null && !target.matches("[data-open]")) pulse(target);
