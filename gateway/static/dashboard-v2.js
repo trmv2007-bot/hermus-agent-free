@@ -875,7 +875,7 @@
       const p=d.providers,k=d.keys;
       html='<div class="grid cols-2"><div class="card"><div class="card-head"><div><strong>PROVIDERS</strong><small>Known vs configured vs usable.</small></div><button class="btn" type="button" data-provider-refresh>SYNC</button></div><div class="card-body list">'+
         (Array.isArray(p?.providers)?p.providers.map(x=>rowValue(x.name||x.id||x.provider||'Provider',valueSummary(x.usable??x.available??x.configured??x.ok),'provider state')).join(''):'<div class="empty">'+esc(errText(p)||'No providers returned.')+'</div>')+
-        '</div></div><div class="card"><div class="card-head"><div><strong>API KEYS</strong><small>Only redacted previews are displayed.</small></div><button class="btn primary" type="button" data-key-auto>DISCOVER FREE</button></div><div class="card-body">'+renderKeyGroups(k?.llm_keys)+'</div></div></div>'+
+        '</div></div><div class="card"><div class="card-head"><div><strong>API KEYS</strong><small>Test credentials and filter the working ones before using them for routing.</small></div><button class="btn primary" type="button" data-key-auto>DISCOVER FREE</button></div><div class="card-body" id="apiKeysHost">'+renderKeyGroups(k?.llm_keys)+'</div></div></div>'+
         '<div class="card form-card" style="margin-top:12px"><div class="card-head"><div><strong>ADD PROVIDER KEY</strong><small>Stored by the canonical multi-key manager; key material is never echoed back into the UI.</small></div></div><div class="card-body"><div class="form-grid"><label class="field">PROVIDER<input id="keyProvider" placeholder="ollama / groq / openai-compatible"></label><label class="field">API KEY<input id="keyValue" type="password" placeholder="••••••••"></label><label class="field">BASE URL<input id="keyBaseUrl" placeholder="http://127.0.0.1:11434"></label><label class="field">DEFAULT MODEL<input id="keyModel" placeholder="optional"></label></div><div class="actions"><button class="btn primary" type="button" data-key-add>ADD KEY</button></div><div id="keyResult" class="result">Not submitted.</div></div></div>';
     } else if(tab==='agents'){
       html='<div class="grid cols-3">'+stat('REGISTERED',String(Array.isArray(d.agents?.agents)?d.agents.agents.length:state.agents.length),'agent manager')+
@@ -992,15 +992,58 @@
   }
   function renderKeyGroups(groups) {
     if(!groups||failed(groups)) return '<div class="empty">'+esc(errText(groups)||'No provider keys configured.')+'</div>';
-    const entries=Object.entries(groups);
+    const entries=Object.entries(groups).filter(([,list])=>(Array.isArray(list)?list:[list]).length);
     if(!entries.length) return '<div class="empty">No API keys configured.</div>';
-    return '<div class="list">'+entries.map(([provider,list])=>{
+
+    const rows=[];
+    for(const [provider,list] of entries){
       const arr=Array.isArray(list)?list:[list];
-      return '<div class="key-group"><div class="eyebrow">'+esc(provider)+'</div>'+arr.map(k=>{
-        const id=k?.name||k?.id||k?.key||'key'; const preview=k?.preview||k?.key_preview||'configured';
-        return '<div class="row"><div class="row-main"><strong>'+esc(id)+'</strong><small>'+esc(preview)+'</small></div><button class="btn danger" type="button" data-key-remove="'+esc(id)+'" data-key-provider="'+esc(provider)+'">REMOVE</button></div>';
-      }).join('')+'</div>';
-    }).join('')+'</div>';
+      for(const k of arr){
+        const id=k?.name||k?.id||k?.key||'key';
+        const preview=k?.preview||k?.key_preview||'configured';
+        const health=String(k?.health_status||'').toLowerCase();
+        const working=k?.healthy===true||health==='healthy'||health==='ok'||health==='working';
+        const failedKey=k?.healthy===false||['failed','auth_failed','rate_limited','unhealthy'].includes(health);
+        const state=working?'working':failedKey?'failed':'untested';
+        rows.push({provider,k,id,preview,state});
+      }
+    }
+
+    return '<div class="key-toolbar">'+
+      '<label class="field grow">FILTER API KEYS<select id="keyStatusFilter" aria-label="Filter API keys">'+
+      '<option value="all">ALL · '+rows.length+'</option>'+
+      '<option value="working">WORKING · '+rows.filter(x=>x.state==='working').length+'</option>'+
+      '<option value="failed">NOT WORKING · '+rows.filter(x=>x.state==='failed').length+'</option>'+
+      '<option value="untested">UNTESTED · '+rows.filter(x=>x.state==='untested').length+'</option>'+
+      '</select></label>'+
+      '<button class="btn primary" type="button" data-key-test-all>TEST ALL KEYS</button>'+
+      '</div>'+
+      '<div id="keyGroupsHost">'+renderFilteredKeyGroups(rows,'all')+'</div>';
+  }
+
+  function renderFilteredKeyGroups(rows,filter) {
+    const selected=filter||qs('#keyStatusFilter')?.value||'all';
+    const visible=rows.filter(x=>selected==='all'||x.state===selected);
+    if(!visible.length) return '<div class="empty">No API keys match this filter.</div>';
+    const grouped=new Map();
+    for(const x of visible){
+      if(!grouped.has(x.provider)) grouped.set(x.provider,[]);
+      grouped.get(x.provider).push(x);
+    }
+    return '<div class="list">'+[...grouped.entries()].map(([provider,items])=>
+      '<div class="key-group"><div class="eyebrow">'+esc(provider)+' · '+items.length+'</div>'+
+      items.map(({k,id,preview,state})=>{
+        const statusLabel=state==='working'?'WORKING':state==='failed'?'NOT WORKING':'UNTESTED';
+        const statusKind=state==='working'?'good':state==='failed'?'bad':'warn';
+        const meta=[preview,k?.default_model?'model · '+k.default_model:'',k?.models_count!=null?k.models_count+' models':''].filter(Boolean).join(' · ');
+        return '<div class="row key-row" data-key-state="'+state+'">'+
+          '<div class="row-main"><strong>'+esc(id)+'</strong><small>'+esc(meta||'credential stored')+'</small></div>'+
+          badge(statusLabel,statusKind)+
+          '<div class="row-actions"><button class="btn" type="button" data-key-test data-key-provider="'+esc(provider)+'" data-key-name="'+esc(id)+'">TEST</button>'+
+          '<button class="btn danger" type="button" data-key-remove="'+esc(id)+'" data-key-provider="'+esc(provider)+'">REMOVE</button>'+
+          '<span class="compact-result" data-key-result="'+esc(provider)+'/'+esc(id)+'"></span></div></div>';
+      }).join('')+'</div>'
+    ).join('')+'</div>';
   }
 
   async function loadSettings() {
@@ -1031,6 +1074,57 @@
       await loadModels({refresh:true,probe:true});
     }catch(e){qs('#keyResult').textContent='Add failed · '+e.message;toast(e.message,true);}
   }
+  function renderKeyGroupsFilteredFromPayload(groups,filter='all'){
+    if(!groups||failed(groups)) return '<div class="empty">'+esc(errText(groups)||'No API keys configured.')+'</div>';
+    const rows=[];
+    for(const [provider,list] of Object.entries(groups)){
+      for(const k of (Array.isArray(list)?list:[list])){
+        const id=k?.name||k?.id||k?.key||'key';
+        const health=String(k?.health_status||'').toLowerCase();
+        const working=k?.healthy===true||health==='healthy'||health==='ok'||health==='working';
+        const failedKey=k?.healthy===false||['failed','auth_failed','rate_limited','unhealthy'].includes(health);
+        rows.push({provider,k,id,preview:k?.preview||k?.key_preview||'configured',state:working?'working':failedKey?'failed':'untested'});
+      }
+    }
+    return renderFilteredKeyGroups(rows,filter);
+  }
+
+  async function testStoredKey(button){
+    const provider=button.dataset.keyProvider||'',name=button.dataset.keyName||'';
+    const resultNode=qs('[data-key-result="'+CSS.escape(provider+'/'+name)+'"]');
+    button.disabled=true;
+    button.textContent='TESTING…';
+    if(resultNode) resultNode.textContent='testing…';
+    try{
+      const d=await api('/keys/test',{method:'POST',body:JSON.stringify({provider,name})});
+      if(d.working){
+        toast(provider+'/'+name+' is working');
+      }else{
+        toast(provider+'/'+name+' is not working',true);
+      }
+      await loadSettings();
+      const host=qs('#apiKeysHost');
+      const filter=qs('#keyStatusFilter')?.value||'all';
+      const groups=state.settingsData.keys?.llm_keys;
+      if(host&&groups) host.innerHTML=renderKeyGroupsFilteredFromPayload(groups,filter);
+    }catch(e){
+      toast('API key test failed · '+e.message,true);
+      button.disabled=false;
+      button.textContent='TEST';
+      if(resultNode) resultNode.textContent=e.message;
+    }
+  }
+
+  async function testAllStoredKeys(){
+    const buttons=qsa('[data-key-test]');
+    if(!buttons.length){toast('No stored API keys to test',true);return;}
+    buttons.forEach(b=>{b.disabled=true;b.textContent='TESTING…';});
+    for(const b of buttons.slice()){
+      await testStoredKey(b);
+    }
+    toast('API key test pass complete');
+  }
+
   async function removeKey(provider,id) {
     if(state.settings.confirm!==false && !confirm('Remove the configured '+provider+' credential "'+id+'"?'))return;
     try{
@@ -1189,6 +1283,24 @@
     if(e.target.closest('[data-setting]')){setSetting(e.target.closest('[data-setting]').dataset.setting);return;}
     if(e.target.closest('[data-settings-refresh]')||e.target.closest('[data-provider-refresh]')||e.target.closest('[data-safety-refresh]')||e.target.closest('[data-workspace-refresh]')){await loadSettings();return;}
     if(e.target.closest('[data-key-add]')){await createKey();return;}
+    if(e.target.closest('#keyStatusFilter')){
+      const select=e.target.closest('#keyStatusFilter');
+      const host=qs('#apiKeysHost');
+      const root=select?.closest('.card-body');
+      if(host&&root){
+        const groups=state.settingsData.keys?.llm_keys;
+        if(groups) host.innerHTML=renderKeyGroupsFilteredFromPayload(groups,select.value);
+      }
+      return;
+    }
+    if(e.target.closest('[data-key-test]')){
+      await testStoredKey(e.target.closest('[data-key-test]'));
+      return;
+    }
+    if(e.target.closest('[data-key-test-all]')){
+      await testAllStoredKeys();
+      return;
+    }
     if(e.target.closest('[data-key-auto]')){try{await api('/keys/auto-provision-free',{method:'POST',body:'{}'});toast('Free provider discovery started');loadSettings()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-key-remove]')){await removeKey(e.target.closest('[data-key-remove]').dataset.keyProvider,e.target.closest('[data-key-remove]').dataset.keyRemove);return;}
     if(e.target.closest('[data-approval]')){const b=e.target.closest('[data-approval]');try{await api('/permissions/pending/resolve',{method:'POST',body:JSON.stringify({id:b.dataset.approval,decision:b.dataset.decision,retry:b.dataset.decision==='approve'})});toast('Approval '+b.dataset.decision+'d');loadSettings()}catch(err){toast(err.message,true)}return;}
