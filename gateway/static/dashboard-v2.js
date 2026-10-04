@@ -664,6 +664,43 @@
     host.innerHTML=html||'<div class="empty">Section unavailable.</div>';
   }
 
+  function initSettingsA11y() {
+    const tablist=qs('#settingsTabs'), panel=qs('#settingsHost'), search=qs('#settingsSearch');
+    if(tablist) tablist.setAttribute('role','tablist');
+    qsa('[data-settings-tab]').forEach((b,i)=>{
+      b.setAttribute('role','tab');
+      b.setAttribute('aria-controls','settingsHost');
+      b.setAttribute('aria-selected',i===0?'true':'false');
+      b.setAttribute('tabindex',i===0?'0':'-1');
+      b.addEventListener('keydown',e=>{
+        if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+        e.preventDefault();
+        const tabs=qsa('[data-settings-tab]');
+        const idx=tabs.indexOf(b);
+        const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(idx+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+        tabs[next].focus();
+      });
+    });
+    if(panel){panel.setAttribute('role','tabpanel');panel.setAttribute('tabindex','-1');}
+    if(search) search.addEventListener('input',()=>{
+      const q=search.value.trim().toLowerCase();
+      qsa('[data-settings-tab]').forEach(b=>{
+        const ok=!q||b.textContent.toLowerCase().includes(q);
+        b.hidden=!ok;
+      });
+    });
+  }
+
+  function trapPaletteFocus(e) {
+    const p=qs('#commandPalette');
+    if(!p?.classList.contains('open')||e.key!=='Tab') return;
+    const focusables=qsa('button,input,[href],[tabindex]:not([tabindex="-1"])',p).filter(x=>!x.disabled&&!x.hidden&&x.offsetParent!==null);
+    if(!focusables.length) return;
+    const first=focusables[0],last=focusables[focusables.length-1];
+    if(e.shiftKey && document.activeElement===first){e.preventDefault();last.focus();}
+    else if(!e.shiftKey && document.activeElement===last){e.preventDefault();first.focus();}
+  }
+
   function settingRow(title, desc, key, enabled) {
     return '<div class="row"><div class="row-main"><strong>'+esc(title)+'</strong><small>'+esc(desc)+'</small></div><button class="btn" type="button" data-setting="'+esc(key)+'">'+(enabled?'ON':'OFF')+'</button></div>';
   }
@@ -913,10 +950,12 @@
   window.addEventListener('hashchange',()=>{const key=location.hash.slice(1);if(key&&views[key]&&key!==state.view)openView(key,{history:false});});
   document.addEventListener('keydown',e=>{
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette();}
+    trapPaletteFocus(e);
     if(e.key==='Escape')closePalette();
   });
 
   async function boot() {
+    initSettingsA11y();
     applySettings();
     const hash=location.hash.slice(1);
     openView(views[hash]?hash:'overview',{history:false});
