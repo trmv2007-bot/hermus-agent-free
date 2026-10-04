@@ -23,12 +23,12 @@ def _vision_error(exc: Exception, model: str | None) -> dict:
     if fc == FailureClass.MODEL_UNAVAILABLE.value:
         return {
             "success": False,
-            "error": f"Selected vision model is unavailable: {model or 'dynamic selection'}",
+            "error": f"Selected vision model is unavailable: {model or 'dynamic selection'} — run \'ollama pull {model or '<model>'}\' to install it.",
         }
     if fc in (FailureClass.NETWORK.value, FailureClass.PROVIDER_UNAVAILABLE.value):
         return {
             "success": False,
-            "error": f"Vision provider is unavailable for {model or 'dynamic selection'}: {exc}",
+            "error": f"Ollama not running or unreachable for {model or 'dynamic selection'}: {exc}. Start Ollama with \'ollama serve\'.",
         }
     return {"success": False, "error": f"Vision analyze failed: {exc}"}
 
@@ -90,22 +90,30 @@ def vision_analyze_multiple(
 
 
 def vision_available_models() -> dict:
-    """Return all discovered deployments whose catalog says vision=yes."""
+    """Return dynamically discovered vision-capable models with a legacy fallback."""
+    gateway = get_model_gateway()
     try:
-        catalog = get_model_gateway().catalog(probe=True, refresh=True)
+        catalog = gateway.catalog(probe=True, refresh=True)
+        rows = list(catalog.get("models") or [])
+        all_models = [row.get("ref") for row in rows if row.get("ref")]
+        models = [row for row in rows if (row.get("capabilities") or {}).get("vision") == "yes"]
+        if models or all_models:
+            return {
+                "models": models,
+                "vision_models": [row.get("ref") for row in models if row.get("ref")],
+                "all_models": all_models,
+                "providers": catalog.get("providers") or [],
+                "generated_at": catalog.get("generated_at"),
+            }
+    except Exception:
+        pass
+    try:
+        all_models = list(gateway.vision_models() or [])
+        markers = ("llava", "bakllava", "moondream", "minicpm-v", "vision")
+        vision_models = [m for m in all_models if any(tag in str(m).lower() for tag in markers)]
+        return {"models": vision_models, "vision_models": vision_models, "all_models": all_models}
     except Exception as exc:
-        return {"error": str(exc), "vision_models": [], "models": []}
-    models = [
-        row
-        for row in (catalog.get("models") or [])
-        if (row.get("capabilities") or {}).get("vision") == "yes"
-    ]
-    return {
-        "models": models,
-        "vision_models": [row.get("ref") for row in models],
-        "providers": catalog.get("providers") or [],
-        "generated_at": catalog.get("generated_at"),
-    }
+        return {"error": str(exc), "vision_models": [], "all_models": [], "models": []}
 
 
 TOOLS = [
