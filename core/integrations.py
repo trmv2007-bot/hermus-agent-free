@@ -371,7 +371,7 @@ def register_architecture_tools(registry) -> None:
         seconds: float = 10.0,
         max_events: int = 12,
         use_vision: bool = True,
-        model: str = "llava:7b",
+        model: str | None = None,
     ) -> dict[str, Any]:
         from .computer import VideoAnalyzer
 
@@ -510,7 +510,7 @@ def register_architecture_tools(registry) -> None:
                 "seconds": {"type": "number", "default": 10.0},
                 "max_events": {"type": "integer", "default": 12},
                 "use_vision": {"type": "boolean", "default": True},
-                "model": {"type": "string", "default": "llava:7b"},
+                "model": {"type": "string", "description": "Optional provider/model; omit for automatic vision selection."},
             },
             [],
         ),
