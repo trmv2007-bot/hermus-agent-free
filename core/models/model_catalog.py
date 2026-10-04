@@ -112,16 +112,6 @@ class ModelCatalog:
                 else:
                     probe_info = {**info, "source": "stored" if known else "unavailable"}
 
-            # Preserve a configured backend's default only as a backend
-            # fallback when it has not returned a catalog of its own.
-            if not discovered:
-                default = str(bundle.get("default_model") or "").strip()
-                if default:
-                    normalized = self._normalize_model(provider, default)
-                    if normalized:
-                        normalized["source"] = "default"
-                        discovered = [normalized]
-
             pstatus = provider_status.setdefault(
                 provider,
                 {
