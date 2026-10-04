@@ -124,7 +124,13 @@ class PlanBuilder:
     """Build a structured Plan from a goal — one free LLM call, safe fallback."""
 
     def __init__(self, model: str | None = None):
-        self.model = model or config.model
+        if model:
+            self.model = model
+        else:
+            from ..models import get_model_gateway
+
+            provider, selected = get_model_gateway().resolve_model("reasoning")
+            self.model = f"{provider}/{selected}" if provider and selected else config.model
 
     def build_plan(self, goal: str, session_id: str = "", difficulty: int = 3) -> Plan:
         plan = Plan(goal=goal, session_id=session_id, difficulty=difficulty)
