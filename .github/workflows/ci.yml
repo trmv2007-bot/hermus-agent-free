@@ -122,7 +122,10 @@ jobs:
           page.on('pageerror',e=>errors.push(e.message));
           page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
-          await page.waitForTimeout(300);
+          await page.waitForFunction(
+            () => document.querySelector('#setupWizard')?.classList.contains('open'),
+            {timeout: 3000}
+          );
 
           // First-run setup is a real guided configuration flow, not a static onboarding screen.
           if(!(await page.locator('#setupWizard').evaluate(el=>el.classList.contains('open')))) throw new Error('Setup wizard did not auto-open on first run');
