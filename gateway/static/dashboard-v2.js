@@ -50,7 +50,7 @@
   };
 
   const settingTabs = [
-    ['general','General'],['models','Models'],['providers','Providers & Keys'],['agents','Agents'],
+    ['general','General'],['chat','Chat'],['models','Models'],['providers','Providers & Keys'],['agents','Agents'],
     ['safety','Safety & Approvals'],['voice','Voice'],['computer','Computer'],['memory','Memory'],
     ['workspace','Workspace'],['integrations','Integrations'],['runtime','Runtime & Doctor'],['updates','Updates']
   ];
@@ -479,7 +479,7 @@
         method:'POST',
         body:JSON.stringify({
           kind:'runtime.turn',
-          payload:{text,platform:'web',mode:'chat',stream:true,session_id:session || undefined,user_id:'default'}
+          payload:{text,platform:'web',mode:'chat',stream:true,model:(state.settings.chat_model||undefined),session_id:session || undefined,user_id:'default'}
         })
       });
       if (result.session_id) localStorage.setItem('hermus_session_id', String(result.session_id));
@@ -1089,7 +1089,28 @@
     const d=state.settingsData;
     const link = (view, label) => '<button class="btn" type="button" data-view="'+view+'">'+label+'</button>';
     let html='';
-    if(tab==='general'){
+    if(tab==='chat'){
+      const models=Array.isArray(state.modelCatalog)?state.modelCatalog:[];
+      const current=state.settings.chat_model||'auto';
+      const font=Number(state.settings.chat_font_size||8);
+      const modelOptions='<option value="auto">AUTO · use role routing</option>'+models.map(m =>
+        '<option value="'+esc(m.ref||m.id||'')+'" '+((m.ref||m.id||'')===current?'selected':'')+'>'+esc(m.name||m.id||m.ref||'Deployment')+'</option>'
+      ).join('');
+      html='<div class="grid cols-2">'+
+        '<div class="card form-card"><div class="card-head"><div><strong>CHAT MODEL</strong><small>Choose the model used for direct Chat messages. AUTO follows the default role routing.</small></div><button class="btn" type="button" data-chat-model-refresh>SYNC</button></div><div class="card-body">'+
+        '<label class="field">MODEL<select id="chatModelSelect">'+modelOptions+'</select></label>'+
+        '<div id="chatModelResult" class="result">'+(current==='auto'?'Using default role routing.':'Chat is pinned to '+esc(current)+'.')+'</div></div></div>'+
+        '<div class="card form-card"><div class="card-head"><div><strong>CHAT FONT SIZE</strong><small>Adjust message readability without changing the rest of the dashboard.</small></div><span id="chatFontSizeValue" class="badge good">'+esc(String(font))+' PX</span></div><div class="card-body">'+
+        '<input id="chatFontSizeRange" class="settings-range" type="range" min="8" max="16" step="1" value="'+esc(String(font))+'" aria-label="Chat font size">'+
+        '<div class="range-labels"><span>8 PX</span><span>16 PX</span></div>'+
+        '<div class="result">Preview updates immediately and is saved locally for this dashboard.</div></div></div></div>'+
+        '<div class="card" style="margin-top:12px"><div class="card-head"><div><strong>CHAT BEHAVIOR</strong><small>Hermes-style live activity stays visible while the final assistant response replaces the temporary status.</small></div></div><div class="card-body list">'+
+        rowValue('Live model status','Enabled','shows connection / thinking state')+
+        rowValue('Tool activity','Enabled','shows tool start/result rows during a run')+
+        rowValue('Reasoning text','Hidden','the UI never exposes private chain-of-thought')+
+        '</div></div>';
+      loadModels().catch(()=>{});
+    } else if(tab==='general'){
       const health=d.health, ready=d.ready;
       html='<div class="grid cols-2">'+
         '<div class="card"><div class="card-head"><div><strong>DASHBOARD</strong><small>Local presentation settings only.</small></div></div><div class="card-body list">'+
@@ -1386,9 +1407,21 @@
     localStorage.setItem('hermus_dashboard_settings',JSON.stringify(state.settings));
     applySettings();renderSettingsTab('general');toast(name+' setting updated');
   }
+  function setChatFontSize(value) {
+    const size=Math.max(8,Math.min(16,Number(value)||8));
+    state.settings.chat_font_size=size;
+    localStorage.setItem('hermus_dashboard_settings',JSON.stringify(state.settings));
+    applySettings();
+    const valueNode=qs('#chatFontSizeValue');
+    if(valueNode)valueNode.textContent=size+' PX';
+  }
   function applySettings() {
     document.body.classList.toggle('compact-mode',!!state.settings.compact);
     document.body.classList.toggle('motion-off',state.settings.motion===false);
+    const size=Math.max(8,Math.min(16,Number(state.settings.chat_font_size)||8));
+    document.documentElement.style.setProperty('--chat-font-size',size+'px');
+    document.documentElement.style.setProperty('--chat-meta-size',Math.max(6,size-2)+'px');
+    document.documentElement.style.setProperty('--chat-activity-size',Math.max(7,size-1)+'px');
   }
 
   async function refreshView(key) {
@@ -1526,9 +1559,20 @@
     if(e.target.closest('[data-computer-resume]')){const id=e.target.closest('[data-computer-resume]').dataset.computerResume;try{await api('/computer/control/resume/'+encodeURIComponent(id),{method:'POST',body:'{}'});toast('Computer task resumed');loadComputer()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-computer-cancel]')){const id=e.target.closest('[data-computer-cancel]').dataset.computerCancel;if(state.settings.confirm!==false&&!confirm('Cancel computer task '+id+'?'))return;try{await api('/computer/control/cancel/'+encodeURIComponent(id),{method:'POST',body:'{}'});toast('Computer task cancellation requested');loadComputer()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-settings-tab]')){openSettingsTab(e.target.closest('[data-settings-tab]').dataset.settingsTab);return;}
+    if(e.target.closest('[data-chat-model-refresh]')){await loadModels({refresh:true,probe:true});toast('Chat models refreshed');return;}
+    if(e.target.closest('#chatModelSelect')){
+      const model=e.target.closest('#chatModelSelect').value||'auto';
+      state.settings.chat_model=model;
+      localStorage.setItem('hermus_dashboard_settings',JSON.stringify(state.settings));
+      const result=qs('#chatModelResult');
+      if(result)result.textContent=model==='auto'?'Using default role routing.':'Chat is pinned to '+model+'.';
+      toast('Chat model updated');
+      return;
+    }
     if(e.target.closest('[data-setting]')){setSetting(e.target.closest('[data-setting]').dataset.setting);return;}
     if(e.target.closest('[data-settings-refresh]')||e.target.closest('[data-provider-refresh]')||e.target.closest('[data-safety-refresh]')||e.target.closest('[data-workspace-refresh]')){await loadSettings();return;}
     if(e.target.closest('[data-key-add]')){await createKey();return;}
+    if(e.target.closest('#chatFontSizeRange')){setChatFontSize(e.target.closest('#chatFontSizeRange').value);return;}
     if(e.target.closest('#keyStatusFilter')) return;
     if(e.target.closest('[data-key-test]')){
       await testStoredKey(e.target.closest('[data-key-test]'));
@@ -1589,6 +1633,8 @@
   qs('#commandbarForm')?.addEventListener('submit',e=>{e.preventDefault();const i=qs('#commandbarInput');if(i)sendCommand(i.value);if(i)i.value='';});
   qs('#overviewCommandForm')?.addEventListener('submit',e=>{e.preventDefault();const i=qs('#overviewCommand');if(i)sendCommand(i.value);if(i)i.value='';});
   qs('#paletteInput')?.addEventListener('input',renderPalette);
+  document.addEventListener('input',e=>{if(e.target?.id==='chatFontSizeRange')setChatFontSize(e.target.value)},false);
+
   qs('#paletteInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'){const first=qs('[data-palette-view]');if(first)first.click();}});
   qs('#chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}});
   qs('#buildEditor')?.addEventListener('input',()=>{qs('#buildDirty').textContent='UNSAVED';});
