@@ -64,7 +64,7 @@ jobs:
       - name: Browser QA against mocked services
         run: |
           mkdir -p /tmp/hermus-ui/static
-          cp gateway/control.html /tmp/hermus-ui/control
+          cp gateway/control.html /tmp/hermus-ui/control.html
           cp -r gateway/static/* /tmp/hermus-ui/static/
           python -m http.server 4173 --directory /tmp/hermus-ui >/tmp/hermus-ui-server.log 2>&1 &
           cat >/tmp/jarvis-ui-qa.mjs <<'EOF'
@@ -105,7 +105,7 @@ jobs:
 
           const errors=[];
           page.on('pageerror',e=>errors.push(e.message));
-          await page.goto('http://127.0.0.1:4173/control',{waitUntil:'networkidle'});
+          await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'networkidle'});
           await page.screenshot({path:out+'/00-baseline.png',fullPage:true});
 
           const buttons=page.locator('button:visible');
