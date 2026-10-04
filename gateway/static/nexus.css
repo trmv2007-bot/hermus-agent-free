@@ -365,3 +365,6 @@ body:after{
   background:rgba(2,8,16,.12);
   box-shadow:0 0 42px rgba(47,157,255,.1),inset 0 0 18px rgba(103,232,255,.025);
 }
+
+/* Visual diagnostic: the primary orb has its own lighting; hide the standalone glow layer. */
+.jarvis-home .stage-scene>.core-glow{display:none!important}
