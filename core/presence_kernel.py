@@ -109,7 +109,9 @@ class PresenceKernel:
                 except Exception:
                     pass
             self._bus = bus
-            self._unsubscribe = bus.subscribe()(self._on_event)
+            subscriber = bus.subscribe()(self._on_event)
+            self._subscriber = subscriber
+            self._unsubscribe = lambda: bus.unsubscribe(subscriber)
         return self
 
     # ---------------------------------------------------------------- events
@@ -141,7 +143,7 @@ class PresenceKernel:
                     or getattr(event, "command", None)
                     or event_type.replace(".", " ")
                 ),
-                "at": _text(getattr(event, "created_at", "") or _now(), 80),
+                "at": _text(getattr(event, "timestamp", "") or getattr(event, "created_at", "") or _now(), 80),
             }
             with self._lock:
                 self._recent.append(row)
