@@ -762,6 +762,30 @@ async def control_console_js():
     return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
 
 
+@app.get("/static/nexus.css")
+async def nexus_css():
+    """Nexus dashboard stylesheet."""
+    return _serve_control_asset("nexus.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/nexus.js")
+async def nexus_js():
+    """Nexus dashboard application script."""
+    return _serve_control_asset("nexus.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/nexus-mock.js")
+async def nexus_mock_js():
+    """Nexus dashboard compatibility/mock layer."""
+    return _serve_control_asset("nexus-mock.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/personal-space.js")
+async def personal_space_js():
+    """Nexus Personal Space client."""
+    return _serve_control_asset("personal-space.js", "application/javascript; charset=utf-8")
+
+
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache stats - for optimization dashboard"""
