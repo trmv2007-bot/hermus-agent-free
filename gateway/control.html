@@ -13,7 +13,7 @@
   <div class="space" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
   <header class="topbar">
     <a class="brand" href="/control" aria-label="HERMUS Nexus">
-      <span class="brand-mark"><span></span></span>
+      <span class="brand-mark" id="hermusLogo" title="Workshop"><span></span></span>
       <span><strong>HERMUS</strong><small>NEXUS</small></span>
     </a>
     <div class="system-state"><span id="stateDot" class="state-dot"></span><span id="stateLabel">CONNECTING</span></div>
@@ -111,6 +111,37 @@
       <button data-open="Console manifest" type="button"><span>⌁</span>Console</button>
     </nav>
   </main>
+
+  <div id="workshop" class="workshop" aria-hidden="true">
+    <header class="workshop-top">
+      <div class="workshop-title"><span class="eyebrow">HERMUS WORKSHOP</span><strong id="workshopProject">No project</strong></div>
+      <div class="workshop-actions"><span id="workshopRunState">READY</span><button id="workshopAsk" type="button">ASK HERMUS</button><button id="workshopClose" type="button">×</button></div>
+    </header>
+    <div class="workshop-grid">
+      <aside class="workbench-pane project-pane">
+        <div class="pane-head"><span>PROJECTS</span><button id="workshopRefresh" type="button">↻</button></div>
+        <div id="workshopProjects" class="workshop-list"><div class="empty-event">Loading…</div></div>
+        <div class="pane-head tree-head"><span>FILES</span></div>
+        <div id="workshopTree" class="workshop-list tree-list"><div class="empty-event">Select a project</div></div>
+      </aside>
+      <section class="workbench-pane editor-pane">
+        <div class="pane-head"><span id="workshopFileName">No file selected</span><div><button id="workshopSave" type="button" disabled>SAVE</button></div></div>
+        <textarea id="workshopEditor" spellcheck="false" disabled placeholder="Select a text file…"></textarea>
+        <div class="editor-foot"><span id="workshopFileMeta">Workspace files are policy-bound through ToolGateway.</span><span id="workshopDirty"></span></div>
+      </section>
+      <aside class="workbench-pane context-pane">
+        <div class="pane-head"><span>HERMUS CONTEXT</span><b>LIVE</b></div>
+        <div id="workshopContext" class="workshop-context"><div class="empty-event">Loading context…</div></div>
+        <div class="pane-head"><span>MISSION</span><button id="workshopMissionOpen" type="button">OPEN</button></div>
+        <div id="workshopMission" class="workshop-mission"><div class="empty-event">No active mission</div></div>
+      </aside>
+    </div>
+    <footer class="workshop-command">
+      <span class="command-prefix">›</span>
+      <input id="workshopCommand" autocomplete="off" placeholder="Work on this project with HERMUS…">
+      <button id="workshopSend" type="button">↗</button>
+    </footer>
+  </div>
 
   <div id="overlay" class="overlay" aria-hidden="true">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">

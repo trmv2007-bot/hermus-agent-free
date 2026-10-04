@@ -2,7 +2,7 @@
   const $ = (s) => document.querySelector(s);
   const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
   if (token) localStorage.setItem('hermus_gateway_token', token);
-  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, _kernelEvents:new Set() };
+  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, workshop:false, workshopProject:null, workshopFile:null, workshopDirty:false, _kernelEvents:new Set() };
 
   async function api(path, options={}) {
     const headers = new Headers(options.headers || {});
@@ -428,6 +428,184 @@
   setInterval(()=>refreshModels(false),30000);
   setInterval(refreshKernel,2500);
 
+  // -------------------------------------------------------------- WORKSHOP
+  function setWorkshop(open){
+    const host=$('#workshop');
+    if(!host) return;
+    state.workshop=!!open;
+    host.classList.toggle('open',state.workshop);
+    host.setAttribute('aria-hidden',state.workshop?'false':'true');
+    document.body.classList.toggle('workshop-mode',state.workshop);
+    if(state.workshop) refreshWorkshop();
+  }
+
+  function renderWorkshopTree(tree){
+    const host=$('#workshopTree');
+    if(!host) return;
+    const rows=Array.isArray(tree)?tree:[];
+    host.innerHTML=rows.length ? rows.map(item=>{
+      const cls=item.type==='directory'?'workshop-item':'workshop-item workshop-file';
+      const icon=item.type==='directory'?'▸':'·';
+      const size=item.type==='file' && item.size!=null ? String(item.size)+'b':'';
+      return '<div class="'+cls+'" data-workshop-path="'+esc(item.path)+'" data-workshop-type="'+esc(item.type)+'"><span>'+icon+'</span><span>'+esc(item.name)+'</span><small>'+esc(size)+'</small></div>';
+    }).join('') : '<div class="empty-event">Project is empty.</div>';
+  }
+
+  function renderWorkshopProjects(projects,current){
+    const host=$('#workshopProjects');
+    if(!host) return;
+    const rows=Array.isArray(projects)?projects:[];
+    host.innerHTML=rows.length ? rows.map(p=>{
+      const name=String(p.name||'');
+      return '<div class="workshop-item '+(name===current?'active':'')+'" data-workshop-project="'+esc(name)+'"><span>◇</span><span>'+esc(name)+'</span></div>';
+    }).join('') : '<div class="empty-event">No workspace projects.</div>';
+  }
+
+  function renderWorkshopContext(){
+    const host=$('#workshopContext');
+    if(!host) return;
+    const k=state.kernel||{};
+    const world=(k.world&&k.world.facts)||{};
+    const summary=(k.summary)||{};
+    const rows=[
+      ['STATE',String(summary.state||'idle')],
+      ['ATTENTION',String(summary.attention_count||0)+' active'],
+      ['WORKSPACE',state.workshopProject||'none'],
+      ['GIT',String(world['workspace.git.branch']?.value||'unknown')],
+      ['GIT STATUS',JSON.stringify(world['workspace.git.status']?.value||{})],
+      ['BROWSER',world['browser.state']?.value ? JSON.stringify(world['browser.state'].value):'not connected'],
+      ['WORLD',world['world.last_refresh_at']?.value||'unknown']
+    ];
+    host.innerHTML=rows.map(([label,value])=>'<div class="context-row"><label>'+esc(label)+'</label><span>'+esc(value)+'</span></div>').join('');
+  }
+
+  function renderWorkshopMission(){
+    const host=$('#workshopMission');
+    if(!host) return;
+    if(!state.missionData && !state.mission) {
+      host.innerHTML='<div class="empty-event">No active mission</div>';
+      return;
+    }
+    const m=state.missionData||{};
+    host.innerHTML=[
+      ['STATE',m.status||'WORKING'],
+      ['DETAIL',m.detail||''],
+      ['PROGRESS',m.progress||''],
+      ['RUN',state.mission||'']
+    ].map(([label,value])=>'<div class="mission-run-row"><b>'+esc(label)+'</b><span>'+esc(value)+'</span></div>').join('');
+  }
+
+  async function refreshWorkshop(){
+    try{
+      const project=state.workshopProject ? '?project='+encodeURIComponent(state.workshopProject) : '';
+      const snap=await api('/workshop/snapshot'+project);
+      state.workshopProject=snap.current||snap.project||state.workshopProject;
+      $('#workshopProject').textContent=state.workshopProject||'No project';
+      renderWorkshopProjects(snap.projects,state.workshopProject);
+      renderWorkshopTree(snap.tree);
+      renderWorkshopContext();
+      renderWorkshopMission();
+    }catch(e){
+      const tree=$('#workshopTree'); if(tree) tree.innerHTML='<div class="empty-event">'+esc(e.message)+'</div>';
+    }
+  }
+
+  async function openWorkshopFile(path){
+    if(!path || path==='.') return;
+    try{
+      const project=state.workshopProject ? '&project='+encodeURIComponent(state.workshopProject) : '';
+      const data=await api('/workshop/file?path='+encodeURIComponent(path)+project);
+      if(data.editable===false){
+        addEvent('Workshop · binary/non-editable file','error');
+        return;
+      }
+      state.workshopFile=path; state.workshopDirty=false;
+      $('#workshopFileName').textContent=path;
+      $('#workshopEditor').disabled=false;
+      $('#workshopEditor').value=String(data.content||'');
+      $('#workshopFileMeta').textContent=String(data.size||0)+' bytes · '+(data.editable?'editable':'read only');
+      $('#workshopDirty').textContent='';
+      $('#workshopSave').disabled=false;
+    }catch(e){ addEvent('Workshop · '+e.message,'error'); }
+  }
+
+  function markWorkshopDirty(){
+    state.workshopDirty=true;
+    $('#workshopDirty').textContent='UNSAVED';
+  }
+
+  async function saveWorkshopFile(){
+    if(!state.workshopFile) return;
+    const editor=$('#workshopEditor');
+    try{
+      const result=await api('/workshop/file',{
+        method:'PUT',
+        body:JSON.stringify({
+          project:state.workshopProject,
+          path:state.workshopFile,
+          content:editor.value
+        })
+      });
+      if(!result.success) throw new Error(result.error||'save failed');
+      state.workshopDirty=false;
+      $('#workshopDirty').textContent='SAVED';
+      addEvent('Workshop · saved '+state.workshopFile);
+      await refreshWorkshop();
+    }catch(e){
+      addEvent('Workshop · save failed · '+e.message,'error');
+    }
+  }
+
+  // Three clicks on the HERMUS mark opens the second workspace.
+  let logoClicks=0, logoTimer=null;
+  $('#hermusLogo')?.addEventListener('click',()=>{
+    logoClicks++;
+    clearTimeout(logoTimer);
+    logoTimer=setTimeout(()=>{logoClicks=0;},1300);
+    if(logoClicks>=3){logoClicks=0;setWorkshop(true);}
+  });
+  $('#workshopClose')?.addEventListener('click',()=>setWorkshop(false));
+  $('#workshopRefresh')?.addEventListener('click',refreshWorkshop);
+  $('#workshopSave')?.addEventListener('click',saveWorkshopFile);
+  $('#workshopEditor')?.addEventListener('input',markWorkshopDirty);
+  $('#workshopProjects')?.addEventListener('click',async e=>{
+    const item=e.target.closest('[data-workshop-project]');
+    if(!item) return;
+    const name=item.dataset.workshopProject;
+    try{
+      const out=await api('/workshop/project/use',{method:'POST',body:JSON.stringify({name})});
+      if(!out.success) throw new Error(out.error||'project switch failed');
+      state.workshopProject=name; state.workshopFile=null;
+      $('#workshopEditor').disabled=true; $('#workshopEditor').value='';
+      $('#workshopSave').disabled=true; await refreshWorkshop();
+    }catch(err){ addEvent('Workshop · '+err.message,'error'); }
+  });
+  $('#workshopTree')?.addEventListener('click',e=>{
+    const item=e.target.closest('[data-workshop-path]');
+    if(item && item.dataset.workshopType==='file') openWorkshopFile(item.dataset.workshopPath);
+  });
+  $('#workshopAsk')?.addEventListener('click',()=>$('#command')?.focus());
+  $('#workshopMissionOpen')?.addEventListener('click',()=>{
+    if(state.mission) {
+      const mission=state.missionData||{};
+      $('#modalTitle').textContent='Mission '+state.mission;
+      $('#modalLog').textContent=JSON.stringify(mission,null,2);
+      $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
+    }
+  });
+  $('#workshopSend')?.addEventListener('click',()=>{
+    const input=$('#workshopCommand'); const value=(input?.value||'').trim();
+    if(!value) return;
+    input.value='';
+    setWorkshop(false);
+    sendCommand(value);
+  });
+  $('#workshopCommand')?.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();$('#workshopSend')?.click();}
+  });
+
+  window.HermusNexus.refreshWorkshop = refreshWorkshop;
+  
   window.HermusNexus.refreshModels = refreshModels;
   window.HermusNexus.saveModelSelection = saveModelSelection;
   window.HermusNexus.refreshAttention = refreshAttention;
