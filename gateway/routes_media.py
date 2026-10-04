@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse
-from core.media import gallery, generate_image, generate_video, status
+from core.media import IMAGE_ROOT, VIDEO_ROOT, gallery, generate_image, generate_video, status
 
 router=APIRouter(prefix="/media",tags=["media"])
 
@@ -22,7 +22,7 @@ async def media_gallery(kind:str,limit:int=40):
 async def media_file(kind:str,name:str):
     if kind not in {"image","video"}:
         return JSONResponse({"success":False,"error":"invalid media kind"},status_code=400)
-    root=Path(__import__("core.media",fromlist=["IMAGE_ROOT"]).IMAGE_ROOT if kind=="image" else __import__("core.media",fromlist=["VIDEO_ROOT"]).VIDEO_ROOT)
+    root=Path(IMAGE_ROOT if kind=="image" else VIDEO_ROOT)
     target=(root/name).resolve()
     if target.parent!=root.resolve() or not target.is_file():
         return JSONResponse({"success":False,"error":"media file not found"},status_code=404)
