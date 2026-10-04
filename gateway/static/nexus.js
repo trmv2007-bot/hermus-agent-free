@@ -222,7 +222,7 @@
     'Safety preflight': ['/safety/preflight'],
     'Capability registry': ['/capabilities/registry'],
     'Devices': ['/devices'],
-    'Agents': ['/api/v1/agents/list'],
+    'Agents': ['/agents'],
     'Routines': ['/routines'],
     'Focus': ['/focus'],
     'Learning': ['/learning'],
@@ -259,14 +259,183 @@
     return api(path,{method:'POST',body:JSON.stringify(payload)});
   }
 
+  function surfaceRoot(){
+    const host=$('#surfaceView');
+    if(!host) return null;
+    host.innerHTML='';
+    return host;
+  }
+
+  function badge(text,kind=''){
+    return '<span class="surface-badge '+esc(kind)+'">'+esc(String(text||'').toUpperCase())+'</span>';
+  }
+
+  function actionButton(label, action, payload='{}', primary=false){
+    return '<button type="button" class="button '+(primary?'primary ':'')+'" data-surface-action="'+esc(action)+'" data-surface-payload="'+esc(payload)+'">'+esc(label)+'</button>';
+  }
+
+  function kv(label,value){
+    return '<div><span>'+esc(label)+'</span><b>'+esc(value)+'</b></div>';
+  }
+
+  function renderHealth(data){
+    const host=surfaceRoot(); if(!host)return;
+    const caps=data?.capabilities||{};
+    const entries=Object.entries(caps);
+    host.innerHTML=
+      '<div class="surface-toolbar"><div><div class="eyebrow">LIVE HEALTH</div><strong>Core readiness</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"System health"}',true)+'</div>'+
+      '<div class="surface-grid-list">'+(entries.length?entries.map(([name,v])=>{
+        const ok=!!(v?.present ?? v?.ok ?? v?.installed ?? v);
+        const detail=typeof v==='object' ? (v.detail||v.version||v.message||'reported by doctor') : String(v);
+        return '<article class="surface-card"><div class="surface-card-head"><div><h3>'+esc(name.replaceAll('_',' '))+'</h3><p>'+esc(detail)+'</p></div>'+badge(ok?'READY':'ATTENTION',ok?'good':'warn')+'</div></article>';
+      }).join(''):'<div class="surface-empty">No health probes reported.</div>')+'</div>'+
+      '<div class="surface-section"><header><strong>Runtime</strong></header><div class="surface-card"><div class="surface-kv">'+kv('Overall',data.ok?'Healthy':'Degraded')+kv('Python',data.python||'unknown')+kv('Virtual environment',data.venv||'unknown')+'</div></div></div>';
+  }
+
+  function renderCapabilitiesSurface(data){
+    const host=surfaceRoot(); if(!host)return;
+    const providers=Array.isArray(data?.providers)?data.providers:[];
+    const tools=data?.tools&&typeof data.tools==='object'?Object.entries(data.tools):[];
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">INTELLIGENCE</div><strong>Capabilities & tools</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Capabilities"}',true)+'</div>'+
+      '<div class="surface-section"><header><strong>Providers</strong>'+badge(providers.length+' connected')+'</header><div class="surface-grid-list">'+(providers.length?providers.map(p=>{
+        const name=p.name||p.id||p.provider||'Provider'; const ok=p.ok??p.reachable??p.healthy??true;
+        return '<article class="surface-card"><div class="surface-card-head"><div><h3>'+esc(name)+'</h3><p>'+esc(p.base_url||p.models||p.detail||'Provider runtime')</p></div>'+badge(ok?'READY':'DEGRADED',ok?'good':'warn')+'</div></article>';
+      }).join(''):'<div class="surface-empty">No providers reported.</div>')+'</div></div>'+
+      '<div class="surface-section"><header><strong>Registered tools</strong>'+badge(tools.length+' available','good')+'</header><div class="surface-list" id="toolSurfaceList">'+(tools.length?tools.slice(0,60).map(([name,d])=>{
+        const desc=d?.description||d?.summary||'Registered HERMUS capability'; const enabled=d?.enabled??d?.available??true;
+        return '<div class="surface-row"><div class="surface-row-main"><strong>'+esc(name)+'</strong><small>'+esc(desc)+'</small></div>'+badge(enabled?'READY':'UNAVAILABLE',enabled?'good':'warn')+'</div>';
+      }).join(''):'<div class="surface-empty">No tools reported.</div>')+'</div></div>';
+  }
+
+  function renderAgentsSurface(data){
+    const host=surfaceRoot(); if(!host)return;
+    const agents=Array.isArray(data?.agents)?data.agents:[];
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">AGENT CONTROL</div><strong>Persistent agent fleet</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Agents"}',true)+'</div>'+
+      (agents.length?'<div class="surface-grid-list">'+agents.map(a=>{
+        const name=String(a.name||a.id||a.role||'Agent'), role=String(a.role||'general').replaceAll('_',' '), status=String(a.status||a.state||'idle').toLowerCase();
+        const running=['running','active','working'].includes(status);
+        const action=running?'agent-stop':'agent-start';
+        return '<article class="surface-card"><div class="surface-card-head"><div><h3>'+esc(name)+'</h3><p>'+esc(role)+' · '+esc(status)+(a.model?' · '+a.model:'')+'</p></div>'+badge(status,running?'good':(status==='error'?'bad':''))+'</div><div class="surface-actions">'+actionButton(running?'STOP':'START',action,JSON.stringify({name}),!running)+actionButton('CHAT','agent-chat',JSON.stringify({name}))+'</div></article>';
+      }).join('')+'</div>':'<div class="surface-empty">No persistent agents are currently registered.</div>');
+  }
+
+  function renderModelsSurface(){
+    const host=surfaceRoot(); if(!host)return;
+    const catalog=modelState.catalog||{}, selected=modelState.selected?.selections||{}, models=Array.isArray(catalog.models)?catalog.models:[];
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">MODEL HUB</div><strong>Runtime-discovered deployments</strong></div>'+actionButton('SYNC','models-refresh','{}',true)+'</div>'+
+      '<div class="surface-section"><header><strong>Role routing</strong></header><div class="form-grid">'+
+      '<label>ROLE<select id="surfaceModelRole" aria-label="Model role">'+[...MODEL_ROLES].map(r=>'<option value="'+esc(r)+'">'+esc(r)+'</option>').join('')+'</select></label>'+
+      '<label>DEPLOYMENT<select id="surfaceModelSelect" aria-label="Model deployment"><option value="auto">AUTO · best available</option>'+models.map(m=>'<option value="'+esc(m.ref)+'">'+esc(modelLabel(m))+'</option>').join('')+'</select></label></div>'+
+      '<div class="surface-actions">'+actionButton('USE SELECTION','models-save','{}',true)+'</div></div>'+
+      '<div class="surface-section"><header><strong>Available deployments</strong>'+badge(models.length+' discovered')+'</header><div class="surface-grid-list">'+(models.length?models.map(m=>{
+        const live=m.source==='live', reach=m.reachable!==false;
+        return '<article class="surface-card"><div class="surface-card-head"><div><h3>'+esc(modelLabel(m))+'</h3><p>'+esc((m.provider||'provider')+' · '+(m.id||m.ref||'model'))+'</p></div>'+badge(reach?(live?'LIVE':'CACHED'):'OFFLINE',reach?(live?'good':''):'bad')+'</div><div class="surface-kv">'+kv('Tools',m.capabilities?.tools||'unknown')+kv('Vision',m.capabilities?.vision||'unknown')+kv('Source',m.source||'unknown')+'</div></article>';
+      }).join(''):'<div class="surface-empty">No model deployments discovered.</div>')+'</div></div>'+
+      '<div class="surface-section"><header><strong>Current routing</strong></header><div class="surface-card"><div class="surface-kv">'+Object.entries(selected).map(([k,v])=>kv(k,v)).join('')+'</div></div></div>';
+    const role=currentModelRole();
+    $('#surfaceModelRole').value=role;
+    const configured=selected[role]||'auto';
+    if([...models.map(m=>m.ref),'auto'].includes(configured)) $('#surfaceModelSelect').value=configured;
+  }
+
+  async function renderMissionsRoutinesSurface(){
+    const host=surfaceRoot(); if(!host)return;
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">MISSIONS & AUTOMATION</div><strong>Work that can run without the dashboard</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Routines"}',true)+'</div><div id="missionRoutineBody"><div class="surface-loading">Loading missions…</div></div>';
+    try{
+      const [missions,routines]=await Promise.all([api('/missions'),api('/routines')]);
+      const ms=Array.isArray(missions?.missions)?missions.missions:[];
+      const rs=Array.isArray(routines?.routines)?routines.routines:[];
+      $('#missionRoutineBody').innerHTML=
+        '<div class="surface-section"><header><strong>Missions</strong>'+badge(ms.length+' total')+'</header><div class="surface-list">'+(ms.length?ms.map(m=>{
+          const st=String(m.state||m.status||'unknown').toLowerCase(), recover=['failed','blocked','interrupted'].includes(st);
+          return '<div class="surface-row"><div class="surface-row-main"><strong>'+esc(m.goal||m.title||m.id||'Mission')+'</strong><small>'+esc(st)+(m.id?' · '+m.id:'')+'</small></div><div class="surface-row-actions">'+(recover?actionButton('RESUME','mission-resume',JSON.stringify({id:m.id}),true):'')+'</div></div>';
+        }).join(''):'<div class="surface-empty">No missions yet.</div>')+'</div></div>'+
+        '<div class="surface-section"><header><strong>Routines</strong>'+actionButton('NEW ROUTINE','routine-new','{}',true)+'</header><div class="surface-list">'+(rs.length?rs.map(r=>{
+          const enabled=!!r.enabled, id=r.id||r.name;
+          return '<div class="surface-row"><div class="surface-row-main"><strong>'+esc(r.name||id)+'</strong><small>'+esc((r.event_type||'schedule')+' → '+(r.action_type||'runtime.turn'))+'</small></div><div class="surface-row-actions">'+actionButton(enabled?'DISABLE':'ENABLE','routine-toggle',JSON.stringify({id,enabled:!enabled}),enabled)+actionButton('DELETE','routine-delete',JSON.stringify({id}))+'</div></div>';
+        }).join(''):'<div class="surface-empty">No proactive routines configured.</div>')+'</div></div>';
+    }catch(e){ $('#missionRoutineBody').innerHTML='<div class="surface-empty">Could not load missions or routines: '+esc(e.message)+'</div>'; }
+  }
+
+  function renderFocusSurface(data){
+    const host=surfaceRoot(); if(!host)return;
+    const items=Array.isArray(data?.items)?data.items:[];
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">FOCUS</div><strong>What matters now</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Focus"}',true)+'</div>'+
+      (items.length?'<div class="surface-list">'+items.map(i=>'<div class="surface-row"><div class="surface-row-main"><strong>'+esc(i.title||i.name||'Focus item')+'</strong><small>'+esc((i.area||'general')+' · '+(i.priority||'normal'))+(i.detail?' · '+i.detail:'')+'</small></div>'+badge(i.priority||'normal',String(i.priority||'').toLowerCase()==='high'?'warn':'')+'</div>').join('')+'</div>':'<div class="surface-empty">Nothing is demanding attention right now.</div>');
+  }
+
+  function renderLearningSurface(data){
+    const host=surfaceRoot(); if(!host)return;
+    const rows=[];
+    for(const key of ['lessons','skills','episodes','items']) if(Array.isArray(data?.[key])) rows.push(...data[key].slice(0,30).map(x=>({kind:key,...x})));
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">KNOWLEDGE</div><strong>Learning fabric</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Learning"}',true)+'</div>'+
+      (rows.length?'<div class="surface-list">'+rows.map(i=>'<div class="surface-row"><div class="surface-row-main"><strong>'+esc(i.title||i.name||i.content||'Learning record')+'</strong><small>'+esc(i.kind)+(i.summary?' · '+i.summary:'')+'</small></div>'+badge('SAVED')+'</div>').join('')+'</div>':'<div class="surface-empty">No learning records reported yet.</div>');
+  }
+
+  function renderDevicesSurface(data){
+    const host=surfaceRoot(); if(!host)return;
+    const entries=Object.entries(data||{});
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">DEVICE FABRIC</div><strong>Connected environments</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Devices"}',true)+'</div>'+
+      '<div class="surface-grid-list">'+(entries.length?entries.map(([k,v])=>{
+        const obj=v&&typeof v==='object'?v:null, ok=obj?.connected??obj?.ready??obj?.ok??true;
+        const detail=obj?Object.entries(obj).slice(0,4).map(([a,b])=>a+': '+String(b)).join(' · '):String(v);
+        return '<article class="surface-card"><div class="surface-card-head"><div><h3>'+esc(k.replaceAll('_',' '))+'</h3><p>'+esc(detail)+'</p></div>'+badge(ok?'READY':'UNAVAILABLE',ok?'good':'warn')+'</div><div class="surface-actions">'+(k.toLowerCase().includes('browser')?actionButton('OPEN BROWSER','device-command',JSON.stringify({command:'Open browser context'}),true):'')+'</div></article>';
+      }).join(''):'<div class="surface-empty">No device state reported.</div>')+'</div>';
+  }
+
+  function renderDashboardState(data){
+    const host=surfaceRoot(); if(!host)return;
+    const counts=data?.counts||{}, queue=data?.queue||{}, telemetry=data?.telemetry||{};
+    const runs=Array.isArray(data?.runs)?data.runs:[], jobs=Array.isArray(data?.jobs)?data.jobs:[];
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">CONTROL PLANE</div><strong>Operational state</strong></div>'+actionButton('REFRESH','surface-refresh','{"name":"Dashboard state"}',true)+'</div>'+
+      '<div class="metric-strip">'+
+      '<article class="metric"><span>ACTIVE JOBS</span><strong>'+esc(counts.active_jobs||0)+'</strong><small>queue</small></article>'+
+      '<article class="metric"><span>ACTIVE RUNS</span><strong>'+esc(counts.active_runs||0)+'</strong><small>execution</small></article>'+
+      '<article class="metric"><span>TOOLS</span><strong>'+esc(counts.tools||0)+'</strong><small>registered</small></article>'+
+      '<article class="metric"><span>AGENTS</span><strong>'+esc(counts.agents||0)+'</strong><small>fleet</small></article>'+
+      '</div>'+
+      '<div class="surface-section"><header><strong>Recent execution</strong>'+badge(runs.length+' runs')+'</header><div class="surface-list">'+(runs.slice(-12).reverse().map(r=>'<div class="surface-row"><div class="surface-row-main"><strong>'+esc(r.label||r.run_id||'Run')+'</strong><small>'+esc(r.status||r.state||'unknown')+'</small></div>'+badge(r.status||'unknown')+'</div>').join('')||'<div class="surface-empty">No recent runs.</div>')+'</div></div>'+
+      '<div class="surface-section"><header><strong>Runtime telemetry</strong></header><div class="surface-card"><div class="surface-kv">'+Object.entries(telemetry||{}).slice(0,12).map(([k,v])=>kv(k,typeof v==='object'?JSON.stringify(v):String(v))).join('')+'</div></div></div>';
+  }
+
+  function renderConsoleSurface(data){
+    const host=surfaceRoot(); if(!host)return;
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">CONSOLE</div><strong>'+esc(data?.name||'HERMUS Console')+'</strong></div>'+badge(data?.status||'READY','good')+'</div><article class="surface-card"><h3>Canonical subsystem console</h3><p>The console owns replay, safety, mission lifecycle and low-level operational controls. Use command search or the dedicated workspaces to act.</p><div class="surface-actions">'+actionButton('OPEN COMMAND PALETTE','open-palette', '{}', true)+actionButton('SYSTEM HEALTH','surface-open',JSON.stringify({name:'System health'}))+'</div></article>';
+  }
+
+  async function renderSurface(name,data){
+    switch(name){
+      case 'System health': renderHealth(data); break;
+      case 'Capabilities': renderCapabilitiesSurface(data); break;
+      case 'Agents': renderAgentsSurface(data); break;
+      case 'Models': renderModelsSurface(); break;
+      case 'Routines': await renderMissionsRoutinesSurface(); break;
+      case 'Focus': renderFocusSurface(data); break;
+      case 'Learning': renderLearningSurface(data); break;
+      case 'Devices': renderDevicesSurface(data); break;
+      case 'Dashboard state':
+      case 'Snapshot': renderDashboardState(data); break;
+      case 'Console manifest': renderConsoleSurface(data); break;
+      default:
+        const host=surfaceRoot(); if(host) host.innerHTML='<div class="surface-empty">This subsystem is available through the command workspace.</div>';
+    }
+  }
+
   async function open(name) {
-    $('#modalTitle').textContent=name; $('#modalLog').textContent='Loading…'; $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
+    $('#modalTitle').textContent=name;
+    surfaceRoot()?.insertAdjacentHTML('beforeend','<div class="surface-loading">Loading…</div>');
+    $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
     const path=(surfaces[name] || [])[0];
-    if(!path){$('#modalLog').textContent='Contextual HERMUS surface available through command and subsystem actions.';return;}
-    try {
-      if(path.endsWith('/')) { $('#modalLog').textContent=JSON.stringify({source:path, mission:state.mission, mode:'replay'},null,2); return; }
-      const value=await api(path); $('#modalLog').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);
-    } catch(e) { $('#modalLog').textContent=e.message; }
+    if(!path){
+      const host=surfaceRoot(); if(host) host.innerHTML='<div class="surface-empty">This HERMUS surface is available through the command workspace.</div>';
+      return;
+    }
+    try{
+      const value=await api(path);
+      await renderSurface(name,value);
+    }catch(e){
+      const host=surfaceRoot(); if(host) host.innerHTML='<div class="surface-empty">Could not load '+esc(name)+': '+esc(e.message)+'</div>';
+    }
   }
 
   $('#paletteInput')?.addEventListener('input',renderPalette);
@@ -511,59 +680,102 @@
       window.HermusPersonalSpace.open();
       return;
     }
-    if(name === 'Focus' || name === 'Learning'){
-      try{
-        const endpoint=name==='Focus' ? '/focus' : '/learning?limit=6';
-        const data=await api(endpoint);
-        $('#modalTitle').textContent=name;
-        $('#modalLog').textContent=JSON.stringify(data,null,2);
-        $('#overlay').classList.add('open');
-        $('#overlay').setAttribute('aria-hidden','false');
-      }catch(e){
-        $('#modalTitle').textContent=name;
-        $('#modalLog').textContent=name+' unavailable: '+e.message;
-        $('#overlay').classList.add('open');
-        $('#overlay').setAttribute('aria-hidden','false');
-      }
+    if(name === 'Models'){
+      $('#modalTitle').textContent='Models';
+      $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
+      await refreshModels(true);
+      renderModelsSurface();
       return;
     }
     if(name === 'Routines'){
-      try{
-        const data=await api('/routines');
-        const rows=Array.isArray(data.routines)?data.routines:[];
-        $('#modalTitle').textContent='Routines';
-        $('#modalLog').textContent=rows.length
-          ? rows.map(r=>[
-              String(r.enabled?'ON ':'OFF ') + String(r.name||r.id||'routine'),
-              'trigger='+String(r.event_type||''),
-              'action='+String(r.action_type||''),
-              'task='+String(r.task||'').slice(0,220),
-              'cooldown='+String(r.cooldown_seconds||0)+'s'
-            ].join('\n')).join('\n\n')
-          : 'No routines configured.';
-        $('#overlay').classList.add('open');
-        $('#overlay').setAttribute('aria-hidden','false');
-      }catch(e){
-        $('#modalTitle').textContent='Routines';
-        $('#modalLog').textContent='Routine discovery unavailable: '+e.message;
-        $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
-      }
-      return;
-    }
-    if(name === 'Models'){
-      await refreshModels(true);
-      $('#modalTitle').textContent='Models';
-      $('#modalLog').textContent=JSON.stringify({
-        count:(modelState.catalog||{}).count || 0,
-        models:(modelState.catalog||{}).models || [],
-        selected:(modelState.selected||{}).selections || {}
-      },null,2);
-      $('#overlay').classList.add('open');
-      $('#overlay').setAttribute('aria-hidden','false');
+      $('#modalTitle').textContent='Missions & Automation';
+      $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
+      await renderMissionsRoutinesSurface();
       return;
     }
     return originalOpen(name);
   };
+
+  async function handleSurfaceAction(button){
+    const action=button.dataset.surfaceAction;
+    let payload={}; try{payload=JSON.parse(button.dataset.surfacePayload||'{}');}catch{}
+    button.disabled=true;
+    try{
+      if(action==='surface-refresh'){ await open(payload.name); return; }
+      if(action==='surface-open'){ await open(payload.name); return; }
+      if(action==='open-palette'){ showPalette(true); return; }
+      if(action==='models-refresh'){ await refreshModels(true); renderModelsSurface(); return; }
+      if(action==='models-save'){
+        const role=$('#surfaceModelRole')?.value||'default', model=$('#surfaceModelSelect')?.value||'auto';
+        const result=await api('/models/select',{method:'POST',body:JSON.stringify({role,model})});
+        modelState.selected=result; renderModelsSurface(); flash('Model routing saved');
+        return;
+      }
+      if(action==='agent-start' || action==='agent-stop'){
+        const path=action==='agent-start'?'/agents/start':'/agents/stop';
+        await api(path,{method:'POST',body:JSON.stringify(payload)});
+        await open('Agents'); flash((action==='agent-start'?'Started ':'Stopped ')+payload.name);
+        return;
+      }
+      if(action==='agent-chat'){ sendCommand('Start a chat with agent '+payload.name); return; }
+      if(action==='mission-resume'){
+        await api('/missions/'+encodeURIComponent(payload.id)+'/resume',{method:'POST',body:JSON.stringify({})});
+        await renderMissionsRoutinesSurface(); flash('Mission resume requested');
+        return;
+      }
+      if(action==='routine-toggle'){
+        await api('/routines/'+encodeURIComponent(payload.id)+'/enable',{method:'POST',body:JSON.stringify({enabled:!!payload.enabled})});
+        await renderMissionsRoutinesSurface(); flash('Routine updated');
+        return;
+      }
+      if(action==='routine-delete'){
+        await api('/routines/'+encodeURIComponent(payload.id),{method:'DELETE'});
+        await renderMissionsRoutinesSurface(); flash('Routine deleted');
+        return;
+      }
+      if(action==='routine-new'){
+        renderNewRoutineForm(); return;
+      }
+      if(action==='device-command'){ sendCommand(payload.command||'Open browser context'); return; }
+    }catch(e){ flash(e.message,'error'); }
+    finally{ button.disabled=false; }
+  }
+
+  function renderNewRoutineForm(){
+    const host=surfaceRoot(); if(!host)return;
+    host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">AUTOMATION</div><strong>Create routine</strong></div><button type="button" class="button" data-surface-action="surface-refresh" data-surface-payload="{&quot;name&quot;:&quot;Routines&quot;}">BACK</button></div>'+
+      '<div class="surface-card"><div class="form-grid">'+
+      '<label>Name<input id="routineName" placeholder="Daily review"></label>'+
+      '<label>Trigger<input id="routineEvent" placeholder="schedule"></label>'+
+      '<label>Action<select id="routineAction"><option value="runtime.turn">Runtime turn</option><option value="agent.autonomous">Autonomous agent</option><option value="mission.start">Start mission</option></select></label>'+
+      '<label>Cooldown (s)<input id="routineCooldown" type="number" value="60" min="0"></label>'+
+      '<label class="full">Task<textarea id="routineTask" placeholder="Review my current project and surface anything important."></textarea></label>'+
+      '</div><label class="check-line"><input id="routineEnabled" type="checkbox"> Enable after creation</label><div class="surface-actions">'+actionButton('CREATE ROUTINE','routine-create','{}',true)+actionButton('VALIDATE','routine-validate','{}')+'</div></div>';
+  }
+
+  root.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-surface-action]');
+    if(btn) handleSurfaceAction(btn);
+  });
+  async function createOrValidateRoutine(validateOnly){
+    const payload={
+      name:$('#routineName')?.value||'routine',
+      event_type:$('#routineEvent')?.value||'',
+      action_type:$('#routineAction')?.value||'runtime.turn',
+      task:$('#routineTask')?.value||'',
+      cooldown_seconds:Number($('#routineCooldown')?.value||60),
+      enabled:!!$('#routineEnabled')?.checked
+    };
+    try{
+      const result=await api(validateOnly?'/routines/validate':'/routines',{method:'POST',body:JSON.stringify(payload)});
+      if(validateOnly){
+        const host=surfaceRoot(); if(host) host.innerHTML='<div class="surface-toolbar"><div><div class="eyebrow">VALIDATION</div><strong>Routine check</strong></div>'+actionButton('BACK','surface-refresh','{"name":"Routines"}',true)+'</div><div class="surface-card"><div class="surface-kv">'+kv('Valid',result.valid?'YES':'NO')+kv('Action',result.action_type||payload.action_type)+kv('Safety',result.safety||'Policy controlled')+'</div>'+(result.errors?.length?'<div class="proposal-box">'+result.errors.map(esc).join('<br>')+'</div>':'')+'</div>';
+      }else{
+        await renderMissionsRoutinesSurface(); flash('Routine created');
+      }
+    }catch(e){ flash(e.message,'error'); }
+  }
+
 
   refreshModels(false);
   refreshKernel();
