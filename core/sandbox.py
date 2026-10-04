@@ -711,10 +711,39 @@ class Sandbox:
                 timeout=pol.timeout,
                 input=input_text or "",
             )
+            stderr = proc.stderr[: pol.max_output_chars // 2]
+            stdout = proc.stdout[: pol.max_output_chars]
+            missing_image = any(
+                marker in stderr.lower()
+                for marker in (
+                    "unable to find image",
+                    "pull access denied",
+                    "manifest unknown",
+                    "image not found",
+                )
+            )
+            if proc.returncode != 0 and missing_image and not pol.network:
+                # A detected container runtime is not enough: CI/dev machines may
+                # have no cached image. Fall back to the hardened local backend
+                # instead of making every caller treat the missing image as a
+                # failed skill/validation run.
+                local_command = command
+                prefix = "cd /hermus && "
+                if local_command.startswith(prefix):
+                    local_command = f"cd {shlex.quote(str(workdir))} && " + local_command[len(prefix):]
+                workspace_prefix = "cd /workspace && "
+                if mounted_cwd and local_command.startswith(workspace_prefix):
+                    local_command = f"cd {shlex.quote(str(mounted_cwd))} && " + local_command[len(workspace_prefix):]
+                local = self._run_local(
+                    local_command, pol, workdir, sandbox_id, env, input_text,
+                    f"{reason}; container image unavailable, hardened local fallback",
+                )
+                local.limits.setdefault("container_fallback", binary)
+                return local
             return SandboxResult(
                 success=proc.returncode == 0,
-                stdout=proc.stdout[: pol.max_output_chars],
-                stderr=proc.stderr[: pol.max_output_chars // 2],
+                stdout=stdout,
+                stderr=stderr,
                 returncode=proc.returncode,
                 backend=binary,
                 sandbox_id=sandbox_id,
