@@ -694,7 +694,17 @@
     try{
       source=new EventSource(chatStreamUrl(runId));
       state.runPollers.set(runId,{source,stop});
-      source.onmessage=message=>{try{consume(JSON.parse(message.data));}catch{}};
+      const streamEvents=[
+        'run_started','turn_started','mission_runtime_started','step_started','step_observed',
+        'llm_delta','llm_finished','tool_call','tool_result','tools_expanded','memory','skill',
+        'skill_harvest_started','skill_created','subagent','approval_required','verification',
+        'steer','steer_applied','steer_consumed','model_capability_warning','job_status',
+        'runtime_issue','run_error','mission_error','run_finished','mission_finished','log',
+        'cancel_requested'
+      ];
+      for(const name of streamEvents){
+        source.addEventListener(name,message=>{try{consume(JSON.parse(message.data));}catch{}});
+      }
       source.onerror=()=>{startPolling();};
       setTimeout(()=>{if(!eventLog.length)startPolling();},1200);
     }catch{
