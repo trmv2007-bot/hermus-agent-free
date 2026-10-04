@@ -213,8 +213,8 @@
     try{
       const query=probe ? '?probe=true&refresh=true' : '?probe=false&refresh=false';
       const results=await Promise.all([
-        api('/api/v1/models/catalog' + query),
-        api('/api/v1/models/selected')
+        api('/models/catalog' + query),
+        api('/models/selected')
       ]);
       modelState.catalog=results[0];
       modelState.selected=results[1];
@@ -235,7 +235,7 @@
     const select=$('#modelSelect');
     if(!select) return;
     try{
-      const result=await api('/api/v1/models/select',{
+      const result=await api('/models/select',{
         method:'POST',
         body:JSON.stringify({role:role,model:select.value || 'auto'})
       });
