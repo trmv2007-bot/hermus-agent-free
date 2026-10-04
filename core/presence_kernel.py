@@ -344,6 +344,46 @@ class PresenceKernel:
         except Exception:
             return []
 
+    def _world_projection(self) -> dict[str, Any]:
+        """Return high-value world facts without dumping large process/browser payloads."""
+        wanted = (
+            ("runtime", "platform"),
+            ("runtime", "os"),
+            ("runtime", "architecture"),
+            ("runtime", "cpu_percent"),
+            ("runtime", "memory"),
+            ("workspace.git", "branch"),
+            ("workspace.git", "commit"),
+            ("workspace.git", "status"),
+            ("browser", "state"),
+            ("world", "last_refresh_at"),
+            ("world", "observation_digest"),
+        )
+        facts: dict[str, Any] = {}
+        for subject, predicate in wanted:
+            try:
+                fact = self.world.get(subject, predicate)
+            except Exception:
+                fact = None
+            if fact is None:
+                continue
+            value = fact.value
+            if isinstance(value, str):
+                value = value[:500]
+            elif isinstance(value, dict):
+                value = {str(k): v for k, v in list(value.items())[:12]}
+            facts[f"{subject}.{predicate}"] = {
+                "value": value,
+                "source": fact.source,
+                "confidence": fact.confidence,
+                "observed_at": fact.observed_at,
+            }
+        try:
+            recent = [event.to_dict() for event in self.world.recent_events(limit=8)]
+        except Exception:
+            recent = []
+        return {"facts": facts, "recent_events": recent}
+
     # ---------------------------------------------------------------- snapshot
     def snapshot(self, *, user_id: str = "default", include_events: bool = True) -> dict[str, Any]:
         self.start()
@@ -389,7 +429,7 @@ class PresenceKernel:
             "identity": presence.get("identity", {}),
             "presence": presence.get("presence", {}),
             "goals": goals,
-            "world": world_status,
+            "world": {**world_status, **self._world_projection()},
             "attention": self.attention(user_id=user_id),
             "runtime": {
                 "active_runs": active_runs[:20],
