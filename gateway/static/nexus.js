@@ -2,7 +2,7 @@
   const $ = (s) => document.querySelector(s);
   const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
   if (token) localStorage.setItem('hermus_gateway_token', token);
-  const state = { online:false, busy:false, mission:null, kernel:null, _kernelEvents:new Set() };
+  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, _kernelEvents:new Set() };
 
   async function api(path, options={}) {
     const headers = new Headers(options.headers || {});
@@ -47,31 +47,120 @@
       state.online=true; $('#stateLabel').textContent='ONLINE'; $('#stateDot').className='state-dot';
       const healthEntries = health && typeof health === 'object' ? health : {};
       const healthy = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
-      $('#healthValue').textContent = healthy ? `${healthy} systems ready` : 'READY';
+      if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthy ? `${healthy} systems ready` : 'READY'; }
       renderCapabilities(caps.capabilities || caps);
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
     } catch (e) {
-      state.online=false; $('#stateLabel').textContent='OFFLINE'; $('#stateDot').className='state-dot bad'; $('#healthValue').textContent='OFFLINE';
+      state.online=false; $('#stateLabel').textContent='OFFLINE'; $('#stateDot').className='state-dot bad'; const mission=$('#missionStatus'); if(mission&&!state.missionLive) mission.textContent='OFFLINE';
       setState('DISCONNECTED','gateway unavailable'); addEvent(e.message,'error');
     }
   }
 
+  function missionReset(){
+    if(state.runStream){ try{state.runStream.close();}catch{} state.runStream=null; }
+    state.missionLive=false;
+    state.missionData=null;
+  }
+
+  function renderMission(data){
+    state.missionData=data;
+    const status=$('#missionStatus');
+    const detail=$('#missionDetail');
+    const progress=$('#missionProgress');
+    const pulse=$('#missionPulse');
+    if(status) status.textContent=String(data.status||'WORKING').toUpperCase();
+    if(detail) detail.textContent=String(data.detail||'processing');
+    if(progress) progress.textContent=String(data.progress||'Live execution stream connected');
+    if(pulse) pulse.style.opacity=(data.terminal ? '.45' : '1');
+    if(data.terminal) state.missionLive=false;
+  }
+
+  function handleRunEvent(type, event){
+    let payload={};
+    try{ payload=JSON.parse(event.data||'{}'); }catch{}
+    const data=(payload && payload.data) || {};
+    const mission=state.missionData || {status:'WORKING',detail:'processing',step:0,total:0,tool:'',verification:false};
+    const step=Number(data.step||data.i||0);
+    const total=Number(data.of||data.total||mission.total||0);
+    let status=mission.status, detail=mission.detail, progress=mission.progress;
+
+    if(type==='run_started' || type==='job_started' || type==='agent_started'){
+      status='WORKING'; detail='starting execution'; progress='Run connected';
+    } else if(type==='step_started'){
+      status='WORKING'; detail='executing plan'; progress=total ? `Step ${step} / ${total}` : `Step ${step||'?'}`;
+    } else if(type==='llm_delta' || type==='llm_finished'){
+      status='THINKING'; detail='reasoning through the current step'; progress=progress || 'Model active';
+    } else if(type==='tool_call'){
+      status='WORKING'; detail='using '+String(data.tool||data.name||'tool'); progress=total ? `Step ${step||mission.step||'?'} / ${total}` : 'Tool execution';
+    } else if(type==='tool_result'){
+      status='WORKING'; detail='tool result received'; progress=String(data.ok===false?'tool reported an issue':'tool completed');
+    } else if(type==='subagent'){
+      status='WORKING'; detail='specialist agent active'; progress=String(data.role||data.name||'delegated worker');
+    } else if(type==='verification' || type==='mission_verification'){
+      status='VERIFYING'; detail='checking evidence'; progress=String(data.message||data.status||'Verification in progress');
+    } else if(type==='cancel_requested' || type==='run_cancelled'){
+      status='CANCELLING'; detail='stopping safely'; progress='Cancellation requested';
+    } else if(type==='run_error' || type==='mission_error'){
+      status='ERROR'; detail=String(data.error||data.message||'run failed'); progress='Execution failed';
+      state.busy=false;
+      mission.terminal=true;
+    } else if(type==='run_finished' || type==='mission_finished' || type==='stream_end'){
+      const finalStatus=String(data.status||'finished').toLowerCase();
+      status=finalStatus==='finished'||finalStatus==='completed'||finalStatus==='succeeded'?'COMPLETED':'FINISHED';
+      detail='execution complete'; progress=data.duration_ms ? `Finished · ${data.duration_ms}ms` : 'Verified run complete';
+      state.busy=false;
+      mission.terminal=true;
+    } else if(type==='agent_response'){
+      status='WORKING'; detail='final response ready'; progress='Response received';
+    } else if(type==='job_status'){
+      status=String(data.status||data.stage||status).toUpperCase(); detail=String(data.message||'queue update'); progress=String(data.stage||data.status||progress);
+    }
+
+    mission.status=status; mission.detail=detail; mission.progress=progress; mission.step=step||mission.step||0; mission.total=total||mission.total||0;
+    renderMission(mission);
+
+    if(type==='tool_call' || type==='tool_result' || type==='verification' || type==='run_error' || type==='run_finished')
+      addEvent((data.message||data.tool||data.name||type), type.includes('error')?'error':'info');
+
+    if(type==='run_finished' || type==='run_error' || type==='stream_end'){
+      if(state.runStream){ try{state.runStream.close();}catch{} state.runStream=null; }
+      setState(status, detail);
+    }
+  }
+
+  function connectRun(runId){
+    if(!runId) return;
+    if(state.runStream){ try{state.runStream.close();}catch{} }
+    state.missionLive=true;
+    state.missionData={status:'WORKING',detail:'connecting to execution',progress:'Opening live stream',step:0,total:0,terminal:false};
+    renderMission(state.missionData);
+    const query=token ? `?token=${encodeURIComponent(token)}` : '';
+    const source=new EventSource('/stream/run/'+encodeURIComponent(runId)+query);
+    state.runStream=source;
+    const types=['run_started','job_started','step_started','llm_delta','llm_finished','tool_call','tool_result','subagent','verification','mission_verification','cancel_requested','run_cancelled','run_error','mission_error','run_finished','mission_finished','stream_end','agent_response','job_status'];
+    types.forEach(type=>source.addEventListener(type,e=>handleRunEvent(type,e)));
+    source.onopen=()=>{ addEvent('Mission stream connected'); };
+    source.onerror=()=>{
+      if(state.missionLive) addEvent('Mission stream reconnecting','error');
+    };
+  }
+
   async function sendCommand(value=null) {
     const input=$('#command'); const command=(value ?? input.value).trim(); if(!command)return;
-    input.value=''; state.busy=true; setState('WORKING','processing your request'); addEvent(`Command · ${command}`);
+    input.value=''; missionReset(); state.busy=true; setState('WORKING','processing your request'); addEvent(`Command · ${command}`);
     try {
-      // HERMUS command transport. The UI does not own mission truth.
       const result=await api('/api/v1/commands',{method:'POST',body:JSON.stringify({command,text:command,platform:'web',mode:'chat',stream:true})});
-      const id=result.run_id || result.job_id || result.mission_id; state.mission=id || null;
+      const id=result.run_id || result.mission_id; state.mission=id || null;
       addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
+      if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
     } catch(e) {
-      // Compatibility fallback for older gateways during migration.
       try {
         const result=await api('/jobs',{method:'POST',body:JSON.stringify({kind:'runtime.turn',payload:{text:command,platform:'web',mode:'chat',stream:true}})});
-        const id=result.run_id || result.job_id; state.mission=id || null; addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
-      } catch (fallback) { addEvent(fallback.message,'error'); setState('ATTENTION',fallback.message); }
-    } finally { state.busy=false; }
+        const id=result.run_id || result.mission_id; state.mission=id || null; addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
+        if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
+      } catch (fallback) { state.busy=false; state.missionLive=false; addEvent(fallback.message,'error'); setState('ATTENTION',fallback.message); }
+    }
   }
 
   // HERMUS contextual surfaces. These are real engine capabilities, not legacy
@@ -263,7 +352,7 @@
     if(!kernel) return;
     state.kernel=kernel;
     const summary=kernel.summary || {};
-    setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
+    if(!state.missionLive) setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
 
     const active=Number(summary.active_runs || 0);
     const attentionCount=Number(summary.attention_count || 0);
