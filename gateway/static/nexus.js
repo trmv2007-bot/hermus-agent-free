@@ -352,7 +352,7 @@
     if(!kernel) return;
     state.kernel=kernel;
     const summary=kernel.summary || {};
-    setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
+    if(!state.missionLive) setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
 
     const active=Number(summary.active_runs || 0);
     const attentionCount=Number(summary.attention_count || 0);
