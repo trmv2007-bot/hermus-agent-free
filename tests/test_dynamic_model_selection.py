@@ -137,3 +137,40 @@ def test_gateway_llm_uses_persisted_selection(monkeypatch):
     gateway.llm()
     assert seen["provider"] == "fake"
     assert seen["model"] == "runtime-42"
+
+
+def test_model_gateway_uses_dashboard_selection_when_model_is_omitted(monkeypatch, tmp_path):
+    from core.models.gateway import ModelGateway
+    import core.models.model_catalog as catalog_mod
+    import core.model_preferences as pref_mod
+
+    monkeypatch.setattr(
+        catalog_mod.model_catalog,
+        "list",
+        lambda **kwargs: {
+            "models": [{
+                "ref": "fake/selected-model",
+                "provider": "fake",
+                "id": "selected-model",
+                "capabilities": {"tools": "yes", "vision": "no"},
+                "source": "live",
+                "reachable": True,
+            }],
+            "providers": [{"provider": "fake", "configured": True}],
+            "count": 1,
+        },
+    )
+    pref = pref_mod.ModelPreferences(path=str(tmp_path / "prefs.json"))
+    pref.set("default", "fake/selected-model", validate=True)
+    monkeypatch.setattr(pref_mod, "model_preferences", pref)
+
+    built = {}
+
+    def builder(**kwargs):
+        built.update(kwargs)
+        return object()
+
+    gateway = ModelGateway(llm_builder=builder)
+    gateway.llm()
+    assert built["provider"] == "fake"
+    assert built["model"] == "selected-model"
