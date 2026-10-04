@@ -1089,6 +1089,13 @@
     return renderFilteredKeyGroups(rows,filter);
   }
 
+  document.addEventListener('change',e=>{
+    if(!e.target.closest('#keyStatusFilter')) return;
+    const host=qs('#apiKeysHost');
+    const groups=state.settingsData.keys?.llm_keys;
+    if(host&&groups) host.innerHTML=renderKeyGroupsFilteredFromPayload(groups,e.target.value);
+  },false);
+
   async function testStoredKey(button){
     const provider=button.dataset.keyProvider||'',name=button.dataset.keyName||'';
     const resultNode=qs('[data-key-result="'+CSS.escape(provider+'/'+name)+'"]');
@@ -1283,16 +1290,7 @@
     if(e.target.closest('[data-setting]')){setSetting(e.target.closest('[data-setting]').dataset.setting);return;}
     if(e.target.closest('[data-settings-refresh]')||e.target.closest('[data-provider-refresh]')||e.target.closest('[data-safety-refresh]')||e.target.closest('[data-workspace-refresh]')){await loadSettings();return;}
     if(e.target.closest('[data-key-add]')){await createKey();return;}
-    if(e.target.closest('#keyStatusFilter')){
-      const select=e.target.closest('#keyStatusFilter');
-      const host=qs('#apiKeysHost');
-      const root=select?.closest('.card-body');
-      if(host&&root){
-        const groups=state.settingsData.keys?.llm_keys;
-        if(groups) host.innerHTML=renderKeyGroupsFilteredFromPayload(groups,select.value);
-      }
-      return;
-    }
+    if(e.target.closest('#keyStatusFilter')) return;
     if(e.target.closest('[data-key-test]')){
       await testStoredKey(e.target.closest('[data-key-test]'));
       return;
