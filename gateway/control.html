@@ -177,7 +177,7 @@
       </section>
 
       <section class="view" id="view-settings">
-        <div class="view-head"><div><div class="eyebrow">CONTROL CENTER</div><h1>HERMUS configuration.</h1><p>One place to inspect and operate the real runtime: models, providers, permissions, voice, computer control, memory, integrations and updates.</p></div></div>
+        <div class="view-head"><div><div class="eyebrow">CONTROL CENTER</div><h1>HERMUS configuration.</h1><p>One place to inspect and operate the real runtime: models, providers, permissions, voice, computer control, memory, integrations and updates.</p></div><div class="actions"><button class="btn primary" type="button" data-open-wizard>SETUP WIZARD</button></div></div>
         <div class="settings-frame">
           <nav class="settings-nav" id="settingsTabs" role="tablist" aria-label="Control Center sections">
     <div class="settings-nav-head"><strong>CONTROL CENTER</strong><input id="settingsSearch" type="search" placeholder="Filter settings…" aria-label="Filter Control Center settings"></div>
@@ -201,7 +201,22 @@
   </div>
 </div>
 
-<div id="commandPalette" class="command-palette" aria-hidden="true">
+
+<div id="setupWizard" class="setup-wizard" aria-hidden="true">
+  <section class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+    <header class="wizard-head">
+      <div><div class="eyebrow">HERMUS SETUP</div><h2 id="wizardTitle">Let HERMUS configure itself with you.</h2><p id="wizardSubtitle">We will inspect the runtime first, then walk through only the parts that need attention.</p></div>
+      <button class="icon-btn" type="button" data-wizard-close aria-label="Close setup wizard">×</button>
+    </header>
+    <div class="wizard-progress" id="wizardProgress"></div>
+    <div class="wizard-body" id="wizardBody"></div>
+    <footer class="wizard-foot">
+      <button class="btn ghost" type="button" data-wizard-back>BACK</button>
+      <div class="wizard-foot-actions"><button class="btn" type="button" data-wizard-later>CONFIGURE LATER</button><button class="btn primary" type="button" data-wizard-next>NEXT</button></div>
+    </footer>
+  </section>
+</div>
+\n<div id="commandPalette" class="command-palette" aria-hidden="true">
   <section class="palette" role="dialog" aria-modal="true" aria-labelledby="paletteTitle">
     <div class="palette-head"><span id="paletteTitle">HERMUS COMMAND</span><button id="paletteClose" type="button" aria-label="Close command palette">×</button></div>
     <input id="paletteInput" placeholder="Find a workspace or control section…" aria-label="Search HERMUS workspaces">
