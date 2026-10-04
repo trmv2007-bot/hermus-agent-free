@@ -543,6 +543,7 @@ from gateway.routes_focus import router as _focus_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_learning import router as _learning_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
+from gateway.routes_media import router as _media_router  # noqa: E402
 from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
@@ -564,6 +565,7 @@ app.include_router(_channels_router)
 app.include_router(_channels_control_router, dependencies=_gate_control)
 app.include_router(_registry_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
+app.include_router(_media_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
 app.include_router(_console_router, dependencies=_gate_control)
 app.include_router(_dashboard_router, dependencies=_gate_control)
