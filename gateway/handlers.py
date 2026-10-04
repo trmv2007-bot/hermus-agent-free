@@ -109,6 +109,7 @@ def _runtime_execute(
         mode=payload.get("mode", "agent"),
         api_key=payload.get("api_key"),
         base_url=payload.get("base_url"),
+        session_id=payload.get("session_id"),
         prefer=prefer,
         on_event=_emit,
         stream=bool(payload.get("stream", getattr(config, "gateway_stream_enabled", True))),
