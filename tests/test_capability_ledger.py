@@ -111,6 +111,7 @@ def test_capability_ledger_can_write_setup_proposal(tmp_path):
 
 def test_control_room_can_generate_setup_proposal():
     src = control_room_source()
-    assert "/capabilities/ledger/propose" in src
-    assert "Propose setup" in src
-    assert "function proposePower" in src
+    assert 'data-settings-tab="integrations"' in src
+    assert "CONNECT ENABLED" in src
+    assert "/mcp/connect" in src
+
