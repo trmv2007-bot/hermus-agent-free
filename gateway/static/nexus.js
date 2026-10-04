@@ -52,7 +52,7 @@
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
     } catch (e) {
-      state.online=false; $('#stateLabel').textContent='OFFLINE'; $('#stateDot').className='state-dot bad'; $('#healthValue').textContent='OFFLINE';
+      state.online=false; $('#stateLabel').textContent='OFFLINE'; $('#stateDot').className='state-dot bad'; const mission=$('#missionStatus'); if(mission&&!state.missionLive) mission.textContent='OFFLINE';
       setState('DISCONNECTED','gateway unavailable'); addEvent(e.message,'error');
     }
   }
@@ -151,13 +151,13 @@
     input.value=''; missionReset(); state.busy=true; setState('WORKING','processing your request'); addEvent(`Command · ${command}`);
     try {
       const result=await api('/api/v1/commands',{method:'POST',body:JSON.stringify({command,text:command,platform:'web',mode:'chat',stream:true})});
-      const id=result.run_id || result.job_id || result.mission_id; state.mission=id || null;
+      const id=result.run_id || result.mission_id; state.mission=id || null;
       addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
       if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
     } catch(e) {
       try {
         const result=await api('/jobs',{method:'POST',body:JSON.stringify({kind:'runtime.turn',payload:{text:command,platform:'web',mode:'chat',stream:true}})});
-        const id=result.run_id || result.job_id; state.mission=id || null; addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
+        const id=result.run_id || result.mission_id; state.mission=id || null; addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
         if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
       } catch (fallback) { state.busy=false; state.missionLive=false; addEvent(fallback.message,'error'); setState('ATTENTION',fallback.message); }
     }
