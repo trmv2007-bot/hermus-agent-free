@@ -42,28 +42,24 @@ def test_control_room_serves_from_real_backend_seeds():
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     text = control_room_source()
-    # snapshot + replay + command architecture, no UI-owned truth
-    assert "Snapshot" in text and "Replay" in text
-    assert "/api/v1/commands" in text
-    assert "never simulates success" in text or "never owns truth" in text
-    # every meaningful control maps to a real backend command
+    # canonical dashboard-v2 shell + real API owners
+    assert "HERMUS" in text
+    assert "/jobs" in text
+    assert "/computer/status" in text
+    assert "/computer/run" in text
+    assert "/doctor/status" in text
+    assert "/doctor/run" in text
     for api in (
+        "/readyz",
         "/api/v1/system/health",
         "/api/v1/system/capabilities",
         "/jobs",
-        "/queue/status",
-        "/events/recent",
-        "/dashboard/events",
         "/computer/status",
         "/computer/run",
-        "/computer/control/emergency-stop",
-        "/remote/status",
-        "/remote/approvals",
-        "/remote/",
-        "/remote/",
-        "/doctor/status",
-        "/doctor/run",
-        "/api/v1/runs/",
+        "/missions",
+        "/routines",
+        "/workspace",
+        "/navigator/fetch",
     ):
         assert api in text, f"control room must wire {api}"
     # approve/reject are built dynamically from a real /remote/{action} command
