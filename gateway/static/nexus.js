@@ -153,8 +153,8 @@
 
   function roleFilter(row, role){
     const caps=row.capabilities || {};
-    if(role==='vision') return caps.vision !== 'no';
-    if(role==='default' || role==='reasoning' || role==='coding') return caps.tools !== 'no';
+    if(role==='vision') return caps.vision === 'yes';
+    if(role==='default' || role==='reasoning' || role==='coding') return caps.tools === 'yes';
     return true;
   }
 
