@@ -64,6 +64,7 @@ def test_cli_and_dashboard_expose_bundle_flow():
     dash = control_room_source()
     assert 'add_parser("bundles"' in cli
     assert 'add_parser("resolve-bundle"' in cli
-    assert "Approval bundles" in dash
-    assert "/permissions/bundles/resolve" in dash
-    assert "function resolveBundle" in dash
+    assert 'data-settings-tab="safety"' in dash
+    assert "PENDING APPROVALS" in dash
+    assert 'data-approval="' in dash
+
