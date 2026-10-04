@@ -25,6 +25,7 @@ not replace them.
 | 16 | Self-improving agent | Verified outcomes + skills | ✅ Complete |
 | 17 | Distributed HERMUS | Shared identity + memory + device workers | ✅ Complete |
 | 18 | Reliability & recovery | Queue + distributed control plane + state | ✅ Complete |
+| 19 | JARVIS × FAIRY adaptive model environment | ModelGateway + Control Room + World Model | ✅ Complete |
 
 ## Architectural invariants
 
@@ -145,3 +146,39 @@ signals, and distributed lease/fencing support. Recovery remains subordinate to
 approval, red-line, sandbox, verification and emergency-stop controls.
 
 See docs/PHASE_18_RELIABILITY_RECOVERY.md.
+
+
+## Phase 19 — JARVIS × FAIRY Adaptive Model Environment
+
+Completed. HERMUS now has a discovery-first model environment rather than a
+dashboard hardcoded around particular model names. Configured provider/runtime
+bundles are discovered into a secret-free catalog, roles can be set to Auto or
+an explicitly discovered deployment, and the canonical ModelGateway resolves
+those choices at runtime.
+
+The main agent, planning/reasoning paths and Meta-Counsel respect explicit
+dashboard selections. Vision selection is capability-driven rather than tied to
+a fixed model ID. ModelGateway also records per-model runtime telemetry for the
+Control Room.
+
+The Nexus dashboard now presents the model environment as part of HERMUS's
+persistent operating surface: discovery, role selection, live sync,
+capability/reachability information, latency telemetry and a dedicated Models
+surface.
+
+See docs/JARVIS_FAIRY_ENVIRONMENT_SPEC.md.
+
+### Phase 19 follow-on work
+
+The next improvements should be workload-specific routing and evaluation rather
+than more hardcoded model lists:
+
+- quality-gated model fallback;
+- task-class routing based on real HERMUS workload telemetry;
+- token/cost budgets where provider data exists;
+- model approval/subset governance;
+- full mission traces connecting routing → tools → verification;
+- physical device connectors that make HERMUS inhabit the user's environment.
+
+These follow-on items remain subordinate to the existing approval, red-line,
+sandbox, verification and emergency-stop controls.
