@@ -93,8 +93,8 @@ def test_control_room_has_discovery_driven_model_surface():
     js = Path("gateway/static/nexus.js").read_text(encoding="utf-8")
     css = Path("gateway/static/nexus.css").read_text(encoding="utf-8")
     assert 'id="modelSelect"' in html
-    assert "/api/v1/models/catalog" in js
-    assert "/api/v1/models/select" in js
+    assert "/models/catalog" in js
+    assert "/models/select" in js
     assert "AUTO · best available" in js
     assert "model-surface" in css
     assert "llava:7b" not in html
