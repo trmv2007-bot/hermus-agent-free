@@ -1559,7 +1559,7 @@
     if(e.target.closest('[data-computer-resume]')){const id=e.target.closest('[data-computer-resume]').dataset.computerResume;try{await api('/computer/control/resume/'+encodeURIComponent(id),{method:'POST',body:'{}'});toast('Computer task resumed');loadComputer()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-computer-cancel]')){const id=e.target.closest('[data-computer-cancel]').dataset.computerCancel;if(state.settings.confirm!==false&&!confirm('Cancel computer task '+id+'?'))return;try{await api('/computer/control/cancel/'+encodeURIComponent(id),{method:'POST',body:'{}'});toast('Computer task cancellation requested');loadComputer()}catch(err){toast(err.message,true)}return;}
     if(e.target.closest('[data-settings-tab]')){openSettingsTab(e.target.closest('[data-settings-tab]').dataset.settingsTab);return;}
-    if(e.target.closest('[data-chat-model-refresh]')){await loadModels({refresh:true,probe:true});toast('Chat models refreshed');return;}
+    if(e.target.closest('[data-chat-model-refresh]')){await loadModels({refresh:true,probe:true});renderSettingsTab('chat');toast('Chat models refreshed');return;}
     if(e.target.closest('#chatModelSelect')){
       const model=e.target.closest('#chatModelSelect').value||'auto';
       state.settings.chat_model=model;
