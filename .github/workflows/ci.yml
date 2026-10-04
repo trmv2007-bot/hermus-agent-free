@@ -74,7 +74,7 @@ jobs:
           const out='/tmp/jarvis-ui';
           fs.mkdirSync(out,{recursive:true});
           const browser=await chromium.launch({headless:true});
-          const page=await browser.newPage({viewport:{width:1920,height:1080}});
+          const page=await browser.newPage({viewport:{width:1920,height:1080}}); page.setDefaultTimeout(2500); page.setDefaultNavigationTimeout(5000);
           const json=(body)=>({status:200,contentType:'application/json',body:JSON.stringify(body)});
           await page.route('**/*',async route=>{
             const u=new URL(route.request().url()), m=route.request().method();
@@ -105,7 +105,7 @@ jobs:
 
           const errors=[];
           page.on('pageerror',e=>errors.push(e.message));
-          await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
+          await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'}); console.log('QA: baseline loaded');
           await page.screenshot({path:out+'/00-baseline.png',fullPage:true});
 
           const buttons=page.locator('button:visible');
@@ -118,45 +118,45 @@ jobs:
             const box=await b.boundingBox(); if(!box||box.width<1||box.height<1) throw new Error('Bad geometry: '+label);
           }
 
-          await page.locator('#globalSearch').click();
+          console.log('QA: command palette'); await page.locator('#globalSearch').click();
           await page.locator('#paletteInput').fill('model');
           await page.locator('#paletteList button').first().click(); await page.waitForTimeout(120);
           await page.locator('#overlay [data-close]').click();
 
-          for(const v of ['chat','ide','browser','terminal','image','video','notes']){
+          console.log('QA: workbench slides'); for(const v of ['chat','ide','browser','terminal','image','video','notes']){
             await page.locator('[data-workbench-tab="'+v+'"]').click();
             if(await page.locator('[data-workbench-view="'+v+'"]').evaluate(el=>!el.classList.contains('active'))) throw new Error('Workbench view failed: '+v);
             await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:true});
           }
 
-          for(const t of await page.locator('[data-toggle]:visible').all()){
+          console.log('QA: toggles'); for(const t of await page.locator('[data-toggle]:visible').all()){
             const before=await t.getAttribute('aria-pressed'); await t.click();
             if(await t.getAttribute('aria-pressed')===before) throw new Error('Toggle failed');
             await t.click(); if(await t.getAttribute('aria-pressed')!==before) throw new Error('Toggle restore failed');
           }
 
-          const env=page.locator('.environment-panel');
+          console.log('QA: environment'); const env=page.locator('.environment-panel');
           await env.locator('[data-panel-toggle]').click();
           if(!(await env.evaluate(el=>el.classList.contains('is-collapsed')))) throw new Error('Environment collapse failed');
           await env.locator('[data-panel-toggle]').click();
 
-          await page.locator('#modelRole').selectOption('vision');
+          console.log('QA: models'); await page.locator('#modelRole').selectOption('vision');
           await page.locator('#modelSelect').selectOption('local/vision-demo');
           await page.locator('#modelSave').click();
           await page.locator('#modelRefresh').click();
 
-          for(const room of ['main-hall','ide-lab','model-lab','media-studio','control-room','personal-space']){
+          console.log('QA: rooms'); for(const room of ['main-hall','ide-lab','model-lab','media-studio','control-room','personal-space']){
             await page.locator('[data-room="'+room+'"]').click();
             if(room==='main-hall'||room==='ide-lab'){ await page.locator('#workshopClose').click(); }
             else { await page.locator('#overlay [data-close]').click().catch(()=>{}); }
           }
 
-          await page.locator('#personalSpaceOpenDock').click();
+          console.log('QA: personal space'); await page.locator('#personalSpaceOpenDock').click();
           await page.locator('#overlay').waitFor({state:'visible'});
           if(!(await page.locator('#personalSpaceActions').count())) throw new Error('Personal Space action mock failed');
           await page.locator('#overlay [data-close]').click();
 
-          await page.locator('[data-workshop-open]').first().click();
+          console.log('QA: workshop'); await page.locator('[data-workshop-open]').first().click();
           await page.locator('#workshop').waitFor({state:'visible'});
           await page.locator('#workshopRefresh').click();
           await page.locator('[data-workshop-project="demo-app"]').click();
@@ -170,7 +170,7 @@ jobs:
           await page.locator('#workshopSend').click();
           await page.locator('#workshop').waitFor({state:'hidden'});
 
-          await page.locator('#workbenchClose').click();
+          console.log('QA: workbench hide/restore'); await page.locator('#workbenchClose').click();
           await page.locator('#workbenchRestore').click();
 
           for(const sel of ['[data-open]','[data-command]','[data-workshop-open]']){
