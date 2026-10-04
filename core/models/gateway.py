@@ -330,6 +330,7 @@ class ModelGateway:
         tools: list[dict[str, Any]] | None = None,
         trace_id: str | None = None,
         max_retries: int = 1,
+        role: str = "default",
         **kw,
     ):
         """Real completion through the canonical boundary.
@@ -341,7 +342,10 @@ class ModelGateway:
         Never fabricates a response on failure.
         """
         llm_obj = self.llm(
-            model=model, provider=provider, **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw}
+            model=model,
+            provider=provider,
+            role=role,
+            **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw},
         )
         started = time.time()
         try:
