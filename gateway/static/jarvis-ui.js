@@ -180,6 +180,10 @@
     }
   }, true);
 
+  q("#workshopAsk")?.addEventListener("click", () => {
+    requestAnimationFrame(() => q("#workshopCommand")?.focus());
+  }, true);
+
   qa("[data-toggle]").forEach(button => setToggle(button, button.getAttribute("aria-pressed") === "true"));
   q(".bottom-workbench")?.setAttribute("data-view", "chat");
   q("#workbenchRestore")?.classList.remove("visible");
