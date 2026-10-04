@@ -220,9 +220,9 @@ jobs:
             await page.waitForTimeout(50);
           }
 
-          if(await page.locator('#workshop.open').count()){
+          if(await page.locator('#workshop').isVisible().catch(()=>false)){
             await page.locator('#workshopClose').click();
-            await page.waitForTimeout(250);
+            await page.waitForTimeout(300);
           }
           await page.locator('[data-workbench-tab="chat"]').click();
           await page.locator('[data-room="main-hall"]').click();
