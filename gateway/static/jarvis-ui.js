@@ -30,6 +30,7 @@
       host.className = "ui-toast-host";
       document.body.appendChild(host);
     }
+    host.querySelectorAll(".ui-toast").forEach(existing => existing.remove());
     const toast = document.createElement("div");
     toast.className = "ui-toast " + (kind === "error" ? "error" : "");
     toast.innerHTML = "<b>HERMUS</b><span>" + String(message).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])) + "</span>";
