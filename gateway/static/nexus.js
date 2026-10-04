@@ -90,6 +90,10 @@
       const healthy = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
       if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthy ? `${healthy} systems ready` : 'READY'; }
       renderCapabilities(caps.capabilities || caps);
+      const gatewayState = $('#systemGatewayState');
+      if(gatewayState) { gatewayState.textContent = healthy ? 'HEALTHY' : 'DEGRADED'; gatewayState.className = healthy ? 'good' : 'warn'; }
+      const response = $('#systemResponse');
+      if(response) response.textContent = `${Math.round(performance.now()-started)} ms`;
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
     } catch (e) {
@@ -423,6 +427,8 @@
 
     const active=Number(summary.active_runs || 0);
     const attentionCount=Number(summary.attention_count || 0);
+    const metricTasks=$('#metricTasks');
+    if(metricTasks) metricTasks.textContent=String(active);
     const health=$('#healthValue');
     if(health) health.textContent = active
       ? (active + (active===1 ? ' active task' : ' active tasks'))
@@ -826,6 +832,8 @@
     try {
       const data = await api('/api/v1/agents/list');
       const agents = Array.isArray(data?.agents) ? data.agents : [];
+      const metricAgents=q('#metricAgents');
+      if(metricAgents) metricAgents.textContent=String(agents.length);
       if (!agents.length) {
         host.innerHTML = '<div class="agent-row muted-row"><span class="agent-avatar">✥</span><div><strong>No active subagents</strong><small>Agents appear here when spawned</small></div><i></i></div>';
         return;
