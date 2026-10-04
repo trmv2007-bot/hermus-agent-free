@@ -368,3 +368,89 @@ body:after{
 
 /* Visual diagnostic: the primary orb has its own lighting; hide the standalone glow layer. */
 .jarvis-home .stage-scene>.core-glow{display:none!important}
+
+
+/* ------------------------------------------------------------------ JARVIS INTERACTION MOCK / PRODUCTION POLISH */
+.toggle-row{
+  appearance:none;width:100%;border:0;border-top:1px solid rgba(67,167,244,.06);
+  background:transparent;color:#7190a7;display:flex;align-items:center;justify-content:space-between;
+  padding:9px 0;text-align:left;cursor:pointer;font:inherit;transition:background .18s ease,color .18s ease,transform .18s ease;
+}
+.toggle-row:first-of-type{border-top:0}
+.toggle-row:hover{color:#dff7ff;background:rgba(47,157,255,.035)}
+.toggle-row:focus-visible,.workbench-tab:focus-visible,.room:focus-visible,.workbench-mock-action:focus-visible,
+.workbench-restore:focus-visible{outline:1px solid rgba(89,205,255,.72);outline-offset:2px}
+.toggle-row .toggle{
+  position:relative;width:29px;height:14px;border-radius:999px;display:block;flex:0 0 auto;
+  background:rgba(72,95,117,.34);border:1px solid rgba(90,128,157,.28);transition:background .2s ease,box-shadow .2s ease;
+}
+.toggle-row .toggle:after{
+  content:"";position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;
+  background:#6c8195;transition:transform .2s ease,background .2s ease,box-shadow .2s ease;
+}
+.toggle-row .toggle.on{background:rgba(47,157,255,.22);border-color:rgba(89,205,255,.42);box-shadow:0 0 13px rgba(47,157,255,.12)}
+.toggle-row .toggle.on:after{transform:translateX(14px);background:#8fe9ff;box-shadow:0 0 10px rgba(104,220,255,.7)}
+
+.room-preview{position:relative;isolation:isolate}
+.room-preview-copy{
+  position:absolute;left:14px;right:14px;bottom:13px;z-index:3;display:grid;gap:3px;
+  padding:8px 9px;border:1px solid rgba(95,192,255,.13);border-radius:9px;
+  background:rgba(1,10,20,.56);backdrop-filter:blur(7px);box-shadow:0 10px 30px rgba(0,0,0,.18)
+}
+.room-preview-copy .panel-kicker{margin:0;font-size:6px}.room-preview-copy strong{font-size:11px;color:#d9f5ff}.room-preview-copy small{font-size:7px;color:#6e899f;line-height:1.5}
+
+.environment-panel.is-collapsed .room-preview,
+.environment-panel.is-collapsed .room-list{display:none}
+.environment-panel.is-collapsed{min-height:62px}
+.environment-panel.is-collapsed .panel-head{margin-bottom:0}
+
+.workbench-view-stage{
+  position:relative;overflow:hidden;min-height:74px;border-bottom:1px solid rgba(67,167,244,.08);
+  background:linear-gradient(90deg,rgba(8,23,41,.66),rgba(4,13,25,.35))
+}
+.workbench-view{
+  display:none;min-height:74px;padding:13px 16px;align-items:center;justify-content:space-between;gap:18px;
+  animation:viewEnter .28s ease both
+}
+.workbench-view.active{display:flex}
+.view-hero{min-width:0}.view-hero h3{margin:2px 0 4px;font-size:12px;color:#e3f8ff;font-weight:500}.view-hero p{margin:0;color:#668097;font-size:8px;line-height:1.5;max-width:620px}
+.workbench-mock-action{
+  flex:0 0 auto;padding:7px 10px;border:1px solid rgba(75,181,255,.24);border-radius:7px;
+  background:rgba(47,157,255,.06);color:#9bdcff;font-size:7px;letter-spacing:.08em;cursor:pointer
+}
+.workbench-mock-action:hover{border-color:rgba(98,211,255,.46);background:rgba(47,157,255,.11);color:#e9fbff}
+.bottom-workbench[data-view="chat"] .workbench-view-stage{background:linear-gradient(90deg,rgba(8,23,41,.44),rgba(4,13,25,.22))}
+.bottom-workbench:not([data-view="chat"]) .workbench-body{display:none}
+
+.workbench-restore{
+  position:fixed;right:18px;bottom:18px;z-index:70;opacity:0;pointer-events:none;transform:translateY(12px);
+  padding:8px 11px;border:1px solid rgba(74,181,255,.25);border-radius:10px;
+  background:rgba(3,13,25,.92);color:#9ad8f7;font-size:8px;letter-spacing:.08em;cursor:pointer;
+  box-shadow:0 10px 35px rgba(0,0,0,.35);transition:opacity .22s ease,transform .22s ease,border-color .22s ease
+}
+.workbench-restore.visible{opacity:1;pointer-events:auto;transform:none}
+.bottom-workbench.is-hidden{display:none}
+
+.ui-toast-host{position:fixed;top:78px;left:50%;transform:translateX(-50%);z-index:100;display:grid;gap:7px;pointer-events:none}
+.ui-toast{
+  display:flex;align-items:center;gap:9px;min-width:220px;max-width:min(420px,80vw);padding:8px 11px;
+  border:1px solid rgba(71,181,255,.2);border-radius:9px;background:rgba(3,15,29,.92);
+  box-shadow:0 14px 40px rgba(0,0,0,.35);opacity:0;transform:translateY(-8px) scale(.98);
+  transition:opacity .2s ease,transform .2s ease;backdrop-filter:blur(10px)
+}
+.ui-toast.show{opacity:1;transform:none}.ui-toast b{font-size:7px;letter-spacing:.14em;color:#69dfff}.ui-toast span{font-size:8px;color:#a3b9cc}.ui-toast.error{border-color:rgba(255,93,111,.28)}.ui-toast.error b{color:#ff93a2}
+
+.ui-pulse{animation:uiPulse .36s ease}
+.ui-opening{animation:surfaceOpen .24s ease both}
+@keyframes uiPulse{0%{transform:scale(1)}45%{transform:scale(.985)}100%{transform:scale(1)}}
+@keyframes surfaceOpen{from{opacity:.25;transform:translateY(7px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes viewEnter{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
+
+@media (max-width:980px){
+  .workbench-view{align-items:flex-start;flex-direction:column;gap:9px}
+  .workbench-mock-action{align-self:flex-start}
+}
+@media (prefers-reduced-motion:reduce){
+  .workbench-view,.ui-opening,.ui-pulse{animation:none!important}
+  .toggle-row .toggle,.toggle-row .toggle:after,.ui-toast,.workbench-restore{transition:none!important}
+}
