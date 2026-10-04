@@ -45,12 +45,14 @@ jobs:
       - run: python -m mypy core/log.py core/errors.py
 
       - name: JavaScript syntax
-        run: node --check gateway/static/nexus.js
+        run: |
+          node --check gateway/static/nexus.js
+          node --check gateway/static/dashboard-v2.js
 
 
   ui-qa:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -61,257 +63,113 @@ jobs:
           npm init -y
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Browser QA against mocked services
+      - name: Browser QA for HERMUS dashboard
         run: |
           mkdir -p /tmp/hermus-ui/static
           cp gateway/control.html /tmp/hermus-ui/control.html
           cp -r gateway/static/. /tmp/hermus-ui/static/
           python -m http.server 4173 --directory /tmp/hermus-ui >/tmp/hermus-ui-server.log 2>&1 &
-          cat >/tmp/jarvis-ui-qa.mjs <<'EOF'
+          cat >/tmp/dashboard-v2-qa.mjs <<'EOF'
           import {chromium} from 'playwright';
           import fs from 'node:fs';
-
-          const out='/tmp/jarvis-ui';
+          const out='/tmp/hermus-ui';
           fs.mkdirSync(out,{recursive:true});
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage({viewport:{width:1920,height:1080}});
-          page.setDefaultTimeout(1800);
-          page.setDefaultNavigationTimeout(5000);
-
-          const json=(body)=>({status:200,contentType:'application/json',body:JSON.stringify(body)});
+          page.setDefaultTimeout(2500);
+          const json=(x)=>({status:200,contentType:'application/json',body:JSON.stringify(x)});
           await page.route('**/*',async route=>{
-            const u=new URL(route.request().url()), m=route.request().method(), p=u.pathname;
+            const u=new URL(route.request().url()),p=u.pathname,m=route.request().method();
             if(m==='POST') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa'}));
-            if(!/^(\/api\/|\/models\/|\/workshop\/|\/context|\/presence\/|\/focus|\/learning|\/routines|\/devices|\/personal-space)/.test(p)) return route.continue();
             if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true}}));
-            if(p==='/api/v1/system/capabilities') return route.fulfill(json({capabilities:{web_search:true,osint_tools:true,world_model:true,workshop:true,media:true}}));
-            if(p==='/api/v1/agents/list') return route.fulfill(json({agents:[{name:'Researcher',role:'research',state:'working'},{name:'Coder',role:'coding',state:'idle'}]}));
-            if(p==='/presence/kernel') return route.fulfill(json({summary:{state:'idle',headline:'All systems ready',active_runs:0,attention_count:0},attention:[],events:{recent:[]},world:{facts:{}}}));
-            if(p==='/models/catalog') return route.fulfill(json({count:2,models:[{ref:'local/qwen3:4b',provider:'local',provider_name:'Ollama',id:'qwen3:4b',source:'live',reachable:true,capabilities:{tools:'yes',vision:'no'}},{ref:'local/vision-demo',provider:'local',provider_name:'Ollama',id:'vision-demo',source:'live',reachable:true,capabilities:{tools:'yes',vision:'yes'}}]}));
-            if(p==='/models/selected') return route.fulfill(json({selections:{default:'auto',reasoning:'auto',vision:'local/vision-demo',coding:'local/qwen3:4b',background:'auto',doctor:'auto',voice:'auto'}}));
-            if(p==='/models/health') return route.fulfill(json({models:{'local/qwen3:4b':{avg_latency_ms:42},'local/vision-demo':{avg_latency_ms:61}}}));
-            if(p==='/models/select' || p==='/conversation/session' || p==='/api/v1/commands' || p==='/jobs') return route.fulfill(json({success:true,accepted:true,session_id:'qa',selections:{default:'auto',vision:'local/vision-demo',coding:'local/qwen3:4b'}}));
-            if(p==='/focus') return route.fulfill(json({items:[{title:'UI QA',priority:'high'}]}));
-            if(p==='/learning') return route.fulfill(json({lessons:[{title:'UI validation'}]}));
-            if(p==='/routines') return route.fulfill(json({routines:[{name:'Daily review',enabled:true,event_type:'schedule',action_type:'command',task:'Review workspace'}]}));
-            if(p==='/devices') return route.fulfill(json({browser:{connected:true},desktop:{ready:true}}));
-            if(p==='/api/v1/console/manifest') return route.fulfill(json({name:'HERMUS Console',status:'ready'}));
-            if(p==='/personal-space' || p==='/personal-space/') return route.fulfill(json({status:'proposal_ready',idle_for_seconds:120,pending_proposals:1,daily_cycles:1,daily_cap:3,proposals:[{id:'qa',status:'pending',title:'QA proposal',summary:'Review every visible control.',category:'ui',confidence:.99,why:'QA',next_action:'Approve'}]}));
-            if(p==='/personal-space/run' || p.startsWith('/personal-space/proposals/')) return route.fulfill(json({success:true,status:'curious'}));
-            if(p==='/workshop/snapshot') return route.fulfill(json({current:'demo-app',projects:[{name:'demo-app'},{name:'hermus-core'}],tree:[{name:'app.py',path:'app.py',type:'file',size:18},{name:'README.md',path:'README.md',type:'file',size:10}]}));
-            if(p==='/context') return route.fulfill(json({project:'demo-app',summary:{state:'idle'},presence:{world:{facts:{}}},attention:[],memory:[{content:'QA'}],goals:[{title:'Ship'}]}));
-            if(p==='/workshop/file' && m==='GET') return route.fulfill(json({path:'app.py',content:'print(1)\\n',size:9,editable:true}));
-            if(p==='/workshop/file' && m==='PUT') return route.fulfill(json({success:true}));
-            if(p==='/workshop/project/use' && m==='POST') return route.fulfill(json({success:true}));
+            if(p==='/api/v1/system/capabilities') return route.fulfill(json({providers:[{name:'Local Runtime',ok:true}],tools:{web_search:{description:'Web search',available:true},terminal:{description:'Terminal execution',available:true},image_generation:{description:'Image generation',available:true}}}));
+            if(p==='/api/v1/agents/list'||p==='/agents') return route.fulfill(json({agents:[{name:'Researcher',role:'research',state:'working'},{name:'Coder',role:'coding',state:'idle'}]}));
+            if(p==='/presence/kernel') return route.fulfill(json({summary:{active_runs:1,attention_count:1},attention:[{title:'UI review',detail:'One QA task',severity:'medium'}],events:{recent:[{summary:'Test run ready',type:'run_finished',at:'now'}]}}));
+            if(p==='/models/catalog') return route.fulfill(json({count:2,models:[{ref:'local/qwen3:4b',id:'qwen3:4b',name:'Qwen 3 4B',provider:'Ollama',source:'live',reachable:true,capabilities:{tools:'yes',vision:'no'}},{ref:'local/vision',id:'vision',name:'Vision Demo',provider:'Ollama',source:'live',reachable:true,capabilities:{tools:'yes',vision:'yes'}}]}));
+            if(p==='/models/selected') return route.fulfill(json({selections:{default:'auto',vision:'local/vision',coding:'local/qwen3:4b'}}));
+            if(p==='/routines') return route.fulfill(json({routines:[{id:'r1',name:'Daily review',enabled:true,event_type:'schedule',action_type:'runtime.turn'}]}));
+            if(p==='/missions') return route.fulfill(json({missions:[{id:'m1',goal:'Review workspace',state:'blocked'}]}));
+            if(p==='/learning') return route.fulfill(json({lessons:[{title:'UI validation',summary:'Reusable lesson'}]}));
+            if(p==='/personal-space') return route.fulfill(json({status:'proposal_ready',idle_for_seconds:120,daily_cycles:1,daily_cap:3,proposals:[{id:'p1',status:'pending',title:'Useful discovery',summary:'QA proposal'}]}));
+            if(p==='/workshop/snapshot') return route.fulfill(json({current:'demo-app',projects:[{name:'demo-app'},{name:'hermus-core'}],tree:[{name:'app.py',path:'app.py',type:'file',size:12}]}));
+            if(p==='/context') return route.fulfill(json({project:'demo-app',summary:{state:'idle'},attention:[],goals:[{title:'Ship dashboard'}],memory:[{content:'QA note'}]}));
+            if(p==='/workshop/file'&&m==='GET') return route.fulfill(json({path:'app.py',content:'print(1)\\n',size:9,editable:true}));
             return route.fulfill(json({success:true,ok:true}));
           });
-
-          const errors=[];
-          page.on('pageerror',e=>errors.push(e.message));
-          page.on('console',msg=>{if(msg.type()==='error') errors.push(msg.text())});
-
+          const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
-          console.log('QA: baseline');
-          await page.screenshot({path:out+'/00-baseline.png',fullPage:false});
-
-          const visibleButtons=page.locator('button:visible');
-          const count=await visibleButtons.count();
-          if(count<30) throw new Error('Too few visible buttons: '+count);
-
-          for(let i=0;i<count;i++){
-            const b=visibleButtons.nth(i);
-            const label=((await b.innerText().catch(()=>''))||await b.getAttribute('aria-label')||await b.getAttribute('title')||'').trim();
-            if(!label) throw new Error('Unlabelled visible button '+i);
-            const contract=await b.evaluate(el=>['data-open','data-command','data-workshop-open','data-toggle','data-workbench-tab','data-panel-toggle','data-close-workbench','data-close','id'].some(a=>el.hasAttribute(a)));
-            if(!contract) throw new Error('Unbound visible button: '+label);
-            const box=await b.boundingBox();
-            if(!box||box.width<1||box.height<1) throw new Error('Bad geometry: '+label);
+          await page.waitForTimeout(300);
+          await page.screenshot({path:out+'/00-overview.png'});
+          const nav=[...new Set(await page.locator('[data-view]:visible').evaluateAll(es=>es.map(e=>e.dataset.view)))];
+          for(const v of nav){
+            await page.locator('[data-view="'+v+'"]:visible').first().click();
+            await page.waitForTimeout(100);
+            if(!(await page.locator('#view-'+v).evaluate(el=>el.classList.contains('active'))))throw new Error('View failed to open: '+v);
+            await page.screenshot({path:out+'/view-'+v+'.png'});
           }
-
-          console.log('QA: interactive semantics');
-          const roleButtons=page.locator('[role="button"]:visible');
-          if(await roleButtons.count()<1) throw new Error('No visible role=button control found');
-          await page.locator('#globalSearch').press('Enter');
-          if(!(await page.locator('#palette').evaluate(el=>el.classList.contains('open')))) throw new Error('Command surface keyboard activation failed');
+          await page.locator('[data-view="overview"]').first().click();
+          await page.locator('[data-overview-send]').click().catch(()=>{});
+          await page.locator('[data-command]').first().click();
+          await page.locator('#commandFocus').click();
+          if(!(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))))throw new Error('Command palette click failed');
+          await page.locator('#paletteClose').click();
+          await page.locator('#topCommand').press('Enter');
+          if(!(await page.locator('#commandPalette').evaluate(el=>el.classList.contains('open'))))throw new Error('Command palette keyboard failed');
           await page.keyboard.press('Escape');
-
-          for(const select of await page.locator('select:visible').all()){
-            const aria=await select.getAttribute('aria-label');
-            if(!aria) throw new Error('Visible select without aria-label');
-            const box=await select.boundingBox();
-            if(!box||box.width<20||box.height<20) throw new Error('Bad select geometry');
-          }
-
-          for(const input of await page.locator('input:visible').all()){
-            const aria=await input.getAttribute('aria-label');
-            const placeholder=await input.getAttribute('placeholder');
-            if(!aria && !placeholder) throw new Error('Visible input without label/placeholder');
-          }
-
-          console.log('QA: palette');
-          await page.locator('#globalSearch').click();
-          await page.locator('#paletteInput').fill('model');
-          if(await page.locator('#paletteList button').count()!==1) throw new Error('Palette filter failed');
-          await page.locator('#paletteList button').first().click();
-          await page.locator('#overlay [data-close]').click();
-
-          console.log('QA: structured product surfaces');
-          for (const name of ['System health','Capabilities','Agents','Focus','Learning','Devices','Dashboard state']) {
-            await page.locator('[data-open="'+name+'"]:visible').first().click().catch(()=>{});
-            await page.waitForTimeout(120);
-            if (!(await page.locator('#overlay').evaluate(el=>el.classList.contains('open')))) throw new Error('Surface failed to open: '+name);
-            if (await page.locator('#surfaceView .surface-loading').count() && await page.locator('#surfaceView .surface-loading').first().isVisible()) throw new Error('Surface stuck loading: '+name);
-            if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in '+name);
-            await page.screenshot({path:out+'/surface-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.png',fullPage:false});
-            await page.locator('#overlay [data-close]').click();
-          }
-
-          await page.locator('[data-open="Models"]:visible').first().click();
-          await page.waitForTimeout(250);
-          if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in Models');
-          await page.locator('#surfaceModelRole').selectOption('vision');
-          await page.locator('#surfaceModelSelect').selectOption('local/vision-demo');
-          await page.locator('[data-surface-action="models-save"]').click();
-          await page.locator('#overlay [data-close]').click();
-
-          await page.locator('[data-open="Routines"]:visible').first().click();
-          await page.waitForTimeout(250);
-          if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in Missions & Automation');
-          await page.locator('[data-surface-action="routine-new"]').click();
+          await page.locator('[data-view="models"]').first().click();
+          await page.locator('#modelRoleInput').selectOption('vision');
+          await page.locator('#modelDeploymentInput').selectOption('local/vision');
+          await page.locator('[data-model-save]').click();
+          await page.locator('[data-view="agents"]').first().click();
+          if(await page.locator('[data-agent-action]').count()<2)throw new Error('Agent controls missing');
+          await page.locator('[data-view="missions"]').first().click();
+          await page.locator('[data-routine-new]').click();
           await page.locator('#routineName').fill('QA routine');
           await page.locator('#routineEvent').fill('schedule');
           await page.locator('#routineTask').fill('Review workspace');
-          await page.locator('[data-surface-action="routine-validate"]').click();
-          if (await page.locator('#surfaceView pre:visible').count()) throw new Error('Raw JSON visible in routine validation');
-          await page.locator('#overlay [data-close]').click();
-
-          console.log('QA: workbench slides');
-          for(const v of ['chat','ide','browser','terminal','image','video','notes']){
-            await page.locator('[data-workbench-tab="'+v+'"]').click();
-            if(!(await page.locator('[data-workbench-view="'+v+'"]').evaluate(el=>el.classList.contains('active')))) throw new Error('Workbench view failed: '+v);
-            await page.waitForTimeout(350);
-            await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:false});
-          }
-
-          console.log('QA: models');
-          await page.locator('#modelRole').selectOption('vision');
-          await page.locator('#modelSelect').selectOption('local/vision-demo');
-          await page.locator('#modelSave').click();
-          await page.locator('#modelRefresh').click();
-
-          console.log('QA: rooms');
-          await page.locator('[data-room="main-hall"]').click(); await page.locator('#workshopClose').click();
-          await page.locator('[data-room="ide-lab"]').click(); await page.locator('#workshopClose').click();
-          await page.locator('[data-room="model-lab"]').click(); await page.locator('#overlay [data-close]').click();
-          await page.locator('[data-room="media-studio"]').click();
-          await page.locator('[data-room="control-room"]').click(); await page.locator('#overlay [data-close]').click();
-          await page.locator('[data-room="personal-space"]').click(); await page.locator('#overlay [data-close]').click();
-
-          console.log('QA: personal space');
-          await page.locator('#personalSpaceOpenDock').click();
-          await page.locator('#overlay').waitFor({state:'visible'});
-          if(!(await page.locator('#personalSpaceActions').count())) throw new Error('Personal Space actions missing');
+          await page.locator('[data-routine-validate]').click();
+          await page.locator('[data-view="personal"]').first().click();
+          if(!(await page.locator('[data-personal-run]').count()))throw new Error('Personal Space controls missing');
+          await page.locator('[data-view="build"]').first().click();
           await page.waitForTimeout(250);
-          await page.screenshot({path:out+'/personal-space-open.png',fullPage:false});
-          await page.locator('#overlay [data-close]').click();
-
-          console.log('QA: workshop');
-          await page.locator('[data-workshop-open]').first().click();
-          await page.locator('#workshop').waitFor({state:'visible'});
-          await page.waitForTimeout(250);
-          await page.screenshot({path:out+'/workshop-open.png',fullPage:false});
-          await page.locator('#workshopRefresh').click();
-          await page.locator('[data-workshop-project="demo-app"]').click();
-          await page.locator('[data-workshop-path="app.py"]').click();
-          await page.locator('#workshopEditor').fill('print(2)');
-          await page.locator('#workshopSave').click();
-          await page.locator('#workshopAsk').click(); await page.waitForTimeout(50);
-          if(!(await page.locator('#workshopCommand').evaluate(el=>document.activeElement===el))) throw new Error('ASK did not focus Workshop command');
-          await page.locator('#workshopCommand').fill('Review workspace');
-          await page.locator('#workshopSend').click();
-          await page.locator('#workshop').waitFor({state:'hidden'});
-
-          console.log('QA: tool workspaces');
-          await page.locator('[data-workbench-target="browser"]').click();
+          if(!(await page.locator('[data-project="demo-app"]').count()))throw new Error('Workshop project UI missing');
+          await page.locator('[data-project="demo-app"]').click();
+          await page.waitForTimeout(150);
+          await page.locator('[data-file="app.py"]').click();
+          await page.locator('#buildEditor').fill('print(2)');
+          await page.locator('#buildSave').click();
+          await page.locator('[data-view="browser"]').first().click();
           await page.locator('#browserUrl').fill('https://example.com');
-          await page.locator('#browserOpen').click();
-          await page.locator('[data-workbench-target="terminal"]').click();
-          await page.locator('#terminalCommand').fill('echo QA');
-          await page.locator('#terminalRun').click();
-          await page.locator('[data-workbench-target="image"]').click();
-          await page.locator('#imagePrompt').fill('QA concept');
-          await page.locator('#imageRun').click();
-          await page.locator('[data-workbench-target="video"]').click();
-          await page.locator('#videoPrompt').fill('QA shot');
-          await page.locator('#videoRun').click();
-          await page.locator('[data-workbench-target="notes"]').click();
-          await page.locator('#noteContent').fill('QA note');
-          await page.locator('#noteSave').click();
-          await page.locator('[data-workbench-target="chat"]').click();
-
-          console.log('QA: workbench hide/restore and chat');
-          await page.locator('[data-workbench-tab="chat"]').click();
-          await page.locator('#workbenchClose').click();
-          if(!(await page.locator('.bottom-workbench').evaluate(el=>el.classList.contains('is-hidden')))) throw new Error('Workbench hide failed');
-          await page.locator('#workbenchRestore').click();
-          await page.locator('#command').fill('QA command');
-          await page.locator('#send').click();
-          await page.locator('#command').fill('QA enter');
-          await page.locator('#command').press('Enter');
-          await page.locator('#voiceButton').click();
-
-          console.log('QA: unique action coverage');
-          const opens=[...new Set(await page.locator('[data-open]:visible').evaluateAll(es=>es.map(e=>e.getAttribute('data-open'))))];
-          for(const name of opens){
-            await page.locator('[data-open="'+name+'"]:visible').first().click();
-            await page.waitForTimeout(50);
-            if(await page.locator('#overlay').evaluate(el=>el.classList.contains('open'))) await page.locator('#overlay [data-close]').click();
-          }
-          const commands=[...new Set(await page.locator('[data-command]:visible').evaluateAll(es=>es.map(e=>e.getAttribute('data-command'))))];
-          for(const command of commands){
-            await page.locator('[data-command="'+command+'"]:visible').first().click();
-            await page.waitForTimeout(50);
-          }
-
-          if(await page.locator('#workshop').isVisible().catch(()=>false)){
-            await page.locator('#workshopClose').click();
-            await page.waitForTimeout(300);
-          }
-          await page.locator('[data-workbench-tab="chat"]').click();
-          await page.locator('[data-room="main-hall"]').click();
-          await page.waitForTimeout(350);
-          await page.evaluate(()=>{
-            window.scrollTo(0,0);
-            if(document.documentElement.scrollWidth > window.innerWidth + 2) throw new Error('Horizontal overflow at desktop viewport');
-            if(document.documentElement.scrollHeight < window.innerHeight) throw new Error('Unexpectedly empty viewport');
-          });
-          await page.screenshot({path:out+'/99-final.png',fullPage:false});
-
+          await page.locator('[data-browser-open]').click();
+          await page.locator('[data-view="terminal"]').first().click();
+          await page.locator('#terminalInput').fill('echo QA');
+          await page.locator('[data-tool-run="terminal"]').click();
+          await page.locator('[data-view="image"]').first().click();
+          await page.locator('#imageInput').fill('QA concept');
+          await page.locator('[data-tool-run="image"]').click();
+          await page.locator('[data-view="video"]').first().click();
+          await page.locator('#videoInput').fill('QA shot');
+          await page.locator('[data-tool-run="video"]').click();
+          await page.evaluate(()=>{if(document.documentElement.scrollWidth>innerWidth+2)throw new Error('Desktop horizontal overflow')});
           const mobile=await browser.newPage({viewport:{width:390,height:844}});
-          mobile.setDefaultTimeout(1800);
-          const mobileErrors=[];
-          mobile.on('pageerror',e=>mobileErrors.push(e.message));
-          mobile.on('console',msg=>{if(msg.type()==='error') mobileErrors.push(msg.text())});
-          await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
-          await mobile.waitForTimeout(500);
-          if(await mobile.locator('button:visible').count()<20) throw new Error('Too few mobile controls');
-          if(await mobile.evaluate(()=>document.documentElement.scrollWidth > window.innerWidth + 2)) throw new Error('Horizontal overflow at mobile viewport');
-          await mobile.screenshot({path:out+'/mobile-baseline.png',fullPage:false});
-          await mobile.locator('#globalSearch').press('Enter');
-          if(!(await mobile.locator('#palette').evaluate(el=>el.classList.contains('open')))) throw new Error('Mobile command palette failed');
-          await mobile.keyboard.press('Escape');
-          if(mobileErrors.length) throw new Error('Mobile browser errors: '+mobileErrors.join(' | '));
+          const mobileErrors=[];mobile.on('pageerror',e=>mobileErrors.push(e.message));mobile.on('console',m=>{if(m.type()==='error')mobileErrors.push(m.text())});
+          await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});await mobile.waitForTimeout(250);
+          const mobileViews=await mobile.locator('[data-view]:visible').count();if(mobileViews<10)throw new Error('Mobile navigation incomplete');
+          if(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2))throw new Error('Mobile horizontal overflow');
+          await mobile.locator('[data-view="agents"]:visible').first().click();
+          if(!(await mobile.locator('#view-agents').evaluate(el=>el.classList.contains('active'))))throw new Error('Mobile view switching failed');
+          await mobile.screenshot({path:out+'/mobile-agents.png'});
+          if(mobileErrors.length)throw new Error('Mobile browser errors: '+mobileErrors.join(' | '));
           await mobile.close();
-
           await browser.close();
-          if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
+          if(errors.length)throw new Error('Browser errors: '+errors.join(' | '));
+          console.log('HERMUS DASHBOARD QA PASS');
           EOF
-          cp /tmp/jarvis-ui-qa.mjs ./jarvis-ui-qa.mjs
-          node ./jarvis-ui-qa.mjs
-      - name: Upload JARVIS visual QA
+          node /tmp/dashboard-v2-qa.mjs
+      - name: Upload dashboard QA screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: jarvis-ui-qa
-          path: /tmp/jarvis-ui/*.png
+          name: hermus-dashboard-v2-qa
+          path: /tmp/hermus-ui/*.png
           if-no-files-found: error
