@@ -68,11 +68,12 @@ jobs:
           const out='/tmp/hermus-ui';
           fs.mkdirSync(out,{recursive:true});
           const browser=await chromium.launch({headless:true});
-          const page=await browser.newPage({viewport:{width:1920,height:1080}});
+          const context=await browser.newContext();
+          const page=await context.newPage({viewport:{width:1920,height:1080}});
           page.setDefaultTimeout(3500);
-          await page.addInitScript(() => { window.confirm = () => true; window.alert = () => {}; });
+          await context.addInitScript(() => { window.confirm = () => true; window.alert = () => {}; });
           const json=(x)=>({status:200,contentType:'application/json',body:JSON.stringify(x)});
-          await page.route('**/*',async route=>{
+          await context.route('**/*',async route=>{
             const u=new URL(route.request().url()),p=u.pathname,m=route.request().method();
             if(p==='/control.html' || p.startsWith('/static/')) return route.continue();
             if(m==='POST' && p==='/jobs') return route.fulfill(json({success:true,accepted:true,ok:true,session_id:'qa',run_id:'qa-run'}));
@@ -257,15 +258,12 @@ jobs:
 
           await page.evaluate(()=>{if(document.documentElement.scrollWidth>innerWidth+2)throw new Error('Desktop horizontal overflow')});
 
-          const mobile=await browser.newPage({viewport:{width:390,height:844}});
+          const mobile=await context.newPage({viewport:{width:390,height:844}});
           const mobileErrors=[];
           mobile.on('pageerror',e=>mobileErrors.push(e.message));
           mobile.on('console',m=>{if(m.type()==='error')mobileErrors.push(m.text())});
-          await mobile.addInitScript(() => {
-            window.confirm=()=>true;
-            window.alert=()=>{};
-            localStorage.setItem('hermus_setup_complete','1');
-          });
+          await mobile.goto('about:blank');
+          await mobile.evaluate(() => localStorage.setItem('hermus_setup_complete','1'));
           await mobile.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           await mobile.waitForTimeout(250);
           const mobileNav=await mobile.locator('[data-view]:visible').count();
