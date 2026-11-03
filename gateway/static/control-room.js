@@ -1165,6 +1165,9 @@ function initVoice(){
 initVoice();
 
 async function boot(){
+  // The JARVIS shell shares this file's request/error helpers with console.js,
+  // but its polling belongs only to the legacy control-room page.
+  if (!$("#conn")) return;
   await refreshOverview();
   await refreshPresence();
   await refreshJobs();
@@ -1173,5 +1176,5 @@ async function boot(){
   openTmStream();
 }
 boot();
-setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
+if ($("#conn")) setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
 RETRY_ACTIONS.overview = refreshOverview;
