@@ -160,6 +160,8 @@ The Nexus Control Room also includes a discovery-driven **JARVIS × FAIRY model 
 | 🧠 **Project Memory** | SQLite-backed memory with FTS5 retrieval and optional vector search |
 | 📚 **Lessons Loop** | Corrections and failures become reusable lessons |
 | ✅ **Verification** | Domain-specific verification plus offline evaluation harness |
+| 🧪 **Agent Harness** | Run task suites against **any configured model** (API-key/auth hosted providers or local ollama — `hermus harness models`, `--model auto\|groq\|ollama/...`) in isolated workspaces, verify with checks, JSON/markdown reports + multi-model comparison (`hermus harness run <suite>`) |
+| ⚡ **Sentinel (always-alert core)** | Event-driven FAIRY layer: reacts to the event bus **inline/instantly** (no polling), salience-scored decisions, LLM triage with any model, never idles — `hermus sentinel run` + autostart via `hermus sentinel install`; measurable via `hermus harness run sentinel` |
 | 🔒 **Sandboxing** | Policy-controlled command execution with isolation backends |
 
 ### 🌐 Gateway & Integrations
@@ -208,8 +210,17 @@ The **Control Room** at `http://localhost:8000/control` is the operational comma
 hermus mission start "Build and test a web application that does X"
 hermus swe run "Fix the failing tests and package the project"
 hermus counsel run "Compare three architectures and synthesize the tradeoffs"
+hermus harness run smoke --model mock/mock   # measure the agent on a task suite (offline)
+hermus harness models                        # every model it can see (API keys + local + mock)
+hermus harness compare <run_a> <run_b>       # A/B two runs
+hermus sentinel run --model auto             # always-alert core: instant event reaction, never idles
+hermus sentinel install                      # autostart on boot (systemd / Termux / cron)
 hermus doctor
 ```
+
+Harness: `docs/HARNESS.md` · Sentinel: `docs/SENTINEL.md` · Always-on: `docs/ALWAYS_ON.md`
+
+Easy mode: `hermus check` (offline selfcheck + scoreboard) · `hermus harness run` with no args runs every builtin suite · `hermus doctor --harness` for always-on health.
 
 ---
 

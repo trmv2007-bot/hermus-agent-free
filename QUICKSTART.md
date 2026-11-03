@@ -6,6 +6,16 @@ Get up and running with Hermus on **Linux, macOS, or Android/Termux** in 3 simpl
 
 ## ⚡ 3-Step Fast Installation (Linux / WSL / macOS)
 
+## Easy mode (one command, fully offline)
+
+```bash
+hermus check                 # env sanity + always-on suites on mock/mock + scoreboard (exit 1 on any failure; CI-ready)
+make selfcheck               # same thing
+hermus harness run           # no args = run ALL builtin suites, then a scoreboard
+hermus harness run fairy --model groq/... --strict   # one suite, one model, CI gate
+hermus doctor --harness      # is the always-on core healthy? suites, sentinel, last runs
+```
+
 ### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
@@ -174,3 +184,44 @@ assets were removed and folded into `/control`.
 # Run autonomous mission
 ./hermus mission start "Build a Python CLI for file search"
 ```
+
+---
+
+## 🧪 Run HERMUS as an Agent Harness (measure the agent, not vibes)
+
+```bash
+./hermus harness suites                                  # committed task suites (smoke, fairy)
+./hermus harness tasks smoke                             # tasks + checks in a suite
+./hermus harness models                                  # every model it can see: API-key/auth providers + local (ollama) + mock
+./hermus harness ping groq/llama-3.3-70b-versatile      # live one-shot check of one model
+./hermus harness run smoke --model auto --tag ci         # any model: auto | role | provider/model | bare provider | mock/mock
+./hermus harness run smoke --models auto,groq,mock/mock  # same suite across models + comparison table
+./hermus harness run fairy --model auto                  # Fairy (proactive ZZZ-style) suite
+./hermus harness run path/to/suite.json --limit 5        # any JSON suite works too
+./hermus harness runs                                    # past runs
+./hermus harness show <run_id>                           # per-task results
+./hermus harness report <run_id>                         # markdown report
+./hermus harness compare <run_a> <run_b>                 # A/B: regressions, fixes, winner
+```
+
+---
+
+## ⚡ The Sentinel — HERMUS that never sits idle (FAIRY side)
+
+```bash
+./hermus sentinel run --model auto            # daemon: reacts to every event INSTANTLY (inline on the event bus)
+./hermus sentinel run --once --dry-run        # replay recent events, decide, record, change nothing
+./hermus sentinel test '{"type":"incident","command":"circuit_open","status":"failed","args":{"severity":"critical"}}'
+./hermus sentinel status                      # thresholds + recent decisions
+./hermus sentinel install                     # autostart on boot: systemd user unit / Termux boot / cron @reboot
+./hermus harness run sentinel --model mock/mock   # measure the always-on behavior itself (offline, 6/6)
+```
+
+The sentinel scores each event (severity, failures, your current focus/goals),
+then decides instantly: `ignore` / `note` / `enqueue` a job / `alert` you —
+optionally asking any configured model for act/ignore triage. It never runs
+tools directly; approvals and red lines stay in charge. See `docs/SENTINEL.md`.
+
+Each task runs in its own isolated workspace under `data/harness/runs/<run_id>/`
+with step/time budgets; checks (response, file, command, tool-called) decide
+pass/fail. Suite format + check reference: `docs/HARNESS.md`.

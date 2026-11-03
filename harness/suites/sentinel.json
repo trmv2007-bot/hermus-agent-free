@@ -1,0 +1,86 @@
+{
+  "name": "sentinel",
+  "description": "Sentinel suite — drives the always-alert core (driver=sentinel) with synthetic events and verifies its instant decisions + side effects (enqueued jobs, alerts). Runs offline; add use_llm_triage tasks with any --model for LLM triage. Run: hermus harness run sentinel --model mock/mock",
+  "tasks": [
+    {
+      "id": "critical_incident_alerts",
+      "category": "alert",
+      "driver": "sentinel",
+      "prompt": "A critical incident must alert AND enqueue instantly.",
+      "event": {"type": "incident", "command": "circuit_open", "status": "failed", "args": {"severity": "critical", "detail": "provider groq circuit OPEN"}},
+      "checks": [
+        {"type": "json", "key": "decisions.0.action", "value": "alert"},
+        {"type": "file_exists", "path": "sentinel_decisions.jsonl"},
+        {"type": "file_exists", "path": "enqueued.jsonl"},
+        {"type": "file_exists", "path": "alerts.jsonl"},
+        {"type": "file_contains", "path": "alerts.jsonl", "value": "circuit_open"}
+      ]
+    },
+    {
+      "id": "failed_watchdog_enqueues",
+      "category": "enqueue",
+      "driver": "sentinel",
+      "prompt": "A mid-severity watchdog failure enqueues a repair job but does not alert.",
+      "event": {"type": "watchdog.fix_failed", "command": "repair", "args": {"severity": "warn", "pattern": "JSONDecodeError"}},
+      "checks": [
+        {"type": "json", "key": "decisions.0.action", "value": "enqueue"},
+        {"type": "file_contains", "path": "enqueued.jsonl", "value": "watchdog"}
+      ]
+    },
+    {
+      "id": "heartbeat_ignored",
+      "category": "ignore",
+      "driver": "sentinel",
+      "prompt": "Routine heartbeats are ignored — the sentinel stays quiet when nothing matters.",
+      "event": {"type": "presence.heartbeat", "command": "beat", "args": {"n": 42}},
+      "checks": [
+        {"type": "json", "key": "decisions.0.action", "value": "ignore"}
+      ]
+    },
+    {
+      "id": "duplicate_deescalates",
+      "category": "dedupe",
+      "driver": "sentinel",
+      "prompt": "The same incident twice: first alerts, the repeat de-escalates to a note (no alert spam).",
+      "events": [
+        {"type": "incident", "command": "disk_full", "status": "failed", "args": {"severity": "critical", "detail": "disk 99%"}},
+        {"type": "incident", "command": "disk_full", "status": "failed", "args": {"severity": "critical", "detail": "disk 99%"}}
+      ],
+      "checks": [
+        {"type": "json", "key": "decisions.0.action", "value": "alert"},
+        {"type": "json", "key": "decisions.1.action", "value": "note"},
+        {"type": "json", "key": "decisions.1.duplicate", "value": "true"}
+      ]
+    },
+    {
+      "id": "llm_triage_consulted",
+      "category": "triage",
+      "driver": "sentinel",
+      "use_llm_triage": true,
+      "prompt": "A mid-salience signal goes through LLM triage (any --model); the decision record must show llm_triage was consulted.",
+      "event": {"type": "signal.new", "command": "triage_me", "args": {"title": "something needs a look"}},
+      "checks": [
+        {"type": "json", "key": "decisions.0.action"},
+        {"type": "substring", "value": "llm_triage"},
+        {"type": "file_exists", "path": "sentinel_decisions.jsonl"}
+      ]
+    },
+    {
+      "id": "multi_event_stream",
+      "category": "stream",
+      "driver": "sentinel",
+      "prompt": "A stream of mixed events: one decision per event, in order.",
+      "events": [
+        {"type": "presence.heartbeat", "command": "beat", "args": {}},
+        {"type": "incident", "command": "db_down", "status": "failed", "args": {"severity": "critical"}},
+        {"type": "state.changed", "command": "ui", "args": {"k": "v"}}
+      ],
+      "checks": [
+        {"type": "json", "key": "decisions.0.action", "value": "ignore"},
+        {"type": "json", "key": "decisions.1.action", "value": "alert"},
+        {"type": "json", "key": "decisions.2.action", "value": "ignore"},
+        {"type": "command", "cmd": "test \"$(wc -l < sentinel_decisions.jsonl)\" -eq 3"}
+      ]
+    }
+  ]
+}

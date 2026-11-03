@@ -1,0 +1,235 @@
+{
+  "name": "watchdog",
+  "description": "Watchdog x sentinel x product-eval loop (driver=sentinel) \u2014 watchdog lifecycle events and harness run events drive sentinel decisions: fix applied stays calm, fix failed alerts, harness regression alerts, failed run enqueues, clean run is ignored. Fully offline. Run: hermus harness run watchdog",
+  "tasks": [
+    {
+      "id": "fix_applied_stays_calm",
+      "category": "watchdog",
+      "driver": "sentinel",
+      "prompt": "A watchdog fix that succeeded (watchdog.fix_applied) must enqueue follow-up but NOT alert/notify.",
+      "event": {
+        "type": "watchdog.fix_applied",
+        "command": "fix_json",
+        "status": "succeeded",
+        "args": {
+          "severity": "warn"
+        }
+      },
+      "checks": [
+        {
+          "type": "json",
+          "key": "decisions.0.action",
+          "value": "enqueue"
+        },
+        {
+          "type": "command",
+          "cmd": "! grep -q watchdog alerts.jsonl",
+          "expect_exit": 0
+        },
+        {
+          "type": "file_contains",
+          "path": "enqueued.jsonl",
+          "value": "watchdog.fix_applied"
+        }
+      ]
+    },
+    {
+      "id": "fix_failed_alerts",
+      "category": "watchdog",
+      "driver": "sentinel",
+      "prompt": "A failed watchdog fix (watchdog.fix_failed, status failed) must alert AND enqueue \u2014 self-healing broke, a human/agent must look.",
+      "event": {
+        "type": "watchdog.fix_failed",
+        "command": "fix_timeout",
+        "status": "failed",
+        "args": {
+          "severity": "high"
+        }
+      },
+      "checks": [
+        {
+          "type": "json",
+          "key": "decisions.0.action",
+          "value": "alert"
+        },
+        {
+          "type": "file_contains",
+          "path": "alerts.jsonl",
+          "value": "watchdog.fix_failed"
+        },
+        {
+          "type": "file_contains",
+          "path": "enqueued.jsonl",
+          "value": "watchdog.fix_failed"
+        }
+      ]
+    },
+    {
+      "id": "command_failed_alerts",
+      "category": "watchdog",
+      "driver": "sentinel",
+      "prompt": "A raw command failure must alert instantly (weight 0.8 + failed bonus).",
+      "event": {
+        "type": "command.failed",
+        "command": "pytest tests/",
+        "status": "failed",
+        "args": {
+          "severity": "high"
+        }
+      },
+      "checks": [
+        {
+          "type": "json",
+          "key": "decisions.0.action",
+          "value": "alert"
+        },
+        {
+          "type": "file_contains",
+          "path": "alerts.jsonl",
+          "value": "command.failed"
+        }
+      ]
+    },
+    {
+      "id": "repeated_fix_failures_propose_rule",
+      "category": "learning",
+      "driver": "sentinel",
+      "prompt": "The same failing watchdog fix three times must produce a rule proposal (approve to make it durable).",
+      "events": [
+        {
+          "type": "watchdog.fix_failed",
+          "command": "fix_timeout",
+          "status": "failed",
+          "args": {
+            "severity": "high"
+          }
+        },
+        {
+          "type": "watchdog.fix_failed",
+          "command": "fix_timeout",
+          "status": "failed",
+          "args": {
+            "severity": "high"
+          }
+        },
+        {
+          "type": "watchdog.fix_failed",
+          "command": "fix_timeout",
+          "status": "failed",
+          "args": {
+            "severity": "high"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "type": "file_exists",
+          "path": "proposed_rules.json"
+        },
+        {
+          "type": "file_contains",
+          "path": "proposed_rules.json",
+          "value": "watchdog.fix_failed|fix_timeout"
+        },
+        {
+          "type": "file_contains",
+          "path": "proposed_rules.json",
+          "value": "\"approved\": false"
+        }
+      ]
+    },
+    {
+      "id": "harness_regression_alerts",
+      "category": "product",
+      "driver": "sentinel",
+      "prompt": "A harness regression (suite got worse vs previous run) must alert instantly.",
+      "event": {
+        "type": "harness.regression",
+        "command": "fairy regressed vs 20261103-120000-abc",
+        "status": "failed",
+        "args": {
+          "severity": "high",
+          "suite": "fairy",
+          "drop": 0.4,
+          "failed_tasks": [
+            "fairy_triage"
+          ]
+        }
+      },
+      "checks": [
+        {
+          "type": "json",
+          "key": "decisions.0.action",
+          "value": "alert"
+        },
+        {
+          "type": "file_contains",
+          "path": "alerts.jsonl",
+          "value": "harness.regression"
+        },
+        {
+          "type": "file_contains",
+          "path": "enqueued.jsonl",
+          "value": "harness.regression"
+        }
+      ]
+    },
+    {
+      "id": "harness_run_failed_enqueues",
+      "category": "product",
+      "driver": "sentinel",
+      "prompt": "A failed harness run (tasks failed or over budget) enqueues follow-up without a full alert.",
+      "event": {
+        "type": "harness.run.failed",
+        "command": "harness run smoke",
+        "status": "failed",
+        "args": {
+          "suite": "smoke",
+          "passed": 4,
+          "runs": 6
+        }
+      },
+      "checks": [
+        {
+          "type": "json",
+          "key": "decisions.0.action",
+          "value": "enqueue"
+        },
+        {
+          "type": "command",
+          "cmd": "! grep -q 'harness.run.failed' alerts.jsonl",
+          "expect_exit": 0
+        },
+        {
+          "type": "file_contains",
+          "path": "enqueued.jsonl",
+          "value": "harness.run.failed"
+        }
+      ]
+    },
+    {
+      "id": "harness_run_completed_clean_is_quiet",
+      "category": "product",
+      "driver": "sentinel",
+      "prompt": "A clean harness run (all passed) is background noise \u2014 ignore.",
+      "event": {
+        "type": "harness.run.completed",
+        "command": "harness run sentinel",
+        "status": "succeeded",
+        "args": {
+          "suite": "sentinel",
+          "passed": 6,
+          "runs": 6,
+          "success_rate": 1.0
+        }
+      },
+      "checks": [
+        {
+          "type": "json",
+          "key": "decisions.0.action",
+          "value": "ignore"
+        }
+      ]
+    }
+  ]
+}

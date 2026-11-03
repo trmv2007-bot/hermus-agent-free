@@ -20,6 +20,7 @@ get_agent_for_user` and `gateway.gateway.<attr>` monkeypatching keep working
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 # Direct execution (python gateway/gateway.py): put the repo root on sys.path
@@ -77,6 +78,65 @@ from gateway.context import (  # noqa: F401
 )
 
 logger = get_logger(__name__)
+
+
+_sentinel_checkin_state: dict[str, float] = {"last": 0.0}
+
+
+def _sentinel_alert_checkin(env) -> dict | None:
+    """FAIRY handoff: when the sentinel ALERTS, queue one read-only check-in.
+
+    Opt-in (HERMUS_PRESENCE_PROACTIVE_CHECKINS=1), cooldown-limited, and always
+    through the canonical queue as a read-only runtime.turn — approvals stay
+    authoritative; the sentinel itself never calls the model.
+    """
+    try:
+        args = getattr(env, "args_redacted", None) or {}
+        if not isinstance(args, dict) or args.get("action") != "alert":
+            return None
+        if not getattr(config, "presence_proactive_checkins", False):
+            return None
+        cooldown = float(getattr(config, "sentinel_checkin_cooldown_seconds", 900) or 900)
+        now = time.time()
+        if now - _sentinel_checkin_state["last"] < cooldown:
+            return None
+        from gateway.queue import job_queue
+
+        if not job_queue.enabled or not job_queue._started:
+            return None
+        event_type = str(args.get("event_type") or "event")
+        salience = args.get("salience")
+        text = (
+            f"FAIRY sentinel flagged a high-salience event ({event_type}, salience={salience}). "
+            "Give the owner a concise, read-only status: what happened, what is queued, what is NOT done. "
+            "Use only real evidence; do not execute tools, send messages, or change anything — ask first."
+        )
+        job = job_queue.submit(
+            "runtime.turn",
+            {
+                "text": text,
+                "platform": "sentinel",
+                "user_id": "default",
+                "mode": "chat",
+                "prefer": "chat",
+                "read_only": True,
+                "stream": True,
+                "trigger": {"type": "sentinel.decision", "event_type": event_type},
+            },
+            session_key="sentinel:default",
+            run_id=f"run_sentinel_{os.urandom(4).hex()}",
+        )
+        _sentinel_checkin_state["last"] = now
+        return {"job_id": job.id, "run_id": job.run_id, "event_type": event_type}
+    except Exception as exc:
+        logger.warning(f"[Sentinel] check-in handoff skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _on_sentinel_decision(env) -> None:
+    r = _sentinel_alert_checkin(env)
+    if r:
+        logger.info(f"[Sentinel] alert -> proactive check-in queued: {r.get('job_id')} ({r.get('event_type')})")
 
 
 def _queue_due_presence_checkin(snapshot: dict) -> dict | None:
@@ -293,6 +353,30 @@ async def lifespan(app: FastAPI):
     presence_task = None
     ambient_task = None
     personal_space_task = None
+    sentinel_stop = None
+    if getattr(config, "sentinel_with_gateway", True):
+        try:
+            import threading as _threading
+
+            from core.sentinel import Sentinel, build_llm, default_recorder
+
+            sentinel_stop = _threading.Event()
+            _llm, _res = build_llm(getattr(config, "sentinel_model", "auto"))
+            _sentinel = Sentinel(
+                llm=_llm,
+                model=_res.get("ref"),
+                recorder=default_recorder(config.resolve_path("data/sentinel/decisions.jsonl")),
+            )
+            _sentinel_thread = _threading.Thread(
+                target=_sentinel.serve, kwargs={"stop": sentinel_stop.is_set}, daemon=True, name="hermus-sentinel"
+            )
+            _sentinel_thread.start()
+            logger.info("[Gateway] sentinel started — always-alert core inline on EventBus")
+            from core.events import get_bus as _get_bus
+
+            _get_bus().subscribe("sentinel.decision")(_on_sentinel_decision)
+        except Exception as e:
+            logger.error(f"[Gateway] sentinel failed to start: {type(e).__name__}: {e}")
     if getattr(config, "presence_enabled", True):
         try:
             from core.ambient_loop import ambient_loop
@@ -341,6 +425,20 @@ async def lifespan(app: FastAPI):
             presence_task.cancel()
         if ambient_task and not ambient_task.done():
             ambient_task.cancel()
+        if sentinel_stop is not None:
+            sentinel_stop.set()
+            try:
+                from core.events import get_bus
+
+                get_bus().unsubscribe(_sentinel.handle_event)  # detach immediately, don't wait for the thread
+            except Exception:
+                pass
+        try:
+            from core.events import get_bus
+
+            get_bus().unsubscribe(_on_sentinel_decision)
+        except Exception:
+            pass
         if personal_space_task and not personal_space_task.done():
             personal_space_task.cancel()
         try:
@@ -540,6 +638,7 @@ from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
 from gateway.routes_devices import router as _devices_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_focus import router as _focus_router  # noqa: E402
+from gateway.routes_harness import router as _harness_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_learning import router as _learning_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
@@ -547,6 +646,7 @@ from gateway.routes_personal_space import router as _personal_space_router  # no
 from gateway.routes_presence import router as _presence_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
 from gateway.routes_routines import router as _routines_router  # noqa: E402
+from gateway.routes_sentinel import router as _sentinel_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
@@ -563,6 +663,8 @@ _gate_control = [Depends(_check_gateway_auth)]
 app.include_router(_channels_router)
 app.include_router(_channels_control_router, dependencies=_gate_control)
 app.include_router(_registry_router, dependencies=_gate_control)
+app.include_router(_sentinel_router, dependencies=_gate_control)
+app.include_router(_harness_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
 app.include_router(_console_router, dependencies=_gate_control)

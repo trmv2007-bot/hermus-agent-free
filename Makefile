@@ -4,7 +4,7 @@ VENV ?= .venv
 PY := $(VENV)/bin/python
 RUFF := $(VENV)/bin/ruff
 
-.PHONY: help setup test test-full test-cov bench lint format format-check typecheck run doctor deploy-up deploy-down smoke clean
+.PHONY: help setup test test-full test-cov bench harness selfcheck lint format format-check typecheck run doctor deploy-up deploy-down smoke clean
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -22,6 +22,9 @@ test-full: ## Entire suite including evals.
 
 test-cov: ## Suite with coverage report for core/ + gateway/.
 	$(PY) -m pytest tests/ -q --ignore=tests/eval --cov=core --cov=gateway --cov-report=term-missing
+
+selfcheck: ## Always-on self-test, fully offline: one command — env sanity + sentinel/watchdog/ambient suites on mock/mock with a scoreboard; exit 1 on any failure.
+	$(PY) hermus.py check --no-ping
 
 bench: ## Performance benchmarks (async fan-out, gateway middleware, CLI startup).
 	$(PY) scripts/bench.py

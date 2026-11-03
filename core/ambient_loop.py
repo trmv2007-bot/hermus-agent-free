@@ -154,6 +154,50 @@ class AmbientLoop:
         return self._running
 
 
+def run_ambient_task(task, workspace) -> dict[str, Any]:
+    """Harness driver (driver="ambient"): run scripted ambient ticks and capture events.
+
+    ``task.ticks`` is a list of attention-item lists, one per tick. Each tick's
+    raised/cleared attention changes are emitted on an isolated bus; the events
+    are written to ``ambient_events.jsonl`` in the workspace for file checks.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    from .events.bus import EventBus
+
+    ws = _Path(workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+    bus = EventBus(log_path=ws / "ambient_bus.jsonl")
+    ticks = list(getattr(task, "ticks", None) or [])
+
+    class _ScriptedKernel:
+        def __init__(self) -> None:
+            self.i = 0
+
+        def start(self) -> None:
+            return None
+
+        def snapshot(self, *, user_id: str = "default", include_events: bool = True) -> dict[str, Any]:
+            items = ticks[min(self.i, len(ticks) - 1)] if ticks else []
+            self.i += 1
+            return {"attention": [dict(x) for x in items], "summary": {"state": "ok"}}
+
+    loop = AmbientLoop(kernel=_ScriptedKernel(), awareness=None, bus=bus, refresh=lambda: {"ok": True})
+    tick_results = [loop.tick() for _ in ticks]
+    events = [{"type": e.type, "command": e.command, "status": e.status, "args": e.args_redacted} for e in bus.recent(limit=200)]
+    with (ws / "ambient_events.jsonl").open("w", encoding="utf-8") as f:
+        for e in events:
+            f.write(_json.dumps(e, default=str) + "\n")
+    response = _json.dumps({"ticks": tick_results, "events": events}, default=str)
+    return {
+        "response": response,
+        "steps": len(ticks),
+        "tool_calls": ["ambient.tick"] * len(ticks),
+        "tool_results": [{"tool": "ambient.tick", "result": r} for r in tick_results],
+    }
+
+
 ambient_loop = AmbientLoop()
 
-__all__ = ["AmbientLoop", "ambient_loop"]
+__all__ = ["AmbientLoop", "ambient_loop", "run_ambient_task"]

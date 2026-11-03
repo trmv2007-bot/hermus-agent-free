@@ -12,13 +12,23 @@ import pytest
 def test_singleton_exposes_all_settings():
     from core.config import Config, config
 
-    assert len(Config.model_fields) == 184
+    assert len(Config.model_fields) == 194
     assert {
         "personal_space_enabled",
         "personal_space_state_path",
         "personal_space_interval_seconds",
         "personal_space_idle_minutes",
         "personal_space_daily_cap",
+        "sentinel_alert_threshold",
+        "sentinel_enqueue_threshold",
+        "sentinel_note_threshold",
+        "sentinel_llm_triage_threshold",
+        "sentinel_llm_triage_enabled",
+        "sentinel_consolidate_seconds",
+        "sentinel_rule_propose_after",
+        "sentinel_with_gateway",
+        "sentinel_model",
+        "sentinel_checkin_cooldown_seconds",
     } <= set(Config.model_fields)
     assert config.model
     assert isinstance(config.nollama_port, int)
