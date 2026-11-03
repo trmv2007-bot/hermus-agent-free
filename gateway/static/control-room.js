@@ -932,36 +932,38 @@ function refreshDoctor(){
 }
 RETRY_ACTIONS.doctor = refreshDoctor;
 // ---------- wiring ----------
-$("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
-$("#cmdBtn").addEventListener("click", postCommand);
-$("#identitySave").addEventListener("click", savePresenceIdentity);
-$("#presenceGoalAdd").addEventListener("click", addPresenceGoal);
-$("#presenceGoal").addEventListener("keydown", (e) => { if (e.key === "Enter") addPresenceGoal(); });
-$("#presenceHeartbeat").addEventListener("click", sendPresenceHeartbeat);
-$("#presenceCheckIn").addEventListener("click", requestPresenceCheckIn);
-$("#missionPreflight").addEventListener("click", missionPreflight);
-$("#missionStart").addEventListener("click", () => startMission(false));
-$("#missionPlanBlocked").addEventListener("click", () => startMission(true));
-$("#runId").addEventListener("keydown", (e) => { if (e.key === "Enter") replayTimeline($("#runId").value.trim()); });
-$("#cmdName").addEventListener("keydown", (e) => { if (e.key === "Enter") postCommand(); });
-$("#tmClear").addEventListener("click", () => { const f = $("#tmFeed"); f.innerHTML = ""; f.dataset.ready = ""; refreshTelemetry(true); });
-$("#compRun").addEventListener("click", compRun);
-$("#compStop").addEventListener("click", compStop);
-$("#emergencyBtn").addEventListener("click", toggleEmergency);
-$("#grantCreate").addEventListener("click", createGrant);
-$("#powerAdd").addEventListener("click", addPower);
-$("#powerPropose").addEventListener("click", proposePower);
-$("#capRegistryRefresh").addEventListener("click", refreshCapabilityRegistry);
-$("#capSetup").addEventListener("click", setupCapability);
-$("#capActivationRequest").addEventListener("click", requestCapabilityActivation);
-$("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
-$("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
-$("#preflightRun").addEventListener("click", runPreflight);
-$("#preflightApprovals").addEventListener("click", createPreflightApprovals);
-$("#runDownloadsScan").addEventListener("click", runDownloadsScan);
-$("#startDownloadsScanMission").addEventListener("click", startDownloadsScanMission);
-$("#refreshScanReports").addEventListener("click", listScanReports);
-document.querySelectorAll("button[data-safety-example]").forEach((b) => b.addEventListener("click", () => applySafetyExample(b.dataset.safetyExample)));
+if ($("#conn")) {
+  $("#replayBtn").addEventListener("click", () => replayTimeline($("#runId").value.trim()));
+  $("#cmdBtn").addEventListener("click", postCommand);
+  $("#identitySave").addEventListener("click", savePresenceIdentity);
+  $("#presenceGoalAdd").addEventListener("click", addPresenceGoal);
+  $("#presenceGoal").addEventListener("keydown", (e) => { if (e.key === "Enter") addPresenceGoal(); });
+  $("#presenceHeartbeat").addEventListener("click", sendPresenceHeartbeat);
+  $("#presenceCheckIn").addEventListener("click", requestPresenceCheckIn);
+  $("#missionPreflight").addEventListener("click", missionPreflight);
+  $("#missionStart").addEventListener("click", () => startMission(false));
+  $("#missionPlanBlocked").addEventListener("click", () => startMission(true));
+  $("#runId").addEventListener("keydown", (e) => { if (e.key === "Enter") replayTimeline($("#runId").value.trim()); });
+  $("#cmdName").addEventListener("keydown", (e) => { if (e.key === "Enter") postCommand(); });
+  $("#tmClear").addEventListener("click", () => { const f = $("#tmFeed"); f.innerHTML = ""; f.dataset.ready = ""; refreshTelemetry(true); });
+  $("#compRun").addEventListener("click", compRun);
+  $("#compStop").addEventListener("click", compStop);
+  $("#emergencyBtn").addEventListener("click", toggleEmergency);
+  $("#grantCreate").addEventListener("click", createGrant);
+  $("#powerAdd").addEventListener("click", addPower);
+  $("#powerPropose").addEventListener("click", proposePower);
+  $("#capRegistryRefresh").addEventListener("click", refreshCapabilityRegistry);
+  $("#capSetup").addEventListener("click", setupCapability);
+  $("#capActivationRequest").addEventListener("click", requestCapabilityActivation);
+  $("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
+  $("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
+  $("#preflightRun").addEventListener("click", runPreflight);
+  $("#preflightApprovals").addEventListener("click", createPreflightApprovals);
+  $("#runDownloadsScan").addEventListener("click", runDownloadsScan);
+  $("#startDownloadsScanMission").addEventListener("click", startDownloadsScanMission);
+  $("#refreshScanReports").addEventListener("click", listScanReports);
+  document.querySelectorAll("button[data-safety-example]").forEach((b) => b.addEventListener("click", () => applySafetyExample(b.dataset.safetyExample)));
+}
 
 // ---------- voice-first (Jarvis) mode ----------
 function vlog(kind, text){
@@ -1165,6 +1167,9 @@ function initVoice(){
 initVoice();
 
 async function boot(){
+  // The JARVIS shell shares this file's request/error helpers with console.js,
+  // but its polling belongs only to the legacy control-room page.
+  if (!$("#conn")) return;
   await refreshOverview();
   await refreshPresence();
   await refreshJobs();
@@ -1173,5 +1178,5 @@ async function boot(){
   openTmStream();
 }
 boot();
-setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
+if ($("#conn")) setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
 RETRY_ACTIONS.overview = refreshOverview;

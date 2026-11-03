@@ -117,7 +117,7 @@
   }
 
   document.addEventListener('click',e=>{
-    if(e.target.closest('#personalSpaceOpen') || e.target.closest('#personalSpaceOpenDock')) openSpace();
+    if(e.target.closest('#personalSpaceOpen') || e.target.closest('#personalSpaceOpenDock') || e.target.closest('#personalSpaceOpenCard')) openSpace();
   });
   refresh();
   setInterval(refresh,15000);

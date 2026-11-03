@@ -61,6 +61,7 @@ from typing import Any
 from .agent_dag import AgentDAG, DAGNode, DAGNodeStatus
 from .artifact_manager import artifact_manager
 from .atomic_io import atomic_write_json, file_lock
+from .cost_guard import CostGuard
 from .critic import critic_manager
 from .mission_files import MissionFileScope
 from .rollback import rollback_manager
@@ -962,6 +963,7 @@ def make_agent_backed_executor(
     model: str | None = None,
     scope: MissionFileScope | None = None,
     workspace_dir: str | None = None,
+    cost_guard: CostGuard | None = None,
 ) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
     """Build an executor that actually runs each DAG node goal via an agent.
 
@@ -1033,6 +1035,21 @@ def make_agent_backed_executor(
             )
             text = str(res.get("response") or "")
             provider = str(getattr(getattr(node_agent, "llm", None), "provider", "") or "")
+
+            # Record cost/token usage in the circuit breaker
+            usage = res.get("last_usage") or res.get("usage")
+            if cost_guard and usage:
+                model_name = getattr(node_agent, "model_name", "unknown")
+                cost_guard.record_usage(usage, model=f"{provider}/{model_name}")
+
+            if cost_guard and not cost_guard.is_safe():
+                reason = f"COST_BREAKER_TRIPPED: {cost_guard.trip_reason}"
+                return {
+                    "success": False,
+                    "output": text,
+                    "error": reason,
+                    "evidence": [{"stage": stage, "status": "cost_breaker_tripped", "reason": cost_guard.trip_reason}],
+                }
 
             if res.get("status") == "waiting_for_approval" or res.get("waiting_for_approval"):
                 approval_request = res.get("waiting_for_approval") or {}
@@ -1196,6 +1213,7 @@ class MissionEngine:
         self,
         executor: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None,
         storage_dir: Path | None = None,
+        cost_guard_factory: Callable[[], CostGuard] | None = None,
     ):
         # NOTE: a real agent-backed executor is wired lazily on first use
         # (see ``_raw_executor``). The old inline ``_default_node_executor``
@@ -1205,6 +1223,10 @@ class MissionEngine:
         # tests that pass ``executor=`` themselves.
         self._injected_executor = executor
         self._real_executor: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None
+        self._cost_guard_factory = cost_guard_factory or CostGuard
+        self._default_cost_guard = self._cost_guard_factory()
+        self._cost_guards: dict[str, CostGuard] = {}
+        self._cost_guard_lock = threading.Lock()
         self.storage_dir = storage_dir or (workspace.root / "missions")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         # per-run overrides (bound agent / events / control hooks). Missions run
@@ -1213,12 +1235,19 @@ class MissionEngine:
         self._tls = threading.local()
 
     @property
+    def cost_guard(self) -> CostGuard:
+        """Return the guard for this worker's active mission, if any."""
+        return getattr(self._tls, "cost_guard", self._default_cost_guard)
+
+    @property
     def _raw_executor(self) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
         if self._injected_executor is not None:
             return self._injected_executor
-        if self._real_executor is None:
-            self._real_executor = self._build_real_executor()
-        return self._real_executor
+        executor = getattr(self._tls, "real_executor", None)
+        if executor is None:
+            executor = self._build_real_executor()
+            self._tls.real_executor = executor
+        return executor
 
     @_raw_executor.setter
     def _raw_executor(self, value: Callable[[Any, dict[str, Any]], dict[str, Any]]) -> None:
@@ -1239,7 +1268,9 @@ class MissionEngine:
 
     def _build_real_executor(self) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
         """Lazily build the default agent-backed executor (fresh agent per node)."""
-        return make_agent_backed_executor()
+        guard = self.cost_guard
+        executor = make_agent_backed_executor(cost_guard=guard)
+        return self._bind_control_hooks(executor, cost_guard=guard)
 
     @staticmethod
     def _compute_progress(dag: AgentDAG) -> int:
@@ -1302,20 +1333,29 @@ class MissionEngine:
         executor: Callable[[Any, dict[str, Any]], dict[str, Any]],
         *,
         should_cancel: Callable[[], bool] | None = None,
+        cost_guard: CostGuard | None = None,
     ) -> Callable[[Any, dict[str, Any]], dict[str, Any]]:
-        """Layer cooperative cancellation on top of an injected executor."""
-        if should_cancel is None:
+        """Layer cooperative cancellation and cost circuit-breaker on top of an injected executor."""
+        if should_cancel is None and cost_guard is None:
             return executor
 
         def wrapped(node: Any, parent_ctx: dict[str, Any]) -> dict[str, Any]:
             try:
-                if should_cancel():
+                if should_cancel and should_cancel():
                     stage = str(getattr(node, "role", "?") or "?")
                     return {
                         "success": False,
                         "output": "",
                         "error": "cancelled",
                         "evidence": [{"stage": stage, "status": "cancelled"}],
+                    }
+                if cost_guard and not cost_guard.is_safe():
+                    stage = str(getattr(node, "role", "?") or "?")
+                    return {
+                        "success": False,
+                        "output": "",
+                        "error": f"COST_BREAKER_TRIPPED: {cost_guard.trip_reason}",
+                        "evidence": [{"stage": stage, "status": "cost_breaker_tripped", "reason": cost_guard.trip_reason}],
                     }
             except Exception:
                 pass
@@ -1478,6 +1518,11 @@ class MissionEngine:
         from .config import config as _cfg
 
         mid = f"msn_{int(time.time())}_{os.urandom(2).hex()}"
+        active_guard = self._cost_guard_factory()
+        self._tls.cost_guard = active_guard
+        self._tls.real_executor = None
+        with self._cost_guard_lock:
+            self._cost_guards[mid] = active_guard
         detected_domain = domain or verifier_registry.auto_detect_domain(goal)
         preflight_data = None
         # The safety pre-flight guards the *agent-driven* autonomy path. When a
@@ -1560,7 +1605,9 @@ class MissionEngine:
             # runtimes) must not be replaced by the default agent-backed one
             # just because the caller also passed streaming/control hooks —
             # the hooks are layered on top of it instead.
-            self._tls.executor = self._bind_control_hooks(self._injected_executor, should_cancel=should_cancel)
+            self._tls.executor = self._bind_control_hooks(
+                self._injected_executor, should_cancel=should_cancel, cost_guard=getattr(self, "cost_guard", None)
+            )
         elif agent is not None or on_event or should_cancel or steer_source:
             self._tls.executor = make_agent_backed_executor(
                 agent=agent,
@@ -1569,6 +1616,7 @@ class MissionEngine:
                 steer_source=steer_source,
                 scope=scope,
                 workspace_dir=str(workspace_dir),
+                cost_guard=self.cost_guard,
             )
         else:
             self._tls.executor = None
@@ -1728,6 +1776,24 @@ class MissionEngine:
 
             # Check for explicit external blockers
             blocked_nodes = [n for n in dag.nodes.values() if n.status == DAGNodeStatus.BLOCKED.value]
+
+            # Check for Cost Guard trips
+            cost_blocked_nodes = [
+                n
+                for n in dag.nodes.values()
+                if n.outputs and isinstance(n.outputs, dict) and "COST_BREAKER_TRIPPED" in str(n.outputs.get("error", ""))
+            ]
+            if cost_blocked_nodes and not blocked_nodes:
+                report.state = MissionState.BLOCKED.value
+                node = cost_blocked_nodes[0]
+                report.blocker_reason = f"Autonomous Cost Guard tripped: {node.outputs.get('error')}"
+                report.blocker_instructions = (
+                    "The mission exceeded its financial or token budget. Increase limits in config and resume."
+                )
+                self._save_mission(report)
+                _emit("mission_finished", {"state": report.state, "blocker_reason": report.blocker_reason})
+                return report
+
             if blocked_nodes:
                 report.state = MissionState.BLOCKED.value
                 blocked = blocked_nodes[0]
@@ -1989,6 +2055,14 @@ class MissionEngine:
         if not report:
             raise ValueError(f"Mission {mission_id} not found")
 
+        with self._cost_guard_lock:
+            active_guard = self._cost_guards.get(mission_id)
+            if active_guard is None:
+                active_guard = self._cost_guard_factory()
+                self._cost_guards[mission_id] = active_guard
+        self._tls.cost_guard = active_guard
+        self._tls.real_executor = None
+
         if report.state == MissionState.COMPLETED.value:
             raise ValueError(f"Mission {mission_id} is already completed; nothing to resume")
         if report.state == MissionState.CANCELLED.value:
@@ -2039,7 +2113,9 @@ class MissionEngine:
         report.approval_request = None
         scope = self._mission_file_scope(report.mission_id)
         if self._injected_executor is not None and agent is None:
-            self._tls.executor = self._bind_control_hooks(self._injected_executor, should_cancel=should_cancel)
+            self._tls.executor = self._bind_control_hooks(
+                self._injected_executor, should_cancel=should_cancel, cost_guard=getattr(self, "cost_guard", None)
+            )
         elif agent is not None or on_event or should_cancel or steer_source:
             self._tls.executor = make_agent_backed_executor(
                 agent=agent,
@@ -2048,6 +2124,7 @@ class MissionEngine:
                 steer_source=steer_source,
                 scope=scope,
                 workspace_dir=str(self._mission_workspace(report.mission_id)),
+                cost_guard=self.cost_guard,
             )
         else:
             self._tls.executor = None
