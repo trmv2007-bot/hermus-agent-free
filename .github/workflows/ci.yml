@@ -110,6 +110,15 @@ jobs:
           page.on('console',msg=>{if(msg.type()==='error') errors.push(msg.text())});
 
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
+          const duplicateIds=await page.locator('[id]').evaluateAll(elements=>{
+            const seen=new Set(), duplicates=new Set();
+            for(const element of elements){
+              if(seen.has(element.id)) duplicates.add(element.id);
+              seen.add(element.id);
+            }
+            return [...duplicates];
+          });
+          if(duplicateIds.length) throw new Error('Duplicate DOM IDs: '+duplicateIds.join(', '));
           console.log('QA: baseline');
           await page.screenshot({path:out+'/00-baseline.png',fullPage:false});
 
