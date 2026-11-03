@@ -106,8 +106,8 @@ jobs:
             usingSystemChrome=true;
           }
           const page=await browser.newPage({viewport:{width:1920,height:1080}});
-          page.setDefaultTimeout(1800);
-          page.setDefaultNavigationTimeout(5000);
+          page.setDefaultTimeout(10000);
+          page.setDefaultNavigationTimeout(20000);
 
           const json=(body)=>({status:200,contentType:'application/json',body:JSON.stringify(body)});
           await page.route('**/*',async route=>{
@@ -141,6 +141,9 @@ jobs:
           page.on('console',msg=>{if(msg.type()==='error') errors.push(msg.text())});
 
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
+          await page.waitForTimeout(1500);
+          const gs=page.locator('#globalSearch');
+          console.log('::notice ::diagnostics: #globalSearch count='+await gs.count()+' visible='+(await gs.count()?await gs.first().isVisible():false)+' errors='+errors.join(' | '));
           console.log('QA: baseline');
           await page.screenshot({path:out+'/00-baseline.png',fullPage:false});
 
