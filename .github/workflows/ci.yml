@@ -83,6 +83,10 @@ jobs:
           import {chromium} from 'playwright';
           import fs from 'node:fs';
 
+          process.on('uncaughtException', e => {
+            console.log('::error ::UI-QA failed: ' + String(e && e.message || e).replace(/\n/g, ' | '));
+          });
+
           const out='/tmp/jarvis-ui';
           fs.mkdirSync(out,{recursive:true});
           let browser;
