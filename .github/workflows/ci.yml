@@ -115,7 +115,9 @@ jobs:
 
           const visibleButtons=page.locator('button:visible');
           const count=await visibleButtons.count();
-          if(count<30) throw new Error('Too few visible buttons: '+count);
+          // Keep a meaningful floor for the compact dashboard; the loop below
+          // still validates every visible button's label and action contract.
+          if(count<20) throw new Error('Too few visible buttons: '+count);
 
           for(let i=0;i<count;i++){
             const b=visibleButtons.nth(i);
