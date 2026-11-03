@@ -22,7 +22,12 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: python -m compileall -q core gateway tools hermus_cli scheduler
-      - run: python -m pytest tests/ -q --ignore=tests/eval
+      - name: Test suite
+        run: |
+          python -m pytest tests/ -q --ignore=tests/eval --tb=short -rf | tee /tmp/pytest.log
+      - name: Pytest failure summary (shows failed tests in the PR checks)
+        if: failure()
+        run: tail -n 150 /tmp/pytest.log >> "$GITHUB_STEP_SUMMARY"
 
       # Normalize the historical Ruff backlog once on the dedicated repair
       # branch. The actual fixes are committed so main will validate the exact
@@ -56,11 +61,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install Playwright
+      - name: Install Playwright (with retry — browser CDN can hiccup)
         run: |
           npm init -y
-          npm install --no-save playwright@1.55.0
-          npx playwright install --with-deps chromium
+          ok=0
+          for i in 1 2 3; do
+            if npm install --no-save playwright@1.55.0; then ok=1; break; fi
+            echo "npm attempt $i failed"; sleep 5
+          done
+          [ "$ok" = "1" ] || exit 1
+          ok=0
+          for i in 1 2 3; do
+            if npx playwright install --with-deps chromium; then ok=1; break; fi
+            echo "browser download attempt $i failed"; sleep 10
+          done
+          [ "$ok" = "1" ]
       - name: Browser QA against mocked services
         run: |
           mkdir -p /tmp/hermus-ui/static
