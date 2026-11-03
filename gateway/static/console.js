@@ -13,10 +13,8 @@
  * * **No per-panel code.** Rendering is generic, so a capability added to the
  *   table appears here without touching this file. The alternative — a bespoke
  *   panel per subsystem — is what this tab replaces.
- * * **It reuses the control room's plumbing** (`requestJSON` for the canonical
- *   error envelope, `stateHtml` for loading/empty/error states, `toast` for
- *   action feedback, `RETRY_ACTIONS` for retry buttons) instead of carrying a
- *   second copy of all four.
+ * * **It uses the page's authenticated Nexus API** and keeps its small render
+ *   helpers local, so the console does not depend on a different page's script.
  *
  * Actions post to the endpoint printed on the card. This file never invents a
  * route, and a card whose endpoint is not in the gateway's own route table is
@@ -31,6 +29,68 @@
     open: {},           // panel id -> raw JSON expanded
     results: {},        // panel id -> action result (text)
   };
+
+  const retryActions = Object.create(null);
+  const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
+    (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+  const kpi = (value, label) => '<div class="kpi"><div class="v">' + esc(value)
+    + '</div><div class="l">' + esc(label) + '</div></div>';
+
+  async function requestJSON(path, options) {
+    try {
+      const data = await window.HermusNexus.api(path, options || {});
+      return { ok: true, data, status: 200, requestId: null, retryable: false };
+    } catch (error) {
+      return {
+        ok: false,
+        data: null,
+        status: error && error.status || 0,
+        requestId: error && error.requestId || null,
+        code: error && error.code || 'request_failed',
+        message: error && error.message || 'Request failed',
+        retryable: error && error.retryable !== false,
+      };
+    }
+  }
+
+  function stateHtml(value, options) {
+    const opts = options || {};
+    if (value.loading) return '<div class="skeleton"></div><div class="skeleton" style="width:70%"></div>';
+    if (value.empty) return '<div class="panel-state">' + esc(value.empty) + '</div>';
+    const error = value.error || {};
+    const label = opts.label ? esc(opts.label) + ': ' : '';
+    const code = error.code ? ' <span class="tag">(' + esc(error.code) + ')</span>' : '';
+    const retry = error.retryable && opts.onRetryId
+      ? '<div class="panel-retry"><button class="ghost" data-retry="' + esc(opts.onRetryId) + '">Retry</button></div>' : '';
+    return '<div class="panel-state error">' + label + esc(error.message || 'Request failed') + code + retry + '</div>';
+  }
+
+  function toast(message, kind, options) {
+    const host = document.querySelector('#toasts');
+    if (!host) return null;
+    const node = document.createElement('div');
+    node.className = 'toast ' + (kind || 'info');
+    const text = document.createElement('span');
+    text.className = 'toast-msg';
+    text.textContent = message;
+    node.appendChild(text);
+    if (options && options.retry && options.onRetry) {
+      const retry = document.createElement('button');
+      retry.className = 'toast-retry ghost';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', () => { node.remove(); options.onRetry(); });
+      node.appendChild(retry);
+    }
+    host.appendChild(node);
+    setTimeout(() => node.remove(), kind === 'error' ? 9000 : 4000);
+    return () => node.remove();
+  }
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest && event.target.closest('[data-retry]');
+    const retry = button && retryActions[button.getAttribute('data-retry')];
+    if (retry) retry();
+  });
 
   const HOST = () => document.querySelector('#consolePanels');
 
@@ -251,8 +311,8 @@
    * "every panel that offers Retry has an action registered" true for the
    * generated panels, including the doctor card that replaced its own tab. */
   function registerRetries() {
-    (state.manifest.panels || []).forEach((p) => { RETRY_ACTIONS[p.id] = () => refreshPanel(p.id); });
-    RETRY_ACTIONS.console = () => refresh();
+    (state.manifest.panels || []).forEach((p) => { retryActions[p.id] = () => refreshPanel(p.id); });
+    retryActions.console = () => refresh();
   }
 
   async function boot() {
