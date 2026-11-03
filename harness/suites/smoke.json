@@ -1,0 +1,69 @@
+{
+  "name": "smoke",
+  "description": "Offline-friendly smoke suite for the harness itself. Response/tool checks pass with `--model mock/mock`; file-writing tasks need a real model. Run: hermus harness run smoke --model mock/mock",
+  "tasks": [
+    {
+      "id": "echo_marker",
+      "category": "response",
+      "prompt": "Reply with exactly this marker and nothing else: HERMUS-HARNESS-OK",
+      "checks": [
+        {"type": "substring", "value": "HERMUS-HARNESS-OK"}
+      ]
+    },
+    {
+      "id": "tool_search",
+      "category": "tools",
+      "prompt": "Search the web for the latest Python release notes and summarize them.",
+      "timeout_s": 90,
+      "checks": [
+        {"type": "tool_called", "name": "web_search"}
+      ]
+    },
+    {
+      "id": "write_hello",
+      "category": "file",
+      "prompt": "Create a file named hello.txt in the current directory containing exactly one line: hello harness",
+      "max_steps": 6,
+      "checks": [
+        {"type": "file_exists", "path": "hello.txt"},
+        {"type": "file_contains", "path": "hello.txt", "value": "hello harness"}
+      ]
+    },
+    {
+      "id": "nested_dir",
+      "category": "file",
+      "prompt": "Create a directory docs/guide and inside it a file intro.md whose first line is: # Intro",
+      "max_steps": 8,
+      "checks": [
+        {"type": "file_exists", "path": "docs/guide/intro.md"},
+        {"type": "file_regex", "path": "docs/guide/intro.md", "pattern": "#\\s*Intro"}
+      ]
+    },
+    {
+      "id": "env_command",
+      "category": "command",
+      "prompt": "List the files in the current workspace and report how many there are.",
+      "checks": [
+        {
+          "type": "command",
+          "cmd": "python3 -c \"print(6*7)\"",
+          "expect_exit": 0,
+          "stdout_contains": "42"
+        }
+      ]
+    },
+    {
+      "id": "seeded_workspace",
+      "category": "setup",
+      "files": {"README.md": "# Demo project\n"},
+      "setup": ["python3 -c \"open('setup_ran.txt','w').write('yes')\""],
+      "prompt": "Read README.md and setup_ran.txt in the current directory, then tell me the project name.",
+      "max_steps": 6,
+      "checks": [
+        {"type": "file_exists", "path": "setup_ran.txt"},
+        {"type": "substring", "value": "project name"}
+      ],
+      "metadata": {"difficulty": "easy"}
+    }
+  ]
+}
