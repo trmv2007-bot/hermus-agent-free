@@ -22,7 +22,7 @@ class CostGuard:
 
     last_check: float = field(default_factory=time.time)
     tripped: bool = False
-    trip_reason: Optional[str] = None
+    trip_reason: str | None = None
 
     def record_usage(self, usage: dict[str, Any] | None, model: str = "unknown"):
         """Ingest the usage dict returned by LLMResponse."""
