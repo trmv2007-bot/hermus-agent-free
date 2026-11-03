@@ -194,9 +194,10 @@ jobs:
             console.log('QA: room navigation controls absent; skipped');
           }
 
-          if (await page.locator('#personalSpaceOpenDock').count()) {
+          const personalSpaceEntry=page.locator('#personalSpaceOpen:visible, #personalSpaceOpenDock:visible, #personalSpaceOpenCard:visible').first();
+          if (await personalSpaceEntry.count()) {
             console.log('QA: personal space');
-            await page.locator('#personalSpaceOpenDock').click();
+            await personalSpaceEntry.click();
             await page.locator('#overlay').waitFor({state:'visible'});
             if(!(await page.locator('#personalSpaceActions').count())) throw new Error('Personal Space actions missing');
             await page.locator('#overlay [data-close]').click();
