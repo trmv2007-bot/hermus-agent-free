@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-PY = str(REPO / ".venv/bin/python")
+PY = sys.executable  # works in CI (system python) and locally (.venv)
 
 
 def _cli(*argv, timeout=300):
