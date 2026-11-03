@@ -130,7 +130,8 @@ jobs:
           }
 
           console.log('QA: palette');
-          await page.locator('#globalSearch').click();
+          await page.keyboard.press('Control+p');
+          await page.locator('#paletteInput').waitFor({state:'visible'});
           await page.locator('#paletteInput').fill('model');
           if(await page.locator('#paletteList button').count()!==1) throw new Error('Palette filter failed');
           await page.locator('#paletteList button').first().click();
