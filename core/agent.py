@@ -1111,6 +1111,7 @@ Rules:
             "router": routed,
             "project": self.project,
             "verification": verification,
+            "last_usage": last_usage,
             "waiting_for_approval": pending_approval,
             "status": "waiting_for_approval" if pending_approval else "done",
             "events": None,

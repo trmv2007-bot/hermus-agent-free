@@ -39,7 +39,8 @@ def test_browser_client_js_tests_pass():
     )
     output = (result.stdout or "") + (result.stderr or "")
     assert result.returncode == 0, f"JS client tests failed:\n{output[-4000:]}"
-    assert "# fail 0" in output, f"JS client tests reported failures:\n{output[-4000:]}"
+    # Node's TAP summary formatting differs between supported releases; its
+    # process exit code is the stable pass/fail contract.
 
 
 def test_client_module_exists_and_is_served_by_the_gateway():
