@@ -61,21 +61,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install Playwright (with retry — browser CDN can hiccup)
+      - name: Install Playwright (best-effort browser; fall back to system chrome)
         run: |
           npm init -y
-          ok=0
-          for i in 1 2 3; do
-            if npm install --no-save playwright@1.55.0; then ok=1; break; fi
-            echo "npm attempt $i failed"; sleep 5
-          done
-          [ "$ok" = "1" ] || exit 1
-          ok=0
-          for i in 1 2 3; do
-            if npx playwright install --with-deps chromium; then ok=1; break; fi
-            echo "browser download attempt $i failed"; sleep 10
-          done
-          [ "$ok" = "1" ]
+          if ! npm install --no-save playwright@1.55.0; then
+            echo "::error ::npm install playwright@1.55.0 failed"
+            exit 1
+          fi
+          echo "::notice ::system browsers: $(which google-chrome google-chrome-stable chromium chromium-browser 2>/dev/null | tr '\n' ' ')"
+          if ! npx playwright install --with-deps chromium; then
+            echo "::warning ::playwright browser download failed; will try system chrome"
+            npx playwright install chromium || echo "::warning ::no playwright chromium either; relying on system chrome"
+          fi
       - name: Browser QA against mocked services
         run: |
           mkdir -p /tmp/hermus-ui/static
@@ -88,7 +85,12 @@ jobs:
 
           const out='/tmp/jarvis-ui';
           fs.mkdirSync(out,{recursive:true});
-          const browser=await chromium.launch({headless:true});
+          let browser;
+          try { browser=await chromium.launch({headless:true, channel:'chrome'}); }
+          catch(e1) {
+            console.log('system chrome unavailable ('+e1.message.split('\n')[0]+'); using playwright chromium');
+            browser=await chromium.launch({headless:true});
+          }
           const page=await browser.newPage({viewport:{width:1920,height:1080}});
           page.setDefaultTimeout(1800);
           page.setDefaultNavigationTimeout(5000);
