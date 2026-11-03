@@ -6,24 +6,25 @@ This module aggregates real-time usage (USD and tokens) and enforces hard limits
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Any
+
 
 @dataclass
 class CostGuard:
     max_cost_usd: float = 2.00  # Default hard limit: $2.00 per mission
-    max_tokens: int = 500_000   # Default hard limit: 500k tokens per mission
-    
+    max_tokens: int = 500_000  # Default hard limit: 500k tokens per mission
+
     total_cost: float = 0.0
     total_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    model_costs: Dict[str, float] = field(default_factory=dict)
-    
+    model_costs: dict[str, float] = field(default_factory=dict)
+
     last_check: float = field(default_factory=time.time)
     tripped: bool = False
     trip_reason: Optional[str] = None
 
-    def record_usage(self, usage: Optional[Dict[str, Any]], model: str = "unknown"):
+    def record_usage(self, usage: dict[str, Any] | None, model: str = "unknown"):
         """Ingest the usage dict returned by LLMResponse."""
         if not usage or not isinstance(usage, dict):
             return
@@ -38,13 +39,14 @@ class CostGuard:
             self.total_tokens += t_tokens
             self.prompt_tokens += p_tokens
             self.completion_tokens += c_tokens
-            
+
             self.model_costs[model] = self.model_costs.get(model, 0.0) + cost
             self.last_check = time.time()
             self._check_limits()
 
     def _check_limits(self):
-        if self.tripped: return
+        if self.tripped:
+            return
         if self.total_cost >= self.max_cost_usd:
             self.tripped = True
             self.trip_reason = f"cost_limit_exceeded (${self.total_cost:.4f} >= ${self.max_cost_usd:.2f})"
@@ -55,9 +57,11 @@ class CostGuard:
     def is_safe(self) -> bool:
         return not self.tripped
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         return {
-            "tripped": self.tripped, "trip_reason": self.trip_reason,
-            "total_cost_usd": round(self.total_cost, 6), "total_tokens": self.total_tokens,
-            "limits": {"max_cost_usd": self.max_cost_usd, "max_tokens": self.max_tokens}
+            "tripped": self.tripped,
+            "trip_reason": self.trip_reason,
+            "total_cost_usd": round(self.total_cost, 6),
+            "total_tokens": self.total_tokens,
+            "limits": {"max_cost_usd": self.max_cost_usd, "max_tokens": self.max_tokens},
         }
