@@ -186,7 +186,7 @@ jobs:
           await page.locator('#modelRefresh').click();
 
           console.log('QA: personal space');
-          await page.locator('#personalSpaceOpenDock').click();
+          await page.locator('#personalSpaceOpenDock').first().click();
           await page.locator('#overlay').waitFor({state:'visible'});
           await page.locator('#personalSpaceActions').waitFor({state:'attached'});
           await page.locator('#overlay [data-close]').click();
@@ -194,15 +194,15 @@ jobs:
           console.log('QA: workshop');
           await page.locator('[data-deep-workshop]:visible').first().click();
           await page.locator('#workshop').first().waitFor({state:'visible'});
-          await page.locator('#workshopRefresh').click();
+          await page.locator('#workshopRefresh').first().click();
           await page.locator('[data-workshop-project="demo-app"]').click();
           await page.locator('[data-workshop-path="app.py"]').click();
-          await page.locator('#workshopEditor').fill('print(2)');
-          await page.locator('#workshopSave').click();
-          await page.locator('#workshopAsk').click(); await page.waitForTimeout(50);
-          if(!(await page.locator('#workshopCommand').evaluate(el=>document.activeElement===el))) throw new Error('ASK did not focus Workshop command');
-          await page.locator('#workshopCommand').fill('Review workspace');
-          await page.locator('#workshopSend').click();
+          await page.locator('#workshopEditor').first().fill('print(2)');
+          await page.locator('#workshopSave').first().click();
+          await page.locator('#workshopAsk').first().click(); await page.waitForTimeout(50);
+          if(!(await page.locator('#workshopCommand').first().evaluate(el=>document.activeElement===el))) throw new Error('ASK did not focus Workshop command');
+          await page.locator('#workshopCommand').first().fill('Review workspace');
+          await page.locator('#workshopSend').first().click();
           await page.locator('#workshop').first().waitFor({state:'hidden'});
 
           console.log('QA: command line');
