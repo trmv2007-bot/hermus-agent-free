@@ -202,8 +202,8 @@ jobs:
           await page.locator('[data-workshop-path="app.py"]').click();
           await page.locator('#workshopEditor').first().fill('print(2)');
           await page.locator('#workshopSave').first().click();
-          await page.locator('#workshopAsk').first().click(); await page.waitForTimeout(50);
-          if(!(await page.locator('#workshopCommand').first().evaluate(el=>document.activeElement===el))) throw new Error('ASK did not focus Workshop command');
+          await page.locator('#workshopAsk').first().click();
+          await page.waitForFunction(()=>document.activeElement && document.activeElement.id==='workshopCommand',null,{timeout:5000}).catch(()=>{throw new Error('ASK did not focus Workshop command');});
           await page.locator('#workshopCommand').first().fill('Review workspace');
           await page.locator('#workshopSend').first().click();
           await page.locator('#workshop').first().waitFor({state:'hidden'});
