@@ -193,6 +193,8 @@ jobs:
           await page.locator('#overlay [data-close]').click();
 
           console.log('QA: workshop');
+          await logo.click(); await logo.click(); await logo.click();
+          await page.locator('#jarvisWorkspace.open').waitFor({state:'attached'});
           await page.locator('[data-deep-workshop]:visible').first().click();
           await page.locator('#workshop').first().waitFor({state:'visible'});
           await page.locator('#workshopRefresh').first().click();
