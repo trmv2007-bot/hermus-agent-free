@@ -18,7 +18,7 @@
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
 <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/actions"><img src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&style=for-the-badge" alt="CI"></a>
-<a href="https://discord.gg/example"><img src="https://img.shields.io/discord/123456789.svg?style=for-the-badge&logo=discord&label=Community" alt="Discord"></a>
+<a href="https://github.com/trmv2007-bot/hermus-agent-free/discussions"><img src="https://img.shields.io/github/discussions/trmv2007-bot/hermus-agent-free?style=for-the-badge&logo=github&label=Discussions" alt="Discussions"></a>
 </p>
 
 ---
@@ -44,6 +44,27 @@ cd hermus-agent-free
 
 ---
 
+## 🌌 The Flight Deck
+
+![HERMUS Control Room](docs/assets/flightdeck-overview.png)
+
+`/control` is a single, local-first operations console served by the gateway itself
+(no CDN, no build step, no hosted frontend). Its centrepiece is a **living core**
+whose rings, colour and motion are derived from real state — `/readyz`, the job
+queue, tool events, pending approvals and the turn harness. When the gateway is
+down it dims and says `offline`; it never animates a fiction.
+
+- **Command palette** (`Ctrl/Cmd+K`) to jump anywhere or run a declared command
+- **Live activity drawer** (`[`) fed by the canonical event log
+- **Context tile** showing the harness budget, the last compaction and the recall path
+- **Calm mode** plus full `prefers-reduced-motion` support
+
+<p align="center">
+  <img src="docs/assets/flightdeck-palette.png" alt="Command palette" width="420">
+</p>
+
+---
+
 ## ✨ Features
 
 ### 🎯 Core Capabilities
@@ -57,6 +78,7 @@ cd hermus-agent-free
 | 🔄 **Self-Improving** | Successful trajectories become reusable skills |
 | 🧠 **Project Memory** | SQLite-backed memory with FTS5 retrieval and optional vector search |
 | 📚 **Lessons Loop** | Corrections and failures become reusable lessons |
+| 🧩 **Turn Harness** | Token-budgeted compaction, durable sessions, swarm mail, cascade recall and a read-only `/api/v1/harness/*` projection |
 | ✅ **Verification** | Domain-specific verification plus offline evaluation harness |
 | 🔒 **Sandboxing** | Policy-controlled command execution with isolation backends |
 
@@ -222,7 +244,7 @@ We welcome contributions! Please:
 
 1. ✨ **Star** the repository
 2. 🐛 **Report** bugs and issues
-3. 💬 **Join** the Discord community
+3. 💬 **Join** the discussions
 4. 📝 **Read** the [Contributing Guide](CONTRIBUTING.md)
 5. 🔧 **Submit** pull requests
 

@@ -20,21 +20,21 @@ router = APIRouter(prefix="/presence", tags=["presence"])
 
 @router.get("")
 @router.get("/")
-async def presence_snapshot(user_id: str | None = None):
+def presence_snapshot(user_id: str | None = None):
     from core.presence import get_presence
 
     return get_presence().snapshot(user_id=user_id)
 
 
 @router.get("/status")
-async def presence_status(user_id: str | None = None):
+def presence_status(user_id: str | None = None):
     from core.presence import get_presence
 
     return get_presence().snapshot(user_id=user_id)
 
 
 @router.get("/identity")
-async def presence_identity():
+def presence_identity():
     from core.presence import get_presence
 
     return {"identity": get_presence().identity()}
@@ -42,7 +42,7 @@ async def presence_identity():
 
 @router.put("/identity")
 @router.post("/identity")
-async def presence_identity_update(payload: dict[str, Any] | None = None):
+def presence_identity_update(payload: dict[str, Any] | None = None):
     from core.presence import get_presence
 
     payload = payload or {}
@@ -62,14 +62,14 @@ async def presence_identity_update(payload: dict[str, Any] | None = None):
 
 
 @router.get("/goals")
-async def presence_goals(status: str | None = None, user_id: str | None = None):
+def presence_goals(status: str | None = None, user_id: str | None = None):
     from core.presence import get_presence
 
     return {"goals": get_presence().list_goals(status=status, user_id=user_id)}
 
 
 @router.post("/goals")
-async def presence_goal_add(payload: dict[str, Any] | None = None):
+def presence_goal_add(payload: dict[str, Any] | None = None):
     from core.presence import get_presence
 
     payload = payload or {}
@@ -87,7 +87,7 @@ async def presence_goal_add(payload: dict[str, Any] | None = None):
 
 
 @router.post("/goals/{goal_id}/complete")
-async def presence_goal_complete(
+def presence_goal_complete(
     goal_id: str,
     payload: dict[str, Any] | None = None,
     user_id: str | None = None,
@@ -107,7 +107,7 @@ async def presence_goal_complete(
 
 
 @router.post("/goals/{goal_id}/touch")
-async def presence_goal_touch(goal_id: str, payload: dict[str, Any] | None = None, user_id: str | None = None):
+def presence_goal_touch(goal_id: str, payload: dict[str, Any] | None = None, user_id: str | None = None):
     from core.presence import get_presence
 
     payload = payload or {}
@@ -119,14 +119,14 @@ async def presence_goal_touch(goal_id: str, payload: dict[str, Any] | None = Non
 
 
 @router.post("/heartbeat")
-async def presence_heartbeat():
+def presence_heartbeat():
     from core.presence import get_presence
 
     return get_presence().heartbeat(force_event=True)
 
 
 @router.post("/check-in")
-async def presence_check_in(payload: dict[str, Any] | None = None):
+def presence_check_in(payload: dict[str, Any] | None = None):
     """Queue a safe, read-only conversational check-in for one ongoing goal.
 
     The endpoint is explicit rather than automatic. It asks Hermus for a status

@@ -1165,7 +1165,12 @@ def _synthesize(goal: str, answers: Sequence[str], results: Sequence[dict[str, A
                 "content": f"Goal: {goal[:600]}\n\nConfidences: {[r.get('confidence') for r in results]}\n\n{joined[:12000]}",
             },
         ]
-        resp = get_model_gateway().chat(messages)
+        # Harness-governed: a 12k-char child-answer pile is exactly the prompt
+        # that needs the token budget. Budget-only (no memory/notices) because the
+        # contract here is "return the merged answer", nothing else.
+        from .harness import governed_call
+
+        resp = get_model_gateway().chat(governed_call(messages, session_id="delegation.synthesize"))
         text = (getattr(resp, "content", "") or "").strip()
         if text and "[MOCK" not in text[:20]:
             return text
@@ -1199,7 +1204,9 @@ def plan_workstreams(goal: str, *, max_children: int = 4) -> dict[str, Any]:
             },
             {"role": "user", "content": goal[:1200]},
         ]
-        resp = get_model_gateway().chat(messages)
+        from .harness import governed_call
+
+        resp = get_model_gateway().chat(governed_call(messages, session_id="delegation.plan"))
         text = getattr(resp, "content", "") or ""
         import re
 

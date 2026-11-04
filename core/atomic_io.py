@@ -17,9 +17,10 @@ Guarantees
     concurrent reader can observe invalid JSON).
 
 ``file_lock``
-    exclusive advisory lock (``flock``) around read-modify-write cycles such as
+    exclusive advisory lock around read-modify-write cycles such as
     ``load mission → change budget → save mission``, so two workers cannot
-    clobber each other's edits.
+    clobber each other's edits. POSIX uses ``flock``; Windows uses
+    ``msvcrt.locking`` over one byte of the sidecar file.
 """
 
 from __future__ import annotations
@@ -36,6 +37,11 @@ try:  # pragma: no cover - platform dependent
     import fcntl
 except Exception:  # pragma: no cover - Windows / exotic platforms
     fcntl = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - Windows only
+    import msvcrt
+except Exception:  # pragma: no cover - POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 PathLike = str | Path
 
@@ -99,9 +105,43 @@ def file_lock(path: PathLike, *, exclusive: bool = True) -> Iterator[None]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    if fcntl is None:  # pragma: no cover - non-POSIX
-        yield
+    if fcntl is None:
+        # Windows: ``msvcrt.locking`` is the real advisory lock. It locks one
+        # byte at the current offset, so make sure the file has one. Without
+        # this the lock was a silent no-op on Windows and concurrent saves
+        # could interleave.
+        if msvcrt is None:  # pragma: no cover - exotic platform
+            yield
+            return
+        try:
+            fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        except OSError:  # pragma: no cover - unwritable dir
+            yield
+            return
+        locked = False
+        try:
+            try:
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                locked = True
+            except OSError:
+                locked = False
+            yield
+        finally:
+            if locked:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         return
+
     flags = os.O_RDWR | os.O_CREAT
     try:
         fd = os.open(str(lock_path), flags, 0o644)

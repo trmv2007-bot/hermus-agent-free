@@ -312,7 +312,9 @@ class Memory:
                     "content": f"Query: {query}\n\nPrior sessions:\n{context}\n\nSummarize what is relevant for cross-session recall.",
                 },
             ]
-            resp = get_model_gateway().chat(messages)
+            from ..harness import governed_call
+
+            resp = get_model_gateway().chat(governed_call(messages, session_id="memory.summarize"))
             return resp.content
         except Exception:
             # Fallback without LLM

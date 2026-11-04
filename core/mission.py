@@ -1017,6 +1017,37 @@ def make_agent_backed_executor(
                     mode="agent",
                 )
 
+            # Fast, honest no-backend check: never spend a mission round (or
+            # council deliberation) retrying an unreachable model.
+            try:
+                if hasattr(node_agent, "_backend_available"):
+                    _backend_ok = bool(node_agent._backend_available())
+                else:
+                    _prov = str(getattr(getattr(node_agent, "llm", None), "provider", "") or "").lower()
+                    # Match the historical no-backend contract: only a 'mock'
+                    # provider (and an unreachable Ollama) count as "no backend".
+                    # Test stand-ins using 'fake' still run so evidence can be
+                    # classified.
+                    _backend_ok = _prov not in ("mock",)
+                    if _backend_ok and _prov == "ollama":
+                        import requests as _rq
+
+                        _base = str(getattr(_config, "ollama_base_url", "http://localhost:11434")).rstrip("/")
+                        _backend_ok = _rq.get(f"{_base}/api/tags", timeout=2).status_code == 200
+            except Exception:
+                _backend_ok = True
+            if not _backend_ok:
+                _reason = "No model backend reachable (no Ollama and no API key). Configure a model before running missions."
+                _emit("node_finished", {"stage": stage, "status": "blocked", "reason": _reason})
+                return {
+                    "success": False,
+                    "blocked": True,
+                    "blocker_reason": _reason,
+                    "output": "",
+                    "error": "no_model_backend",
+                    "evidence": [{"stage": stage, "status": "blocked", "reason": _reason}],
+                }
+
             # Per-node file baseline: precise diff, scoped to this mission.
             node_snapshot = scope.snapshot() if scope is not None else None
             prompt = build_node_prompt(

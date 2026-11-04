@@ -94,10 +94,15 @@ class MetaCounsel:
         )
         proposed = []
         try:
+            from ..harness import governed_call
             from ..models import get_model_gateway
 
             resp = get_model_gateway().chat(
-                [{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}], model=config.model
+                governed_call(
+                    [{"role": "system", "content": _META_SYSTEM}, {"role": "user", "content": prompt}],
+                    session_id="counsel.meta",
+                ),
+                model=config.model,
             )
             proposed = self._parse_amendments(resp.content or "")
         except Exception as e:

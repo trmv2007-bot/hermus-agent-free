@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -18,14 +19,27 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 _STARTED = time.monotonic()
 
+#: The aggregate samples the resource monitor and capability gate, which can
+#: take seconds (nvidia-smi). Reusing one real sample for a few seconds keeps
+#: the 5s UI poll cheap without inventing values.
+STATUS_TTL_SECONDS = 30.0
+_STATUS_LOCK = threading.Lock()
+_STATUS_CACHE: dict[str, object] = {"ts": 0.0, "data": None}
+
 
 def _active_count(rows: list[dict]) -> int:
     return sum(1 for row in rows if row.get("status") in {"queued", "running"})
 
 
 @router.get("/api/jarvis/status")
-async def jarvis_status():
-    """One factual snapshot used by the JARVIS status/telemetry panels."""
+def jarvis_status():
+    """One factual snapshot used by the JARVIS status/telemetry panels.
+
+    Declared ``def`` (not ``async def``) on purpose: the body reads the queue,
+    the run bus, the agent/tool/artifact registries and the resource monitor,
+    all synchronously. FastAPI runs a sync handler in its threadpool, so this
+    can no longer stall the event loop while the Control Room polls it.
+    """
     from core.agent_manager import agent_manager
     from core.artifact_manager import artifact_manager
     from core.computer.resources import get_resource_monitor
@@ -37,6 +51,12 @@ async def jarvis_status():
     from gateway.channels import get_channel_status, get_discord_token, get_telegram_token
     from gateway.queue import job_queue
 
+    now = time.monotonic()
+    with _STATUS_LOCK:
+        cached = _STATUS_CACHE.get("data")
+        if isinstance(cached, dict) and now - float(_STATUS_CACHE.get("ts") or 0.0) < STATUS_TTL_SECONDS:
+            return cached
+
     queue = job_queue.status()
     jobs = job_queue.list_jobs(limit=100)
     runs = run_bus.runs()[-100:]
@@ -45,11 +65,11 @@ async def jarvis_status():
     channels = get_channel_status()
     artifacts = artifact_manager.list_artifacts()
     model_ref = str(getattr(config, "model", "") or "")
-    capability = await asyncio.to_thread(mission_capability_gate, model_ref)
-    telemetry = await asyncio.to_thread(get_resource_monitor().sample)
+    capability = mission_capability_gate(model_ref)
+    telemetry = get_resource_monitor().sample()
     providers = list_providers()
 
-    return {
+    snapshot = {
         "gateway": {"reachable": True, "version": "2.2-free-architecture", "uptime_seconds": int(time.monotonic() - _STARTED)},
         "queue": queue,
         "counts": {
@@ -70,6 +90,9 @@ async def jarvis_status():
         "providers": providers,
         "telemetry": telemetry,
     }
+    with _STATUS_LOCK:
+        _STATUS_CACHE.update(ts=time.monotonic(), data=snapshot)
+    return snapshot
 
 
 def _validate_public_url(value: str) -> tuple[str | None, str | None]:

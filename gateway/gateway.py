@@ -20,6 +20,7 @@ get_agent_for_user` and `gateway.gateway.<attr>` monkeypatching keep working
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 # Direct execution (python gateway/gateway.py): put the repo root on sys.path
@@ -267,12 +268,64 @@ async def _memory_maintenance_loop():
             logger.error(f"[Gateway] memory sweep failed: {e}")
 
 
+def _warm_gateway_caches() -> None:
+    """Run the expensive status probes once, off the event loop, at startup.
+
+    ``bootstrap.doctor()`` and the GPU probe each shell out to the interpreter /
+    ``nvidia-smi`` and cost seconds on a cold machine. Warming them here means
+    the first Control Room load reads a cached real result instead of showing
+    skeletons while every other panel is already painted.
+    """
+    started = time.monotonic()
+    logger.info("[Gateway] warming status probes (doctor, GPU, resources)")
+    try:
+        from gateway.routes_canonical import warm_health_cache
+
+        warm_health_cache()
+    except Exception as e:
+        logger.info(f"[Gateway] health warm-up failed: {e}")
+    try:
+        from core.local_first import get_local_first
+
+        lfp = get_local_first()
+        lfp.detect_gpu()
+        # Recommended setup probes local providers over HTTP; it is what made
+        # the first GPU-card request take ~12s.
+        lfp.get_recommended_setup()
+    except Exception as e:
+        logger.info(f"[Gateway] GPU warm-up failed: {e}")
+    try:
+        from core.computer.resources import get_resource_monitor
+
+        get_resource_monitor().sample()
+    except Exception as e:
+        logger.info(f"[Gateway] resource warm-up failed: {e}")
+    try:
+        # A UI-only gateway never runs a turn, so this is the only place stale
+        # harness session records get pruned (once an hour, live sessions kept).
+        from core.harness import sessions as harness_sessions
+
+        pruned = harness_sessions.gc_once_per_hour()
+        if pruned:
+            logger.info(f"[Gateway] harness sessions pruned: {pruned}")
+    except Exception as e:
+        logger.info(f"[Gateway] harness session GC failed: {e}")
+    logger.info(f"[Gateway] status probes warm in {time.monotonic() - started:.1f}s")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
     setup_logging()
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
+    # Warm the slow probes in the background. The doctor probe and the GPU
+    # probe each cost seconds on a cold machine; without this the first Control
+    # Room load sat on "probing..." while every other panel had rendered.
+    try:
+        asyncio.create_task(asyncio.to_thread(_warm_gateway_caches))
+    except Exception as e:
+        logger.debug(f"[Gateway] probe warm-up skipped: {e}")
     if getattr(config, "auto_start_channels", True):
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
@@ -490,6 +543,7 @@ from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
 from gateway.routes_console import router as _console_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
+from gateway.routes_harness import router as _harness_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
@@ -519,6 +573,7 @@ app.include_router(_jarvis_router, dependencies=_gate_control)
 app.include_router(_voice_router, dependencies=_gate_control)
 app.include_router(_engine_router, dependencies=_gate_control)
 app.include_router(_canonical_router, dependencies=_gate_control)
+app.include_router(_harness_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
 app.include_router(_presence_router, dependencies=_gate_control)
 app.include_router(_agents_router, dependencies=_gate_control)
@@ -694,6 +749,36 @@ async def control_room_css():
 async def control_console_js():
     """Generated Systems console: renders ``core/console.py`` (see routes_console)."""
     return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-core.js")
+async def control_core_js():
+    """Living core: a canvas projection of real gateway state (no animation fiction)."""
+    return _serve_control_asset("control-core.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-shell.js")
+async def control_shell_js():
+    """Flight-deck shell: rail, command palette, activity drawer, composer."""
+    return _serve_control_asset("control-shell.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-agents.js")
+async def control_agents_js():
+    """Agents tab controller, extracted from the old inline script."""
+    return _serve_control_asset("control-agents.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/assets/favicon.svg")
+async def control_favicon():
+    """Brand favicon. The document links it, so it must be served (it used to 404)."""
+    return _serve_control_asset("assets/favicon.svg", "image/svg+xml")
+
+
+@app.get("/static/assets/logo.svg")
+async def control_logo():
+    """Brand mark shared by the room and the docs."""
+    return _serve_control_asset("assets/logo.svg", "image/svg+xml")
 
 
 @app.get("/cache/stats")

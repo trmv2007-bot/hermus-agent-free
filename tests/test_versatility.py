@@ -103,7 +103,9 @@ def test_mcp_echo_server_end_to_end():
             mgr = MCPManager()
             # Replace config with only our echo server (avoid default disabled example)
             mgr._config = []
-            mgr.add_server("echo", "python3", args=[echo_path], enabled=True)
+            # ``python3`` does not exist on Windows; use this interpreter so the
+            # test exercises the MCP transport, not the machine's PATH.
+            mgr.add_server("echo", sys.executable, args=[echo_path], enabled=True)
             connected = mgr.connect_enabled()
             ok = [r for r in connected["results"] if r.get("name") == "echo"]
             assert ok and ok[0]["success"], connected

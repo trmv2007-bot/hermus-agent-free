@@ -593,7 +593,7 @@ class SkillForge:
         try:
             self.skills_dir.mkdir(parents=True, exist_ok=True)
             tmp = self.registry_path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True))
+            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True), encoding="utf-8")
             tmp.replace(self.registry_path)
         except Exception:
             pass
@@ -767,9 +767,10 @@ class SkillForge:
         if self._llm:
             return self._llm(messages)
         try:
+            from .harness import governed_call
             from .models import get_model_gateway
 
-            resp = get_model_gateway().chat(messages)
+            resp = get_model_gateway().chat(governed_call(messages, session_id="skill_forge"))
             return getattr(resp, "content", "") or ""
         except Exception:
             return ""
@@ -989,7 +990,15 @@ class SkillForge:
             from .sandbox import sandbox
 
             res = sandbox.run_python(code, timeout=timeout, purpose="skill-validation")
-            return int(res.get("returncode", 1)), str(res.get("stdout", "")), str(res.get("stderr", ""))
+            rc = int(res.get("returncode", 1))
+            out = str(res.get("stdout", "") or "")
+            err = str(res.get("stderr", "") or "")
+            # Only trust the sandbox when it actually produced output. A
+            # disabled/unavailable backend can report rc=0 with nothing at all;
+            # that used to quarantine a perfectly good skill with an empty
+            # "import failed:" message.
+            if out or err:
+                return rc, out, err
         except Exception:
             pass
         try:
@@ -997,6 +1006,8 @@ class SkillForge:
                 [sys.executable, "-c", code],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 cwd=str(self.skills_dir.parent),
             )
@@ -1026,16 +1037,18 @@ class SkillForge:
         staging = self.skills_dir / f".staging_{cand.name}"
         try:
             staging.mkdir(parents=True, exist_ok=True)
-            (staging / "SKILL.md").write_text(self.skill_md(cand))
-            (staging / "skill.py").write_text(self.skill_py(cand))
-            (staging / "test_skill.py").write_text(self.smoke_test(cand))
+            (staging / "SKILL.md").write_text(self.skill_md(cand), encoding="utf-8")
+            (staging / "skill.py").write_text(self.skill_py(cand), encoding="utf-8")
+            (staging / "test_skill.py").write_text(self.smoke_test(cand), encoding="utf-8")
             report = self.validate(staging) if validate else {"valid": True, "skipped": True}
             if not report.get("valid"):
                 self.quarantine_dir.mkdir(parents=True, exist_ok=True)
                 bad = self.quarantine_dir / f"{cand.name}_{datetime.now().strftime('%H%M%S')}"
                 shutil.move(str(staging), str(bad))
                 try:
-                    (bad / "VALIDATION_ERROR.txt").write_text(json.dumps(report, indent=2, default=str))
+                    (bad / "VALIDATION_ERROR.txt").write_text(
+                        json.dumps(report, indent=2, default=str), encoding="utf-8"
+                    )
                 except Exception:
                     pass
                 return {"installed": False, "quarantined": str(bad), "report": report}

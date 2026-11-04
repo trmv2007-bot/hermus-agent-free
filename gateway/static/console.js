@@ -261,7 +261,11 @@
     if (!(await loadManifest())) return;
     syncGroups();
     render();
-    await refresh();
+    // Probing every panel on page load meant a ~20s storm of SQLite/filesystem
+    // probes behind an Overview nobody had asked for. Probe when Systems is
+    // actually visible; refreshTab("systems") still triggers it on open.
+    const panel = document.getElementById('tab-systems');
+    if (panel && panel.classList.contains('on')) await refresh();
     registerRetries();
   }
 

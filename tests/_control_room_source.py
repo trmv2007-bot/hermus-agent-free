@@ -24,6 +24,9 @@ _ASSETS = (
     "gateway/static/control-client.js",
     "gateway/static/control-room.js",
     "gateway/static/console.js",
+    "gateway/static/control-core.js",
+    "gateway/static/control-shell.js",
+    "gateway/static/control-agents.js",
 )
 
 

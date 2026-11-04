@@ -10,10 +10,14 @@ Each role has:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import asyncio
+import json
+import uuid
 from enum import Enum
+from typing import Any, Optional
 
 from core.log import get_logger
+
 from .agent import Agent, AgentConfig, AgentRole
 
 logger = get_logger(__name__)
@@ -464,22 +468,39 @@ class ToolRunner(SpecializedAgent):
         self._allowed_tools.discard(tool_name)
 
     async def execute_tool(self, tool_name: str, args: dict = None) -> str:
-        """
-        Execute a tool.
+        """Execute an allowed tool through the canonical ToolGateway.
+
+        This used to compose a prompt (``# TODO: Actually execute the tool``) and
+        hand it to ``run_task``, so the caller received prose and believed the
+        tool had run. The gateway is the same seam :class:`core.agent.HermusAgent`
+        uses — policy gate, typed ``ToolResult`` classification, honest error
+        path — so a failed tool is never reported as a success.
 
         Args:
             tool_name: Name of the tool to execute
             args: Arguments for the tool
 
         Returns:
-            Tool execution result
+            The tool's own output, or an ``"Error: ..."`` string
         """
         if tool_name not in self._allowed_tools:
             return f"Error: Tool {tool_name} not allowed"
 
-        # TODO: Actually execute the tool
-        prompt = f"Execute tool: {tool_name}\nArgs: {json.dumps(args or {}, indent=2)}"
-        return await self.run_task(prompt)
+        from ..tools import get_tool_gateway
+
+        try:
+            res = await asyncio.to_thread(get_tool_gateway().execute, str(tool_name), dict(args or {}))
+        except Exception as exc:
+            return f"Error: {tool_name} raised {type(exc).__name__}: {exc}"
+
+        if res.ok:
+            out = res.output
+            if isinstance(out, str):
+                return out[:4000]
+            return json.dumps(out, indent=2, default=str)[:4000]
+        detail = res.error_message or f"tool '{tool_name}' failed"
+        code = res.error_code or "TOOL_ERROR"
+        return f"Error: {detail} [{code}]"
 
 
 # Factory functions for creating specialized agents

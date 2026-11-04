@@ -221,10 +221,14 @@ def test_console_script_reuses_the_control_room_plumbing():
         assert redeclared not in src, f"console.js redeclares {redeclared} instead of reusing it"
 
 
-def test_console_tab_replaced_the_bespoke_doctor_tab_only():
-    """Ten tabs before the console, ten after: the Doctor card moved into it."""
+def test_console_tab_is_the_only_systems_surface():
+    """The Doctor card lives inside Systems; no bespoke doctor tab exists.
+
+    Eleven sections: the original ten plus the Agents tab. The count is pinned
+    so a tab cannot be added or dropped without a deliberate test change.
+    """
     html = (ROOT / "gateway/control.html").read_text(encoding="utf-8")
-    assert html.count('role="tab"') == 10
+    assert html.count('role="tab"') == 11
     assert 'data-tab="doctor"' not in html, "the bespoke doctor tab should be the doctor panel now"
     assert "doctor" in {p.id for p in console.panels()}, "the doctor capability must still be reachable"
 

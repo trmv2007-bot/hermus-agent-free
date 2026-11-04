@@ -583,6 +583,32 @@ class Sandbox:
     def run_python(self, code: str, **kw) -> dict[str, Any]:
         """Run a Python snippet under the same boundary (used by skill validation)."""
         kw.setdefault("purpose", "python")
+        if os.name == "nt":
+            # cmd.exe does not honour POSIX quoting (``shlex.quote``), so the
+            # shell form failed with "filename, directory name, or volume label
+            # syntax is incorrect". Run the interpreter directly: no shell
+            # interpolation, same timeout, explicit UTF-8.
+            timeout = int(kw.get("timeout") or 30)
+            try:
+                proc = subprocess.run(
+                    [sys.executable or "python", "-c", code],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                )
+                return {
+                    "success": proc.returncode == 0,
+                    "stdout": (proc.stdout or "")[:8000],
+                    "stderr": (proc.stderr or "")[:4000],
+                    "returncode": proc.returncode,
+                    "backend": "local-direct",
+                }
+            except subprocess.TimeoutExpired:
+                return {"success": False, "error": f"timed out after {timeout}s", "returncode": 124, "backend": "local-direct"}
+            except Exception as exc:  # pragma: no cover - defensive
+                return {"success": False, "error": str(exc), "returncode": 1, "backend": "local-direct"}
         quoted = shlex.quote(code)
         return self.run(f"{shlex.quote(sys.executable or 'python3')} -c {quoted}", **kw)
 
@@ -749,7 +775,15 @@ class Sandbox:
         reason: str,
     ) -> SandboxResult:
         """Hardened local execution: rlimits + new session + no new privs."""
-        argv: list[str] = ["/bin/sh", "-c", command]
+        if os.name == "nt":
+            # cmd.exe must receive the whole command as one string (shell=True).
+            # Passing it as an argv element mangled quoted commands into
+            # "filename, directory name, or volume label syntax is incorrect".
+            argv: list[str] | str = command
+            shell = True
+        else:
+            argv = ["/bin/sh", "-c", command]
+            shell = False
         if not pol.network and self.probe.unshare_net():
             # A real network cut (empty netns), not just an env hint.
             argv = [self.probe.binary("unshare"), "-n", *argv]
@@ -759,14 +793,14 @@ class Sandbox:
             "pids": pol.pids,
             "disk_mb": pol.disk_mb,
             "network": pol.network,
-            "network_dropped": argv[0].endswith("unshare"),
+            "network_dropped": isinstance(argv, list) and argv[0].endswith("unshare"),
             "rlimits": resource is not None,
             "no_new_privs": pol.soft_no_new_privs,
             "setsid": os.name == "posix",
             "cwd": self._exec_cwd(pol, workdir),
             "reason": reason,
         }
-        return self._exec(argv, "local", pol, workdir, sandbox_id, env, input_text, limits)
+        return self._exec(argv, "local", pol, workdir, sandbox_id, env, input_text, limits, shell=shell)
 
     def _run_bwrap(
         self,
@@ -822,7 +856,7 @@ class Sandbox:
 
     def _exec(
         self,
-        argv: list[str],
+        argv: list[str] | str,
         backend: str,
         pol: SandboxPolicy,
         workdir: Path,
@@ -830,6 +864,8 @@ class Sandbox:
         env: dict[str, str] | None,
         input_text: str | None,
         limits: dict[str, Any],
+        *,
+        shell: bool = False,
     ) -> SandboxResult:
         """Shared hardened execution for the non-container backends."""
         env_final = self._env(pol, env)
@@ -840,9 +876,12 @@ class Sandbox:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 cwd=limits.get("cwd") or str(workdir),
                 env=env_final,
                 stdin=subprocess.PIPE,
+                shell=shell,
                 preexec_fn=self._preexec(pol, pol.timeout),
             )
             try:

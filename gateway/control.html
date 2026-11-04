@@ -3,429 +3,212 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>HERMUS JARVIS Control Room</title>
+<title>HERMUS // Flight Deck</title>
 <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />
 <link rel="stylesheet" href="/static/control.css" />
-<style>
-  /* JARVIS Orb Animation - Spacegrid Background */
-  body {
-    background: #06080f url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%231a2332' stroke-width='0.5' opacity='0.3'%3E%3Cpath d='M10 10h80v80H10z'/%3E%3Cpath d='M20 20h60v60H20z'/%3E%3Cpath d='M30 30h40v40H30z'/%3E%3Cpath d='M40 40h20v20H40z'/%3E%3Cpath d='M0 0l100 100M100 0L0 100'/%3E%3Cpath d='M0 25l100 50M100 25L0 75'/%3E%3Cpath d='M0 50l100 0'/%3E%3Cpath d='M25 0l50 100M75 0l-50 100'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 40px 40px;
-    background-attachment: fixed;
-    overflow-x: hidden;
-  }
-
-  /* Floating Particles for Spacegrid */
-  .particle-container {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: -1;
-    overflow: hidden;
-  }
-
-  .particle {
-    position: absolute;
-    width: 2px;
-    height: 2px;
-    background: #58a6ff;
-    border-radius: 50%;
-    opacity: 0.6;
-    animation: float-particle 15s infinite linear;
-  }
-
-  @keyframes float-particle {
-    0% { transform: translateY(0) translateX(0); opacity: 0; }
-    10% { opacity: 0.6; }
-    90% { opacity: 0.6; }
-    100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
-  }
-
-  /* JARVIS Orb Container */
-  .jarvis-orb-container {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    z-index: 10;
-    pointer-events: none;
-  }
-
-  .jarvis-orb {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    position: relative;
-    background: radial-gradient(circle at 30% 30%, #234f72 0%, #102238 34%, #0e1420 72%);
-    border: 2px solid #58a6ff;
-    box-shadow:
-      0 0 30px rgba(88, 166, 255, 0.3),
-      inset 0 0 25px rgba(88, 166, 255, 0.15),
-      0 0 40px rgba(88, 166, 255, 0.1);
-    animation: jarvis-pulse 4s ease-in-out infinite, jarvis-rotate 20s linear infinite;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 48px;
-    color: #58a6ff;
-    cursor: pointer;
-  }
-
-  .jarvis-orb:hover {
-    transform: scale(1.1);
-    box-shadow:
-      0 0 40px rgba(88, 166, 255, 0.5),
-      inset 0 0 30px rgba(88, 166, 255, 0.2),
-      0 0 50px rgba(88, 166, 255, 0.2);
-  }
-
-  @keyframes jarvis-pulse {
-    0%, 100% { transform: scale(1); opacity: 0.9; }
-    50% { transform: scale(1.05); opacity: 1; }
-  }
-
-  @keyframes jarvis-rotate {
-    from { transform: rotate(0deg) scale(1); }
-    to { transform: rotate(360deg) scale(1); }
-  }
-
-  .jarvis-orb::before {
-    content: '';
-    position: absolute;
-    width: 140px;
-    height: 140px;
-    border: 1px solid rgba(88, 166, 255, 0.2);
-    border-radius: 50%;
-    animation: jarvis-ring 3s ease-in-out infinite;
-  }
-
-  @keyframes jarvis-ring {
-    0%, 100% { transform: scale(1); opacity: 0.3; }
-    50% { transform: scale(1.2); opacity: 0.6; }
-  }
-
-  .jarvis-orb.working {
-    border-color: #3fb950;
-    color: #3fb950;
-    box-shadow:
-      0 0 30px rgba(63, 185, 80, 0.4),
-      inset 0 0 25px rgba(63, 185, 80, 0.2),
-      0 0 40px rgba(63, 185, 80, 0.2);
-    animation: jarvis-pulse 2s ease-in-out infinite;
-  }
-
-  .jarvis-orb.error {
-    border-color: #f85149;
-    color: #f85149;
-    box-shadow:
-      0 0 30px rgba(248, 81, 73, 0.4),
-      inset 0 0 25px rgba(248, 81, 73, 0.2),
-      0 0 40px rgba(248, 81, 73, 0.2);
-    animation: jarvis-pulse 1s ease-in-out infinite, error-pulse 1s ease-in-out infinite;
-  }
-
-  @keyframes error-pulse {
-    0%, 100% { box-shadow: 0 0 30px rgba(248, 81, 73, 0.4); }
-    50% { box-shadow: 0 0 50px rgba(248, 81, 73, 0.6); }
-  }
-
-  /* Agent Cards Floating */
-  .agent-card-floating {
-    position: fixed;
-    z-index: 5;
-    background: rgba(20, 25, 36, 0.95);
-    border: 1px solid rgba(88, 166, 255, 0.3);
-    border-radius: 12px;
-    padding: 12px;
-    backdrop-filter: blur(10px);
-    animation: float-agent 6s ease-in-out infinite;
-    max-width: 200px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  }
-
-  @keyframes float-agent {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
-  }
-
-  /* Agent Visualization Panel */
-  .agents-visualization {
-    position: relative;
-    height: 300px;
-    background: linear-gradient(135deg, rgba(88, 166, 255, 0.05) 0%, rgba(20, 25, 36, 0.5) 100%);
-    border: 1px solid rgba(88, 166, 255, 0.2);
-    border-radius: 12px;
-    overflow: hidden;
-  }
-
-  .agent-node {
-    position: absolute;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #58a6ff, #79c0ff);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 12px;
-    font-weight: bold;
-    box-shadow: 0 2px 10px rgba(88, 166, 255, 0.3);
-    cursor: pointer;
-    transition: all 0.3s ease;
-    z-index: 1;
-  }
-
-  .agent-node:hover {
-    transform: scale(1.2);
-    box-shadow: 0 4px 20px rgba(88, 166, 255, 0.5);
-  }
-
-  .agent-node.working {
-    background: linear-gradient(135deg, #3fb950, #4ae27a);
-    box-shadow: 0 2px 10px rgba(63, 185, 80, 0.4);
-    animation: node-pulse 2s ease-in-out infinite;
-  }
-
-  .agent-node.idle {
-    background: linear-gradient(135deg, #8b98a9, #a8b5c8);
-    box-shadow: 0 2px 10px rgba(139, 152, 169, 0.3);
-  }
-
-  .agent-node.error {
-    background: linear-gradient(135deg, #f85149, #ff6b6b);
-    box-shadow: 0 2px 10px rgba(248, 81, 73, 0.4);
-  }
-
-  @keyframes node-pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-  }
-
-  .agent-connection {
-    position: absolute;
-    height: 2px;
-    background: linear-gradient(90deg, rgba(88, 166, 255, 0.3), rgba(88, 166, 255, 0.6));
-    border-radius: 1px;
-    z-index: 0;
-    animation: connection-flow 2s linear infinite;
-  }
-
-  @keyframes connection-flow {
-    0% { opacity: 0.3; }
-    50% { opacity: 0.8; }
-    100% { opacity: 0.3; }
-  }
-
-  /* Quick Action Buttons */
-  .quick-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin: 10px 0;
-  }
-
-  .quick-action-btn {
-    background: linear-gradient(135deg, rgba(88, 166, 255, 0.2), rgba(88, 166, 255, 0.4));
-    border: 1px solid rgba(88, 166, 255, 0.3);
-    color: #58a6ff;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .quick-action-btn:hover {
-    background: linear-gradient(135deg, rgba(88, 166, 255, 0.4), rgba(88, 166, 255, 0.6));
-    border-color: #58a6ff;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(88, 166, 255, 0.2);
-  }
-
-  .quick-action-btn:active {
-    transform: translateY(0);
-  }
-
-  /* VRAM Monitor */
-  .vram-monitor {
-    background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(20, 25, 36, 0.5));
-    border: 1px solid rgba(88, 166, 255, 0.2);
-    border-radius: 12px;
-    padding: 16px;
-    margin: 10px 0;
-  }
-
-  .vram-bar {
-    height: 20px;
-    background: rgba(20, 25, 36, 0.8);
-    border-radius: 10px;
-    overflow: hidden;
-    margin: 10px 0;
-    position: relative;
-  }
-
-  .vram-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #3fb950, #58a6ff, #f85149);
-    border-radius: 10px;
-    transition: width 0.5s ease;
-    position: relative;
-  }
-
-  .vram-fill::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 20px;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
-  }
-
-  .vram-text {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    color: #8b98a9;
-  }
-</style>
 </head>
 <body>
-  <!-- Spacegrid Background Particles -->
-  <div class="particle-container" id="particleContainer"></div>
-
-  <!-- JARVIS Orb -->
-  <div class="jarvis-orb-container" id="jarvisOrbContainer">
-    <div class="jarvis-orb" id="jarvisOrb" onclick="toggleJarvisView()">
-      <span id="jarvisStatus">&#9670;</span>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-overview" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/></symbol>
+    <symbol id="i-agents" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 6h10M6 8l5 8M18 8l-5 8"/></symbol>
+    <symbol id="i-presence" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+    <symbol id="i-voice" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+    <symbol id="i-jobs" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+    <symbol id="i-missions" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></symbol>
+    <symbol id="i-telemetry" viewBox="0 0 24 24"><path d="M2 13h4l3-8 4 14 3-9 2 3h4"/></symbol>
+    <symbol id="i-computer" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-remote" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-safety" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z"/></symbol>
+    <symbol id="i-systems" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/></symbol>
+  </defs>
+</svg>
+<div class="app">
+  <div class="rail-scrim" id="railScrim" aria-hidden="true"></div>
+  <aside class="rail" id="rail" aria-label="Hermus sections">
+    <div class="rail-brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="16" cy="16" r="13" opacity=".45"/>
+          <circle cx="16" cy="16" r="7"/>
+          <path d="M16 3v5M16 24v5M3 16h5M24 16h5"/>
+        </svg>
+      </span>
+      <span class="wordmark">HERMUS</span>
     </div>
-  </div>
-
-<header>
-  <div class="logo">
-    <svg width="24" height="24" viewBox="0 0 100 100" style="margin-right: 8px; vertical-align: middle;">
-      <defs>
-        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style="stop-color:#58a6ff"/>
-          <stop offset="100%" style="stop-color:#79c0ff"/>
-        </linearGradient>
-        <radialGradient id="orb" cx="50%" cy="50%" r="50%" fx="30%" fy="30%">
-          <stop offset="0%" style="stop-color:#234f72"/>
-          <stop offset="100%" style="stop-color:#0e1420"/>
-        </radialGradient>
-      </defs>
-      <circle cx="50" cy="50" r="45" fill="url(#orb)" stroke="#58a6ff" stroke-width="2"/>
-      <circle cx="50" cy="50" r="30" fill="none" stroke="url(#grad)" stroke-width="3" stroke-linecap="round"/>
-    </svg>
-    HERMUS JARVIS
-  </div>
-  <div class="health">
-    <span id="conn" class="pill">connecting...</span>
-    <span id="rtt" class="pill">--</span>
-    <span id="presencePill" class="pill">presence: --</span>
-    <span id="jobcount" class="pill">jobs: 0</span>
-    <span id="agentCount" class="pill">agents: 0</span>
-    <span id="vramUsage" class="pill">VRAM: --</span>
-    <button id="emergencyBtn" class="danger">&#9888;&#65039; Emergency stop</button>
-  </div>
-</header>
-
-<nav role="tablist" aria-label="Control room sections">
-  <button data-tab="overview" class="on" role="tab" id="tabbtn-overview" aria-controls="tab-overview" aria-selected="true" tabindex="0">&#128065; Overview</button>
-  <button data-tab="agents" role="tab" id="tabbtn-agents" aria-controls="tab-agents" aria-selected="false" tabindex="-1">&#128100; Agents</button>
-  <button data-tab="presence" role="tab" id="tabbtn-presence" aria-controls="tab-presence" aria-selected="false" tabindex="-1">&#128118; Presence</button>
-  <button data-tab="voice" role="tab" id="tabbtn-voice" aria-controls="tab-voice" aria-selected="false" tabindex="-1">&#128187; Voice</button>
-  <button data-tab="jobs" role="tab" id="tabbtn-jobs" aria-controls="tab-jobs" aria-selected="false" tabindex="-1">&#128196; Jobs</button>
-  <button data-tab="missions" role="tab" id="tabbtn-missions" aria-controls="tab-missions" aria-selected="false" tabindex="-1">&#128640; Missions</button>
-  <button data-tab="telemetry" role="tab" id="tabbtn-telemetry" aria-controls="tab-telemetry" aria-selected="false" tabindex="-1">&#128200; Telemetry</button>
-  <button data-tab="computer" role="tab" id="tabbtn-computer" aria-controls="tab-computer" aria-selected="false" tabindex="-1">&#128187; Computer</button>
-  <button data-tab="remote" role="tab" id="tabbtn-remote" aria-controls="tab-remote" aria-selected="false" tabindex="-1">&#128279; Remote</button>
-  <button data-tab="safety" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1">&#128737; Safety</button>
-  <button data-tab="systems" role="tab" id="tabbtn-systems" aria-controls="tab-systems" aria-selected="false" tabindex="-1">&#128736; Systems</button>
-</nav>
-
-<main>
-  <!-- ============ OVERVIEW ============ -->
-  <div class="tab on" id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview">
-    <div class="grid">
-      <!-- JARVIS Control Panel -->
-      <section class="full">
-        <h2>&#128065; JARVIS Control Center</h2>
-        <div class="vram-monitor">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px;">RTX 3050 VRAM Monitor</h3>
-          <div class="vram-text">
-            <span>VRAM Usage: <span id="vramPercent">0%</span></span>
-            <span><span id="vramUsed">0GB</span> / 8GB</span>
-          </div>
-          <div class="vram-bar">
-            <div class="vram-fill" id="vramFill" style="width: 0%;"></div>
-          </div>
-          <div class="hint">Optimized for RTX 3050 with 8GB VRAM - Safe limit: 7GB</div>
-        </div>
-
-        <div class="quick-actions">
-          <button class="quick-action-btn" onclick="createAgent()">&#43; Create Agent</button>
-          <button class="quick-action-btn" onclick="startAllAgents()">&#9654; Start All</button>
-          <button class="quick-action-btn" onclick="stopAllAgents()">&#9209; Stop All</button>
-          <button class="quick-action-btn" onclick="showSpacegrid()">&#128287; Spacegrid View</button>
-          <button class="quick-action-btn" onclick="toggleJarvis()">&#128065; Toggle JARVIS</button>
-        </div>
-
-        <h3 style="margin: 20px 0 10px 0;">Agent Pool Status</h3>
-        <div class="cells" id="agentPoolStatus"></div>
-      </section>
-
-      <section>
-        <h2>Snapshot &#8226; System health</h2>
-        <div class="cells" id="health"></div>
-        <div class="hint">Snapshot = `GET /api/v1/system/health` &#8214; every value from a live probe.</div>
-      </section>
-
-      <section>
-        <h2>Snapshot &#8226; Capabilities</h2>
-        <div class="cells" id="caps"></div>
-        <div class="hint">Snapshot = `GET /api/v1/system/capabilities` (providers, tools, circuit).</div>
-      </section>
-
-      <section class="full">
-        <h2>Agent Visualization</h2>
-        <div class="agents-visualization" id="agentsVisualization">
-          <!-- Agent nodes will be dynamically added here -->
-        </div>
-        <div class="hint">Live visualization of active agents and their connections</div>
-      </section>
-
-      <section class="full">
-        <h2>Replay &#8226; Canonical event log</h2>
-        <div class="bar">
-          <input id="runId" placeholder="run / mission / trace id (e.g. run_abc)" />
-          <button id="replayBtn">Replay timeline</button>
-        </div>
-        <div class="feed" id="log"><div class="note">No run selected &#8214; reconstructs state from the durable EventBus.</div></div>
-        <div class="hint">Replay = `GET /api/v1/runs/{id}/timeline` re-reads the durable event log.</div>
-      </section>
-
-      <section class="full">
-        <h2>Command &#8226; typed backend command</h2>
-        <div class="bar">
-          <input id="cmdName" placeholder="command e.g. system.health / computer.run" value="system.health" />
-        </div>
-        <div class="bar">
-          <input id="cmdArgs" placeholder='args JSON e.g. {"goal":"..."}' value="{}" />
-          <button id="cmdBtn">POST /api/v1/commands</button>
-        </div>
-        <div class="feed" id="cmdOut"><div class="note">Every click becomes a typed Command on the canonical EventBus.</div></div>
-      </section>
+    <nav class="rail-nav" role="tablist" aria-label="Control room sections" aria-orientation="vertical">
+      <button data-tab="overview" class="rail-btn on" role="tab" id="tabbtn-overview" aria-controls="tab-overview" aria-selected="true" tabindex="0"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-overview"/></svg></span><span class="label">Overview</span></button>
+      <div class="rail-sep" role="presentation" aria-hidden="true"></div>
+      <button data-tab="missions" class="rail-btn" role="tab" id="tabbtn-missions" aria-controls="tab-missions" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-missions"/></svg></span><span class="label">Missions</span></button>
+      <button data-tab="jobs" class="rail-btn" role="tab" id="tabbtn-jobs" aria-controls="tab-jobs" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-jobs"/></svg></span><span class="label">Jobs</span></button>
+      <button data-tab="telemetry" class="rail-btn" role="tab" id="tabbtn-telemetry" aria-controls="tab-telemetry" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-telemetry"/></svg></span><span class="label">Telemetry</span></button>
+      <div class="rail-sep" role="presentation" aria-hidden="true"></div>
+      <button data-tab="agents" class="rail-btn" role="tab" id="tabbtn-agents" aria-controls="tab-agents" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-agents"/></svg></span><span class="label">Agents</span></button>
+      <button data-tab="presence" class="rail-btn" role="tab" id="tabbtn-presence" aria-controls="tab-presence" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-presence"/></svg></span><span class="label">Presence</span></button>
+      <button data-tab="computer" class="rail-btn" role="tab" id="tabbtn-computer" aria-controls="tab-computer" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-computer"/></svg></span><span class="label">Computer</span></button>
+      <button data-tab="remote" class="rail-btn" role="tab" id="tabbtn-remote" aria-controls="tab-remote" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-remote"/></svg></span><span class="label">Remote</span></button>
+      <div class="rail-sep" role="presentation" aria-hidden="true"></div>
+      <button data-tab="safety" class="rail-btn" role="tab" id="tabbtn-safety" aria-controls="tab-safety" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-safety"/></svg></span><span class="label">Safety</span></button>
+      <button data-tab="voice" class="rail-btn" role="tab" id="tabbtn-voice" aria-controls="tab-voice" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-voice"/></svg></span><span class="label">Voice</span></button>
+      <button data-tab="systems" class="rail-btn" role="tab" id="tabbtn-systems" aria-controls="tab-systems" aria-selected="false" tabindex="-1"><span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-systems"/></svg></span><span class="label">Systems</span></button>
+    </nav>
+    <div class="rail-foot">
+      <span class="mini">flight deck</span>
+      <button class="rail-btn" id="pinRail" type="button" title="Close sections">
+        <span class="glyph"><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><use href="#i-pin"/></svg></span>
+        <span class="label">Close</span>
+      </button>
     </div>
-  </div>
+  </aside>
 
-  <!-- ============ AGENTS ============ -->
+  <div class="shell-main">
+    <header class="topbar">
+      <div class="title">
+        <h1>Hermus Flight Deck</h1>
+        <span class="sub">local-first &middot; this room never owns truth</span>
+        <button id="advancedBtn" class="toggle" type="button" aria-expanded="false" aria-controls="rail" title="Every section: missions, jobs, telemetry, agents, safety, settings">Advanced</button>
+      </div>
+      <div class="status-strip">
+        <span id="conn" class="pill">connecting&hellip;</span>
+        <span id="rtt" class="pill">--</span>
+        <span id="presencePill" class="pill">presence: --</span>
+        <span id="jobcount" class="pill">jobs: 0</span>
+        <span id="agentCount" class="pill">agents: 0</span>
+        <span id="vramUsage" class="pill">GPU: --</span>
+        <button id="emergencyBtn" class="danger" type="button">Emergency stop</button>
+        <button id="calmBtn" class="icon-btn" type="button" aria-pressed="false" title="Calm mode (reduce motion)">
+          <svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><use href="#i-pause"/></svg>
+        </button>
+        <button id="paletteBtn" class="icon-btn" type="button" title="Command palette (Ctrl+K)" aria-label="Open command palette">
+          <svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><use href="#i-search"/></svg>
+        </button>
+        <button id="drawerBtn" class="icon-btn" type="button" title="Live activity ( [ )" aria-expanded="false" aria-controls="activityDrawer">
+          <svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><use href="#i-sidebar"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <div class="tab on" id="tab-overview" role="tabpanel" aria-labelledby="tabbtn-overview">
+        <div class="grid" id="overviewGrid">
+          <section class="core-panel" aria-labelledby="coreHeading">
+            <div class="core">
+              <canvas id="hermusCore" class="core-canvas" width="520" height="520" aria-hidden="true"></canvas>
+              <div class="core-readout">
+                <div class="core-state" id="coreState" role="status" aria-live="polite">offline</div>
+                <div class="core-name" id="coreName">HERMUS</div>
+                <div class="core-sub" id="coreSub">flight deck &middot; local-first</div>
+              </div>
+            </div>
+            <div class="core-body">
+              <h2 id="coreHeading">Now</h2>
+              <p class="core-now" id="coreNow">Awaiting the gateway.</p>
+              <p class="core-detail" id="coreDetail">
+                Every value on this page is a live probe, a persisted record or an
+                event-log replay. Nothing is simulated to look complete.
+              </p>
+              <div class="core-metrics" id="coreMetrics">
+                <div class="kpi"><span class="v" id="nowQueue">--</span><span class="l">queue</span></div>
+                <div class="kpi"><span class="v" id="nowAgents">--</span><span class="l">agents</span></div>
+                <div class="kpi"><span class="v" id="nowModel">--</span><span class="l">model</span></div>
+                <div class="kpi"><span class="v" id="nowContext">--</span><span class="l">context</span></div>
+              </div>
+              <div class="composer">
+                <label class="micro" for="directive">Directive</label>
+                <textarea id="directive" placeholder="Tell Hermus what to do. It plans, runs and verifies."></textarea>
+                <div class="composer-row">
+                  <select id="directiveMode" aria-label="Directive mode">
+                    <option value="agent">Agent</option>
+                    <option value="chat">Chat</option>
+                    <option value="computer">Computer</option>
+                  </select>
+                  <button id="autonomyBtn" class="toggle on" type="button" aria-pressed="true" title="On: goals run as missions to completion. Off: one reply, no mission. Approvals still apply; red lines still block.">Autonomy</button>
+                  <span class="run-state" id="runState"><span class="dot"></span><span id="runStateText">ready</span></span>
+                  <span class="spacer"></span>
+                  <button id="directiveStop" class="ghost" type="button" hidden>Stop</button>
+                  <button id="directiveSend" type="button">Run</button>
+                </div>
+                <div class="act-out" id="directiveOut" hidden></div>
+                <div class="console-tools">
+                  <button id="detailsBtn" class="toggle" type="button" aria-pressed="false" aria-controls="overviewGrid">System panels</button>
+                  <button id="explainBtn" class="toggle" type="button" aria-pressed="false">Explain</button>
+                  <span class="spacer"></span>
+                  <span class="micro">Ctrl+Enter</span>
+                </div>
+                <div class="console-feed" id="consoleEvents"></div>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Snapshot &bull; System health</h2>
+            <div class="cells" id="health"><div class="panel-state">probing <code>/api/v1/system/health</code>&hellip;</div></div>
+            <div class="hint">Snapshot = <code>GET /api/v1/system/health</code> &Vert; every value from a live probe.</div>
+          </section>
+
+          <section>
+            <h2>Snapshot &bull; Capabilities</h2>
+            <div class="cells" id="caps"><div class="panel-state">probing <code>/api/v1/system/capabilities</code>&hellip;</div></div>
+            <div class="hint">Snapshot = <code>GET /api/v1/system/capabilities</code> (providers, tools, circuit).</div>
+          </section>
+
+          <section>
+            <h2>Harness &bull; context</h2>
+            <div class="cells" id="harnessContext">
+              <div class="kpi"><span class="v">--</span><span class="l">sessions</span></div>
+              <div class="kpi"><span class="v">--</span><span class="l">notices</span></div>
+              <div class="kpi"><span class="v">--</span><span class="l">compaction</span></div>
+              <div class="kpi"><span class="v">--</span><span class="l">recall</span></div>
+            </div>
+            <div class="hint" id="harnessTurn">Reads <code>/api/v1/harness/overview</code>. Compaction and recall numbers come from the last real turn.</div>
+          </section>
+
+          <section>
+            <h2>Hardware &bull; GPU</h2>
+            <div class="gpu-meter">
+              <div class="gpu-legend"><span id="vramPercent">--</span><span id="vramUsed">--</span></div>
+              <div class="gpu-bar"><div class="gpu-fill" id="vramFill"></div></div>
+            </div>
+            <div class="hint" id="gpuNote">Reads <code>/api/v1/agents/vram/status</code>. An unavailable GPU is shown as unavailable, never as a plausible number.</div>
+          </section>
+
+          <section class="full">
+            <h2>Agents &bull; live crew</h2>
+            <div class="agents-visualization" id="agentsVisualization">
+              <div class="panel-state">No agents yet. Create one from the Agents tab.</div>
+            </div>
+            <div class="cells" id="agentPoolStatus"></div>
+            <div class="hint">Live visualization of registered agents and their delegation links.</div>
+          </section>
+
+          <section class="full">
+            <h2>Replay &bull; Canonical event log</h2>
+            <div class="bar">
+              <input id="runId" placeholder="run / mission / trace id (e.g. run_abc)" />
+              <button id="replayBtn" type="button">Replay timeline</button>
+            </div>
+            <div class="feed" id="log"><div class="note">No run selected &Vert; reconstructs state from the durable EventBus.</div></div>
+            <div class="hint">Replay = <code>GET /api/v1/runs/{id}/timeline</code> re-reads the durable event log.</div>
+          </section>
+
+          <section class="full">
+            <h2>Command &bull; typed backend command</h2>
+            <div class="bar">
+              <input id="cmdName" placeholder="command e.g. system.health / computer.run" value="system.health" />
+            </div>
+            <div class="bar">
+              <input id="cmdArgs" placeholder='args JSON e.g. {"goal":"..."}' value="{}" />
+              <button id="cmdBtn" type="button">POST /api/v1/commands</button>
+            </div>
+            <div class="act-out" id="cmdOut"></div>
+            <div class="hint">One typed Command envelope, one trace id, one audit record. See <code>/api/v1/commands</code>.</div>
+          </section>
+        </div>
+      </div>
   <div class="tab" id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents">
     <div class="grid">
       <section class="full">
@@ -789,506 +572,67 @@
     <div class="console-grid" id="consolePanels"><div class="note">loading manifest...</div></div>
   </div>
 </main>
+    </main>
 
-<footer>
-  HERMUS JARVIS Control Room -- Local-First AI Assistant | RTX 3050 Optimized | 100% Free & Open Source
-</footer>
+    <footer class="footer">
+      <span>HERMUS Flight Deck &mdash; local-first, MIT, no paywall.</span>
+      <span class="micro">this room never owns truth &middot; it never simulates success</span>
+    </footer>
+  </div>
+</div>
 
-<!-- Action feedback -->
+<aside class="drawer" id="activityDrawer" aria-label="Live activity">
+  <div class="drawer-head">
+    <h2>Live activity</h2>
+    <button class="ghost" id="drawerClose" type="button">Close</button>
+  </div>
+  <div class="hint">Reads <code>/events/recent</code> and the canonical event log. Newest first.</div>
+  <div class="feed" id="activityFeed"><div class="note">No events yet.</div></div>
+</aside>
+
 <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+
+<div class="palette-backdrop" id="paletteBackdrop">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input id="paletteInput" role="combobox" aria-expanded="true" aria-controls="paletteList"
+           aria-autocomplete="list" placeholder="Jump to a section or run a command..." autocomplete="off" />
+    <div class="palette-list" id="paletteList" role="listbox" aria-label="Results"></div>
+    <div class="palette-foot"><span>&uarr;&darr; navigate</span><span>&crarr; run</span><span>esc close</span></div>
+  </div>
+</div>
 
 <script src="/static/control-client.js"></script>
 <script>
-// When gateway auth is enabled, open /control?token=... once (or store it as
-// hermus_gateway_token). Browser fetch cannot read the server-side environment,
-// so attach that token to every API request without putting it into ordinary
-// fetch URLs. SSE/WS helpers add it separately because those browser APIs do
-// not support custom headers.
+// Gateway token bootstrap. Must stay the first inline script block: it
+// captures ?token= / localStorage before any module fetches, and pins the
+// credential into a header instead of leaving it in the address bar.
 const tokenFromUrl = new URLSearchParams(location.search).get("token") || "";
 let gatewayToken = tokenFromUrl;
 if (!gatewayToken) {
-  try { gatewayToken = localStorage.getItem("hermus_gateway_token") || ""; } catch(e) {};
+  try { gatewayToken = localStorage.getItem("hermus_gateway_token") || ""; } catch (e) {}
 }
 if (gatewayToken) {
   window.__HERMUS_GATEWAY_TOKEN = gatewayToken;
   if (tokenFromUrl) {
-    try { history.replaceState(null, "", location.pathname + location.hash); } catch(e) {}
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
   }
-}
-if (gatewayToken && window.fetch) {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    const opts = Object.assign({}, init || {});
-    const headers = new Headers(input && input.headers ? input.headers : undefined);
-    new Headers(opts.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-Hermus-Token", gatewayToken);
-    opts.headers = headers;
-    return nativeFetch(input, opts);
-  };
+  if (window.fetch) {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const opts = Object.assign({}, init || {});
+      const headers = new Headers(input && input.headers ? input.headers : undefined);
+      new Headers(opts.headers || {}).forEach((value, key) => headers.set(key, value));
+      headers.set("X-Hermus-Token", gatewayToken);
+      opts.headers = headers;
+      return nativeFetch(input, opts);
+    };
+  }
 }
 </script>
 <script src="/static/control-room.js" defer></script>
 <script src="/static/console.js" defer></script>
-
-<!-- JARVIS Agent System JavaScript -->
-<script>
-// Agent System State
-let agentSystem = {
-  agents: [],
-  messages: [],
-  apiKeys: {},
-  vramUsage: 0,
-  spacegridEnabled: false
-};
-
-// Initialize particles
-function initParticles() {
-  const container = document.getElementById('particleContainer');
-  if (!container) return;
-
-  const particleCount = 50;
-  for (let i = 0; i < particleCount; i++) {
-    const particle = document.createElement('div');
-    particle.className = 'particle';
-    particle.style.left = Math.random() * 100 + '%';
-    particle.style.top = Math.random() * 100 + '%';
-    particle.style.animationDelay = Math.random() * 15 + 's';
-    particle.style.animationDuration = (10 + Math.random() * 10) + 's';
-    container.appendChild(particle);
-  }
-}
-
-// Toggle JARVIS Orb
-function toggleJarvis() {
-  const orb = document.getElementById('jarvisOrb');
-  const status = document.getElementById('jarvisStatus');
-
-  if (orb.classList.contains('working')) {
-    orb.classList.remove('working');
-    orb.classList.add('error');
-    status.innerHTML = '&#9888;';
-  } else if (orb.classList.contains('error')) {
-    orb.classList.remove('error');
-    status.innerHTML = '&#9670;';
-  } else {
-    orb.classList.add('working');
-    status.innerHTML = '&#9679;';
-  }
-}
-
-// Toggle JARVIS View
-function toggleJarvisView() {
-  // Toggle between overview and agents tab
-  const overviewTab = document.getElementById('tabbtn-overview');
-  const agentsTab = document.getElementById('tabbtn-agents');
-
-  if (agentsTab.classList.contains('on')) {
-    overviewTab.click();
-  } else {
-    agentsTab.click();
-  }
-}
-
-// Create Agent
-function createAgent() {
-  const provider = document.getElementById('agentProviderSelect').value;
-  const model = document.getElementById('agentModelSelect').value;
-  const name = document.getElementById('agentNameInput').value || `Agent-${Date.now()}`;
-  const role = document.getElementById('agentRoleSelect').value;
-
-  fetch('/api/v1/agents/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, model, name, role })
-  }).then(r => r.json()).then(data => {
-    showToast(`Agent ${name} created!`, 'ok');
-    refreshAgents();
-  }).catch(e => {
-    showToast(`Failed to create agent: ${e}`, 'error');
-  });
-}
-
-// Create Specialized Agent
-function createSpecializedAgent(role) {
-  fetch('/api/v1/agents/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      role: role,
-      name: `Agent-${role}-${Date.now()}`,
-      provider: 'ollama',
-      model: 'mistral:7b'
-    })
-  }).then(r => r.json()).then(data => {
-    showToast(`Specialized ${role} agent created!`, 'ok');
-    refreshAgents();
-  }).catch(e => {
-    showToast(`Failed to create agent: ${e}`, 'error');
-  });
-}
-
-// Create Custom Agent
-function createCustomAgent() {
-  createAgent();
-}
-
-// Add API Key
-function addApiKey() {
-  const provider = document.getElementById('apiKeyProvider').value;
-  const key = document.getElementById('apiKeyInput').value;
-
-  if (!key) {
-    showToast('Please enter an API key', 'error');
-    return;
-  }
-
-  fetch('/api/v1/agents/api-keys/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, key })
-  }).then(r => r.json()).then(data => {
-    showToast(`API key for ${provider} added!`, 'ok');
-    document.getElementById('apiKeyInput').value = '';
-    refreshApiKeys();
-  }).catch(e => {
-    showToast(`Failed to add API key: ${e}`, 'error');
-  });
-}
-
-// Send Agent Message
-function sendAgentMessage() {
-  const senderId = document.getElementById('messageSender').value;
-  const targetId = document.getElementById('messageTarget').value;
-  const content = document.getElementById('messageContent').value;
-
-  if (!senderId || !targetId || !content) {
-    showToast('Please select sender, target, and enter message', 'error');
-    return;
-  }
-
-  fetch('/api/v1/agents/message', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sender_id: senderId, target_id: targetId, content })
-  }).then(r => r.json()).then(data => {
-    showToast(`Message sent from ${senderId} to ${targetId}`, 'ok');
-    document.getElementById('messageContent').value = '';
-    refreshAgentMessages();
-  }).catch(e => {
-    showToast(`Failed to send message: ${e}`, 'error');
-  });
-}
-
-// Broadcast to All Agents
-function broadcastToAll() {
-  const content = prompt('Enter message to broadcast:');
-  if (!content) return;
-
-  fetch('/api/v1/agents/broadcast', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content })
-  }).then(r => r.json()).then(data => {
-    showToast(`Broadcast sent to ${data.count || 0} agents`, 'ok');
-    refreshAgentMessages();
-  }).catch(e => {
-    showToast(`Failed to broadcast: ${e}`, 'error');
-  });
-}
-
-// Ping All Agents
-function pingAllAgents() {
-  fetch('/api/v1/agents/ping', {
-    method: 'POST'
-  }).then(r => r.json()).then(data => {
-    showToast(`Pinged ${data.count || 0} agents`, 'ok');
-  }).catch(e => {
-    showToast(`Failed to ping: ${e}`, 'error');
-  });
-}
-
-// Start All Agents
-function startAllAgents() {
-  fetch('/api/v1/agents/start-all', {
-    method: 'POST'
-  }).then(r => r.json()).then(data => {
-    showToast(`Started ${data.count || 0} agents`, 'ok');
-    refreshAgents();
-  }).catch(e => {
-    showToast(`Failed to start agents: ${e}`, 'error');
-  });
-}
-
-// Stop All Agents
-function stopAllAgents() {
-  if (!confirm('Stop all agents?')) return;
-
-  fetch('/api/v1/agents/stop-all', {
-    method: 'POST'
-  }).then(r => r.json()).then(data => {
-    showToast(`Stopped ${data.count || 0} agents`, 'ok');
-    refreshAgents();
-  }).catch(e => {
-    showToast(`Failed to stop agents: ${e}`, 'error');
-  });
-}
-
-// Show Spacegrid
-function showSpacegrid() {
-  agentSystem.spacegridEnabled = !agentSystem.spacegridEnabled;
-  showToast(`Spacegrid ${agentSystem.spacegridEnabled ? 'enabled' : 'disabled'}`, 'ok');
-}
-
-// Refresh Agents
-function refreshAgents() {
-  fetch('/api/v1/agents/list')
-    .then(r => r.json())
-    .then(data => {
-      agentSystem.agents = data.agents || [];
-      updateAgentUI();
-      updateAgentVisualization();
-      updateAgentDropdowns();
-    });
-}
-
-// Refresh API Keys
-function refreshApiKeys() {
-  fetch('/api/v1/agents/api-keys/list')
-    .then(r => r.json())
-    .then(data => {
-      agentSystem.apiKeys = data.keys || {};
-      updateApiKeysUI();
-    });
-}
-
-// Refresh Agent Messages
-function refreshAgentMessages() {
-  fetch('/api/v1/agents/messages')
-    .then(r => r.json())
-    .then(data => {
-      agentSystem.messages = data.messages || [];
-      updateMessagesUI();
-    });
-}
-
-// Update Agent UI
-function updateAgentUI() {
-  const container = document.getElementById('activeAgents');
-  if (!container) return;
-
-  container.innerHTML = '';
-
-  agentSystem.agents.forEach(agent => {
-    const card = document.createElement('div');
-    card.className = 'kpi';
-    card.innerHTML = `
-      <div class="v">${agent.name || agent.agent_id.substring(0, 8)}</div>
-      <div class="l">${agent.state || 'unknown'}</div>
-      <div class="l">Provider: ${agent.provider || 'ollama'}</div>
-      <div class="l">Role: ${agent.role || 'general'}</div>
-    `;
-    container.appendChild(card);
-  });
-
-  // Update agent count
-  const countEl = document.getElementById('agentCount');
-  if (countEl) {
-    countEl.textContent = `agents: ${agentSystem.agents.length}`;
-  }
-}
-
-// Update Agent Visualization
-function updateAgentVisualization() {
-  const container = document.getElementById('agentsVisualization');
-  if (!container) return;
-
-  container.innerHTML = '';
-
-  // Create connections first
-  for (let i = 0; i < agentSystem.agents.length; i++) {
-    for (let j = i + 1; j < agentSystem.agents.length; j++) {
-      const connection = document.createElement('div');
-      connection.className = 'agent-connection';
-      connection.style.left = '0';
-      connection.style.top = '50%';
-      connection.style.width = '100%';
-      connection.style.height = '2px';
-      container.appendChild(connection);
-    }
-  }
-
-  // Create agent nodes
-  const positions = [
-    { x: 20, y: 30 }, { x: 80, y: 30 }, { x: 50, y: 70 },
-    { x: 15, y: 80 }, { x: 85, y: 80 }, { x: 30, y: 50 },
-    { x: 70, y: 50 }, { x: 40, y: 20 }, { x: 60, y: 20 }
-  ];
-
-  agentSystem.agents.forEach((agent, index) => {
-    const node = document.createElement('div');
-    node.className = `agent-node ${agent.state || 'idle'}`;
-    const pos = positions[index % positions.length];
-    node.style.left = pos.x + '%';
-    node.style.top = pos.y + '%';
-    node.textContent = agent.name ? agent.name.substring(0, 2) : agent.agent_id.substring(0, 2);
-    node.title = `${agent.name || agent.agent_id}
-Provider: ${agent.provider || 'ollama'}
-Role: ${agent.role || 'general'}
-State: ${agent.state || 'unknown'}`;
-    container.appendChild(node);
-  });
-}
-
-// Update Agent Dropdowns
-function updateAgentDropdowns() {
-  const senderSelect = document.getElementById('messageSender');
-  const targetSelect = document.getElementById('messageTarget');
-
-  if (!senderSelect || !targetSelect) return;
-
-  senderSelect.innerHTML = '<option value="">Select Agent</option>';
-  targetSelect.innerHTML = '<option value="">Select Target</option>';
-
-  agentSystem.agents.forEach(agent => {
-    const option1 = document.createElement('option');
-    option1.value = agent.agent_id;
-    option1.textContent = `${agent.name || agent.agent_id.substring(0, 8)} (${agent.role || 'general'})`;
-    senderSelect.appendChild(option1);
-
-    const option2 = document.createElement('option');
-    option2.value = agent.agent_id;
-    option2.textContent = `${agent.name || agent.agent_id.substring(0, 8)} (${agent.role || 'general'})`;
-    targetSelect.appendChild(option2);
-  });
-}
-
-// Update API Keys UI
-function updateApiKeysUI() {
-  const container = document.getElementById('apiKeysList');
-  if (!container) return;
-
-  container.innerHTML = '';
-
-  for (const [provider, keys] of Object.entries(agentSystem.apiKeys)) {
-    const div = document.createElement('div');
-    div.style.margin = '5px 0';
-    div.innerHTML = `<strong>${provider}</strong>: ${keys.length} key(s)`;
-    container.appendChild(div);
-  }
-}
-
-// Update Messages UI
-function updateMessagesUI() {
-  const container = document.getElementById('agentMessages');
-  if (!container) return;
-
-  container.innerHTML = '';
-
-  if (agentSystem.messages.length === 0) {
-    container.innerHTML = '<div class="note">No agent messages yet</div>';
-    return;
-  }
-
-  agentSystem.messages.slice().reverse().forEach(msg => {
-    const div = document.createElement('div');
-    div.style.padding = '5px 0';
-    div.style.borderBottom = '1px dashed #1c2534';
-    div.innerHTML = `
-      <strong>${msg.sender_id || 'system'}</strong> -> ${msg.target_id || 'all'}: ${msg.content || '(no content)'}
-    `;
-    container.appendChild(div);
-  });
-}
-
-// Update VRAM Monitor
-function updateVRAMMonitor() {
-  const fill = document.getElementById('vramFill');
-  const percent = document.getElementById('vramPercent');
-  const used = document.getElementById('vramUsed');
-  const vramPill = document.getElementById('vramUsage');
-
-  if (!fill || !percent || !used) return;
-
-  // Simulate VRAM usage (in real implementation, this would come from GPU monitoring)
-  const vramUsed = Math.min(7, Math.random() * 4 + 1); // 1-5GB (safe limit: 7GB)
-  const vramPercent = Math.round((vramUsed / 8) * 100);
-
-  fill.style.width = vramPercent + '%';
-  percent.textContent = vramPercent + '%';
-  used.textContent = vramUsed.toFixed(1) + 'GB';
-
-  if (vramPill) {
-    vramPill.textContent = `VRAM: ${vramUsed.toFixed(1)}GB/${vramPercent}%`;
-    vramPill.className = 'pill ' + (vramPercent > 80 ? 'err' : vramPercent > 60 ? 'warn' : 'ok');
-  }
-
-  // Update JARVIS orb based on VRAM
-  const orb = document.getElementById('jarvisOrb');
-  if (orb) {
-    if (vramPercent > 80) {
-      orb.classList.add('error');
-      orb.classList.remove('working');
-    } else if (vramPercent > 50) {
-      orb.classList.add('working');
-      orb.classList.remove('error');
-    } else {
-      orb.classList.remove('working', 'error');
-    }
-  }
-}
-
-// Show Toast Notification
-function showToast(message, type = 'info') {
-  const container = document.getElementById('toasts');
-  if (!container) return;
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <span class="toast-msg">${message}</span>
-    <button class="toast-close" onclick="this.parentElement.remove()">&#10005;</button>
-  `;
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 300);
-  }, 5000);
-}
-
-// Initialize on load
-window.addEventListener('load', () => {
-  initParticles();
-
-  // Start periodic updates
-  setInterval(refreshAgents, 5000);
-  setInterval(refreshApiKeys, 10000);
-  setInterval(refreshAgentMessages, 5000);
-  setInterval(updateVRAMMonitor, 2000);
-
-  // Initial updates
-  refreshAgents();
-  refreshApiKeys();
-  refreshAgentMessages();
-  updateVRAMMonitor();
-
-  showToast('HERMUS JARVIS Control Room loaded!', 'ok');
-});
-
-// Expose functions to global scope
-window.createAgent = createAgent;
-window.createSpecializedAgent = createSpecializedAgent;
-window.createCustomAgent = createCustomAgent;
-window.addApiKey = addApiKey;
-window.sendAgentMessage = sendAgentMessage;
-window.broadcastToAll = broadcastToAll;
-window.pingAllAgents = pingAllAgents;
-window.startAllAgents = startAllAgents;
-window.stopAllAgents = stopAllAgents;
-window.showSpacegrid = showSpacegrid;
-window.toggleJarvis = toggleJarvis;
-window.toggleJarvisView = toggleJarvisView;
-window.refreshAgents = refreshAgents;
-</script>
+<script src="/static/control-core.js" defer></script>
+<script src="/static/control-shell.js" defer></script>
+<script src="/static/control-agents.js" defer></script>
 </body>
 </html>

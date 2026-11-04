@@ -20,6 +20,55 @@ a query credential only where browser SSE/WebSocket APIs cannot set headers.
 The browser may also use a token saved under `hermus_gateway_token` in local
 storage. Keys and provider credentials remain server-side.
 
+## Design language: the Flight Deck
+
+The room is a restrained holographic HUD, not a sci-fi wallpaper. One 14px
+UI scale, one mono scale for data, 1 px hairlines, HUD corner brackets on
+panels, and colour used only as a signal.
+
+| Token | Value | Meaning |
+|---|---|---|
+| `--cyan` | `#5ee8ff` | primary / ready |
+| `--mint` | `#7dffc4` | listening, healthy |
+| `--amber` | `#ffbe5c` | blocked, acting |
+| `--red` | `#ff5f6d` | error |
+| `--violet` | `#9d8cff` | deliberation / verification |
+| `--ink-0` | `#04070c` | page |
+
+**The living core** is a canvas projection, never an animation loop divorced
+from truth. It resolves one state per poll:
+
+| State | Derived from |
+|---|---|
+| `offline` | `/readyz` not 200 |
+| `idle` | ready, queue clear |
+| `thinking` | active jobs/runs in `/api/jarvis/status` |
+| `acting` | a real tool/computer event, or a running computer task |
+| `verifying` | a verification event |
+| `blocked` | pending approvals in `/remote/approvals` |
+| `error` | a failure event, held briefly |
+
+Presence identity (`/presence`) labels the core; `/api/v1/harness/overview`
+supplies the context tile. Motion pauses when the tab is hidden, is replaced by
+a still frame under `prefers-reduced-motion`, and can be switched off with the
+topbar **Calm** toggle (persisted in `localStorage`).
+
+Assets are plain files served by the gateway, no build step:
+
+| File | Role |
+|---|---|
+| `gateway/static/control.css` | token system + every component |
+| `gateway/static/control-room.js` | panels, envelope-aware API layer, tabs |
+| `gateway/static/console.js` | manifest-driven Systems tab |
+| `gateway/static/control-core.js` | living-core canvas + state polling |
+| `gateway/static/control-shell.js` | rail, command palette, drawer, composer |
+| `gateway/static/control-agents.js` | Agents tab controller + real GPU probe |
+
+`docs/assets/flightdeck-full.png` is the same room at a narrow viewport,
+captured from the running gateway; `flightdeck-palette.png` shows the command
+palette, and `flightdeck-widths.png` renders 1440 / 1024 / 768 / 520 px side by
+side (vertical rail, two-row bar, single-column sections).
+
 ## Control Room
 
 The opening view prioritizes running and monitoring tasks. The **Presence** tab
@@ -80,8 +129,9 @@ panel but may not enter native fullscreen.
 
 ## Connected modules
 
-The control room is organised as ten tabs (Overview, Missions, Computer, Jobs,
-Telemetry, Safety, Remote, Presence, Voice, Systems). The **Systems** tab is not
+The control room is organised as eleven tabs (Overview, Missions, Computer,
+Jobs, Telemetry, Safety, Remote, Presence, Voice, Agents, Systems). The
+**Systems** tab is not
 a fixed set of cards: it renders `GET /api/v1/console/manifest` — the capability
 manifest declared in `core/console.py` — and probes every panel through
 `GET /api/v1/console/panels`. Registered subsystems therefore show up
@@ -146,6 +196,10 @@ transcription.
 | `/api/v1/console/panels` | GET | Live probe of panels (`?ids=` narrows) |
 | `/api/v1/console/projection/{panel_id}` | GET | One panel as a read-only projection |
 | `/api/v1/console/action/{panel_id}/{action}` | POST | Server-side panel action (declared actions only; confirmation-gated) |
+| `/api/v1/harness/overview` | GET | Harness counts, pending notices, last real turn, live budget |
+| `/api/v1/harness/sessions` | GET | Recent server-owned sessions (bounded, redacted) |
+| `/api/v1/harness/sessions/{id}` | GET | One session + pending notices/mail (404 when unknown) |
+| `/api/v1/harness/events` | GET | File-shift notices and swarm mail, newest first, truncated |
 | `/android/*` | — | Android control API (consent-gated, audited) |
 
 `POST /command` accepts additive `talking: true` or `speak: true` fields and can

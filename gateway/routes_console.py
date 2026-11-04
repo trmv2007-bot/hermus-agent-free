@@ -19,6 +19,7 @@ Two things are never faked here:
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -27,6 +28,12 @@ from fastapi.responses import JSONResponse
 from core import console
 
 router = APIRouter(prefix="/api/v1/console", tags=["console"])
+
+#: Panel probes touch SQLite, the filesystem and (for a few) subprocess
+#: discovery. Reusing one result briefly turns a 20s probe storm on every page
+#: load into a single pass, while every value is still a real probe result.
+PANEL_TTL_SECONDS = 8.0
+_PANEL_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _route_index() -> set[str]:
@@ -103,7 +110,13 @@ async def console_panels(
 
     async def one(panel_id: str) -> dict[str, Any]:
         async with limit:
-            return await asyncio.to_thread(console.probe, panel_id)
+            hit = _PANEL_CACHE.get(panel_id)
+            now = time.monotonic()
+            if hit and now - hit[0] < PANEL_TTL_SECONDS:
+                return hit[1]
+            result = await asyncio.to_thread(console.probe, panel_id)
+            _PANEL_CACHE[panel_id] = (time.monotonic(), result)
+            return result
 
     results = await asyncio.gather(*(one(p.id) for p in (console.panels() if not selected else [console.get(i) for i in selected])))
     ready = sum(1 for r in results if r["status"] == "ready")

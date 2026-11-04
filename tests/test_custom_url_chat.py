@@ -30,25 +30,37 @@ def mock_server():
 
 @pytest.fixture()
 def clean_keys():
+    """Run against an empty key store, then put back what the operator had.
+
+    This used to ``unlink()`` the real ``data/api_keys.json`` on the way in and
+    ``unlink()`` it again on teardown, which permanently destroyed a developer's
+    stored provider keys — the suite has no claim on that file.
+    """
+    from core.config import config
     from core.multi_key import multi_key_manager
 
-    db = Path("data/api_keys.json")
-    if db.exists():
+    db = config.resolve_path("data/api_keys.json")
+    saved = db.read_bytes() if db.exists() else None
+    if saved is not None:
         db.unlink()
     multi_key_manager._load_queues()
     yield
-    if db.exists():
-        db.unlink()
+    if saved is None:
+        db.unlink(missing_ok=True)
+    else:
+        db.write_bytes(saved)
     multi_key_manager._load_queues()
 
 
 @pytest.fixture()
 def clean_custom_apis():
+    """Empty the custom-API list for one test, restoring it afterwards."""
     from core.custom_api import custom_api_manager
 
+    saved = custom_api_manager._load()
     custom_api_manager._save([])
     yield
-    custom_api_manager._save([])
+    custom_api_manager._save(saved)
 
 
 def test_custom_key_used_in_chat_mode(mock_server, clean_keys):
@@ -94,10 +106,19 @@ def test_gateway_agent_cache_respects_model_change(mock_server, clean_keys):
     assert "MOCK REPLY" in res.get("response", "")
 
 
-def test_default_chat_falls_back_to_custom_key(mock_server, clean_keys):
+def test_default_chat_falls_back_to_custom_key(mock_server, clean_keys, monkeypatch):
     from core.agent import HermusAgent
     from core.cache import clear_all_caches
+    from core.config import config
     from core.multi_key import multi_key_manager
+
+    # A host that exports OPENAI_API_KEY must not change this test's path. Pin
+    # every ambient provider credential to empty and reload the queues so the
+    # custom key below is the only fallback available.
+    for field in ("openai_api_key", "groq_api_key", "hf_token"):
+        if hasattr(config, field):
+            monkeypatch.setattr(config, field, "")
+    multi_key_manager._load_queues()
 
     # Avoid cached ollama responses from other tests
     clear_all_caches()

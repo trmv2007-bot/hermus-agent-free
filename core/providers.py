@@ -376,6 +376,19 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "notes": "Any provider with /v1/chat/completions — set base_url",
     },
+    "kilo": {
+        "name": "Kilo AI (free 1M-context chat + cloud agents)",
+        "base_url": "https://ai-gateway.kilo.ai/api/v1",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+        "default_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "supports_tools": True,
+        "env_key": "KILO_API_KEY",
+        "notes": "Free OpenAI-compatible gateway — 17 free :free models, qfmodel, 1M context, no rate cap. Also has a cloud-agents API (see ~/.qoder/cloud-agents.md).",
+        # No published per-minute ceiling on free keys; leave unset = unmetered.
+    },
     "anthropic": {
         "name": "Anthropic (via OpenAI-compat proxies)",
         "base_url": "https://api.anthropic.com/v1",

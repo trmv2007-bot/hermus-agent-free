@@ -127,6 +127,7 @@ class SkillManager:
         )
 
         try:
+            from .harness import governed_call
             from .models import get_model_gateway
 
             messages = [
@@ -139,7 +140,7 @@ class SkillManager:
                     "content": f'Trajectory:\n{traj_text}\n\nCreate a skill. Return JSON: {{"name": "skill_name_snake_case", "description": "...", "capabilities": ["read"], "code": "def ..."}}',
                 },
             ]
-            resp = get_model_gateway().chat(messages)
+            resp = get_model_gateway().chat(governed_call(messages, session_id="skill_manager"))
             content = resp.content
             json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:

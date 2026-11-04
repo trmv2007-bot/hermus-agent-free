@@ -12,7 +12,9 @@ import pytest
 def test_singleton_exposes_all_settings():
     from core.config import Config, config
 
-    assert len(Config.model_fields) == 179
+    # Pinned on purpose: adding a setting is a deliberate act. 179 -> 187 when
+    # the turn harness gained its budget/session/recall knobs (HERMUS_HARNESS_*).
+    assert len(Config.model_fields) == 187
     assert config.model
     assert isinstance(config.nollama_port, int)
     assert isinstance(config.presence_enabled, bool)
@@ -80,6 +82,11 @@ def test_non_prefixed_provider_keys_keep_exact_names(monkeypatch):
 def test_env_lookup_is_case_sensitive(monkeypatch):
     from core.config import Config
 
+    # Windows environment variables are case-insensitive at the OS level: setting
+    # ``hermus_model`` overwrites ``HERMUS_MODEL`` before pydantic sees them, so
+    # the distinction only exists on POSIX.
+    if __import__("sys").platform == "win32":
+        pytest.skip("Windows env vars are case-insensitive at the OS level")
     monkeypatch.setenv("HERMUS_MODEL", "mock/mock")
     monkeypatch.setenv("hermus_model", "must_be_ignored")
     assert Config().model == "mock/mock"

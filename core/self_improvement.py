@@ -102,6 +102,7 @@ class SelfImprovement:
         try:
             from tools.web_search import web_search
 
+            from .harness import governed_call
             from .models import get_model_gateway
 
             for mistake in mistakes[:3]:  # Search for top 3 mistakes
@@ -125,7 +126,7 @@ class SelfImprovement:
                             "content": f"Mistake: {mistake}\n\nSearch results for best practices:\n{search_text[:1000]}\n\nSuggest how agent should fix itself in background - e.g., improve skill, add error handling, update tool, etc.",
                         },
                     ]
-                    resp = get_model_gateway().chat(messages)
+                    resp = get_model_gateway().chat(governed_call(messages, session_id="self_improvement"))
                     improvements.append(
                         {
                             "mistake": mistake,

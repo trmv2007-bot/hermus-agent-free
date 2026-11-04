@@ -174,6 +174,50 @@ class HermusAgent:
         except Exception:
             return ""
 
+    def _backend_available(self) -> bool:
+        """Fast check whether the bound model backend can actually answer.
+
+        Used to skip expensive multi-model deliberation (council) when the
+        backend is down, so a mission fails fast and honestly instead of
+        spending minutes retrying unreachable models.
+        """
+        try:
+            provider = str(getattr(getattr(self, "llm", None), "provider", "") or "").lower()
+        except Exception:
+            return False
+        if provider in ("", "mock", "fake", "offline"):
+            return False
+        if provider == "ollama":
+            try:
+                import requests
+
+                base = str(getattr(config, "ollama_base_url", "http://localhost:11434")).rstrip("/")
+                r = requests.get(f"{base}/api/tags", timeout=2)
+                return r.status_code == 200
+            except Exception:
+                return False
+        # Hosted/custom providers: treat as available only when a key is present.
+        try:
+            from .multi_key import multi_key_manager
+
+            entry = None
+            try:
+                entry = multi_key_manager.get_entry(provider, None)
+            except Exception:
+                entry = None
+            if entry and (entry.get("api_key") or entry.get("key")):
+                return True
+        except Exception:
+            pass
+        try:
+            if getattr(self.llm, "api_key_override", None):
+                return True
+            if getattr(self.llm, "base_url_override", None):
+                return True
+        except Exception:
+            pass
+        return True
+
     def _execute_tool(self, name: str, args: dict) -> dict:
         """Execute via the canonical ToolGateway — the one invocation path.
 
@@ -453,7 +497,7 @@ Rules:
         try:
             from .reasoning.governor import governor
 
-            if governor.should_use_council(user_message, mode=self.mode.value):
+            if governor.should_use_council(user_message, mode=self.mode.value) and self._backend_available():
                 cc = governor.council_config(user_message, mode=self.mode.value)
                 logger.info(
                     f"[Counsel] difficulty={cc['difficulty']} -> convening council "
@@ -577,36 +621,17 @@ Rules:
         except Exception as e:
             logger.warning(f"[DeepThink] plan-first skipped ({e})")
 
-        # Hybrid memory recall
-        memory_results = []
-        memory_summary = ""
-        try:
-            from .embeddings import embedding_store
-
-            hybrid = embedding_store.hybrid_search(user_message, limit=3)
-            memory_results = hybrid.get("results") or []
-            memory_summary = hybrid.get("summary") or ""
-            if memory_results and not memory_summary:
-                memory_summary = "\n".join(
-                    f"- ({r.get('score', '?')}) {(r.get('content') or '')[:200]}" for r in memory_results[:3]
-                )
-        except Exception:
-            memory_results = memory.search_sessions(user_message, limit=3)
-            memory_summary = memory.summarize_search_results(user_message, memory_results) if memory_results else ""
+        # Per-turn recall is owned by the harness (one cascade path). The agent
+        # used to run its own hybrid search *and* the harness cascade on the
+        # same query: two latencies, duplicated snippets in the prompt.
+        memory_results: list[dict] = []
 
         messages: list[dict] = [
             {
                 "role": "system",
-                "content": system_prompt + (f"\n\nRelevant memory:\n{memory_summary}" if memory_summary else ""),
+                "content": system_prompt,
             },
         ]
-        try:
-            from .harness import harness as _harness
-
-            _prep = _harness.prepare_turn(self.session_id, user_message, messages, project=str(self.project or ""))
-            messages = _prep.get("messages") or messages
-        except Exception as exc:
-            record_issue("harness", "prepare_turn", exc, retryable=False, fallback="turn continues without harness context")
         # Recent trajectory context
         for turn in self.trajectory[-12:]:
             role = turn.get("role") or "user"
@@ -615,6 +640,27 @@ Rules:
                 messages.append({"role": "user", "content": turn.get("content", "")[:2000]})
             elif role in ("user", "assistant", "system"):
                 messages.append({"role": role, "content": turn.get("content", "")[:4000]})
+
+        # Harness runs on the FULL assembled prompt. It has to be after the
+        # trajectory append: calling it earlier meant compaction only ever saw
+        # the system message and never actually compacted history. governed_turn
+        # is the same entry every other hand-built prompt path uses, so a
+        # harness failure degrades here instead of aborting the turn.
+        try:
+            from .harness import governed_turn as _governed_turn
+
+            _prep = _governed_turn(
+                self.session_id,
+                user_message,
+                messages,
+                project=str(self.project or ""),
+                budget_tokens=int(getattr(config, "harness_budget_tokens", 6000)),
+                model=self.model_name,
+            )
+            messages = _prep.get("messages") or messages
+            memory_results = (_prep.get("memory") or {}).get("hits") or []
+        except Exception as exc:
+            record_issue("harness", "prepare_turn", exc, retryable=False, fallback="turn continues without harness context")
 
         all_tool_results: list[dict] = []
         steps = 0

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -48,6 +49,38 @@ class MCPServerConnection:
         self._initialized = False
         self.last_error: str | None = None
         self._buf = b""
+        self._reader_queue: queue.Queue | None = None
+
+    def _reader(self) -> queue.Queue:
+        """One background reader per process, feeding raw stdout chunks.
+
+        A blocking ``read`` in a thread replaces ``select`` on the pipe, which
+        is invalid on Windows (WinError 10038). Created lazily so a restarted
+        process gets a fresh reader on its new stdout.
+        """
+        stream = self.proc.stdout if self.proc else None
+        if stream is None:
+            raise RuntimeError("MCP process not running")
+        if self._reader_queue is not None and getattr(self, "_reader_stream", None) is stream:
+            return self._reader_queue
+        q: queue.Queue = queue.Queue()
+        self._reader_stream = stream
+        self._reader_queue = q
+
+        def pump() -> None:
+            try:
+                while True:
+                    chunk = stream.read(4096)
+                    if not chunk:
+                        break
+                    q.put(chunk)
+            except Exception:
+                pass
+            finally:
+                q.put(b"")  # EOF sentinel
+
+        threading.Thread(target=pump, name=f"mcp-reader-{self.name}", daemon=True).start()
+        return q
 
     def _next_id(self) -> int:
         self._id += 1
@@ -160,18 +193,20 @@ class MCPServerConnection:
             if parsed is not None:
                 return parsed
 
-            # Read more bytes with timeout via select
-            import select
-
+            # Read more bytes with a bounded wait. ``select`` only accepts
+            # sockets on Windows (a pipe raises WinError 10038), so a reader
+            # thread feeds a queue on every platform: one transport path, no
+            # platform branch.
             remaining = max(0.05, deadline - time.time())
-            ready, _, _ = select.select([self.proc.stdout], [], [], remaining)
-            if not ready:
+            try:
+                chunk = self._reader().get(timeout=remaining)
+            except queue.Empty:
                 continue
-            chunk = self.proc.stdout.read(4096)
             if chunk:
                 self._buf += chunk
-            elif chunk == b"" and self.proc.poll() is not None:
-                continue
+            else:
+                # EOF: the poll() check at the top reports the exit reason.
+                time.sleep(0.02)
         raise TimeoutError("MCP response timeout")
 
     def _try_parse_buffer(self) -> dict | None:

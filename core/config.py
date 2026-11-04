@@ -246,7 +246,7 @@ class Config(BaseSettings):
     # Keep persistent background agents alive (gateway watchdog tick).
     background_agents_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_BG_AGENTS_ENABLED")
     # Active persona / profile name (independent memory + system prompt).
-    profile: str = Field(default="", validation_alias="HERMUS_PROFILE")
+    profile: str = Field(default="fairy", validation_alias="HERMUS_PROFILE")
 
     # ---- Presence / continuity layer ---------------------------------------
     # Gives Hermus a durable identity, visible operational state, ongoing goals
@@ -287,6 +287,22 @@ class Config(BaseSettings):
     memory_rrf_k: int = Field(default=60, validation_alias="HERMUS_MEMORY_RRF_K")
     memory_prior_weight: float = Field(default=0.35, validation_alias="HERMUS_MEMORY_PRIOR_WEIGHT")
     memory_sweep_minutes: int = Field(default=60, validation_alias="HERMUS_MEMORY_SWEEP_MINUTES")
+
+    # ---- Harness: turn context, durable session state, swarm mail ----------
+    # The harness owns per-turn compaction, session records and recall entirely.
+    harness_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_HARNESS_ENABLED")
+    # Token budget for the assembled prompt; older payloads are elided above it.
+    harness_budget_tokens: int = Field(default=6000, validation_alias="HERMUS_HARNESS_BUDGET_TOKENS")
+    # Newest messages that are never modified by compaction.
+    harness_keep_recent: int = Field(default=6, validation_alias="HERMUS_HARNESS_KEEP_RECENT")
+    # Per-message character cap when an old tool/user payload is elided.
+    harness_tool_payload_chars: int = Field(default=1200, validation_alias="HERMUS_HARNESS_TOOL_PAYLOAD_CHARS")
+    # Session records older than this (and not live) are pruned.
+    harness_session_ttl_hours: float = Field(default=168.0, validation_alias="HERMUS_HARNESS_SESSION_TTL_HOURS")
+    harness_max_sessions: int = Field(default=500, validation_alias="HERMUS_HARNESS_MAX_SESSIONS")
+    # Cascade recall: hits injected per turn and the per-stage deadline.
+    harness_recall_limit: int = Field(default=4, validation_alias="HERMUS_HARNESS_RECALL_LIMIT")
+    harness_recall_timeout_ms: int = Field(default=800, validation_alias="HERMUS_HARNESS_RECALL_TIMEOUT_MS")
 
     # ---- Skill forge: post-task trajectory → SKILL.md ----------------------
     skill_forge_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_SKILL_FORGE")
@@ -368,7 +384,7 @@ class Config(BaseSettings):
     voice_ack_mode: AckMode = Field(default="canned", validation_alias="HERMUS_VOICE_ACK_MODE")
     # Pipe-separated acknowledgment pool used by the canned mode.
     voice_ack_phrases: str = Field(
-        default="On it.|Give me a second.|Working on that now.|Sure, one moment.|Right away.",
+        default="On it, Master.|Processing, Master.|I'll handle that, Master.|Right away, Master.|Working on it now.",
         validation_alias="HERMUS_VOICE_ACK_PHRASES",
     )
     # Synthesize the final answer for speech when the job finishes.

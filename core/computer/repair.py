@@ -536,7 +536,9 @@ Allowed action kinds: click_target, press_key, hotkey, type_text, scroll, focus_
 Generate at most {self.max_steps} steps. An empty steps list is better than an unsafe guess.
 """
         try:
-            response = self.llm.chat([{"role": "user", "content": prompt}])
+            from ..harness import governed_call
+
+            response = self.llm.chat(governed_call([{"role": "user", "content": prompt}], session_id="computer.repair"))
             parsed = self._json_value(getattr(response, "content", str(response)))
         except Exception as exc:  # noqa: BLE001
             return RepairPlan(

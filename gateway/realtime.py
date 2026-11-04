@@ -261,7 +261,7 @@ async def stream_command(payload: dict[str, Any] = None, request: Request = None
 
 
 @router.get("/queue/status")
-async def queue_status():
+def queue_status():
     from gateway.queue import job_queue
 
     return {"queue": job_queue.status(), "runs": run_bus.runs()[-20:]}

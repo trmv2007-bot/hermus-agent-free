@@ -878,10 +878,13 @@ def _p_queue() -> dict[str, Any]:
 
 
 def _p_harness() -> dict[str, Any]:
-    from core.harness.sessions import list_sessions
+    from core.harness import stats
 
-    rows = _as_list(_safe(lambda: list_sessions()))
-    return {"sessions": len(rows), "recent": rows[:10]}
+    # One owner for the harness projection: the Systems panel and
+    # /api/v1/harness/overview must never disagree.
+    data = _safe(stats.overview) or {}
+    rows = _as_list(_safe(lambda: stats.sessions_view(10).get("sessions")))
+    return {**(data if isinstance(data, dict) else {}), "recent": rows}
 
 
 def _p_computer() -> dict[str, Any]:

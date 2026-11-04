@@ -14,10 +14,20 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 sys.path.append(str(Path(__file__).parent.parent))
 
 _TMP = tempfile.mkdtemp(prefix="hermus_sbx_")
 os.environ["HERMUS_HOME"] = _TMP
+
+# The local backend is a POSIX sandbox: ``/bin/sh`` commands, rlimits, setsid
+# and network namespaces. Windows has cmd.exe and none of those primitives —
+# the capability report says so (``rlimits: False``, ``setsid: False``). The
+# tests below exercise that POSIX contract, so they are skipped there instead
+# of asserting behaviour the platform cannot provide. Basic execution is still
+# covered on Windows by the non-posix tests in this file.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only sandbox contract")
 
 from core.config import config  # noqa: E402
 
@@ -92,6 +102,7 @@ def test_blocked_command_is_refused_not_executed():
     assert "allow_dangerous" in res["error"] and "hermus perms" in res["error"]
 
 
+@posix_only
 def test_explicit_override_runs_and_is_audited():
     marker = Path(_TMP) / "override_marker.txt"
     res = sandbox.run(f"echo x > {marker} && cat {marker}", allow_dangerous=True, purpose="test:allow")
@@ -103,6 +114,7 @@ def test_explicit_override_runs_and_is_audited():
     assert any(e.get("blocked") for e in entries)  # the earlier denial is on record
 
 
+@posix_only
 def test_scratch_dir_is_ephemeral_and_isolated():
     first = sandbox.run("touch inside.txt && ls", files={"seed.txt": "x"}, purpose="test:scratch")
     assert "inside.txt" in first["stdout"] and "seed.txt" in first["stdout"]
@@ -116,6 +128,7 @@ def test_scratch_dir_is_ephemeral_and_isolated():
     assert second["sandbox_id"] != first["sandbox_id"]
 
 
+@posix_only
 def test_keep_artifacts_preserves_outputs():
     res = sandbox.run(
         "echo payload > out.txt && ls", files={"seed.txt": "x"}, purpose="test:artifacts", policy={"keep_artifacts": True}
@@ -128,6 +141,7 @@ def test_keep_artifacts_preserves_outputs():
     shutil.rmtree(str(kept), ignore_errors=True)
 
 
+@posix_only
 def test_staged_files_are_visible_to_the_command():
     res = sandbox.run("cat data.txt && wc -l < data.txt", files={"data.txt": "a\nb\nc\n"}, purpose="test:files")
     assert res["returncode"] == 0, res
@@ -140,6 +154,7 @@ def test_staged_files_cannot_escape_the_scratch_dir():
     assert not victim.exists()
 
 
+@posix_only
 def test_secrets_never_enter_the_child_env():
     res = sandbox.run(
         "env | sort", env={"OPENAI_API_KEY": "sk-super-secret", "AWS_SECRET_ACCESS_KEY": "nope"}, purpose="test:env"
@@ -152,6 +167,7 @@ def test_secrets_never_enter_the_child_env():
         assert "HTTP_PROXY" in res2["stdout"]
 
 
+@posix_only
 def test_stdin_and_exit_codes_are_propagated():
     res = sandbox.run("cat", input_text="piped input", purpose="test:stdin")
     assert res["stdout"].strip() == "piped input"
@@ -166,6 +182,7 @@ def test_run_python_evaluates_under_the_same_boundary():
     assert bad["returncode"] == 3 and bad["success"] is False
 
 
+@posix_only
 def test_timeout_kills_the_process():
     if not JAIL_LIMITS:
         return
@@ -174,6 +191,7 @@ def test_timeout_kills_the_process():
     assert res["duration_ms"] < 6000
 
 
+@posix_only
 def test_memory_limit_bites():
     if not JAIL_LIMITS:
         return
@@ -185,6 +203,7 @@ def test_memory_limit_bites():
     assert "MemoryError" in blob or "Cannot allocate" in blob or "allocated" not in blob
 
 
+@posix_only
 def test_process_cap_is_reported_and_enforced_in_config():
     """A pid cap is only useful if callers can see it (fork bombs hit RLIMIT_NPROC)."""
     res = sandbox.run("echo ok", purpose="test:pids", policy={"pids": 40})

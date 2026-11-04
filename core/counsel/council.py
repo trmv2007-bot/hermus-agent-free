@@ -195,6 +195,43 @@ class CouncilSession:
     def _member_llm(self, member: CounselMember) -> FreeLLM:
         return member.llm()
 
+    def _govern(self, member: CounselMember, messages: list[dict], user_text: str = "") -> list[dict]:
+        """Full turn governance for a member: budget + cascade memory + swarm mail.
+
+        Counsel used to hand-build a prompt and call ``llm.chat`` directly, so the
+        council ran outside the harness: no token budget on a prompt that carries
+        the whole transcript, no memory, no swarm mail, and no session record for
+        the Control Room.
+        """
+        from ..harness import governed_turn
+
+        prep = governed_turn(
+            self.session_id,
+            user_text or self.goal,
+            messages,
+            model=str(member.model or ""),
+        )
+        return prep.get("messages") or messages
+
+    def _budget(self, member: CounselMember, messages: list[dict]) -> list[dict]:
+        """Budget-only governance for a member call whose contract is strict JSON.
+
+        Proposals/plans/votes must come back as JSON. Appending a memory block to
+        the system message is how such a call starts answering in prose, so those
+        calls get the token budget and nothing else.
+        """
+        from ..harness import governed_call
+
+        return governed_call(messages, session_id=self.session_id, model=str(member.model or ""))
+
+    def _turn(self, member: CounselMember, messages: list[dict], user_text: str = ""):
+        """One governed member turn (prose in, prose out)."""
+        return self._member_llm(member).chat(self._govern(member, messages, user_text))
+
+    def _call(self, member: CounselMember, messages: list[dict]):
+        """One governed member call under a strict output contract."""
+        return self._member_llm(member).chat(self._budget(member, messages))
+
     def _base_messages(self, member: CounselMember, extra_system: str = "") -> list[dict]:
         rules_text = json.dumps(self.rules, indent=1)[:600]
         system = (
@@ -215,13 +252,14 @@ class CouncilSession:
         logger.info(f"[⚖️ Counsel] Proposals from {len(self.debaters)} members (parallel)...")
 
         def draft(m: CounselMember) -> dict:
+            ask = "Propose your approach (3-6 concrete steps)."
             messages = self._base_messages(
                 m,
                 extra_system="\nYour task NOW: propose your approach to the task. End with 'PROPOSAL:' plus 3-6 concrete steps.",
             )
-            messages.append({"role": "user", "content": f"Task: {self.goal}\n\nPropose your approach (3-6 concrete steps)."})
+            messages.append({"role": "user", "content": f"Task: {self.goal}\n\n{ask}"})
             try:
-                resp = self._member_llm(m).chat(messages)
+                resp = self._turn(m, messages, f"Task: {self.goal}\n\n{ask}")
                 return {"member": m.name, "role": m.role, "content": resp.content or ""}
             except Exception as e:
                 return {"member": m.name, "role": m.role, "content": f"(proposal failed: {e})"}
@@ -256,18 +294,14 @@ class CouncilSession:
                     critic_rule = (
                         "\nYou MUST end with either 'OBJECTION:' and one concrete problem, or 'APPROVAL:' and your reason."
                     )
+                ask = f"Task: {self.goal}\n\nWhat the council said so far:\n{history}\n\nYour turn as {member.name}:"
                 messages = self._base_messages(
                     member,
                     extra_system=f"\nDeliberation round {round_num}. Build on what others said. {critic_rule}",
                 )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"Task: {self.goal}\n\nWhat the council said so far:\n{history}\n\nYour turn as {member.name}:",
-                    }
-                )
+                messages.append({"role": "user", "content": ask})
                 try:
-                    resp = self._member_llm(member).chat(messages)
+                    resp = self._turn(member, messages, ask)
                     content = resp.content or ""
                 except Exception as e:
                     content = f"(deliberation failed: {e})"
@@ -295,16 +329,17 @@ class CouncilSession:
             return
         logger.info("\n[⚖️ Counsel] Judge scoring proposals...")
         proposals_text = "\n\n".join(f"[{name}]:\n{content[:800]}" for name, content in self.proposal_texts.items())
+        ask = f"Task: {self.goal}\n\nProposals:\n{proposals_text[:3000]}\n\nScore them."
         messages = [
             {
                 "role": "system",
                 "content": judge.persona
                 + '\nYou score each proposal 0-10. Return ONLY JSON: {"scores": {"<member>": 0-10}, "winner": "<member>", "reason": "..."}',
             },
-            {"role": "user", "content": f"Task: {self.goal}\n\nProposals:\n{proposals_text[:3000]}\n\nScore them."},
+            {"role": "user", "content": ask},
         ]
         try:
-            resp = self._member_llm(judge).chat(messages)
+            resp = self._call(judge, messages)
             parsed = self._parse_vote_json(resp.content or "")
             if parsed:
                 self.votes = [
@@ -375,7 +410,7 @@ class CouncilSession:
                 },
             ]
             try:
-                resp = self._member_llm(chair).chat(messages)
+                resp = self._call(chair, messages)
                 from ..reasoning.scaffold import PlanBuilder
 
                 steps = PlanBuilder._parse_steps(resp.content or "")
@@ -462,7 +497,9 @@ class CouncilSession:
             step_failed = False
             for _round in range(tool_rounds_cap):
                 try:
-                    resp = executor.llm().chat(messages, tools=tools)
+                    # Tool observations append to this list every round; the
+                    # harness is what keeps the loop inside the token budget.
+                    resp = executor.llm().chat(self._govern(executor, messages, step.goal), tools=tools)
                 except Exception as e:
                     observations.append(f"executor error: {e}")
                     step_failed = True
@@ -544,7 +581,8 @@ class CouncilSession:
             if not member:
                 continue
             try:
-                resp = member.llm().chat(
+                resp = self._call(
+                    member,
                     [
                         {
                             "role": "system",
@@ -552,7 +590,7 @@ class CouncilSession:
                             + "\nYou are replanning failed council steps. Be pragmatic; prefer simpler actions and fallback tools.",
                         },
                         {"role": "user", "content": prompt},
-                    ]
+                    ],
                 )
                 from ..reasoning.scaffold import PlanBuilder
 
@@ -590,7 +628,7 @@ class CouncilSession:
                 },
             ]
             try:
-                resp = synth.llm().chat(messages)
+                resp = self._turn(synth, messages, f"Task: {self.goal}\n\nProduce the final answer.")
                 self.final_answer = (resp.content or "").strip()
             except Exception as e:
                 self.errors.append(str(e))

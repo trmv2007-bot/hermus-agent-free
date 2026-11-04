@@ -129,14 +129,18 @@ class PlanBuilder:
     def build_plan(self, goal: str, session_id: str = "", difficulty: int = 3) -> Plan:
         plan = Plan(goal=goal, session_id=session_id, difficulty=difficulty)
         try:
+            from ..harness import governed_call
             from ..models import get_model_gateway
 
             llm = get_model_gateway().llm(model=self.model)
             resp = llm.chat(
-                [
-                    {"role": "system", "content": _PLAN_PROMPT},
-                    {"role": "user", "content": f"Goal: {goal}"},
-                ]
+                governed_call(
+                    [
+                        {"role": "system", "content": _PLAN_PROMPT},
+                        {"role": "user", "content": f"Goal: {goal}"},
+                    ],
+                    session_id=session_id or "reasoning.plan",
+                )
             )
             parsed = self._parse_steps(resp.content or "")
             if parsed:

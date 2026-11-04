@@ -702,20 +702,22 @@ def test_single_control_room_is_queue_first_and_failure_aware():
 # ===========================================================================
 # 11. CI is committed, not just documented
 # ===========================================================================
-def test_ci_is_local_not_hosted():
-    """Hosted CI is intentionally not part of this repo (local gates only).
+def test_ci_is_deliberate_and_matches_the_readme_badge():
+    """Hosted CI is a deliberate choice, not a dangling badge.
 
-    Guard against dangling references: no workflow files, no CI badge in the
-    README, and the local gate commands stay documented.
+    The repo used to advertise a ``test.yml`` workflow badge with no workflow
+    behind it while this guard forbade workflows. Hosted CI is now in place on
+    purpose: the workflow must exist, the README must point at it, and the
+    local gate commands must stay documented so a contributor without Actions
+    can reproduce the same checks.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    workflows = root / ".github" / "workflows"
-    assert not workflows.exists(), (
-        "GitHub Actions was intentionally removed; if you want hosted CI back, re-add it deliberately and update this test"
-    )
+    workflow = root / ".github" / "workflows" / "test.yml"
+    assert workflow.exists(), "the documented CI badge needs a real workflow behind it"
+    body = workflow.read_text(encoding="utf-8")
+    assert "pytest" in body and "ruff" in body
     readme = (root / "README.md").read_text(encoding="utf-8")
-    assert "actions/workflows" not in readme, "README still references a CI badge"
-    assert "docs/ci-workflow.yml" not in readme, "README points at a removed file"
+    assert "actions/workflow/status" in readme, "README lost its CI badge"
     hardening = (root / "docs" / "EXECUTION_PATH_HARDENING.md").read_text(encoding="utf-8")
     assert "python -m pytest tests/" in hardening, "local pytest gate must stay documented"
 

@@ -26,11 +26,16 @@ logger = get_logger(__name__)
 
 
 def _chat(llm: FreeLLM, system: str, user: str) -> str:
+    from ..harness import governed_call
+
     resp = llm.chat(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
+        governed_call(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            session_id="reasoning.strategy",
+        )
     )
     return (resp.content or "").strip()
 

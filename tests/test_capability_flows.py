@@ -277,6 +277,8 @@ def test_task5_event_bus_replays_after_bus_recreated():
         b2 = EventBus(log_path=log)
         evs = b2.replay(since_cursor=0)
         assert any(e.command == "mission.start" for e in evs)
+        # Windows cannot delete the log while a handler still holds it open.
+        b2.close()
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +340,8 @@ def test_task7_memory_roundtrip_typed_and_session():
         m.add_token_usage("sess7", {"model": "free", "prompt_tokens": 10, "completion_tokens": 5})
         usage = m.get_token_usage("sess7")
         assert usage.get("count", 0) >= 1
+        # Release the SQLite handle so the temp dir can be removed on Windows.
+        m.close()
 
 
 # ---------------------------------------------------------------------------

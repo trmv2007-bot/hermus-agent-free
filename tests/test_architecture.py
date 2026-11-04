@@ -95,7 +95,7 @@ def test_memory2_typed_and_scored_recall():
 # --------------------------------------------------------------------------
 # Model Router 2.0
 # --------------------------------------------------------------------------
-def test_router_classify_and_select_falls_back():
+def test_router_classify_and_select_falls_back(monkeypatch):
     from core.router2 import ModelRouter
 
     r = ModelRouter()
@@ -106,7 +106,9 @@ def test_router_classify_and_select_falls_back():
     assert 1 <= r.classify_difficulty("hello") <= 5
     assert r.estimate_context_tokens("a" * 400) >= 100
 
-    # no workers configured → graceful fallback, never crashes
+    # "no workers configured" must be forced: a developer's real provider keys
+    # (OPENAI_API_KEY in the environment) legitimately make rank() return one.
+    monkeypatch.setattr(r, "rank", lambda *a, **k: [])
     sel = r.select("rewrite this function to be faster")
     assert sel["task_type"] == "code"
     assert sel["provider"] in ("ollama", "mock")
@@ -358,6 +360,9 @@ def test_profile_manager_isolated_memory():
 
     assert any(p["name"] == "coder" for p in pm.list())
     assert pm.delete("coder")["success"]
+    # Release the researcher handle too; Windows keeps memory2.db locked
+    # until the facade is closed, which breaks the temp-dir cleanup.
+    pm.close()
 
 
 if __name__ == "__main__":

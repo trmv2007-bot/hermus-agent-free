@@ -12,6 +12,8 @@ Two invariants matter:
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 import time
 
 import pytest
@@ -28,6 +30,23 @@ from core.nollama import (
     NollamaManager,
     model_dir_ready,
 )
+
+
+def _write_venv_python(venv: pathlib.Path) -> None:
+    """Create the venv interpreter in this platform's layout.
+
+    POSIX venvs expose ``bin/python``; Windows exposes ``Scripts/python.exe``.
+    The old fixtures only wrote the POSIX path, so ``venv_ready()`` was always
+    false on Windows and the start/install tests failed for the wrong reason.
+    """
+    bindir = venv / ("Scripts" if os.name == "nt" else "bin")
+    bindir.mkdir(parents=True, exist_ok=True)
+    exe = bindir / ("python.exe" if os.name == "nt" else "python")
+    exe.write_text("#!/bin/sh\n", encoding="utf-8")
+    try:
+        exe.chmod(0o755)
+    except OSError:
+        pass
 
 
 @pytest.fixture
@@ -71,9 +90,7 @@ def test_install_downloads_no_model_weights(mgr, monkeypatch):
             return 0, "cloned"
         if "venv" in cmd:
             # Stand in for `python -m venv`: the real thing creates the interpreter.
-            venv = pathlib.Path(cmd[-1])
-            (venv / "bin").mkdir(parents=True, exist_ok=True)
-            (venv / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+            _write_venv_python(pathlib.Path(cmd[-1]))
             return 0, ""
         return 0, ""
 
@@ -118,9 +135,7 @@ def test_start_never_binds_the_gateway_port(mgr, monkeypatch, tmp_path):
     """NoLlama's 8000 default would shadow the Hermus gateway."""
     mgr.home.mkdir(parents=True, exist_ok=True)
     (mgr.home / "nollama.py").write_text("# server\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin").mkdir(parents=True)
-    (mgr.home / "venv" / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin" / "python").chmod(0o755)
+    _write_venv_python(mgr.home / "venv")
 
     captured = {}
 
@@ -154,9 +169,7 @@ def test_start_auto_resolves_downloaded_model_dir(mgr, monkeypatch):
     NoLlama automatically instead of relying on its internal registry."""
     mgr.home.mkdir(parents=True, exist_ok=True)
     (mgr.home / "nollama.py").write_text("# server\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin").mkdir(parents=True)
-    (mgr.home / "venv" / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
-    (mgr.home / "venv" / "bin" / "python").chmod(0o755)
+    _write_venv_python(mgr.home / "venv")
 
     captured = {}
 

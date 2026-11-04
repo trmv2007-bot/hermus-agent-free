@@ -1,32 +1,9 @@
 const $ = (s) => document.querySelector(s);
-// When gateway auth is enabled, open /control?token=... once (or store it as
-// hermus_gateway_token). Browser fetch cannot read the server-side environment,
-// so attach that token to every API request without putting it into ordinary
-// fetch URLs. SSE/WS helpers add it separately because those browser APIs do
-// not support custom headers.
-const tokenFromUrl = new URLSearchParams(location.search).get("token") || "";
-let gatewayToken = tokenFromUrl;
-if (!gatewayToken) {
-  try { gatewayToken = localStorage.getItem("hermus_gateway_token") || ""; } catch(e) {};
-}
-if (gatewayToken) {
-  window.__HERMUS_GATEWAY_TOKEN = gatewayToken;
-  // Do not leave a query credential in the address bar/history after capturing it.
-  if (tokenFromUrl) {
-    try { history.replaceState(null, "", location.pathname + location.hash); } catch(e) {}
-  }
-}
-if (gatewayToken && window.fetch) {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    const opts = Object.assign({}, init || {});
-    const headers = new Headers(input && input.headers ? input.headers : undefined);
-    new Headers(opts.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-Hermus-Token", gatewayToken);
-    opts.headers = headers;
-    return nativeFetch(input, opts);
-  };
-}
+// The gateway token is installed by the document bootstrap (an inline script
+// that runs before this file). Do NOT redeclare `tokenFromUrl`/`gatewayToken`
+// here: a duplicate top-level lexical declaration across classic scripts is a
+// SyntaxError that aborts this entire module, leaving every panel dead.
+const GW_TOKEN = window.__HERMUS_GATEWAY_TOKEN || "";
 const conn = $("#conn");
 const rtt = $("#rtt");
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -412,10 +389,12 @@ function renderCaps(c){
   $("#caps").innerHTML = html;
 }
 async function refreshOverview(){
+  // Readiness first: the connection pill must not wait behind the slowest
+  // capability probe. bootstrap.doctor() can take seconds on a cold machine.
+  try { await refreshReadiness(); } catch(e){}
   try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; }
   catch(e){ $("#health").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
     { label: "system health", onRetryId: "overview" }); }
-  try { await refreshReadiness(); } catch(e){}
   try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); } catch(e){}
   try { await refreshEmergency(); } catch(e){}
 }
@@ -594,7 +573,7 @@ RETRY_ACTIONS.safetyReport = refreshSafetyReport;
 
 function openTmStream(){
   try {
-    const wsToken = gatewayToken ? "?token=" + encodeURIComponent(gatewayToken) : "";
+    const wsToken = GW_TOKEN ? "?token=" + encodeURIComponent(GW_TOKEN) : "";
     tmWs = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/dashboard/events" + wsToken);
     tmWs.onmessage = (ev) => {
       try { const msg = JSON.parse(ev.data); if (msg && msg.kind === "snapshot") msg.events.forEach(tmAppend); else if (msg && msg.id) tmAppend(msg); } catch(e){}
@@ -1165,10 +1144,9 @@ function initVoice(){
 initVoice();
 
 async function boot(){
-  await refreshOverview();
-  await refreshPresence();
-  await refreshJobs();
-  try { await refreshMissions(); } catch(e){}
+  // Every panel loads independently. Serialising them meant a slow probe (the
+  // doctor-backed health card) delayed readiness, presence and jobs behind it.
+  await Promise.allSettled([refreshOverview(), refreshPresence(), refreshJobs(), refreshMissions()]);
   refreshTelemetry(true);
   openTmStream();
 }

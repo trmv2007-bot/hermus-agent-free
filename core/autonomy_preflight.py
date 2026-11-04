@@ -251,7 +251,16 @@ def assess_preflight_action(action: PreflightAction) -> PreflightFinding:
             missing_capability = True
             missing_reason = "tool/connector availability could not be confirmed"
 
-    missing_approval = decision == "ask" and not approval_present and safety.zone != "red"
+    # Only a *yellow* ask is an approval gap. A green-zone ask already executes
+    # under ``HERMUS_ASK_POLICY=allow`` without a prompt, and no grant can ever
+    # satisfy it (grants match the yellow zone by construction), so treating it
+    # as "needs approval" blocked every ordinary goal — a coding mission infers
+    # ``shell_execute``, which is a green-zone ask, and was therefore refused
+    # before it could start.
+    missing_approval = decision == "ask" and safety.zone == "yellow" and not approval_present
+    reasons = list(safety.reasons)
+    if safety.zone == "green" and decision == "ask":
+        reasons.append("green-zone ask: executes without a prompt, no grant required")
     if missing_capability and not missing_reason:
         missing_reason = "capability must be implemented/registered before use"
     return PreflightFinding(
@@ -260,7 +269,7 @@ def assess_preflight_action(action: PreflightAction) -> PreflightFinding:
         zone=safety.zone,
         decision=decision,
         red_lines=list(safety.red_lines),
-        reasons=list(safety.reasons),
+        reasons=reasons,
         capabilities=capabilities or [action.expected_capability] if action.expected_capability else capabilities,
         approval_present=approval_present,
         missing_approval=missing_approval,

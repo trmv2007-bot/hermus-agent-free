@@ -179,8 +179,11 @@ async def engine_download_cancel(job_id: str):
 # Live telemetry feed (polling fallback for the dashboard)
 # ---------------------------------------------------------------------------
 @router.get("/events/recent")
-async def events_recent(limit: int = 30):
-    """Recent dashboard events — the feed the overview's Live Telemetry shows."""
+def events_recent(limit: int = 30):
+    """Recent dashboard events — the feed the overview's Live Telemetry shows.
+
+    Sync handler (threadpool) so serving the feed cannot block the loop.
+    """
     try:
         from core.dashboard_events import dashboard_event_bus
 

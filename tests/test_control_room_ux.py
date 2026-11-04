@@ -332,8 +332,11 @@ def test_readiness_pill_maps_ready_draining_and_offline(node_available):
 def test_markup_is_a_real_tablist():
     html = CONTROL_HTML.read_text(encoding="utf-8")
     assert 'role="tablist"' in html
-    assert html.count('role="tab"') == 10
-    assert html.count('role="tabpanel"') == 10
+    # Eleven sections: the original ten plus the Agents tab added with the
+    # JARVIS control plane. The count is pinned so a tab cannot be added or
+    # dropped without a deliberate test change.
+    assert html.count('role="tab"') == 11
+    assert html.count('role="tabpanel"') == 11
     assert html.count('aria-selected="true"') == 1  # exactly one selected
     assert html.count('tabindex="0"') == 1  # roving tabindex: one tabbable
     assert 'aria-controls="tab-overview"' in html

@@ -131,6 +131,18 @@ class MultiAIChat:
         except Exception:
             return []
 
+    def _govern(self, topic: str, agent: AgentPersona, messages: list[dict]) -> list[dict]:
+        """Govern one panel turn: same harness entry the agent loop uses.
+
+        The panel used to send its hand-built prompt straight to the model, so a
+        3-round multi-agent debate ran with no token budget, no cascade memory
+        and no swarm mail, and left no session record behind.
+        """
+        from .harness import governed_turn
+
+        prep = governed_turn(self.session_id, topic, messages, model=str(agent.model or ""))
+        return prep.get("messages") or messages
+
     def _build_agent_prompt(self, agent: AgentPersona, topic: str, include_history: bool = True) -> list[dict]:
         """Build prompt for agent with persona + history"""
         system_content = f"{agent.persona}\n\nYou are {agent.name} in a multi-AI collaboration. Current topic/task: {topic}\n\nOther agents in team: {', '.join([f'{a.name} ({a.persona[:40]}...)' for a in self.agents if a.name != agent.name])}\n\nRules:\n- Collaborate, not compete\n- Build on others' ideas\n- Be concise but thorough\n- If you have tools, use them\n- You can disagree respectfully and propose better ideas\n- Aim for consensus but highlight trade-offs\n"
@@ -194,7 +206,10 @@ class MultiAIChat:
                     except Exception:
                         pass
 
-                    response = agent.llm.chat(messages, tools=tools or [])
+                    response = agent.llm.chat(
+                        self._govern(topic, agent, messages),
+                        tools=tools or [],
+                    )
                     content = response.content
 
                     # Save to history
@@ -273,8 +288,10 @@ class MultiAIChat:
 
         # Use first agent's LLM as judge (or free mock)
         try:
+            from .harness import governed_call
+
             judge_llm = get_model_gateway().llm(model=self.agents[0].model if self.agents else config.model)
-            resp = judge_llm.chat(judge_messages)
+            resp = judge_llm.chat(governed_call(judge_messages, session_id=str(self.session_id or "")))
             final = resp.content
 
             # Save final

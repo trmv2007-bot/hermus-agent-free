@@ -16,12 +16,21 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1", tags=["canonical"])
+
+#: A health snapshot is a live probe reused for this long. The UI polls every
+#: few seconds; sharing one probe keeps the event loop free without inventing
+#: a status (the payload is always the result of a real probe).
+HEALTH_TTL_SECONDS = 30.0
+_HEALTH_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_CAPABILITY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class CommandRequest(BaseModel):
@@ -38,47 +47,92 @@ class CommandRequest(BaseModel):
 
 @router.get("/system/health")
 async def system_health():
-    """Real health probes (never fabricated)."""
-    import bootstrap
+    """Real health probes (never fabricated).
+
+    ``bootstrap.doctor()`` shells out to inspect the interpreter, the venv and
+    every optional capability. It is a real probe, not a cheap one: running it
+    inline on the event loop blocked *every* other request for ~7s, which made
+    the Control Room feel dead while its own health card was loading. The probe
+    now runs in a worker thread and its result is reused for a few seconds —
+    still a live probe, just not a stampede of them.
+    """
+    now = time.monotonic()
+    cached = _HEALTH_CACHE.get("data")
+    if cached is not None and now - float(_HEALTH_CACHE.get("ts") or 0.0) < HEALTH_TTL_SECONDS:
+        return cached
 
     try:
-        report = bootstrap.doctor()
-        required_ok = all(v["present"] for k, v in report["capabilities"].items() if k.startswith("required."))
-        return {
-            "ok": required_ok,
-            "python": report.get("python"),
-            "venv": report.get("venv"),
-            "capabilities": report["capabilities"],
-        }
+        report = await asyncio.to_thread(_probe_health)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"health probe failed: {exc}") from exc
+    _HEALTH_CACHE.update(ts=time.monotonic(), data=report)
+    return report
+
+
+def _probe_health() -> dict[str, Any]:
+    import bootstrap
+
+    report = bootstrap.doctor()
+    required_ok = all(v["present"] for k, v in report["capabilities"].items() if k.startswith("required."))
+    return {
+        "ok": required_ok,
+        "python": report.get("python"),
+        "venv": report.get("venv"),
+        "capabilities": report["capabilities"],
+    }
+
+
+def warm_health_cache() -> None:
+    """Probe once at startup so the first Control Room load is not 10s of skeletons."""
+    try:
+        report = _probe_health()
+    except Exception:
+        return
+    _HEALTH_CACHE.update(ts=time.monotonic(), data=report)
 
 
 @router.get("/system/capabilities")
 async def system_capabilities(payload: bool = False):
-    """Live provider/model/tool capability state from the canonical gateways."""
+    """Live provider/model/tool capability state from the canonical gateways.
+
+    Building the provider/tool/voice/avatar inventory is synchronous work that
+    touches the filesystem and (for speech/avatar) subprocess discovery. It runs
+    off the event loop and is reused briefly, so opening the Control Room does
+    not block every other request behind capability discovery.
+    """
+    key = "payload" if payload else "cached"
+    now = time.monotonic()
+    hit = _CAPABILITY_CACHE.get(key)
+    if hit and now - float(hit[0]) < HEALTH_TTL_SECONDS:
+        return hit[1]
+    try:
+        report = await asyncio.to_thread(_probe_capabilities, bool(payload))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"capability probe failed: {exc}") from exc
+    _CAPABILITY_CACHE[key] = (time.monotonic(), report)
+    return report
+
+
+def _probe_capabilities(payload: bool) -> dict[str, Any]:
     from core.avatar import get_avatar_service
     from core.models import get_model_gateway
     from core.speech import speech_engine
     from core.tools import get_tool_gateway
     from tools.voice import voice_available_models
 
-    try:
-        model_gw = get_model_gateway()
-        providers = model_gw.providers(probe=bool(payload))
-        tool_gw = get_tool_gateway()
-        tools = tool_gw.descriptors()
-        return {
-            "providers": providers,
-            "tools": {name: d.to_dict() for name, d in tools.items()},
-            "tool_count": len(tools),
-            "circuit": model_gw.health(),
-            "speech": speech_engine.status(),
-            "transcription": voice_available_models(),
-            "avatar": get_avatar_service().status(probe=bool(payload)),
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"capability probe failed: {exc}") from exc
+    model_gw = get_model_gateway()
+    providers = model_gw.providers(probe=payload)
+    tool_gw = get_tool_gateway()
+    tools = tool_gw.descriptors()
+    return {
+        "providers": providers,
+        "tools": {name: d.to_dict() for name, d in tools.items()},
+        "tool_count": len(tools),
+        "circuit": model_gw.health(),
+        "speech": speech_engine.status(),
+        "transcription": voice_available_models(),
+        "avatar": get_avatar_service().status(probe=payload),
+    }
 
 
 @router.post("/commands")

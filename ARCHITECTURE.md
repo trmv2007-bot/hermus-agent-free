@@ -61,6 +61,8 @@ The dashboard is only a projection (snapshot + replay) — it never owns truth.
 | **Mission** | `core.mission.MissionEngine` | mission reports/workspace | only autonomy engine |
 | **Jobs** | `gateway/queue.py` `Job` (subclasses `core.contracts.Job`) + `core/agent_manager` (registry/delegation) | durable event log + results | lease/heartbeat/reaper |
 | **Delegation** | `subagents.subagent` (facade) `→` `subagent.delegate` Job on `gateway.queue.JobQueue` | job log + results | the queue owns lifecycle; `core.delegation` is only the worker implementation |
+| **Harness** | `core.harness.governed_turn` / `governed_call` (`core.harness.runtime`) | `data/harness/*` via `core.harness._store` (atomic + locked) | **Every model turn** goes through `governed_turn` (budget + notices + one cascade recall + session record) or, for strict output contracts, `governed_call` (budget only). `observe_tool` records file-shift; `core/harness/stats.py` is the one read-only projection behind `/api/v1/harness/*` and the console panel. Swarm execution and pooled agents go through the canonical `runtime.turn` / `subagent.delegate` jobs, never a second agent loop. |
+| **Agent pool / roles** | `core.agents` (`Agent`, `AgentPool`, role classes) | harness session + bus records | `run_task` submits a canonical `runtime.turn` job and reports the real answer or an `"Error: …"` — it never simulates completion. `ToolRunner.execute_tool` goes through `ToolGateway`; agent traffic is recorded on `core.harness.bus`. HTTP surface: `/api/v1/agents/*`. |
 | **Web acquisition** | `core.web.WebGateway` (see `docs/WEB_ACQUISITION.md`) | bounded page cache (`core.cache` LRU) + in-memory session jars | `ToolGateway → tools.web_acquisition → WebGateway → StrategyRouter → Scrapling backend` (the only Scrapling importer; required base dependency, browser strategy remains platform-aware) |
 | **Health** | `bootstrap.doctor()` / `core.doctor` | diagnostics | bounded recovery |
 | **Red-line policy / approvals** | `RED_LINES.md` + `core.safety_policy` + `core.approval` | `policies/red_lines.json` + capability ledger + scoped approval grants | deterministic green/yellow/red classification plus scoped grants for yellow actions |
@@ -86,6 +88,25 @@ Speech/media integration follows the same one-owner rule:
 - Capability/status reporting for these features must flow through the existing
   canonical surfaces (`ToolGateway`, `/api/v1/system/capabilities`, `/speech/*`,
   `bootstrap`, `core.doctor`) rather than a dashboard-only truth source.
+
+Turn governance follows the same one-entry rule:
+
+- A path that assembles its own prompt (Council deliberation and planning,
+  delegation synthesis/planning, the multi-model panel, the fleet probe, computer
+  planner/repair, skill distillation, reasoning strategies, the voice ack) calls
+  `core.harness.governed_turn` or `governed_call` before the model. An ungoverned
+  turn has no token budget, no cascade memory, no swarm mail and no session
+  record — and is invisible to the Control Room.
+- `governed_call` is budget-only on purpose. Prompts whose contract is strict
+  JSON (plan, vote, amendments) must not get a memory block appended, or the
+  model starts answering in prose.
+- Three exemptions exist and are declared with a reason in
+  `tests/test_harness_consolidation.py`: the two transports that governance calls
+  into (`core/llm.py`, `core/models/gateway.py`) and the health probe
+  (`core/doctor.py`), which must measure the raw model.
+- `tests/test_harness_consolidation.py` is the gate: an AST walk fails the build
+  on any new ungoverned `.chat(` site, and the gate has a self-test proving it
+  can still fail.
 
 ---
 
@@ -161,11 +182,14 @@ It is served as markup plus assets rather than one inline monolith:
 | `gateway/static/control-room.js` | application script |
 | `gateway/static/control-client.js` | SSE + voice-first browser client |
 | `gateway/static/console.js` | Systems-tab renderer driven by the capability manifest |
+| `gateway/static/control-core.js` | living-core canvas + state polling (a projection, not an animation) |
+| `gateway/static/control-shell.js` | rail, command palette, activity drawer, directive composer |
+| `gateway/static/control-agents.js` | Agents-tab controller (registry CRUD, crew mail, real GPU probe) |
 
 Assets are served from an explicit allow-list (`_serve_control_asset`), not a
 `StaticFiles` mount, so the gateway does not expose the directory. Tests that
 pin control-room wording search `tests/_control_room_source.py`, which
-concatenates all five files.
+concatenates all eight files.
 
 The **Systems** tab is manifest-driven rather than hand-built. `core/console.py`
 declares every subsystem panel (id, group, read-only probe, HTTP endpoint,

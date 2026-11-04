@@ -740,6 +740,7 @@ class MultiKeyManager:
 
         def run_one(task_id: int, task_data: dict, entry: dict) -> dict:
             try:
+                from .harness import governed_call
                 from .llm import FreeLLM
 
                 model = task_data.get("model") or entry.get("default_model") or get_provider(provider).get("default_model")
@@ -753,7 +754,7 @@ class MultiKeyManager:
                     "messages",
                     [{"role": "user", "content": task_data.get("prompt", "")}],
                 )
-                resp = llm.chat(messages, tools=task_data.get("tools"))
+                resp = llm.chat(governed_call(messages, session_id="multi_key.probe", model=f"{provider}/{model}"), tools=task_data.get("tools"))
                 return {
                     "task_id": task_id,
                     "task": task_data.get("prompt") or task_data.get("messages", [{}])[-1].get("content", "")[:80],

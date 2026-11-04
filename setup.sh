@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+c#!/usr/bin/env bash
 #
 # Hermus Agent Free — safe, idempotent installer/orchestrator.
 #

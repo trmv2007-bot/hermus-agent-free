@@ -176,6 +176,7 @@ def _available_workers(models: list[str] = None, providers: list[str] = None, li
 
 
 def _run_worker(worker: dict, prompt: str, system: str = None) -> dict:
+    from .harness import governed_call
     from .llm import FreeLLM
 
     t0 = time.time()
@@ -190,7 +191,9 @@ def _run_worker(worker: dict, prompt: str, system: str = None) -> dict:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        resp = llm.chat(messages)
+        # Budget-only: a fleet probe measures the worker, so no memory/notices
+        # block may be appended to the prompt it is timed on.
+        resp = llm.chat(governed_call(messages, session_id="model_fleet", model=model_ref))
         ms = int((time.time() - t0) * 1000)
         content = resp.content or ""
         # Detect error-ish

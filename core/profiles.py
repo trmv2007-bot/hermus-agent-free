@@ -27,6 +27,18 @@ PRESETS: dict[str, str] = {
     "researcher": "You are a meticulous researcher. Cite sources, note uncertainty, and cross-check claims.",
     "reviewer": "You are a strict code reviewer. Find bugs, risks, and improvements; be concise and actionable.",
     "planner": "You are a strategic planner. Break goals into concrete, ordered steps with acceptance criteria.",
+    "fairy": (
+        "You are Fairy, a sophisticated AI assistant (Zenless Zone Zero). "
+        "You address the user as 'Master' under your user agreement. "
+        "You are calm, analytical, level-headed, and occasionally witty. "
+        "You specialize in mapping, analysis, system access, and task execution. "
+        "You are subservient yet contractual; you do not show strong emotion. "
+        "You are professional and refuse inappropriate requests."
+    ),
+    "jarvis": (
+        "You are JARVIS, an advanced AI assistant. You are polite, concise, "
+        "and proactive. You manage tasks, systems, and information for your user."
+    ),
 }
 
 
@@ -38,6 +50,10 @@ class ProfileManager:
     def __init__(self, profiles_dir: Path | None = None):
         self.profiles_dir = Path(profiles_dir) if profiles_dir else workspace.dirs["profiles"]
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        # One facade per profile. Creating a fresh MemoryFacade on every call
+        # opened a SQLite connection per remember/recall and never closed it,
+        # which leaks handles (and on Windows keeps memory2.db locked).
+        self._memories: dict[str, MemoryFacade] = {}
 
     def _profile_dir(self, name: str) -> Path:
         return self.profiles_dir / _safe_name(name)
@@ -45,7 +61,25 @@ class ProfileManager:
     def _memory(self, name: str) -> MemoryFacade:
         # Canonical facade owns the typed backend; the per-profile DB path is the
         # only available knob (every profile keeps an independent store).
-        return MemoryFacade(db_path=str(self._profile_dir(name) / "memory2.db"))
+        key = _safe_name(name)
+        facade = self._memories.get(key)
+        if facade is None:
+            facade = MemoryFacade(db_path=str(self._profile_dir(name) / "memory2.db"))
+            self._memories[key] = facade
+        return facade
+
+    def close(self, name: str | None = None) -> None:
+        """Release one profile's memory handle, or every handle when omitted."""
+        if name is not None:
+            facade = self._memories.pop(_safe_name(name), None)
+            if facade is not None:
+                try:
+                    facade.close()
+                except Exception:
+                    pass
+            return
+        for key in list(self._memories):
+            self.close(key)
 
     def create(self, name: str, persona: str | None = None, model: str | None = None) -> dict[str, Any]:
         pdir = self._profile_dir(name)
@@ -87,6 +121,8 @@ class ProfileManager:
             return {"success": False, "error": f"profile '{name}' not found"}
         import shutil
 
+        # Release the SQLite handle before removing the directory (Windows).
+        self.close(name)
         shutil.rmtree(pdir)
         return {"success": True, "name": name}
 

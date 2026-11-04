@@ -135,18 +135,23 @@ def _llm_ack(transcript: str) -> str:
         llm = getattr(agent, "llm", None)
         if llm is None:
             return ""
+        from core.harness import governed_call
+
         response = llm.chat(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a voice assistant acknowledging a spoken request. Reply with ONE "
-                        "short spoken sentence (max 12 words) confirming you are starting the work. "
-                        "No preamble, no markdown, no tool calls."
-                    ),
-                },
-                {"role": "user", "content": str(transcript or "")[:500]},
-            ],
+            governed_call(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a voice assistant acknowledging a spoken request. Reply with ONE "
+                            "short spoken sentence (max 12 words) confirming you are starting the work. "
+                            "No preamble, no markdown, no tool calls."
+                        ),
+                    },
+                    {"role": "user", "content": str(transcript or "")[:500]},
+                ],
+                session_id="voice.ack",
+            ),
             tools=None,
         )
         return str(getattr(response, "content", "") or "").strip()[:200]

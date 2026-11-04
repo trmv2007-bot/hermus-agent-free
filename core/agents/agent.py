@@ -254,20 +254,14 @@ class Agent:
             await self.reply(sender_id, f"Received: {content[:100]}")
 
     async def _handle_task_message(self, message: dict) -> None:
-        """Handle a task message."""
+        """Handle a task message by really running it."""
         self.state = AgentState.WORKING
         self.current_task = message.get("task_id")
 
         try:
-            # TODO: Actually process the task
-            # For now, just simulate work
-            await asyncio.sleep(0.5)
-
-            self.stats.tasks_completed += 1
-            response = f"Task completed: {message.get('content', 'unknown')}"
-
+            answer = await self.run_task(str(message.get("content") or ""), task_id=message.get("task_id"))
             if message.get("sender_id"):
-                await self.reply(message["sender_id"], response)
+                await self.reply(message["sender_id"], answer)
 
         except Exception as e:
             self.stats.tasks_failed += 1
@@ -281,14 +275,45 @@ class Agent:
         """Handle a collaboration request."""
         self.state = AgentState.THINKING
 
-        # TODO: Implement actual collaboration logic
-        await asyncio.sleep(0.3)
-
-        response = f"Collaborating on: {message.get('content', 'unknown')}"
+        content = str(message.get("content") or "")
+        answer = await self.run_task(
+            "Collaborate on this with your part of the work, then report your result:\n" + content
+        )
         if message.get("sender_id"):
-            await self.reply(message["sender_id"], response)
+            await self.reply(message["sender_id"], answer)
 
         self.state = AgentState.IDLE
+
+    def _publish_to_bus(self, content: str, *, target_id: str | None = None, kind: str = "dm") -> None:
+        """Record the exchange on the harness bus — the one durable swarm mailbox.
+
+        The in-process queue only reaches agents alive in this process; a reply
+        from another worker or a later session needs the persisted bus, which is
+        also what the Control Room and ``harness_inbox`` read.
+        """
+        try:
+            from ..harness import bus
+
+            bus.send(content, self.agent_id, to=target_id, kind=kind)
+        except Exception:
+            pass
+
+    async def _deliver_locally(self, target_id: str, content: str, message_type: str) -> bool:
+        """Push into a live agent's listener queue. Writes nothing to the bus."""
+        queue = Agent._message_queues.get(target_id)
+        if queue is None:
+            return False
+        message = {
+            "sender_id": self.agent_id,
+            "target_id": target_id,
+            "content": content,
+            "type": message_type,
+            "timestamp": time.time(),
+        }
+        self.stats.messages_sent += 1
+        self.stats.tokens_used += len(content) // 4  # Rough estimate
+        await queue.put(message)
+        return True
 
     async def send(self, target_id: str, content: str, message_type: str = "text") -> bool:
         """
@@ -306,20 +331,9 @@ class Agent:
             logger.warning(f"Target agent {target_id} not found")
             return False
 
-        message = {
-            "sender_id": self.agent_id,
-            "target_id": target_id,
-            "content": content,
-            "type": message_type,
-            "timestamp": time.time(),
-        }
-
-        # Add to our sent stats
-        self.stats.messages_sent += 1
-        self.stats.tokens_used += len(content) // 4  # Rough estimate
-
-        # Queue the message
-        await Agent._message_queues[target_id].put(message)
+        if not await self._deliver_locally(target_id, content, message_type):
+            return False
+        self._publish_to_bus(content, target_id=target_id, kind="dm")
 
         logger.info(f"📤 Agent {self.config.name} sent to {target_id}: {content[:50]}...")
         return True
@@ -332,14 +346,20 @@ class Agent:
         """
         Send a message to all connected agents.
 
+        The bus gets ONE broadcast (swarm semantics), not one DM per recipient;
+        the live listener queues are still fed so agents in this process wake up.
+
         Returns:
             Number of agents that received the message
         """
         count = 0
         for agent_id, agent in Agent._registry.items():
-            if agent.agent_id != self.agent_id:
-                if await self.send(agent_id, content, message_type):
-                    count += 1
+            if agent.agent_id == self.agent_id:
+                continue
+            if await self._deliver_locally(agent_id, content, message_type):
+                count += 1
+        if count:
+            self._publish_to_bus(content, kind="broadcast")
         return count
 
     def connect(self, other: "Agent") -> None:
@@ -356,39 +376,116 @@ class Agent:
             del other.connections[self.agent_id]
         logger.info(f"🔓 Agent {self.config.name} disconnected from {other.config.name}")
 
-    async def run_task(self, task: str, task_id: str = None) -> str:
+    #: The canonical queue kind for one agent turn — the same kind ``POST
+    #: /command`` runs, so a pooled agent is not a second execution engine.
+    JOB_KIND = "runtime.turn"
+
+    def _run_through_queue(self, prompt: str) -> dict:
+        """Execute one prompt as a canonical ``runtime.turn`` job (blocking).
+
+        Callers reach this through ``asyncio.to_thread``: the JobQueue owns the
+        execution lifecycle (queued→running→done/failed/cancelled, retry, timeout,
+        cancellation, persistence), and the turn itself goes through the harness
+        inside ``HermusAgent``. Nothing here builds a prompt or calls a model.
         """
-        Run a task.
+        from subagents.subagent import submit_and_wait
+
+        return submit_and_wait(
+            self.JOB_KIND,
+            {
+                "text": prompt,
+                "model": self.config.model or None,
+                "platform": "api",
+                "user_id": self.agent_id,
+                "mode": "agent",
+            },
+            session_key=f"agent:{self.agent_id}",
+            timeout=float(self.config.timeout or 120),
+        )
+
+    async def run_task(self, task: str, task_id: str = None) -> str:
+        """Run a task through the canonical queue and report what actually happened.
+
+        This used to be ``await asyncio.sleep(0.5)`` followed by
+        ``f"Completed: {task}"``. Every caller inherited that lie: all twelve
+        role methods in :mod:`core.agents.specialization`, the collaborative
+        mission loop, the ``/api/v1/agents`` endpoints and the Control Room
+        Agents panel reported success for work that never reached a model. A
+        failure is now returned as a failure.
 
         Args:
             task: The task to perform
             task_id: Optional task ID
 
         Returns:
-            Result of the task
+            The real answer, or an ``"Error: ..."`` string. Never a fabricated
+            completion.
         """
+        prompt = str(task or "")
         self.state = AgentState.WORKING
         self.current_task = task_id or f"task-{time.time()}"
         self.last_task_time = time.time()
+        self.stats.api_calls += 1
+        self.memory.add_message(role="user", content=prompt)
 
-        # Add to memory
-        self.memory.add_message(role="user", content=task)
+        if not prompt.strip():
+            self.state = AgentState.IDLE
+            self.current_task = None
+            return "Error: task is required"
+
+        # A pooled agent is a harness-governed identity: register the session so
+        # the Control Room sees it working, with the turn attributed to this role.
+        try:
+            from ..harness import sessions as _sessions
+
+            _sessions.begin(
+                self.agent_id,
+                task=prompt[:200],
+                model=str(self.config.model or ""),
+                role=str(getattr(self.config.role, "value", "worker") or "worker"),
+            )
+        except Exception:
+            _sessions = None
 
         try:
-            # TODO: Actually run the task through LLM
-            # For now, simulate processing
-            await asyncio.sleep(0.5)
+            status = await asyncio.to_thread(self._run_through_queue, prompt)
+            result = status.get("result") or {}
+            answer = str(result.get("response") or result.get("answer") or "").strip()
+            queue_state = str(status.get("status") or "")
+            reason = str(
+                status.get("error")
+                or result.get("error")
+                or result.get("blocker_reason")
+                or result.get("failure")
+                or ""
+            )
 
-            result = f"Completed: {task}"
-            self.memory.add_message(role="assistant", content=result)
+            if queue_state in ("failed", "cancelled", "timeout") or not answer:
+                self.stats.tasks_failed += 1
+                self.last_activity = time.time()
+                detail = reason[:300] or f"job ended in state {queue_state or 'unknown'} with no answer"
+                error_msg = f"Error: task did not complete: {detail}"
+                self.memory.add_message(role="assistant", content=error_msg)
+                if _sessions is not None:
+                    _sessions.finish(self.agent_id, status="error", error=detail[:200])
+                logger.warning(f"Agent {self.config.name} task failed: {detail[:120]}")
+                return error_msg
+
+            usage = result.get("usage") or {}
             self.stats.tasks_completed += 1
-
-            return result
+            self.stats.tokens_used += int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
+            self.last_activity = time.time()
+            self.memory.add_message(role="assistant", content=answer)
+            if _sessions is not None:
+                _sessions.finish(self.agent_id, status="done", tokens_out=len(answer) // 4)
+            return answer
 
         except Exception as e:
             self.stats.tasks_failed += 1
             error_msg = f"Error: {str(e)}"
             self.memory.add_message(role="assistant", content=error_msg)
+            if _sessions is not None:
+                _sessions.finish(self.agent_id, status="error", error=str(e)[:200])
             return error_msg
 
         finally:

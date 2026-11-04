@@ -62,6 +62,34 @@ def test_gateway_and_cli_expose_preflight():
     assert "--create-approval-prompts" in cli
 
 
+def test_preflight_green_zone_ask_does_not_block_a_normal_goal():
+    """A coding goal must be able to start without an approval prompt.
+
+    ``shell_execute`` is a green-zone ASK: it runs under the default
+    ``HERMUS_ASK_POLICY=allow`` and no grant can match it, so counting it as a
+    missing approval refused every ordinary build/test mission before it began.
+    """
+    report = preflight_goal("build me a small todo web app and run its tests until they pass")
+    if report.status == "EMERGENCY_STOP_ACTIVE":
+        return
+    assert report.status == "READY"
+    assert report.can_start is True
+    assert report.missing_approvals == []
+    shell = next(f for f in report.findings if f["tool"] == "shell_execute")
+    assert shell["zone"] == "green"
+    assert shell["decision"] == "ask"
+    assert shell["missing_approval"] is False
+
+
+def test_preflight_still_requires_approval_for_yellow_actions():
+    report = preflight_goal("scan ~/Downloads for malware then email me a report")
+    if report.status == "EMERGENCY_STOP_ACTIVE":
+        return
+    yellow = [f for f in report.findings if f["zone"] == "yellow"]
+    assert yellow
+    assert any(f["missing_approval"] for f in yellow)
+
+
 def test_control_room_exposes_preflight_panel():
     src = control_room_source()
     assert "Pre-flight autonomy check" in src

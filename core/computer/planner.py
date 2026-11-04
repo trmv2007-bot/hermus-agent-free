@@ -335,7 +335,9 @@ Return ONLY JSON:
 Supported actions: click_target, type_text, press_key, hotkey, scroll, open_application, close_application, focus_window, wait_until. Never invent coordinates. Decompose every clause. Include preconditions, visual postconditions, ordering dependencies, and explicit transitions. The final successful node must transition to SUCCESS. Unsafe or impossible requests should transition to FAILURE rather than guessing.
 """
         try:
-            response = self.llm.chat([{"role": "user", "content": prompt}])
+            from ..harness import governed_call
+
+            response = self.llm.chat(governed_call([{"role": "user", "content": prompt}], session_id="computer.planner"))
             parsed = self._extract_json(getattr(response, "content", str(response)))
         except Exception:
             parsed = None
