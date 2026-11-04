@@ -186,7 +186,7 @@ jobs:
           await page.locator('#modelRefresh').click();
 
           console.log('QA: personal space');
-          await page.locator('#personalSpaceOpenDock').first().click();
+          await page.locator('#personalSpaceOpenDock:visible').click();
           await page.locator('#overlay').waitFor({state:'visible'});
           await page.locator('#personalSpaceActions').waitFor({state:'attached'});
           await page.locator('#overlay [data-close]').click();
