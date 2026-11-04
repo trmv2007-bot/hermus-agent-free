@@ -167,7 +167,7 @@ jobs:
           await page.locator('#paletteInput').first().fill('model');
           if(await page.locator('#paletteList button').count()!==1) throw new Error('Palette filter failed');
           await page.locator('#paletteList button').first().click();
-          if(!(await page.locator('#overlay').evaluate(el=>el.classList.contains('open')))) throw new Error('Palette item did not open surface');
+          await page.locator('#overlay.open').waitFor({state:'attached'});
           await page.locator('#overlay [data-close]').click();
 
           console.log('QA: jarvis workspace');
