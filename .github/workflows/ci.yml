@@ -186,7 +186,8 @@ jobs:
           await page.locator('#modelRefresh').click();
 
           console.log('QA: personal space');
-          await page.locator('#personalSpaceOpenDock:visible').click();
+          console.log('::notice ::ps-diag url='+page.url()+' body='+await page.evaluate(()=>document.body.className+'|'+document.body.dataset.state)+' btns='+await page.locator('#personalSpaceOpenDock, #personalSpaceOpen').evaluateAll(es=>es.map(e=>{const r=e.getBoundingClientRect();const cs=getComputedStyle(e);return e.id+'='+cs.display+'/'+cs.visibility+' '+Math.round(r.width)+'x'+Math.round(r.height)}).join(' | ')));
+          await page.locator('#personalSpaceOpenDock:visible, #personalSpaceOpen:visible').first().click();
           await page.locator('#overlay').waitFor({state:'visible'});
           await page.locator('#personalSpaceActions').waitFor({state:'attached'});
           await page.locator('#overlay [data-close]').click();
