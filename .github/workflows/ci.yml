@@ -179,7 +179,7 @@ jobs:
           if(await page.locator('#jarvisWorkspace').evaluate(el=>el.classList.contains('open'))) throw new Error('JARVIS workspace did not close');
 
           console.log('QA: models');
-          await page.locator('#modelSelect option').first().waitFor();
+          await page.locator('#modelSelect option').first().waitFor({state:'attached'});
           await page.locator('#modelRole').selectOption('vision');
           await page.locator('#modelSelect').selectOption('local/vision-demo');
           await page.locator('#modelSave').click();
