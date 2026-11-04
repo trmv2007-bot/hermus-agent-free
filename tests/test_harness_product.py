@@ -5,6 +5,7 @@ reaction to harness events, and the nightly-eval scheduler."""
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from core.events.bus import EventBus
@@ -169,7 +170,7 @@ def test_harness_schedule_cli_registers_and_removes():
 
     env.update({k: v for k, v in os.environ.items() if k.startswith("HERMUS_")})
     env["HERMUS_NO_DOTENV"] = "1"
-    py = str(REPO / ".venv/bin/python")
+    py = sys.executable  # CI has no .venv; use the running interpreter
     suite = "zz_sched_test"
     r = subprocess.run(
         [py, str(REPO / "hermus.py"), "harness", "schedule", "--suite", suite, "--at", "4:00 am"],
