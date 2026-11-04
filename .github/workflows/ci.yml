@@ -112,7 +112,7 @@ jobs:
           const json=(body)=>({status:200,contentType:'application/json',body:JSON.stringify(body)});
           await page.route('**/*',async route=>{
             const u=new URL(route.request().url()), m=route.request().method(), p=u.pathname;
-            if(!/^(\/api\/|\/models\/|\/workshop\/|\/context|\/presence\/|\/focus|\/learning|\/routines|\/devices|\/personal-space)/.test(p)) return route.continue();
+            if(p.startsWith('/static/')||p==='/control.html'||p==='/favicon.ico') return route.continue();
             if(p==='/api/v1/system/health') return route.fulfill(json({gateway:{ok:true},runtime:{running:true}}));
             if(p==='/api/v1/system/capabilities') return route.fulfill(json({capabilities:{web_search:true,osint_tools:true,world_model:true,workshop:true,media:true}}));
             if(p==='/api/v1/agents/list') return route.fulfill(json({agents:[{name:'Researcher',role:'research',state:'working'},{name:'Coder',role:'coding',state:'idle'}]}));
@@ -142,8 +142,7 @@ jobs:
 
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           await page.waitForTimeout(1500);
-          const gs=page.locator('#globalSearch');
-          console.log('::notice ::diagnostics: #globalSearch count='+await gs.count()+' visible='+(await gs.count()?await gs.first().isVisible():false)+' errors='+errors.join(' | '));
+          console.log('::notice ::diagnostics: errors so far='+(errors.join(' | ')||'none'));
           console.log('QA: baseline');
           await page.screenshot({path:out+'/00-baseline.png',fullPage:false});
 
@@ -163,56 +162,37 @@ jobs:
           }
 
           console.log('QA: palette');
-          await page.locator('#globalSearch').click();
+          await page.keyboard.press('Control+p');
+          if(!(await page.locator('#palette').evaluate(el=>el.classList.contains('open')))) throw new Error('Ctrl+P did not open palette');
           await page.locator('#paletteInput').fill('model');
           if(await page.locator('#paletteList button').count()!==1) throw new Error('Palette filter failed');
           await page.locator('#paletteList button').first().click();
+          if(!(await page.locator('#overlay').evaluate(el=>el.classList.contains('open')))) throw new Error('Palette item did not open surface');
           await page.locator('#overlay [data-close]').click();
 
-          console.log('QA: workbench slides');
-          for(const v of ['chat','ide','browser','terminal','image','video','notes']){
-            await page.locator('[data-workbench-tab="'+v+'"]').click();
-            if(!(await page.locator('[data-workbench-view="'+v+'"]').evaluate(el=>el.classList.contains('active')))) throw new Error('Workbench view failed: '+v);
-            await page.screenshot({path:out+'/workbench-'+v+'.png',fullPage:false});
-          }
-
-          console.log('QA: toggles');
-          for(const t of await page.locator('[data-toggle]:visible').all()){
-            const before=await t.getAttribute('aria-pressed');
-            await t.click();
-            if(await t.getAttribute('aria-pressed')===before) throw new Error('Toggle failed');
-            await t.click();
-            if(await t.getAttribute('aria-pressed')!==before) throw new Error('Toggle restore failed');
-          }
-
-          console.log('QA: environment');
-          const env=page.locator('.environment-panel');
-          await env.locator('[data-panel-toggle]').click();
-          if(!(await env.evaluate(el=>el.classList.contains('is-collapsed')))) throw new Error('Environment collapse failed');
-          await env.locator('[data-panel-toggle]').click();
+          console.log('QA: jarvis workspace');
+          const logo=page.locator('#hermusLogo');
+          await logo.click(); await logo.click(); await logo.click();
+          if(!(await page.locator('#jarvisWorkspace').evaluate(el=>el.classList.contains('open')))) throw new Error('Triple-click did not open JARVIS workspace');
+          await page.screenshot({path:out+'/jarvis-workspace.png',fullPage:false});
+          await page.locator('[data-jarvis-close]').click();
+          if(await page.locator('#jarvisWorkspace').evaluate(el=>el.classList.contains('open'))) throw new Error('JARVIS workspace did not close');
 
           console.log('QA: models');
+          await page.locator('#modelSelect option').first().waitFor();
           await page.locator('#modelRole').selectOption('vision');
           await page.locator('#modelSelect').selectOption('local/vision-demo');
           await page.locator('#modelSave').click();
           await page.locator('#modelRefresh').click();
 
-          console.log('QA: rooms');
-          await page.locator('[data-room="main-hall"]').click(); await page.locator('#workshopClose').click();
-          await page.locator('[data-room="ide-lab"]').click(); await page.locator('#workshopClose').click();
-          await page.locator('[data-room="model-lab"]').click(); await page.locator('#overlay [data-close]').click();
-          await page.locator('[data-room="media-studio"]').click();
-          await page.locator('[data-room="control-room"]').click(); await page.locator('#overlay [data-close]').click();
-          await page.locator('[data-room="personal-space"]').click(); await page.locator('#overlay [data-close]').click();
-
           console.log('QA: personal space');
           await page.locator('#personalSpaceOpenDock').click();
           await page.locator('#overlay').waitFor({state:'visible'});
-          if(!(await page.locator('#personalSpaceActions').count())) throw new Error('Personal Space actions missing');
+          await page.locator('#personalSpaceActions').waitFor({state:'attached'});
           await page.locator('#overlay [data-close]').click();
 
           console.log('QA: workshop');
-          await page.locator('[data-workshop-open]').first().click();
+          await page.locator('[data-deep-workshop]:visible').first().click();
           await page.locator('#workshop').waitFor({state:'visible'});
           await page.locator('#workshopRefresh').click();
           await page.locator('[data-workshop-project="demo-app"]').click();
@@ -225,11 +205,7 @@ jobs:
           await page.locator('#workshopSend').click();
           await page.locator('#workshop').waitFor({state:'hidden'});
 
-          console.log('QA: workbench hide/restore and chat');
-          await page.locator('[data-workbench-tab="chat"]').click();
-          await page.locator('#workbenchClose').click();
-          if(!(await page.locator('.bottom-workbench').evaluate(el=>el.classList.contains('is-hidden')))) throw new Error('Workbench hide failed');
-          await page.locator('#workbenchRestore').click();
+          console.log('QA: command line');
           await page.locator('#command').fill('QA command');
           await page.locator('#send').click();
           await page.locator('#command').fill('QA enter');

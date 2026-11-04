@@ -257,6 +257,9 @@
 
   async function boot() {
     if (!document.querySelector('#consolePanels')) return;
+    // The landing shell mounts #consolePanels without the control-room script;
+    // without the shared plumbing there is nothing to boot against.
+    if (typeof requestJSON === 'undefined') return;
     bind();
     if (!(await loadManifest())) return;
     syncGroups();
