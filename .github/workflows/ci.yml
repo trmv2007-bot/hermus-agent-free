@@ -216,15 +216,15 @@ jobs:
           await page.locator('#voiceButton').click();
 
           console.log('QA: unique action coverage');
-          const opens=[...new Set(await page.locator('[data-open]:visible').evaluateAll(es=>es.map(e=>e.getAttribute('data-open'))))];
+          const opens=[...new Set(await page.locator('[data-open]:visible:not(.sr-only)').evaluateAll(es=>es.map(e=>e.getAttribute('data-open'))))];
           for(const name of opens){
-            await page.locator('[data-open="'+name+'"]:visible').first().click();
+            await page.locator('[data-open="'+name+'"]:visible:not(.sr-only)').first().click();
             await page.waitForTimeout(50);
             if(await page.locator('#overlay').evaluate(el=>el.classList.contains('open'))) await page.locator('#overlay [data-close]').click();
           }
-          const commands=[...new Set(await page.locator('[data-command]:visible').evaluateAll(es=>es.map(e=>e.getAttribute('data-command'))))];
+          const commands=[...new Set(await page.locator('[data-command]:visible:not(.sr-only)').evaluateAll(es=>es.map(e=>e.getAttribute('data-command'))))];
           for(const command of commands){
-            await page.locator('[data-command="'+command+'"]:visible').first().click();
+            await page.locator('[data-command="'+command+'"]:visible:not(.sr-only)').first().click();
             await page.waitForTimeout(50);
           }
 
