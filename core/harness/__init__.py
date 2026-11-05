@@ -1,36 +1,54 @@
-"""Hermus agent harness — jcode-inspired runtime primitives.
+"""Hermus agent harness.
 
-Session ≠ window. Compaction, file-shift events, a message bus, cascade
-memory and same-repo swarm live here so the ReAct loop can stay small.
+Two layers live here:
 
-Ownership: :mod:`core.harness.runtime` is the one facade the agent calls, and
-:func:`core.harness.runtime.governed_turn` is the ONE turn entry — every path
-that assembles a prompt by hand (counsel, delegation, multi-model panels, the
-fleet probe, the swarm pool) goes through it, so no model turn escapes budget,
-memory, swarm mail and the session record. :mod:`core.harness.stats` is the one
-read-only projection the gateway uses; :mod:`core.harness._store` is the one
-durable JSON store; :mod:`core.harness.bus` is the one agent-message bus.
+* **Runtime primitives** (``bus``, ``files``, ``sessions``, compaction,
+  cascade memory, swarm) — jcode-inspired machinery the ReAct loop uses each
+  turn so the loop itself can stay small. Session ≠ window.
+* **Eval harness** (``tasks``, ``verify``, ``runner``, ``report``, ``models``) —
+  the outer layer that makes HERMUS usable *as* a harness: define task suites,
+  run the agent against each task in an isolated workspace, verify the result,
+  and produce JSON/markdown reports with history and A/B comparison. Any model
+  the runtime can see — API-key/auth hosted providers or local runtimes — can
+  be the agent under test via a flexible ``--model`` spec.
+  CLI: ``hermus harness run <suite>`` (see ``hermus_cli/g_runtime.py``).
 """
 
-from . import bus, files, sessions, stats
+from . import bus, files, sessions
 from .compaction import compact_messages
 from .memory_graph import cascade_recall
-from .runtime import HarnessRuntime, governed_call, governed_turn, harness
+from .runner import HarnessRunner, RunOptions, default_agent_factory
+from .runtime import HarnessRuntime, harness
 from .swarm import run_workers, spawn
 from .swarm import status as swarm_status
+from .tasks import BUILTIN_SUITES_DIR, Suite, SuiteError, Task, list_builtin_suites, resolve_suite, suite_info
+from .verify import verify_task
 
 __all__ = [
     "bus",
     "files",
     "sessions",
-    "stats",
     "compact_messages",
     "cascade_recall",
     "HarnessRuntime",
     "harness",
-    "governed_turn",
-    "governed_call",
     "spawn",
     "run_workers",
     "swarm_status",
+    # eval harness
+    "BUILTIN_SUITES_DIR",
+    "Suite",
+    "SuiteError",
+    "Task",
+    "list_builtin_suites",
+    "resolve_suite",
+    "suite_info",
+    "verify_task",
+    "MOCK_REF",
+    "list_models",
+    "ping_model",
+    "resolve_model_spec",
+    "HarnessRunner",
+    "RunOptions",
+    "default_agent_factory",
 ]

@@ -593,7 +593,7 @@ class SkillForge:
         try:
             self.skills_dir.mkdir(parents=True, exist_ok=True)
             tmp = self.registry_path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True), encoding="utf-8")
+            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True))
             tmp.replace(self.registry_path)
         except Exception:
             pass
@@ -767,10 +767,9 @@ class SkillForge:
         if self._llm:
             return self._llm(messages)
         try:
-            from .harness import governed_call
             from .models import get_model_gateway
 
-            resp = get_model_gateway().chat(governed_call(messages, session_id="skill_forge"))
+            resp = get_model_gateway().chat(messages)
             return getattr(resp, "content", "") or ""
         except Exception:
             return ""
@@ -968,14 +967,20 @@ class SkillForge:
         except Exception as e:
             return {**report, "valid": False, "error": f"skill.py does not compile: {e}"}
 
+        project_root = json.dumps(str(Path(__file__).resolve().parents[1]))
         probe = (
             "import importlib.util,sys,json;"
-            f"spec=importlib.util.spec_from_file_location('sk', r'{py}');"
+            f"sys.path.insert(0,{project_root});"
+            "spec=importlib.util.spec_from_file_location('sk','skill.py');"
             "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
             "steps=m.plan();r=m.run(task='validate', execute=False);"
             "print(json.dumps({'ok':bool(r.get('success')),'steps':len(steps)}))"
         )
-        rc, out, err = self._probe(probe, timeout=timeout)
+        rc, out, err = self._probe(
+            probe,
+            timeout=timeout,
+            files={"skill.py": py.read_text(encoding="utf-8")},
+        )
         report["checks"].append(
             {"name": "import+entrypoint", "ok": rc == 0 and '"ok": true' in out, "detail": (out or err)[:400]}
         )
@@ -984,21 +989,26 @@ class SkillForge:
         report["valid"] = all(c["ok"] for c in report["checks"])
         return report
 
-    def _probe(self, code: str, timeout: int = 25) -> tuple[int, str, str]:
+    def _probe(
+        self,
+        code: str,
+        timeout: int = 25,
+        cwd: Path | None = None,
+        files: dict[str, str] | None = None,
+    ) -> tuple[int, str, str]:
         """Execute a validation snippet under resource limits (sandbox if present)."""
+        probe_cwd = str(cwd or self.skills_dir.parent)
         try:
             from .sandbox import sandbox
 
-            res = sandbox.run_python(code, timeout=timeout, purpose="skill-validation")
-            rc = int(res.get("returncode", 1))
-            out = str(res.get("stdout", "") or "")
-            err = str(res.get("stderr", "") or "")
-            # Only trust the sandbox when it actually produced output. A
-            # disabled/unavailable backend can report rc=0 with nothing at all;
-            # that used to quarantine a perfectly good skill with an empty
-            # "import failed:" message.
-            if out or err:
-                return rc, out, err
+            res = sandbox.run_python(
+                code,
+                timeout=timeout,
+                cwd=probe_cwd if not files else None,
+                files=files,
+                purpose="skill-validation",
+            )
+            return int(res.get("returncode", 1)), str(res.get("stdout", "")), str(res.get("stderr", ""))
         except Exception:
             pass
         try:
@@ -1006,10 +1016,8 @@ class SkillForge:
                 [sys.executable, "-c", code],
                 capture_output=True,
                 text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=timeout,
-                cwd=str(self.skills_dir.parent),
+                cwd=probe_cwd,
             )
             return proc.returncode, proc.stdout, proc.stderr
         except Exception as e:
@@ -1037,18 +1045,16 @@ class SkillForge:
         staging = self.skills_dir / f".staging_{cand.name}"
         try:
             staging.mkdir(parents=True, exist_ok=True)
-            (staging / "SKILL.md").write_text(self.skill_md(cand), encoding="utf-8")
-            (staging / "skill.py").write_text(self.skill_py(cand), encoding="utf-8")
-            (staging / "test_skill.py").write_text(self.smoke_test(cand), encoding="utf-8")
+            (staging / "SKILL.md").write_text(self.skill_md(cand))
+            (staging / "skill.py").write_text(self.skill_py(cand))
+            (staging / "test_skill.py").write_text(self.smoke_test(cand))
             report = self.validate(staging) if validate else {"valid": True, "skipped": True}
             if not report.get("valid"):
                 self.quarantine_dir.mkdir(parents=True, exist_ok=True)
                 bad = self.quarantine_dir / f"{cand.name}_{datetime.now().strftime('%H%M%S')}"
                 shutil.move(str(staging), str(bad))
                 try:
-                    (bad / "VALIDATION_ERROR.txt").write_text(
-                        json.dumps(report, indent=2, default=str), encoding="utf-8"
-                    )
+                    (bad / "VALIDATION_ERROR.txt").write_text(json.dumps(report, indent=2, default=str))
                 except Exception:
                     pass
                 return {"installed": False, "quarantined": str(bad), "report": report}
@@ -1221,6 +1227,16 @@ class SkillForge:
             }
 
         result = self.install(cand)
+        if result.get("installed"):
+            try:
+                reg = self._registry()
+                entry = (reg.get("skills") or {}).get(cand.name)
+                if entry is not None:
+                    entry["runs"] = max(int(entry.get("runs") or 0), observed)
+                    entry["successes"] = max(int(entry.get("successes") or 0), observed)
+                    self._save_registry(reg)
+            except Exception:
+                pass
         result["evaluation"] = evaluation.to_dict()
         result["proof"] = proof.to_dict()
         result["repeatability"] = {"signature": signature, "observed": observed, "required": min_repeats}

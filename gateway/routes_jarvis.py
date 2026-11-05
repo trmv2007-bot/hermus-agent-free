@@ -1,7 +1,8 @@
 """Read-only control-plane data and honest Navigator operations for JARVIS.
 
-This router deliberately aggregates existing runtime registries rather than
-inventing dashboard state.  No secret values are returned.
+This router exposes the product-facing Nexus contract while retaining the
+existing runtime endpoints for compatibility. Nexus is the interaction layer;
+queue/run services remain the execution layer.
 """
 
 from __future__ import annotations
@@ -9,22 +10,18 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-import threading
 import time
 from urllib.parse import urlparse
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from core.nexus.service import nexus
+from core.orchestrator import orchestrator
+from core.run_events import run_bus
+
 router = APIRouter()
 _STARTED = time.monotonic()
-
-#: The aggregate samples the resource monitor and capability gate, which can
-#: take seconds (nvidia-smi). Reusing one real sample for a few seconds keeps
-#: the 5s UI poll cheap without inventing values.
-STATUS_TTL_SECONDS = 30.0
-_STATUS_LOCK = threading.Lock()
-_STATUS_CACHE: dict[str, object] = {"ts": 0.0, "data": None}
 
 
 def _active_count(rows: list[dict]) -> int:
@@ -32,30 +29,16 @@ def _active_count(rows: list[dict]) -> int:
 
 
 @router.get("/api/jarvis/status")
-def jarvis_status():
-    """One factual snapshot used by the JARVIS status/telemetry panels.
-
-    Declared ``def`` (not ``async def``) on purpose: the body reads the queue,
-    the run bus, the agent/tool/artifact registries and the resource monitor,
-    all synchronously. FastAPI runs a sync handler in its threadpool, so this
-    can no longer stall the event loop while the Control Room polls it.
-    """
+async def jarvis_status():
     from core.agent_manager import agent_manager
     from core.artifact_manager import artifact_manager
     from core.computer.resources import get_resource_monitor
     from core.config import config
     from core.model_capabilities import mission_capability_gate
     from core.providers import list_providers
-    from core.run_events import run_bus
     from core.tool_registry import tool_registry
     from gateway.channels import get_channel_status, get_discord_token, get_telegram_token
     from gateway.queue import job_queue
-
-    now = time.monotonic()
-    with _STATUS_LOCK:
-        cached = _STATUS_CACHE.get("data")
-        if isinstance(cached, dict) and now - float(_STATUS_CACHE.get("ts") or 0.0) < STATUS_TTL_SECONDS:
-            return cached
 
     queue = job_queue.status()
     jobs = job_queue.list_jobs(limit=100)
@@ -65,11 +48,10 @@ def jarvis_status():
     channels = get_channel_status()
     artifacts = artifact_manager.list_artifacts()
     model_ref = str(getattr(config, "model", "") or "")
-    capability = mission_capability_gate(model_ref)
-    telemetry = get_resource_monitor().sample()
+    capability = await asyncio.to_thread(mission_capability_gate, model_ref)
+    telemetry = await asyncio.to_thread(get_resource_monitor().sample)
     providers = list_providers()
-
-    snapshot = {
+    return {
         "gateway": {"reachable": True, "version": "2.2-free-architecture", "uptime_seconds": int(time.monotonic() - _STARTED)},
         "queue": queue,
         "counts": {
@@ -90,9 +72,6 @@ def jarvis_status():
         "providers": providers,
         "telemetry": telemetry,
     }
-    with _STATUS_LOCK:
-        _STATUS_CACHE.update(ts=time.monotonic(), data=snapshot)
-    return snapshot
 
 
 def _validate_public_url(value: str) -> tuple[str | None, str | None]:
@@ -100,8 +79,6 @@ def _validate_public_url(value: str) -> tuple[str | None, str | None]:
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             return None, "Only absolute http:// or https:// URLs are supported"
-        # Browser retrieval is server-side. Refuse loopback/private/link-local
-        # targets so this UI cannot be used as an SSRF primitive.
         for info in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)):
             ip = ipaddress.ip_address(info[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
@@ -113,12 +90,10 @@ def _validate_public_url(value: str) -> tuple[str | None, str | None]:
 
 @router.post("/navigator/fetch")
 async def navigator_fetch(payload: dict | None = None):
-    """Perform a real Playwright navigation and extract visible body text."""
     payload = payload or {}
     url, error = await asyncio.to_thread(_validate_public_url, str(payload.get("url") or "").strip())
     if error:
         return JSONResponse({"success": False, "error": error}, status_code=400)
-
     from tools.browser import browser_extract, browser_navigate
 
     result = await asyncio.to_thread(browser_navigate, url)
@@ -137,3 +112,58 @@ async def navigator_fetch(payload: dict | None = None):
         "text": str(extracted.get("text") or "")[:20000],
         "retrieval": "playwright",
     }
+
+
+# ---------------------------------------------------------------- Nexus API
+# The dashboard consumes this product-level contract. It does not need to know
+# how queues, agents, memory, approvals or tools are implemented internally.
+@router.get("/api/nexus/state")
+async def nexus_state(user_id: str = "default"):
+    return orchestrator.state(user_id=user_id)
+
+
+@router.post("/api/nexus/command")
+async def nexus_command(payload: dict | None = None):
+    payload = payload or {}
+    result = orchestrator.submit(
+        str(payload.get("text") or ""),
+        user_id=str(payload.get("user_id") or "default"),
+        session_id=str(payload.get("session_id") or "") or None,
+        platform=str(payload.get("channel") or payload.get("platform") or "nexus"),
+        mode=str(payload.get("mode") or "chat"),
+        prefer=str(payload.get("prefer") or "") or None,
+        priority=int(payload.get("priority") or 0),
+    )
+    return JSONResponse(result.to_dict(), status_code=202 if result.accepted else 400)
+
+
+@router.get("/api/nexus/missions/{mission_id}")
+async def nexus_mission(mission_id: str):
+    mission = nexus.mission(mission_id)
+    if mission is None:
+        return JSONResponse({"error": "mission not found", "mission_id": mission_id}, status_code=404)
+    return {"mission": mission}
+
+
+@router.post("/api/nexus/runs/{run_id}/cancel")
+async def nexus_cancel(run_id: str):
+    ok = orchestrator.cancel(run_id)
+    return JSONResponse({"ok": ok, "run_id": run_id}, status_code=200 if ok else 404)
+
+
+@router.post("/api/nexus/runs/{run_id}/steer")
+async def nexus_steer(run_id: str, payload: dict | None = None):
+    payload = payload or {}
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "text is required"}, status_code=400)
+    ok = orchestrator.steer(run_id, text)
+    return JSONResponse({"ok": ok, "run_id": run_id}, status_code=200 if ok else 404)
+
+
+@router.get("/api/nexus/runs/{run_id}")
+async def nexus_run(run_id: str, after: int = 0):
+    run = run_bus.get(run_id)
+    if run is None:
+        return JSONResponse({"error": "run not found", "run_id": run_id}, status_code=404)
+    return {"run": run.to_dict(), "events": run_bus.history(run_id, after=after)}

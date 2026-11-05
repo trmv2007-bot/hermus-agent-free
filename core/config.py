@@ -264,6 +264,34 @@ class Config(BaseSettings):
     presence_checkin_after_minutes: int = Field(default=240, validation_alias="HERMUS_PRESENCE_CHECKIN_AFTER_MINUTES")
     presence_proactive_checkins: EnvFlag = Field(default=False, validation_alias="HERMUS_PRESENCE_PROACTIVE_CHECKINS")
 
+    # ---- Sentinel (always-alert, event-driven core) --------------------------
+    # Salience thresholds in [0,1]: >= alert_threshold -> notify+enqueue,
+    # >= enqueue_threshold -> enqueue a job, >= note_threshold -> attention
+    # note, >= llm_triage_threshold -> one-shot LLM act/ignore triage.
+    sentinel_alert_threshold: float = Field(default=0.75, validation_alias="HERMUS_SENTINEL_ALERT_THRESHOLD")
+    sentinel_enqueue_threshold: float = Field(default=0.5, validation_alias="HERMUS_SENTINEL_ENQUEUE_THRESHOLD")
+    sentinel_note_threshold: float = Field(default=0.25, validation_alias="HERMUS_SENTINEL_NOTE_THRESHOLD")
+    sentinel_llm_triage_threshold: float = Field(default=0.45, validation_alias="HERMUS_SENTINEL_LLM_TRIAGE_THRESHOLD")
+    sentinel_llm_triage_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_SENTINEL_LLM_TRIAGE_ENABLED")
+    # Periodic event->memory consolidation ("learning about my things"), seconds.
+    sentinel_consolidate_seconds: int = Field(default=300, validation_alias="HERMUS_SENTINEL_CONSOLIDATE_SECONDS")
+    # Propose a durable proactive rule after this many acted-on repeats of the
+    # same event pattern (proposals still need human approval to enable).
+    sentinel_rule_propose_after: int = Field(default=3, validation_alias="HERMUS_SENTINEL_RULE_PROPOSE_AFTER")
+    # When the gateway starts, also run the sentinel inline (always-alert core).
+    sentinel_with_gateway: EnvFlag = Field(default=True, validation_alias="HERMUS_SENTINEL_WITH_GATEWAY")
+    # Model spec used for sentinel LLM triage when spawned by the gateway.
+    sentinel_model: str = Field(default="auto", validation_alias="HERMUS_SENTINEL_MODEL")
+    # Min seconds between sentinel-alert-triggered proactive check-ins.
+    sentinel_checkin_cooldown_seconds: int = Field(default=900, validation_alias="HERMUS_SENTINEL_CHECKIN_COOLDOWN_SECONDS")
+    # Bounded autonomous curiosity: Personal Space only works after a quiet period,
+    # has a daily cycle cap, and runs curiosity turns read-only until the owner approves a proposal.
+    personal_space_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_PERSONAL_SPACE_ENABLED")
+    personal_space_state_path: str = Field(default="data/personal_space.json", validation_alias="HERMUS_PERSONAL_SPACE_STATE")
+    personal_space_interval_seconds: int = Field(default=900, validation_alias="HERMUS_PERSONAL_SPACE_INTERVAL_SECONDS")
+    personal_space_idle_minutes: int = Field(default=10, validation_alias="HERMUS_PERSONAL_SPACE_IDLE_MINUTES")
+    personal_space_daily_cap: int = Field(default=4, validation_alias="HERMUS_PERSONAL_SPACE_DAILY_CAP")
+
     # Semantic memory / embeddings (free local)
     embeddings_db_path: str = "data/embeddings.db"
     embedding_model: str = Field(default="nomic-embed-text", validation_alias="HERMUS_EMBED_MODEL")

@@ -557,7 +557,7 @@ async def screen_analyze(payload: dict):
     from core.integrations import _screen_recorder
 
     frames = _screen_recorder().recent(float(payload.get("seconds", 10.0)))
-    analyzer = VideoAnalyzer.with_ollama(payload.get("model", "llava:7b")) if payload.get("use_vision", True) else VideoAnalyzer()
+    analyzer = VideoAnalyzer.with_ollama(payload.get("model") or None) if payload.get("use_vision", True) else VideoAnalyzer()
     return await asyncio.to_thread(
         analyzer.analyze,
         frames,
@@ -574,7 +574,7 @@ async def screen_watch(payload: dict):
     denied = _permission_guard("screen_watch", payload or {})
     if denied is not None:
         return denied
-    analyzer = VideoAnalyzer.with_ollama(payload.get("model", "llava:7b"))
+    analyzer = VideoAnalyzer.with_ollama(payload.get("model") or None)
     watcher = ScreenWatcher(_screen_recorder(), analyzer=analyzer)
     return await asyncio.to_thread(
         watcher.watch,
@@ -604,7 +604,7 @@ async def screen_action_after(payload: dict):
     denied = _permission_guard("screen_action_after", payload or {})
     if denied is not None:
         return denied
-    analyzer = VideoAnalyzer.with_ollama(payload.get("model", "llava:7b")) if payload.get("use_vision", False) else None
+    analyzer = VideoAnalyzer.with_ollama(payload.get("model") or None) if payload.get("use_vision", False) else None
     verifier = ScreenVerifier(
         vision_model=analyzer.evaluate_condition if analyzer else None,
         transition_model=analyzer.evaluate_transition if analyzer else None,

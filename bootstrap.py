@@ -786,6 +786,27 @@ def run(
         print("HERMUS SETUP: READY" if report.get("overall", {}).get("required") else "HERMUS SETUP: INCOMPLETE — FIX REQUIRED")
     else:
         print_installation_report(report, optional_install=optional_result)
+    # Best-effort autostart: a fresh, healthy machine should be alert from boot.
+    # Never fatal, never prints READY, skipped in verify-only mode.
+    if not verify_only and not os.environ.get("HERMUS_SKIP_AUTOSTART") and report.get("overall", {}).get("required"):
+        try:
+            import subprocess as _sp
+
+            _root = Path(__file__).resolve().parent
+            _py = vdir_python or sys.executable
+            _r = _sp.run(
+                [_py, str(_root / "hermus.py"), "sentinel", "install"],
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            if _r.returncode == 0:
+                _lines = [ln for ln in (_r.stdout or "").splitlines() if ln.strip()]
+                print("Sentinel autostart: " + (_lines[-1] if _lines else "installed"))
+            else:
+                print(f"Sentinel autostart skipped (non-fatal): {((_r.stderr or _r.stdout) or '').strip()[:200]}")
+        except Exception as e:
+            print(f"Sentinel autostart skipped (non-fatal): {e}")
     return 0 if report.get("overall", {}).get("required") else 1
 
 

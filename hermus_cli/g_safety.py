@@ -225,13 +225,10 @@ def _run_powers(args, ctx: CLIContext) -> None:
 
         registry = get_capability_registry()
         if args.powers_action == "registry":
-            records = registry.list()
-            if not records:
-                # A command that prints nothing looks broken. Say what the
-                # registry is and how to put something in it.
-                print("No capabilities registered yet.")
-                print("Track one with: hermus powers register <power> --category <category> --status missing")
-            for rec in records:
+            rows = registry.list()
+            if not rows:
+                print("No capability readiness/activation records registered yet.")
+            for rec in rows:
                 print(
                     f" - {rec.get('name')} | status={rec.get('status')} | category={rec.get('category')} | activation={rec.get('activation_request_id')}"
                 )

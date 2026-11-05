@@ -14,15 +14,16 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional, Callable
+from typing import Any
 
 from core.log import get_logger
-from .agent import Agent, AgentState, AgentRole
+
+from .agent import Agent, AgentRole
 from .pool import get_pool
-from .messaging import MessageType, MessagePriority
 
 logger = get_logger(__name__)
 
@@ -82,7 +83,7 @@ class MissionTask:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MissionTask":
+    def from_dict(cls, data: dict) -> MissionTask:
         return cls(
             task_id=data.get("task_id", str(uuid.uuid4())),
             description=data.get("description", ""),
@@ -141,7 +142,7 @@ class AgentTeam:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AgentTeam":
+    def from_dict(cls, data: dict) -> AgentTeam:
         return cls(
             team_id=data.get("team_id", str(uuid.uuid4())),
             name=data.get("name", "Team"),
@@ -245,7 +246,7 @@ class CollaborativeMission:
             )
             subtasks.append(
                 await self.add_task(
-                    f"Analyze findings from research",
+                    "Analyze findings from research",
                     AgentRole.RESEARCHER,
                 )
             )
@@ -259,7 +260,7 @@ class CollaborativeMission:
             )
             subtasks.append(
                 await self.add_task(
-                    f"Test the code",
+                    "Test the code",
                     AgentRole.CODER,
                 )
             )
@@ -477,7 +478,7 @@ class CollaborativeMission:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CollaborativeMission":
+    def from_dict(cls, data: dict) -> CollaborativeMission:
         mission = cls(
             mission_id=data.get("mission_id", str(uuid.uuid4())),
             description=data.get("description", ""),
@@ -647,7 +648,7 @@ def create_mission(description: str, team: AgentTeam = None) -> CollaborativeMis
     return mission
 
 
-def get_mission(mission_id: str) -> Optional[CollaborativeMission]:
+def get_mission(mission_id: str) -> CollaborativeMission | None:
     """Get a mission by ID."""
     return _missions.get(mission_id)
 

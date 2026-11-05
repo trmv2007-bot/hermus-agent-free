@@ -98,7 +98,8 @@ class EventBus:
 
     def unsubscribe(self, cb: Subscriber) -> None:
         with self._lock:
-            self._subscribers = [(t, c) for (t, c) in self._subscribers if c is not cb]
+            # bound methods: `is` fails (new object per access), equality works
+            self._subscribers = [(t, c) for (t, c) in self._subscribers if c != cb]
 
     # -- replay / snapshot ------------------------------------------------------
     @property

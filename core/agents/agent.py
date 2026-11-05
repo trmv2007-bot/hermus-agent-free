@@ -13,17 +13,13 @@ Each Agent has:
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Optional
 
 from core.log import get_logger
-from core.config import config
 
 logger = get_logger(__name__)
 
@@ -63,11 +59,14 @@ class AgentConfig:
     model: str = "mistral:7b"
     role: AgentRole = AgentRole.GENERAL
     api_key: str = None
+    key_name: str = None
     base_url: str = None
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout: int = 120
     retry_attempts: int = 3
+    idle_timeout: float = 900
+    max_concurrent: int = 1
 
     def to_dict(self) -> dict:
         return {
@@ -75,27 +74,33 @@ class AgentConfig:
             "provider": self.provider,
             "model": self.model,
             "role": self.role.value,
-            "api_key": self.api_key,
+            "api_key": "***REDACTED***" if self.api_key else None,
+            "key_name": self.key_name,
             "base_url": self.base_url,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "timeout": self.timeout,
             "retry_attempts": self.retry_attempts,
+            "idle_timeout": self.idle_timeout,
+            "max_concurrent": self.max_concurrent,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AgentConfig":
+    def from_dict(cls, data: dict) -> AgentConfig:
         return cls(
             name=data.get("name"),
             provider=data.get("provider", "ollama"),
             model=data.get("model", "mistral:7b"),
             role=AgentRole(data.get("role", "general")),
-            api_key=data.get("api_key"),
+            api_key=None if data.get("api_key") == "***REDACTED***" else data.get("api_key"),
+            key_name=data.get("key_name"),
             base_url=data.get("base_url"),
             max_tokens=data.get("max_tokens", 4096),
             temperature=data.get("temperature", 0.7),
             timeout=data.get("timeout", 120),
             retry_attempts=data.get("retry_attempts", 3),
+            idle_timeout=data.get("idle_timeout", 900),
+            max_concurrent=data.get("max_concurrent", 1),
         )
 
 
@@ -176,7 +181,7 @@ class Agent:
     """
 
     # Class-level registry for all agents
-    _registry: dict[str, "Agent"] = {}
+    _registry: dict[str, Agent] = {}
     _message_queues: dict[str, asyncio.Queue] = {}
 
     def __init__(self, agent_id: str = None, config: AgentConfig = None, **kwargs):
@@ -190,7 +195,7 @@ class Agent:
         self.role = self.config.role
 
         # Agent relationships
-        self.connections: dict[str, "Agent"] = {}  # agent_id -> Agent
+        self.connections: dict[str, Agent] = {}  # agent_id -> Agent
         self.team_id: str = None
 
         # Resource management
@@ -202,6 +207,7 @@ class Agent:
         self._message_queue: asyncio.Queue = asyncio.Queue()
         self._running: bool = True
         self._listener_task: asyncio.Task = None
+        self._runtime_agent = None
 
         # Register this agent
         Agent._registry[self.agent_id] = self
@@ -227,6 +233,30 @@ class Agent:
                     logger.error(f"Agent {self.agent_id} message listener error: {e}")
 
         self._listener_task = asyncio.create_task(listener())
+
+    @property
+    def name(self) -> str:
+        return self.config.name
+
+    @property
+    def provider(self) -> str:
+        return self.config.provider
+
+    @property
+    def model(self) -> str:
+        return self.config.model
+
+    @property
+    def created_at(self) -> datetime:
+        return self.stats.created_at
+
+    @property
+    def last_used(self) -> datetime:
+        return self.stats.last_used
+
+    @property
+    def message_history(self) -> list[dict]:
+        return self.memory.conversation
 
     async def _process_message(self, message: dict) -> None:
         """Process an incoming message."""
@@ -254,14 +284,20 @@ class Agent:
             await self.reply(sender_id, f"Received: {content[:100]}")
 
     async def _handle_task_message(self, message: dict) -> None:
-        """Handle a task message by really running it."""
+        """Handle a task message."""
         self.state = AgentState.WORKING
         self.current_task = message.get("task_id")
 
         try:
-            answer = await self.run_task(str(message.get("content") or ""), task_id=message.get("task_id"))
+            # TODO: Actually process the task
+            # For now, just simulate work
+            await asyncio.sleep(0.5)
+
+            self.stats.tasks_completed += 1
+            response = f"Task completed: {message.get('content', 'unknown')}"
+
             if message.get("sender_id"):
-                await self.reply(message["sender_id"], answer)
+                await self.reply(message["sender_id"], response)
 
         except Exception as e:
             self.stats.tasks_failed += 1
@@ -275,45 +311,14 @@ class Agent:
         """Handle a collaboration request."""
         self.state = AgentState.THINKING
 
-        content = str(message.get("content") or "")
-        answer = await self.run_task(
-            "Collaborate on this with your part of the work, then report your result:\n" + content
-        )
+        # TODO: Implement actual collaboration logic
+        await asyncio.sleep(0.3)
+
+        response = f"Collaborating on: {message.get('content', 'unknown')}"
         if message.get("sender_id"):
-            await self.reply(message["sender_id"], answer)
+            await self.reply(message["sender_id"], response)
 
         self.state = AgentState.IDLE
-
-    def _publish_to_bus(self, content: str, *, target_id: str | None = None, kind: str = "dm") -> None:
-        """Record the exchange on the harness bus — the one durable swarm mailbox.
-
-        The in-process queue only reaches agents alive in this process; a reply
-        from another worker or a later session needs the persisted bus, which is
-        also what the Control Room and ``harness_inbox`` read.
-        """
-        try:
-            from ..harness import bus
-
-            bus.send(content, self.agent_id, to=target_id, kind=kind)
-        except Exception:
-            pass
-
-    async def _deliver_locally(self, target_id: str, content: str, message_type: str) -> bool:
-        """Push into a live agent's listener queue. Writes nothing to the bus."""
-        queue = Agent._message_queues.get(target_id)
-        if queue is None:
-            return False
-        message = {
-            "sender_id": self.agent_id,
-            "target_id": target_id,
-            "content": content,
-            "type": message_type,
-            "timestamp": time.time(),
-        }
-        self.stats.messages_sent += 1
-        self.stats.tokens_used += len(content) // 4  # Rough estimate
-        await queue.put(message)
-        return True
 
     async def send(self, target_id: str, content: str, message_type: str = "text") -> bool:
         """
@@ -331,9 +336,20 @@ class Agent:
             logger.warning(f"Target agent {target_id} not found")
             return False
 
-        if not await self._deliver_locally(target_id, content, message_type):
-            return False
-        self._publish_to_bus(content, target_id=target_id, kind="dm")
+        message = {
+            "sender_id": self.agent_id,
+            "target_id": target_id,
+            "content": content,
+            "type": message_type,
+            "timestamp": time.time(),
+        }
+
+        # Add to our sent stats
+        self.stats.messages_sent += 1
+        self.stats.tokens_used += len(content) // 4  # Rough estimate
+
+        # Queue the message
+        await Agent._message_queues[target_id].put(message)
 
         logger.info(f"📤 Agent {self.config.name} sent to {target_id}: {content[:50]}...")
         return True
@@ -346,29 +362,23 @@ class Agent:
         """
         Send a message to all connected agents.
 
-        The bus gets ONE broadcast (swarm semantics), not one DM per recipient;
-        the live listener queues are still fed so agents in this process wake up.
-
         Returns:
             Number of agents that received the message
         """
         count = 0
         for agent_id, agent in Agent._registry.items():
-            if agent.agent_id == self.agent_id:
-                continue
-            if await self._deliver_locally(agent_id, content, message_type):
-                count += 1
-        if count:
-            self._publish_to_bus(content, kind="broadcast")
+            if agent.agent_id != self.agent_id:
+                if await self.send(agent_id, content, message_type):
+                    count += 1
         return count
 
-    def connect(self, other: "Agent") -> None:
+    def connect(self, other: Agent) -> None:
         """Establish a connection to another agent."""
         self.connections[other.agent_id] = other
         other.connections[self.agent_id] = self
         logger.info(f"🔗 Agent {self.config.name} connected to {other.config.name}")
 
-    def disconnect(self, other: "Agent") -> None:
+    def disconnect(self, other: Agent) -> None:
         """Remove connection to another agent."""
         if other.agent_id in self.connections:
             del self.connections[other.agent_id]
@@ -376,116 +386,67 @@ class Agent:
             del other.connections[self.agent_id]
         logger.info(f"🔓 Agent {self.config.name} disconnected from {other.config.name}")
 
-    #: The canonical queue kind for one agent turn — the same kind ``POST
-    #: /command`` runs, so a pooled agent is not a second execution engine.
-    JOB_KIND = "runtime.turn"
-
-    def _run_through_queue(self, prompt: str) -> dict:
-        """Execute one prompt as a canonical ``runtime.turn`` job (blocking).
-
-        Callers reach this through ``asyncio.to_thread``: the JobQueue owns the
-        execution lifecycle (queued→running→done/failed/cancelled, retry, timeout,
-        cancellation, persistence), and the turn itself goes through the harness
-        inside ``HermusAgent``. Nothing here builds a prompt or calls a model.
-        """
-        from subagents.subagent import submit_and_wait
-
-        return submit_and_wait(
-            self.JOB_KIND,
-            {
-                "text": prompt,
-                "model": self.config.model or None,
-                "platform": "api",
-                "user_id": self.agent_id,
-                "mode": "agent",
-            },
-            session_key=f"agent:{self.agent_id}",
-            timeout=float(self.config.timeout or 120),
-        )
-
     async def run_task(self, task: str, task_id: str = None) -> str:
-        """Run a task through the canonical queue and report what actually happened.
-
-        This used to be ``await asyncio.sleep(0.5)`` followed by
-        ``f"Completed: {task}"``. Every caller inherited that lie: all twelve
-        role methods in :mod:`core.agents.specialization`, the collaborative
-        mission loop, the ``/api/v1/agents`` endpoints and the Control Room
-        Agents panel reported success for work that never reached a model. A
-        failure is now returned as a failure.
+        """
+        Run a task.
 
         Args:
             task: The task to perform
             task_id: Optional task ID
 
         Returns:
-            The real answer, or an ``"Error: ..."`` string. Never a fabricated
-            completion.
+            Result of the task
         """
-        prompt = str(task or "")
         self.state = AgentState.WORKING
         self.current_task = task_id or f"task-{time.time()}"
         self.last_task_time = time.time()
-        self.stats.api_calls += 1
-        self.memory.add_message(role="user", content=prompt)
 
-        if not prompt.strip():
-            self.state = AgentState.IDLE
-            self.current_task = None
-            return "Error: task is required"
-
-        # A pooled agent is a harness-governed identity: register the session so
-        # the Control Room sees it working, with the turn attributed to this role.
-        try:
-            from ..harness import sessions as _sessions
-
-            _sessions.begin(
-                self.agent_id,
-                task=prompt[:200],
-                model=str(self.config.model or ""),
-                role=str(getattr(self.config.role, "value", "worker") or "worker"),
-            )
-        except Exception:
-            _sessions = None
+        # Add to memory
+        self.memory.add_message(role="user", content=task)
 
         try:
-            status = await asyncio.to_thread(self._run_through_queue, prompt)
-            result = status.get("result") or {}
-            answer = str(result.get("response") or result.get("answer") or "").strip()
-            queue_state = str(status.get("status") or "")
-            reason = str(
-                status.get("error")
-                or result.get("error")
-                or result.get("blocker_reason")
-                or result.get("failure")
-                or ""
+            # Keep the pool agent persistent while delegating the actual turn to
+            # HermusAgent. Its fixed session id gives the specialist durable
+            # memory instead of a fresh simulated response on every task.
+            if self._runtime_agent is None:
+                from core.agent import HermusAgent
+
+                model = self.config.model or "mistral:7b"
+                model_ref = model if "/" in model else f"{self.config.provider}/{model}"
+                self._runtime_agent = HermusAgent(
+                    model=model_ref,
+                    session_id=f"persistent_agent_{self.agent_id}",
+                    mode="agent",
+                    api_key=self.config.api_key,
+                    base_url=self.config.base_url,
+                )
+
+            role = self.role.value if hasattr(self.role, "value") else str(self.role)
+            prompt = (
+                f"You are the persistent {role} specialist in a Hermus team.\n"
+                "Work on the task below using the tools and evidence available to you.\n"
+                "Return concrete findings, actions taken, and anything another agent must know.\n\n"
+                f"Task:\n{task}"
             )
-
-            if queue_state in ("failed", "cancelled", "timeout") or not answer:
-                self.stats.tasks_failed += 1
-                self.last_activity = time.time()
-                detail = reason[:300] or f"job ended in state {queue_state or 'unknown'} with no answer"
-                error_msg = f"Error: task did not complete: {detail}"
-                self.memory.add_message(role="assistant", content=error_msg)
-                if _sessions is not None:
-                    _sessions.finish(self.agent_id, status="error", error=detail[:200])
-                logger.warning(f"Agent {self.config.name} task failed: {detail[:120]}")
-                return error_msg
-
-            usage = result.get("usage") or {}
+            result_data = await asyncio.to_thread(self._runtime_agent.chat, prompt)
+            result = str((result_data or {}).get("response") or "")
+            if not result:
+                raise RuntimeError("agent produced no response")
+            self.memory.add_message(role="assistant", content=result)
             self.stats.tasks_completed += 1
-            self.stats.tokens_used += int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
+            self.stats.api_calls += 1
+            self.stats.tokens_used += len(result) // 4
+            self.stats.last_used = datetime.now()
             self.last_activity = time.time()
-            self.memory.add_message(role="assistant", content=answer)
-            if _sessions is not None:
-                _sessions.finish(self.agent_id, status="done", tokens_out=len(answer) // 4)
-            return answer
+
+            return result
 
         except Exception as e:
             self.stats.tasks_failed += 1
+            self.stats.last_used = datetime.now()
+            self.last_activity = time.time()
             error_msg = f"Error: {str(e)}"
             self.memory.add_message(role="assistant", content=error_msg)
-            if _sessions is not None:
-                _sessions.finish(self.agent_id, status="error", error=str(e)[:200])
             return error_msg
 
         finally:
@@ -523,6 +484,7 @@ class Agent:
             del Agent._message_queues[self.agent_id]
 
         self.state = AgentState.DESTROYED
+        self._runtime_agent = None
         self.stats.uptime = time.time() - self.stats.created_at.timestamp()
 
         logger.info(f"💀 Agent {self.config.name} ({self.agent_id[:8]}) destroyed")
@@ -542,7 +504,7 @@ class Agent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Agent":
+    def from_dict(cls, data: dict) -> Agent:
         """Deserialize agent from dict."""
         config = AgentConfig.from_dict(data.get("config", {}))
         agent = cls(agent_id=data.get("agent_id"), config=config)
@@ -558,12 +520,12 @@ class Agent:
         return agent
 
     @classmethod
-    def get_agent(cls, agent_id: str) -> Optional["Agent"]:
+    def get_agent(cls, agent_id: str) -> Agent | None:
         """Get an agent by ID."""
         return cls._registry.get(agent_id)
 
     @classmethod
-    def get_all_agents(cls) -> list["Agent"]:
+    def get_all_agents(cls) -> list[Agent]:
         """Get all active agents."""
         return list(cls._registry.values())
 

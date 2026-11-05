@@ -548,7 +548,7 @@ _ENDPOINTS: dict[str, tuple[str, ...]] = {
     "embeddings": ("POST /embeddings/search", "POST /embeddings/ingest"),
     "skills": ("GET /computer/skills",),
     "forge": ("GET /skills/forge/stats", "POST /skills/forge/run", "POST /skills/forge/harvest", "POST /skills/forge/validate"),
-    "models": ("GET /models/capabilities",),
+    "models": ("GET /models/catalog", "GET /models/selected", "GET /models/capabilities"),
     "providers": ("GET /providers", "GET /providers/available"),
     "keys": ("GET /keys/health", "GET /keys/rates", "GET /keys/models"),
     "fleet": ("GET /fleet/workers", "POST /fleet/run"),
@@ -638,6 +638,7 @@ _ACTIONS: dict[str, tuple[tuple[str, str, str, tuple[str, ...]], ...]] = {
         ("Ingest path", "POST", "/embeddings/ingest", ("path",)),
     ),
     "forge": (("Run forge", "POST", "/skills/forge/run", ("goal", "dry_run=true")),),
+    "models": (("Refresh model catalog", "POST", "/models/refresh", ()),),
     "fleet": (("Fan out", "POST", "/fleet/run", ("goal",)),),
     "router": (("Classify task", "POST", "/router/select", ("task",)),),
     "custom-apis": (

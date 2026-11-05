@@ -80,6 +80,65 @@ from gateway.context import (  # noqa: F401
 logger = get_logger(__name__)
 
 
+_sentinel_checkin_state: dict[str, float] = {"last": 0.0}
+
+
+def _sentinel_alert_checkin(env) -> dict | None:
+    """FAIRY handoff: when the sentinel ALERTS, queue one read-only check-in.
+
+    Opt-in (HERMUS_PRESENCE_PROACTIVE_CHECKINS=1), cooldown-limited, and always
+    through the canonical queue as a read-only runtime.turn — approvals stay
+    authoritative; the sentinel itself never calls the model.
+    """
+    try:
+        args = getattr(env, "args_redacted", None) or {}
+        if not isinstance(args, dict) or args.get("action") != "alert":
+            return None
+        if not getattr(config, "presence_proactive_checkins", False):
+            return None
+        cooldown = float(getattr(config, "sentinel_checkin_cooldown_seconds", 900) or 900)
+        now = time.time()
+        if now - _sentinel_checkin_state["last"] < cooldown:
+            return None
+        from gateway.queue import job_queue
+
+        if not job_queue.enabled or not job_queue._started:
+            return None
+        event_type = str(args.get("event_type") or "event")
+        salience = args.get("salience")
+        text = (
+            f"FAIRY sentinel flagged a high-salience event ({event_type}, salience={salience}). "
+            "Give the owner a concise, read-only status: what happened, what is queued, what is NOT done. "
+            "Use only real evidence; do not execute tools, send messages, or change anything — ask first."
+        )
+        job = job_queue.submit(
+            "runtime.turn",
+            {
+                "text": text,
+                "platform": "sentinel",
+                "user_id": "default",
+                "mode": "chat",
+                "prefer": "chat",
+                "read_only": True,
+                "stream": True,
+                "trigger": {"type": "sentinel.decision", "event_type": event_type},
+            },
+            session_key="sentinel:default",
+            run_id=f"run_sentinel_{os.urandom(4).hex()}",
+        )
+        _sentinel_checkin_state["last"] = now
+        return {"job_id": job.id, "run_id": job.run_id, "event_type": event_type}
+    except Exception as exc:
+        logger.warning(f"[Sentinel] check-in handoff skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _on_sentinel_decision(env) -> None:
+    r = _sentinel_alert_checkin(env)
+    if r:
+        logger.info(f"[Sentinel] alert -> proactive check-in queued: {r.get('job_id')} ({r.get('event_type')})")
+
+
 def _queue_due_presence_checkin(snapshot: dict) -> dict | None:
     """Optionally turn one due goal into a normal, read-only chat job.
 
@@ -268,64 +327,20 @@ async def _memory_maintenance_loop():
             logger.error(f"[Gateway] memory sweep failed: {e}")
 
 
-def _warm_gateway_caches() -> None:
-    """Run the expensive status probes once, off the event loop, at startup.
-
-    ``bootstrap.doctor()`` and the GPU probe each shell out to the interpreter /
-    ``nvidia-smi`` and cost seconds on a cold machine. Warming them here means
-    the first Control Room load reads a cached real result instead of showing
-    skeletons while every other panel is already painted.
-    """
-    started = time.monotonic()
-    logger.info("[Gateway] warming status probes (doctor, GPU, resources)")
-    try:
-        from gateway.routes_canonical import warm_health_cache
-
-        warm_health_cache()
-    except Exception as e:
-        logger.info(f"[Gateway] health warm-up failed: {e}")
-    try:
-        from core.local_first import get_local_first
-
-        lfp = get_local_first()
-        lfp.detect_gpu()
-        # Recommended setup probes local providers over HTTP; it is what made
-        # the first GPU-card request take ~12s.
-        lfp.get_recommended_setup()
-    except Exception as e:
-        logger.info(f"[Gateway] GPU warm-up failed: {e}")
-    try:
-        from core.computer.resources import get_resource_monitor
-
-        get_resource_monitor().sample()
-    except Exception as e:
-        logger.info(f"[Gateway] resource warm-up failed: {e}")
-    try:
-        # A UI-only gateway never runs a turn, so this is the only place stale
-        # harness session records get pruned (once an hour, live sessions kept).
-        from core.harness import sessions as harness_sessions
-
-        pruned = harness_sessions.gc_once_per_hour()
-        if pruned:
-            logger.info(f"[Gateway] harness sessions pruned: {pruned}")
-    except Exception as e:
-        logger.info(f"[Gateway] harness session GC failed: {e}")
-    logger.info(f"[Gateway] status probes warm in {time.monotonic() - started:.1f}s")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
     setup_logging()
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
-    # Warm the slow probes in the background. The doctor probe and the GPU
-    # probe each cost seconds on a cold machine; without this the first Control
-    # Room load sat on "probing..." while every other panel had rendered.
+    agent_pool_started = False
     try:
-        asyncio.create_task(asyncio.to_thread(_warm_gateway_caches))
+        from core.agents import init_pool
+
+        await init_pool()
+        agent_pool_started = True
     except Exception as e:
-        logger.debug(f"[Gateway] probe warm-up skipped: {e}")
+        logger.warning(f"[Gateway] persistent agent pool unavailable: {e}")
     if getattr(config, "auto_start_channels", True):
         mode = getattr(config, "telegram_mode", "auto")
         started = start_all_channels(_agent_factory, telegram_mode=mode)
@@ -336,11 +351,50 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
     presence_task = None
+    ambient_task = None
+    personal_space_task = None
+    sentinel_stop = None
+    if getattr(config, "sentinel_with_gateway", True):
+        try:
+            import threading as _threading
+
+            from core.sentinel import Sentinel, build_llm, default_recorder
+
+            sentinel_stop = _threading.Event()
+            _llm, _res = build_llm(getattr(config, "sentinel_model", "auto"))
+            _sentinel = Sentinel(
+                llm=_llm,
+                model=_res.get("ref"),
+                recorder=default_recorder(config.resolve_path("data/sentinel/decisions.jsonl")),
+            )
+            _sentinel_thread = _threading.Thread(
+                target=_sentinel.serve, kwargs={"stop": sentinel_stop.is_set}, daemon=True, name="hermus-sentinel"
+            )
+            _sentinel_thread.start()
+            logger.info("[Gateway] sentinel started — always-alert core inline on EventBus")
+            from core.events import get_bus as _get_bus
+
+            _get_bus().subscribe("sentinel.decision")(_on_sentinel_decision)
+        except Exception as e:
+            logger.error(f"[Gateway] sentinel failed to start: {type(e).__name__}: {e}")
     if getattr(config, "presence_enabled", True):
         try:
+            from core.ambient_loop import ambient_loop
+            from core.presence_kernel import presence_kernel
+
+            presence_kernel.start()
             presence_task = asyncio.create_task(_presence_heartbeat_loop())
+            ambient_task = asyncio.create_task(ambient_loop.run())
         except Exception as e:
-            logger.error(f"[Gateway] presence heartbeat failed to start: {e}")
+            logger.error(f"[Gateway] ambient presence failed to start: {type(e).__name__}: {e}")
+
+    if getattr(config, "personal_space_enabled", True):
+        try:
+            from core.personal_space import personal_space
+
+            personal_space_task = asyncio.create_task(personal_space.run())
+        except Exception as e:
+            logger.error(f"[Gateway] Personal Space failed to start: {type(e).__name__}: {e}")
 
     maintenance_task = None
     if getattr(config, "memory_sweep_minutes", 60) > 0:
@@ -369,6 +423,36 @@ async def lifespan(app: FastAPI):
         _lifecycle.state.begin_drain("shutdown")
         if presence_task and not presence_task.done():
             presence_task.cancel()
+        if ambient_task and not ambient_task.done():
+            ambient_task.cancel()
+        if sentinel_stop is not None:
+            sentinel_stop.set()
+            try:
+                from core.events import get_bus
+
+                get_bus().unsubscribe(_sentinel.handle_event)  # detach immediately, don't wait for the thread
+            except Exception:
+                pass
+        try:
+            from core.events import get_bus
+
+            get_bus().unsubscribe(_on_sentinel_decision)
+        except Exception:
+            pass
+        if personal_space_task and not personal_space_task.done():
+            personal_space_task.cancel()
+        try:
+            from core.personal_space import personal_space
+
+            personal_space.stop()
+        except Exception:
+            pass
+        try:
+            from core.presence_kernel import presence_kernel
+
+            presence_kernel.stop()
+        except Exception:
+            pass
         if maintenance_task and not maintenance_task.done():
             maintenance_task.cancel()
         if watchdog_task and not watchdog_task.done():
@@ -394,6 +478,13 @@ async def lifespan(app: FastAPI):
             await _realtime.shutdown()
         except Exception:
             pass
+        if agent_pool_started:
+            try:
+                from core.agents import shutdown_pool
+
+                await shutdown_pool()
+            except Exception as e:
+                logger.warning(f"[Gateway] agent pool shutdown failed: {e}")
         # Release the shared async HTTP pool (core.aio) so shutdown does not
         # leave sockets in CLOSE_WAIT behind it.
         try:
@@ -534,24 +625,34 @@ _realtime.install(app)
 
 # Per-concern routers (extracted from this module; see gateway/routes_*.py).
 # Mounted after the realtime layer so its routes keep precedence.
-from gateway.routes_android import router as _android_router  # noqa: E402
 from gateway.routes_agents import router as _agents_router  # noqa: E402
+from gateway.routes_android import router as _android_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
 from gateway.routes_channels import router as _channels_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
 from gateway.routes_console import router as _console_router  # noqa: E402
+from gateway.routes_context import router as _context_router  # noqa: E402
+from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
+from gateway.routes_devices import router as _devices_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
+from gateway.routes_focus import router as _focus_router  # noqa: E402
 from gateway.routes_harness import router as _harness_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_learning import router as _learning_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
+from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
+from gateway.routes_routines import router as _routines_router  # noqa: E402
+from gateway.routes_sentinel import router as _sentinel_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
+from gateway.routes_teach import router as _teach_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
+from gateway.routes_workshop import router as _workshop_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
 # (Telegram/Discord) cannot attach an auth header, so gating it would break
@@ -562,9 +663,12 @@ _gate_control = [Depends(_check_gateway_auth)]
 app.include_router(_channels_router)
 app.include_router(_channels_control_router, dependencies=_gate_control)
 app.include_router(_registry_router, dependencies=_gate_control)
+app.include_router(_sentinel_router, dependencies=_gate_control)
+app.include_router(_harness_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
 app.include_router(_console_router, dependencies=_gate_control)
+app.include_router(_dashboard_router, dependencies=_gate_control)
 app.include_router(_computer_router, dependencies=_gate_control)
 app.include_router(_computer_ws_router)
 app.include_router(_speech_router, dependencies=_gate_control)
@@ -573,10 +677,17 @@ app.include_router(_jarvis_router, dependencies=_gate_control)
 app.include_router(_voice_router, dependencies=_gate_control)
 app.include_router(_engine_router, dependencies=_gate_control)
 app.include_router(_canonical_router, dependencies=_gate_control)
-app.include_router(_harness_router, dependencies=_gate_control)
 app.include_router(_android_router, dependencies=_gate_control)
 app.include_router(_presence_router, dependencies=_gate_control)
 app.include_router(_agents_router, dependencies=_gate_control)
+app.include_router(_workshop_router, dependencies=_gate_control)
+app.include_router(_context_router, dependencies=_gate_control)
+app.include_router(_teach_router, dependencies=_gate_control)
+app.include_router(_devices_router, dependencies=_gate_control)
+app.include_router(_learning_router, dependencies=_gate_control)
+app.include_router(_routines_router, dependencies=_gate_control)
+app.include_router(_focus_router, dependencies=_gate_control)
+app.include_router(_personal_space_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -681,6 +792,8 @@ async def api_status():
             "profiles_personas",
             "durable_identity_presence_heartbeat",
             "ongoing_goals_safe_checkins",
+            "bounded_autonomous_curiosity",
+            "personal_space_proposals",
             "local_engine_routing_npu_gpu",
             "nollama_openvino_engine",
             "hermus_doctor_self_repair",
@@ -751,34 +864,28 @@ async def control_console_js():
     return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
 
 
-@app.get("/static/control-core.js")
-async def control_core_js():
-    """Living core: a canvas projection of real gateway state (no animation fiction)."""
-    return _serve_control_asset("control-core.js", "application/javascript; charset=utf-8")
+@app.get("/static/nexus.css")
+async def nexus_css():
+    """Nexus dashboard stylesheet."""
+    return _serve_control_asset("nexus.css", "text/css; charset=utf-8")
 
 
-@app.get("/static/control-shell.js")
-async def control_shell_js():
-    """Flight-deck shell: rail, command palette, activity drawer, composer."""
-    return _serve_control_asset("control-shell.js", "application/javascript; charset=utf-8")
+@app.get("/static/nexus.js")
+async def nexus_js():
+    """Nexus dashboard application script."""
+    return _serve_control_asset("nexus.js", "application/javascript; charset=utf-8")
 
 
-@app.get("/static/control-agents.js")
-async def control_agents_js():
-    """Agents tab controller, extracted from the old inline script."""
-    return _serve_control_asset("control-agents.js", "application/javascript; charset=utf-8")
+@app.get("/static/nexus-mock.js")
+async def nexus_mock_js():
+    """Nexus dashboard compatibility/mock layer."""
+    return _serve_control_asset("nexus-mock.js", "application/javascript; charset=utf-8")
 
 
-@app.get("/static/assets/favicon.svg")
-async def control_favicon():
-    """Brand favicon. The document links it, so it must be served (it used to 404)."""
-    return _serve_control_asset("assets/favicon.svg", "image/svg+xml")
-
-
-@app.get("/static/assets/logo.svg")
-async def control_logo():
-    """Brand mark shared by the room and the docs."""
-    return _serve_control_asset("assets/logo.svg", "image/svg+xml")
+@app.get("/static/personal-space.js")
+async def personal_space_js():
+    """Nexus Personal Space client."""
+    return _serve_control_asset("personal-space.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/cache/stats")

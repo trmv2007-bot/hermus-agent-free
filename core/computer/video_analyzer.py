@@ -26,8 +26,9 @@ from .video_writer import VideoWriter
 class OllamaVisionModel:
     """Adapter around the existing free local ``tools.vision`` integration."""
 
-    def __init__(self, model: str = "llava:7b"):
+    def __init__(self, model: str | None = None, provider: str | None = None):
         self.model = model
+        self.provider = provider
 
     def available(self) -> dict[str, Any]:
         from tools.vision import vision_available_models
@@ -50,7 +51,7 @@ class OllamaVisionModel:
                 return {"success": False, "error": "could not encode selected frame"}
             temporary.write(data)
             temporary.flush()
-            return vision_analyze(temporary.name, prompt=prompt, model=self.model)
+            return vision_analyze(temporary.name, prompt=prompt, model=self.model, provider=self.provider)
 
 
 class VideoAnalyzer:
@@ -63,8 +64,8 @@ class VideoAnalyzer:
         self.event_detector = event_detector or EventDetector()
 
     @classmethod
-    def with_ollama(cls, model: str = "llava:7b", **kwargs: Any) -> VideoAnalyzer:
-        return cls(vision_model=OllamaVisionModel(model), **kwargs)
+    def with_ollama(cls, model: str | None = None, provider: str | None = None, **kwargs: Any) -> VideoAnalyzer:
+        return cls(vision_model=OllamaVisionModel(model, provider), **kwargs)
 
     @staticmethod
     def _composite(before: Any, after: Any) -> Any:

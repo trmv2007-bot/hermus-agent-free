@@ -4,7 +4,7 @@ VENV ?= .venv
 PY := $(VENV)/bin/python
 RUFF := $(VENV)/bin/ruff
 
-.PHONY: help setup test test-full test-cov bench lint format format-check typecheck run doctor clean
+.PHONY: help setup test test-full test-cov bench harness selfcheck lint format format-check typecheck run doctor deploy-up deploy-down smoke clean
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -22,6 +22,9 @@ test-full: ## Entire suite including evals.
 
 test-cov: ## Suite with coverage report for core/ + gateway/.
 	$(PY) -m pytest tests/ -q --ignore=tests/eval --cov=core --cov=gateway --cov-report=term-missing
+
+selfcheck: ## Always-on self-test, fully offline: one command — env sanity + sentinel/watchdog/ambient suites on mock/mock with a scoreboard; exit 1 on any failure.
+	$(PY) hermus.py check --no-ping
 
 bench: ## Performance benchmarks (async fan-out, gateway middleware, CLI startup).
 	$(PY) scripts/bench.py
@@ -53,3 +56,12 @@ doctor: ## Hermus self-diagnostics.
 clean: ## Remove caches (never touches data/ or user state).
 	rm -rf .ruff_cache .mypy_cache .pytest_cache tests/__pycache__ core/__pycache__ gateway/__pycache__
 	find . -name '__pycache__' -not -path './.venv/*' -prune -exec rm -rf {} + 2>/dev/null; true
+
+deploy-up: ## Build and start HERMUS with Docker Compose.
+	docker compose up -d --build
+
+deploy-down: ## Stop the Docker Compose deployment.
+	docker compose down
+
+smoke: ## Run the local production smoke/health check.
+	$(PY) -m pytest tests/test_production_layers.py -q

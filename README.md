@@ -13,55 +13,136 @@
 <strong>Build with local models or free-tier providers. Keep your data, tools and runtime under your control.</strong>
 </p>
 
-<p align="center">
-<a href="https://github.com/trmv2007-bot/hermus-agent-free/stargazers"><img src="https://img.shields.io/github/stars/trmv2007-bot/hermus-agent-free?style=for-the-badge&color=58a6ff" alt="Stars"></a>
-<a href="https://github.com/trmv2007-bot/hermus-agent-free/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT"></a>
-<a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg?style=for-the-badge&logo=python" alt="Python"></a>
-<a href="https://github.com/trmv2007-bot/hermus-agent-free/actions"><img src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&style=for-the-badge" alt="CI"></a>
-<a href="https://github.com/trmv2007-bot/hermus-agent-free/discussions"><img src="https://img.shields.io/github/discussions/trmv2007-bot/hermus-agent-free?style=for-the-badge&logo=github&label=Discussions" alt="Discussions"></a>
-</p>
-
 ---
 
 ## 🚀 Quick Start
 
-Get Hermus running in 3 simple steps:
+### One-shot full install
 
-### 1️⃣ Clone & Install
-```bash
-git clone https://github.com/trmv2007-bot/hermus-agent-free.git
-cd hermus-agent-free
-./setup.sh
-```
+HERMUS ships one canonical installer path per platform. The installer obtains the repository, creates the project-local Python environment, installs the required runtime dependencies, installs supported optional integrations, installs the browser runtime used by the web subsystem where supported, initializes the runtime layout, and runs the Doctor/live verification.
 
-### 2️⃣ Start the Gateway
-```bash
-./hermus-gateway
-```
+It is safe to re-run. It does not delete HERMUS memory, projects, workspace data, logs, credentials or model files.
 
-### 3️⃣ Open Control Room
-👉 **[http://localhost:8000/control](http://localhost:8000/control)**
+It does not download AI model weights or create provider credentials. Local models and hosted-provider keys remain operator-configured.
+
+#### Windows 10/11
+
+Run this from PowerShell:
+
+    $p = Join-Path $env:TEMP "hermus-install.ps1"
+    Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.ps1" -OutFile $p
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p
+
+The Windows bootstrap uses winget when available to install missing Git, Python and Node.js LTS. The Node runtime is only required when a JavaScript package manifest is present.
+
+#### Linux / WSL
+
+Run:
+
+    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
+    bash /tmp/hermus-install.sh
+
+The Linux installer supports the package-manager families already handled by setup.sh (apt, dnf, yum, pacman and apk).
+
+#### macOS
+
+Run:
+
+    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
+    bash /tmp/hermus-install.sh
+
+macOS uses the canonical setup.sh flow and Homebrew when required host tooling is missing.
+
+#### Android / Termux
+
+Run:
+
+    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
+    bash /tmp/hermus-install.sh
+
+Termux uses pkg for required host packages. Desktop Chromium/Playwright support is intentionally not forced on Termux.
+
+### Already cloned the repository?
+
+Windows:
+
+    .\setup.cmd
+
+Linux / macOS / Termux:
+
+    ./setup.sh
+
+### Verify or repair
+
+Windows:
+
+    .\setup.cmd -VerifyOnly
+    .\setup.cmd -Repair
+
+Linux / macOS / Termux:
+
+    ./setup.sh --verify-only
+    ./setup.sh --repair
+
+### Start HERMUS
+
+    ./hermus gateway start
+
+Open **http://localhost:8000/control** for the Control Room.
+## 🧠 What is HERMUS?
+
+**HERMUS** is a general-purpose personal AI agent: a persistent system that can understand objectives, plan work, delegate to specialist capabilities, operate tools, verify results, recover from failures, remember what it learns, and safely become more useful over time.
+
+The architecture is inspired by the idea of a persistent personal assistant—a **Jarvis/Fairy-style operating layer** rather than a simple chatbot.
+
+> **Autonomy should mean more useful execution, not fewer safety controls.**
 
 ---
 
-## 🌌 The Flight Deck
+## 🚧 Build Status
 
-![HERMUS Control Room](docs/assets/flightdeck-overview.png)
+| Capability | Status |
+|---|:---:|
+| Verified computer-control execution | ✅ Complete |
+| Voice presence + executive integration | ✅ Complete |
+| Control Room / system observability | ✅ Complete |
+| Learning, memory + reusable skills | ✅ Complete |
+| End-to-end autonomy + safety hardening | ✅ Complete |
+| Runtime reliability + observability | ✅ Complete |
+| Proactive event-driven automation | ✅ Complete |
+| Scheduling + time awareness | ✅ Complete |
+| Persistent personal context | ✅ Complete |
+| Live world awareness | ✅ Complete |
+| Advanced long-horizon planning | ✅ Complete |
+| Specialist agent ecosystem | ✅ Complete |
+| Multimodal intelligence | ✅ Complete |
+| Natural conversation + interruption | ✅ Complete |
+| Personal operating system | ✅ Complete |
+| Self-improving agent | ✅ Complete |
+| Distributed HERMUS | ✅ Complete |
+| Reliability & recovery | ✅ Complete |
+| Fresh-machine installation | ✅ Complete |
+| Real-world provider/device deployment | 🔧 Deployment-dependent |
 
-`/control` is a single, local-first operations console served by the gateway itself
-(no CDN, no build step, no hosted frontend). Its centrepiece is a **living core**
-whose rings, colour and motion are derived from real state — `/readyz`, the job
-queue, tool events, pending approvals and the turn harness. When the gateway is
-down it dims and says `offline`; it never animates a fiction.
+---
 
-- **Command palette** (`Ctrl/Cmd+K`) to jump anywhere or run a declared command
-- **Live activity drawer** (`[`) fed by the canonical event log
-- **Context tile** showing the harness budget, the last compaction and the recall path
-- **Calm mode** plus full `prefers-reduced-motion` support
+## 🛡️ Reliability & Recovery
 
-<p align="center">
-  <img src="docs/assets/flightdeck-palette.png" alt="Command palette" width="420">
-</p>
+HERMUS includes retries, circuit breakers, durable idempotency, crash/resume checkpoints, incident tracking, integrity-checked snapshots, recovery/restore controls, resource degradation signals, and distributed lease/fencing support.
+
+The Control Room exposes reliability telemetry and recovery controls so failures can be investigated instead of silently disappearing.
+
+---
+
+## 🏭 Production & Real-World Integration
+
+The repository provides the common contracts and safety boundaries. Third-party accounts, provider-specific credentials, physical devices, mTLS certificates and off-site infrastructure must be supplied by the deployment; HERMUS never invents those secrets.
+
+Remaining deployment validation includes real worker nodes, provider authentication, physical voice devices, off-site backup drills, mTLS and failure-injection testing on the target hardware/network.
+
+See `docs/PRODUCTION_AND_REAL_WORLD_INTEGRATION.md` and `docs/PHASE_18_RELIABILITY_RECOVERY.md`.
+
+The Nexus Control Room also includes a discovery-driven **JARVIS × FAIRY model environment**: models are discovered from configured runtimes, selected by role or Auto mode, validated through the canonical ModelGateway, and never hardcoded into the dashboard. See `docs/JARVIS_FAIRY_ENVIRONMENT_SPEC.md`.
 
 ---
 
@@ -78,220 +159,119 @@ down it dims and says `offline`; it never animates a fiction.
 | 🔄 **Self-Improving** | Successful trajectories become reusable skills |
 | 🧠 **Project Memory** | SQLite-backed memory with FTS5 retrieval and optional vector search |
 | 📚 **Lessons Loop** | Corrections and failures become reusable lessons |
-| 🧩 **Turn Harness** | Token-budgeted compaction, durable sessions, swarm mail, cascade recall and a read-only `/api/v1/harness/*` projection |
 | ✅ **Verification** | Domain-specific verification plus offline evaluation harness |
+| 🧪 **Agent Harness** | Run task suites against **any configured model** (API-key/auth hosted providers or local ollama — `hermus harness models`, `--model auto\|groq\|ollama/...`) in isolated workspaces, verify with checks, JSON/markdown reports + multi-model comparison (`hermus harness run <suite>`) |
+| ⚡ **Sentinel (always-alert core)** | Event-driven FAIRY layer: reacts to the event bus **inline/instantly** (no polling), salience-scored decisions, LLM triage with any model, never idles — `hermus sentinel run` + autostart via `hermus sentinel install`; measurable via `hermus harness run sentinel` |
 | 🔒 **Sandboxing** | Policy-controlled command execution with isolation backends |
 
 ### 🌐 Gateway & Integrations
 
-- **CLI** - Full command-line interface
-- **Web Dashboard** - Live task progress, agents, telemetry, reasoning
-- **Telegram** - Mobile and desktop integration
-- **Discord** - Server and bot integration
-- **Slack** - Workspace webhook support
-- **Voice** - Local speech-to-text and text-to-speech
-- **Computer Control** - Browser automation and system interaction
+- **CLI** — Full command-line interface
+- **Web Dashboard** — Live task progress, agents, telemetry and system state
+- **Telegram / Discord / Slack** — Integration capabilities when configured
+- **Voice** — Local speech-to-text and text-to-speech capabilities
+- **Computer Control** — Browser automation and system interaction
 
 ### 🛡️ Safety & Trust
 
-- **Red Line Policy** - Clear boundaries for autonomous actions
-- **Approval System** - Scoped grants for yellow-zone actions
-- **Emergency Brake** - Immediate stop capability
-- **Audit Logs** - Complete action tracking and review
-- **Sandboxing** - Multiple isolation backends (Docker, Podman, bubblewrap)
+- **Red Line Policy** — Clear boundaries for autonomous actions
+- **Approval System** — Scoped grants for yellow-zone actions
+- **Emergency Brake** — Immediate stop capability
+- **Audit Logs** — Action tracking and review
+- **Verification** — completion is not treated as success without appropriate verification
+- **Capability Boundaries** — self-improvement cannot silently disable protected safety controls
+- **Sandboxing** — Multiple isolation backends where supported
 
 ---
 
-## 🏗️ Architecture
+## 🎨 Control Room Dashboard
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        HERMUS AGENT                             │
-├─────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐      │
-│  │   Gateway   │    │   Mission    │    │   Memory    │      │
-│  │   & API     │◄──►│   Engine     │◄──►│   System     │      │
-│  └─────────────┘    └─────────────┘    └─────────────┘      │
-│          ▲                  ▲                  ▲                │
-│          │                  │                  │                │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐      │
-│  │   CLI       │    │   SWE Mode   │    │   Counsel    │      │
-│  └─────────────┘    └─────────────┘    └─────────────┘      │
-│          ▲                  ▲                  ▲                │
-│          │                  │                  │                │
-│  ┌───────────────────────────────────────────────────────┐   │
-│  │                Tool System & Sandbox                   │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────┘
-```
+The **Control Room** at `http://localhost:8000/control` is the operational command center:
 
-### 🎨 Control Room Dashboard
-
-The **Control Room** at `http://localhost:8000/control` is your command center:
-
-- **📊 Overview** - System health, capabilities, and event log
-- **🎭 Presence** - Agent identity, state, goals, and continuity
-- **🎤 Voice** - Speech-to-text and text-to-speech
-- **📋 Jobs** - Queue management and execution tracking
-- **🚀 Missions** - Autonomous task management
-- **📈 Telemetry** - Live event streaming
-- **💻 Computer** - System automation and control
-- **🔗 Remote** - External integrations
-- **🛡️ Safety** - Red lines, approvals, and emergency controls
-- **⚙️ Systems** - All subsystems at a glance
+- **📊 Overview** — System health and event log
+- **🎭 Presence** — Agent identity, state, goals and continuity
+- **🎤 Voice** — Speech capabilities
+- **📋 Jobs** — Queue management and execution tracking
+- **🚀 Missions** — Autonomous task management
+- **📈 Telemetry** — Live runtime information
+- **💻 Computer** — System automation and control
+- **🔗 Remote** — External integrations
+- **🛡️ Safety** — Red lines, approvals and emergency controls
+- **🧰 Reliability** — Incidents, circuits, checkpoints, backups and recovery
+- **🧠 Model Core** — Runtime-discovered models, role selection and capability fit
+- **✨ Fairy Attention** — Proactive priorities, incidents, tasks and world signals
+- **⚙️ Systems** — Subsystem health
 
 ---
 
 ## 🚀 Usage Examples
 
-### Start an Autonomous Mission
 ```bash
 hermus mission start "Build and test a web application that does X"
-```
-
-### Run Software Engineering Workflow
-```bash
 hermus swe run "Fix the failing tests and package the project"
-```
-
-### Use AI Counsel for Complex Decisions
-```bash
-hermus counsel run "Compare three architectures and recommend the best one"
-```
-
-### Interactive Terminal Agent
-```bash
-hermus
-```
-
-### Check System Health
-```bash
+hermus counsel run "Compare three architectures and synthesize the tradeoffs"
+hermus harness run smoke --model mock/mock   # measure the agent on a task suite (offline)
+hermus harness models                        # every model it can see (API keys + local + mock)
+hermus harness compare <run_a> <run_b>       # A/B two runs
+hermus sentinel run --model auto             # always-alert core: instant event reaction, never idles
+hermus sentinel install                      # autostart on boot (systemd / Termux / cron)
 hermus doctor
 ```
+
+Harness: `docs/HARNESS.md` · Sentinel: `docs/SENTINEL.md` · Always-on: `docs/ALWAYS_ON.md`
+
+Easy mode: `hermus check` (offline selfcheck + scoreboard) · `hermus harness run` with no args runs every builtin suite · `hermus doctor --harness` for always-on health.
 
 ---
 
 ## 🔧 Configuration
 
-Hermus is configured through environment variables. See [`.env.example`](.env.example) for all options.
+HERMUS is configured through environment variables. See `.env.example` for available options.
 
-### Key Configuration Variables
-
-```bash
-# Model Providers
-HERMUS_MODEL_PROVIDER=ollama
-HERMUS_MODEL_NAME=llama3.2
-
-# Gateway
-HERMUS_GATEWAY_PORT=8000
-HERMUS_GATEWAY_TOKEN=your-secret-token
-
-# Safety
-HERMUS_SAFETY_ENABLED=1
-HERMUS_SANDBOX_BACKEND=docker
-
-# Memory
-HERMUS_MEMORY_ENABLED=1
-HERMUS_MEMORY_SWEEP_MINUTES=60
-
-# Multi-Agent
-HERMUS_COUNSEL_ENABLED=1
-HERMUS_COUNSEL_MAX_MEMBERS=5
-```
+Third-party credentials are deployment-specific and must be supplied by the operator.
 
 ---
 
 ## 📚 Documentation
 
 | Document | Purpose |
-|----------|---------|
-| [QUICKSTART.md](QUICKSTART.md) | Installation, onboarding, CLI cheatsheet |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Canonical architecture reference |
-| [LIVING_CONTROL_ROOM.md](LIVING_CONTROL_ROOM.md) | Control room design and features |
-| [RED_LINES.md](RED_LINES.md) | Safety boundaries and red-line policy |
-| [AUTONOMY_BOUNDARIES.md](AUTONOMY_BOUNDARIES.md) | Autonomy and capability boundaries |
-| [CAPABILITY_LEDGER.md](CAPABILITY_LEDGER.md) | Visible ledger of powers and capabilities |
+|---|---|
+| `QUICKSTART.md` | Installation and CLI cheatsheet |
+| `ARCHITECTURE.md` | Canonical architecture reference |
+| `LIVING_CONTROL_ROOM.md` | Control Room design and features |
+| `RED_LINES.md` | Safety boundaries |
+| `AUTONOMY_BOUNDARIES.md` | Autonomy and capability boundaries |
+| `CAPABILITY_LEDGER.md` | Capability ledger |
+| `docs/PHASE_18_RELIABILITY_RECOVERY.md` | Reliability and recovery |
+| `docs/JARVIS_FAIRY_ROADMAP.md` | Long-term roadmap |
+| `docs/JARVIS_FAIRY_ENVIRONMENT.md` | JARVIS/Fairy environment direction and dynamic model policy |
 
 ---
 
 ## 🛠️ Model Providers
 
-Hermus supports multiple model providers:
-
-### Local Models (Recommended)
-- **Ollama** - Primary local model path
-- **NoLlama** - Intel NPU and GPU support
-- **Any local OpenAI-compatible endpoint**
-
-### Hosted Providers
-- Compatible with any OpenAI-compatible API
-- Free-tier providers can be configured
-- No vendor lock-in
-
-### Model Families Supported
-- Llama 2/3
-- Mistral
-- Phi
-- And any other compatible models
+HERMUS supports local models, OpenAI-compatible endpoints and configured hosted providers. No provider credentials are bundled with the repository.
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please:
-
-1. ✨ **Star** the repository
-2. 🐛 **Report** bugs and issues
-3. 💬 **Join** the discussions
-4. 📝 **Read** the [Contributing Guide](CONTRIBUTING.md)
-5. 🔧 **Submit** pull requests
-
-### Development Setup
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+./setup.sh
 ```
+
+For Windows, use `setup.cmd` or `setup.ps1`.
 
 ---
 
 ## 📜 License
 
-Hermus Agent Free is released under the **MIT License**. See [LICENSE](LICENSE).
-
----
-
-## 🙏 Acknowledgments
-
-- Built with ❤️ for the open-source community
-- Inspired by the best AI agent frameworks
-- Powered by Python 3.10+
-- Designed for autonomy and safety
+HERMUS Agent Free is released under the **MIT License**. See `LICENSE`.
 
 ---
 
 <p align="center">
   <strong>⚡ HERMUS Agent Free — Build, Research, Automate, Remember, Verify, Improve.</strong>
-</p>
-
-<p align="center">
-  Made with ❤️ by <a href="https://github.com/trmv2007-bot">trmv2007-bot</a> and contributors
-</p>
-
----
-
-<p align="center">
-  <a href="https://github.com/trmv2007-bot/hermus-agent-free">
-    <img src="https://img.shields.io/github/forks/trmv2007-bot/hermus-agent-free?style=social" alt="Forks">
-  </a>
-  <a href="https://github.com/trmv2007-bot/hermus-agent-free">
-    <img src="https://img.shields.io/github/issues/trmv2007-bot/hermus-agent-free?style=social" alt="Issues">
-  </a>
-  <a href="https://github.com/trmv2007-bot/hermus-agent-free">
-    <img src="https://img.shields.io/github/contributors/trmv2007-bot/hermus-agent-free?style=social" alt="Contributors">
-  </a>
 </p>

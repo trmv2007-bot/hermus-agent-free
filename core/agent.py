@@ -37,13 +37,21 @@ class HermusAgent:
         api_key: str = None,
         base_url: str = None,
     ):
-        self.model_name = model or config.model
         self._model_pinned = model is not None
         from .models import get_model_gateway
 
-        # The canonical ModelGateway is the ONLY place a model client is built;
-        # it returns the concrete FreeLLM provider-call implementation.
-        self.llm = get_model_gateway().llm(model=self.model_name, api_key=api_key, base_url=base_url)
+        # Resolve an omitted model through the canonical runtime catalog and
+        # persisted dashboard preference. Config.model remains only a final
+        # bootstrap fallback when discovery is temporarily empty.
+        gateway = get_model_gateway()
+        if model:
+            self.model_name = model
+        else:
+            selected_provider, selected_model = gateway.resolve_model("default")
+            self.model_name = f"{selected_provider}/{selected_model}" if selected_provider and selected_model else config.model
+
+        # The canonical ModelGateway is the ONLY place a model client is built.
+        self.llm = gateway.llm(model=self.model_name, api_key=api_key, base_url=base_url)
         self.session_id = session_id or (f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}")
         self.trajectory: list[dict] = []
         self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
@@ -256,8 +264,20 @@ class HermusAgent:
         try:
             if getattr(self.llm, "provider", "") == "mock":
                 return None
+            from .model_preferences import model_preferences
             from .models import get_model_gateway
             from .router2 import router2
+
+            # An explicit dashboard choice is authoritative. Auto mode may use
+            # the router, but the router must never silently override a user's
+            # selected deployment.
+            if model_preferences.get("default"):
+                return {
+                    "success": True,
+                    "model": self.model_name,
+                    "task_type": "explicit_preference",
+                    "reason": "dashboard.selection",
+                }
 
             sel = router2.select(user_message)
             if not sel.get("success"):
@@ -280,6 +300,20 @@ class HermusAgent:
 
         user_model = memory.load_user_model()
         user_model_text = json.dumps(user_model, indent=2)[:1000] if user_model else "No user model yet."
+
+        personal_context_block = ""
+        try:
+            from .personal_context import personal_context
+
+            personal_context_block = (
+                "\nPersonal Context:\n"
+                + personal_context.prompt_block(query=user_message, project=self.project, limit=5, max_chars=5000)
+                + "\n"
+            )
+        except Exception as exc:
+            record_issue(
+                "memory", "personal_context_prompt", exc, retryable=False, fallback="turn continues without personal context"
+            )
 
         skills = skill_manager.list_skills()
         skills_text = ", ".join([s["name"] for s in skills[:15]]) if skills else "No skills yet."
@@ -372,6 +406,30 @@ class HermusAgent:
         except Exception as exc:
             record_issue("presence", "prompt_block", exc, retryable=False, fallback="turn continues without presence context")
 
+        dashboard_block = ""
+        try:
+            from .dashboard_state import dashboard_state
+
+            dashboard_snapshot = dashboard_state.snapshot()
+            dashboard_block = (
+                "\nShared Dashboard (the browser sees this same state):\n"
+                + json.dumps(
+                    {
+                        "revision": dashboard_snapshot.get("revision"),
+                        "updated_at": dashboard_snapshot.get("updated_at"),
+                        "tabs": dashboard_snapshot.get("tabs", []),
+                        "workspace_panels": dashboard_snapshot.get("panels", []),
+                        "system_panel_count": dashboard_snapshot.get("system_panel_count", 0),
+                        "system_panels": dashboard_snapshot.get("systems", []),
+                    },
+                    indent=2,
+                    default=str,
+                )[:9000]
+                + "\n"
+            )
+        except Exception as exc:
+            record_issue("dashboard", "state_prompt", exc, retryable=False, fallback="turn continues without dashboard state")
+
         return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
 
 You have:
@@ -387,7 +445,7 @@ Curated Memory:
 
 User Model:
 {user_model_text}
-
+{personal_context_block}
 Available Skills:
 {skills_text}
 
@@ -397,6 +455,7 @@ Periodic Nudges:
 {memory2_block}
 {presence_block}
 {persona_block}
+{dashboard_block}
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
 - After tools return, continue reasoning; call more tools if needed
@@ -404,6 +463,9 @@ Rules:
 - Prefer skill_use for known workflows; memory_search/hybrid for past context
 - Prefer research_deep for multi-source questions needing citations
 - Prefer embeddings_ingest + embeddings_search for document Q&A
+- The Shared Dashboard block is current shared state, not a description to invent over. Use dashboard_get_state before layout changes when needed.
+- Use dashboard_add_panel, dashboard_update_panel, dashboard_move_panel, dashboard_remove_panel, and dashboard_update_tab for dashboard changes. Verify tool success before claiming the browser changed.
+- Dashboard panels accept safe text/data only; never put arbitrary HTML, JavaScript, secrets, or credentials into panel content.
 - You are free, MIT, no paywall — Ollama / Groq / HF
 - Session: {self.session_id}
 - Model: {self.model_name}
@@ -559,6 +621,14 @@ Rules:
             routed = self._apply_router(user_message)
 
         memory.add_session_message(self.session_id, "user", user_message)
+        try:
+            from .personal_context import personal_context
+
+            personal_context.observe_turn(user_message, session_id=self.session_id, project=self.project)
+        except Exception as exc:
+            record_issue(
+                "memory", "personal_context_observe", exc, retryable=False, fallback="explicit context capture skipped this turn"
+            )
         self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
 
         # Lessons loop (Phase 3): user pushing back on a previous answer -> lesson

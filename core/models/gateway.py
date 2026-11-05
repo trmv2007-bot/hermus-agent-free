@@ -103,6 +103,7 @@ class ModelGateway:
         self._lock = threading.RLock()
         # In-process circuit breaker / rate state keyed by provider.
         self._circuit: dict[str, dict[str, Any]] = {}
+        self._model_stats: dict[str, dict[str, Any]] = {}
         # Deterministic fallback ordering guards against infinite fallback loops.
         self._fallback_visited: dict[str, int] = {}
         self._fallback_max_depth = 5
@@ -137,6 +138,80 @@ class ModelGateway:
     def inventory(self) -> list[dict[str, Any]]:
         """Raw credential bundles available to the runtime."""
         return self._resolver_mod().discover_runtime_bundles(include_local=True)
+
+    def catalog(self, *, probe: bool = False, refresh: bool = False) -> dict[str, Any]:
+        """Return the secret-free runtime model catalog used by the UI."""
+        from .model_catalog import model_catalog
+
+        return model_catalog.list(probe=probe, refresh=refresh)
+
+    def selected_models(self) -> dict[str, Any]:
+        """Return persisted role selections without exposing credentials."""
+        from .model_preferences import model_preferences
+
+        return model_preferences.snapshot()
+
+    def select_preference(self, role: str, model: str | None, *, validate: bool = True) -> dict[str, Any]:
+        """Persist a user-selected model after canonical catalog validation."""
+        from .model_preferences import model_preferences
+
+        result = model_preferences.set(role, model, validate=validate)
+        return {**result, "catalog": self.catalog(probe=False)}
+
+    def resolve_model(
+        self, role: str = "default", *, required: list[str] | None = None, provider: str | None = None
+    ) -> tuple[str | None, str | None]:
+        """Resolve a persisted model or dynamically choose a catalog deployment."""
+        from .model_preferences import model_preferences
+
+        preferred = model_preferences.get(role)
+        rows = list(self.catalog(probe=False).get("models") or [])
+
+        def split(ref: str) -> tuple[str, str]:
+            p, _, name = str(ref).partition("/")
+            return p, name
+
+        if preferred:
+            p, name = split(preferred)
+            if p and name and (provider is None or p == provider):
+                row = next((r for r in rows if r.get("ref") == preferred), None)
+                caps = (row or {}).get("capabilities") or {}
+                if row is not None and not any(caps.get(req) == "no" for req in (required or [])):
+                    return p, name
+
+        candidates = []
+        for row in rows:
+            p = str(row.get("provider") or "")
+            if provider and p != provider:
+                continue
+            caps = row.get("capabilities") or {}
+            if any(caps.get(req) == "no" for req in (required or [])):
+                continue
+            if row.get("reachable") is False:
+                continue
+            candidates.append(row)
+
+        if required:
+            exact = [r for r in candidates if all((r.get("capabilities") or {}).get(req) == "yes" for req in required)]
+            if exact:
+                candidates = exact
+
+        if candidates:
+            candidates.sort(
+                key=lambda r: (
+                    0 if r.get("source") == "live" else 1,
+                    -sum(1 for v in (r.get("capabilities") or {}).values() if v == "yes"),
+                    str(r.get("provider") or ""),
+                    str(r.get("id") or ""),
+                )
+            )
+            p, name = split(str(candidates[0].get("ref") or ""))
+            if p and name:
+                return p, name
+
+        # No hard-coded model is a valid runtime fallback. If discovery is
+        # empty, fail honestly instead of silently selecting an arbitrary model.
+        return None, None
 
     # --------------------------------------------------------------------------
     def select(self, req: ModelRequirement) -> list[ModelSelection]:
@@ -223,6 +298,7 @@ class ModelGateway:
         api_key: str | None = None,
         base_url: str | None = None,
         temperature: float | None = None,
+        role: str = "default",
     ):
         """Build the concrete completion object for a model via the canonical path.
 
@@ -231,6 +307,14 @@ class ModelGateway:
         never constructs a provider client or picks a provider/model itself. A test
         seam (``llm_builder``) can inject a deterministic stub.
         """
+        if model is None:
+            selected_provider, selected_model = self.resolve_model(role=role, provider=provider)
+            if selected_model:
+                model = selected_model
+                provider = selected_provider or provider
+        elif provider is None and "/" in str(model):
+            provider, model = str(model).split("/", 1)
+
         if self._llm_builder is not None:
             return self._llm_builder(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
         from .. import llm  # type: ignore
@@ -246,6 +330,7 @@ class ModelGateway:
         tools: list[dict[str, Any]] | None = None,
         trace_id: str | None = None,
         max_retries: int = 1,
+        role: str = "default",
         **kw,
     ):
         """Real completion through the canonical boundary.
@@ -257,24 +342,32 @@ class ModelGateway:
         Never fabricates a response on failure.
         """
         llm_obj = self.llm(
-            model=model, provider=provider, **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw}
+            model=model,
+            provider=provider,
+            role=role,
+            **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw},
         )
         started = time.time()
         try:
             resp = llm_obj.chat(messages, tools=tools)
         except Exception as exc:
-            self._record_outcome(getattr(llm_obj, "provider", provider or "unknown"), self._failed_result(exc, trace_id))
+            actual_provider = getattr(llm_obj, "provider", provider or "unknown")
+            actual_model = getattr(llm_obj, "model_name", model or "")
+            failed = self._failed_result(exc, trace_id)
+            failed.provider = actual_provider
+            failed.model = actual_model
+            self._record_outcome(actual_provider, failed)
             raise ModelGatewayError(
                 str(exc),
                 failure_class=self._classify_failure(exc),
-                provider=getattr(llm_obj, "provider", provider or "unknown"),
-                model=getattr(llm_obj, "model_name", model or ""),
+                provider=actual_provider,
+                model=actual_model,
             ) from exc
         self._record_outcome(
             getattr(llm_obj, "provider", provider or "unknown"),
             ModelGatewayResult(
-                provider=provider or "unknown",
-                model=model or "",
+                provider=getattr(llm_obj, "provider", provider or "unknown"),
+                model=getattr(llm_obj, "model_name", model or ""),
                 ok=True,
                 latency_ms=int((time.time() - started) * 1000),
                 content=resp.content,
@@ -290,14 +383,14 @@ class ModelGateway:
         prompt: str,
         *,
         model: str | None = None,
-        provider: str = "ollama",
+        provider: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         temperature: float | None = None,
     ) -> str:
         """Vision completion (image -> text) through the canonical boundary.
 
-        Resolves the model (default the free-local Ollama LLaVA path), builds the
+        Resolves the configured/selected vision-capable deployment dynamically, builds the
         provider client via ``llm()`` so the caller never constructs one, sends
         the image, records a typed outcome, and returns the text. On failure it
         raises a :class:`ModelGatewayError` carrying a structured ``failure_class``
@@ -305,8 +398,23 @@ class ModelGateway:
         is not running). It never fabricates a description.
         """
 
-        model = model or "llava:7b"
-        llm_obj = self.llm(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
+        if model and "/" in str(model):
+            provider, model = str(model).split("/", 1)
+        if not model:
+            provider, model = self.resolve_model("vision", required=["vision"], provider=provider)
+        if not model or not provider:
+            raise ModelGatewayError(
+                "no dynamically discovered vision-capable model is available",
+                failure_class=FailureClass.CAPABILITY_MISMATCH.value,
+            )
+        llm_obj = self.llm(
+            model=model,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=temperature,
+            role="vision",
+        )
         started = time.time()
         try:
             resp = llm_obj.generate_image(prompt, image_base64)
@@ -785,10 +893,33 @@ class ModelGateway:
                 if st["failures"] >= 3 and st["opened_at"] is None:
                     st["opened_at"] = time.time()
 
+            if result.model:
+                key = f"{provider}/{result.model}"
+                metric = self._model_stats.setdefault(
+                    key,
+                    {"calls": 0, "successes": 0, "failures": 0, "latency_ms_total": 0, "last_used": None},
+                )
+                metric["calls"] += 1
+                metric["successes"] += 1 if result.ok else 0
+                metric["failures"] += 0 if result.ok else 1
+                metric["latency_ms_total"] += int(result.latency_ms or 0)
+                metric["last_used"] = time.time()
+
     def health(self) -> dict[str, Any]:
-        """Expose circuit-breaker / rate state for the dashboard (no fabrication)."""
+        """Expose provider circuits and per-model runtime telemetry."""
         with self._lock:
-            return {p: dict(v) for p, v in self._circuit.items()}
+            models = {}
+            for ref, metric in self._model_stats.items():
+                calls = max(1, int(metric["calls"]))
+                models[ref] = {
+                    **metric,
+                    "success_rate": round(metric["successes"] / calls, 4),
+                    "avg_latency_ms": round(metric["latency_ms_total"] / calls, 1),
+                }
+            providers = {p: dict(v) for p, v in self._circuit.items()}
+            # Keep canonical nested telemetry while exposing provider keys at the
+            # top level for older callers that consumed health()["provider"].
+            return {"providers": providers, "models": models, **providers}
 
 
 _gateway: ModelGateway | None = None

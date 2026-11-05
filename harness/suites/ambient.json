@@ -1,0 +1,49 @@
+{
+  "name": "ambient",
+  "description": "Ambient-loop suite (driver=ambient) — verifies the passive always-on observer detects attention changes: raised on new items, cleared on removal, silent when nothing changed. Fully offline, no model needed. Run: hermus harness run ambient",
+  "tasks": [
+    {
+      "id": "attention_raised",
+      "category": "change-detection",
+      "driver": "ambient",
+      "prompt": "A new attention item appearing between ticks must emit attention.raised.",
+      "ticks": [
+        [{"id": "sig_a", "severity": "low", "title": "all quiet"}],
+        [{"id": "sig_a", "severity": "low", "title": "all quiet"}, {"id": "sig_b", "severity": "high", "title": "new incident"}]
+      ],
+      "checks": [
+        {"type": "file_exists", "path": "ambient_events.jsonl"},
+        {"type": "file_contains", "path": "ambient_events.jsonl", "value": "attention.raised"},
+        {"type": "file_contains", "path": "ambient_events.jsonl", "value": "sig_b"}
+      ]
+    },
+    {
+      "id": "attention_cleared",
+      "category": "change-detection",
+      "driver": "ambient",
+      "prompt": "An attention item disappearing between ticks must emit attention.cleared.",
+      "ticks": [
+        [{"id": "sig_a", "severity": "high", "title": "incident"}, {"id": "sig_b", "severity": "low", "title": "note"}],
+        [{"id": "sig_a", "severity": "high", "title": "incident"}]
+      ],
+      "checks": [
+        {"type": "file_contains", "path": "ambient_events.jsonl", "value": "attention.cleared"},
+        {"type": "file_contains", "path": "ambient_events.jsonl", "value": "sig_b"}
+      ]
+    },
+    {
+      "id": "no_change_no_event",
+      "category": "quiet",
+      "driver": "ambient",
+      "prompt": "Identical attention across ticks must stay silent (no attention.raised/cleared).",
+      "ticks": [
+        [{"id": "sig_a", "severity": "low", "title": "same"}],
+        [{"id": "sig_a", "severity": "low", "title": "same"}]
+      ],
+      "checks": [
+        {"type": "command", "cmd": "! grep -q 'attention.raised\\|attention.cleared' ambient_events.jsonl", "expect_exit": 0},
+        {"type": "json", "key": "ticks.1.attention_changed", "value": "false"}
+      ]
+    }
+  ]
+}

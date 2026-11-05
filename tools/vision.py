@@ -1,23 +1,17 @@
-"""Vision LLaVA via Ollama Free - No API key, local free vision model.
+"""Vision analysis tool routed through the canonical dynamic ModelGateway."""
 
-All model traffic flows through the canonical :class:`ModelGateway` so there is a
-single owner of provider/credential/capability resolution and outcome recording —
-this module never issues a request to a model backend directly. The free-local
-Ollama LLaVA path is the model the tool advertises by default.
-"""
+from __future__ import annotations
 
 import base64
 from pathlib import Path
 
-from core.config import config
 from core.contracts import FailureClass
 from core.models import ModelGatewayError, get_model_gateway
 
-OLLAMA_AVAILABLE = True  # Vision via the free-local Ollama node (no API key).
+OLLAMA_AVAILABLE = True
 
 
 def _encode_image_to_base64(image_path: str) -> str:
-    """Encode image to base64 for Ollama."""
     try:
         with open(image_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
@@ -25,27 +19,28 @@ def _encode_image_to_base64(image_path: str) -> str:
         return ""
 
 
-def _vision_error(exc: Exception, model: str) -> dict:
-    """Map a ModelGatewayError to the legacy vision-tool error contract."""
+def _vision_error(exc: Exception, model: str | None) -> dict:
     fc = getattr(exc, "failure_class", "")
     if fc == FailureClass.MODEL_UNAVAILABLE.value:
         return {
             "success": False,
-            "error": f"Model {model} not found. Pull with: ollama pull {model} (free)",
+            "error": f"Selected vision model is unavailable (model not found): {model or 'dynamic selection'} — run 'ollama pull {model or '<model>'}' to install it.",
         }
     if fc in (FailureClass.NETWORK.value, FailureClass.PROVIDER_UNAVAILABLE.value):
         return {
             "success": False,
-            "error": (
-                f"Ollama not running at {config.ollama_base_url}. "
-                f"Start: ollama serve && ollama pull {model}. Free offline vision."
-            ),
+            "error": f"Ollama not running or unreachable for {model or 'dynamic selection'}: {exc}. Start Ollama with 'ollama serve'.",
         }
     return {"success": False, "error": f"Vision analyze failed: {exc}"}
 
 
-def vision_analyze(image_path: str, prompt: str = "Describe this image in detail", model: str = "llava:7b") -> dict:
-    """Vision analysis via Ollama LLaVA free - no API key, local."""
+def vision_analyze(
+    image_path: str,
+    prompt: str = "Describe this image in detail",
+    model: str | None = None,
+    provider: str | None = None,
+) -> dict:
+    """Analyze an image with the selected or dynamically discovered vision model."""
     p = Path(image_path)
     if not p.exists():
         return {"success": False, "error": f"Image not found: {image_path}"}
@@ -55,15 +50,27 @@ def vision_analyze(image_path: str, prompt: str = "Describe this image in detail
         return {"success": False, "error": "Failed to encode image"}
 
     try:
-        description = get_model_gateway().vision_complete(base64_image, prompt, model=model, provider="ollama")
+        description = get_model_gateway().vision_complete(
+            base64_image,
+            prompt,
+            model=model,
+            provider=provider,
+        )
     except ModelGatewayError as exc:
         return _vision_error(exc, model)
     except Exception as exc:
         return {"success": False, "error": f"Vision analyze failed: {exc}"}
 
+    selected = model
+    try:
+        selected_provider, selected_model = get_model_gateway().resolve_model("vision", required=["vision"], provider=provider)
+        if not selected and selected_model:
+            selected = f"{selected_provider}/{selected_model}"
+    except Exception:
+        pass
     return {
         "success": True,
-        "model": model,
+        "model": selected or model,
         "prompt": prompt,
         "image": image_path,
         "description": description,
@@ -71,39 +78,49 @@ def vision_analyze(image_path: str, prompt: str = "Describe this image in detail
     }
 
 
-def vision_analyze_multiple(image_paths: list[str], prompt: str = "Describe these images", model: str = "llava:7b") -> dict:
-    """Analyze multiple images - free."""
-    results = []
-    for img_path in image_paths:
-        results.append(vision_analyze(img_path, prompt, model))
+def vision_analyze_multiple(
+    image_paths: list[str],
+    prompt: str = "Describe these images",
+    model: str | None = None,
+    provider: str | None = None,
+) -> dict:
+    results = [vision_analyze(img_path, prompt, model, provider) for img_path in image_paths]
     return {"results": results, "count": len(results)}
 
 
 def vision_available_models() -> dict:
-    """List available vision models in Ollama - free."""
+    """Return dynamically discovered vision-capable models with a legacy fallback."""
+    gateway = get_model_gateway()
     try:
-        all_models = get_model_gateway().vision_models()
-    except ModelGatewayError as exc:
-        return {
-            "error": str(exc),
-            "vision_models": [],
-            "suggestion": "Install Ollama and pull free vision model: ollama pull llava:7b",
-        }
-    vision_models = [m for m in all_models if any(k in m.lower() for k in ("llava", "vision", "bakllava"))]
-    return {
-        "all_models": all_models,
-        "vision_models": vision_models,
-        "ollama_url": config.ollama_base_url,
-    }
+        catalog = gateway.catalog(probe=True, refresh=True)
+        rows = list(catalog.get("models") or [])
+        all_models = [row.get("ref") for row in rows if row.get("ref")]
+        models = [row for row in rows if (row.get("capabilities") or {}).get("vision") == "yes"]
+        if models or all_models:
+            return {
+                "models": models,
+                "vision_models": [row.get("ref") for row in models if row.get("ref")],
+                "all_models": all_models,
+                "providers": catalog.get("providers") or [],
+                "generated_at": catalog.get("generated_at"),
+            }
+    except Exception:
+        pass
+    try:
+        all_models = list(gateway.vision_models() or [])
+        markers = ("llava", "bakllava", "moondream", "minicpm-v", "vision")
+        vision_models = [m for m in all_models if any(tag in str(m).lower() for tag in markers)]
+        return {"models": vision_models, "vision_models": vision_models, "all_models": all_models}
+    except Exception as exc:
+        return {"error": str(exc), "vision_models": [], "all_models": [], "models": []}
 
 
-# Tool definitions for free LLM
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "vision_analyze",
-            "description": "Analyze image via Ollama LLaVA free local vision model - no API key, describe image, read text in image, etc. Requires Ollama and llava model: ollama pull llava:7b (free)",
+            "description": "Analyze an image with the selected or automatically discovered vision-capable model.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -115,8 +132,11 @@ TOOLS = [
                     },
                     "model": {
                         "type": "string",
-                        "description": "Vision model, e.g., llava:7b, llava:13b, bakllava",
-                        "default": "llava:7b",
+                        "description": "Optional provider/model reference. Omit for automatic selection.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider override. Omit for automatic selection.",
                     },
                 },
                 "required": ["image_path"],
@@ -127,7 +147,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "vision_available_models",
-            "description": "List available vision models in Ollama - free",
+            "description": "List currently discovered vision-capable model deployments.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },

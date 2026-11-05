@@ -11,20 +11,13 @@ This ensures HERMUS works 100% offline with zero configuration.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import subprocess
-import time
 from typing import Any
 
 from core.log import get_logger
 
 logger = get_logger(__name__)
-
-#: A GPU probe shells out (GPUtil/NVML) and can take seconds. One probe is
-#: reused for this long so status polling cannot turn into a thread storm.
-GPU_CACHE_SECONDS = 60.0
-_GPU_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 
 
 # Local providers that require NO API keys
@@ -234,23 +227,7 @@ class LocalFirstProvider:
         return results
 
     def detect_gpu(self) -> dict[str, Any]:
-        """Detect GPU information, reusing a recent probe.
-
-        Probing shells out to ``nvidia-smi`` (GPUtil/NVML) and, historically,
-        imported ``torch`` \u2014 which alone costs several seconds. The Control
-        Room polls the GPU meter continuously, so an uncached probe made every
-        poll a multi-second thread. One probe is reused for a minute.
-        """
-        now = time.monotonic()
-        cached = _GPU_CACHE.get("data")
-        if cached is not None and now - float(_GPU_CACHE.get("ts") or 0.0) < GPU_CACHE_SECONDS:
-            return dict(cached)
-        gpu_info = self._probe_gpu()
-        _GPU_CACHE.update(ts=time.monotonic(), data=dict(gpu_info))
-        return gpu_info
-
-    def _probe_gpu(self) -> dict[str, Any]:
-        """One real GPU probe (GPUtil / NVML / an already-imported torch)."""
+        """Detect GPU information."""
         gpu_info = {
             "detected": False,
             "name": None,
@@ -275,12 +252,7 @@ class LocalFirstProvider:
 
             # Try pynvml
             try:
-                from pynvml import (
-                    nvmlDeviceGetHandleByIndex,
-                    nvmlDeviceGetMemoryInfo,
-                    nvmlDeviceGetName,
-                    nvmlInit,
-                )
+                from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlDeviceGetName, nvmlInit
 
                 nvmlInit()
                 handle = nvmlDeviceGetHandleByIndex(0)
@@ -292,28 +264,71 @@ class LocalFirstProvider:
             except Exception:
                 pass
 
-            # Try torch only when something already imported it. Importing torch
-            # purely to answer a status probe costs seconds and was the reason a
-            # GPU poll could block for ~12s on a machine without NVIDIA tools.
-            if not gpu_info["detected"]:
-                import sys as _sys
+            # Try torch
+            try:
+                import torch
 
-                if "torch" in _sys.modules:
-                    try:
-                        import torch
-
-                        if torch.cuda.is_available():
-                            gpu_info["detected"] = True
-                            gpu_info["name"] = torch.cuda.get_device_name(0)
-                            gpu_info["vram"] = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                            gpu_info["is_rtx3050"] = "RTX 3050" in gpu_info["name"]
-                    except Exception:
-                        pass
+                if torch.cuda.is_available():
+                    gpu_info["detected"] = True
+                    gpu_info["name"] = torch.cuda.get_device_name(0)
+                    gpu_info["vram"] = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    gpu_info["is_rtx3050"] = "RTX 3050" in gpu_info["name"]
+            except Exception:
+                pass
 
         except Exception as e:
             logger.debug(f"GPU detection failed: {e}")
 
         return gpu_info
+
+    def get_vram_usage(self) -> dict[str, Any]:
+        """Return live VRAM usage when a supported GPU monitor is available."""
+        gpu = self.detect_gpu()
+        total_gb = float(gpu.get("vram") or 0)
+        used_gb = None
+
+        try:
+            from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlInit
+
+            nvmlInit()
+            info = nvmlDeviceGetMemoryInfo(nvmlDeviceGetHandleByIndex(0))
+            total_gb = info.total / (1024**3)
+            used_gb = info.used / (1024**3)
+        except Exception:
+            pass
+
+        if used_gb is None:
+            try:
+                import GPUtil
+
+                devices = GPUtil.getGPUs()
+                if devices:
+                    used_gb = float(devices[0].memoryUsed) / 1024
+                    total_gb = float(devices[0].memoryTotal) / 1024
+            except Exception:
+                pass
+
+        if used_gb is None:
+            return {"available": False, "used": 0, "free": total_gb, "total": total_gb, "percent": 0}
+
+        free_gb = max(0.0, total_gb - used_gb)
+        return {
+            "available": True,
+            "used": used_gb,
+            "free": free_gb,
+            "total": total_gb,
+            "percent": (used_gb / total_gb * 100) if total_gb else 0,
+        }
+
+    def get_vram_monitor_data(self) -> dict[str, Any]:
+        """Return the dashboard's stable VRAM monitor shape."""
+        usage = self.get_vram_usage()
+        return {
+            "gpu": self.detect_gpu(),
+            "vram": usage,
+            "vram_used": usage.get("used", 0),
+            "vram_percent": usage.get("percent", 0),
+        }
 
     async def auto_start_ollama(self) -> bool:
         """Automatically start Ollama if installed but not running."""
@@ -366,7 +381,7 @@ class LocalFirstProvider:
             priority_list.append("ollama")
 
         # 2. FREE API PROVIDERS (only if user has keys)
-        for provider_id, _ in sorted(FREE_API_PROVIDERS.items(), key=lambda x: x[1].get("priority", 99)):
+        for provider_id, info in sorted(FREE_API_PROVIDERS.items(), key=lambda x: x[1].get("priority", 99)):
             if self._available_free.get(provider_id, False):
                 priority_list.append(provider_id)
 
@@ -424,74 +439,6 @@ class LocalFirstProvider:
         else:
             # Default to Ollama
             return self.get_optimized_config("ollama")
-
-    def get_vram_usage(self) -> dict[str, Any]:
-        """Real VRAM usage, or an explicit unavailable result.
-
-        Probing used to fail open: the caller returned a plausible-looking
-        "RTX 3050 / 8 GB" whenever detection failed, so the Control Room
-        claimed hardware it had never seen. Detection failure now returns
-        ``available: False`` with zeroed numbers.
-        """
-        info = self.detect_gpu()
-        total = float(info.get("vram") or 0)
-        if not info.get("detected"):
-            return {
-                "used": 0.0,
-                "free": 0.0,
-                "total": 0.0,
-                "percent": 0.0,
-                "available": False,
-                "source": "none",
-            }
-
-        used: float | None = None
-        source = "none"
-        try:  # NVML gives exact device memory.
-            from pynvml import (
-                nvmlDeviceGetHandleByIndex,
-                nvmlDeviceGetMemoryInfo,
-                nvmlInit,
-            )
-
-            nvmlInit()
-            mem = nvmlDeviceGetMemoryInfo(nvmlDeviceGetHandleByIndex(0))
-            used = float(mem.used) / (1024**3)
-            total = total or float(mem.total) / (1024**3)
-            source = "pynvml"
-        except Exception:
-            try:  # GPUtil reports megabytes.
-                import GPUtil
-
-                gpus = GPUtil.getGPUs()
-                if gpus:
-                    used = float(gpus[0].memoryUsed) / 1024.0
-                    total = total or float(gpus[0].memoryTotal) / 1024.0
-                    source = "gputil"
-            except Exception:
-                used = None
-
-        if used is None or total <= 0:
-            return {
-                "used": 0.0,
-                "free": round(total, 2),
-                "total": round(total, 2),
-                "percent": 0.0,
-                "available": True,
-                "usage_unknown": True,
-                "source": "detect-only",
-            }
-
-        total = max(total, used)
-        free = max(0.0, total - used)
-        return {
-            "used": round(used, 2),
-            "free": round(free, 2),
-            "total": round(total, 2),
-            "percent": round((used / total) * 100, 1) if total else 0.0,
-            "available": True,
-            "source": source,
-        }
 
     def get_recommended_setup(self) -> dict[str, Any]:
         """

@@ -488,6 +488,13 @@ class Sandbox:
         sandbox_id = f"sbx_{uuid.uuid4().hex[:10]}"
         chosen, reason = self._resolve_backend(pol)
 
+        # Explicit dangerous overrides remain audited and resource-limited,
+        # but use the hardened local backend so trusted absolute host paths
+        # (including /tmp) remain reachable.
+        if allow_dangerous and chosen in ("docker", "podman", "bwrap"):
+            chosen = "local"
+            reason = f"{reason}; explicit dangerous override → hardened local backend"
+
         denied = scan_command(command, pol.deny_patterns)
         if denied and not allow_dangerous:
             self._audit(
@@ -535,7 +542,7 @@ class Sandbox:
                 # Staged input means "work on these files": run with the scratch dir
                 # as cwd (the container path when a container backend is in play),
                 # otherwise the jail's default cwd would not see them at all.
-                base = mounted_cwd if chosen in ("docker", "podman") else str(workdir)
+                base = "/hermus" if chosen in ("docker", "podman") else str(workdir)
                 command = f"cd {shlex.quote(str(base))} && {command}"
 
         if not self._sem.acquire(timeout=max(1.0, pol.timeout)):
@@ -548,7 +555,7 @@ class Sandbox:
             if chosen in ("docker", "podman"):
                 res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id, env, input_text, reason)
             elif chosen == "bwrap":
-                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason)
+                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason, allow_dangerous=allow_dangerous)
             elif chosen == "off":
                 res = self._run_raw(command, pol, workdir, sandbox_id, env, input_text, reason)
             else:
@@ -610,7 +617,16 @@ class Sandbox:
             except Exception as exc:  # pragma: no cover - defensive
                 return {"success": False, "error": str(exc), "returncode": 1, "backend": "local-direct"}
         quoted = shlex.quote(code)
-        return self.run(f"{shlex.quote(sys.executable or 'python3')} -c {quoted}", **kw)
+        requested_backend = str(kw.get("backend") or "").lower()
+        policy = kw.get("policy") or {}
+        probe_policy = replace(self.policy, **policy) if isinstance(policy, dict) else self.policy
+        chosen, _ = self._resolve_backend(probe_policy)
+        if requested_backend:
+            chosen = requested_backend
+        # Container images have their own interpreter; never pass the host runner's
+        # absolute Python path into the container namespace.
+        executable = "python3" if chosen in ("docker", "podman") else (sys.executable or "python3")
+        return self.run(f"{shlex.quote(executable)} -c {quoted}", **kw)
 
     def run_wasm(self, module_path: str, *, args: Sequence[str] = (), timeout: int = 20) -> dict[str, Any]:
         """Optional WASI path: run a .wasm module with wasmtime (strictly isolated, no fs/net)."""
@@ -710,6 +726,7 @@ class Sandbox:
             args[3:3] = ["-e", f"{k}={v}"]
         limits = {
             "cpus": pol.cpus,
+            "cpu_seconds": pol.timeout,
             "memory_mb": pol.memory_mb,
             "pids": pol.pids,
             "disk_mb": pol.disk_mb,
@@ -727,10 +744,44 @@ class Sandbox:
                 timeout=pol.timeout,
                 input=input_text or "",
             )
+            stderr = proc.stderr[: pol.max_output_chars // 2]
+            stdout = proc.stdout[: pol.max_output_chars]
+            missing_image = any(
+                marker in stderr.lower()
+                for marker in (
+                    "unable to find image",
+                    "pull access denied",
+                    "manifest unknown",
+                    "image not found",
+                )
+            )
+            if proc.returncode != 0 and missing_image and not pol.network:
+                # A detected container runtime is not enough: CI/dev machines may
+                # have no cached image. Fall back to the hardened local backend
+                # instead of making every caller treat the missing image as a
+                # failed skill/validation run.
+                local_command = command
+                prefix = "cd /hermus && "
+                if local_command.startswith(prefix):
+                    local_command = f"cd {shlex.quote(str(workdir))} && " + local_command[len(prefix) :]
+                workspace_prefix = "cd /workspace && "
+                if mounted_cwd and local_command.startswith(workspace_prefix):
+                    local_command = f"cd {shlex.quote(str(mounted_cwd))} && " + local_command[len(workspace_prefix) :]
+                local = self._run_local(
+                    local_command,
+                    pol,
+                    workdir,
+                    sandbox_id,
+                    env,
+                    input_text,
+                    f"{reason}; container image unavailable, hardened local fallback",
+                )
+                local.limits.setdefault("container_fallback", binary)
+                return local
             return SandboxResult(
                 success=proc.returncode == 0,
-                stdout=proc.stdout[: pol.max_output_chars],
-                stderr=proc.stderr[: pol.max_output_chars // 2],
+                stdout=stdout,
+                stderr=stderr,
                 returncode=proc.returncode,
                 backend=binary,
                 sandbox_id=sandbox_id,
@@ -811,9 +862,14 @@ class Sandbox:
         env: dict[str, str] | None,
         input_text: str | None,
         reason: str,
+        *,
+        allow_dangerous: bool = False,
     ) -> SandboxResult:
         """bubblewrap jail: read-only /, writable scratch, no network, clean env."""
         exec_cwd = self._exec_cwd(pol, workdir)
+        # An explicit dangerous override is still audited and policy-gated; make
+        # host /tmp visible so trusted commands using absolute temp paths can run.
+        tmp_mount = ["--bind", "/tmp", "/tmp"] if allow_dangerous else ["--tmpfs", "/tmp"]
         argv = [
             self.probe.binary("bwrap") or "bwrap",
             "--ro-bind",
@@ -823,8 +879,7 @@ class Sandbox:
             "/dev",
             "--proc",
             "/proc",
-            "--tmpfs",
-            "/tmp",
+            *tmp_mount,
             "--bind",
             str(workdir),
             str(workdir),
