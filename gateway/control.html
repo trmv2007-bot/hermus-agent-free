@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0a0f1a">
-  <title>HERMUS — Nexus Control Room</title>
+  <meta name="theme-color" content="#f4f5f7">
+  <title>HERMUS — Control Center</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/nexus.css">
   <link rel="stylesheet" href="/static/control.css">
@@ -17,7 +17,7 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-copy">
         <strong id="hermusLogo">HERMUS</strong>
-        <small>NEXUS · control room</small>
+        <small>NEXUS core · control center</small>
       </span>
     </a>
 
@@ -129,7 +129,7 @@
             </div>
             <div class="model-toolbar">
               <label for="modelRole">Role</label>
-              <select id="modelRole"><option value="default">default</option></select>
+              <select id="modelRole" aria-label="HERMUS model role"><option value="default">Default</option><option value="reasoning">Reasoning</option><option value="vision">Vision</option><option value="coding">Coding</option><option value="background">Background</option><option value="doctor">Doctor</option><option value="voice">Voice</option></select>
               <label for="modelSelect">Model</label>
               <select id="modelSelect"><option value="">loading…</option></select>
             </div>
@@ -624,6 +624,99 @@
 
     </main>
   </div>
+
+  <!-- ================= JARVIS workspace (second space) =================
+       Opened by triple-clicking the HERMUS mark. Everything here is a real
+       surface: quick actions hit real commands, the roster reads
+       /api/v1/agents/list, and the rail only links live capabilities. -->
+  <section id="jarvisWorkspace" class="jarvis-workspace" aria-hidden="true">
+    <header class="jw-top">
+      <div class="jw-brand">
+        <span class="eyebrow">HERMUS · second space</span>
+        <strong id="heroGreeting">Good evening.</strong>
+        <small>Build · Think · Explore · Orchestrate</small>
+      </div>
+      <div class="jw-top-actions">
+        <span class="tag ok">CORE ONLINE</span>
+        <button type="button" data-deep-workshop class="btn ghost">Open Workshop ↗</button>
+        <button type="button" data-jarvis-close class="btn ghost" aria-label="Close JARVIS workspace">Close ×</button>
+      </div>
+    </header>
+    <div class="jw-body">
+      <aside class="jw-rail">
+        <div class="jw-section-title">Quick actions</div>
+        <button class="jw-rail-item" type="button" data-command="Research the latest AI news">⌕ <span>Research</span></button>
+        <button class="jw-rail-item" type="button" data-command="Analyze my current project">◫ <span>Analyze</span></button>
+        <button class="jw-rail-item" type="button" data-open="Routines">⟳ <span>Automate</span></button>
+        <button class="jw-rail-item" type="button" data-open="Devices">◫ <span>Devices</span></button>
+        <div class="jw-section-title">Surfaces</div>
+        <button class="jw-rail-item" type="button" data-open="Models">◉ <span>Model routing</span></button>
+        <button class="jw-rail-item" type="button" data-open="Capabilities">◇ <span>Capabilities</span></button>
+        <button class="jw-rail-item" type="button" data-open="Focus">◎ <span>Focus</span></button>
+        <button class="jw-rail-item" type="button" data-open="Learning">❂ <span>Learning</span></button>
+      </aside>
+      <main class="jw-main">
+        <section class="jw-hero">
+          <span class="eyebrow">JARVIS workspace</span>
+          <h1>READY</h1>
+          <p>Your private second workspace for orchestrating HERMUS — same runtime, same command contract, a quieter room.</p>
+          <div class="jw-hero-actions">
+            <button type="button" data-command="Research the latest AI news">RESEARCH</button>
+            <button type="button" data-command="Build a web component">BUILD</button>
+            <button type="button" data-command="Analyze my current project">ANALYZE</button>
+            <button type="button" data-command="Create a visual concept">CREATE</button>
+          </div>
+        </section>
+        <section class="jw-cards">
+          <article class="jw-card">
+            <div class="jw-card-head"><span>AGENTS</span><b>LIVE</b></div>
+            <strong>Agent roster</strong>
+            <small>Live from /api/v1/agents/list — spawns appear here in real time.</small>
+            <div id="agentList"></div>
+          </article>
+          <article class="jw-card">
+            <div class="jw-card-head"><span>PERSONAL SPACE</span><b>QUIET</b></div>
+            <strong>Bounded curiosity</strong>
+            <small>HERMUS explores within safe limits and proposes useful discoveries.</small>
+            <button type="button" class="jw-card-button" data-open="Personal Space">OPEN PERSONAL SPACE ↗</button>
+          </article>
+          <article class="jw-card">
+            <div class="jw-card-head"><span>DEEP WORK</span><b>WORKSHOP</b></div>
+            <strong>Project workbench</strong>
+            <small>Files, editor and mission context — policy-bound through ToolGateway.</small>
+            <button type="button" class="jw-card-button" data-deep-workshop>OPEN WORKSHOP ↗</button>
+          </article>
+        </section>
+        <section class="jw-bottom">
+          <div class="jw-command-title"><span class="eyebrow">JARVIS command</span><strong>Tell HERMUS what to do.</strong></div>
+          <div class="jw-command">
+            <span aria-hidden="true">›</span>
+            <input id="jwCommand" autocomplete="off" placeholder="Research, build, analyze, automate…" aria-label="JARVIS command">
+            <button type="button" id="jwSend" aria-label="Send JARVIS command">↗</button>
+          </div>
+          <div class="jw-hints"><span>Enter</span> execute <span>Esc</span> back to the control center <span>Triple-click</span> the logo to reopen</div>
+        </section>
+      </main>
+      <aside class="jw-side">
+        <article class="jw-status-card">
+          <div class="jw-card-head"><span>JARVIS STATUS</span><b class="good-text">ONLINE</b></div>
+          <div class="jw-side-line"><i></i><span>Command contract live</span><b>READY</b></div>
+          <div class="jw-side-line"><i></i><span>Runs stream to the Jobs tab</span><b>LIVE</b></div>
+        </article>
+        <article class="jw-status-card">
+          <div class="jw-card-head"><span>ATTENTION</span><button type="button" class="ghost" data-open="Focus">FOCUS ↗</button></div>
+          <div class="jw-side-line"><i></i><span>Environment awareness</span><b>LIVE</b></div>
+          <div class="jw-side-line"><i></i><span>Mission context</span><b>READY</b></div>
+        </article>
+        <article class="jw-status-card">
+          <div class="jw-card-head"><span>MODEL ROUTING</span><button type="button" class="ghost" data-open="Models">MANAGE ↗</button></div>
+          <div class="jw-model-route"><span>ROLE</span><strong>AUTO</strong></div>
+          <div class="jw-model-route"><span>DEPLOYMENT</span><strong>BEST AVAILABLE</strong></div>
+          <small class="jw-side-note">Selection stays discovery-driven — nothing is hardcoded.</small>
+        </article>
+      </aside>
+    </div>
+  </section>
 
   <!-- ================= workshop ================= -->
   <div id="workshop" class="workshop" aria-hidden="true">

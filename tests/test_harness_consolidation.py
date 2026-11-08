@@ -119,11 +119,7 @@ def _ungoverned_calls(source: str, label: str) -> tuple[list[tuple[int, str]], i
     except SyntaxError as exc:
         raise AssertionError(f"harness gate cannot parse {label}: {exc}") from exc
 
-    funcs = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.end_lineno
-    ]
+    funcs = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.end_lineno]
     offenders: list[tuple[int, str]] = []
     checked = 0
     for node in ast.walk(tree):
@@ -179,21 +175,21 @@ def test_the_gate_actually_fails_on_an_ungoverned_turn():
     then a model call with and without governance.
     """
     ungoverned = (
-        'class P:\n'
-        '    def plan(self, task):\n'
+        "class P:\n"
+        "    def plan(self, task):\n"
         '        prompt = f"""line one\n'
-        'INTERPOLATED: {task}\n'
+        "INTERPOLATED: {task}\n"
         'line three"""\n'
         '        return self.llm.chat([{"role": "user", "content": prompt}])\n'
     )
     governed = ungoverned.replace(
-        'self.llm.chat([',
-        'self.llm.chat(governed_call([',
+        "self.llm.chat([",
+        "self.llm.chat(governed_call([",
     ).replace('content": prompt}])', 'content": prompt}]))')
 
     assert _offenders_of(ungoverned) == [6], "the gate missed a bare model turn"
     assert _offenders_of(governed) == [], "the gate flags a governed turn"
-    assert _offenders_of('def run(a):\n    return agent.chat(a)\n') == [], "HermusAgent.chat is governed by the engine"
+    assert _offenders_of("def run(a):\n    return agent.chat(a)\n") == [], "HermusAgent.chat is governed by the engine"
 
 
 def test_pooled_agents_never_fake_work():
@@ -388,7 +384,7 @@ def test_governed_call_keeps_a_single_prompt_message_intact(monkeypatch, tmp_pat
     from core.harness import runtime as runtime_mod
 
     monkeypatch.setattr(runtime_mod.config, "harness_budget_tokens", 200_000)
-    prompt = "Return ONLY JSON: {\"steps\": []}\n\nGoal: build a thing"
+    prompt = 'Return ONLY JSON: {"steps": []}\n\nGoal: build a thing'
     messages = [{"role": "system", "content": "You plan."}, {"role": "user", "content": prompt}]
 
     out = runtime_mod.governed_call(messages, session_id="reasoning.plan")

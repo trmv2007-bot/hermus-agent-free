@@ -56,3 +56,41 @@ $ node --test --test-reporter=tap tests/js/*.test.js
 ```
 
 Browser smoke (Chromium, gateway live): 11 tabs, palette, modal, workshop — 0 page errors; every panel populated from real endpoints (no stuck loading states).
+
+## 6 · Round 2 — "Control Center" restyle + CI repairs (post-push feedback)
+
+The first redesign kept a dark, cyan sci-fi look. This round replaces the visual language entirely and makes CI green.
+
+### 6.1 Visual language: dark sci-fi → light Control Center
+
+- `gateway/static/nexus.css` fully rewritten again (~1,050 lines): soft neutral canvas (`#f4f5f7`), white cards with hairline borders, one indigo accent family (`#4f46e5`), semantic green/amber/red, 13.5px base type with an 11px uppercase meta floor. Dark sci-fi chrome, neon glows and the holographic stage are gone.
+- The tab rail is now a proper sidebar (224px, sticky); on ≤1080px it collapses to an icon rail, on ≤760px the grids stack and the topbar declutters.
+- The living core canvas (`control-core.js`) re-tinted to the light palette (indigo idle, amber acting, violet verifying, red error); the old hardcoded cyan (`#5ee8ff`) is gone.
+- `control.css` focus ring fallback updated to the new accent. The pinned strings the tests require ("visual interaction system", `model-surface`, `:focus-visible`, ≥2 `prefers-reduced-motion` blocks) are all preserved.
+- The JARVIS second space was **restored** (it had been dropped from the page): triple-click the HERMUS mark to open it. No neon mockups — the rail only links real surfaces, the roster reads `/api/v1/agents/list` live, and every button is a real `data-open` / `data-command` action.
+- `#modelRole` got its role enum back (default/reasoning/vision/coding/background/doctor/voice — mirrors `MODEL_ROLES` in `nexus.js`), so role-scoped model routing is selectable again.
+
+### 6.2 Bugs found by re-running the CI browser QA locally
+
+- **Missing static routes (pre-existing):** the gateway served `control-room.js`, `console.js`, etc., but had **no routes for `control-core.js`, `control-agents.js` and the brand SVGs** — the living core never rendered and the agents engine never loaded. Added explicit allow-listed routes in `gateway/gateway.py`.
+- **Tab switching regression risk:** the new stylesheet's `.tab[hidden]{display:none!important}` fought the browser UA rule pattern `selectTab` relies on (it toggles `.on` but leaves the `hidden` attribute in place). Removed the over-eager rule so `.tab.on{display:block}` wins, exactly like the previous design.
+- **ui-qa console-noise filter:** the QA boots the page against a static mock server, where the `/dashboard/events` WebSocket upgrade legitimately fails (the mock serves files, not streams). The QA now ignores that network-layer message while still failing on any real `pageerror`.
+
+### 6.3 CI repairs (why the previous push showed "failed")
+
+- The push itself succeeded — what failed was the **"HERMUS CI" workflow**, and it had been failing on the old commit `623d9bb` too.
+- `ruff format --check` exited 1 on six files (four of them harness-remodel leftovers: `core/harness/memory_graph.py`, `core/harness/sessions.py`, `core/harness/stats.py`, `core/multi_key.py` + two harness tests). Formatted; `ruff check` and the `mypy` target verified locally.
+- Local replication of every CI step now passes: compileall, pytest, ruff check, ruff format, mypy, `node --check`, and the full Playwright ui-qa script from `test.yml` (baseline ≥30 labelled+bound buttons, palette, JARVIS workspace, models, Personal Space, workshop, command line, unique action coverage — exit 0, zero page errors).
+
+### 6.4 Verification (round 2)
+
+```
+$ python -m pytest tests/ -q --ignore=tests/eval
+1563 passed, 2 skipped in 256s
+$ python -m ruff check . && python -m ruff format --check .
+All checks passed! / 570 files already formatted
+$ node /tmp/hermus-ui/qa.mjs   # the exact CI ui-qa script, mocked backend
+exit 0, 0 page errors
+```
+
+Screenshots of the new UI (desktop tabs, palette, JARVIS workspace, workshop, mobile) were captured against a live gateway and reviewed.

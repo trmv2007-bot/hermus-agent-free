@@ -71,9 +71,7 @@ def test_swarm_runs_through_the_canonical_queue(monkeypatch, tmp_path):
         calls["tasks"] = tasks
         return {
             "ok": True,
-            "nodes": [
-                {"task": t, "answer": f"answer for {t[:8]}", "success": True} for t in (tasks or [])
-            ],
+            "nodes": [{"task": t, "answer": f"answer for {t[:8]}", "success": True} for t in (tasks or [])],
         }
 
     monkeypatch.setattr("subagents.subagent.delegate", fake_delegate)

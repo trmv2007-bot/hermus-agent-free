@@ -8,7 +8,7 @@
 */
 
 :focus-visible {
-  outline: 2px solid var(--accent, #56c8ff);
+  outline: 2px solid var(--accent, #4f46e5);
   outline-offset: 2px;
   border-radius: 4px;
 }

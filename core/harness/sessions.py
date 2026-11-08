@@ -114,7 +114,13 @@ def touch(session_id: str, **fields: Any) -> dict[str, Any]:
         if isinstance(stats, dict) and stats:
             merged = dict(rec.get("stats") or {})
             for key, value in stats.items():
-                if isinstance(value, (int, float)) and key in ("compactions", "tokens_in", "elapsed_ms", "notices", "recall_hits"):
+                if isinstance(value, (int, float)) and key in (
+                    "compactions",
+                    "tokens_in",
+                    "elapsed_ms",
+                    "notices",
+                    "recall_hits",
+                ):
                     merged[key] = merged.get(key, 0) + value
                 else:
                     merged[key] = value

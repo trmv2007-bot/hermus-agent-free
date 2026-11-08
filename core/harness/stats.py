@@ -43,9 +43,7 @@ def overview() -> dict[str, Any]:
     rows = sessions.list_sessions()
     by_status = Counter(str(r.get("status") or "unknown") for r in rows)
     active = [
-        r
-        for r in sessions.active_since(sessions.ACTIVE_WINDOW_HOURS)
-        if str(r.get("status") or "") in sessions.LIVE_STATUSES
+        r for r in sessions.active_since(sessions.ACTIVE_WINDOW_HOURS) if str(r.get("status") or "") in sessions.LIVE_STATUSES
     ]
     return {
         "enabled": bool(getattr(config, "harness_enabled", True)),

@@ -890,6 +890,26 @@ async def personal_space_js():
     return _serve_control_asset("personal-space.js", "application/javascript; charset=utf-8")
 
 
+@app.get("/static/control-core.js")
+async def control_core_js():
+    """Living-core canvas: a state projection over real gateway probes."""
+    return _serve_control_asset("control-core.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-agents.js")
+async def control_agents_js():
+    """Agents tab: fleet roster, crew mail, API keys, GPU telemetry."""
+    return _serve_control_asset("control-agents.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/assets/{asset_name}")
+async def control_static_asset(asset_name: str):
+    """Static brand assets for the control room (logo, favicon)."""
+    if asset_name not in {"logo.svg", "favicon.svg"}:
+        return Response(f"{asset_name} not found", status_code=404, media_type="text/plain")
+    return _serve_control_asset(f"assets/{asset_name}", "image/svg+xml")
+
+
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache stats - for optimization dashboard"""

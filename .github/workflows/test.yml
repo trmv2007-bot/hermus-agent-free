@@ -138,7 +138,12 @@ jobs:
 
           const errors=[];
           page.on('pageerror',e=>errors.push(e.message));
-          page.on('console',msg=>{if(msg.type()==='error') errors.push(msg.text())});
+          // Network-layer noise from the static mock server only: the browser
+          // logs a console error when the WebSocket upgrade to
+          // /dashboard/events is refused (the mock serves files, not streams).
+          // The real gateway serves that endpoint; genuine JS page errors
+          // above still fail the run.
+          page.on('console',msg=>{if(msg.type()==='error' && !msg.text().startsWith('WebSocket connection to')) errors.push(msg.text())});
 
           await page.goto('http://127.0.0.1:4173/control.html',{waitUntil:'domcontentloaded'});
           await page.waitForTimeout(1500);

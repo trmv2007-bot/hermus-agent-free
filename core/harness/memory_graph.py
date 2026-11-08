@@ -96,7 +96,7 @@ def cascade_recall(
             from ..embeddings import embedding_store
 
             if embedding_store.available():
-                for row in (embedding_store.search(query, limit=limit).get("results") or []):
+                for row in embedding_store.search(query, limit=limit).get("results") or []:
                     hits.append(
                         {
                             "content": str(row.get("content") or "")[:400],
