@@ -13,6 +13,10 @@
 <strong>Build with local models or free-tier providers. Keep your data, tools and runtime under your control.</strong>
 </p>
 
+<p align="center">
+<a href="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/test.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&label=CI"></a>
+</p>
+
 ---
 
 ## 🚀 Quick Start

@@ -343,7 +343,9 @@ class Sentinel:
                 f"Event type: {env.type}. Command: {env.command}. Status: {env.status}. "
                 f"Args: {json.dumps(env.args_redacted or {}, default=str)[:600]}. Salience: {score}."
             )
-            resp = self.llm.chat([{"role": "user", "content": prompt}])
+            from .harness import governed_call
+
+            resp = self.llm.chat(governed_call([{"role": "user", "content": prompt}], session_id="sentinel.triage"))
             obj = _extract_json(getattr(resp, "content", "") or "")
             if isinstance(obj, dict) and "action" in obj:
                 action = str(obj.get("action") or "note").lower()

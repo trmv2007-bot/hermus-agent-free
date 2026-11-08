@@ -17,8 +17,9 @@ Two layers live here:
 from . import bus, files, sessions
 from .compaction import compact_messages
 from .memory_graph import cascade_recall
+from .models import MOCK_REF, list_models, ping_model, resolve_model_spec
 from .runner import HarnessRunner, RunOptions, default_agent_factory
-from .runtime import HarnessRuntime, harness
+from .runtime import HarnessRuntime, governed_call, governed_turn, harness
 from .swarm import run_workers, spawn
 from .swarm import status as swarm_status
 from .tasks import BUILTIN_SUITES_DIR, Suite, SuiteError, Task, list_builtin_suites, resolve_suite, suite_info
@@ -32,6 +33,8 @@ __all__ = [
     "cascade_recall",
     "HarnessRuntime",
     "harness",
+    "governed_turn",
+    "governed_call",
     "spawn",
     "run_workers",
     "swarm_status",

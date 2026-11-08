@@ -767,9 +767,10 @@ class SkillForge:
         if self._llm:
             return self._llm(messages)
         try:
+            from .harness import governed_call
             from .models import get_model_gateway
 
-            resp = get_model_gateway().chat(messages)
+            resp = get_model_gateway().chat(governed_call(messages, session_id="skill_forge"))
             return getattr(resp, "content", "") or ""
         except Exception:
             return ""

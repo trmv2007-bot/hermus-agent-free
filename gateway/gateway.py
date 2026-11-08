@@ -638,6 +638,7 @@ from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
 from gateway.routes_devices import router as _devices_router  # noqa: E402
 from gateway.routes_engine import router as _engine_router  # noqa: E402
 from gateway.routes_focus import router as _focus_router  # noqa: E402
+from gateway.routes_harness import eval_router as _harness_eval_router  # noqa: E402
 from gateway.routes_harness import router as _harness_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_learning import router as _learning_router  # noqa: E402
@@ -665,6 +666,7 @@ app.include_router(_channels_control_router, dependencies=_gate_control)
 app.include_router(_registry_router, dependencies=_gate_control)
 app.include_router(_sentinel_router, dependencies=_gate_control)
 app.include_router(_harness_router, dependencies=_gate_control)
+app.include_router(_harness_eval_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
 app.include_router(_console_router, dependencies=_gate_control)

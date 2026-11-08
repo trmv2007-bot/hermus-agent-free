@@ -465,7 +465,7 @@ class ToolRunner(SpecializedAgent):
 
     async def execute_tool(self, tool_name: str, args: dict = None) -> str:
         """
-        Execute a tool.
+        Execute a tool through the canonical ToolGateway.
 
         Args:
             tool_name: Name of the tool to execute
@@ -474,12 +474,24 @@ class ToolRunner(SpecializedAgent):
         Returns:
             Tool execution result
         """
+        import asyncio
+        import json as _json
+
+        from core.tools.gateway import get_tool_gateway
+
         if tool_name not in self._allowed_tools:
             return f"Error: Tool {tool_name} not allowed"
 
-        # TODO: Actually execute the tool
-        prompt = f"Execute tool: {tool_name}\nArgs: {json.dumps(args or {}, indent=2)}"
-        return await self.run_task(prompt)
+        result = await asyncio.to_thread(
+            get_tool_gateway().execute,
+            tool_name,
+            args or {},
+            actor=f"tool_runner:{getattr(self.config, 'name', 'tool-runner')}",
+        )
+        if getattr(result, "ok", False):
+            output = getattr(result, "output", None)
+            return output if isinstance(output, str) else _json.dumps(output, default=str)
+        return f"Error: {getattr(result, 'error_code', None) or 'TOOL_ERROR'}: {getattr(result, 'error_message', None) or 'tool failed'}"
 
 
 # Factory functions for creating specialized agents

@@ -12,7 +12,10 @@ import pytest
 def test_singleton_exposes_all_settings():
     from core.config import Config, config
 
-    assert len(Config.model_fields) == 194
+    # Field-count pin: update when you add/remove a setting on purpose.
+    # 194 → 202: the harness-remodel merge landed 8 additional settings
+    # (model fleet / voice ack / personal-space knobs) without refreshing this pin.
+    assert len(Config.model_fields) == 202
     assert {
         "personal_space_enabled",
         "personal_space_state_path",

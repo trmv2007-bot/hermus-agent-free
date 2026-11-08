@@ -264,12 +264,14 @@ document.querySelectorAll("nav [role=tab]").forEach((b) => {
   selectTab(active ? active.dataset.tab : "overview", { noRefresh: true });
 })();
 function refreshTab(name){
-  if (name === "jobs") refreshJobs();
+  if (name === "jobs") { refreshJobs(); refreshRemote(); }
   else if (name === "missions") refreshMissions();
   else if (name === "telemetry") refreshTelemetry(true);
   else if (name === "computer") refreshComputer();
   else if (name === "remote") refreshRemote();
   else if (name === "safety") refreshSafety();
+  else if (name === "approvals") { refreshSafety(); refreshRemote(); }
+  else if (name === "capabilities") { refreshSafety(); }
   else if (name === "systems") { if (window.HermusConsole) window.HermusConsole.refresh(); }
   else if (name === "presence") refreshPresence();
 }

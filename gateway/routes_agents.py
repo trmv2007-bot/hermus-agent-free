@@ -41,6 +41,66 @@ router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 # ============================================================================
 
 
+@router.post("/subscribe")
+async def subscribe_session(payload: dict) -> dict:
+    """Subscribe a session to a harness bus channel.
+
+    Expected payload:
+    - session_id: str (required)
+    - channel: str (required, non-empty)
+    """
+    from core.harness import bus as harness_bus
+
+    session_id = str(payload.get("session_id") or "").strip()
+    channel = str(payload.get("channel") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    if not channel:
+        raise HTTPException(status_code=400, detail="channel name required")
+
+    try:
+        result = harness_bus.subscribe(session_id, channel)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error") or "subscription failed")
+        return {"ok": True, "session": session_id, "channels": result.get("channels", [])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error subscribing {session_id} to {channel}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/unsubscribe")
+async def unsubscribe_session(payload: dict) -> dict:
+    """Remove a session from a harness bus channel."""
+    from core.harness import bus as harness_bus
+
+    session_id = str(payload.get("session_id") or "").strip()
+    channel = str(payload.get("channel") or "").strip()
+    if not session_id or not channel:
+        raise HTTPException(status_code=400, detail="session_id and channel are required")
+
+    try:
+        result = harness_bus.unsubscribe(session_id, channel)
+        return {"ok": True, "session": session_id, "channels": result.get("channels", [])}
+    except Exception as e:
+        logger.error(f"Error unsubscribing {session_id} from {channel}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/inbox/{session_id}")
+async def get_harness_inbox(session_id: str, channel: str | None = None, unread_only: bool = False) -> dict:
+    """Read a session's harness bus inbox (DMs, broadcasts, subscribed channels)."""
+    from core.harness import bus as harness_bus
+
+    try:
+        messages = harness_bus.inbox(session_id, channel=channel, unread_only=bool(unread_only))
+        return {"status": "ok", "count": len(messages), "messages": messages}
+    except Exception as e:
+        logger.error(f"Error reading inbox for {session_id}: {e}")
+        return {"status": "ok", "count": 0, "messages": []}
+
+
 @router.get("/pool/status")
 async def get_pool_status(request: Request) -> dict:
     """Get the current status of the agent pool."""

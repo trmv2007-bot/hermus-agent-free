@@ -30,8 +30,11 @@ def test_browser_client_js_tests_pass():
     patterns = sorted(p.name for p in JS_DIR.glob("*.test.js"))
     assert patterns, "expected at least one JS test file under tests/js"
 
+    # --test-reporter=tap pins the output format: Node >= 23 defaults to the
+    # spec reporter ("ℹ fail 0") whose output has no "# fail 0" line, so the
+    # TAP contract below broke on modern Node even with a green suite.
     result = subprocess.run(
-        ["node", "--test", *(f"tests/js/{name}" for name in patterns)],
+        ["node", "--test", "--test-reporter=tap", *(f"tests/js/{name}" for name in patterns)],
         cwd=str(ROOT),
         capture_output=True,
         text=True,
