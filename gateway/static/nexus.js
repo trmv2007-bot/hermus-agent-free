@@ -57,7 +57,65 @@
     if(stateEl) stateEl.textContent=label;
     if(detailEl) detailEl.textContent=detail;
     document.body.dataset.state=label.toLowerCase().replace(/\s+/g,'-');
+    // The hero chip's second line ("Idle. The queue is clear.") is owned by
+    // control-core's poller. While a run is live, that line must agree with
+    // the run instead of contradicting the label two pixels away; otherwise
+    // it mirrors this state's own detail so label+line always match.
+    const now=$('#coreNow');
+    if(now) now.textContent = (state.busy || state.missionLive)
+      ? (state.commandInFlight ? `working on “${state.commandInFlight}”` : 'working on your request…')
+      : (detail || 'awaiting your command');
   }
+
+  /* ------------------------------------------------------------------ *
+   * Conversation transcript — the answer must never be swallowed again.
+   *
+   * The run bus publishes the final response as 'agent_response' with the
+   * full text; before round 3 that event only flipped a status chip and the
+   * answer was lost. The transcript renders it, keeps the last stretch of
+   * the conversation in localStorage so a refresh does not erase it, and
+   * turns "no model backend" answers into a one-click fix. */
+  const TRANSCRIPT_KEY='hermus_transcript_v1';
+  const MODEL_HELP_RE=/ollama|no usable (hosted )?provider|no model backend|model backend|api key|provider.*not|not running at/i;
+  function transcriptLoad(){
+    try{ const raw=JSON.parse(localStorage.getItem(TRANSCRIPT_KEY)||'[]'); return Array.isArray(raw)?raw.slice(-20):[]; }catch{ return []; }
+  }
+  function transcriptSave(rows){
+    try{ localStorage.setItem(TRANSCRIPT_KEY, JSON.stringify(rows.slice(-20))); }catch{/* private mode etc */}
+  }
+  function messageEl(role, text, error){
+    const row=document.createElement('div');
+    row.className='msg '+role+(error?' error':'');
+    const who=role==='user'?'You':'HERMUS';
+    row.innerHTML='<div class="msg-who">'+esc(who)+'</div>'
+      +'<div class="msg-text">'+esc(text).replace(/\n/g,'<br>')+'</div>'
+      +(MODEL_HELP_RE.test(String(text||''))
+        ? '<div class="msg-actions"><button type="button" class="btn ghost" data-goto="systems">Connect a model →</button></div>'
+        : '');
+    return row;
+  }
+  function addMessage(role, text, opts={}){
+    const body=$('#transcriptBody'); if(!body) return;
+    if(body.querySelector('.note')) body.innerHTML='';
+    body.appendChild(messageEl(role, text, !!opts.error));
+    body.scrollTop=body.scrollHeight;
+    const rows=transcriptLoad();
+    rows.push({role:String(role),text:String(text),error:!!opts.error,at:Date.now()});
+    transcriptSave(rows);
+  }
+  function transcriptRestore(){
+    const body=$('#transcriptBody'); if(!body) return;
+    const rows=transcriptLoad();
+    if(!rows.length) return;
+    body.innerHTML='';
+    rows.forEach(r=>body.appendChild(messageEl(r.role==='user'?'user':'hermus', String(r.text||''), !!r.error)));
+    body.scrollTop=body.scrollHeight;
+  }
+  $('#transcriptClear')?.addEventListener('click',()=>{
+    transcriptSave([]);
+    const body=$('#transcriptBody');
+    if(body) body.innerHTML='<div class="note">Ask HERMUS anything — answers stream here and are kept in this browser.</div>';
+  });
   function renderCapabilities(entries) {
     const list=$('#capabilities'); if(!list)return;
     list.innerHTML='';
@@ -119,6 +177,7 @@
       const healthEntries = health && typeof health === 'object' ? health : {};
       const healthyCount = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
       const healthy = healthyCount > 0;
+      state.lastHealthHealthy = healthy;
       syncJarvisStatus(true, healthy, healthEntries);
       if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthyCount ? `${healthyCount} systems ready` : 'READY'; }
       renderCapabilities(caps.capabilities || caps);
@@ -177,15 +236,36 @@
     } else if(type==='run_error' || type==='mission_error'){
       status='ERROR'; detail=String(data.error||data.message||'run failed'); progress='Execution failed';
       state.busy=false;
+      state.commandInFlight='';
       mission.terminal=true;
+      addMessage('hermus', String(data.error||data.message||'The run failed.'), {error:true});
     } else if(type==='run_finished' || type==='mission_finished' || type==='stream_end'){
       const finalStatus=String(data.status||'finished').toLowerCase();
       status=finalStatus==='finished'||finalStatus==='completed'||finalStatus==='succeeded'?'COMPLETED':'FINISHED';
-      detail='execution complete'; progress=data.duration_ms ? `Finished · ${data.duration_ms}ms` : 'Verified run complete';
+      detail=state.lastResponse ? 'answered — see the conversation' : 'execution complete';
+      progress=data.duration_ms ? `Finished · ${data.duration_ms}ms` : 'Verified run complete';
       state.busy=false;
+      state.commandInFlight='';
       mission.terminal=true;
+      if(!state.lastResponse && (type==='run_finished'||type==='mission_finished')){
+        addMessage('hermus',
+          'The run finished'+(data.duration_ms?` in ${data.duration_ms}ms`:'')+' but returned no response text. Open the Jobs tab and click the job row for its event log.',
+          {error:false});
+      }
     } else if(type==='agent_response'){
       status='WORKING'; detail='final response ready'; progress='Response received';
+      // Round 3: the response text IS the product. Render it, remember it,
+      // and let a run that ends without one say so honestly.
+      const text=String(data.text||'').trim();
+      if(text){
+        state.lastResponse=text;
+        addMessage('hermus', text);
+        state.answeredAt=Date.now();
+        const activeTab=document.querySelector('nav [role=tab].on');
+        if(activeTab && activeTab.dataset.tab!=='overview' && window.toast){
+          window.toast('HERMUS answered — see the conversation on Overview','info');
+        }
+      }
     } else if(type==='job_status'){
       status=String(data.status||data.stage||status).toUpperCase(); detail=String(data.message||'queue update'); progress=String(data.stage||data.status||progress);
     }
@@ -221,18 +301,27 @@
 
   async function sendCommand(value=null) {
     const input=$('#command'); const command=(value ?? input.value).trim(); if(!command)return;
-    input.value=''; missionReset(); state.busy=true; setState('WORKING','processing your request'); addEvent(`Command · ${command}`);
+    input.value=''; missionReset(); state.busy=true; state.lastResponse=null;
+    state.commandInFlight=command.length>48 ? command.slice(0,48)+'…' : command;
+    setState('WORKING','processing your request');
+    addMessage('user', command);
+    addEvent(`Command · ${command}`);
+    // The command bar speaks natural language, so it must start a real run:
+    // POST /jobs (kind=runtime.turn) returns a run_id and streams the answer
+    // on /stream/run/{run_id}. The old primary — POST /api/v1/commands — is
+    // the console-command ledger: it recorded {ok:true, command_id:null} and
+    // started nothing, which is why requests vanished without a word.
     try {
-      const result=await api('/api/v1/commands',{method:'POST',body:JSON.stringify({command,text:command,platform:'web',mode:'chat',stream:true,session_id:await ensureSession(),user_id:'default'})});
-      const id=result.run_id || result.mission_id; state.mission=id || null;
+      const result=await api('/jobs',{method:'POST',body:JSON.stringify({kind:'runtime.turn',payload:{text:command,platform:'web',mode:'chat',stream:true,session_id:await ensureSession(),user_id:'default'}})});
+      const id=result.run_id || result.job_id; state.mission=id || null;
       addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
-      if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
-    } catch(e) {
-      try {
-        const result=await api('/jobs',{method:'POST',body:JSON.stringify({kind:'runtime.turn',payload:{text:command,platform:'web',mode:'chat',stream:true,session_id:await ensureSession(),user_id:'default'}})});
-        const id=result.run_id || result.mission_id; state.mission=id || null; addEvent(`Request accepted${id ? ` · ${id}` : ''}`); setState('WORKING',id ? `run ${id}` : 'request accepted');
-        if(id) connectRun(id); else { state.busy=false; state.missionLive=false; }
-      } catch (fallback) { state.busy=false; state.missionLive=false; addEvent(fallback.message,'error'); setState('ATTENTION',fallback.message); }
+      if(result.run_id) connectRun(result.run_id);
+      else if(id) addEvent(`Queued as ${id} — no live stream for this kind`);
+      else { state.busy=false; state.missionLive=false; addMessage('hermus','The request was queued but returned no run id. Open the Jobs tab to follow it.',{error:true}); }
+    } catch (e) {
+      state.busy=false; state.missionLive=false; state.commandInFlight='';
+      addEvent(e.message,'error'); setState('ATTENTION',e.message);
+      addMessage('hermus', 'Your request could not be started: '+e.message, {error:true});
     }
   }
 
@@ -299,7 +388,6 @@
     } catch(e) { $('#modalLog').textContent=e.message; }
   }
 
-  $('#paletteInput')?.addEventListener('input',renderPalette);
   $('#paletteClose')?.addEventListener('click',()=>showPalette(false));
   $('#paletteBtn')?.addEventListener('click',()=>showPalette(true));
   $('#palette')?.addEventListener('click',e=>{
@@ -310,12 +398,17 @@
   document.addEventListener('click', e => {
     const nav=e.target.closest('[data-open]'); if(nav)open(nav.dataset.open);
     const suggestion=e.target.closest('[data-command]'); if(suggestion)sendCommand(suggestion.dataset.command);
+    // Cross-panel jumps: every dead-end we render offers the next step, so
+    // "Connect a model →" actually goes somewhere.
+    const goto=e.target.closest('[data-goto]');
+    if(goto){ if(window.selectTab) window.selectTab(goto.dataset.goto); else { const b=document.querySelector('#tabbtn-'+goto.dataset.goto); if(b) b.click(); } }
     if(e.target.closest('[data-close]')){$('#overlay').classList.remove('open');$('#overlay').setAttribute('aria-hidden','true');}
     if(e.target.closest('#send'))sendCommand();
   });
   $('#command')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendCommand();}});
   window.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#palette')?.classList.contains('open')){showPalette(false);}else{$('#overlay')?.classList.remove('open');$('#overlay')?.setAttribute('aria-hidden','true');}}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#command')?.focus();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='p'){e.preventDefault();showPalette(true);}});
   refresh(); setInterval(refresh,10000);
+  transcriptRestore();
 
   // Discoverable capability vocabulary for contextual HERMUS surfaces:
   // Snapshot, Replay, Emergency stop, Missions, approval-aware lifecycle,
@@ -330,7 +423,9 @@
   // /jobs, /queue/status, /events/recent, /dashboard/events, /remote/status,
   // /remote/approvals, /doctor/status, /doctor/run, /api/v1/runs/.
   // Command palette: PALETTE_ITEMS, Ctrl K focus, Ctrl P palette, e.key.toLowerCase()==='p'.
-  window.HermusNexus = { api, sendCommand, contextualAction, actions, state };
+  window.HermusNexus = { api, sendCommand, contextualAction, actions, state,
+    // Exposed for the Node test harness; not part of the page contract.
+    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent } };
 
   const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);
   const modelState = { catalog:null, selected:null, health:null, inFlight:false };
@@ -397,8 +492,9 @@
           ' · ' + esc(reach) + (caps ? ' · ' + esc(caps) : '') + '</span>';
       }).join('');
     } else {
-      meta.textContent='No compatible deployments discovered for this role.';
-      fleet.innerHTML='<div class="empty-event">Configure a provider or local runtime, then press SYNC.</div>';
+      meta.textContent='No compatible deployments for this role yet.';
+      fleet.innerHTML='<div class="empty-event">No model is reachable right now. Add an API key (Agents tab → API keys) or start a local runtime, then refresh.<br>'
+        +'<button type="button" class="btn ghost" data-goto="systems">Show me how →</button></div>';
     }
 
     if(pill) pill.textContent='MODEL · ' + (select.value==='auto' ? 'AUTO' : select.value).toUpperCase();
@@ -425,7 +521,7 @@
       const pill=$('#modelPill');
       if(pill) pill.textContent='MODEL · UNAVAILABLE';
       const fleet=$('#modelFleet');
-      if(fleet) fleet.innerHTML='<div class="model-state unavailable"><span>RUNTIME UNAVAILABLE</span><small>Connect or restore the model runtime, then press SYNC.</small></div>';
+      if(fleet) fleet.innerHTML='<div class="model-state unavailable"><span>RUNTIME UNAVAILABLE</span><small>The model hub could not be reached. It usually comes back on its own; if not, check the gateway process or open Systems → Local engine.</small><button type="button" class="btn ghost" data-goto="systems">Open Systems →</button></div>';
     }finally{
       modelState.inFlight=false;
     }
@@ -450,11 +546,28 @@
     }
   }
 
+  /* Attention dismissal is per-browser and keyed on title+detail so a real
+   * new problem (different text) always resurfaces. */
+  const ATTENTION_DISMISS_KEY='hermus_attention_dismissed_v1';
+  function attentionKey(item){
+    return String((item&&item.title)||'')+'|'+String((item&&item.detail)||'');
+  }
+  function attentionDismissed(){
+    try{ const raw=JSON.parse(localStorage.getItem(ATTENTION_DISMISS_KEY)||'[]'); return Array.isArray(raw)?raw.slice(-50):[]; }catch{ return []; }
+  }
+  function dismissAttention(key){
+    const rows=attentionDismissed().filter(k=>k!==key); rows.push(key);
+    try{ localStorage.setItem(ATTENTION_DISMISS_KEY, JSON.stringify(rows.slice(-50))); }catch{/* ignore */}
+  }
+
   function renderKernel(kernel){
     if(!kernel) return;
     state.kernel=kernel;
     const summary=kernel.summary || {};
-    if(!state.missionLive) setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
+    // Single-writer rule: while a user command is in flight the run stream
+    // owns the hero chip. The kernel poller only writes when nothing is live,
+    // otherwise the label said THINKING while the line under it said "Idle.".
+    if(!state.missionLive && !state.busy) setState(String(summary.state || 'idle').replace(/_/g,' ').toUpperCase(), String(summary.detail || 'ready'));
 
     const active=Number(summary.active_runs || 0);
     const attentionCount=Number(summary.attention_count || 0);
@@ -465,18 +578,38 @@
 
     const host=$('#attention');
     if(host){
-      const rows=Array.isArray(kernel.attention) ? kernel.attention.slice(0,8) : [];
+      /* Attention items must be actionable: "Diagnose" jumps to the Systems
+       * console, "Dismiss" hides the item for this browser (persisted). A
+       * degraded gateway with an empty kernel attention list still earns a
+       * pointer to the Doctor, instead of claiming "All systems ready"
+       * under a DEGRADED badge. */
+      const dismissed=attentionDismissed();
+      const raw=Array.isArray(kernel.attention) ? kernel.attention.slice(0,8) : [];
+      const rows=raw.filter(item=>!dismissed.includes(attentionKey(item)));
       host.innerHTML=rows.length
         ? rows.map(item=>{
             const sev=String(item.severity||'').toLowerCase();
             const cls=sev==='critical' ? 'bad' : (sev==='high'||sev==='medium' ? 'warn' : '');
-            return '<div class="attention-item '+cls+'"><i></i><span><strong>'+esc(item.title||'Attention')+'</strong><small>'+esc(item.detail||'')+'</small></span></div>';
+            return '<div class="attention-item '+cls+'" data-attention-key="'+esc(attentionKey(item))+'"><i></i><span><strong>'+esc(item.title||'Attention')+'</strong><small>'+esc(item.detail||'')+'</small>'
+              +'<span class="att-actions"><button type="button" class="btn ghost" data-goto="systems">Diagnose</button>'
+              +'<button type="button" class="btn ghost" data-attention-dismiss="'+esc(attentionKey(item))+'">Dismiss</button></span></span></div>';
           }).join('')
-        : '<div class="empty-event">'+esc(String((kernel.summary||{}).headline||'All systems ready'))+'</div>';
+        : (state.lastHealthHealthy===false
+          ? '<div class="attention-item warn"><i></i><span><strong>No subsystem reports ready</strong><small>The gateway is up, but the health probe found nothing healthy. Run the Doctor to find out why.</small><span class="att-actions"><button type="button" class="btn ghost" data-goto="systems">Diagnose</button></span></span></div>'
+          : '<div class="empty-event">'+esc(String((kernel.summary||{}).headline||'All systems ready'))+'</div>');
+      host.querySelectorAll('button[data-attention-dismiss]').forEach(btn=>btn.addEventListener('click',()=>{
+        dismissAttention(btn.dataset.attentionDismiss);
+        const sel='[data-attention-key="'+(window.CSS&&CSS.escape ? CSS.escape(btn.dataset.attentionDismiss) : btn.dataset.attentionDismiss.replace(/"/g,'\\"'))+'"]';
+        const item=host.querySelector(sel);
+        if(item) item.remove();
+        const status=$('#attentionStatus');
+        if(status) status.textContent=host.querySelector('.attention-item') ? status.textContent : 'CLEAR';
+      }));
     }
 
     const status=$('#attentionStatus');
-    if(status) status.textContent=attentionCount ? (attentionCount+' ACTIVE') : 'CLEAR';
+    const visibleAttention=host ? host.querySelectorAll('.attention-item').length : attentionCount;
+    if(status) status.textContent=visibleAttention ? (visibleAttention+' ACTIVE') : 'CLEAR';
 
     const recent=(kernel.events && kernel.events.recent) || [];
     recent.slice(-4).forEach(ev=>{
@@ -512,7 +645,7 @@
     const host=$('#palette'); if(!host)return;
     host.classList.toggle('open',open);
     host.setAttribute('aria-hidden',open?'false':'true');
-    if(open){ renderPalette(); setTimeout(()=>$('#paletteInput')?.focus(),0); }
+    if(open){ paletteActive=0; renderPalette(); setTimeout(()=>$('#paletteInput')?.focus(),0); }
   }
 
   const PALETTE_ITEMS=[
@@ -527,12 +660,43 @@
     ['Console manifest','Open the full subsystem console'],
     ['Dashboard state','Inspect runtime state'],
   ];
+  /* A command palette is a keyboard instrument first: arrow keys move the
+   * active row, Enter runs it, and the digit hints (1–9) are real shortcuts,
+   * not decoration. */
+  let paletteActive=0;
+  function paletteItemsNow(){ return Array.from(document.querySelectorAll('#paletteList .palette-item')); }
+  function paletteMarkActive(){
+    const items=paletteItemsNow();
+    if(paletteActive>=items.length) paletteActive=Math.max(0,items.length-1);
+    items.forEach((el,i)=>el.classList.toggle('active',i===paletteActive));
+    if(items[paletteActive] && items[paletteActive].scrollIntoView) items[paletteActive].scrollIntoView({block:'nearest'});
+  }
+  function paletteMove(delta){
+    const items=paletteItemsNow(); if(!items.length) return;
+    paletteActive=(paletteActive+delta+items.length)%items.length;
+    paletteMarkActive();
+  }
+  function paletteRunActive(){
+    const items=paletteItemsNow();
+    const it=items[paletteActive]||items[0];
+    if(it) it.click();
+  }
   function renderPalette(){
     const input=$('#paletteInput'); const host=$('#paletteList'); if(!host)return;
     const q=String(input?.value||'').toLowerCase();
     const items=PALETTE_ITEMS.filter(([name,desc])=>(name+' '+desc).toLowerCase().includes(q));
-    host.innerHTML=items.length?items.map(([name,desc],i)=>'<button class="palette-item" data-palette-open="'+esc(name)+'"><b>'+esc(name)+'</b><span>'+esc(desc)+'</span><kbd>'+String(i+1)+'</kbd></button>').join(''):'<div class="empty-event">No HERMUS surface found.</div>';
+    host.innerHTML=items.length?items.map(([name,desc],i)=>'<button class="palette-item'+(i===paletteActive?' active':'')+'" data-palette-open="'+esc(name)+'"><b>'+esc(name)+'</b><span>'+esc(desc)+'</span><kbd>'+String(i+1)+'</kbd></button>').join(''):'<div class="empty-event">No HERMUS surface found.</div>';
   }
+  $('#paletteInput')?.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'){ e.preventDefault(); paletteMove(1); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); paletteMove(-1); }
+    else if(e.key==='Enter'){ e.preventDefault(); paletteRunActive(); }
+    else if(/^[1-9]$/.test(e.key)){
+      const it=paletteItemsNow()[Number(e.key)-1];
+      if(it){ e.preventDefault(); it.click(); }
+    }
+  });
+  $('#paletteInput')?.addEventListener('input',()=>{ paletteActive=0; renderPalette(); });
 
   const originalOpen = open;
   open = async function(name){
@@ -589,7 +753,7 @@
       rows.push('<div class="kv"><span class="k">discovered models</span><span class="v">'+esc(String(cat.count||models.length))+'</span></div>');
       rows.push('<div class="kv"><span class="k">selected</span><span class="v">'+esc(selKeys.length?selKeys.map(k=>k+': '+sel[k]).join(' · '):'auto — best available')+'</span></div>');
       if(!models.length){
-        rows.push('<div class="note">No deployments discovered. Configure a provider in the Model fleet panel, then press Refresh.</div>');
+        rows.push('<div class="note">No deployments discovered. Add an API key (Agents tab → API keys) or start a local runtime, then refresh the Model fleet panel.</div>');
       } else {
         models.slice(0,8).forEach(m=>rows.push('<div class="kv"><span class="k">'+esc(String(m.provider||'?')+'/'+String(m.id||m.ref||'?'))+'</span><span class="v">'+esc(String(m.source||'runtime'))+'</span></div>'));
         if(models.length>8){ rows.push('<div class="note">+'+(models.length-8)+' more in the catalog.</div>'); }
@@ -655,6 +819,9 @@
       }
       const runId=data.run_id;
       state.mission=runId||state.mission;
+      state.busy=true; state.lastResponse=null;
+      state.commandInFlight='voice request';
+      addMessage('user','🎙 voice request');
       addEvent('Voice request accepted');
       if(runId) connectRun(runId);
     }catch(e){

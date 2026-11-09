@@ -113,3 +113,38 @@ Six small UX debts from the self-review, each verified against a live gateway:
 6. **Dark-theme integrity** (`nexus.css`) — two leftover hardcoded light colors from the light era (skeleton shimmer `#fafbfc`, workshop editor `#fcfcfd`) now use theme tokens; the file header still described "white cards on a soft neutral canvas" and now documents the Dark Cockpit language. Remote-status KPIs print `on`/`off` instead of `true`/`false`.
 
 **Tests:** 4 new tests (relative ages incl. epoch + clock-skew clamp, mission buckets, mission-tools wiring, tablist tabindex pin updated to 2 with a comment). Full suite: **1566 passed, 2 skipped, 0 failed**. `node --check` clean on all touched JS; zero browser console errors; live-gateway verification of every behavior above.
+
+---
+
+## 9 · Round 3 — a user walked the whole product (this commit)
+
+The method this time was not a code review but a role-play: **use the product like a first-time human** — type a command, read what comes back, click every tab, every row, every button — and fix whatever makes the moment uncomfortable. That walk surfaced one product-killer and a stack of friction points; all are fixed and pinned by tests.
+
+### The killer: the command bar swallowed every answer
+
+Typing "list the files in this repo" produced "Request accepted" and then **silence, forever**. Two stacked causes, both verified against the live gateway:
+
+1. `sendCommand` POSTed natural language to `/api/v1/commands` — the *console-command ledger*, which answers `{ok:true, command_id:null}` and starts nothing. The real engine path (`POST /jobs`, kind `runtime.turn`) was only a dead-code fallback behind an HTTP error. The command bar now uses the real path; the ledger endpoint stays where it belongs (the Systems "Typed command" card).
+2. The run bus *did* publish the final response as `agent_response` with the full text — and `handleRunEvent` threw it away, flipping a status chip instead. The answer now lands in a **conversation transcript** under the command bar: user lines right in accent, HERMUS lines left, persisted in `localStorage` (last 20 messages, survives reload), with a Clear control. A run that finishes without a response says so honestly; a run error lands in the transcript; voice requests appear as "🎙 voice request".
+
+### From dead ends to doors
+
+Every dead end the walk hit now offers the next step:
+
+- **Model fleet** no longer says *"press SYNC"* (a button that does not exist). Empty/unavailable states explain what is missing and carry a working jump: "Show me how →" / "Open Systems →".
+- **Answers that name a missing model backend** (the default state on a fresh install) get a "Connect a model →" button in the transcript itself.
+- **Mission blockers** ("No model backend reachable… Configure a model before running missions") render a "connect a model →" jump next to the blocker text.
+- **System health** has a Diagnose button; **attention items** carry Diagnose + Dismiss (dismissal is per-browser, keyed on title+detail, so a genuinely new problem always resurfaces). When the gateway is degraded but the kernel attention list is empty, the card synthesizes "No subsystem reports ready — run the Doctor" instead of claiming "All systems ready" under a DEGRADED badge.
+- **Job rows are doors**: clicking (or Enter/Space on) a row expands the request text, run linkage, wait/run time, error and the canonical result from `/jobs/{id}/result`. Columns now read job / kind / state / tries / run / age, and the queue line uses real fields — "backend inprocess · 4 workers · 49 succeeded" instead of "backend=? · workers=?".
+
+### The hero chip stopped arguing with itself
+
+Two pollers owned the same pixels: the label could say **THINKING** while the line under it said *"Idle. The queue is clear."* Now there is a single-writer rule — while a user run is live, nexus owns the chip ("working on 'list the files…'"); the queue-derived copy yields (`control-core` checks `HermusNexus.state.busy/missionLive` before writing), a just-answered run shows *"Answered — the response is in the conversation…"* for a few seconds, and each writer always writes label + line as one consistent pair.
+
+### Small comforts
+
+- **Command palette is a keyboard instrument**: ArrowUp/Down move a highlighted active row, Enter runs it, the digit hints 1–9 are real shortcuts, and typing resets the selection. (Before: the hints were decoration and Enter did nothing.)
+- **Telemetry timeline reads like words**: "2m ago · turn prepared" (raw type + ISO stamp kept in the tooltip); the search filter matches humanized or raw text.
+- **Harness context numbers agree with the words**: `6.1k/6.0k` now flags amber with a tooltip and the line says *"over budget (trimmed next turn)"* instead of contradicting itself with "within budget"; KPI labels read "66 / 797 live sessions", "recall mode".
+
+**Tests:** 18 new tests (`tests/test_command_answer_loop.py`) evaluate the real `nexus.js` / `control-room.js` / `control-core.js` in Node: agent_response → transcript, honest no-response and error paths, transcript persistence, palette keyboard nav, attention dismissal persistence, job row expansion + real queue fields, telemetry humanization + filter, mission blocker CTA, budget honesty, and the single-writer hero rule — plus a regression pin that the command bar POSTs `runtime.turn` to `/jobs` and never the ledger endpoint again. Full suite: **1584 passed, 2 skipped, 0 failed**. Every behavior above was additionally verified by hand against a live gateway (command → streamed answer, job expansion, palette Enter, CTA navigation, dismissal, reload persistence).

@@ -506,18 +506,83 @@ function postCommand(){
 }
 
 // ---------- JOBS ----------
+/* A job row is a door, not a dead end: clicking it expands the payload
+ * (the user's own words, for runtime.turn jobs), the run linkage, error and
+ * timing, plus the canonical result fetched from /jobs/{id}/result. Columns
+ * match what a human scans: job, kind, state, tries, run, age. */
+function jobRowHtml(x){
+  const status = x.status || "unknown";
+  const ask = x.payload && typeof x.payload === "object"
+    ? String(x.payload.text || x.payload.task || x.payload.goal || "") : "";
+  const preview = ask ? '<small class="cell-sub" title="' + esc(ask.slice(0, 200)) + '">' + esc(ask.slice(0, 80)) + '</small>' : "";
+  return '<tr class="job-row" data-job="' + esc(x.id) + '" tabindex="0" role="button" aria-expanded="false" '
+    + 'title="click to inspect this job">'
+    + '<td><code>' + esc(x.id) + '</code>' + preview + '</td>'
+    + '<td>' + esc(x.kind) + '</td>'
+    + '<td><span class="status s-' + esc(status) + '">' + esc(status) + '</span></td>'
+    + '<td>' + esc(x.attempts) + '/' + esc(x.max_attempts) + '</td>'
+    + '<td><code>' + esc(x.run_id || "") + '</code></td>'
+    + '<td>' + relCell(x.created_at) + '</td></tr>'
+    + '<tr class="job-detail" hidden><td colspan="6"><div class="note">loading job…</div></td></tr>';
+}
+function jobDetailHtml(x, resultEnvelope){
+  const ask = x.payload && typeof x.payload === "object"
+    ? String(x.payload.text || x.payload.task || x.payload.goal || "") : "";
+  const bits = [];
+  bits.push('<div class="kv"><span class="k">job</span><span class="v"><code>' + esc(x.id) + '</code></span></div>');
+  if (ask) bits.push('<div class="kv"><span class="k">request</span><span class="v">' + esc(ask.slice(0, 400)) + '</span></div>');
+  if (x.error) bits.push('<div class="kv"><span class="k">error</span><span class="v">' + esc(String(x.error).slice(0, 400)) + '</span></div>');
+  if (x.wait_ms != null) bits.push('<div class="kv"><span class="k">waited</span><span class="v">' + esc(Math.round(Number(x.wait_ms) / 100) / 10) + 's</span></div>');
+  if (x.duration_ms != null) bits.push('<div class="kv"><span class="k">ran for</span><span class="v">' + esc(Math.round(Number(x.duration_ms) / 100) / 10) + 's</span></div>');
+  const result = resultEnvelope && (resultEnvelope.result ?? resultEnvelope);
+  if (result != null) {
+    const text = typeof result === "object" ? (result.response || result.text || result.output || "") : result;
+    if (text) bits.push('<div class="kv"><span class="k">result</span><span class="v">' + esc(String(text).slice(0, 600)) + '</span></div>');
+    else if (typeof result === "object") bits.push('<div class="detail-block">' + humanSummary(result) + '</div>');
+  } else if (x.has_result === false) {
+    bits.push('<div class="note">no stored result — the event ledger has the full timeline</div>');
+  }
+  return bits.join("") || '<div class="note">no details recorded</div>';
+}
+async function toggleJobDetail(row){
+  const detail = row.nextElementSibling;
+  if (!detail) return;
+  const opening = detail.hidden;
+  detail.hidden = !opening;
+  row.setAttribute("aria-expanded", opening ? "true" : "false");
+  if (!opening) return;
+  const jobId = row.dataset.job;
+  detail.innerHTML = '<td colspan="6"><div class="note">loading job…</div></td>';
+  try {
+    const all = await getJSON("/jobs");
+    const list = (Array.isArray(all.j) ? all.j : all.j.jobs || []);
+    const x = list.find((y) => String(y.id) === String(jobId)) || {};
+    let envelope = null;
+    try { envelope = (await getJSON("/jobs/" + encodeURIComponent(jobId) + "/result")).j; }
+    catch (err) { envelope = null; }
+    detail.innerHTML = '<td colspan="6">' + jobDetailHtml(x, envelope) + '</td>';
+  } catch (e) {
+    detail.innerHTML = '<td colspan="6"><div class="note">job details unavailable: ' + esc(e.message) + '</div></td>';
+  }
+}
 async function refreshJobs(){
   const body = $("#jobs tbody");
   try {
     const { j } = await getJSON("/jobs");
     const rows = (Array.isArray(j) ? j : j.jobs || []).slice(0, 60);
     if (!rows.length) { body.innerHTML = stateRowHtml({ empty: "queue idle — no jobs yet" }, 6); }
-    else body.innerHTML = rows.map((x) => `<tr><td><code>${esc(x.id)}</code></td><td>${esc(x.kind)}</td><td><span class="status s-${esc(x.status)}">${esc(x.status)}</span></td><td>${esc(x.attempts)}/${esc(x.max_attempts)}</td><td>${esc(x.run_id || "")}</td><td>${relCell(x.created_at)}</td></tr>`).join("");
+    else body.innerHTML = rows.map(jobRowHtml).join("");
+    body.querySelectorAll("tr.job-row").forEach((tr) => {
+      tr.addEventListener("click", () => toggleJobDetail(tr));
+      tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleJobDetail(tr); } });
+    });
     const n = Array.isArray(j) ? j.length : (j.jobs || []).length;
     $("#jobcount").textContent = n + " jobs";
     const { j: st } = await getJSON("/queue/status");
-    const bs = st.by_status || {};
-    $("#qstatus").textContent = "backend=" + (st.backend || "?") + " · workers=" + (st.workers || "?") + " · " + Object.entries(bs).map(([k,v])=>v+" "+k).join(", ");
+    const q = (st && st.queue) || st || {};
+    const bs = q.by_status || {};
+    const parts = Object.entries(bs).map(([k,v])=>v+" "+k).join(", ");
+    $("#qstatus").textContent = "backend " + (q.backend || "?") + " · " + (q.workers || "?") + " workers" + (parts ? " · " + parts : "");
   } catch(e){
     body.innerHTML = stateRowHtml({ error: e.envelope || { message: e.message } }, 6,
       { label: "queue", onRetryId: "jobs" });
@@ -560,15 +625,21 @@ async function refreshMissions(){
       const ap = m.approval_request || {};
       const failure = m.failure || {};
       const createPrompts = m.create_prompts_action || {};
-      const blocker = ap.id ? ('approval <code>' + esc(ap.id) + '</code>') : esc(m.blocker_reason || failure.reason || '');
+      const blockerRaw = String(m.blocker_reason || failure.reason || "");
+      const blocker = ap.id ? ('approval <code>' + esc(ap.id) + '</code>') : esc(blockerRaw);
+      // "Configure a model before running missions" must be a door, not a
+      // dead end: when the blocker is the model backend, offer the jump.
+      const modelBtn = /configure a model|no model backend|ollama|api key/i.test(blockerRaw)
+        ? ' <button class="ghost" data-goto-tab="systems">connect a model →</button>' : '';
       const approveBtn = ap.id ? `<button class="ghost" data-mission-approve="${esc(m.mission_id)}" data-approval-id="${esc(ap.id)}">approve+retry</button>` : '';
       const promptsBtn = createPrompts.endpoint ? `<button class="ghost" data-mission-prompts="${esc(m.mission_id)}">create prompts</button>` : '';
       const resumeBtn = MISSION_RESUMABLE_STATES.has(String(m.state).toLowerCase()) || ["executing","pending","continuing"].includes(String(m.state)) ? `<button class="ghost" data-mission-resume="${esc(m.mission_id)}">resume</button>` : '';
-      return `<tr><td><code>${esc(m.mission_id)}</code></td><td><span class="status s-${esc(m.state)}">${esc(m.state)}</span></td><td>${esc(m.progress_pct ?? 0)}%</td><td>${blocker}</td><td>${approveBtn} ${promptsBtn} ${resumeBtn}</td></tr>`;
+      return `<tr><td><code>${esc(m.mission_id)}</code></td><td><span class="status s-${esc(m.state)}">${esc(m.state)}</span></td><td>${esc(m.progress_pct ?? 0)}%</td><td>${blocker}${modelBtn}</td><td>${approveBtn} ${promptsBtn} ${resumeBtn}</td></tr>`;
     }).join("");
     body.querySelectorAll("button[data-mission-approve]").forEach((b) => b.addEventListener("click", () => approveMission(b.dataset.missionApprove, b.dataset.approvalId)));
     body.querySelectorAll("button[data-mission-prompts]").forEach((b) => b.addEventListener("click", () => createMissionPrompts(b.dataset.missionPrompts)));
     body.querySelectorAll("button[data-mission-resume]").forEach((b) => b.addEventListener("click", () => resumeMission(b.dataset.missionResume)));
+    body.querySelectorAll("button[data-goto-tab]").forEach((b) => b.addEventListener("click", () => { if (window.selectTab) selectTab(b.dataset.gotoTab); }));
   } catch(e){ setPill("#blockedMissionCount", "blocked missions: ?", "warn"); updateSafetyCore();
     body.innerHTML = stateRowHtml({ error: e.envelope || { message: e.message } }, 5,
       { label: "missions", onRetryId: "missions" });
@@ -657,13 +728,28 @@ async function bulkResumeMissions(){
 
 // ---------- TELEMETRY ----------
 let tmWs = null;
+/* Raw event types are for the ledger, not for eyes: "harness.turn_prepared"
+ * reads as "turn prepared", with the raw type and timestamp kept in the
+ * row title for anyone diagnosing. */
+const TM_QUIET_NAMESPACES = new Set(["harness", "dashboard", "nexus", "kernel", "runtime"]);
+function tmHumanType(t){
+  const s = String(t || "");
+  const dot = s.indexOf(".");
+  if (dot < 0) return s.replace(/_/g, " ");
+  const head = s.slice(0, dot), rest = s.slice(dot + 1).replace(/_/g, " ");
+  return TM_QUIET_NAMESPACES.has(head) ? rest : head + " " + rest;
+}
 function tmAppend(e){
   const feed = $("#tmFeed");
-  const f = $("#tmSearch").value.trim();
+  if (!feed) return;
   const t = (e && e.type) || "";
-  if (f && !t.includes(f)) return;
+  const human = tmHumanType(t);
+  const f = $("#tmSearch").value.trim().toLowerCase();
+  if (f && !(t.toLowerCase().includes(f) || human.toLowerCase().includes(f))) return;
   const el = document.createElement("div");
-  el.innerHTML = `<span class="t">${esc(e.ts || e.timestamp || "")}</span> <span class="e">${esc(t)}</span> ${esc(e.command || e.status || "")}`;
+  const when = relCell(e.ts || e.timestamp || "");
+  el.innerHTML = `<span class="t">${when}</span> <span class="e">${esc(human || t)}</span> ${esc(e.command || e.status || "")}`;
+  el.title = String(t || "") + (e.ts || e.timestamp ? " · " + String(e.ts || e.timestamp) : "");
   feed.prepend(el);
   while (feed.children.length > 200) feed.removeChild(feed.lastChild);
 }

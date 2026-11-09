@@ -97,6 +97,17 @@
               <button type="button" data-command="Check system health and tell me if anything needs attention">System check</button>
             </div>
             <p class="hint"><kbd>Enter</kbd> run · <kbd>Ctrl+K</kbd> focus command · <kbd>Ctrl+P</kbd> palette</p>
+
+            <div class="transcript" id="transcript">
+              <div class="transcript-head">
+                <span class="transcript-title">Conversation</span>
+                <button id="transcriptClear" class="btn ghost" type="button"
+                        title="Clear the conversation history kept in this browser">Clear</button>
+              </div>
+              <div class="transcript-body" id="transcriptBody" aria-live="polite" aria-label="Conversation with HERMUS">
+                <div class="note">Ask HERMUS anything — answers stream here and are kept in this browser.</div>
+              </div>
+            </div>
           </div>
 
           <!-- mission + attention -->
@@ -112,7 +123,7 @@
               <ul class="attention-list" id="attention"></ul>
             </div>
             <div class="card">
-              <div class="card-head"><h2>System health</h2></div>
+              <div class="card-head"><h2>System health</h2><button id="healthDiagnose" class="btn ghost" type="button" data-goto="systems" title="Open the Systems console and run the Doctor">Diagnose</button></div>
               <div class="kpi-row"><div class="kpi"><div class="v" id="healthValue">…</div><div class="l">gateway</div></div></div>
               <ul class="cap-list" id="capabilities"></ul>
             </div>
@@ -213,8 +224,8 @@
             </div>
           </div>
           <table id="jobs">
-            <thead><tr><th>run</th><th>kind</th><th>state</th><th>created</th><th>detail</th></tr></thead>
-            <tbody><tr><td colspan="5" class="note">loading…</td></tr></tbody>
+            <thead><tr><th>job</th><th>kind</th><th>state</th><th>tries</th><th>run</th><th>age</th></tr></thead>
+            <tbody><tr><td colspan="6" class="note">loading…</td></tr></tbody>
           </table>
         </div>
         <div class="card">

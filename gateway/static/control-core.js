@@ -378,21 +378,35 @@
       var lastTurn = harness && harness.last_turn;
       var budget = (harness && harness.budget && harness.budget.tokens) || 0;
       var used = lastTurn && lastTurn.tokens_after;
-      if (contextEl) contextEl.textContent = used ? fmtTokens(used) + "/" + fmtTokens(budget) : "--";
+      var overBudget = !!(used && budget && Number(used) > Number(budget));
+      if (contextEl) {
+        contextEl.textContent = used ? fmtTokens(used) + "/" + fmtTokens(budget) : "--";
+        // The numbers must agree with the words: if the last turn ended over
+        // the budget the page says so instead of claiming "within budget".
+        contextEl.style.color = overBudget ? "var(--warn, #fbbf24)" : "";
+        contextEl.title = "context tokens used / per-turn budget"
+          + (overBudget ? " — the last turn ended over budget; the harness trims on the next turn" : "");
+      }
       if (harnessCells && harness) {
         var s = harness.sessions || {};
         var f = harness.files || {};
-        harnessCells.innerHTML = kpi(String(s.active || 0), "live of " + String(s.total || 0))
+        harnessCells.innerHTML = kpi(String(s.active || 0) + " / " + String(s.total || 0), "live sessions")
           + kpi(String(f.pending || 0), "notices")
           + kpi(lastTurn && lastTurn.compacted ? fmtTokens(lastTurn.tokens_before) + "→" + fmtTokens(lastTurn.tokens_after) : "none", "compaction")
-          + kpi((lastTurn && lastTurn.recall_mode) || "—", "recall");
+          + kpi((lastTurn && lastTurn.recall_mode) || "—", "recall mode");
       }
       if (harnessTurn && lastTurn) {
-        harnessTurn.textContent = "Last turn: " + (lastTurn.compacted ? "compacted" : "within budget")
+        harnessTurn.textContent = "Last turn: " + (lastTurn.compacted ? "compacted" : (overBudget ? "over budget (trimmed next turn)" : "within budget"))
           + " · " + String(lastTurn.recall_count || 0) + " recall hit(s) in " + String(lastTurn.recall_ms || 0) + "ms"
           + " · " + String(lastTurn.notices || 0) + " notice(s).";
       }
 
+      var now = Date.now();
+      // Single-writer rule: while a user command is live (nexus owns the hero
+      // copy) or just answered, the queue-derived lines must not fight it.
+      var nx = (window.HermusNexus && window.HermusNexus.state) || null;
+      var nexusOwns = !!(nx && (nx.busy || nx.missionLive));
+      var nexusAnswered = !!(nx && nx.answeredAt && (now - nx.answeredAt) < 12000);
       if (!ready || !ready.ok) {
         setState("offline", {
           now: "Gateway unreachable. Nothing is running.",
@@ -401,9 +415,12 @@
         });
         return;
       }
-
-      var now = Date.now();
-      if (now < errorUntil) {
+      if (nexusOwns) {
+        return;
+      }
+      if (nexusAnswered) {
+        setState("idle", { now: "Answered — the response is in the conversation under the command bar.", progress: 0 });
+      } else if (now < errorUntil) {
         setState("error", { now: "A run failed. Replay it from Telemetry.", progress: 0.02 });
       } else if (pending > 0) {
         setState("blocked", { now: pending + " action(s) awaiting your approval.", detail: "Pending actions are listed on the Remote tab. Nothing yellow proceeds without a grant.", progress: 0.5 });
@@ -462,7 +479,9 @@
   window.HermusCore = {
     setState: setState,
     state: function () { return state; },
-    burst: function () { burst = 1; }
+    burst: function () { burst = 1; },
+    // Test hook: lets the Node harness drive one poll deterministically.
+    pollOnce: pollCore
   };
 
   if (document.readyState === "loading") {
