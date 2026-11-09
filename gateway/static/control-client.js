@@ -221,8 +221,11 @@ async function jget(path, init) {
   return data;
 }
 
-/** core/llm.py emits this when no model is reachable. It is not an answer. */
-const MOCK_FALLBACK_RE = /Fallback mock for:/i;
+/** core/llm.py emits this when no model is reachable. It is not an answer.
+ * The backend also keeps the historic "Fallback mock for:" phrase out of the
+ * reply — this catches the humanized marker and the legacy one, so a cached
+ * transcript from an older build is still detected. */
+const MOCK_FALLBACK_RE = /no model was reachable|Fallback mock for:/i;
 
 /**
  * Run one command inline and normalize the outcome.

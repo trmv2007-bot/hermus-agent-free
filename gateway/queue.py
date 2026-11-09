@@ -625,13 +625,12 @@ class JobQueue:
                 "result_preview": _trim(job.result or {}),
             },
         )
-        _emit_lifecycle_event(
-            job,
-            _lifecycle_event_type(status),
-            status=status,
-            error=job.error if status == STATUS_FAILED else "",
-            extra={"duration_ms": job.brief()["duration_ms"]},
-        )
+        # The run must be terminal on the RunBus BEFORE the lifecycle event
+        # reaches the canonical EventBus. The presence kernel derives the
+        # terminal state from that lifecycle event and asks the RunBus whether
+        # anything is still active — finishing afterwards meant the kernel
+        # always saw this very run as "running" and presence latched at
+        # "working / another task is still active" forever.
         try:
             self.bus.finish(
                 job.run_id,
@@ -641,6 +640,13 @@ class JobQueue:
             )
         except Exception:
             pass
+        _emit_lifecycle_event(
+            job,
+            _lifecycle_event_type(status),
+            status=status,
+            error=job.error if status == STATUS_FAILED else "",
+            extra={"duration_ms": job.brief()["duration_ms"]},
+        )
 
     # ------------------------------------------------------------------ control
     def cancel(self, job_id: str) -> dict[str, Any]:

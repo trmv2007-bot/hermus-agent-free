@@ -254,6 +254,9 @@ button.ghost {
   color: var(--ink-2);
   font-weight: 600;
   padding: 4px 10px;
+  /* inside table cells (Missions ACTIONS) a narrow column broke the label
+     mid-word — "resum / e". A button label is one word-shaped unit. */
+  white-space: nowrap;
 }
 button.ghost:hover { background: var(--surface-3); border-color: var(--line-strong); color: var(--ink); }
 
@@ -384,9 +387,18 @@ button.tag { height: 26px; cursor: pointer; }
 .tag.err, .tag.bad { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
 
 .kpi-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+/* Stat chips must form a strip wherever they land, not stack one full-width
+   card per number: most KPI hosts are plain block elements (p.meta, a feed,
+   a card body), where a block-level .kpi took the whole row. inline-flex
+   keeps them side by side and wrapping, and inside .kpi-row/.cells the
+   flex sizing below still applies unchanged. */
 .kpi {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
   flex: 1 1 120px;
   min-width: 110px;
+  max-width: 240px;
   padding: 10px 12px;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -742,6 +754,9 @@ td code { white-space: nowrap; }
   font-weight: 650;
   font-size: 11.5px;
   color: var(--ink-2);
+  /* td carries overflow-wrap:anywhere, so a narrow STATE column used to
+     break the word itself — "blocke / d". A status word never wraps. */
+  white-space: nowrap;
 }
 .status::before {
   content: "";

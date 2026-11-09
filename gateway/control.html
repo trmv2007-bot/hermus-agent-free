@@ -420,6 +420,15 @@
         </div>
 
         <div class="card">
+          <div class="card-head">
+            <h2>Live capability summary</h2>
+            <div class="card-actions"><button id="capsRefresh" class="btn ghost" type="button">Refresh</button></div>
+          </div>
+          <div class="kpi-row" id="caps"><div class="kpi"><div class="v">…</div><div class="l">probing</div></div></div>
+          <p class="meta">Read from <code>/api/v1/system/capabilities</code> — providers, tools, circuits, speech, transcription and avatar as the backend reports them.</p>
+        </div>
+
+        <div class="card">
           <div class="card-head"><h2>Capability ledger</h2></div>
           <div class="form-grid">
             <label for="powerName">Power</label><input id="powerName" class="input" placeholder="capability name">
@@ -465,12 +474,28 @@
       <section id="tab-memory" class="tab" role="tabpanel" aria-labelledby="tabbtn-memory" hidden>
         <div class="page-head">
           <h2>Memory</h2>
-          <p class="meta">Memory · Learning · skills and procedural evidence. Promotion is evidence-gated.</p>
+          <p class="meta">What HERMUS remembers, how it recalls it, and the skills proven runs have distilled. Promotion is evidence-gated.</p>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Memory now</h2>
+            <div class="card-actions"><button id="memoryStatsRefresh" class="btn ghost" type="button">Refresh</button></div>
+          </div>
+          <div class="kpi-row" id="memoryKpis"><div class="kpi"><div class="v">…</div><div class="l">loading</div></div></div>
+          <p class="meta" id="memoryIndexNote">recall index status appears here</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Recall</h2></div>
+          <div class="replay-row">
+            <input id="memoryRecallQuery" class="input" placeholder="Search what HERMUS remembers — e.g. “downloads scan result”" aria-label="Memory recall query">
+            <button id="memoryRecallBtn" class="btn primary" type="button">Recall</button>
+          </div>
+          <div class="feed" id="memoryRecallOut"><div class="note">Type a query and press Recall — the matching memories appear here.</div></div>
         </div>
         <div class="card">
           <div class="card-head"><h2>Skill memory</h2></div>
-          <p class="meta">Skills distilled from real runs appear here. The skill forge only records provenance-verified trajectories; nothing is invented.</p>
-          <ul class="cap-list" id="caps"></ul>
+          <p class="meta">Skills distilled from real runs. The skill forge only records provenance-verified trajectories; nothing is invented.</p>
+          <ul class="cap-list" id="skillList"><li class="note">loading skills…</li></ul>
         </div>
         <div class="card">
           <div class="card-head"><h2>Learning fabric</h2></div>

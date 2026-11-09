@@ -46,7 +46,7 @@ test('inline fallback returns the authoritative real response', async () => {
 });
 
 test('offline model fallback is visibly failed, never fake success', async () => {
-  global.fetch = async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify({ response: 'Ollama not running. Fallback mock for: hello', run_kind: 'chat' }) });
+  global.fetch = async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify({ response: 'Ollama not running. This reply came from the built-in helper because no model was reachable. Your message was: "hello"', run_kind: 'chat' }) });
   const result = await client.sendCommand({ text: 'hello', runId: 'offline-test' });
   assert.equal(result.ok, false); assert.match(result.error, /Model not configured/); assert.equal(result.response, '');
 });

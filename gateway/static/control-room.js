@@ -329,7 +329,8 @@ function refreshTab(name){
   else if (name === "remote") refreshRemote();
   else if (name === "safety") refreshSafety();
   else if (name === "approvals") { refreshSafety(); refreshRemote(); }
-  else if (name === "capabilities") { refreshSafety(); }
+  else if (name === "capabilities") { refreshCaps(); refreshSafety(); }
+  else if (name === "memory") refreshMemory();
   else if (name === "systems") { if (window.HermusConsole) window.HermusConsole.refresh(); }
   else if (name === "presence") refreshPresence();
 }
@@ -448,6 +449,74 @@ function renderCaps(c){
   html += kpi(avatar.available ? "ready" : "optional", "avatar");
   $("#caps").innerHTML = html;
 }
+async function refreshCaps(){
+  try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); }
+  catch(e){ $("#caps").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">capability summary unavailable</div></div>'; }
+}
+
+// ---------- MEMORY (real numbers, real recall, real skills) ----------
+// The tab used to promise "skill memory" while actually hosting the
+// capability stats — the capability summary now lives on its own tab and the
+// Memory tab reads /memory2/stats: totals by kind, index health, the skill
+// forge's registry, and a recall box over the live store.
+function renderMemoryStats(data){
+  const m = (data && data.memory) || {};
+  const kinds = m.by_kind || {};
+  let html;
+  if (m.error) {
+    html = kpi("—", "memory");
+    $("#memoryIndexNote").textContent = "memory stats unavailable: " + m.error;
+  } else {
+    html = kpi(String(m.total ?? 0), "memories")
+      + kpi(String(kinds.episodic ?? 0), "episodic")
+      + kpi(String(kinds.semantic ?? 0), "semantic")
+      + kpi(String(kinds.procedural ?? 0), "procedural")
+      + kpi(String(m.access_events ?? 0), "recall hits");
+    const idx = m.recall_index || {};
+    $("#memoryIndexNote").textContent = idx.available
+      ? "Recall index live: FTS5 " + (idx.fts5 ? "on" : "off") + " · vectors via " + (idx.vector_backend || "—") + " · " + String(idx.vectors_indexed ?? 0) + " indexed"
+      : "Recall index not built yet — recall falls back to the typed store.";
+  }
+  $("#memoryKpis").innerHTML = html;
+  const s = (data && data.skills) || {};
+  const host = $("#skillList");
+  if (s.error) { host.innerHTML = '<li class="note">skill forge unavailable: ' + esc(s.error) + '</li>'; return; }
+  const rows = s.skills || [];
+  host.innerHTML = rows.length
+    ? rows.map((sk) => '<li><div><strong>' + esc(sk.name) + '</strong>'
+        + (sk.summary ? '<div class="note">' + esc(sk.summary) + '</div>' : '')
+        + '</div></li>').join("")
+    : '<li class="note">No skills distilled yet — after a run proves itself repeatable, its skill appears here.</li>';
+}
+async function refreshMemory(){
+  try { const { j } = await getJSON("/memory2/stats"); renderMemoryStats(j); }
+  catch(e){
+    $("#memoryKpis").innerHTML = stateHtml({ error: e.envelope || { message: e.message } }, { label: "memory stats", onRetryId: "memory" });
+  }
+}
+async function recallMemory(){
+  const input = $("#memoryRecallQuery");
+  const out = $("#memoryRecallOut");
+  const q = (input && input.value || "").trim();
+  if (!q) { out.innerHTML = '<div class="note">Type what to look for first.</div>'; return; }
+  out.innerHTML = '<div class="note">searching memories…</div>';
+  // requestJSON (not getJSON) — recall is a POST and getJSON sends GET only.
+  const res = await requestJSON("/memory2/recall", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ query: q, limit: 8 }),
+  });
+  if (!res.ok) { out.innerHTML = '<div class="note">recall failed: ' + esc(res.message || ("HTTP " + res.status)) + '</div>'; return; }
+  const rows = (res.data || {}).results || [];
+  out.innerHTML = rows.length
+    ? rows.map((r) => {
+        const kind = esc(String(r.kind || r.type || "memory"));
+        const when = r.created_at || r.at || "";
+        const text = esc(String(r.content || r.text || "").slice(0, 400));
+        return '<div><span class="tag">' + kind + '</span> <span class="e">' + (when ? esc(presenceTime(when)) : "") + '</span><div class="note">' + text + '</div></div>';
+      }).join("")
+    : '<div class="note">Nothing matched “' + esc(q) + '”. Memories appear as turns run; try another wording.</div>';
+}
 async function refreshOverview(){
   // Readiness first: the connection pill must not wait behind the slowest
   // capability probe. bootstrap.doctor() can take seconds on a cold machine.
@@ -455,7 +524,9 @@ async function refreshOverview(){
   try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; }
   catch(e){ $("#health").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
     { label: "system health", onRetryId: "overview" }); }
-  try { const { j } = await getJSON("/api/v1/system/capabilities"); renderCaps(j); } catch(e){}
+  // The capability summary KPIs (#caps) now live on the Capabilities tab and
+  // refresh when that tab opens or via its Refresh button — not on every
+  // overview poll.
   try { await refreshEmergency(); } catch(e){}
 }
 async function refreshEmergency(){
@@ -1148,6 +1219,10 @@ $("#powerPropose").addEventListener("click", proposePower);
 $("#capRegistryRefresh").addEventListener("click", refreshCapabilityRegistry);
 $("#capSetup").addEventListener("click", setupCapability);
 $("#capActivationRequest").addEventListener("click", requestCapabilityActivation);
+$("#capsRefresh").addEventListener("click", refreshCaps);
+$("#memoryStatsRefresh").addEventListener("click", refreshMemory);
+$("#memoryRecallBtn").addEventListener("click", recallMemory);
+$("#memoryRecallQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") recallMemory(); });
 $("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
 $("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
 $("#preflightRun").addEventListener("click", runPreflight);

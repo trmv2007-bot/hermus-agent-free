@@ -493,9 +493,12 @@ class PresenceManager:
                 "idle",
                 detail=detail,
                 session_id=session_id or None,
-                run_id=None,
+                run_id="",
                 user_id=user_id or None,
-                goal=None,
+                # "" clears active_goal (the turn is over); None would mean
+                # "keep the old value" and left "focusing on <old goal>"
+                # next to an idle "ready" line forever.
+                goal="",
                 last_result=response,
                 last_error=error if not success else None,
             )

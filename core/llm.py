@@ -104,7 +104,7 @@ class FreeLLM:
                 model=f"ollama/{self.model_name}",
             )
             configured = [f"{p['provider']} — {p.get('reason') or 'configured'}" for p in diag.get("configured", [])]
-            detail = "\n".join(configured) if configured else "none"
+            detail = "\n- ".join(configured) if configured else "none"
             mock_content = (
                 f"⚠️ Ollama not running at {config.ollama_base_url}. "
                 "No usable hosted provider was found"
@@ -115,14 +115,19 @@ class FreeLLM:
                 + "\nStart Ollama with: ollama serve && ollama pull "
                 + f"{self.model_name} — or add any key: "
                 + "hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
-                + f"Fallback mock for: {messages[-1].get('content', '')[:100]}"
+                # Human words, not "Fallback mock for: …" — but the phrase
+                # "no model was reachable" stays stable: the dashboard detects
+                # it so a no-model reply is never presented as a real answer.
+                + "This reply came from the built-in helper because no model was reachable. "
+                + f"Your message was: \"{str(messages[-1].get('content', ''))[:100]}\""
             )
         except Exception:
             mock_content = (
                 f"⚠️ Ollama not running at {config.ollama_base_url} and no API keys configured. "
                 f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
                 f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
-                f"Fallback mock for: {messages[-1].get('content', '')[:100]}"
+                "This reply came from the built-in helper because no model was reachable. "
+                f"Your message was: \"{str(messages[-1].get('content', ''))[:100]}\""
             )
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(mock_content), model="ollama/mock")
         return LLMResponse(mock_content, usage=usage)

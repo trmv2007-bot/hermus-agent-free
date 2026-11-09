@@ -127,6 +127,52 @@ async def memory2_recall(payload: dict):
     }
 
 
+@router.get("/memory2/stats")
+async def memory2_stats():
+    """One read-only overview for the control room's Memory tab: how much is
+    remembered, what kinds, whether the recall index is live, and which skills
+    the forge has distilled. Best-effort — a missing subsystem returns an
+    honest note instead of a 500."""
+    out: dict = {"success": True, "memory": {}, "skills": {}}
+    try:
+        from core.memory import memory
+
+        st = memory.stats() or {}
+        index = st.get("index") or {}
+        out["memory"] = {
+            "total": st.get("total", 0),
+            "archived": st.get("archived", 0),
+            "by_kind": st.get("by_kind") or {},
+            "access_events": st.get("access_events", 0),
+            "recall_index": {
+                "available": bool(index.get("available")),
+                "fts5": bool(index.get("fts5")),
+                "vector_backend": index.get("vector_backend") or "",
+                "vectors_indexed": index.get("vectors_indexed", 0),
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        out["memory"] = {"error": str(exc)}
+    try:
+        from core.skill_forge import skill_forge
+
+        idx = skill_forge.index() or {}
+        skills = []
+        for name, meta in list((idx.get("skills") or {}).items())[:50]:
+            meta = meta if isinstance(meta, dict) else {}
+            skills.append(
+                {
+                    "name": str(name),
+                    "summary": str(meta.get("summary") or meta.get("description") or "")[:200],
+                    "created_at": meta.get("created_at") or meta.get("at") or "",
+                }
+            )
+        out["skills"] = {"count": int(idx.get("count") or len(skills)), "path": idx.get("path") or "", "skills": skills}
+    except Exception as exc:  # noqa: BLE001
+        out["skills"] = {"error": str(exc)}
+    return out
+
+
 @router.get("/permissions/log")
 async def permissions_log(limit: int = 20):
     from core.permissions import permission_manager

@@ -66,9 +66,15 @@
     // the run instead of contradicting the label two pixels away; otherwise
     // it mirrors this state's own detail so label+line always match.
     const now=$('#coreNow');
-    if(now) now.textContent = (state.busy || state.missionLive)
-      ? (state.commandInFlight ? `working on “${state.commandInFlight}”` : 'working on your request…')
-      : (detail || 'awaiting your command');
+    // Two writers share the hero: nexus (live run) and control-core (queue
+    // poller). While a run is live nexus owns the second line; when idle it
+    // must NOT mirror the chip's own detail into it — the same sentence then
+    // sat twice, stacked, and the 2.5s kernel poll fought the 5s queue poll.
+    if(now && (state.busy || state.missionLive)) {
+      now.textContent = state.commandInFlight
+        ? `working on “${state.commandInFlight}”`
+        : 'working on your request…';
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -121,15 +127,44 @@
     if(body) body.innerHTML='<div class="note">Ask HERMUS anything — answers stream here and are kept in this browser.</div>';
   });
   function renderCapabilities(entries) {
+    /* /api/v1/system/capabilities is a capability SUMMARY, not a flat map of
+     * {name: {available}} — providers is a list of provider dicts, tools a
+     * dict of 200+ tool specs, transcription carries available_models. The
+     * old probe (available ?? ready ?? ok) came out undefined for every one
+     * of those shapes, so the rail claimed providers/tools UNAVAILABLE while
+     * tool count read READY two rows below. Each row now reads the shape the
+     * backend actually sends and names what it found. */
     const list=$('#capabilities'); if(!list)return;
     list.innerHTML='';
-    Object.entries(entries && typeof entries==='object'?entries:{}).slice(0,10).forEach(([name,value])=>{
-      const ok=typeof value==='object' ? (value.available ?? value.ready ?? value.ok) : !!value;
+    const rows=[];
+    const add=(name,label,ok)=>rows.push({name,label,ok});
+    const e=entries && typeof entries==='object' ? entries : {};
+    const hasData=e.providers || e.tools || e.tool_count!=null || e.circuit || e.speech || e.transcription || e.avatar;
+    if(!hasData){ list.innerHTML='<div class="empty-event">No capability data reported</div>'; return; }
+    const providers=Array.isArray(e.providers)?e.providers:[];
+    const configured=providers.filter(p=>p && (p.configured || p.has_credentials)).length;
+    add('providers', configured ? configured+' configured' : 'none configured', configured>0);
+    const toolCount=Number(e.tool_count ?? (e.tools?Object.keys(e.tools).length:0))||0;
+    add('tools', toolCount ? toolCount+' ready' : 'none registered', toolCount>0);
+    const circ=e.circuit && typeof e.circuit==='object' ? e.circuit : {};
+    const circN=Object.keys(circ.providers||circ).length;
+    add('circuit', circN ? circN+' registered' : 'none registered', circN>0);
+    const speech=e.speech && typeof e.speech==='object' ? e.speech : {};
+    add('speech', speech.available ? String(speech.backend||'ready') : 'off', !!speech.available);
+    const tx=e.transcription && typeof e.transcription==='object' ? e.transcription : {};
+    const txModels=Array.isArray(tx.available_models)?tx.available_models.length:0;
+    const txReady=!!(tx.faster_whisper_installed||txModels>0);
+    add('transcription', txReady ? (tx.current_model && tx.current_model!=='none' ? tx.current_model : 'models ready · none selected') : 'off', txReady);
+    const avatar=e.avatar && typeof e.avatar==='object' ? e.avatar : {};
+    add('avatar', avatar.available ? 'ready' : (avatar.configured ? 'configured · not probed' : 'optional'), !!avatar.available);
+    rows.forEach(({name,label,ok})=>{
       const row=document.createElement('div'); row.className='cap';
-      row.innerHTML=`<span>${esc(name.replaceAll('_',' '))}</span><b class="${ok?'ready':'muted'}">${ok?'READY':'UNAVAILABLE'}</b>`;
+      const cls=ok?'ready':'muted';
+      const title=name+' — '+label;
+      row.innerHTML=`<span title="${esc(title)}">${esc(name)}</span><b class="${cls}" title="${esc(title)}">${esc(label||'—')}</b>`;
       list.appendChild(row);
     });
-    if (!list.children.length) list.innerHTML='<div class="empty-event">No capability data reported</div>';
+    if (!rows.length) list.innerHTML='<div class="empty-event">No capability data reported</div>';
   }
 
   /* The health payload is not a flat map of subsystems: the top level is
@@ -459,7 +494,7 @@
   // Command palette: PALETTE_ITEMS, Ctrl K focus, Ctrl P palette, e.key.toLowerCase()==='p'.
   window.HermusNexus = { api, sendCommand, contextualAction, actions, state,
     // Exposed for the Node test harness; not part of the page contract.
-    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent, addEvent, setState, badgeTitle, healthFacts } };
+    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent, addEvent, setState, badgeTitle, healthFacts, renderCapabilities } };
 
   const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);
   const modelState = { catalog:null, selected:null, health:null, inFlight:false };

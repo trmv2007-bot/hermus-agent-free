@@ -92,6 +92,7 @@ class PresenceKernel:
         self.runs = runs or run_bus
         self._bus = bus
         self._unsubscribe = None
+        self._runs_unsubscribe = None
         self._lock = threading.RLock()
         self._recent: deque[dict[str, Any]] = deque(maxlen=60)
         self._last_meaningful_at: str | None = None
@@ -111,6 +112,16 @@ class PresenceKernel:
             subscriber = bus.subscribe()(self._on_event)
             self._subscriber = subscriber
             self._unsubscribe = lambda: bus.unsubscribe(subscriber)
+        # Run lifecycle lives on the RunBus event stream, not on the EventBus.
+        # A run that finishes without any later EventBus event (e.g. an inline
+        # /command turn whose last tool event fired while the run was still
+        # registered) used to leave presence at "working / another task is
+        # still active" forever. The sink re-derives the terminal state when a
+        # run actually finishes, whichever path finished it.
+        try:
+            self._runs_unsubscribe = self.runs.add_sink(self._on_run_bus_event)
+        except Exception:
+            self._runs_unsubscribe = None
         return self
 
     def stop(self) -> None:
@@ -119,9 +130,16 @@ class PresenceKernel:
             unsubscribe = self._unsubscribe
             self._unsubscribe = None
             self._subscriber = None
+            runs_unsubscribe = self._runs_unsubscribe
+            self._runs_unsubscribe = None
         if unsubscribe is not None:
             try:
                 unsubscribe()
+            except Exception:
+                pass
+        if runs_unsubscribe is not None:
+            try:
+                runs_unsubscribe()
             except Exception:
                 pass
 
@@ -193,6 +211,11 @@ class PresenceKernel:
             )
         elif any(word in combined for word in _FINISHED_WORDS):
             state, detail = self._terminal_state()
+            # The turn is over: a stale "focusing on …" goal next to an idle
+            # "ready" line read as if work was still queued. last_goal keeps
+            # the history; active_goal only names live work.
+            if state == "idle":
+                payload = {**payload, "goal": ""}
 
         if state is None:
             return
@@ -220,6 +243,38 @@ class PresenceKernel:
         except Exception:
             active = []
         return ("working", "another task is still active") if active else ("idle", "ready")
+
+    def _on_run_bus_event(self, run_id: str, event: dict[str, Any]) -> None:
+        """Re-derive the terminal state when a run finishes on the RunBus.
+
+        The EventBus only sees per-tool command events and queue lifecycle
+        events; the run's own finish (inline /command path, mission loop,
+        doctor) streams on the RunBus alone. When the last EventBus event
+        fired while the run was still registered, presence latched at
+        "working" forever. Presence is a projection: a broken observer must
+        never break runtime, so this never raises.
+        """
+        try:
+            etype = str((event or {}).get("type") or "")
+            if etype not in {"run_finished", "run_error"}:
+                return
+            with self._lock:
+                current = self.presence.current() or {}
+                # approval / error / learning states are not ours to stomp —
+                # only a busy state can be wrong about a finished run.
+                if str(current.get("state") or "") not in {"working", "thinking", "verifying"}:
+                    return
+                state, detail = self._terminal_state()
+                if state == "working":
+                    return
+                self.presence.set_state(
+                    "idle",
+                    detail=detail,
+                    run_id="",
+                    goal="",
+                )
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------- attention
     def attention(self, *, user_id: str = "default") -> list[dict[str, Any]]:
