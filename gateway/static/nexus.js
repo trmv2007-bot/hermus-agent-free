@@ -33,23 +33,27 @@
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   /* Periodic pollers (model catalog every 30s, kernel every 2.5s) report the
    * same healthy line over and over. A quiet system must not paint the feed
-   * with repeats: a run of identical messages collapses into one row with a
-   * ×N counter and the timestamp of the latest occurrence. Any different
-   * message starts a new row, so state changes still surface immediately. */
+   * with repeats: an identical message collapses into ONE row with a ×N
+   * counter and the timestamp of the latest occurrence. The match scans every
+   * row, not just the first — pollers interleave (a kernel event between two
+   * catalog heartbeats used to break the run and stack duplicates) — and the
+   * surviving row moves to the top, matching how a new event would sit. */
   function addEvent(text, kind='info') {
     const host=$('#activity'); if(!host)return;
     if (host.querySelector('.empty-event')) host.innerHTML='';
-    const first=host.firstElementChild;
-    if (first && first.dataset.msg===text && first.dataset.kind===kind){
-      const n=(Number(first.dataset.repeat)||1)+1;
-      first.dataset.repeat=String(n);
-      first.querySelector('.count').textContent='×'+n;
-      first.querySelector('time').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const stamp=()=>new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const prev=[...host.children].find(r=>r.dataset.msg===text && r.dataset.kind===kind);
+    if (prev){
+      const n=(Number(prev.dataset.repeat)||1)+1;
+      prev.dataset.repeat=String(n);
+      const c=prev.querySelector('.count'); if(c) c.textContent='×'+n;
+      const t=prev.querySelector('time'); if(t) t.textContent=stamp();
+      if (prev!==host.firstElementChild) host.prepend(prev);
       return;
     }
     const row=document.createElement('div'); row.className='event';
     row.dataset.msg=text; row.dataset.kind=kind; row.dataset.repeat='1';
-    row.innerHTML=`<i class="${kind}"></i><span>${esc(text)}</span><b class="count" aria-label="repeated"></b><time>${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>`;
+    row.innerHTML=`<i class="${kind}"></i><span>${esc(text)}</span><b class="count" aria-label="repeated"></b><time>${stamp()}</time>`;
     host.prepend(row); while(host.children.length>7)host.lastElementChild.remove();
   }
   function setState(label, detail='') {
@@ -128,20 +132,49 @@
     if (!list.children.length) list.innerHTML='<div class="empty-event">No capability data reported</div>';
   }
 
+  /* The health payload is not a flat map of subsystems: the top level is
+   * {ok, python, venv, capabilities:{name:{present,status,reason,install}}}.
+   * Treating those scalars as subsystems once listed the payload's own keys
+   * (ok, python, venv, capabilities) as broken — every install was DEGRADED
+   * forever, even healthy ones. healthFacts() reads the payload the way the
+   * backend means it: ok is the overall verdict, capabilities is the
+   * subsystem list, and a missing required module carries the exact pip
+   * command that repairs it. */
+  function healthFacts(health){
+    const caps=health && typeof health==='object' && health.capabilities && typeof health.capabilities==='object'
+      ? health.capabilities : {};
+    const entries=Object.entries(caps);
+    const missing=entries.filter(([,v])=>v && v.present===false);
+    const requiredMissing=entries.filter(([k,v])=>k.indexOf('required.')===0 && v && v.present===false);
+    const shortName=(k)=>String(k).replace(/^required\./,'').replace(/_/g,' ');
+    return {
+      total: entries.length,
+      ready: entries.length - missing.length,
+      missing: missing.map(([k,v])=>({name: shortName(k), install: String((v&&v.install)||'')})),
+      requiredMissing: requiredMissing.map(([k,v])=>({name: shortName(k), install: String((v&&v.install)||'')})),
+      ok: !!(health && health.ok===true),
+      venvOk: !!(health && health.venv===true),
+      python: health && health.python ? String(health.python) : '',
+    };
+  }
+
   /* The badge explains itself on hover/focus instead of posing a riddle:
-   * which subsystems were probed, which of them reported unhealthy, and where
-   * to go next. The cause list is built from the live health snapshot, so the
-   * tooltip never drifts from what the gateway actually reported. */
+   * what the probe checked, what is actually missing (by name), and where the
+   * full report lives. Built from the live snapshot, so it never drifts. */
   function badgeTitle(healthy, health){
-    const entries=Object.entries(health && typeof health==='object' ? health : {});
+    const f=healthFacts(health);
+    if(!f.total) return 'No capability data reported yet — Systems tab → Run diagnostics gives the full picture.';
+    const score=' capabilities ready ('+f.ready+' of '+f.total+')';
     if(healthy){
-      const okKeys=entries.filter(([,v])=>v && (v.ok===true || v.running===true || v.installed===true)).map(([k])=>k);
-      return 'Healthy — subsystems reporting ready: ' + (okKeys.join(', ') || 'none named');
+      const extras=f.missing.length
+        ? ' · '+f.missing.length+(f.missing.length===1 ? ' optional extra off: ' : ' optional extras off: ')+f.missing.map(m=>m.name).join(', ')
+        : ' · no optional extras missing';
+      return 'HEALTHY —'+score+extras+'.';
     }
-    const badKeys=entries.filter(([,v])=>!(v && (v.ok===true || v.running===true || v.installed===true))).map(([k])=>k);
-    return entries.length
-      ? 'Degraded — no subsystem reports healthy. Not ready: ' + (badKeys.join(', ') || 'none') + '. Open the Systems tab → Doctor panel to diagnose.'
-      : 'Degraded — the health endpoint returned no subsystems to check. Open the Systems tab → Doctor panel to diagnose.';
+    const gaps=[];
+    if(f.requiredMissing.length) gaps.push(f.requiredMissing.length+(f.requiredMissing.length===1 ? ' distribution module missing: ' : ' distribution modules missing: ')+f.requiredMissing.map(m=>m.name).join(', '));
+    if(!f.venvOk) gaps.push('no usable project venv (running on '+ (f.python||'the system interpreter') +')');
+    return 'DEGRADED —'+score+(gaps.length ? ' · '+gaps.join(' · ') : '')+'. Systems tab → Run diagnostics lists each fix.';
   }
   function syncJarvisStatus(online, healthy, health) {
     const label=$('#jarvisStatusLabel');
@@ -175,11 +208,12 @@
       const [health, caps] = await Promise.all([api('/api/v1/system/health'), api('/api/v1/system/capabilities')]);
       state.online=true;
       const healthEntries = health && typeof health === 'object' ? health : {};
-      const healthyCount = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
-      const healthy = healthyCount > 0;
+      const f=healthFacts(healthEntries);
+      const healthy=f.ok;
       state.lastHealthHealthy = healthy;
+      state.lastHealth = healthEntries;
       syncJarvisStatus(true, healthy, healthEntries);
-      if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthyCount ? `${healthyCount} systems ready` : 'READY'; }
+      if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = f.total ? `${f.ready} of ${f.total} capabilities ready` : 'capability probe pending'; }
       renderCapabilities(caps.capabilities || caps);
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);
@@ -425,7 +459,7 @@
   // Command palette: PALETTE_ITEMS, Ctrl K focus, Ctrl P palette, e.key.toLowerCase()==='p'.
   window.HermusNexus = { api, sendCommand, contextualAction, actions, state,
     // Exposed for the Node test harness; not part of the page contract.
-    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent } };
+    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent, addEvent, setState, badgeTitle, healthFacts } };
 
   const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);
   const modelState = { catalog:null, selected:null, health:null, inFlight:false };
@@ -555,6 +589,26 @@
   function attentionDismissed(){
     try{ const raw=JSON.parse(localStorage.getItem(ATTENTION_DISMISS_KEY)||'[]'); return Array.isArray(raw)?raw.slice(-50):[]; }catch{ return []; }
   }
+
+  /* The gateway is up but the health probe is not fully green. A sentence like
+   * "the health probe found nothing healthy" sends the user to the Doctor with
+   * no idea what to fix; this fallback names the gaps and carries the exact
+   * pip line when the backend could provide one, so the fastest fix is
+   * copy-paste close and the full report is one click away. */
+  function degradedHealthAttention(){
+    const f=healthFacts(state.lastHealth);
+    const installCmds=f.requiredMissing.map(m=>m.install).filter(Boolean);
+    const pip=installCmds.length ? installCmds.join(' ') : '';
+    const why=[];
+    if(f.requiredMissing.length) why.push(f.requiredMissing.length+' distribution modules missing ('+f.requiredMissing.map(m=>m.name).join(', ')+')');
+    if(!f.venvOk) why.push('no usable project venv');
+    return '<div class="attention-item warn"><i></i><span><strong>'
+      +(f.requiredMissing.length ? 'Install is not fully provisioned' : 'Capability probe reports gaps')
+      +'</strong><small>'+(why.join(' · ')||'The capability probe reports gaps.')
+      +(pip ? ' Fastest fix: <code>'+esc(pip)+'</code>' : '')
+      +'</small><span class="att-actions"><button type="button" class="btn ghost" data-goto="systems">Diagnose</button></span></span></div>';
+  }
+
   function dismissAttention(key){
     const rows=attentionDismissed().filter(k=>k!==key); rows.push(key);
     try{ localStorage.setItem(ATTENTION_DISMISS_KEY, JSON.stringify(rows.slice(-50))); }catch{/* ignore */}
@@ -595,7 +649,7 @@
               +'<button type="button" class="btn ghost" data-attention-dismiss="'+esc(attentionKey(item))+'">Dismiss</button></span></span></div>';
           }).join('')
         : (state.lastHealthHealthy===false
-          ? '<div class="attention-item warn"><i></i><span><strong>No subsystem reports ready</strong><small>The gateway is up, but the health probe found nothing healthy. Run the Doctor to find out why.</small><span class="att-actions"><button type="button" class="btn ghost" data-goto="systems">Diagnose</button></span></span></div>'
+          ? degradedHealthAttention()
           : '<div class="empty-event">'+esc(String((kernel.summary||{}).headline||'All systems ready'))+'</div>');
       host.querySelectorAll('button[data-attention-dismiss]').forEach(btn=>btn.addEventListener('click',()=>{
         dismissAttention(btn.dataset.attentionDismiss);

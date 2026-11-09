@@ -66,6 +66,58 @@ REQUIRED_IMPORTS = [
     "websockets",
 ]
 
+REQUIRED_PIP_BY_IMPORT: dict[str, str] = {
+    # Import name -> pip package name for every REQUIRED_IMPORTS entry. The
+    # plain REQUIRED_PIP list above silently drifted out of order with
+    # REQUIRED_IMPORTS at least once (imageio-ffmpeg vs feedparser), so a zip
+    # would mispair names; a keyed map cannot. probe_capabilities() puts these
+    # on missing entries so the UI can hand the human the exact repair command
+    # instead of a dead end.
+    "pydantic": "pydantic",
+    "dotenv": "python-dotenv",
+    "requests": "requests",
+    "tiktoken": "tiktoken",
+    "PIL": "Pillow",
+    "fastapi": "fastapi",
+    "uvicorn": "uvicorn",
+    "multipart": "python-multipart",
+    "psutil": "psutil",
+    "httpx": "httpx",
+    "ddgs": "ddgs",
+    "playwright": "playwright",
+    "scrapling": "scrapling[fetchers]",
+    "faster_whisper": "faster-whisper",
+    "feedparser": "feedparser",
+    "pypdf": "pypdf",
+    "yaml": "PyYAML",
+    "imageio_ffmpeg": "imageio-ffmpeg",
+    "apscheduler": "APScheduler",
+    "prompt_toolkit": "prompt_toolkit",
+    "rich": "rich",
+    "websockets": "websockets",
+}
+
+#: Optional modules whose pip name differs from the import name. Only the
+#: certain mismatches live here — a wrong hint is worse than no hint. Other
+#: optional modules install under their import name (pyautogui, torch, redis…);
+#: ``omnivoice`` has no public pip package, so it gets no hint at all.
+OPTIONAL_PIP_BY_IMPORT: dict[str, str] = {
+    "telegram": "python-telegram-bot",
+    "discord": "discord.py",
+    "sqlite_vec": "sqlite-vec",
+}
+OPTIONAL_NO_PIP_HINT = {"omnivoice"}
+
+
+def _install_hint(mod: str, *, required: bool) -> str | None:
+    """The pip command that installs ``mod``, or None when the pip name is unknown."""
+    if required:
+        pip = REQUIRED_PIP_BY_IMPORT.get(mod)
+    else:
+        pip = OPTIONAL_PIP_BY_IMPORT.get(mod, None if mod in OPTIONAL_NO_PIP_HINT else mod)
+    return f"pip install {pip}" if pip else None
+
+
 # Kept for the public/bootstrap compatibility contract and for a useful repair
 # hint. Installation itself reads requirements.txt rather than this list.
 REQUIRED_PIP = [
@@ -537,18 +589,26 @@ def probe_capabilities() -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for mod, cap in OPTIONAL:
         present = _module_ok(mod)
-        out[cap] = {
+        entry = {
             "present": present,
             "status": "capable" if present else "unavailable",
             "reason": "" if present else f"optional module '{mod}' is not installed",
         }
+        if not present:
+            hint = _install_hint(mod, required=False)
+            if hint:
+                entry["install"] = hint
+        out[cap] = entry
     for mod in REQUIRED_IMPORTS:
         present = _module_ok(mod)
-        out[f"required.{mod}"] = {
+        entry = {
             "present": present,
             "status": "ready" if present else "missing",
             "reason": "" if present else f"required module '{mod}' is not installed",
         }
+        if not present:
+            entry["install"] = _install_hint(mod, required=True)
+        out[f"required.{mod}"] = entry
     out["system.python"] = {
         "present": sys.version_info >= (3, 10),
         "status": "ready" if sys.version_info >= (3, 10) else "missing",

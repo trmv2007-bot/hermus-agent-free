@@ -1380,12 +1380,18 @@ def _jsonable(value: Any, depth: int = 0) -> Any:
         return value
     if isinstance(value, str):
         return value if len(value) <= _MAX_STR else value[:_MAX_STR] + "…"
-    if depth >= 3:
+    # The depth valve used to close at 3, which is exactly where a shaped
+    # panel row sits — a model's roles/devices list arrived in the browser as
+    # the Python repr "['doctor', 'background']" instead of real data. Row
+    # shaping is six levels of plain containers at most, and every level is
+    # size-capped, so containers get room to stay real data; the valve still
+    # closes on genuinely pathological nesting.
+    if depth >= 6:
         return str(value)[:_MAX_STR]
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v, depth + 1) for k, v in list(value.items())[:_MAX_COLS]}
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(v, depth + 1) for v in list(value)[:_MAX_ROWS]]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v, depth + 1) for k, v in list(value.items())[:_MAX_COLS]}
     for attr in ("to_dict", "model_dump"):
         fn = getattr(value, attr, None)
         if callable(fn):

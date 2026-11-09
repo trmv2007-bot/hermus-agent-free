@@ -1627,3 +1627,41 @@ meter#hfLevel::-moz-meter-bar { background: linear-gradient(90deg, var(--accent)
   }
   .dock button:hover { transform: none; }
 }
+
+/* ============ doctor report (console action output) ============ */
+/* The doctor's findings are the product: severity chips, one row per finding
+ * with title, evidence and the fixes the doctor already wrote — instead of
+ * "findings: 16 item(s)" over a raw JSON dump. */
+.doc-report { display: grid; gap: 8px; }
+.doc-line { font-size: 12px; color: var(--ink-2); letter-spacing: 0.02em; }
+.doc-report .chip-row { gap: 6px; flex-wrap: wrap; }
+.doc-sev.critical, .doc-sev.high { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+.doc-sev.medium { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+.doc-sev.low, .doc-sev.info { color: var(--dim); background: var(--surface-2); border-color: var(--line); }
+.doc-finding {
+  border: 1px solid var(--line); border-left: 3px solid var(--dim);
+  border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px;
+  background: var(--surface);
+}
+.doc-finding.sev-critical, .doc-finding.sev-high { border-left-color: var(--bad); }
+.doc-finding.sev-medium { border-left-color: var(--warn); }
+.doc-finding-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doc-finding-head b { font-size: 12.5px; color: var(--ink); }
+.doc-finding small { color: var(--dim); font-size: 11.5px; overflow-wrap: anywhere; }
+.doc-finding-head .tag { font-size: 10px; }
+.doc-fixes { display: flex; flex-wrap: wrap; gap: 6px; }
+.doc-fixes code {
+  font-size: 11px; color: var(--ink-2); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
+}
+
+/* ============ console tables breathe ============ */
+/* Twelve-column owner tables crammed into a card produced sliver columns
+ * with one word per line. Cap the width, keep it readable, and let the
+ * table scroll horizontally instead of crushing every column. */
+.console-card .mini { display: block; overflow-x: auto; }
+.console-card .mini td, .console-card .mini th {
+  max-width: 260px; min-width: 64px; white-space: normal;
+  overflow-wrap: anywhere; vertical-align: top;
+}
+.console-card .mini td:first-child, .console-card .mini th:first-child { min-width: 90px; }

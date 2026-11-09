@@ -102,12 +102,30 @@
     return parts.join('');
   }
 
+  /* Table cells arrive straight from owner JSON, where a list field renders
+   * as Python repr — ['doctor', 'background'] — and a boolean as "false".
+   * cellText turns those into what a human scans: word-dot-word lists and
+   * yes/no. Object items collapse to compact JSON so a list of dicts reads
+   * as data, never "[object Object]". Values that are already strings pass
+   * through untouched. */
+  function cellText(v) {
+    if (v == null || v === '') return '';
+    if (Array.isArray(v)) return v.map((item) => {
+      if (item == null) return '';
+      if (typeof item === 'object') return JSON.stringify(item).slice(0, 40);
+      return String(item);
+    }).filter(Boolean).join(' · ');
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    if (typeof v === 'object') return JSON.stringify(v).slice(0, 60);
+    return String(v).slice(0, 80);
+  }
+
   function tableHtml(view) {
     const cols = view.columns || [];
     const rows = view.rows || [];
     if (!cols.length || !rows.length) return '';
     return '<table class="mini"><thead><tr>' + cols.map((c) => '<th title="' + esc(String(c)) + '">' + esc(kpiLabel(c).text) + '</th>').join('')
-      + '</tr></thead><tbody>' + rows.map((r) => '<tr>' + cols.map((c) => '<td>' + esc(String(r[c] == null ? '' : r[c]).slice(0, 80)) + '</td>').join('') + '</tr>').join('')
+      + '</tr></thead><tbody>' + rows.map((r) => '<tr>' + cols.map((c) => '<td>' + esc(cellText(r[c])) + '</td>').join('') + '</tr>').join('')
       + '</tbody></table>';
   }
 
@@ -162,7 +180,10 @@
       + bodyHtml(panel, view)
       + endpointsHtml(panel)
       + (panel.actions && panel.actions.length ? '<div class="acts">' + actionsHtml(panel) + '</div>' : '')
-      + (state.results[panel.id] ? '<div class="act-out"><pre>' + esc(state.results[panel.id].text || state.results[panel.id]) + '</pre>'
+      + (state.results[panel.id] ? '<div class="act-out">'
+        + (state.results[panel.id].doctor
+          ? state.results[panel.id].doctor
+          : '<pre>' + esc(state.results[panel.id].text || state.results[panel.id]) + '</pre>')
         + (state.results[panel.id].raw ? '<details class="raw"><summary>raw owner return</summary><pre>' + esc(state.results[panel.id].raw) + '</pre></details>' : '')
         + '</div>' : '')
       + '</section>';
@@ -221,9 +242,46 @@
     }
     return lines.join('\n') || 'done';
   }
+
+  /* A doctor report is not a generic blob: its findings ARE the product —
+   * severity, title, evidence, and the fixes the doctor already wrote. The
+   * generic summary reduced all of that to "findings: 16 item(s)" over a raw
+   * JSON dump; this renders what the user ran the tool to read. */
+  function doctorReportHtml(d) {
+    const counts = d.counts || {};
+    const sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+    const chips = sevOrder.filter((k) => counts[k]).map((k) => '<span class="tag doc-sev ' + esc(k) + '">' + esc(k) + ': ' + esc(counts[k]) + '</span>').join(' ');
+    const engine = d.engine && typeof d.engine === 'object'
+      ? 'engine: ' + [d.engine.mode, d.engine.status, d.engine.doctor_model ? 'doctor model ' + d.engine.doctor_model : ''].filter(Boolean).join(' · ') : '';
+    const findings = (Array.isArray(d.findings) ? d.findings : []).slice(0, 16).map((f) => {
+      const fixes = Array.isArray(f.fixes) && f.fixes.length
+        ? '<div class="doc-fixes">' + f.fixes.slice(0, 4).map((x) => '<code>' + esc(String(x).slice(0, 140)) + '</code>').join('') + '</div>' : '';
+      return '<div class="doc-finding sev-' + esc(String(f.severity || 'info').toLowerCase()) + '">'
+        + '<div class="doc-finding-head"><b>' + esc(String(f.title || f.category || 'finding').slice(0, 120)) + '</b>'
+        + (f.component ? '<span class="tag">' + esc(String(f.component)) + '</span>' : '')
+        + (f.auto_fixable ? '<span class="tag ok">auto-fixable</span>' : '')
+        + '</div>'
+        + (f.evidence ? '<small>' + esc(String(f.evidence).slice(0, 200)) + '</small>' : '')
+        + fixes + '</div>';
+    }).join('');
+    const stuck = d.stuck && (d.stuck.count || d.stuck.runs || d.stuck.jobs)
+      ? '<div class="kv"><span class="k">stuck work</span><span class="v">' + esc(valueLabel(d.stuck.count != null ? d.stuck.count : d.stuck)) + '</span></div>' : '';
+    return '<div class="doc-report">'
+      + '<div class="doc-line">' + esc(String(d.status || 'done')) + (d.worst_severity ? ' · worst: ' + esc(d.worst_severity) : '') + (engine ? ' · ' + esc(engine) : '') + '</div>'
+      + (chips ? '<div class="chip-row">' + chips + '</div>' : '')
+      + (findings || '<div class="note">no findings — nothing needs attention</div>')
+      + stuck + '</div>';
+  }
+
   function resultRecord(prefix, res) {
     if (!res.ok) return { text: '✗ ' + prefix + '\n' + res.message + ' (' + res.code + ')' };
-    return { text: prefix + ' — ok\n' + flatSummary(res.data), raw: JSON.stringify(res.data, null, 2).slice(0, 4000) };
+    const d = res.data;
+    // Shape-match a doctor report: findings list + severity counts. Generic
+    // results keep the flat summary; the doctor gets the findings renderer.
+    if (d && typeof d === 'object' && Array.isArray(d.findings) && d.counts && typeof d.counts === 'object') {
+      return { doctor: doctorReportHtml(d), raw: JSON.stringify(d, null, 2).slice(0, 4000) };
+    }
+    return { text: prefix + ' — ok\n' + flatSummary(d), raw: JSON.stringify(d, null, 2).slice(0, 4000) };
   }
 
   async function runAction(panelId, index, node) {
@@ -311,6 +369,8 @@
     refreshPanel: refreshPanel,
     reload: async () => { state.views = {}; await loadManifest(); syncGroups(); render(); await refresh(); },
     state: state,
+    // Exposed for the Node test harness; not part of the page contract.
+    __test: { cellText, flatSummary, doctorReportHtml, resultRecord },
   };
   boot();
 })();

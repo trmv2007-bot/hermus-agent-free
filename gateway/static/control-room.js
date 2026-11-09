@@ -215,8 +215,8 @@ function kpi(v,l){ return `<div class="kpi"><div class="v">${esc(v)}</div><div c
 /* Last-resort payload rendering: when an endpoint has no markdown formatter,
  * build a definition list of its scalar fields instead of dumping raw JSON. */
 function valueLabel(v){
-  if (v === true) return "ready";
-  if (v === false) return "not installed";
+  if (v === true) return "yes";
+  if (v === false) return "no";
   if (v == null || v === "") return "—";
   if (typeof v === "number") {
     // epoch seconds/ms and ISO stamps read as clock time, not raw floats
@@ -509,7 +509,14 @@ function postCommand(){
 /* A job row is a door, not a dead end: clicking it expands the payload
  * (the user's own words, for runtime.turn jobs), the run linkage, error and
  * timing, plus the canonical result fetched from /jobs/{id}/result. Columns
- * match what a human scans: job, kind, state, tries, run, age. */
+ * match what a human scans: job, kind, state, tries, run, age.
+ *
+ * The queue poller rebuilds the whole tbody every few seconds; without
+ * special care that collapsed (i.e. slammed shut) any detail the user was
+ * reading mid-read. EXPANDED_JOBS remembers which rows are open so a poll
+ * refresh re-opens exactly those — the reader keeps their place, the detail
+ * just gets fresher. */
+const EXPANDED_JOBS = new Set();
 function jobRowHtml(x){
   const status = x.status || "unknown";
   const ask = x.payload && typeof x.payload === "object"
@@ -544,14 +551,15 @@ function jobDetailHtml(x, resultEnvelope){
   }
   return bits.join("") || '<div class="note">no details recorded</div>';
 }
-async function toggleJobDetail(row){
+async function toggleJobDetail(row, force){
   const detail = row.nextElementSibling;
   if (!detail) return;
-  const opening = detail.hidden;
+  const opening = force === true ? true : detail.hidden;
   detail.hidden = !opening;
   row.setAttribute("aria-expanded", opening ? "true" : "false");
+  const jobId = String(row.dataset.job || "");
+  if (opening) EXPANDED_JOBS.add(jobId); else EXPANDED_JOBS.delete(jobId);
   if (!opening) return;
-  const jobId = row.dataset.job;
   detail.innerHTML = '<td colspan="6"><div class="note">loading job…</div></td>';
   try {
     const all = await getJSON("/jobs");
@@ -575,6 +583,8 @@ async function refreshJobs(){
     body.querySelectorAll("tr.job-row").forEach((tr) => {
       tr.addEventListener("click", () => toggleJobDetail(tr));
       tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleJobDetail(tr); } });
+      // A poll refresh must not slam shut the detail row the user is reading.
+      if (EXPANDED_JOBS.has(String(tr.dataset.job || ""))) toggleJobDetail(tr, true);
     });
     const n = Array.isArray(j) ? j.length : (j.jobs || []).length;
     $("#jobcount").textContent = n + " jobs";
