@@ -34,7 +34,7 @@
 
     <div class="conn-cluster">
       <span class="pill model-pill" id="modelPill" title="Selected model fleet">model: …</span>
-      <span class="pill" id="jarvisStatusBadge"><span id="jarvisStatusLabel">control plane</span></span>
+      <span class="pill" id="jarvisStatusBadge" tabindex="0" title="control plane status"><span id="jarvisStatusLabel">control plane</span></span>
     </div>
 
     <button class="btn ghost" id="paletteBtn" type="button" title="Command palette (Ctrl+P)">
@@ -256,6 +256,19 @@
         </div>
         <div class="card">
           <div class="card-head"><h2>Mission list</h2></div>
+          <div class="mission-tools">
+            <label class="meta" for="missionStateFilter">show</label>
+            <select id="missionStateFilter" aria-label="Filter missions by state">
+              <option value="all">all states</option>
+              <option value="blocked">blocked</option>
+              <option value="failed">failed</option>
+              <option value="active">active (planning / executing / verifying…)</option>
+              <option value="terminal">terminal (completed / cancelled)</option>
+            </select>
+            <span class="meta" id="missionCount" aria-live="polite">—</span>
+            <span class="topbar-spacer"></span>
+            <button id="missionBulkResume" class="btn ghost" type="button" title="Resume every blocked or failed mission (approve + retry, extra steps)" disabled>resume blocked</button>
+          </div>
           <table id="missions">
             <thead><tr><th>mission</th><th>state</th><th>progress</th><th>blocker</th><th>actions</th></tr></thead>
             <tbody><tr><td colspan="5" class="note">loading…</td></tr></tbody>

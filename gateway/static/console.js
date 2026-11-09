@@ -68,6 +68,17 @@
   }
 
   /* ---------------------------------------------------------------- render */
+  /* KPI labels arrive as dotted snake_case keys from the server's shaper
+   * (`engine.doctor_model`, `stuck.threshold_minutes`). Rendered raw they
+   * read as code; render them as words — "engine · doctor model" — while the
+   * exact key stays in the tooltip so a value can still be correlated with
+   * the raw owner return one click away. */
+  function kpiLabel(label) {
+    const raw = String(label == null ? '' : label);
+    const text = raw.split('.').map((part) => part.replace(/_/g, ' ').trim()).filter(Boolean).join(' · ');
+    return { text: text || raw, title: raw };
+  }
+
   function summaryHtml() {
     const m = state.manifest || {};
     const views = Object.keys(state.views).length;
@@ -95,7 +106,7 @@
     const cols = view.columns || [];
     const rows = view.rows || [];
     if (!cols.length || !rows.length) return '';
-    return '<table class="mini"><thead><tr>' + cols.map((c) => '<th>' + esc(c) + '</th>').join('')
+    return '<table class="mini"><thead><tr>' + cols.map((c) => '<th title="' + esc(String(c)) + '">' + esc(kpiLabel(c).text) + '</th>').join('')
       + '</tr></thead><tbody>' + rows.map((r) => '<tr>' + cols.map((c) => '<td>' + esc(String(r[c] == null ? '' : r[c]).slice(0, 80)) + '</td>').join('') + '</tr>').join('')
       + '</tbody></table>';
   }
@@ -105,7 +116,10 @@
     if (view.status !== 'ready') {
       return '<div class="panel-state error">' + esc(view.error || 'unavailable') + '</div>';
     }
-    const kpis = (view.kpis || []).map((k) => kpi(valueLabel(k.value), k.label)).join('');
+    const kpis = (view.kpis || []).map((k) => {
+      const label = kpiLabel(k.label);
+      return '<div class="kpi" title="' + esc(label.title) + '"><div class="v">' + esc(valueLabel(k.value)) + '</div><div class="l">' + esc(label.text) + '</div></div>';
+    }).join('');
     const raw = state.open[panel.id]
       ? '<details class="raw" open><summary>raw owner return</summary><pre>' + esc(JSON.stringify(view.raw, null, 2)) + '</pre></details>'
       : '<details class="raw"><summary>raw owner return</summary><pre>' + esc(JSON.stringify(view.raw, null, 2)) + '</pre></details>';

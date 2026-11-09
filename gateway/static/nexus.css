@@ -1,14 +1,15 @@
 /* ===========================================================================
-   HERMUS — Control Center visual interaction system.
+   HERMUS — Dark Cockpit visual interaction system.
 
-   A calm, light, data-first design language for the whole control surface:
-   readable typography (13.5px base, 11px floor), one indigo accent family,
-   white cards on a soft neutral canvas, honest states (loading / empty /
-   error), and a real ARIA tab rail. Dark sci-fi chrome is gone: the UI is
-   built for long reading sessions, dense tables and clear hierarchy.
+   A calm, dark, data-first design language for the whole control surface:
+   readable typography (13.5px base, 11px floor), one cyan instrument-glow
+   accent family, layered graphite surfaces on a deep-space canvas, honest
+   states (loading / empty / error), and a real ARIA tab rail. The UI is built
+   for long reading sessions, dense tables and clear hierarchy.
 
-   Palette: soft neutral canvas, white surfaces, indigo accent, semantic
-   green / amber / red. Motion is subtle and respects reduced-motion.
+   Palette: deep-space canvas (#0a0f16), three graphite surface layers, cyan
+   accent with a soft glow, semantic green / amber / red. Motion is subtle and
+   respects reduced-motion.
    =========================================================================== */
 
 :root {
@@ -508,6 +509,11 @@ button.tag { height: 26px; cursor: pointer; }
 
 .mission-line { display: flex; align-items: baseline; gap: 10px; }
 .mission-line strong { font-size: 15px; letter-spacing: 0.01em; }
+/* Mission list toolbar: state filter + live count on the left, bulk action
+ * pushed to the right edge so it reads as a list-level operation. */
+.mission-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.mission-tools select { min-width: 200px; }
+.mission-tools .meta { font-variant-numeric: tabular-nums; }
 .card .headline { font-size: 14.5px; font-weight: 600; margin: 6px 0 4px; }
 
 .attention-list { display: grid; gap: 8px; }
@@ -700,13 +706,17 @@ td code { white-space: nowrap; }
 .event i.error { background: var(--bad); }
 .event span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .event time { flex: none; font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+/* Repeat counter for collapsed identical events: invisible until the run
+ * actually repeats, so a single occurrence reads as a normal line. */
+.event .count { flex: none; font-size: 10.5px; font-weight: 650; color: var(--accent); font-variant-numeric: tabular-nums; }
+.event .count:empty { display: none; }
 
 /* ============ states (loading / empty / error) ============ */
 .skeleton {
   height: 12px;
   border-radius: 6px;
   margin: 8px 0;
-  background: linear-gradient(90deg, var(--surface-3) 25%, #fafbfc 50%, var(--surface-3) 75%);
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--surface-2) 50%, var(--surface-3) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -1078,7 +1088,7 @@ meter#hfLevel::-moz-meter-bar { background: linear-gradient(90deg, var(--accent)
   resize: none;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fcfcfd;
+  background: var(--bg-deep);
   padding: 12px;
   font-family: var(--mono);
   font-size: 12px;

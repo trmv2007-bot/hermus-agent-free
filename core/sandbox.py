@@ -949,13 +949,7 @@ class Sandbox:
                 except Exception:
                     out, err = "", "killed after timeout"
                 rc, timed_out = 124, True
-            if (
-                not timed_out
-                and rc != 0
-                and pol.pids
-                and not limits.get("nproc_relaxed")
-                and _fork_denied(err)
-            ):
+            if not timed_out and rc != 0 and pol.pids and not limits.get("nproc_relaxed") and _fork_denied(err):
                 # The child could not fork under RLIMIT_NPROC (multi-user hosts
                 # count sibling processes against the same uid). The module
                 # contract is to degrade with a note, never to crash: retry once

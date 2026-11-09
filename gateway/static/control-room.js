@@ -228,6 +228,42 @@ function valueLabel(v){
   if (/^\d{4}-\d{2}-\d{2}T[\d:]/.test(s)) { const d = new Date(s); if (!isNaN(d)) return d.toLocaleTimeString(); }
   return s.length > 80 ? s.slice(0, 77) + "…" : s;
 }
+/* Ages read as ages: a queue row should say "2m ago", not a raw ISO stamp
+ * or an epoch float. The exact timestamp moves into the tooltip so
+ * correlation with the gateway log is one hover away. Unparseable values
+ * pass through untouched. */
+function parseStamp(v){
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return NaN;
+  let t = Date.parse(s);
+  if (!t || isNaN(t)) {
+    // owners are free to store epoch seconds (the job queue does) or epoch ms
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const n = Number(s);
+      if (n > 1e12) t = n;
+      else if (n > 1e9) t = n * 1000;
+    }
+  }
+  return t;
+}
+function relTime(v){
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return "—";
+  const t = parseStamp(s);
+  if (!t || isNaN(t)) return s.length > 24 ? s.slice(0, 21) + "…" : s;
+  const sec = Math.max(0, (Date.now() - t) / 1000);
+  if (sec < 60) return Math.floor(sec) + "s ago";
+  if (sec < 3600) return Math.floor(sec / 60) + "m ago";
+  if (sec < 86400) return Math.floor(sec / 3600) + "h ago";
+  return Math.floor(sec / 86400) + "d ago";
+}
+function relCell(v){
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return "—";
+  const t = parseStamp(s);
+  if (!t || isNaN(t)) return esc(s);
+  return '<span title="' + esc(new Date(t).toLocaleString()) + '">' + esc(relTime(s)) + '</span>';
+}
 function humanSummary(d){
   if (d == null) return "";
   if (typeof d === "string") return esc(d);
@@ -476,7 +512,7 @@ async function refreshJobs(){
     const { j } = await getJSON("/jobs");
     const rows = (Array.isArray(j) ? j : j.jobs || []).slice(0, 60);
     if (!rows.length) { body.innerHTML = stateRowHtml({ empty: "queue idle — no jobs yet" }, 6); }
-    else body.innerHTML = rows.map((x) => `<tr><td><code>${esc(x.id)}</code></td><td>${esc(x.kind)}</td><td><span class="status s-${esc(x.status)}">${esc(x.status)}</span></td><td>${esc(x.attempts)}/${esc(x.max_attempts)}</td><td>${esc(x.run_id || "")}</td><td>${esc(x.created_at || "")}</td></tr>`).join("");
+    else body.innerHTML = rows.map((x) => `<tr><td><code>${esc(x.id)}</code></td><td>${esc(x.kind)}</td><td><span class="status s-${esc(x.status)}">${esc(x.status)}</span></td><td>${esc(x.attempts)}/${esc(x.max_attempts)}</td><td>${esc(x.run_id || "")}</td><td>${relCell(x.created_at)}</td></tr>`).join("");
     const n = Array.isArray(j) ? j.length : (j.jobs || []).length;
     $("#jobcount").textContent = n + " jobs";
     const { j: st } = await getJSON("/queue/status");
@@ -490,23 +526,44 @@ async function refreshJobs(){
 RETRY_ACTIONS.jobs = refreshJobs;
 
 // ---------- MISSIONS ----------
+/* The state filter groups the twelve lifecycle states into the buckets a
+ * human actually scans for: blocked, failed, active, terminal. The bucket
+ * lives next to the renderer so the dropdown and the table can never
+ * disagree about what "active" means. */
+const MISSION_ACTIVE_STATES = new Set(["pending","planning","executing","observing","verifying","diagnosing","repairing","continuing"]);
+const MISSION_TERMINAL_STATES = new Set(["completed","cancelled"]);
+const MISSION_RESUMABLE_STATES = new Set(["blocked","failed"]);
+function missionBucket(state){
+  const s = String(state || "").toLowerCase();
+  if (MISSION_RESUMABLE_STATES.has(s)) return s;
+  if (MISSION_TERMINAL_STATES.has(s)) return "terminal";
+  if (MISSION_ACTIVE_STATES.has(s)) return "active";
+  return "other";
+}
 async function refreshMissions(){
   const body = $("#missions tbody");
   try {
     const { j } = await getJSON("/missions");
-    const rows = (j.missions || []).slice(0, 80);
+    const rows = j.missions || [];
+    const filter = $("#missionStateFilter")?.value || "all";
+    const shown = filter === "all" ? rows : rows.filter((m) => missionBucket(m.state) === filter);
     const blockedN = rows.filter((m) => String(m.state).toLowerCase() === "blocked" || m.approval_request).length;
     setPill("#blockedMissionCount", "blocked missions: " + blockedN, blockedN ? "warn" : "ok");
     updateSafetyCore();
+    const count = $("#missionCount");
+    if (count) count.textContent = rows.length ? ("showing " + shown.length + " of " + rows.length) : "";
+    const bulk = $("#missionBulkResume");
+    if (bulk) bulk.disabled = !rows.some((m) => MISSION_RESUMABLE_STATES.has(String(m.state).toLowerCase()));
     if (!rows.length) { body.innerHTML = stateRowHtml({ empty: "no missions yet" }, 5); return; }
-    body.innerHTML = rows.map((m) => {
+    if (!shown.length) { body.innerHTML = stateRowHtml({ empty: "no missions in this state — switch the filter to see the other " + rows.length }, 5); return; }
+    body.innerHTML = shown.slice(0, 80).map((m) => {
       const ap = m.approval_request || {};
       const failure = m.failure || {};
       const createPrompts = m.create_prompts_action || {};
       const blocker = ap.id ? ('approval <code>' + esc(ap.id) + '</code>') : esc(m.blocker_reason || failure.reason || '');
       const approveBtn = ap.id ? `<button class="ghost" data-mission-approve="${esc(m.mission_id)}" data-approval-id="${esc(ap.id)}">approve+retry</button>` : '';
       const promptsBtn = createPrompts.endpoint ? `<button class="ghost" data-mission-prompts="${esc(m.mission_id)}">create prompts</button>` : '';
-      const resumeBtn = ['blocked','failed','executing','pending','continuing'].includes(String(m.state)) ? `<button class="ghost" data-mission-resume="${esc(m.mission_id)}">resume</button>` : '';
+      const resumeBtn = MISSION_RESUMABLE_STATES.has(String(m.state).toLowerCase()) || ["executing","pending","continuing"].includes(String(m.state)) ? `<button class="ghost" data-mission-resume="${esc(m.mission_id)}">resume</button>` : '';
       return `<tr><td><code>${esc(m.mission_id)}</code></td><td><span class="status s-${esc(m.state)}">${esc(m.state)}</span></td><td>${esc(m.progress_pct ?? 0)}%</td><td>${blocker}</td><td>${approveBtn} ${promptsBtn} ${resumeBtn}</td></tr>`;
     }).join("");
     body.querySelectorAll("button[data-mission-approve]").forEach((b) => b.addEventListener("click", () => approveMission(b.dataset.missionApprove, b.dataset.approvalId)));
@@ -560,6 +617,42 @@ function resumeMission(missionId){
   fetch("/missions/" + encodeURIComponent(missionId) + "/resume", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ extra_steps: 8 }) })
     .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>resume <code>' + esc(missionId) + '</code>: <span class="e">' + esc(d.state || d.status || d.success || d.error) + '</span></div>'; refreshMissions(); })
     .catch((e)=>{ out.innerHTML = '<div class="note">resume failed: ' + esc(e.message) + '</div>'; });
+}
+/* Bulk resume: one click for the common "everything is blocked after a
+ * restart" case. Each mission gets its own honest per-row result — a bulk
+ * button that only said "done" would hide which resumes actually took. */
+async function bulkResumeMissions(){
+  const out = $("#missionOut");
+  const btn = $("#missionBulkResume");
+  try {
+    const { j } = await getJSON("/missions");
+    const targets = (j.missions || []).filter((m) => MISSION_RESUMABLE_STATES.has(String(m.state).toLowerCase()));
+    if (!targets.length) { out.innerHTML = '<div class="note">no blocked or failed missions to resume</div>'; refreshMissions(); return; }
+    if (btn) { btn.disabled = true; btn.textContent = "resuming…"; }
+    out.innerHTML = '<div class="note">resuming ' + targets.length + ' mission' + (targets.length > 1 ? 's' : '') + '…</div>';
+    const results = [];
+    for (const m of targets) {
+      let ok = false, state = "?";
+      try {
+        const r = await fetch("/missions/" + encodeURIComponent(m.mission_id) + "/resume", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ extra_steps: 8 }) });
+        const d = await r.json();
+        state = d.state || d.status || d.success || d.error || "?";
+        /* HTTP 200 only means the request was handled; the honest success
+         * signal is the mission actually leaving the blocked/failed bucket.
+         * A mission that re-blocks on the same missing model counts as NOT
+         * resumed, whatever the transport status said. */
+        ok = r.ok && !MISSION_RESUMABLE_STATES.has(String(state).toLowerCase());
+      } catch(e){ state = e.message; }
+      results.push({ id: m.mission_id, ok, state });
+    }
+    out.innerHTML = results.map((x) => '<div>resume <code>' + esc(x.id) + '</code>: <span class="' + (x.ok ? 'e' : 'note') + '">' + esc(String(x.state)) + '</span></div>').join("")
+      + '<div class="note">' + results.filter((x) => x.ok).length + '/' + results.length + ' resumed</div>';
+    refreshMissions();
+  } catch(e){
+    out.innerHTML = '<div class="note">bulk resume failed: ' + esc(e.message) + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "resume blocked"; }
+  }
 }
 
 // ---------- TELEMETRY ----------
@@ -616,7 +709,7 @@ async function refreshComputer(){
       + kpi(String(st.stats?.total ?? 0), "total tasks") + kpi(String((st.recorder||{}).running ? "on" : "off"), "recorder");
     const body = $("#compTasks tbody");
     const tasks = st.tasks || st.list || [];
-    body.innerHTML = tasks.slice(0, 30).map((t) => `<tr><td><code>${esc(t.task_id || t.id || "")}</code></td><td><span class="status s-${esc(t.status)}">${esc(t.status)}</span></td><td>${esc(t.updated_at || "")}</td><td>${esc(t.goal || t.task || t.summary || "")}</td></tr>`).join("")
+    body.innerHTML = tasks.slice(0, 30).map((t) => `<tr><td><code>${esc(t.task_id || t.id || "")}</code></td><td><span class="status s-${esc(t.status)}">${esc(t.status)}</span></td><td>${relCell(t.updated_at)}</td><td>${esc(t.goal || t.task || t.summary || "")}</td></tr>`).join("")
       || stateRowHtml({ empty: "no computer tasks" }, 4);
   } catch(e){
     $("#compStatus").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
@@ -645,8 +738,8 @@ function compStop(){
 async function refreshRemote(){
   try {
     const { j: st } = await getJSON("/remote/status");
-    $("#remoteStatus").innerHTML = kpi(esc(String(st.approval?.enabled ?? st.enabled ?? false)), "approval gate")
-      + kpi(esc(String(st.control?.active ?? st.active ?? false)), "active")
+    $("#remoteStatus").innerHTML = kpi(((st.approval?.enabled ?? st.enabled ?? false)) ? "on" : "off", "approval gate")
+      + kpi(((st.control?.active ?? st.active ?? false)) ? "on" : "off", "active")
       + kpi(esc(String((st.control?.halted ?? st.halted) ? "halted" : "round")), "state");
     const { j: ap } = await getJSON("/remote/approvals");
     const hist = ap.history || [];
@@ -945,6 +1038,8 @@ $("#presenceCheckIn").addEventListener("click", requestPresenceCheckIn);
 $("#missionPreflight").addEventListener("click", missionPreflight);
 $("#missionStart").addEventListener("click", () => startMission(false));
 $("#missionPlanBlocked").addEventListener("click", () => startMission(true));
+$("#missionStateFilter").addEventListener("change", refreshMissions);
+$("#missionBulkResume").addEventListener("click", bulkResumeMissions);
 $("#runId").addEventListener("keydown", (e) => { if (e.key === "Enter") replayTimeline($("#runId").value.trim()); });
 $("#cmdName").addEventListener("keydown", (e) => { if (e.key === "Enter") postCommand(); });
 $("#tmClear").addEventListener("click", () => { const f = $("#tmFeed"); f.innerHTML = ""; f.dataset.ready = ""; refreshTelemetry(true); });

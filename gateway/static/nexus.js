@@ -31,11 +31,25 @@
   }
 
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  /* Periodic pollers (model catalog every 30s, kernel every 2.5s) report the
+   * same healthy line over and over. A quiet system must not paint the feed
+   * with repeats: a run of identical messages collapses into one row with a
+   * ×N counter and the timestamp of the latest occurrence. Any different
+   * message starts a new row, so state changes still surface immediately. */
   function addEvent(text, kind='info') {
     const host=$('#activity'); if(!host)return;
     if (host.querySelector('.empty-event')) host.innerHTML='';
+    const first=host.firstElementChild;
+    if (first && first.dataset.msg===text && first.dataset.kind===kind){
+      const n=(Number(first.dataset.repeat)||1)+1;
+      first.dataset.repeat=String(n);
+      first.querySelector('.count').textContent='×'+n;
+      first.querySelector('time').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      return;
+    }
     const row=document.createElement('div'); row.className='event';
-    row.innerHTML=`<i class="${kind}"></i><span>${esc(text)}</span><time>${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>`;
+    row.dataset.msg=text; row.dataset.kind=kind; row.dataset.repeat='1';
+    row.innerHTML=`<i class="${kind}"></i><span>${esc(text)}</span><b class="count" aria-label="repeated"></b><time>${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>`;
     host.prepend(row); while(host.children.length>7)host.lastElementChild.remove();
   }
   function setState(label, detail='') {
@@ -56,7 +70,22 @@
     if (!list.children.length) list.innerHTML='<div class="empty-event">No capability data reported</div>';
   }
 
-  function syncJarvisStatus(online, healthy) {
+  /* The badge explains itself on hover/focus instead of posing a riddle:
+   * which subsystems were probed, which of them reported unhealthy, and where
+   * to go next. The cause list is built from the live health snapshot, so the
+   * tooltip never drifts from what the gateway actually reported. */
+  function badgeTitle(healthy, health){
+    const entries=Object.entries(health && typeof health==='object' ? health : {});
+    if(healthy){
+      const okKeys=entries.filter(([,v])=>v && (v.ok===true || v.running===true || v.installed===true)).map(([k])=>k);
+      return 'Healthy — subsystems reporting ready: ' + (okKeys.join(', ') || 'none named');
+    }
+    const badKeys=entries.filter(([,v])=>!(v && (v.ok===true || v.running===true || v.installed===true))).map(([k])=>k);
+    return entries.length
+      ? 'Degraded — no subsystem reports healthy. Not ready: ' + (badKeys.join(', ') || 'none') + '. Open the Systems tab → Doctor panel to diagnose.'
+      : 'Degraded — the health endpoint returned no subsystems to check. Open the Systems tab → Doctor panel to diagnose.';
+  }
+  function syncJarvisStatus(online, healthy, health) {
     const label=$('#jarvisStatusLabel');
     const badge=$('#jarvisStatusBadge');
     const topLabel=$('#stateLabel');
@@ -68,6 +97,7 @@
       if(badge){
         badge.textContent=healthy ? 'HEALTHY' : 'DEGRADED';
         badge.classList.toggle('warn', !healthy);
+        badge.title=badgeTitle(healthy, health);
       }
     } else {
       if(topLabel) topLabel.textContent='OFFLINE';
@@ -76,6 +106,7 @@
       if(badge){
         badge.textContent='OFFLINE';
         badge.classList.remove('warn');
+        badge.title='Gateway unreachable — the page keeps its last snapshot and keeps retrying. Check the gateway process or network.';
       }
     }
   }
@@ -85,10 +116,11 @@
     try {
       const [health, caps] = await Promise.all([api('/api/v1/system/health'), api('/api/v1/system/capabilities')]);
       state.online=true;
-      syncJarvisStatus(true, Object.values(health||{}).some(v=>v && (v.ok===true || v.running===true || v.installed===true)));
       const healthEntries = health && typeof health === 'object' ? health : {};
-      const healthy = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
-      if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthy ? `${healthy} systems ready` : 'READY'; }
+      const healthyCount = Object.values(healthEntries).filter(v=>v && (v.ok===true || v.running===true || v.installed===true)).length;
+      const healthy = healthyCount > 0;
+      syncJarvisStatus(true, healthy, healthEntries);
+      if(!state.missionLive) { const mission=$('#missionStatus'); if(mission) mission.textContent = healthyCount ? `${healthyCount} systems ready` : 'READY'; }
       renderCapabilities(caps.capabilities || caps);
       if (!state.busy) setState('READY','awaiting your command');
       document.body.style.setProperty('--rtt', `${Math.round(performance.now()-started)}ms`);

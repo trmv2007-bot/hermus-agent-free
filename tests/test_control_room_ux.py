@@ -108,6 +108,7 @@ def run_in_node(body: str) -> dict:
             global.__api = {
               requestJSON, getJSON, stateHtml, stateRowHtml, toast,
               refreshReadiness, selectTab, RETRY_ACTIONS, reportFailure,
+              relTime, relCell, missionBucket,
               document, REGISTRY,
             };
             """
@@ -338,7 +339,10 @@ def test_markup_is_a_real_tablist():
     assert html.count('role="tab"') == 11
     assert html.count('role="tabpanel"') == 11
     assert html.count('aria-selected="true"') == 1  # exactly one selected
-    assert html.count('tabindex="0"') == 1  # roving tabindex: one tabbable
+    # Two deliberately tabbable elements: the selected tab (roving tabindex)
+    # and the status badge, whose DEGRADED/HEALTHY cause tooltip must reach
+    # keyboard users, not just pointer users.
+    assert html.count('tabindex="0"') == 2
     assert 'aria-controls="tab-overview"' in html
     assert 'aria-labelledby="tabbtn-overview"' in html
 
@@ -379,3 +383,81 @@ def test_css_honours_focus_and_reduced_motion():
     css = CONTROL_CSS.read_text(encoding="utf-8")
     assert ":focus-visible" in css, "keyboard focus must be visible"
     assert css.count("prefers-reduced-motion") >= 2, "animated affordances must respect reduced motion"
+
+
+# ---------------------------------------------------------------------------
+# Product polish: relative ages, mission buckets, mission tools wiring
+# ---------------------------------------------------------------------------
+def test_relative_ages_render_and_fall_back(node_available):
+    out = run_in_node(
+        """
+        const now = Date.now();
+        const res = {
+          empty: relTime(""),
+          seconds: relTime(new Date(now - 42 * 1000).toISOString()),
+          minutes: relTime(new Date(now - 5 * 60 * 1000).toISOString()),
+          hours: relTime(new Date(now - 3 * 3600 * 1000).toISOString()),
+          days: relTime(new Date(now - 4 * 86400 * 1000).toISOString()),
+          future_clamped: relTime(new Date(now + 60 * 1000).toISOString()),
+          epoch_seconds: relTime(String(Math.floor(now / 1000) - 5 * 60)),
+          epoch_ms: relTime(String(now - 5 * 60 * 1000)),
+          unparseable: relTime("not-a-timestamp"),
+          cell_title: relCell(new Date(now - 5 * 60 * 1000).toISOString()),
+        };
+        console.log(JSON.stringify(res));
+        """
+    )
+    assert out["empty"] == "—"
+    assert out["seconds"] == "42s ago"
+    assert out["minutes"] == "5m ago"
+    assert out["hours"] == "3h ago"
+    assert out["days"] == "4d ago"
+    # A future stamp (clock skew) must not render as a negative age.
+    assert out["future_clamped"] == "0s ago"
+    # The job queue stores epoch floats; those age too, not just ISO strings.
+    assert out["epoch_seconds"] == "5m ago"
+    assert out["epoch_ms"] == "5m ago"
+    # Unparseable strings pass through instead of being swallowed.
+    assert out["unparseable"] == "not-a-timestamp"
+    # The cell keeps the absolute timestamp available on hover.
+    assert 'title="' in out["cell_title"] and "5m ago" in out["cell_title"]
+
+
+def test_mission_buckets_group_lifecycle_states(node_available):
+    out = run_in_node(
+        """
+        const res = {
+          blocked: missionBucket("blocked"),
+          failed: missionBucket("FAILED"),
+          active: ["pending", "planning", "executing", "observing",
+                   "verifying", "diagnosing", "repairing", "continuing"]
+                   .map((s) => missionBucket(s)),
+          terminal: ["completed", "cancelled"].map((s) => missionBucket(s)),
+          unknown: [missionBucket("paused"), missionBucket(null), missionBucket("")],
+        };
+        console.log(JSON.stringify(res));
+        """
+    )
+    assert out["blocked"] == "blocked"
+    assert out["failed"] == "failed"  # bucketing is case-insensitive
+    assert set(out["active"]) == {"active"}
+    assert set(out["terminal"]) == {"terminal"}
+    assert set(out["unknown"]) == {"other"}  # honest bucket for unseen states
+
+
+def test_mission_tools_are_wired():
+    """The state filter and bulk resume must exist in markup and in code."""
+    html = CONTROL_HTML.read_text(encoding="utf-8")
+    js = ROOM_JS.read_text(encoding="utf-8")
+    for control_id in ("missionStateFilter", "missionBulkResume", "missionCount"):
+        assert f'id="{control_id}"' in html, control_id
+    # The filter offers the four buckets plus "all"; the bulk action is a
+    # real button (not a link) that starts disabled until a resumable
+    # mission exists.
+    for opt in ('value="all"', 'value="blocked"', 'value="failed"', 'value="active"', 'value="terminal"'):
+        assert opt in html, opt
+    assert 'id="missionBulkResume"' in html and "disabled" in html
+    assert "missionBucket" in js
+    assert "bulkResumeMissions" in js
+    assert '$("#missionStateFilter").addEventListener' in js
+    assert '$("#missionBulkResume").addEventListener' in js

@@ -94,3 +94,22 @@ exit 0, 0 page errors
 ```
 
 Screenshots of the new UI (desktop tabs, palette, JARVIS workspace, workshop, mobile) were captured against a live gateway and reviewed.
+
+---
+
+## 7 · Dark Cockpit remodel (commit 7738071)
+
+The Control Center language moved from light-indigo to a **Dark Cockpit**: deep-space canvas (`#0a0f16`), three graphite surface layers, one cyan instrument-glow accent (`#22d3ee`) with `--glow` tokens, glassy topbar, gradient primary buttons with dark text, cyan presence orb, active-tab inset rail. `color-scheme: dark` and the `theme-color` meta keep native controls dark. All 1563 tests stayed green through the remodel; five screenshots (Overview / Jobs / Safety / Missions / palette) verified against a live gateway.
+
+## 8 · Product-polish round 2 (this commit)
+
+Six small UX debts from the self-review, each verified against a live gateway:
+
+1. **Activity feed de-duplication** (`nexus.js` + CSS) — the 30s model-catalog poll used to repaint the same "Model catalog · 0 deployment(s) discovered" line every cycle. Consecutive identical events now collapse into one row with a cyan `×N` counter and the latest timestamp; any different message starts a new row.
+2. **Status badge that explains itself** (`nexus.js`, `control.html`) — HEALTHY / DEGRADED / OFFLINE now carry a dynamic tooltip built from the live health snapshot (which subsystems were probed, which are not ready, "open Systems → Doctor to diagnose"). The badge is focusable (`tabindex="0"`) so keyboard users get the same explanation.
+3. **Missions filter + bulk resume** (`control-room.js`, `control.html`, CSS) — a state filter (all / blocked / failed / active / terminal — the twelve lifecycle states bucketed the way a human scans), a live "showing N of M" count, and a "resume blocked" bulk action that resumes every blocked/failed mission sequentially and reports **per-mission** results. Success is counted honestly: a mission that re-blocks on the same missing model counts as *not* resumed even when the HTTP call returned 200 (verified live: "0/18 resumed", each row showing its true post-resume state).
+4. **Console KPI + table-label humanization** (`console.js`) — the Systems console renders server-shaped dotted keys as words: `engine.doctor_model` → "engine · doctor model", `stuck.threshold_minutes` → "stuck · threshold minutes", table headers `est_size_gb` → "est size gb". The exact raw key stays in the tooltip for correlation with the raw owner return.
+5. **Relative ages** (`control-room.js`) — Jobs and Computer tables show "2m ago" instead of raw ISO stamps or epoch floats (the job queue stores `created_at` as epoch seconds — the parser handles ISO strings, epoch seconds and epoch ms, and passes unparseable values through). The absolute timestamp is one hover away.
+6. **Dark-theme integrity** (`nexus.css`) — two leftover hardcoded light colors from the light era (skeleton shimmer `#fafbfc`, workshop editor `#fcfcfd`) now use theme tokens; the file header still described "white cards on a soft neutral canvas" and now documents the Dark Cockpit language. Remote-status KPIs print `on`/`off` instead of `true`/`false`.
+
+**Tests:** 4 new tests (relative ages incl. epoch + clock-skew clamp, mission buckets, mission-tools wiring, tablist tabindex pin updated to 2 with a comment). Full suite: **1566 passed, 2 skipped, 0 failed**. `node --check` clean on all touched JS; zero browser console errors; live-gateway verification of every behavior above.
