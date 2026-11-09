@@ -949,6 +949,31 @@ class Sandbox:
                 except Exception:
                     out, err = "", "killed after timeout"
                 rc, timed_out = 124, True
+            if (
+                not timed_out
+                and rc != 0
+                and pol.pids
+                and not limits.get("nproc_relaxed")
+                and _fork_denied(err)
+            ):
+                # The child could not fork under RLIMIT_NPROC (multi-user hosts
+                # count sibling processes against the same uid). The module
+                # contract is to degrade with a note, never to crash: retry once
+                # with a relaxed process cap and record the adjustment.
+                relaxed = min(16384, max(1024, int(pol.pids) * 8))
+                note = f"NPROC raised {int(pol.pids)} -> {relaxed} after child fork denial"
+                retry_limits = {**limits, "pids": relaxed, "nproc_relaxed": True, "note": note}
+                return self._exec(
+                    argv,
+                    backend,
+                    replace(pol, pids=relaxed),
+                    workdir,
+                    sandbox_id,
+                    env,
+                    input_text,
+                    retry_limits,
+                    shell=shell,
+                )
             return SandboxResult(
                 success=(rc == 0) and not timed_out,
                 stdout=(out or "")[: pol.max_output_chars],
@@ -1003,6 +1028,18 @@ class Sandbox:
 
 def sandbox_tag() -> str:
     return datetime.now().strftime("%H%M%S")
+
+
+def _fork_denied(stderr: str | None) -> bool:
+    """True when the child failed to spawn a subprocess (fork/exec EAGAIN).
+
+    dash prints ``Cannot fork``; bash prints ``fork: retry: Resource
+    temporarily unavailable``. RLIMIT_NPROC is enforced per real uid across
+    the whole user namespace, so on multi-tenant hosts the configured cap can
+    be exhausted by processes this container cannot even see.
+    """
+    e = (stderr or "").lower()
+    return "cannot fork" in e or "resource temporarily unavailable" in e or "fork: retry" in e
 
 
 def _kill_group(proc: subprocess.Popen) -> None:

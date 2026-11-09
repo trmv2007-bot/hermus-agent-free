@@ -340,6 +340,18 @@
 
         <div class="card">
           <div class="card-head">
+            <h2>Red-line policy</h2>
+            <div class="card-actions"><span class="tag">read live from /red-lines/policy</span></div>
+          </div>
+          <p class="meta">Hard authority limits. Actions in the red zone are blocked before they run.</p>
+          <table id="redLines">
+            <thead><tr><th>#</th><th>red line</th><th>rule</th></tr></thead>
+            <tbody><tr><td colspan="3" class="note">loading policy…</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
             <h2>Safety Event Timeline</h2>
             <div class="card-actions"><button id="safetyEventsRefresh" class="btn ghost" type="button">Refresh</button></div>
           </div>
@@ -497,6 +509,16 @@
         <div class="card">
           <div class="card-head"><h2>Status</h2></div>
           <div class="feed" id="compStatus"><div class="note">computer status loading…</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Recent tasks</h2>
+            <div class="card-actions"><span class="tag">latest 30</span></div>
+          </div>
+          <table id="compTasks">
+            <thead><tr><th>task</th><th>state</th><th>updated</th><th>objective</th></tr></thead>
+            <tbody><tr><td colspan="4" class="note">loading…</td></tr></tbody>
+          </table>
         </div>
         <div class="card">
           <div class="card-head"><h2>Run a task</h2></div>

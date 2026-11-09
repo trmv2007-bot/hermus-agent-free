@@ -260,13 +260,16 @@
     const path=(surfaces[name] || [])[0];
     if(!path){$('#modalLog').textContent='Contextual HERMUS surface available through command and subsystem actions.';return;}
     try {
-      if(path.endsWith('/')) { $('#modalLog').textContent=JSON.stringify({source:path, mission:state.mission, mode:'replay'},null,2); return; }
-      const value=await api(path); $('#modalLog').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);
+      if(path.endsWith('/')) { $('#modalLog').textContent='Replay surface — source: '+path+' · mode: replay. Live mission state streams on the Overview board.'; return; }
+      const value=await api(path);
+      if(typeof value==='string'){ $('#modalLog').textContent=value; }
+      else { $('#modalLog').innerHTML=window.humanSummary ? window.humanSummary(value) : '<div class="note">done — open the Systems tab for the full probe results.</div>'; }
     } catch(e) { $('#modalLog').textContent=e.message; }
   }
 
   $('#paletteInput')?.addEventListener('input',renderPalette);
   $('#paletteClose')?.addEventListener('click',()=>showPalette(false));
+  $('#paletteBtn')?.addEventListener('click',()=>showPalette(true));
   $('#palette')?.addEventListener('click',e=>{
     const item=e.target.closest('[data-palette-open]');
     if(item){showPalette(false);open(item.dataset.paletteOpen);}
@@ -510,7 +513,7 @@
         const endpoint=name==='Focus' ? '/focus' : '/learning?limit=6';
         const data=await api(endpoint);
         $('#modalTitle').textContent=name;
-        $('#modalLog').textContent=JSON.stringify(data,null,2);
+        $('#modalLog').innerHTML=window.humanSummary ? window.humanSummary(data) : '<div class="note">loaded — details render on the matching tab.</div>';
         $('#overlay').classList.add('open');
         $('#overlay').setAttribute('aria-hidden','false');
       }catch(e){
@@ -546,12 +549,21 @@
     }
     if(name === 'Models'){
       await refreshModels(true);
+      const cat=(modelState.catalog||{});
+      const models=Array.isArray(cat.models)?cat.models:[];
+      const sel=(modelState.selected||{}).selections||{};
+      const selKeys=Object.keys(sel);
+      const rows=[];
+      rows.push('<div class="kv"><span class="k">discovered models</span><span class="v">'+esc(String(cat.count||models.length))+'</span></div>');
+      rows.push('<div class="kv"><span class="k">selected</span><span class="v">'+esc(selKeys.length?selKeys.map(k=>k+': '+sel[k]).join(' · '):'auto — best available')+'</span></div>');
+      if(!models.length){
+        rows.push('<div class="note">No deployments discovered. Configure a provider in the Model fleet panel, then press Refresh.</div>');
+      } else {
+        models.slice(0,8).forEach(m=>rows.push('<div class="kv"><span class="k">'+esc(String(m.provider||'?')+'/'+String(m.id||m.ref||'?'))+'</span><span class="v">'+esc(String(m.source||'runtime'))+'</span></div>'));
+        if(models.length>8){ rows.push('<div class="note">+'+(models.length-8)+' more in the catalog.</div>'); }
+      }
       $('#modalTitle').textContent='Models';
-      $('#modalLog').textContent=JSON.stringify({
-        count:(modelState.catalog||{}).count || 0,
-        models:(modelState.catalog||{}).models || [],
-        selected:(modelState.selected||{}).selections || {}
-      },null,2);
+      $('#modalLog').innerHTML=rows.join('');
       $('#overlay').classList.add('open');
       $('#overlay').setAttribute('aria-hidden','false');
       return;
@@ -652,6 +664,13 @@
     }).join('') : '<div class="empty-event">No workspace projects.</div>';
   }
 
+  function humanWorldFact(v){
+    if(v==null) return 'unknown';
+    if(typeof v==='string') return v;
+    if(Array.isArray(v)){ return v.length ? v.slice(0,4).map(x=>String((x&&(x.path||x.file||x.name))||x)).join(', ')+(v.length>4?' +'+(v.length-4)+' more':'') : 'clean'; }
+    if(typeof v==='object'){ const s=Object.entries(v).slice(0,3).map(([k,val])=>k+': '+(Array.isArray(val)?val.length+' item(s)':String(val))).join(' · '); return s||'none'; }
+    return String(v);
+  }
   function renderWorkshopContext(ctx=null){
     const host=$('#workshopContext');
     if(!host) return;
@@ -664,8 +683,8 @@
       ['ATTENTION',String((ctx?.attention||k.attention||[]).length)+' active'],
       ['WORKSPACE',ctx?.project||state.workshopProject||'none'],
       ['GIT',String(world['workspace.git.branch']?.value||'unknown')],
-      ['GIT STATUS',JSON.stringify(world['workspace.git.status']?.value||{})],
-      ['BROWSER',world['browser.state']?.value ? JSON.stringify(world['browser.state'].value):'not connected'],
+      ['GIT STATUS',humanWorldFact(world['workspace.git.status']?.value)],
+      ['BROWSER',world['browser.state']?.value ? humanWorldFact(world['browser.state'].value):'not connected'],
       ['WORLD',world['world.last_refresh_at']?.value||'unknown']
     ];
     const memories=Array.isArray(ctx?.memory)?ctx.memory.slice(0,4):[];
@@ -801,7 +820,7 @@
     if(state.mission) {
       const mission=state.missionData||{};
       $('#modalTitle').textContent='Mission '+state.mission;
-      $('#modalLog').textContent=JSON.stringify(mission,null,2);
+      $('#modalLog').innerHTML=window.humanSummary ? window.humanSummary(mission) : '<div class="note">mission '+esc(state.mission)+' — live state is on the Missions tab.</div>';
       $('#overlay').classList.add('open'); $('#overlay').setAttribute('aria-hidden','false');
     }
   });

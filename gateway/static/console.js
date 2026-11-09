@@ -105,7 +105,7 @@
     if (view.status !== 'ready') {
       return '<div class="panel-state error">' + esc(view.error || 'unavailable') + '</div>';
     }
-    const kpis = (view.kpis || []).map((k) => kpi(String(k.value), k.label)).join('');
+    const kpis = (view.kpis || []).map((k) => kpi(valueLabel(k.value), k.label)).join('');
     const raw = state.open[panel.id]
       ? '<details class="raw" open><summary>raw owner return</summary><pre>' + esc(JSON.stringify(view.raw, null, 2)) + '</pre></details>'
       : '<details class="raw"><summary>raw owner return</summary><pre>' + esc(JSON.stringify(view.raw, null, 2)) + '</pre></details>';
@@ -148,7 +148,9 @@
       + bodyHtml(panel, view)
       + endpointsHtml(panel)
       + (panel.actions && panel.actions.length ? '<div class="acts">' + actionsHtml(panel) + '</div>' : '')
-      + (state.results[panel.id] ? '<div class="act-out"><pre>' + esc(state.results[panel.id]) + '</pre></div>' : '')
+      + (state.results[panel.id] ? '<div class="act-out"><pre>' + esc(state.results[panel.id].text || state.results[panel.id]) + '</pre>'
+        + (state.results[panel.id].raw ? '<details class="raw"><summary>raw owner return</summary><pre>' + esc(state.results[panel.id].raw) + '</pre></details>' : '')
+        + '</div>' : '')
       + '</section>';
   }
 
@@ -191,6 +193,25 @@
     return v;
   }
 
+  /* Action/GET results read like a product: flat label/value lines first, the
+   * full owner return one click away in a collapsed details block. */
+  function flatSummary(d) {
+    if (d == null) return 'done';
+    if (typeof d !== 'object') return String(d);
+    const lines = [];
+    for (const [k, v] of Object.entries(d)) {
+      if (v == null || k === 'success' || k === 'trace_id' || k === 'request_id') continue;
+      if (typeof v === 'object') lines.push(k.replace(/_/g, ' ') + ': ' + (Array.isArray(v) ? v.length + ' item(s)' : 'see raw return'));
+      else lines.push(k.replace(/_/g, ' ') + ': ' + valueLabel(v));
+      if (lines.length >= 12) { lines.push('…'); break; }
+    }
+    return lines.join('\n') || 'done';
+  }
+  function resultRecord(prefix, res) {
+    if (!res.ok) return { text: '✗ ' + prefix + '\n' + res.message + ' (' + res.code + ')' };
+    return { text: prefix + ' — ok\n' + flatSummary(res.data), raw: JSON.stringify(res.data, null, 2).slice(0, 4000) };
+  }
+
   async function runAction(panelId, index, node) {
     const panel = (state.manifest.panels || []).find((p) => p.id === panelId);
     const action = panel && panel.actions[index];
@@ -207,8 +228,7 @@
     const res = await requestJSON(action.path, isPost
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : { method: 'GET' });
-    const text = res.ok ? JSON.stringify(res.data, null, 2).slice(0, 4000) : (res.message + ' (' + res.code + ')');
-    state.results[panelId] = (res.ok ? 'POST ' : '✗ ') + action.path + '\n' + text;
+    state.results[panelId] = resultRecord('POST ' + action.path, res);
     toast(panel.label + ' · ' + action.label + ': ' + (res.ok ? 'ok' : res.message),
       res.ok ? 'ok' : 'error',
       { requestId: res.requestId, retry: res.retryable, onRetry: () => runAction(panelId, index, node) });
@@ -218,8 +238,7 @@
 
   async function fetchEndpoint(path, panelId, node) {
     const res = await requestJSON(path, { method: 'GET' });
-    state.results[panelId] = (res.ok ? 'GET ' : '✗ ') + path + '\n'
-      + (res.ok ? JSON.stringify(res.data, null, 2).slice(0, 4000) : res.message);
+    state.results[panelId] = resultRecord('GET ' + path, res);
     render();
     toast(panelId + ' · GET ' + path + ': ' + (res.ok ? 'ok' : res.message), res.ok ? 'ok' : 'error',
       { requestId: res.requestId, retry: res.retryable, onRetry: () => fetchEndpoint(path, panelId, node) });

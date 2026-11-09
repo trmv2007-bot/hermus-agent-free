@@ -160,7 +160,8 @@ function stopAllAgents() {
   });
 }
 
-// Refresh Agents
+// Refresh Agents — a transient gateway restart must degrade to a note, not an
+// unhandled pageerror from an uncaught rejection inside a 5s poller.
 function refreshAgents() {
   fetch('/api/v1/agents/list')
     .then(r => r.json())
@@ -169,6 +170,10 @@ function refreshAgents() {
       updateAgentUI();
       updateAgentVisualization();
       updateAgentDropdowns();
+    })
+    .catch(() => {
+      const note = document.getElementById('agentCount');
+      if (note) note.textContent = 'fleet unavailable, retries automatically';
     });
 }
 
@@ -179,7 +184,8 @@ function refreshApiKeys() {
     .then(data => {
       agentSystem.apiKeys = data.keys || {};
       updateApiKeysUI();
-    });
+    })
+    .catch(() => { /* transient; the next poll retries */ });
 }
 
 // Refresh Agent Messages
@@ -189,7 +195,8 @@ function refreshAgentMessages() {
     .then(data => {
       agentSystem.messages = data.messages || [];
       updateMessagesUI();
-    });
+    })
+    .catch(() => { /* transient; the next poll retries */ });
 }
 
 // Update Agent UI

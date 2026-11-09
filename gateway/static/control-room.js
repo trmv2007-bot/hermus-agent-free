@@ -209,15 +209,37 @@ function updateSafetyCore(){
   if (core) core.innerHTML = kpi(activeBrake ? "ACTIVE" : "clear", "emergency brake") + kpi(String(pendingN), "pending approvals") + kpi(String(blockedN), "blocked missions") + kpi("visible", "capability ledger");
 }
 
-function getJSON(url){
-  const t0 = Date.now();
-  return fetch(url, { headers: { "Accept": "application/json" } }).then((r) => {
-    const ms = Date.now() - t0;
-    if (!r.ok) throw new Error(url + " -> " + r.status);
-    return r.json().then((j) => ({ j, ms }));
-  });
-}
+/* kpi(v,l) — one stat chip */
 function kpi(v,l){ return `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`; }
+
+/* Last-resort payload rendering: when an endpoint has no markdown formatter,
+ * build a definition list of its scalar fields instead of dumping raw JSON. */
+function valueLabel(v){
+  if (v === true) return "ready";
+  if (v === false) return "not installed";
+  if (v == null || v === "") return "—";
+  if (typeof v === "number") {
+    // epoch seconds/ms and ISO stamps read as clock time, not raw floats
+    if (v > 1e12) return new Date(v).toLocaleTimeString();
+    if (v > 1e9) return new Date(v * 1000).toLocaleTimeString();
+    return String(v);
+  }
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}T[\d:]/.test(s)) { const d = new Date(s); if (!isNaN(d)) return d.toLocaleTimeString(); }
+  return s.length > 80 ? s.slice(0, 77) + "…" : s;
+}
+function humanSummary(d){
+  if (d == null) return "";
+  if (typeof d === "string") return esc(d);
+  if (typeof d !== "object") return esc(String(d));
+  const skip = new Set(["success", "trace_id", "request_id"]);
+  const rows = Object.entries(d).filter(([, v]) => v != null && typeof v !== "object")
+    .map(([k, v]) => `<div class="kv"><span class="k">${esc(k.replace(/_/g, " "))}</span><span class="v" title="${esc(String(v)).slice(0, 200)}">${esc(valueLabel(v))}</span></div>`);
+  const extra = Object.entries(d).filter(([k, v]) => !skip.has(k) && v && typeof v === "object").length;
+  return rows.length
+    ? rows.join("") + (extra ? `<div class="note">${extra} detail group${extra > 1 ? "s" : ""} in the response — ask for a report for the full text.</div>` : "")
+    : '<div class="note">done</div>';
+}
 
 // ---------- tabs ----------
 /* Tabs are a real ARIA tablist (see control.html), not just styled buttons:
@@ -502,7 +524,7 @@ function missionPreflight(){
   if (!goal) { out.innerHTML = '<div class="note">mission goal required</div>'; return; }
   out.innerHTML = '<div class="note">running mission pre-flight…</div>';
   fetch("/safety/preflight", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal, format:"markdown" }) })
-    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); refreshSafetyEvents(); })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown) || humanSummary(d); refreshSafetyEvents(); })
     .catch((e)=>{ out.innerHTML = '<div class="note">mission pre-flight failed: ' + esc(e.message) + '</div>'; });
 }
 function startMission(allowPlanningBlocked){
@@ -689,7 +711,7 @@ async function refreshSafetyReport(){
   feed.innerHTML = '<div class="note">generating safety report…</div>';
   try {
     const { j } = await getJSON("/safety/report?format=markdown");
-    feed.innerHTML = mdLite(j.markdown || JSON.stringify(j, null, 2));
+    feed.innerHTML = mdLite(j.markdown) || humanSummary(j);
   } catch(e){ feed.innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
     { label: "safety report", onRetryId: "safetyReport" }); }
 }
@@ -814,7 +836,7 @@ function proposePower(){
   if (!power) { out.innerHTML = '<div class="note">power name required</div>'; return; }
   out.innerHTML = '<div class="note">generating setup proposal…</div>';
   fetch("/capabilities/ledger/propose", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ power }) })
-    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown) || humanSummary(d); })
     .catch((e)=>{ out.innerHTML = '<div class="note">proposal failed: ' + esc(e.message) + '</div>'; });
 }
 function runPreflight(){
@@ -823,14 +845,14 @@ function runPreflight(){
   if (!goal) { out.innerHTML = '<div class="note">goal required</div>'; return; }
   out.innerHTML = '<div class="note">running pre-flight…</div>';
   fetch("/safety/preflight", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal, format:"markdown" }) })
-    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); refreshSafetyEvents(); })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown) || humanSummary(d); refreshSafetyEvents(); })
     .catch((e)=>{ out.innerHTML = '<div class="note">pre-flight failed: ' + esc(e.message) + '</div>'; });
 }
 function runDownloadsScan(){
   const out = $("#preflightOut");
   out.innerHTML = '<div class="note">running approved Downloads defensive scan…</div>';
   fetch("/local-defense/scan", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ path:"~/Downloads", purpose:"malware", max_files:500, save_report:true }) })
-    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown || JSON.stringify(d, null, 2)); refreshSafetyEvents(); })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = mdLite(d.markdown) || humanSummary(d); refreshSafetyEvents(); })
     .catch((e)=>{ out.innerHTML = '<div class="note">scan failed: ' + esc(e.message) + '</div>'; });
 }
 function startDownloadsScanMission(){
@@ -855,7 +877,7 @@ function createPreflightApprovals(){
   if (!goal) { out.innerHTML = '<div class="note">goal required</div>'; return; }
   out.innerHTML = '<div class="note">creating draft approval prompts…</div>';
   fetch("/safety/preflight/approvals", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ goal }) })
-    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>draft prompts created: <span class="e">' + esc((d.created||[]).length) + '</span></div>' + (d.errors?.length ? '<div class="note">errors: ' + esc(JSON.stringify(d.errors)) + '</div>' : ''); refreshSafety(); refreshSafetyEvents(); })
+    .then((r)=>r.json()).then((d)=>{ out.innerHTML = '<div>draft prompts created: <span class="e">' + esc((d.created||[]).length) + '</span></div>' + (d.errors?.length ? '<div class="note">errors: ' + esc(d.errors.map((x) => x.message || x.error || String(x)).join("; ")) + '</div>' : ''); refreshSafety(); refreshSafetyEvents(); })
     .catch((e)=>{ out.innerHTML = '<div class="note">approval prompt creation failed: ' + esc(e.message) + '</div>'; });
 }
 function applySafetyExample(kind){

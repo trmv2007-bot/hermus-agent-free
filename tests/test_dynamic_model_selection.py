@@ -52,11 +52,15 @@ def test_catalog_only_contains_runtime_discovered_or_stored_models(monkeypatch):
     assert "fake/preset-model" not in refs
 
 
-def test_model_selection_route_is_runtime_validated(monkeypatch):
+def test_model_selection_route_is_runtime_validated(monkeypatch, tmp_path):
     import core.model_preferences as pref_mod
     import core.models.model_catalog as catalog_mod
     from gateway.gateway import app
 
+    # Redirect the durable preferences file into this test's tmp dir: the route
+    # under test really saves (that is its job), and saving must never leak the
+    # test selection into the repo's runtime data/model_preferences.json.
+    monkeypatch.setattr(pref_mod.model_preferences, "path", tmp_path / "model_preferences.json")
     monkeypatch.setattr(
         catalog_mod.model_catalog,
         "list",
