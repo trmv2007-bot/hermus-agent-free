@@ -902,6 +902,18 @@ async def control_agents_js():
     return _serve_control_asset("control-agents.js", "application/javascript; charset=utf-8")
 
 
+@app.get("/static/hud.css")
+async def hud_css():
+    """Fairy Core skin: JARVIS hairlines x ZZZ street neon (cosmetic layer)."""
+    return _serve_control_asset("hud.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/hud.js")
+async def hud_js():
+    """Fairy Core runtime: boot ceremony, avatar moods, ticker (no backend calls)."""
+    return _serve_control_asset("hud.js", "application/javascript; charset=utf-8")
+
+
 @app.get("/static/assets/{asset_name}")
 async def control_static_asset(asset_name: str):
     """Static brand assets for the control room (logo, favicon)."""

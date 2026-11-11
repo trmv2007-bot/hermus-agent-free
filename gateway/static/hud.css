@@ -1,0 +1,470 @@
+/* ===========================================================================
+   HERMUS — FAIRY CORE skin. JARVIS hairlines × Zenless street neon.
+
+   This is a layered reskin, not a replacement: nexus.css keeps every layout,
+   a11y and honesty contract; this sheet only re-paints the cockpit. Loaded
+   last so its overrides win. Every animation is optional and dies under
+   prefers-reduced-motion (mirrored in control.css's contract).
+
+   Design DNA:
+   · JARVIS  — cyan hairlines on near-black, corner brackets, mono readouts,
+                a boot sequence that talks like a butler.
+   · FAIRY   — one pink companion accent, a small living avatar next to the
+                command bar, deadpan quips, ZZZ diagonal cuts + hazard tape
+                on warnings, a bottom ticker that mirrors real events only.
+   =========================================================================== */
+
+:root {
+  /* Fairy Core palette — deeper space, brighter instrument cyan. */
+  --bg: #04070c;
+  --bg-deep: #020508;
+  --surface: #080d15;
+  --surface-2: #0c1220;
+  --surface-3: #111a2a;
+  --line: #14202f;
+  --line-strong: #1f3448;
+
+  --accent: #41e8ff;
+  --accent-strong: #a5f3ff;
+  --accent-soft: rgba(65, 232, 255, 0.1);
+  --accent-line: rgba(65, 232, 255, 0.34);
+  --accent-ink: #b7f4ff;
+
+  /* The Fairy accent — the only warm voice in a cold cockpit. */
+  --fairy: #ff7ad9;
+  --fairy-ink: #ffc9ee;
+  --fairy-soft: rgba(255, 122, 217, 0.12);
+  --fairy-line: rgba(255, 122, 217, 0.4);
+
+  /* Street neon helpers. */
+  --lime: #c8ff4d;
+  --holo-grad: linear-gradient(135deg, #41e8ff 0%, #7ce7ff 40%, #ff7ad9 100%);
+
+  --glow: 0 0 0 1px rgba(65, 232, 255, 0.3), 0 0 26px rgba(65, 232, 255, 0.13);
+}
+
+/* ============ ambient chrome: scanlines, grid, sweep ============ */
+html, body {
+  background:
+    radial-gradient(1100px 500px at 82% -12%, rgba(65, 232, 255, 0.06), transparent 60%),
+    radial-gradient(760px 420px at -12% 118%, rgba(255, 122, 217, 0.05), transparent 62%),
+    var(--bg);
+}
+
+/* CRT scanlines + faint hex grid — fixed, inert, near-invisible. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(160, 230, 255, 0.022) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(65, 232, 255, 0.014) 0 1px, transparent 1px 84px);
+  mix-blend-mode: screen;
+}
+
+/* One slow holographic sweep crossing the cockpit every 14s. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: -20% -60%;
+  z-index: 91;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 42%, rgba(65, 232, 255, 0.03) 50%, rgba(255, 122, 217, 0.02) 54%, transparent 62%);
+  animation: hud-sweep 14s linear infinite;
+}
+@keyframes hud-sweep {
+  0% { transform: translateX(-60%); }
+  100% { transform: translateX(60%); }
+}
+
+::selection { background: rgba(255, 122, 217, 0.3); color: var(--ink); }
+
+/* ============ topbar: holo hairline + fairy orb brand ============ */
+.topbar {
+  background: rgba(3, 6, 10, 0.82);
+  border-bottom: 1px solid transparent;
+}
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(65, 232, 255, 0.65) 22%, rgba(255, 122, 217, 0.55) 78%, transparent);
+  pointer-events: none;
+}
+
+.brand-mark {
+  border-radius: 50%;
+  background:
+    radial-gradient(6px 6px at 64% 30%, rgba(255, 255, 255, 0.95), transparent 70%),
+    radial-gradient(circle at 50% 45%, #ff7ad9 0%, #b44dff 45%, #0a6f8f 100%);
+  box-shadow: 0 0 14px rgba(255, 122, 217, 0.45), 0 0 22px rgba(65, 232, 255, 0.25);
+  animation: orb-breathe 4.2s ease-in-out infinite;
+}
+@keyframes orb-breathe {
+  0%, 100% { box-shadow: 0 0 10px rgba(255, 122, 217, 0.4), 0 0 18px rgba(65, 232, 255, 0.2); }
+  50% { box-shadow: 0 0 18px rgba(255, 122, 217, 0.6), 0 0 30px rgba(65, 232, 255, 0.35); }
+}
+
+.brand-copy strong {
+  font-style: italic;
+  letter-spacing: 0.06em;
+  background: var(--holo-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ============ cards: JARVIS corner brackets ============
+   One pseudo paints two opposite L-brackets with four hairline stripes.
+   .hero keeps its gradient ::before; brackets live on ::after everywhere. */
+.card { position: relative; background: linear-gradient(180deg, rgba(65, 232, 255, 0.015), transparent 30%), var(--surface); }
+
+.card:not(.hero)::after,
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--accent), var(--accent)) top left / 16px 1px,
+    linear-gradient(var(--accent), var(--accent)) top left / 1px 16px,
+    linear-gradient(rgba(65, 232, 255, 0.7), rgba(65, 232, 255, 0.7)) bottom right / 16px 1px,
+    linear-gradient(rgba(65, 232, 255, 0.7), rgba(65, 232, 255, 0.7)) bottom right / 1px 16px;
+  background-repeat: no-repeat;
+  opacity: 0.35;
+  transition: opacity 0.25s var(--ease);
+}
+.card:hover::after,
+.hero:hover::after { opacity: 0.9; }
+
+/* Card titles get the street slash. */
+.card-head h2::before { content: "// "; color: var(--lime); font-style: italic; }
+.eyebrow {
+  color: var(--lime);
+  font-family: var(--mono);
+  letter-spacing: 0.14em;
+}
+
+/* ============ ZZZ diagonal cuts + tape ============ */
+.btn.primary {
+  background: linear-gradient(135deg, #41e8ff 0%, #23c6e8 55%, #ff7ad9 160%);
+  color: #03242b;
+  border-color: rgba(65, 232, 255, 0.55);
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  box-shadow: 0 0 18px rgba(65, 232, 255, 0.3), var(--shadow-sm);
+}
+.btn.primary:hover {
+  background: linear-gradient(135deg, #8ff4ff 0%, #41e8ff 55%, #ffa1e4 170%);
+  box-shadow: 0 0 26px rgba(65, 232, 255, 0.45), 0 0 34px rgba(255, 122, 217, 0.18), var(--shadow-sm);
+}
+
+.tag {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+/* Warnings wear hazard tape — ZZZ's "careful now" voice. */
+.tag.err, .tag.bad {
+  background: repeating-linear-gradient(45deg, rgba(248, 113, 113, 0.16) 0 7px, rgba(248, 113, 113, 0.04) 7px 14px);
+}
+.pill.warn {
+  background: repeating-linear-gradient(45deg, rgba(251, 191, 36, 0.14) 0 7px, rgba(251, 191, 36, 0.04) 7px 14px);
+  animation: warn-glitch 2.8s steps(1) infinite;
+}
+@keyframes warn-glitch {
+  0%, 92%, 100% { text-shadow: none; transform: none; }
+  93% { text-shadow: -1px 0 rgba(65, 232, 255, 0.7), 1px 0 rgba(255, 122, 217, 0.7); }
+  95% { text-shadow: 1px 0 rgba(65, 232, 255, 0.7), -1px 0 rgba(255, 122, 217, 0.7); transform: translateY(-1px); }
+  97% { text-shadow: none; transform: none; }
+}
+
+/* ============ command shell: the cockpit's voice ============ */
+.command-shell {
+  background: linear-gradient(180deg, rgba(65, 232, 255, 0.03), transparent 40%), var(--surface-2);
+}
+.command-shell:focus-within {
+  border-color: rgba(65, 232, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(65, 232, 255, 0.12), 0 0 24px rgba(65, 232, 255, 0.15), var(--shadow-md);
+}
+.command-prefix { color: var(--fairy); text-shadow: 0 0 8px rgba(255, 122, 217, 0.5); }
+#command::placeholder { color: rgba(133, 149, 172, 0.75); }
+
+.suggestions button {
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  border-radius: 2px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10.5px;
+}
+.suggestions button:hover { border-color: var(--fairy-line); background: var(--fairy-soft); color: var(--fairy-ink); }
+
+/* ============ hero: the Fairy shares JARVIS's stage ============ */
+.hero::before {
+  background:
+    radial-gradient(420px 260px at 78% -20%, rgba(65, 232, 255, 0.09), transparent 65%),
+    radial-gradient(340px 240px at -10% 112%, rgba(255, 122, 217, 0.08), transparent 62%);
+}
+.hero-copy h1 {
+  font-style: italic;
+  letter-spacing: 0.03em;
+  text-shadow: 0 0 22px rgba(65, 232, 255, 0.25);
+}
+
+/* The living avatar — injected by hud.js into #fairyStage. */
+.fairy-stage {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  width: 108px;
+  height: 128px;
+  pointer-events: none;
+  z-index: 2;
+}
+.fairy { width: 100%; height: 100%; display: block; }
+.fairy .wing { transform-origin: 62px 58px; animation: wing-l 2.6s ease-in-out infinite; }
+.fairy .wing.w-r { transform-origin: 58px 58px; animation-name: wing-r; }
+@keyframes wing-l {
+  0%, 100% { transform: scaleX(1) rotate(0deg); opacity: 0.7; }
+  50% { transform: scaleX(0.82) rotate(-5deg); opacity: 0.95; }
+}
+@keyframes wing-r {
+  0%, 100% { transform: scaleX(1) rotate(0deg); opacity: 0.7; }
+  50% { transform: scaleX(0.82) rotate(5deg); opacity: 0.95; }
+}
+.fairy .orb { animation: fairy-float 3.4s ease-in-out infinite; }
+@keyframes fairy-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.fairy .orb-ring { animation: ring-spin 7s linear infinite; transform-origin: 60px 60px; }
+@keyframes ring-spin { to { transform: rotate(360deg); } }
+.fairy .orb-halo { animation: halo-pulse 2.2s ease-in-out infinite; transform-origin: 60px 60px; }
+@keyframes halo-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
+}
+.fairy-stage { animation: fairy-drift 6.5s ease-in-out infinite; }
+@keyframes fairy-drift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-3px, 4px); }
+}
+
+/* Fairy moods — driven by real core states, never by decoration. */
+.fairy-stage[data-mood="busy"] .wing { animation-duration: 0.6s; }
+.fairy-stage[data-mood="busy"] .orb-ring { animation-duration: 1.2s; }
+.fairy-stage[data-mood="busy"] .orb-core { fill: #ffd166; }
+.fairy-stage[data-mood="error"] .orb-core { fill: #ff5d7a; }
+.fairy-stage[data-mood="error"] .wing { animation-duration: 0.35s; opacity: 0.5; }
+.fairy-stage[data-mood="blocked"] .orb-core { fill: #ffb454; }
+.fairy-stage[data-mood="offline"] { filter: grayscale(0.9) brightness(0.55); }
+
+.fairy-quip {
+  position: absolute;
+  top: 112px;
+  right: 6px;
+  width: 200px;
+  text-align: left;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fairy-ink);
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 6px rgba(2, 5, 8, 0.9);
+  background: linear-gradient(90deg, rgba(255, 122, 217, 0.08), transparent 70%);
+  border-left: 2px solid rgba(255, 122, 217, 0.6);
+  padding: 3px 0 3px 8px;
+  pointer-events: none;
+}
+.fairy-quip::after {
+  content: " ✦";
+  color: var(--fairy);
+}
+.fairy .spark { animation: spark-twinkle 2.8s ease-in-out infinite; }
+.fairy .spark:nth-child(2) { animation-delay: 0.7s; }
+.fairy .spark:nth-child(3) { animation-delay: 1.4s; }
+.fairy .spark:nth-child(4) { animation-delay: 2.1s; }
+@keyframes spark-twinkle {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+/* ============ transcript: Fairy's voice, user's cyan ============ */
+.transcript {
+  border-color: rgba(65, 232, 255, 0.2);
+  background: linear-gradient(180deg, rgba(255, 122, 217, 0.02), transparent 24%), var(--surface);
+}
+.transcript-title { color: var(--fairy); }
+.msg.hermus {
+  background: linear-gradient(180deg, rgba(255, 122, 217, 0.045), transparent 60%), var(--surface-2);
+  border-color: var(--fairy-line);
+  box-shadow: 0 0 14px rgba(255, 122, 217, 0.05);
+}
+.msg.hermus .msg-who { color: var(--fairy); }
+.msg.user {
+  background: linear-gradient(180deg, rgba(65, 232, 255, 0.09), rgba(65, 232, 255, 0.03));
+  border-color: var(--accent-line);
+}
+
+/* ============ ticker: the street voice of real events ============ */
+.ticker {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 60;
+  height: 30px;
+  display: flex;
+  align-items: stretch;
+  background: rgba(2, 5, 8, 0.92);
+  border-top: 1px solid rgba(65, 232, 255, 0.22);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+.ticker[hidden] { display: none; }
+.ticker-tag {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: #03242b;
+  background: linear-gradient(135deg, #41e8ff, #ff7ad9);
+  font-weight: 700;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  flex: none;
+  z-index: 2;
+}
+.ticker-track {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  position: relative;
+}
+.ticker-run {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 100%;
+  animation: ticker-scroll linear infinite;
+  will-change: transform;
+}
+.ticker:hover .ticker-run { animation-play-state: paused; }
+.ticker-run span { padding: 0 26px; color: var(--ink-2); }
+.ticker-run span::before { content: "// "; color: var(--fairy); }
+.ticker-run span.k-warn { color: var(--warn); }
+.ticker-run span.k-error { color: var(--bad); }
+.ticker-run span.k-good { color: var(--good); }
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+body.has-ticker { padding-bottom: 30px; }
+
+/* ============ boot sequence ============ */
+.hud-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background:
+    radial-gradient(760px 460px at 50% 38%, rgba(65, 232, 255, 0.05), transparent 70%),
+    radial-gradient(420px 260px at 62% 66%, rgba(255, 122, 217, 0.04), transparent 70%),
+    #020508;
+  font-family: var(--mono);
+  transition: opacity 0.5s var(--ease);
+}
+.hud-boot.done { opacity: 0; pointer-events: none; }
+.boot-mark {
+  font-size: 44px;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.22em;
+  background: var(--holo-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 18px rgba(65, 232, 255, 0.35));
+  padding-left: 0.22em; /* optical centering against tracking */
+}
+.boot-sub {
+  font-size: 11px;
+  letter-spacing: 0.34em;
+  color: var(--fairy);
+  text-transform: uppercase;
+}
+.boot-lines {
+  min-height: 92px;
+  width: 340px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--lime);
+  text-align: left;
+}
+.boot-lines b { color: var(--accent-strong); font-weight: 400; }
+.boot-bar {
+  width: 340px;
+  height: 2px;
+  background: rgba(65, 232, 255, 0.12);
+  overflow: hidden;
+}
+.boot-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #41e8ff, #ff7ad9);
+  box-shadow: 0 0 12px rgba(65, 232, 255, 0.6);
+  transition: width 0.3s var(--ease);
+}
+.boot-skip {
+  margin-top: 18px;
+  font-size: 10px;
+  color: var(--dim);
+  letter-spacing: 0.12em;
+}
+
+/* ============ shared chrome details ============ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 12px rgba(65, 232, 255, 0.35);
+}
+
+.tabrail button.on { box-shadow: inset 2px 0 0 var(--fairy); }
+
+.kpi .v { text-shadow: 0 0 14px rgba(65, 232, 255, 0.2); }
+
+.feed .event i { box-shadow: 0 0 8px currentColor; }
+
+/* ============ calm + reduced motion: the cockpit stands still ============ */
+html.calm body::after,
+body[data-calm] body::after { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  body::after { animation: none; }
+  .brand-mark, .pill.warn { animation: none !important; }
+  .fairy .wing, .fairy .orb, .fairy .orb-ring, .fairy .orb-halo, .fairy .spark, .fairy-stage { animation: none !important; }
+  .ticker-run { animation: none !important; padding-left: 12px; }
+  .hud-boot { transition: none; }
+  .card::after, .hero::after, .btn, .btn.primary { transition: none; }
+}
+
+@media print {
+  body::before, body::after, .ticker, .hud-boot, .fairy-stage { display: none !important; }
+  body.has-ticker { padding-bottom: 0; }
+}
+
+/* Narrow screens: the fairy shrinks politely instead of covering data. */
+@media (max-width: 720px) {
+  .fairy-stage { transform: scale(0.72); transform-origin: top right; }
+  .fairy-quip { display: none; }
+}
