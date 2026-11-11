@@ -1,10 +1,11 @@
-/* HERMUS — FAIRY CORE runtime. Cosmetic layer only, zero backend calls.
+/* HERMUS — HOLO CORE runtime. Cosmetic layer only, zero backend calls.
  *
  * Four jobs, all additive — nexus.js still owns every real interaction:
  *   1. Boot sequence   — a short, honest "systems online" ceremony.
- *   2. Fairy avatar    — a small companion whose moods mirror the REAL core
- *                        state (hermus:core events + HermesNexus.state),
- *                        with deadpan quips on transitions.
+ *   2. Fairy avatar    — the ZZZ-style companion as an ice-blue hologram;
+ *                        her moods mirror the REAL core state
+ *                        (hermus:core events + HermusNexus.state), with
+ *                        deadpan quips on transitions.
  *   3. Transcript skin — the assistant's rows speak as "FAIRY".
  *   4. Event ticker    — mirrors real feed rows along the bottom edge.
  *
@@ -41,7 +42,7 @@
     var wrap = el("div", "hud-boot");
     wrap.setAttribute("role", "status");
     wrap.appendChild(el("div", "boot-mark", "HERMUS"));
-    wrap.appendChild(el("div", "boot-sub", "fairy core // nexus runtime"));
+    wrap.appendChild(el("div", "boot-sub", "holo core // agent runtime"));
     var lines = el("div", "boot-lines");
     var bar = el("i");
     var barHost = el("div", "boot-bar");
@@ -52,7 +53,7 @@
     document.body.appendChild(wrap);
 
     var SCRIPT = [
-      ["nexus core", "ONLINE"],
+      ["holo core", "ONLINE"],
       ["model fleet", "LINKED"],
       ["safety interlocks", "ARMED"],
       ["fairy consciousness", "AWAKE"],
@@ -86,7 +87,7 @@
           row.appendChild(document.createTextNode("> " + pair[0] + " "));
           var pad = el("span");
           pad.textContent = new Array(Math.max(2, 22 - pair[0].length)).join(".");
-          pad.style.color = "rgba(200,255,77,0.35)";
+          pad.style.color = "rgba(160,220,255,0.3)";
           row.appendChild(pad);
           row.appendChild(el("b", null, pair[1]));
           lines.appendChild(row);
@@ -111,40 +112,40 @@
     '<defs>' +
     '<radialGradient id="hudOrb" cx="42%" cy="38%" r="70%">' +
     '<stop offset="0%" stop-color="#ffffff"/>' +
-    '<stop offset="45%" stop-color="#ff9adf"/>' +
-    '<stop offset="100%" stop-color="#b44dff"/>' +
+    '<stop offset="45%" stop-color="#9beaff"/>' +
+    '<stop offset="100%" stop-color="#2f9ce8"/>' +
     '</radialGradient>' +
     '<linearGradient id="hudWingL" x1="0%" y1="0%" x2="100%" y2="100%">' +
-    '<stop offset="0%" stop-color="rgba(65,232,255,0.5)"/>' +
-    '<stop offset="100%" stop-color="rgba(255,122,217,0.06)"/>' +
+    '<stop offset="0%" stop-color="rgba(167,235,255,0.55)"/>' +
+    '<stop offset="100%" stop-color="rgba(95,216,255,0.06)"/>' +
     '</linearGradient>' +
     '<linearGradient id="hudWingR" x1="100%" y1="0%" x2="0%" y2="100%">' +
-    '<stop offset="0%" stop-color="rgba(65,232,255,0.5)"/>' +
-    '<stop offset="100%" stop-color="rgba(255,122,217,0.06)"/>' +
+    '<stop offset="0%" stop-color="rgba(167,235,255,0.55)"/>' +
+    '<stop offset="100%" stop-color="rgba(95,216,255,0.06)"/>' +
     '</linearGradient>' +
     '</defs>' +
     '<g class="wings">' +
-    '<path class="wing w-l" fill="url(#hudWingL)" stroke="rgba(65,232,255,0.45)" stroke-width="0.8" ' +
+    '<path class="wing w-l" fill="url(#hudWingL)" stroke="rgba(95,216,255,0.5)" stroke-width="0.8" ' +
     'd="M52 56 C 40 30, 16 26, 10 42 C 6 56, 22 62, 40 60 C 30 68, 34 76, 44 74 C 50 72, 52 64, 52 56 Z"/>' +
-    '<path class="wing w-r" fill="url(#hudWingR)" stroke="rgba(65,232,255,0.45)" stroke-width="0.8" ' +
+    '<path class="wing w-r" fill="url(#hudWingR)" stroke="rgba(95,216,255,0.5)" stroke-width="0.8" ' +
     'd="M68 56 C 80 30, 104 26, 110 42 C 114 56, 98 62, 80 60 C 90 68, 86 76, 76 74 C 70 72, 68 64, 68 56 Z"/>' +
     '</g>' +
     '<g class="orb">' +
-    '<circle class="orb-halo" cx="60" cy="60" r="30" fill="none" stroke="rgba(65,232,255,0.35)" stroke-width="1"/>' +
-    '<circle class="orb-ring" cx="60" cy="60" r="23" fill="none" stroke="rgba(255,122,217,0.6)" stroke-width="1" stroke-dasharray="10 14"/>' +
+    '<circle class="orb-halo" cx="60" cy="60" r="30" fill="none" stroke="rgba(95,216,255,0.4)" stroke-width="1"/>' +
+    '<circle class="orb-ring" cx="60" cy="60" r="23" fill="none" stroke="rgba(95,216,255,0.65)" stroke-width="1" stroke-dasharray="10 14"/>' +
     '<circle class="orb-core" cx="60" cy="60" r="15" fill="url(#hudOrb)"/>' +
     '<circle cx="54" cy="54" r="4.4" fill="rgba(255,255,255,0.9)"/>' +
     '</g>' +
     '<g class="sparks">' +
-    '<circle class="spark" cx="34" cy="34" r="1.4" fill="rgba(65,232,255,0.8)"/>' +
-    '<circle class="spark" cx="88" cy="40" r="1.2" fill="rgba(255,122,217,0.8)"/>' +
-    '<circle class="spark" cx="30" cy="72" r="1" fill="rgba(255,122,217,0.6)"/>' +
-    '<circle class="spark" cx="92" cy="70" r="1.4" fill="rgba(65,232,255,0.7)"/>' +
+    '<circle class="spark" cx="34" cy="34" r="1.4" fill="rgba(167,235,255,0.85)"/>' +
+    '<circle class="spark" cx="88" cy="40" r="1.2" fill="rgba(95,216,255,0.8)"/>' +
+    '<circle class="spark" cx="30" cy="72" r="1" fill="rgba(142,162,255,0.7)"/>' +
+    '<circle class="spark" cx="92" cy="70" r="1.4" fill="rgba(167,235,255,0.75)"/>' +
     '</g>' +
     '</svg>';
 
   var QUIPS = {
-    boot: "Fairy online. I checked the systems twice — you're welcome.",
+    boot: "Boot complete. Every system checked — twice.",
     busy: "Working. Try not to touch anything.",
     done: "Done. It was trivial, really.",
     error: "That failed. I'd fix it myself, but you hold the permissions.",
@@ -221,7 +222,7 @@
     row.dataset.fairySkinned = "1";
     row.innerHTML =
       '<div class="msg-who">FAIRY</div>' +
-      '<div class="msg-text">Fairy online. The core is live and the queue is clear — I checked twice, you\'re welcome. Tell me what you need.</div>';
+      '<div class="msg-text">Fairy online. The core is live and the queue is clear — tell me what you need.</div>';
     body.innerHTML = "";
     body.appendChild(row);
   }

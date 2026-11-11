@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#04070c">
-  <title>HERMUS — Fairy Core</title>
+  <meta name="theme-color" content="#040912">
+  <title>HERMUS — Holo Core</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/nexus.css">
   <link rel="stylesheet" href="/static/control.css">
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-copy">
         <strong id="hermusLogo">HERMUS</strong>
-        <small>fairy core · NEXUS runtime</small>
+        <small>holo core · agent runtime</small>
       </span>
     </a>
 
@@ -72,9 +72,12 @@
           <!-- hero: core + command -->
           <div class="hero card">
             <div class="fairy-stage" id="fairyStage" aria-hidden="true"></div>
-            <canvas id="hermusCore" width="420" height="420" aria-hidden="true"></canvas>
+            <div class="core-stage" aria-hidden="true">
+              <div class="core-rings" aria-hidden="true"><i></i><i></i><i></i></div>
+              <canvas id="hermusCore" width="420" height="420" aria-hidden="true"></canvas>
+            </div>
             <div class="hero-copy">
-              <p class="eyebrow">FAIRY CORE // snapshot · replay · projection</p>
+              <p class="eyebrow">HOLO CORE // snapshot · replay · projection</p>
               <h1 id="coreName">HERMUS core</h1>
               <p class="hero-sub" id="coreSub">personal agent runtime · online</p>
               <div class="core-state">
@@ -102,7 +105,7 @@
 
             <div class="transcript" id="transcript">
               <div class="transcript-head">
-                <span class="transcript-title">Fairy channel</span>
+                <span class="transcript-title">fairy · live channel</span>
                 <button id="transcriptClear" class="btn ghost" type="button"
                         title="Clear the conversation history kept in this browser">Clear</button>
               </div>

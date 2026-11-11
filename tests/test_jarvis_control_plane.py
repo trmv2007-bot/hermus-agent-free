@@ -14,7 +14,9 @@ def test_single_control_room_replaces_the_jarvis_page():
     for banner in ("318 Test Suites Verified Passing", "Page scrape active", "Autonomy: 100%"):
         assert banner not in text
     assert "HERMUS" in text
-    assert "NEXUS" in text
+    # The visible product language is the HOLO console (JARVIS x Fairy);
+    # the Nexus interaction layer survives as the asset contract below.
+    assert "holo core" in text
     assert "Tell HERMUS what you need" in text
     assert "/static/nexus.js" in text
     assert TestClient(app).get("/jarvis").status_code == 404

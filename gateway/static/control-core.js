@@ -29,14 +29,14 @@
   var harnessTurn = document.getElementById("harnessTurn");
 
   var COLORS = {
-    offline: "#98a2b3",
-    idle: "#4f46e5",
-    listening: "#0e9384",
-    thinking: "#4f46e5",
-    acting: "#dc6803",
-    verifying: "#6938ef",
-    blocked: "#dc6803",
-    error: "#d92d20"
+    offline: "#7d94ad",
+    idle: "#5fd8ff",
+    listening: "#43e8b8",
+    thinking: "#a7ebff",
+    acting: "#ffc86b",
+    verifying: "#7fa8ff",
+    blocked: "#ffc86b",
+    error: "#ff6584"
   };
 
   var state = "offline";
@@ -197,7 +197,7 @@
 
   function hexA(hex, alpha) {
     var h = String(hex || "").replace("#", "");
-    if (h.length !== 6) return "rgba(79,70,229," + alpha + ")";
+    if (h.length !== 6) return "rgba(95,216,255," + alpha + ")";
     var r = parseInt(h.slice(0, 2), 16);
     var g = parseInt(h.slice(2, 4), 16);
     var b = parseInt(h.slice(4, 6), 16);
