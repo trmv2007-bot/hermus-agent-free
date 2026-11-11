@@ -119,7 +119,7 @@ class FreeLLM:
                 # "no model was reachable" stays stable: the dashboard detects
                 # it so a no-model reply is never presented as a real answer.
                 + "This reply came from the built-in helper because no model was reachable. "
-                + f"Your message was: \"{str(messages[-1].get('content', ''))[:100]}\""
+                + f'Your message was: "{str(messages[-1].get("content", ""))[:100]}"'
             )
         except Exception:
             mock_content = (
@@ -127,7 +127,7 @@ class FreeLLM:
                 f"Start with: ollama serve && ollama pull {self.model_name} — or add any key: "
                 f"hermus multikey add --provider custom --base-url https://... --key sk-...\n\n"
                 "This reply came from the built-in helper because no model was reachable. "
-                f"Your message was: \"{str(messages[-1].get('content', ''))[:100]}\""
+                f'Your message was: "{str(messages[-1].get("content", ""))[:100]}"'
             )
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(mock_content), model="ollama/mock")
         return LLMResponse(mock_content, usage=usage)

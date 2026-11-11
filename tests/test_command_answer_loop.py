@@ -403,8 +403,6 @@ def test_source_pins_no_more_press_sync_and_transcript_wired():
     assert "job-row" in css.replace("tr.job-row", "job-row"), "job row affordance must be styled"
 
 
-
-
 def test_command_bar_starts_a_real_run_not_a_ledger_entry():
     """The hero command bar POSTs runtime.turn to /jobs and opens the run
     stream. The old primary (/api/v1/commands) recorded {ok:true,

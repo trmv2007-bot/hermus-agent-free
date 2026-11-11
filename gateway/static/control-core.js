@@ -224,6 +224,9 @@
         window.dispatchEvent(new CustomEvent("hermus:core", { detail: { state: next, meta: m } }));
       } catch (e) { /* older browsers */ }
     }
+    // Any state write can alter the canvas (colour, progress, readouts);
+    // repaint immediately instead of waiting for the next trickle.
+    requestDraw();
   }
 
   function esc(value) {
@@ -303,6 +306,8 @@
         if (detailEl && type) {
           detailEl.textContent = "last event: " + type + (data.goal || data.session_id ? " · " + String(data.goal || data.session_id).slice(0, 120) : "");
         }
+        // New event evidence can add an activity arc to the canvas.
+        requestDraw();
       }
       lastEventAt = Date.now();
       try {
@@ -369,6 +374,7 @@
         var identity = presence.identity || {};
         if (nameEl && identity.name) nameEl.textContent = String(identity.name).toUpperCase();
         if (identity.model) model = identity.model;
+        requestDraw();
       }
 
       if (queueEl) queueEl.textContent = String(active);
@@ -447,39 +453,73 @@
   }
 
   var raf = 0;
+  var calmTimer = 0;
+
+  // Calm and reduced-motion pages must not redraw a still image sixty times
+  // a second: that pegs software renderers and burns battery. While motion
+  // is allowed the loop runs on every animation frame; otherwise it trickles
+  // one frame per second (so transient activity arcs still expire on time)
+  // and state changes repaint immediately through requestDraw().
+  function motionAllowed() {
+    return !calm() && !reduced();
+  }
+
+  function stopFrame() {
+    if (raf) window.cancelAnimationFrame(raf);
+    if (calmTimer) window.clearTimeout(calmTimer);
+    raf = 0;
+    calmTimer = 0;
+  }
+
   function frame(t) {
+    raf = 0;
     if (burst > 0) burst = Math.max(0, burst - 0.016);
     draw(t);
+    if (motionAllowed()) {
+      raf = window.requestAnimationFrame(frame);
+    } else if (!calmTimer) {
+      calmTimer = window.setTimeout(function () {
+        calmTimer = 0;
+        if (!raf) raf = window.requestAnimationFrame(frame);
+      }, 1000);
+    }
+  }
+
+  function requestDraw() {
+    if (raf) return; // a frame is already queued
+    if (calmTimer) {
+      window.clearTimeout(calmTimer);
+      calmTimer = 0;
+    }
     raf = window.requestAnimationFrame(frame);
   }
 
   function start() {
     resize();
-    raf = window.requestAnimationFrame(frame);
+    requestDraw();
     pollCore();
     pollEvents();
     window.setInterval(pollCore, 5000);
     window.setInterval(pollEvents, 2500);
   }
 
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", function () {
+    resize();
+    requestDraw();
+  });
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) {
-      if (raf) window.cancelAnimationFrame(raf);
-      raf = 0;
-    } else if (!raf) {
-      raf = window.requestAnimationFrame(frame);
+      stopFrame();
+    } else {
+      requestDraw();
     }
   });
-  window.addEventListener("pagehide", function () {
-    if (raf) window.cancelAnimationFrame(raf);
-    raf = 0;
-  });
+  window.addEventListener("pagehide", stopFrame);
 
   window.HermusCore = {
     setState: setState,
     state: function () { return state; },
-    burst: function () { burst = 1; },
+    burst: function () { burst = 1; requestDraw(); },
     // Test hook: lets the Node harness drive one poll deterministically.
     pollOnce: pollCore
   };

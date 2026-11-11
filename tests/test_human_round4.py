@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -120,7 +120,12 @@ def run_node(scripts: list[Path], body: str) -> dict:
     harness = HEADER
     for s in scripts:
         harness += "\n" + s.read_text(encoding="utf-8") + "\n"
-    harness += FOOTER + "\n(async () => {\n" + body + "\n})().then(v => { console.log(typeof v === 'string' ? v : JSON.stringify(v)); }).catch(e => { console.error('BODY-ERR ' + (e && e.message || e)); process.exit(1); });\n"
+    harness += (
+        FOOTER
+        + "\n(async () => {\n"
+        + body
+        + "\n})().then(v => { console.log(typeof v === 'string' ? v : JSON.stringify(v)); }).catch(e => { console.error('BODY-ERR ' + (e && e.message || e)); process.exit(1); });\n"
+    )
     # the combined scripts blow past the OS argv limit; go through a temp file
     with tempfile.NamedTemporaryFile("w", suffix=".cjs", delete=False, encoding="utf-8") as fh:
         fh.write(harness)
@@ -191,7 +196,9 @@ def test_console_shaper_keeps_row_lists_as_real_data():
     model catalog's roles/devices arrived in the browser as Python reprs."""
     from core.console import _jsonable
 
-    data = {"downloads": [{"id": "minicpm", "roles": ["doctor", "background"], "devices": ["GPU", "CPU"], "trust_remote_code": False}]}
+    data = {
+        "downloads": [{"id": "minicpm", "roles": ["doctor", "background"], "devices": ["GPU", "CPU"], "trust_remote_code": False}]
+    }
     out = _jsonable(data)
     row = out["downloads"][0]
     assert row["roles"] == ["doctor", "background"]
@@ -242,7 +249,9 @@ def test_console_human_cells_and_doctor_renderer_exist():
 # Frontend behavior: addEvent collapses interleaved repeats
 # ---------------------------------------------------------------------------
 def test_add_event_collapses_interleaved_duplicates(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const H = document.querySelector('#activity');
       const N = window.HermusNexus.__test;
       // pollers interleave: catalog, kernel, catalog again
@@ -254,19 +263,23 @@ def test_add_event_collapses_interleaved_duplicates(node_ready):
         first: H.children[0].dataset.msg,
         repeats: H.children.map(r => r.dataset.repeat),
       });
-    """)
+    """,
+    )
     assert out["rows"] == 2, "the repeated catalog line must collapse into one row"
     assert out["first"] == "Model catalog · 0 deployment(s) discovered"
     assert out["repeats"] == ["2", "1"]
 
 
 def test_add_event_keeps_feed_bounded(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const H = document.querySelector('#activity');
       const N = window.HermusNexus.__test;
       for (let i = 0; i < 9; i++) N.addEvent('event ' + i);
       return JSON.stringify({ rows: H.children.length });
-    """)
+    """,
+    )
     assert out["rows"] == 7
 
 
@@ -278,20 +291,33 @@ HEALTH = {
     "python": "3.12.16",
     "venv": False,
     "capabilities": {
-        "required.tiktoken": {"present": False, "status": "missing", "reason": "required module 'tiktoken' is not installed", "install": "pip install tiktoken"},
+        "required.tiktoken": {
+            "present": False,
+            "status": "missing",
+            "reason": "required module 'tiktoken' is not installed",
+            "install": "pip install tiktoken",
+        },
         "required.pydantic": {"present": True, "status": "ready", "reason": ""},
-        "computer.mouse": {"present": False, "status": "unavailable", "reason": "optional module 'pyautogui' is not installed", "install": "pip install pyautogui"},
+        "computer.mouse": {
+            "present": False,
+            "status": "unavailable",
+            "reason": "optional module 'pyautogui' is not installed",
+            "install": "pip install pyautogui",
+        },
         "gateway.websocket": {"present": True, "status": "capable", "reason": ""},
     },
 }
 
 
 def test_badge_degraded_names_modules_not_scalars(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const N = window.HermusNexus.__test;
       const h = JSON.parse(jsonHealth);
       return JSON.stringify({ t: N.badgeTitle(false, h) });
-    """.replace("jsonHealth", json.dumps(json.dumps(HEALTH))))
+    """.replace("jsonHealth", json.dumps(json.dumps(HEALTH))),
+    )
     t = out["t"]
     assert t.startswith("DEGRADED")
     assert "tiktoken" in t, "the missing module must be named"
@@ -306,10 +332,13 @@ def test_badge_healthy_reads_a_score_not_a_riddle(node_ready):
     healthy["ok"] = True
     healthy["capabilities"]["required.tiktoken"]["present"] = True
     healthy["capabilities"]["computer.mouse"]["present"] = True
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const N = window.HermusNexus.__test;
       return JSON.stringify({ t: N.badgeTitle(true, JSON.parse(jsonHealth)) });
-    """.replace("jsonHealth", json.dumps(json.dumps(healthy))))
+    """.replace("jsonHealth", json.dumps(json.dumps(healthy))),
+    )
     t = out["t"]
     assert t.startswith("HEALTHY")
     assert "(4 of 4)" in t
@@ -317,10 +346,13 @@ def test_badge_healthy_reads_a_score_not_a_riddle(node_ready):
 
 
 def test_badge_empty_payload_points_at_diagnostics(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const N = window.HermusNexus.__test;
       return JSON.stringify({ t: N.badgeTitle(false, {}) });
-    """)
+    """,
+    )
     assert "Run diagnostics" in out["t"]
 
 
@@ -328,7 +360,9 @@ def test_badge_empty_payload_points_at_diagnostics(node_ready):
 # Frontend behavior: console tables and the doctor report
 # ---------------------------------------------------------------------------
 def test_cell_text_humanizes_lists_and_booleans(node_ready):
-    out = run_node([ROOM_JS, CLIENT_JS, CONSOLE_JS], r"""
+    out = run_node(
+        [ROOM_JS, CLIENT_JS, CONSOLE_JS],
+        r"""
       const C = window.HermusConsole.__test;
       return JSON.stringify({
         roles: C.cellText(['doctor', 'background']),
@@ -339,7 +373,8 @@ def test_cell_text_humanizes_lists_and_booleans(node_ready):
         text: C.cellText('MiniCPM5 1B'),
         nil: C.cellText(null),
       });
-    """)
+    """,
+    )
     assert out["roles"] == "doctor · background"
     assert out["devices"] == "GPU · CPU"
     assert out["no"] == "no"
@@ -350,22 +385,31 @@ def test_cell_text_humanizes_lists_and_booleans(node_ready):
 
 def test_doctor_report_renders_findings_and_fixes(node_ready):
     report = {
-        "status": "attention", "worst_severity": "high",
+        "status": "attention",
+        "worst_severity": "high",
         "counts": {"critical": 0, "high": 1, "medium": 0, "low": 1, "info": 0},
         "engine": {"mode": "cpu_only", "status": "unavailable", "doctor_model": "ollama/llama3.1:8b"},
-        "findings": [{
-            "id": "engine_down-abc", "severity": "high", "category": "engine_down",
-            "title": "Ollama is not reachable but the plan routes work to it",
-            "evidence": "GET http://localhost:11434/v1/models failed",
-            "fixes": ["Start Ollama: ollama serve", "Pull a model: ollama pull llama3.1:8b"],
-            "component": "ollama", "auto_fixable": False,
-        }],
+        "findings": [
+            {
+                "id": "engine_down-abc",
+                "severity": "high",
+                "category": "engine_down",
+                "title": "Ollama is not reachable but the plan routes work to it",
+                "evidence": "GET http://localhost:11434/v1/models failed",
+                "fixes": ["Start Ollama: ollama serve", "Pull a model: ollama pull llama3.1:8b"],
+                "component": "ollama",
+                "auto_fixable": False,
+            }
+        ],
     }
-    out = run_node([ROOM_JS, CLIENT_JS, CONSOLE_JS], r"""
+    out = run_node(
+        [ROOM_JS, CLIENT_JS, CONSOLE_JS],
+        r"""
       const C = window.HermusConsole.__test;
       const h = C.doctorReportHtml(JSON.parse(jsReport));
       return JSON.stringify({ h });
-    """.replace("jsReport", json.dumps(json.dumps(report))))
+    """.replace("jsReport", json.dumps(json.dumps(report))),
+    )
     h = out["h"]
     assert "Ollama is not reachable" in h, "findings are the product"
     assert "ollama serve" in h, "the doctor's fixes must be visible, not buried"
@@ -378,15 +422,20 @@ def test_result_record_routes_doctor_reports_to_the_renderer(node_ready):
     report = {
         "status": "attention",
         "counts": {"high": 1},
-        "findings": [{"id": "x", "severity": "high", "title": "t", "evidence": "", "fixes": [], "component": "c", "auto_fixable": False}],
+        "findings": [
+            {"id": "x", "severity": "high", "title": "t", "evidence": "", "fixes": [], "component": "c", "auto_fixable": False}
+        ],
     }
     generic = {"status": "ok", "items": [1, 2, 3]}
-    out = run_node([ROOM_JS, CLIENT_JS, CONSOLE_JS], r"""
+    out = run_node(
+        [ROOM_JS, CLIENT_JS, CONSOLE_JS],
+        r"""
       const C = window.HermusConsole.__test;
       const doc = C.resultRecord('POST /doctor/run', { ok: true, data: JSON.parse(jsReport) });
       const gen = C.resultRecord('POST /x', { ok: true, data: JSON.parse(jsGeneric) });
       return JSON.stringify({ docIsRendered: !!doc.doctor, docHasNoFlat: !doc.text, genIsFlat: !!gen.text, genHasNoDoctor: !gen.doctor });
-    """.replace("jsReport", json.dumps(json.dumps(report))).replace("jsGeneric", json.dumps(json.dumps(generic))))
+    """.replace("jsReport", json.dumps(json.dumps(report))).replace("jsGeneric", json.dumps(json.dumps(generic))),
+    )
     assert out["docIsRendered"] and out["docHasNoFlat"]
     assert out["genIsFlat"] and out["genHasNoDoctor"]
 
@@ -395,7 +444,9 @@ def test_result_record_routes_doctor_reports_to_the_renderer(node_ready):
 # Frontend behavior: a job detail row survives poll refreshes
 # ---------------------------------------------------------------------------
 def test_job_detail_stays_open_across_refresh(node_ready):
-    out = run_node([ROOM_JS], r"""
+    out = run_node(
+        [ROOM_JS],
+        r"""
       // Intercept at the fetch layer: control-room.js declares its own
       // requestJSON/getJSON, so a global getJSON stub would be shadowed.
       global.fetch = async (url) => {
@@ -433,7 +484,8 @@ def test_job_detail_stays_open_across_refresh(node_ready):
       await refreshJobs();
       const staysClosed = row.getAttribute('aria-expanded');
       return JSON.stringify({ openAfterClick, openHidden, closedAfterClick, reopened, reopenedHidden, detailHasPayload, staysClosed });
-    """)
+    """,
+    )
     assert out["openAfterClick"] == "true"
     assert out["openHidden"] is False
     assert out["closedAfterClick"] == "false"

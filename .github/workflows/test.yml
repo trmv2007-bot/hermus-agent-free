@@ -55,7 +55,7 @@ jobs:
 
   ui-qa:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -94,15 +94,29 @@ jobs:
 
           process.on('uncaughtException', e => {
             console.log('::error ::UI-QA failed: ' + String(e && e.message || e).replace(/\n/g, ' | '));
+            process.exit(1);
           });
+
+          // A hung page (software rendering under the system-chrome fallback)
+          // once stalled this QA until the job timeout cancelled it silently.
+          // The watchdog bounds every phase: a hang becomes a named failure
+          // with the last phase in the log, never a mystery cancellation.
+          const watchdog = setTimeout(() => {
+            console.log('::error ::UI-QA watchdog fired: the run exceeded 7 minutes; see the last QA phase in the log');
+            process.exit(1);
+          }, 7 * 60 * 1000);
 
           const out='/tmp/jarvis-ui';
           fs.mkdirSync(out,{recursive:true});
           let browser, usingSystemChrome=false;
-          try { browser=await chromium.launch({headless:true}); }
+          // --force-prefers-reduced-motion runs the page in its supported calm
+          // mode: the same product path real reduced-motion users get, and a
+          // much lighter render for a software-rendered runner.
+          const args=['--force-prefers-reduced-motion'];
+          try { browser=await chromium.launch({headless:true, args}); }
           catch(e1) {
             console.log('playwright chromium unavailable ('+String(e1.message).split('\n')[0]+'); using system chrome');
-            browser=await chromium.launch({headless:true, channel:'chrome'});
+            browser=await chromium.launch({headless:true, channel:'chrome', args});
             usingSystemChrome=true;
           }
           const page=await browser.newPage({viewport:{width:1920,height:1080}});
@@ -151,20 +165,28 @@ jobs:
           console.log('QA: baseline');
           await page.screenshot({path:out+'/00-baseline.png',fullPage:false});
 
-          const visibleButtons=page.locator('button:visible');
-          const count=await visibleButtons.count();
+          // One page.evaluate instead of ~100 locator actions: per-button
+          // queries re-wait on every element and crawl (or stall) on slow
+          // software-rendered runners. Same assertions, single roundtrip.
+          const audit=await page.evaluate((contractAttrs)=>{
+            const problems=[];
+            const buttons=[...document.querySelectorAll('button')].filter(b=>{
+              const r=b.getBoundingClientRect(); if(r.width<=0||r.height<=0) return false;
+              const cs=getComputedStyle(b); return cs.display!=='none'&&cs.visibility!=='hidden';
+            });
+            buttons.forEach((b,i)=>{
+              const label=((b.innerText||'').trim()||b.getAttribute('aria-label')||b.getAttribute('title')||'').trim();
+              if(!label){ problems.push('Unlabelled visible button '+i); return; }
+              if(!contractAttrs.some(a=>b.hasAttribute(a))){ problems.push('Unbound visible button: '+label); return; }
+              const r=b.getBoundingClientRect();
+              if(r.width<1||r.height<1) problems.push('Bad geometry: '+label);
+            });
+            return {count:buttons.length, problems};
+          }, ['data-open','data-command','data-goto','data-workshop-open','data-toggle','data-workbench-tab','data-panel-toggle','data-close-workbench','data-close','id']);
+          console.log('::notice ::button audit: count='+audit.count+' problems='+(audit.problems.length||'none'));
           const minButtons=usingSystemChrome?20:30;
-          if(count<minButtons) throw new Error('Too few visible buttons: '+count+' (min '+minButtons+', systemChrome='+usingSystemChrome+')');
-
-          for(let i=0;i<count;i++){
-            const b=visibleButtons.nth(i);
-            const label=((await b.innerText().catch(()=>''))||await b.getAttribute('aria-label')||await b.getAttribute('title')||'').trim();
-            if(!label) throw new Error('Unlabelled visible button '+i);
-            const contract=await b.evaluate(el=>['data-open','data-command','data-workshop-open','data-toggle','data-workbench-tab','data-panel-toggle','data-close-workbench','data-close','id'].some(a=>el.hasAttribute(a)));
-            if(!contract) throw new Error('Unbound visible button: '+label);
-            const box=await b.boundingBox();
-            if(!box||box.width<1||box.height<1) throw new Error('Bad geometry: '+label);
-          }
+          if(audit.count<minButtons) throw new Error('Too few visible buttons: '+audit.count+' (min '+minButtons+', systemChrome='+usingSystemChrome+')');
+          if(audit.problems.length) throw new Error('Button audit: '+audit.problems.join(' | '));
 
           console.log('QA: palette');
           await page.keyboard.press('Control+p');
@@ -235,6 +257,7 @@ jobs:
 
           await page.screenshot({path:out+'/99-final.png',fullPage:false});
           await browser.close();
+          clearTimeout(watchdog);
           if(errors.length) throw new Error('Browser errors: '+errors.join(' | '));
           EOF
           cp /tmp/jarvis-ui-qa.mjs ./jarvis-ui-qa.mjs

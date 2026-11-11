@@ -34,7 +34,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -136,7 +135,12 @@ def run_node(scripts: list[Path], body: str) -> dict:
     harness = HEADER
     for s in scripts:
         harness += "\n" + s.read_text(encoding="utf-8") + "\n"
-    harness += FOOTER + "\n(async () => {\n" + body + "\n})().then(v => { console.log(typeof v === 'string' ? v : JSON.stringify(v)); }).catch(e => { console.error('BODY-ERR ' + (e && e.message || e)); process.exit(1); });\n"
+    harness += (
+        FOOTER
+        + "\n(async () => {\n"
+        + body
+        + "\n})().then(v => { console.log(typeof v === 'string' ? v : JSON.stringify(v)); }).catch(e => { console.error('BODY-ERR ' + (e && e.message || e)); process.exit(1); });\n"
+    )
     with tempfile.NamedTemporaryFile("w", suffix=".cjs", delete=False, encoding="utf-8") as fh:
         fh.write(harness)
         path = fh.name
@@ -252,7 +256,6 @@ def test_finish_turn_clears_active_goal_and_run_id(tmp_path):
 # The no-model reply: every provider bulleted, no developer jargon
 # ---------------------------------------------------------------------------
 def test_ollama_down_reply_bullets_every_provider_and_speaks_human(monkeypatch):
-    import core.llm as llm_mod
     from core.llm import FreeLLM
 
     diag = {
@@ -269,7 +272,9 @@ def test_ollama_down_reply_bullets_every_provider_and_speaks_human(monkeypatch):
     monkeypatch.setattr("core.provider_resolver.diagnose", lambda **kw: diag)
 
     client = FreeLLM(provider="ollama", model="ollama/llama3.1:8b")
-    resp = client._ollama_down_response(tools=False, prompt_tokens=10, messages=[{"content": "what models are you running right now"}])
+    resp = client._ollama_down_response(
+        tools=False, prompt_tokens=10, messages=[{"content": "what models are you running right now"}]
+    )
     text = resp.content
 
     assert "Fallback mock for:" not in text, "developer jargon must not reach the user"
@@ -283,12 +288,15 @@ def test_ollama_down_reply_bullets_every_provider_and_speaks_human(monkeypatch):
 def test_dashboard_detects_the_humanized_marker(node_ready):
     """A no-model reply must be reported as a failure, never as an answer —
     now also for the humanized marker (and the legacy one)."""
-    out = run_node([CLIENT_JS], r"""
+    out = run_node(
+        [CLIENT_JS],
+        r"""
       global.fetch = async () => ({ ok: true, status: 200, statusText: 'OK', text: async () =>
         JSON.stringify({ response: 'Ollama not running. This reply came from the built-in helper because no model was reachable. Your message was: "hello"', run_kind: 'chat' }) });
       const r = await window.HermusClient.sendCommand({ text: 'hello', runId: 'r5' });
       return JSON.stringify({ ok: r.ok, error: r.error, response: r.response });
-    """)
+    """,
+    )
     assert out["ok"] is False
     assert "Model not configured" in out["error"]
     assert out["response"] == ""
@@ -312,13 +320,16 @@ CAPS = {
 
 
 def test_capability_rail_reports_what_it_found(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const N = window.HermusNexus.__test;
       const list = document.querySelector('#capabilities');
       N.renderCapabilities(JSON.parse(jsonCaps));
       const rows = [...list.children].map((r) => r.innerHTML);
       return JSON.stringify({ rows });
-    """.replace("jsonCaps", json.dumps(json.dumps(CAPS))))
+    """.replace("jsonCaps", json.dumps(json.dumps(CAPS))),
+    )
     html = "|".join(out["rows"])
     assert len(out["rows"]) == 6, "one honest row per capability family"
     assert "UNAVAILABLE" not in html, "misreading a shape must not claim a subsystem is broken"
@@ -331,12 +342,15 @@ def test_capability_rail_reports_what_it_found(node_ready):
 
 
 def test_capability_rail_empty_payload_stays_honest(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const N = window.HermusNexus.__test;
       const list = document.querySelector('#capabilities');
       N.renderCapabilities({});
       return JSON.stringify({ html: list.innerHTML });
-    """)
+    """,
+    )
     assert "No capability data reported" in out["html"]
 
 
@@ -344,7 +358,9 @@ def test_capability_rail_empty_payload_stays_honest(node_ready):
 # The hero's second line has exactly one writer per situation
 # ---------------------------------------------------------------------------
 def test_hero_second_line_written_only_by_the_live_run(node_ready):
-    out = run_node([NEXUS_JS], r"""
+    out = run_node(
+        [NEXUS_JS],
+        r"""
       const N = window.HermusNexus.__test;
       const st = window.HermusNexus.state;
       const now = document.querySelector('#coreNow');
@@ -358,7 +374,8 @@ def test_hero_second_line_written_only_by_the_live_run(node_ready):
       N.setState('WORKING', 'run run_abc');
       const afterNamed = now.textContent;
       return JSON.stringify({ afterIdle, afterBusy, afterNamed });
-    """)
+    """,
+    )
     assert out["afterIdle"] == "Idle. The queue is clear.", "idle must leave the queue poller's line alone"
     assert out["afterBusy"] == "working on your request…"
     assert out["afterNamed"] == "working on “summarize the report”"
@@ -381,7 +398,9 @@ STATS = {
 
 
 def test_memory_tab_renders_totals_index_and_skills(node_ready):
-    out = run_node([ROOM_JS], r"""
+    out = run_node(
+        [ROOM_JS],
+        r"""
       global.fetch = async () => ({ ok: true, status: 200, headers: { get(){ return null; } },
         text: async () => JSON.stringify(JSON.parse(jsStats)) });
       await refreshMemory();
@@ -393,7 +412,8 @@ def test_memory_tab_renders_totals_index_and_skills(node_ready):
         note: note.textContent,
         skills: s.innerHTML,
       });
-    """.replace("jsStats", json.dumps(json.dumps(STATS))))
+    """.replace("jsStats", json.dumps(json.dumps(STATS))),
+    )
     kpis = out["kpis"]
     assert "118" in kpis and "memories" in kpis
     assert "episodic" in kpis and "92" in kpis
@@ -403,17 +423,22 @@ def test_memory_tab_renders_totals_index_and_skills(node_ready):
 
 
 def test_memory_tab_reports_an_unavailable_stats_endpoint(node_ready):
-    out = run_node([ROOM_JS], r"""
+    out = run_node(
+        [ROOM_JS],
+        r"""
       global.fetch = async () => ({ ok: false, status: 500, headers: { get(){ return null; } },
         text: async () => JSON.stringify({ detail: 'boom' }) });
       await refreshMemory();
       return JSON.stringify({ kpis: document.querySelector('#memoryKpis').innerHTML });
-    """)
+    """,
+    )
     assert "memory stats" in out["kpis"], "a failed probe names what failed"
 
 
 def test_memory_recall_renders_hits_and_honest_miss(node_ready):
-    out = run_node([ROOM_JS], r"""
+    out = run_node(
+        [ROOM_JS],
+        r"""
       let payload = { results: [ { kind: 'episodic', created_at: '2026-11-09T10:00:00Z', content: 'ran the downloads scan' } ] };
       global.fetch = async () => ({ ok: true, status: 200, headers: { get(){ return null; } },
         text: async () => JSON.stringify(payload) });
@@ -425,7 +450,8 @@ def test_memory_recall_renders_hits_and_honest_miss(node_ready):
       await recallMemory();
       const miss = document.querySelector('#memoryRecallOut').innerHTML;
       return JSON.stringify({ hit, miss });
-    """)
+    """,
+    )
     assert "downloads scan" in out["hit"] and "episodic" in out["hit"]
     assert "Nothing matched" in out["miss"] and "quantum cookies" in out["miss"]
 
@@ -437,7 +463,9 @@ def test_memory_stats_route_returns_real_shape():
     assert out.get("success") is True
     mem = out["memory"]
     assert isinstance(mem.get("total", 0), int)
-    assert set(mem.get("by_kind") or {}) <= {"episodic", "semantic", "procedural", "skill", "fact", "note"} or isinstance(mem.get("by_kind"), dict)
+    assert set(mem.get("by_kind") or {}) <= {"episodic", "semantic", "procedural", "skill", "fact", "note"} or isinstance(
+        mem.get("by_kind"), dict
+    )
     idx = mem.get("recall_index") or {}
     assert "available" in idx and "fts5" in idx
     skills = out["skills"]
@@ -467,7 +495,7 @@ def test_css_kpi_forms_a_strip_outside_flex_rows():
 
 def test_capability_summary_lives_on_the_capabilities_tab():
     html = (ROOT / "gateway/control.html").read_text(encoding="utf-8")
-    cap_section = html.split('id="tab-capabilities"', 1)[1].split('<!-- ============ MEMORY', 1)[0]
+    cap_section = html.split('id="tab-capabilities"', 1)[1].split("<!-- ============ MEMORY", 1)[0]
     assert 'id="caps"' in cap_section, "the capability summary moved to the Capabilities tab"
     mem_section = html.split('id="tab-memory"', 1)[1].split("</section>", 1)[0]
     assert 'id="caps"' not in mem_section, "the Memory tab must not host capability stats anymore"
