@@ -32,6 +32,7 @@ from core.agents import (
 from core.agents.messaging import MessagePriority, MessageType, get_bus
 from core.local_first import get_local_first
 from core.log import get_logger
+from gateway.probe_cache import ProbeCache
 
 logger = get_logger(__name__)
 
@@ -697,7 +698,33 @@ async def remove_api_key(request: Request, payload: dict) -> dict:
 # ============================================================================
 
 
+#: ``detect_gpu`` / ``get_vram_usage`` shell out to the vendor tools and cost
+#: 10.5 s on this machine. Called straight from the async handler they blocked the
+#: whole gateway — with a Control Room open, ``/healthz`` took 6.6 s because the
+#: agents panel re-samples every 5 s. They now run in a worker thread, and one
+#: sample serves every caller for a few seconds.
+VRAM_STATUS = ProbeCache("agents.vram_status", ttl=10.0)
+
+
+def _sample_vram() -> dict:
+    lfp = get_local_first()
+    gpu_info = lfp.detect_gpu()
+    vram_info = lfp.get_vram_usage()
+    setup = lfp.get_recommended_setup()
+    rtx = setup.get("rtx3050", {})
+    return {
+        "gpu": gpu_info,
+        "vram": vram_info,
+        "recommended": setup.get("recommended", {}),
+        "limits": {
+            "vram_safe": rtx.get("vram_safe_limit"),
+            "max_models": 1 if rtx else None,
+        },
+    }
+
+
 @router.get("/vram/status")
+<<<<<<< HEAD
 async def get_vram_status(request: Request) -> dict:
     """Current VRAM usage for RTX 3050, with the local-provider recommendation.
 
@@ -709,6 +736,15 @@ async def get_vram_status(request: Request) -> dict:
     """
     try:
         return await asyncio.to_thread(_vram_status_cached)
+=======
+async def get_vram_status(request: Request, fresh: str = "") -> dict:
+    """Get current VRAM usage for RTX 3050."""
+    try:
+        sample = await VRAM_STATUS.get(
+            lambda: asyncio.to_thread(_sample_vram), fresh=str(fresh).strip().lower() in ("1", "true", "yes")
+        )
+        return {"status": "ok", **sample}
+>>>>>>> b9df785f (Stop the gateway blocking itself while the dashboard loads)
     except Exception as e:
         logger.error(f"Error getting VRAM status: {e}")
         # Return an explicit unavailable response rather than inventing hardware.
@@ -753,11 +789,16 @@ def _vram_status_cached() -> dict:
 
 @router.get("/vram/monitor")
 async def monitor_vram(request: Request) -> dict:
-    """Get real-time VRAM monitoring data."""
+    """Get real-time VRAM monitoring data (off the event loop: it shells out)."""
     try:
-        lfp = get_local_first()
-        vram_data = lfp.get_vram_monitor_data()
-        return {"status": "ok", **vram_data}
+        sample = await VRAM_STATUS.get(lambda: asyncio.to_thread(_sample_vram))
+        return {
+            "status": "ok",
+            "gpu": sample["gpu"],
+            "vram": sample["vram"],
+            "vram_used": sample["vram"].get("used", 0),
+            "vram_percent": sample["vram"].get("percent", 0),
+        }
     except Exception as e:
         logger.error(f"Error monitoring VRAM: {e}")
         return {

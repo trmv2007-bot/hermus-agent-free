@@ -22,15 +22,15 @@ import asyncio
 import time
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
+
+from gateway.probe_cache import ProbeCache, fresh_requested
 
 router = APIRouter()
 
 #: Diagnostics are behind a door and answered from a short-lived cache: one
 #: examination per minute is the same truth for every panel that asks.
-DOCTOR_STATUS_TTL_SECONDS = 60.0
-_DOCTOR_STATUS_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
 ENGINE_STATUS_TTL_SECONDS = 30.0
 _ENGINE_STATUS_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
 
@@ -218,28 +218,27 @@ def events_recent(limit: int = 30):
 # ---------------------------------------------------------------------------
 # Hermus doctor — Hermus's own physician
 # ---------------------------------------------------------------------------
+#: ``doctor.status`` walks every subsystem and cost 11.7 s cold on a live install.
+#: Diagnostics, not first-screen state: the Control Room only asks when the person
+#: opens the diagnostics surface, so one computation serves everyone for a short
+#: window — reopening a panel must not re-run the examination. ``ProbeCache`` also
+#: makes concurrent callers share a single probe instead of each starting one.
+DOCTOR_STATUS = ProbeCache("doctor.status", ttl=45.0)
+
+
+async def _doctor_status_probe() -> dict[str, Any]:
+    from core.doctor import doctor
+
+    return await asyncio.to_thread(doctor.status)
+
+
 @router.get("/doctor/status")
-async def doctor_status():
-    """Cheap status: engine, findings by severity, stuck work, recent reports.
-
-    Diagnostics, not first-screen state: the Control Room only asks for this
-    when the person opens the diagnostics surface. It still costs ~10s on a
-    cold machine (it probes engines and reads every diagnostic), so the answer
-    is reused for a minute — reopening a panel must not re-run the examination.
-    """
-    now = time.monotonic()
-    hit = _DOCTOR_STATUS_CACHE.get("data")
-    if hit is not None and now - float(_DOCTOR_STATUS_CACHE.get("at") or 0.0) < DOCTOR_STATUS_TTL_SECONDS:
-        return hit
+async def doctor_status(fresh: str = Query("", description="1 = bypass the cached status and probe again")):
+    """Status: engine, findings by severity, stuck work, recent reports."""
     try:
-        from core.doctor import doctor
-
-        result = await asyncio.to_thread(doctor.status)
+        return await DOCTOR_STATUS.get(_doctor_status_probe, fresh=fresh_requested(fresh))
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=500)
-    if isinstance(result, dict):
-        _DOCTOR_STATUS_CACHE.update(at=time.monotonic(), data=result)
-    return result
 
 
 @router.post("/doctor/run")
