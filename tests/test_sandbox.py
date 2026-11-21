@@ -192,6 +192,11 @@ def test_timeout_kills_the_process():
 
 
 @posix_only
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="macOS accepts RLIMIT_AS and then ignores it, so memory_mb is advisory there "
+    "(core.sandbox.MEMORY_LIMIT_ENFORCED says so); only the container backends cap memory",
+)
 def test_memory_limit_bites():
     if not JAIL_LIMITS:
         return

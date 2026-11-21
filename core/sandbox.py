@@ -74,6 +74,12 @@ DANGEROUS_PATTERNS = (
 SECRET_ENV_RE = re.compile(r"(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|ACCESS_KEY|PRIVATE_KEY|AUTH)", re.I)
 ENV_ALLOW_DEFAULT = ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "TZ", "PYTHONIOENCODING", "PYTHONUNBUFFERED")
 
+#: Whether ``RLIMIT_AS`` actually caps a child's memory on this platform.
+#: Linux enforces it; macOS accepts the limit and then ignores it, so the
+#: ``memory_mb`` policy is advisory there rather than a guarantee. Callers that
+#: need a hard cap on macOS have to use the container backends.
+MEMORY_LIMIT_ENFORCED = sys.platform != "darwin"
+
 VALID_BACKENDS = ("auto", "docker", "podman", "local", "off")
 
 
