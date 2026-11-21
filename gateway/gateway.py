@@ -711,6 +711,7 @@ from gateway.routes_channels import control_router as _channels_control_router  
 from gateway.routes_channels import router as _channels_router  # noqa: E402
 from gateway.routes_computer import router as _computer_router  # noqa: E402
 from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
+from gateway.routes_config import router as _config_router  # noqa: E402
 from gateway.routes_console import router as _console_router  # noqa: E402
 from gateway.routes_context import router as _context_router  # noqa: E402
 from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
@@ -751,6 +752,7 @@ app.include_router(_harness_router, dependencies=_gate_control)
 app.include_router(_harness_eval_router, dependencies=_gate_control)
 app.include_router(_management_router, dependencies=_gate_control)
 app.include_router(_subsystems_router, dependencies=_gate_control)
+app.include_router(_config_router, dependencies=_gate_control)
 app.include_router(_console_router, dependencies=_gate_control)
 app.include_router(_dashboard_router, dependencies=_gate_control)
 app.include_router(_computer_router, dependencies=_gate_control)

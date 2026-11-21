@@ -604,7 +604,11 @@
   }
 
   async function refreshModels(probe){
-    if(modelState.inFlight) return;
+    // A probing refresh is the one that actually fills the Model dropdown, so a
+    // call that arrives while another refresh is running is queued instead of
+    // dropped — otherwise the deferred first-paint probe never happens and the
+    // dropdown stays empty until someone presses Refresh.
+    if(modelState.inFlight){ if(probe) modelState.probeQueued=true; return; }
     modelState.inFlight=true;
     try{
       const query=probe ? '?probe=true&refresh=true' : '?probe=false&refresh=false';
@@ -627,6 +631,10 @@
       if(fleet) fleet.innerHTML='<div class="model-state unavailable"><span>RUNTIME UNAVAILABLE</span><small>The model hub could not be reached. It usually comes back on its own; if not, check the gateway process or open Systems → Local engine.</small><button type="button" class="btn ghost" data-goto="systems">Open Systems →</button></div>';
     }finally{
       modelState.inFlight=false;
+      if(modelState.probeQueued){
+        modelState.probeQueued=false;
+        setTimeout(()=>refreshModels(true),0);
+      }
     }
   }
 
@@ -892,6 +900,12 @@
 
   refreshModels(false);
   refreshKernel();
+  // A first paint must not wait on the model probe: asking every configured
+  // backend what it can serve took 25 s here. Paint the shell unprobed, then
+  // probe once shortly after so the Model dropdown already lists real models
+  // instead of only "auto" when the person looks at it. The shared bus keeps the
+  // recurring refreshes on one timer.
+  setTimeout(()=>refreshModels(true),1200);
   if (window.HermusBus) {
     window.HermusBus.every('models', 30000, ()=>refreshModels(false), {immediate:false});
     window.HermusBus.every('kernel', 2500, refreshKernel, {immediate:false});

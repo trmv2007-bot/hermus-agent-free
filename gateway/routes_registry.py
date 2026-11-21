@@ -6,6 +6,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from gateway.probe_cache import ProbeCache
+
 router = APIRouter()
 
 
@@ -79,12 +81,24 @@ async def embeddings_status():
     return embedding_store.backend_info()
 
 
+#: ``catalog(probe=True)`` asks every configured backend what it can serve and
+#: took 25 s here, straight from an async handler — the same event-loop block that
+#: made the whole dashboard feel frozen. It runs in a worker thread now, and the
+#: probed answer is reused while the persisted selection is unchanged.
+MODEL_CATALOG = ProbeCache("models.catalog_probe", ttl=45.0)
+
+
 @router.get("/models/catalog")
 async def models_catalog(probe: bool = False, refresh: bool = False):
     """Dynamic, secret-free model deployments discovered from configured backends."""
+    import asyncio
+
     from core.models import get_model_gateway
 
-    return get_model_gateway().catalog(probe=probe, refresh=refresh)
+    gateway = get_model_gateway()
+    if not probe:
+        return await asyncio.to_thread(gateway.catalog, probe=False, refresh=refresh)
+    return await MODEL_CATALOG.get(lambda: asyncio.to_thread(gateway.catalog, probe=True, refresh=refresh), fresh=refresh)
 
 
 @router.get("/models/selected")

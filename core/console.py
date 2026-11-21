@@ -181,6 +181,14 @@ _TABLE = (
         "Inspect, edit, build, test and debug workflows",
     ),
     (
+        "settings",
+        "Settings (.env)",
+        "runtime",
+        "core/config_env.py",
+        "@settings",
+        "Environment settings this dashboard may change; a write lands in .env and needs a restart",
+    ),
+    (
         "verifiers",
         "Domain verifiers",
         "agents",
@@ -514,6 +522,7 @@ _TABLE = (
 #: panel. The gateway verifies every one of these against its own live route
 #: table, so a rename shows up as ``unverified`` instead of a dead button.
 _ENDPOINTS: dict[str, tuple[str, ...]] = {
+    "settings": ("GET /api/v1/config/env", "GET /api/v1/config/env/allowed"),
     "engine": (
         "GET /engine/status",
         "GET /engine/models",
@@ -597,6 +606,7 @@ _ENDPOINTS: dict[str, tuple[str, ...]] = {
 #: executed by the browser against the real endpoint — the console adds no
 #: privileged path of its own.
 _ACTIONS: dict[str, tuple[tuple[str, str, str, tuple[str, ...]], ...]] = {
+    "settings": (("Set value", "POST", "/api/v1/config/env", ("key", "value")),),
     "engine": (
         ("Refresh", "POST", "/engine/refresh", ()),
         ("Install engine", "POST", "/engine/nollama/install", ()),
@@ -1268,6 +1278,16 @@ def _p_router() -> dict[str, Any]:
     }
 
 
+def _p_settings() -> dict[str, Any]:
+    """The .env settings the dashboard may change, with where each value came from."""
+    from core.config_env import read_settings
+
+    data = _safe(read_settings) or {}
+    rows = data.get("settings") or []
+    lines = [f"{r['key']} = {r['value'] or '(default)'}  [{r['source']}]" for r in rows]
+    return {"count": len(rows), "state": "ready", "file": data.get("file"), "notes": lines}
+
+
 def _p_swe() -> dict[str, Any]:
     from core.swe_mode import swe_mode
 
@@ -1294,6 +1314,7 @@ def _tool_names(tool_registry: Any) -> list[str]:
 
 
 _SHAPED: dict[str, Callable[[], Any]] = {
+    "settings": _p_settings,
     "missions": _p_missions,
     "agents": _p_agents,
     "queue": _p_queue,
