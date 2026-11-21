@@ -69,7 +69,7 @@ include = [
 # fails to find the Control Room markup, the red-line policy, the API catalog
 # or the builtin suites.
 [tool.setuptools.package-data]
-gateway = ["control.html", "static/*.js", "static/*.css", "static/assets/*"]
+gateway = ["control.html", "harness.html", "static/*.js", "static/*.css", "static/assets/*"]
 policies = ["*.json"]
 resources = ["*.json"]
 harness = ["suites/*.json"]
