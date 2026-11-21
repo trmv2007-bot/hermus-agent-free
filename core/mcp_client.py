@@ -347,7 +347,7 @@ class MCPManager:
                     "note": "Set enabled=true or: hermus mcp add --name echo --command python3 --arg tools/mcp_echo_server.py",
                 }
             ]
-            path.write_text(json.dumps(example, indent=2))
+            path.write_text(json.dumps(example, indent=2), encoding="utf-8")
             self._config = example
             return self._config
         try:
@@ -361,7 +361,7 @@ class MCPManager:
     def save_config(self):
         path = _mcp_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._config, indent=2))
+        path.write_text(json.dumps(self._config, indent=2), encoding="utf-8")
 
     def add_server(
         self,

@@ -1,0 +1,1570 @@
+"""Main Agent Loop - Free Hermes Clone
+Multi-step ReAct tool loop + auto tool registry + semantic memory hooks.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from datetime import datetime
+from typing import Any
+
+from core.log import get_logger
+
+from .config import config
+from .memory import memory
+from .modes import AgentMode, get_mode_config
+from .run_events import record_issue
+from .run_hooks import CancelledRun, CancelToken, make_emitter
+from .skill_manager import skill_manager
+from .task_tracker import task_tracker
+from .tool_registry import tool_registry
+from .tool_select import EXPAND_TOOL_NAME, select_tools, selection_report
+
+logger = get_logger(__name__)
+
+
+class HermusAgent:
+    """Free Hermes-like agent - self-improving with memory, skills, multi-step tools."""
+
+    def __init__(
+        self,
+        model: str = None,
+        session_id: str = None,
+        mode: str = None,
+        max_steps: int = None,
+        api_key: str = None,
+        base_url: str = None,
+    ):
+        self._model_pinned = model is not None
+        from .models import get_model_gateway
+
+        # Resolve an omitted model through the canonical runtime catalog and
+        # persisted dashboard preference. Config.model remains only a final
+        # bootstrap fallback when discovery is temporarily empty.
+        gateway = get_model_gateway()
+        if model:
+            self.model_name = model
+        else:
+            selected_provider, selected_model = gateway.resolve_model("default")
+            self.model_name = f"{selected_provider}/{selected_model}" if selected_provider and selected_model else config.model
+
+        # The canonical ModelGateway is the ONLY place a model client is built.
+        self.llm = gateway.llm(model=self.model_name, api_key=api_key, base_url=base_url)
+        self.session_id = session_id or (f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}")
+        self.trajectory: list[dict] = []
+        self.plan_override = None  # Phase 4: resume an existing plan instead of drafting a new one
+        self.max_steps = max_steps or getattr(config, "max_tool_steps", 8)
+        # Per-turn tool selection state. Reset at the start of every chat() so a
+        # selection never leaks between turns, and so an `expand_tools` call only
+        # widens the turn it happened in.
+        self._turn_selected_tools: list[dict] | None = None
+        self._turn_tool_expanded = False
+
+        if mode is None:
+            try:
+                from .skin_engine import skin_engine
+
+                mode = skin_engine.get_current_mode()
+            except Exception:
+                mode = "agent"
+        try:
+            self.mode = AgentMode(mode.lower().replace("_", "-"))
+        except Exception:
+            self.mode = AgentMode.AGENT
+        self.mode_config = get_mode_config(self.mode)
+
+        # Load tool registry once
+        tool_registry.load()
+        self.tools = self._get_tools()
+        self.agent_tracker_id = None
+
+        # Architecture upgrades: active project + persona profile
+        try:
+            from .workspace import workspace
+
+            self.project = workspace.active_project()
+        except Exception:
+            self.project = getattr(config, "project", "default") or "default"
+        self.profile = getattr(config, "profile", "") or ""
+
+        logger.info(
+            f"[Hermus Free] Session {self.session_id} | Model {self.model_name} | "
+            f"Mode {self.mode.value} ({self.mode_config.name}) | "
+            f"Tools {len(self.tools)} | max_steps={self.max_steps} | Free stack"
+        )
+        try:
+            self.agent_tracker_id = task_tracker.add_agent(
+                agent_id=self.session_id,
+                name=f"agent_{self.mode.value}_{self.session_id[:6]}",
+                model=self.model_name,
+                persona=self.mode.value,
+                task=f"Mode: {self.mode_config.name} - {self.mode_config.description[:60]}",
+            )
+        except Exception as exc:
+            record_issue("telemetry", "agent_register", exc, retryable=False, fallback="agent runs untracked this session")
+
+    def _get_tools(self) -> list[dict]:
+        """Definitions from auto-discovered registry, filtered by mode."""
+        allowed = self.mode_config.tools_allowed
+        if "all" in allowed:
+            return tool_registry.get_definitions(allowed={"all"})
+        if "none" in allowed:
+            defs: list[dict] = []
+        else:
+            defs = tool_registry.get_definitions(allowed=set(allowed))
+        # User-defined custom APIs are available in every mode that allows them
+        # (agent, chat, multi-agent, multi-chat) — even when the mode has no
+        # other tools. The registry already includes them for "all".
+        if self.mode_config.use_custom_api:
+            try:
+                from .custom_api import custom_api_manager
+
+                existing = {d.get("function", {}).get("name") for d in defs}
+                for tdef in custom_api_manager.get_tool_definitions():
+                    if tdef.get("function", {}).get("name") not in existing:
+                        defs.append(tdef)
+            except Exception:
+                pass
+        return defs
+
+    def reload_tools(self):
+        """Force reload registry (e.g. after MCP connect)."""
+        tool_registry.load(force=True)
+        self.tools = self._get_tools()
+        # A stale selection would hide the tools that just arrived.
+        self._turn_selected_tools = None
+        return {"tools": len(self.tools)}
+
+    def _tools_for_turn(self, user_message: str, emit=None) -> list[dict] | None:
+        """Tool schemas for this turn: a relevant subset, or the full catalog.
+
+        Shipping all ~179 schemas costs ~18.3K prompt tokens on *every* step of
+        the loop. We send only the plausibly-relevant ones, and always include
+        ``expand_tools`` so a wrong guess costs one round trip instead of a
+        silently missing capability. Once expanded, the turn keeps the full
+        catalog — widening is sticky within a turn but never leaks to the next.
+        """
+        if not self.tools:
+            return None
+        if self._turn_tool_expanded:
+            return self.tools
+        if self._turn_selected_tools is None:
+            try:
+                selected = select_tools(self.tools, user_message)
+            except Exception as exc:
+                # Selection is an optimization, never a reason to fail a turn.
+                record_issue("tools", "select_tools", exc, retryable=False, fallback="full tool catalog sent this turn")
+                selected = list(self.tools)
+            self._turn_selected_tools = selected
+            if emit is not None:
+                try:
+                    emit("tools_selected", selection_report(self.tools, selected))
+                except Exception:
+                    pass
+        return self._turn_selected_tools
+
+    def _custom_api_signature(self) -> str:
+        """Compact signature of the current custom APIs (name/url/token) so we
+        can detect additions/removals made via Settings between messages."""
+        try:
+            from .custom_api import custom_api_manager
+
+            return json.dumps(
+                [
+                    (a.get("name"), a.get("url"), a.get("auth", {}).get("token") or a.get("auth", {}).get("value") or "")
+                    for a in custom_api_manager.list_apis()
+                ],
+                sort_keys=True,
+                default=str,
+            )
+        except Exception:
+            return ""
+
+    def _backend_available(self) -> bool:
+        """Fast check whether the bound model backend can actually answer.
+
+        Used to skip expensive multi-model deliberation (council) when the
+        backend is down, so a mission fails fast and honestly instead of
+        spending minutes retrying unreachable models.
+        """
+        try:
+            provider = str(getattr(getattr(self, "llm", None), "provider", "") or "").lower()
+        except Exception:
+            return False
+        if provider in ("", "mock", "fake", "offline"):
+            return False
+        if provider == "ollama":
+            try:
+                import requests
+
+                base = str(getattr(config, "ollama_base_url", "http://localhost:11434")).rstrip("/")
+                r = requests.get(f"{base}/api/tags", timeout=2)
+                return r.status_code == 200
+            except Exception:
+                return False
+        # Hosted/custom providers: treat as available only when a key is present.
+        try:
+            from .multi_key import multi_key_manager
+
+            entry = None
+            try:
+                entry = multi_key_manager.get_entry(provider, None)
+            except Exception:
+                entry = None
+            if entry and (entry.get("api_key") or entry.get("key")):
+                return True
+        except Exception:
+            pass
+        try:
+            if getattr(self.llm, "api_key_override", None):
+                return True
+            if getattr(self.llm, "base_url_override", None):
+                return True
+        except Exception:
+            pass
+        return True
+
+    def _execute_tool(self, name: str, args: dict) -> dict:
+        """Execute via the canonical ToolGateway — the one invocation path.
+
+        The gateway performs descriptor resolution, policy gating, typed
+        :class:`ToolResult` classification, timeout handling and canonical event
+        emission (observability + trace correlation for the run/mission). It
+        delegates to the same ``core.tool_registry`` the legacy path used, so
+        tool discovery/fallback is unchanged. On success we return the tool's own
+        dict output; on failure we return the honest ``{error, error_code}`` dict
+        the agent loop reads, so a failed tool is never reported as success.
+        """
+        from .tools import get_tool_gateway
+
+        res = get_tool_gateway().execute(name, args or {})
+        if res.ok:
+            out = res.output
+            # registry.execute always returns a dict, but guard for robustness.
+            return out if isinstance(out, dict) else {"result": out}
+        out = {"error": res.error_message or f"tool '{name}' failed", "error_code": res.error_code}
+        if res.status:
+            out["status"] = res.status
+        if res.retryable:
+            out["retryable"] = True
+        if res.next_action:
+            out["next_action"] = res.next_action
+        if res.data:
+            out.update(res.data)
+        return out
+
+    def _apply_router(self, user_message: str) -> dict | None:
+        """Model Router 2.0: swap the LLM to the best available model for this turn.
+
+        Returns the selection dict on success, or None when routing is skipped
+        (mock provider, no workers, or same model).
+        """
+        try:
+            if getattr(self.llm, "provider", "") == "mock":
+                return None
+            from .model_preferences import model_preferences
+            from .models import get_model_gateway
+            from .router2 import router2
+
+            # An explicit dashboard choice is authoritative. Auto mode may use
+            # the router, but the router must never silently override a user's
+            # selected deployment.
+            if model_preferences.get("default"):
+                return {
+                    "success": True,
+                    "model": self.model_name,
+                    "task_type": "explicit_preference",
+                    "reason": "dashboard.selection",
+                }
+
+            sel = router2.select(user_message)
+            if not sel.get("success"):
+                return None
+            new_ref = sel["model"]
+            if new_ref == self.model_name:
+                return sel
+            new_llm = get_model_gateway().llm(model=new_ref)
+            self.llm = new_llm
+            self.model_name = new_ref
+            logger.info(f"[Router] {sel['task_type']} -> {new_ref} ({sel['reason']})")
+            return sel
+        except Exception as e:
+            logger.warning(f"[Router] skipped ({e})")
+            return None
+
+    def _build_system_prompt(self, user_message: str = "", emit=None) -> str:
+        curated = memory.get_curated_memory(limit=10)
+        curated_text = "\n".join([f"- {m['key']}: {m['value'][:200]}" for m in curated]) if curated else "No curated memory yet."
+
+        user_model = memory.load_user_model()
+        user_model_text = json.dumps(user_model, indent=2)[:1000] if user_model else "No user model yet."
+
+        personal_context_block = ""
+        try:
+            from .personal_context import personal_context
+
+            personal_context_block = (
+                "\nPersonal Context:\n"
+                + personal_context.prompt_block(query=user_message, project=self.project, limit=5, max_chars=5000)
+                + "\n"
+            )
+        except Exception as exc:
+            record_issue(
+                "memory", "personal_context_prompt", exc, retryable=False, fallback="turn continues without personal context"
+            )
+
+        skills = skill_manager.list_skills()
+        skills_text = ", ".join([s["name"] for s in skills[:15]]) if skills else "No skills yet."
+
+        nudges = memory.periodic_nudges()
+        nudges_text = "\n".join(nudges) if nudges else "No nudges."
+
+        # Report what the model will actually be OFFERED, not the catalog size.
+        # With per-turn selection these differ (e.g. 21 offered vs 179
+        # registered); telling the model it has 179 tools when 21 are in the
+        # request invites it to call ones it cannot see.
+        offered_tools = self._tools_for_turn(user_message)
+        tool_count = len(offered_tools) if offered_tools else len(self.tools)
+        tool_note = (
+            ""
+            if tool_count >= len(self.tools)
+            else f" of {len(self.tools)} registered — a subset chosen for this request"
+            " (call `expand_tools` if you need one that is not listed)"
+        )
+
+        # Lessons loop (Phase 3): past corrections/failures injected into the prompt
+        lessons_block = ""
+        try:
+            from .reasoning.lessons import lessons_store
+
+            lessons_block = lessons_store.to_prompt_block(user_message)
+        except Exception as exc:
+            record_issue("memory", "lessons_prompt", exc, retryable=False, fallback="turn continues without lessons block")
+
+        # Typed memory: hybrid recall + decay + eviction via the canonical facade.
+        memory2_block = ""
+        if getattr(config, "memory2_enabled", True):
+            try:
+                ctx = memory.recall_context(user_message, limit=5, project=self.project)
+                memory2_block = (ctx or {}).get("text") or ""
+                if emit is not None:
+                    emit(
+                        "memory_recalled",
+                        {
+                            "mode": ctx.get("mode"),
+                            "kept": len(ctx.get("kept") or []),
+                            "evicted": len(ctx.get("evicted") or []),
+                            "ids": (ctx.get("ids") or [])[:12],
+                            "tokens": ctx.get("tokens"),
+                            "budget_tokens": ctx.get("budget_tokens"),
+                            "index": ctx.get("index"),
+                            "preview": [
+                                {
+                                    "id": m.get("id"),
+                                    "kind": m.get("kind"),
+                                    "score": m.get("score"),
+                                    "rrf": m.get("rrf_score"),
+                                    "text": (m.get("content") or "")[:120],
+                                }
+                                for m in (ctx.get("kept") or [])[:5]
+                            ],
+                        },
+                    )
+            except Exception as exc:
+                record_issue(
+                    "memory", "memory2_recall", exc, retryable=False, fallback="turn continues without memory2 context block"
+                )
+                memory2_block = ""
+
+        # Profile persona (architecture upgrade)
+        persona_block = ""
+        if self.profile:
+            try:
+                from .profiles import profile_manager
+
+                persona_block = f"\nPersona ({self.profile}):\n{profile_manager.system_prompt(self.profile)}\n"
+            except Exception:
+                persona_block = ""
+
+        # Presence/continuity: stable identity + current operational state +
+        # short recent moments. This is deliberately grounded local state, not
+        # a claim that the model is conscious.
+        presence_block = ""
+        try:
+            from .presence import get_presence
+
+            presence_block = (
+                "\n"
+                + get_presence().prompt_block(
+                    session_id=self.session_id,
+                    user_id=str(getattr(self, "user_id", "") or "default"),
+                )
+                + "\n"
+            )
+        except Exception as exc:
+            record_issue("presence", "prompt_block", exc, retryable=False, fallback="turn continues without presence context")
+
+        dashboard_block = ""
+        try:
+            from .dashboard_state import dashboard_state
+
+            dashboard_snapshot = dashboard_state.snapshot()
+            dashboard_block = (
+                "\nShared Dashboard (the browser sees this same state):\n"
+                + json.dumps(
+                    {
+                        "revision": dashboard_snapshot.get("revision"),
+                        "updated_at": dashboard_snapshot.get("updated_at"),
+                        "tabs": dashboard_snapshot.get("tabs", []),
+                        "workspace_panels": dashboard_snapshot.get("panels", []),
+                        "system_panel_count": dashboard_snapshot.get("system_panel_count", 0),
+                        "system_panels": dashboard_snapshot.get("systems", []),
+                    },
+                    indent=2,
+                    default=str,
+                )[:9000]
+                + "\n"
+            )
+        except Exception as exc:
+            record_issue("dashboard", "state_prompt", exc, retryable=False, fallback="turn continues without dashboard state")
+
+        return f"""You are Hermus Agent Free - a self-improving AI agent that grows with the user.
+
+You have:
+- Multi-step tool use (ReAct): you may call tools across multiple rounds until the task is done (max {self.max_steps} steps)
+- Persistent memory (SQLite FTS5) + semantic/hybrid search (embeddings)
+- Typed long-term memory (episodic/semantic/procedural/project) via memory2_recall / memory2_remember
+- Auto-created skills (skill_list / skill_use with task context)
+- MCP tools when configured (mcp_list_servers / mcp_connect_all)
+- {tool_count} tools{tool_note} available (browser, vision, voice, internet eyes, pentest, backends, research, screen, etc.)
+
+Curated Memory:
+{curated_text}
+
+User Model:
+{user_model_text}
+{personal_context_block}
+Available Skills:
+{skills_text}
+
+Periodic Nudges:
+{nudges_text}
+{lessons_block}
+{memory2_block}
+{presence_block}
+{persona_block}
+{dashboard_block}
+Rules:
+- Use tools when needed; do not hallucinate facts you can look up
+- After tools return, continue reasoning; call more tools if needed
+- When finished, respond with a clear final answer and NO further tool calls
+- Prefer skill_use for known workflows; memory_search/hybrid for past context
+- Prefer research_deep for multi-source questions needing citations
+- Prefer embeddings_ingest + embeddings_search for document Q&A
+- The Shared Dashboard block is current shared state, not a description to invent over. Use dashboard_get_state before layout changes when needed.
+- Use dashboard_add_panel, dashboard_update_panel, dashboard_move_panel, dashboard_remove_panel, and dashboard_update_tab for dashboard changes. Verify tool success before claiming the browser changed.
+- Dashboard panels accept safe text/data only; never put arbitrary HTML, JavaScript, secrets, or credentials into panel content.
+- You are free, MIT, no paywall — Ollama / Groq / HF
+- Session: {self.session_id}
+- Model: {self.model_name}
+- Mode: {self.mode.value}
+- Project: {self.project}
+"""
+
+    def _format_tool_result(self, name: str, result: Any, limit: int = 3000) -> str:
+        try:
+            text = json.dumps(result, ensure_ascii=False, default=str)
+        except Exception:
+            text = str(result)
+        if len(text) > limit:
+            text = text[:limit] + "...(truncated)"
+        return f"Tool {name} returned:\n{text}"
+
+    def _chat_impl(
+        self,
+        user_message: str,
+        *,
+        on_event=None,
+        stream: bool = False,
+        should_cancel=None,
+        steer_source=None,
+    ) -> dict[str, Any]:
+        """Multi-step agent loop: plan → tool calls → observe → repeat → final answer.
+
+        ``on_event(event_type, data)`` receives lifecycle events (steps, tool
+        calls/results, llm deltas, memory recall, skill harvest, verification) so
+        the gateway can stream them over SSE/WebSocket. ``stream=True`` requests
+        token-level deltas from the model. ``should_cancel`` is polled at every
+        step boundary for cooperative cancellation. ``steer_source`` is an
+        optional callable returning newly queued mid-run instructions (see
+        ``RunBus.pending_steers``); they are injected into the conversation at
+        the next step boundary so /run/steer actually reaches the model.
+        """
+        emit = make_emitter(on_event)
+        cancel = CancelToken(should_cancel)
+        # Tool selection is per-turn: never carry a subset (or a widening) from a
+        # previous turn into this one.
+        self._turn_selected_tools = None
+        self._turn_tool_expanded = False
+
+        def _drain_steers() -> list[str]:
+            if steer_source is None:
+                return []
+            try:
+                drained = steer_source()
+                return [str(s) for s in (drained or []) if str(s).strip()]
+            except Exception as exc:
+                record_issue("agent", "steer_source", exc, retryable=False, fallback="steering skipped this step")
+                return []
+
+        emit(
+            "turn_started",
+            {
+                "session": self.session_id,
+                "model": self.model_name,
+                "mode": self.mode.value,
+                "project": self.project,
+                "stream": bool(stream),
+                "chars": len(user_message or ""),
+            },
+        )
+        # Pick up custom APIs added/removed via Settings since this agent started
+        sig = self._custom_api_signature()
+        if sig != getattr(self, "_custom_api_sig", None):
+            self._custom_api_sig = sig
+            self.reload_tools()
+
+        task_id = None
+        try:
+            task_id = task_tracker.add_task(
+                task_id=f"chat_{self.session_id[:6]}_{datetime.now().strftime('%H%M%S')}",
+                task_type="chat",
+                description=user_message[:100],
+                model=self.model_name,
+                agent=self.session_id,
+            )
+            task_tracker.update_agent(
+                self.agent_tracker_id,
+                task=user_message[:100],
+                status="running",
+                progress="Thinking...",
+            )
+        except Exception as exc:
+            record_issue("telemetry", "task_tracker_add", exc, retryable=False, fallback="turn continues without task tracking")
+
+        # Counsel System (Phases 0-2): for hard tasks, convene the council of AIs
+        # instead of answering alone. Falls back to the normal loop on any failure.
+        try:
+            from .reasoning.governor import governor
+
+            if governor.should_use_council(user_message, mode=self.mode.value) and self._backend_available():
+                cc = governor.council_config(user_message, mode=self.mode.value)
+                logger.info(
+                    f"[Counsel] difficulty={cc['difficulty']} -> convening council "
+                    f"({cc['max_members']} members, {cc['max_rounds']} rounds)"
+                )
+                try:
+                    task_tracker.update_agent(self.agent_tracker_id, status="running", progress="Council convening...")
+                except Exception:
+                    pass
+                from .counsel.council import CouncilSession
+
+                cs = CouncilSession(
+                    user_message,
+                    model=self.model_name,
+                    difficulty=cc["difficulty"],
+                    max_members=cc["max_members"],
+                    max_rounds=cc["max_rounds"],
+                    execute=True,
+                )
+                result = cs.run()
+                if result and result.get("final_answer"):
+                    return {
+                        "session_id": self.session_id,
+                        "response": result["final_answer"],
+                        "tool_results": [
+                            {
+                                "tool": "council",
+                                "args": {"goal": user_message, "difficulty": cc["difficulty"]},
+                                "result": {
+                                    "session_id": result.get("session_id"),
+                                    "members": result.get("members"),
+                                    "votes": result.get("votes"),
+                                    "replanned": result.get("replanned"),
+                                    "steps": result.get("step_results"),
+                                },
+                            }
+                        ],
+                        "tool_calls": ["council"],
+                        "steps": result.get("transcript_turns", 1),
+                        "max_steps": self.max_steps,
+                        "council": result,
+                        "mode": self.mode.value,
+                        "tools_available": len(self.tools),
+                        "strategy": "council",
+                        "strategy_meta": {"strategy": "council"},
+                    }
+        except Exception as e:
+            logger.warning(f"[Counsel] skipped ({e}) - falling back to normal agent loop")
+
+        # Multi-agent / multi-chat modes: distribute across models+keys when beneficial
+        if self.mode in (AgentMode.MULTI_AGENT, AgentMode.MULTI_CHAT) and self.mode_config.use_multi_ai:
+            fleet_result = self._maybe_fleet_distribute(user_message)
+            if fleet_result is not None:
+                return fleet_result
+
+        # Model Router 2.0 (architecture upgrade): per-turn model selection
+        routed = None
+        if not self._model_pinned and getattr(config, "router2_enabled", True):
+            routed = self._apply_router(user_message)
+
+        memory.add_session_message(self.session_id, "user", user_message)
+        try:
+            from .personal_context import personal_context
+
+            personal_context.observe_turn(user_message, session_id=self.session_id, project=self.project)
+        except Exception as exc:
+            record_issue(
+                "memory", "personal_context_observe", exc, retryable=False, fallback="explicit context capture skipped this turn"
+            )
+        self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
+
+        # Lessons loop (Phase 3): user pushing back on a previous answer -> lesson
+        try:
+            if len(self.trajectory) >= 3:  # only when a prior exchange exists
+                from .reasoning.lessons import lessons_store
+
+                lessons_store.distill_user_correction(user_message)
+        except Exception:
+            pass
+
+        # Index user turn into semantic memory (best-effort)
+        try:
+            from .embeddings import embedding_store
+
+            embedding_store.add_text(
+                user_message,
+                metadata={"session_id": self.session_id, "role": "user"},
+                source=f"session:{self.session_id}",
+            )
+        except Exception as exc:
+            record_issue(
+                "memory", "embeddings_index_user", exc, retryable=False, fallback="user turn not indexed in semantic memory"
+            )
+
+        system_prompt = self._build_system_prompt(user_message)
+
+        # DeepThink plan-first (Phase 0): write an explicit plan for multi-step tasks
+        # Phase 4: plan_override resumes an existing plan (hermus plan resume)
+        plan = None
+        budget_steps = self.max_steps
+        try:
+            from .reasoning.governor import governor
+            from .reasoning.scaffold import plan_builder
+
+            budget_steps = governor.step_budget(user_message, mode=self.mode.value)
+            if self.plan_override is not None:
+                plan = self.plan_override
+                if plan and plan.steps:
+                    system_prompt += (
+                        "\n\nResuming explicit plan (DeepThink):\n"
+                        + plan.to_prompt()
+                        + "\nWork through the plan from the first not-done step; you may deviate if evidence demands it."
+                    )
+                    logger.info(f"[DeepThink] Resuming plan ({len(plan.steps)} steps)")
+            elif governor.should_plan_first(user_message, mode=self.mode.value):
+                plan = plan_builder.build_plan(
+                    user_message,
+                    session_id=self.session_id,
+                    difficulty=governor.classify_difficulty(user_message),
+                )
+                if plan and plan.steps:
+                    plan.save()
+                    system_prompt += (
+                        "\n\nExplicit plan (DeepThink):\n"
+                        + plan.to_prompt()
+                        + "\nWork through the plan; you may deviate if evidence demands it."
+                    )
+                    logger.info(f"[DeepThink] Plan drafted ({len(plan.steps)} steps)")
+        except Exception as e:
+            logger.warning(f"[DeepThink] plan-first skipped ({e})")
+
+        # Per-turn recall is owned by the harness (one cascade path). The agent
+        # used to run its own hybrid search *and* the harness cascade on the
+        # same query: two latencies, duplicated snippets in the prompt.
+        memory_results: list[dict] = []
+
+        messages: list[dict] = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+        ]
+        # Recent trajectory context
+        for turn in self.trajectory[-12:]:
+            role = turn.get("role") or "user"
+            if role == "tool":
+                # Represent prior tool outcomes as user observations for providers without tool role
+                messages.append({"role": "user", "content": turn.get("content", "")[:2000]})
+            elif role in ("user", "assistant", "system"):
+                messages.append({"role": role, "content": turn.get("content", "")[:4000]})
+
+        # Harness runs on the FULL assembled prompt. It has to be after the
+        # trajectory append: calling it earlier meant compaction only ever saw
+        # the system message and never actually compacted history. governed_turn
+        # is the same entry every other hand-built prompt path uses, so a
+        # harness failure degrades here instead of aborting the turn.
+        try:
+            from .harness import governed_turn as _governed_turn
+
+            _prep = _governed_turn(
+                self.session_id,
+                user_message,
+                messages,
+                project=str(self.project or ""),
+                budget_tokens=int(getattr(config, "harness_budget_tokens", 6000)),
+                model=self.model_name,
+            )
+            messages = _prep.get("messages") or messages
+            memory_results = (_prep.get("memory") or {}).get("hits") or []
+        except Exception as exc:
+            record_issue("harness", "prepare_turn", exc, retryable=False, fallback="turn continues without harness context")
+
+        all_tool_results: list[dict] = []
+        steps = 0
+        final_content = ""
+        pending_approval = None
+        last_usage = {}
+
+        # ---- Multi-step ReAct loop ----
+        while steps < budget_steps:
+            if cancel.cancelled:
+                emit("run_cancelled", {"step": steps})
+                raise CancelledRun("agent run cancelled")
+            # Mid-run steering: drain new instructions queued since the last
+            # step (POST /run/steer) and inject them into the conversation.
+            new_steers = _drain_steers()
+            if new_steers:
+                steer_block = (
+                    "MID-RUN STEERING — the user added the following constraint(s) "
+                    "while you were working. Treat them as the newest instruction "
+                    "and adjust your remaining work accordingly:\n- " + "\n- ".join(new_steers)
+                )
+                messages.append({"role": "user", "content": steer_block})
+                self.trajectory.append({"role": "user", "content": steer_block, "tool_calls": []})
+                emit("steer_applied", {"step": steps, "count": len(new_steers), "texts": [s[:200] for s in new_steers]})
+            steps += 1
+            try:
+                task_tracker.update_agent(
+                    self.agent_tracker_id,
+                    status="running",
+                    progress=f"Step {steps}/{budget_steps}",
+                )
+            except Exception:
+                pass
+
+            emit("step_started", {"step": steps, "of": budget_steps})
+            # Only pass tools while we still have budget for another tool round
+            use_tools = self._tools_for_turn(user_message, emit)
+            if stream:
+                response = self.llm.stream_chat(messages, tools=use_tools, on_delta=_delta_sink(emit, steps))
+            else:
+                response = self.llm.chat(messages, tools=use_tools)
+            last_usage = getattr(response, "usage", None) or last_usage
+            emit(
+                "step_observed",
+                {
+                    "step": steps,
+                    "tool_calls": len(getattr(response, "tool_calls", None) or []),
+                    "chars": len(getattr(response, "content", "") or ""),
+                },
+            )
+
+            if not response.tool_calls:
+                # Before committing to a final answer, honor steering that
+                # arrived while the model was generating: the user's newest
+                # instruction takes precedence over a stale answer.
+                late_steers = _drain_steers()
+                if late_steers and steps < budget_steps:
+                    steer_block = (
+                        "MID-RUN STEERING — the user added the following constraint(s) "
+                        "while you were working. Treat them as the newest instruction "
+                        "and adjust your answer/work accordingly:\n- " + "\n- ".join(late_steers)
+                    )
+                    messages.append({"role": "assistant", "content": response.content or ""})
+                    messages.append({"role": "user", "content": steer_block})
+                    self.trajectory.append({"role": "assistant", "content": response.content or "", "tool_calls": []})
+                    self.trajectory.append({"role": "user", "content": steer_block, "tool_calls": []})
+                    emit(
+                        "steer_applied",
+                        {
+                            "step": steps,
+                            "count": len(late_steers),
+                            "phase": "finalizing",
+                            "texts": [s[:200] for s in late_steers],
+                        },
+                    )
+                    continue
+                final_content = response.content or ""
+                break
+
+            # Record assistant tool-call turn
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": response.tool_calls,
+                }
+            )
+            self.trajectory.append(
+                {
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": response.tool_calls,
+                }
+            )
+
+            # Execute each tool call
+            observations = []
+            for tc in response.tool_calls:
+                tool_name = tc.get("name")
+                tool_args = tc.get("arguments", {})
+                if isinstance(tool_args, str):
+                    try:
+                        tool_args = json.loads(tool_args)
+                    except Exception:
+                        tool_args = {}
+                logger.info(f"[Tool step {steps}] {tool_name}({tool_args})")
+                _t0 = time.time()
+                emit("tool_call", {"step": steps, "tool": tool_name, "args": _safe_trunc_args(tool_args)})
+                if tool_name == EXPAND_TOOL_NAME:
+                    # The model needs something the subset did not include. Give
+                    # it the whole catalog for the rest of the turn rather than
+                    # letting it silently work around a missing capability.
+                    self._turn_tool_expanded = True
+                    self._turn_selected_tools = None
+                    result = {
+                        "success": True,
+                        "expanded": True,
+                        "tools_available": len(self.tools or []),
+                        "reason": str(tool_args.get("reason") or ""),
+                        "output": ("Full tool catalog is now available. Call the tool you needed."),
+                    }
+                    emit(
+                        "tools_expanded",
+                        {"step": steps, "reason": result["reason"], "tools_available": result["tools_available"]},
+                    )
+                else:
+                    result = self._execute_tool(tool_name, tool_args)
+                emit(
+                    "tool_result",
+                    {
+                        "step": steps,
+                        "tool": tool_name,
+                        "ms": int((time.time() - _t0) * 1000),
+                        "error": _result_failed(result),
+                        "preview": _preview(result),
+                    },
+                )
+                if isinstance(result, dict) and result.get("error_code") == "APPROVAL_REQUIRED":
+                    pending_approval = result.get("approval_request") or result
+                    emit(
+                        "approval_required",
+                        {
+                            "step": steps,
+                            "tool": tool_name,
+                            "approval_request": result.get("approval_request"),
+                            "safety": result.get("safety"),
+                            "next_action": result.get("next_action"),
+                        },
+                    )
+                try:
+                    from .harness import harness as _harness
+
+                    _harness.observe_tool(self.session_id, tool_name, tool_args)
+                except Exception as exc:
+                    record_issue(
+                        "harness", "observe_tool", exc, retryable=False, fallback=f"observation for tool '{tool_name}' skipped"
+                    )
+                all_tool_results.append({"tool": tool_name, "args": tool_args, "result": result, "step": steps})
+                # Lessons loop (Phase 3): tool failures become lessons immediately
+                try:
+                    rtext = json.dumps(result, default=str)
+                    if "error" in rtext[:300].lower() or "failed" in rtext[:300].lower():
+                        from .reasoning.lessons import lessons_store
+
+                        lessons_store.distill_tool_failure(tool_name, rtext[:150])
+                except Exception:
+                    pass
+                obs = self._format_tool_result(tool_name, result)
+                observations.append(obs)
+
+                memory.add_session_message(
+                    self.session_id,
+                    "tool",
+                    f"Tool {tool_name} result: {json.dumps(result, default=str)[:1000]}",
+                    tool_calls=[tc],
+                    metadata={"tool": tool_name, "step": steps},
+                )
+                self.trajectory.append(
+                    {
+                        "role": "tool",
+                        "content": f"{tool_name} result: {json.dumps(result, default=str)[:800]}",
+                        "tool_calls": [tc],
+                    }
+                )
+                if pending_approval is not None:
+                    break
+
+            if pending_approval is not None:
+                req_id = pending_approval.get("id") if isinstance(pending_approval, dict) else None
+                final_content = (
+                    "Waiting for approval before continuing. "
+                    + (f"Approval request: {req_id}. " if req_id else "")
+                    + "Open the Safety tab or use `hermus perms pending` to approve, deny, or scope this action."
+                )
+                break
+
+            # Feed observations back for next reasoning step
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Tool results (step "
+                        f"{steps}):\n\n"
+                        + "\n\n".join(observations)
+                        + "\n\nContinue. Call more tools if needed, otherwise give the final answer."
+                    ),
+                }
+            )
+        else:
+            # Hit max steps with pending work — force a final synthesis without tools
+            logger.info(f"[Agent] max_steps={self.max_steps} reached, forcing final answer")
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"You hit the max tool steps ({self.max_steps}). "
+                        "Give the best final answer now from the information gathered. No more tools."
+                    ),
+                }
+            )
+            final_resp = self.llm.chat(messages, tools=None)
+            final_content = final_resp.content or ""
+            last_usage = getattr(final_resp, "usage", None) or last_usage
+
+        if not final_content:
+            final_content = "(No response generated)"
+
+        # The model can only act agentically when the provider actually accepts
+        # tool definitions. When the provider stripped them (supports_tools
+        # false), say so instead of letting the model claim it "cannot do
+        # agentic tasks" with no visible reason.
+        tools_disabled = getattr(self.llm, "last_tools_disabled_reason", None)
+        if tools_disabled and self.tools:
+            emit("tools_disabled", {"reason": tools_disabled, "provider": getattr(self.llm, "provider", "")})
+            final_content += (
+                "\n\n---\n⚠️ *This reply ran without tool access: "
+                + tools_disabled
+                + ". Switch to a tool-calling provider (Groq, Ollama, or the local engine) to let Hermus act on your behalf.*"
+            )
+
+        # DeepThink deliberation strategy (Phase 3): reflexion / verify / self-consistency
+        strategy = "none"
+        strategy_meta: dict = {}
+        try:
+            from .reasoning.governor import governor as _gov
+            from .reasoning.strategies import apply_strategy
+
+            strategy = _gov.strategy_for(user_message, mode=self.mode.value)
+            if strategy != "none":
+                logger.info(f"[DeepThink] strategy={strategy} refining final answer")
+                new_content, strategy_meta = apply_strategy(
+                    strategy, user_message, all_tool_results, final_content, model=self.model_name
+                )
+                if new_content and new_content.strip():
+                    final_content = new_content
+        except Exception as e:
+            logger.warning(f"[DeepThink] strategy skipped ({e})")
+
+        # Persist assistant reply (Phase 4, P6: trajectory tagging)
+        try:
+            from .reasoning.governor import governor as _gov2
+
+            _difficulty = _gov2.classify_difficulty(user_message)
+        except Exception:
+            _difficulty = None
+        memory.add_session_message(
+            self.session_id,
+            "assistant",
+            final_content,
+            tag={
+                "strategy": strategy,
+                "difficulty": _difficulty,
+                "plan": plan.to_dict() if plan else None,
+                "council": False,
+            },
+        )
+        self.trajectory.append({"role": "assistant", "content": final_content, "tool_calls": []})
+
+        try:
+            from .embeddings import embedding_store
+
+            embedding_store.add_text(
+                final_content[:2000],
+                metadata={"session_id": self.session_id, "role": "assistant"},
+                source=f"session:{self.session_id}",
+            )
+        except Exception:
+            pass
+
+        # Token usage
+        try:
+            if last_usage:
+                memory.add_token_usage(self.session_id, last_usage)
+        except Exception as exc:
+            record_issue("telemetry", "token_usage", exc, retryable=False, fallback="token usage not recorded")
+
+        try:
+            if task_id:
+                task_tracker.complete_task(task_id, status="done", result=final_content[:200])
+            task_tracker.update_agent(self.agent_tracker_id, status="idle", progress="Done", task="idle")
+        except Exception:
+            pass
+
+        # Background self-improvement
+        try:
+            import threading
+
+            from .self_improvement import self_improvement
+
+            if not self_improvement.background_thread or not self_improvement.background_thread.is_alive():
+                self_improvement.start_background_idle_checker()
+
+            def background_reflection():
+                try:
+                    tool_failures = sum(
+                        1
+                        for turn in self.trajectory
+                        if "error" in turn.get("content", "").lower() or "failed" in turn.get("content", "").lower()
+                    )
+                    if len(self.trajectory) >= 3 or tool_failures > 0:
+                        self_improvement.run_idle_reflection(trajectory=self.trajectory[-20:])
+                except Exception as e:
+                    logger.error(f"[Self-Improvement] Background reflection failed: {e}")
+
+            threading.Thread(target=background_reflection, daemon=True).start()
+        except Exception as e:
+            logger.error(f"[Self-Improvement] Failed to trigger: {e}")
+
+        # Verification is computed *before* the skill forge so distillation is
+        # evidence-gated: we never learn a procedure from a task that failed.
+        verification_early = None
+        if getattr(config, "autonomous_enabled", False) or getattr(config, "skill_forge_enabled", True):
+            verification_early = self._verify_final(user_message, final_content)
+            if verification_early is not None:
+                emit("verification", verification_early)
+
+        # Skill forge (architecture upgrade): evaluate → distill → validate → install
+        skill_created = None
+        if getattr(config, "skill_forge_enabled", True):
+            try:
+                from .skill_forge import skill_forge
+
+                emit("skill_harvest_started", {"steps": steps, "turns": len(self.trajectory)})
+                skill_created = skill_forge.harvest(
+                    user_message,
+                    self.trajectory,
+                    verification=verification_early,
+                    tool_results=all_tool_results,
+                    session_id=self.session_id,
+                    final_answer=final_content,
+                )
+                if skill_created.get("created") or skill_created.get("installed"):
+                    emit(
+                        "skill_created",
+                        {
+                            "name": skill_created.get("name"),
+                            "path": skill_created.get("path"),
+                            "stage": skill_created.get("stage"),
+                            "evaluation": skill_created.get("evaluation"),
+                        },
+                    )
+                    logger.info(
+                        f"[SkillForge] {skill_created.get('stage') or 'installed'}: "
+                        f"{skill_created.get('name') or skill_created.get('merged_into')}"
+                    )
+                else:
+                    emit(
+                        "skill_skipped",
+                        {
+                            "stage": skill_created.get("stage"),
+                            "reasons": (skill_created.get("evaluation") or {}).get("reasons"),
+                            "merged_into": skill_created.get("merged_into"),
+                        },
+                    )
+            except Exception as e:
+                record_issue("skill_forge", "harvest", e, retryable=False, fallback="legacy auto-skill path")
+                logger.warning(f"[SkillForge] skipped ({e}) - falling back to legacy auto-skill")
+                skill_created = None
+        if skill_created is None and skill_manager.should_create_skill(self.trajectory):
+            logger.info("[Skill] Complex trajectory detected, auto-creating skill...")
+            skill_created = skill_manager.create_skill_from_trajectory(self.trajectory, self.session_id)
+
+        # Curate memory heuristic
+        try:
+            if "remember" in user_message.lower() or len(all_tool_results) >= 2:
+                memory.curate_memory(
+                    key=f"session_{self.session_id[:8]}_topic",
+                    value=user_message[:200] + " -> " + final_content[:300],
+                    source_session=self.session_id,
+                    importance=6,
+                )
+        except Exception as exc:
+            record_issue("memory", "curate", exc, retryable=False, fallback="turn not curated into memory")
+
+        # Memory 2.0 (architecture upgrade): auto-persist typed memories
+        self._persist_memory2(user_message, final_content, all_tool_results)
+
+        # Optional autonomous verify gate (non-blocking metadata)
+        verification = verification_early
+
+        emit(
+            "turn_finished",
+            {
+                "steps": steps,
+                "tools": len(all_tool_results),
+                "chars": len(final_content or ""),
+                "skill": (skill_created or {}).get("name"),
+                "verified": (verification or {}).get("verified"),
+            },
+        )
+        return {
+            "session_id": self.session_id,
+            "response": final_content,
+            "tool_results": all_tool_results,
+            "tool_calls": [tr["tool"] for tr in all_tool_results],
+            "steps": steps,
+            "max_steps": self.max_steps,
+            "skill_created": skill_created,
+            "memory_results": memory_results[:3] if memory_results else [],
+            "tools_available": len(self.tools),
+            "plan": plan.to_dict() if plan else None,
+            "strategy": strategy,
+            "strategy_meta": strategy_meta,
+            "router": routed,
+            "project": self.project,
+            "verification": verification,
+            "waiting_for_approval": pending_approval,
+            "status": "waiting_for_approval" if pending_approval else "done",
+            "events": None,
+        }
+
+    def chat(
+        self,
+        user_message: str,
+        *,
+        on_event=None,
+        stream: bool = False,
+        should_cancel=None,
+        steer_source=None,
+    ) -> dict[str, Any]:
+        """Run a turn while updating Hermus' durable identity/presence layer.
+
+        The existing ReAct loop remains the execution owner. This thin wrapper
+        only adds continuity: a user sees Hermus move through operational states,
+        and the next turn receives a short, grounded continuity block.
+        """
+        from .presence import get_presence
+
+        presence = get_presence()
+        job_context: dict[str, str] = {}
+        try:
+            from gateway.queue import current_job_context
+
+            job_context = current_job_context() or {}
+        except Exception:
+            # CLI/direct agent calls do not run inside the gateway queue.
+            job_context = {}
+        run_id = job_context.get("run_id", "")
+        user_id = str(getattr(self, "user_id", "") or "default")
+        goal = str(user_message or "").strip()
+        presence.begin_turn(
+            goal,
+            session_id=self.session_id,
+            run_id=run_id,
+            user_id=user_id,
+        )
+
+        def presence_event(event_type: str, data: dict | None = None) -> None:
+            data = data or {}
+            try:
+                if event_type in {"step_started", "tool_call", "tools_expanded"}:
+                    presence.activity(
+                        "working",
+                        detail=f"working · {event_type.replace('_', ' ')}",
+                        session_id=self.session_id,
+                        run_id=run_id,
+                        user_id=user_id,
+                        goal=goal,
+                    )
+                elif event_type in {"step_observed", "tool_result", "llm_delta"}:
+                    # Keep the status alive without emitting a disk write for
+                    # every streamed token.
+                    presence.touch(detail="thinking", user_id=user_id)
+                elif event_type == "verification":
+                    presence.activity(
+                        "verifying",
+                        detail="checking the result",
+                        session_id=self.session_id,
+                        run_id=run_id,
+                        user_id=user_id,
+                        goal=goal,
+                    )
+                elif event_type == "skill_harvest_started":
+                    presence.activity(
+                        "learning",
+                        detail="turn complete · distilling a reusable skill",
+                        session_id=self.session_id,
+                        run_id=run_id,
+                        user_id=user_id,
+                        goal=goal,
+                    )
+                elif event_type == "approval_required":
+                    presence.activity(
+                        "waiting_approval",
+                        detail="waiting for your approval",
+                        session_id=self.session_id,
+                        run_id=run_id,
+                        user_id=user_id,
+                        goal=goal,
+                    )
+            except Exception:
+                pass
+            if on_event is not None:
+                on_event(event_type, data)
+
+        result: dict[str, Any] | None = None
+        try:
+            result = self._chat_impl(
+                user_message,
+                on_event=presence_event,
+                stream=stream,
+                should_cancel=should_cancel,
+                steer_source=steer_source,
+            )
+            waiting = bool(result.get("waiting_for_approval")) or result.get("status") == "waiting_for_approval"
+            failed = (
+                bool(result.get("error")) or result.get("mission_failed") is True or result.get("status") in {"failed", "blocked"}
+            )
+            failure = result.get("failure") if isinstance(result.get("failure"), dict) else {}
+            failure_reason = str(result.get("error") or failure.get("reason") or "")
+            presence.finish_turn(
+                goal=goal,
+                response=str(result.get("response") or result.get("final_answer") or ""),
+                session_id=self.session_id,
+                run_id=run_id,
+                user_id=user_id,
+                success=not failed,
+                waiting_for_approval=waiting,
+                error=failure_reason if failed else "",
+            )
+            return result
+        except Exception as exc:
+            presence.finish_turn(
+                goal=goal,
+                response="",
+                session_id=self.session_id,
+                run_id=run_id,
+                user_id=user_id,
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    def _persist_memory2(self, user_message: str, final_content: str, tool_results: list[dict]) -> None:
+        """Auto-persist typed memories after a turn (best-effort, offline-safe)."""
+        if not getattr(config, "memory2_enabled", True):
+            return
+        try:
+            project = self.project
+            # episodic: what happened this turn
+            n_tools = len(tool_results)
+            failed = sum(1 for tr in tool_results if "error" in str(tr.get("result", "")).lower()[:300])
+            memory.remember(
+                "episodic",
+                f"User asked: {user_message[:200]}. Agent used {n_tools} tool(s) and {'failed' if failed else 'succeeded'}.",
+                project=project,
+                success=(failed == 0),
+            )
+            # semantic: explicit facts / preferences
+            low = user_message.lower()
+            if any(k in low for k in ("remember that", "i prefer", "i like", "my name is", "i use", "my favorite")):
+                memory.remember("semantic", user_message[:300], project=project, importance=7)
+            # procedural: successful multi-tool sequences become recipes
+            if n_tools >= 2 and failed == 0:
+                chain = " -> ".join(tr["tool"] for tr in tool_results[:5])
+                memory.remember(
+                    "procedural",
+                    f"For '{user_message[:120]}', a working tool sequence: {chain}",
+                    project=project,
+                    success=True,
+                )
+        except Exception as exc:
+            record_issue("memory", "memory2_persist", exc, retryable=False, fallback="typed memories for this turn not persisted")
+
+    def _verify_final(self, user_message: str, final_content: str) -> dict:
+        """Lightweight verification of the final answer (autonomous gate)."""
+        try:
+            from .verifiers import MarkerVerifier
+
+            v = MarkerVerifier().verify(user_message, final_content)
+            return {"verified": v.get("ok", True), "problems": v.get("problems", [])}
+        except Exception as e:
+            return {"verified": True, "error": str(e)}
+
+    def autonomous(
+        self, task: str, max_repairs: int = 2, *, on_event=None, should_cancel=None, steer_source=None
+    ) -> dict[str, Any]:
+        """Run a goal through the universal mission runtime.
+
+        This used to spin up a private ``AutonomousRunner`` — a second,
+        weaker autonomous system that ran in parallel with the MissionEngine
+        (different budget, different verification, different repair loop), so
+        behavior depended on which entry point a request happened to use.
+        ``autonomous()`` now routes through the same MissionEngine the
+        mission API, gateway queue and CLI use; each DAG stage reuses THIS
+        agent's ReAct loop (session memory, model and profile preserved),
+        with evidence-gated node success and mid-run steering.
+
+        The returned dict keeps the legacy contract (``status``, ``phases``,
+        ``steps``, ``verified``, ``repairs``, ``final_answer``) and adds the
+        canonical ``response`` plus the full mission report under ``mission``.
+
+        Set ``HERMUS_MISSION_RUNTIME=0`` to fall back to the old
+        AutonomousRunner path.
+        """
+        from .runtime import execute as runtime_execute
+
+        return runtime_execute(
+            task,
+            agent=self,
+            prefer="mission",
+            max_repairs=max_repairs,
+            on_event=on_event,
+            should_cancel=should_cancel,
+            steer_source=steer_source,
+        )
+
+    def _maybe_fleet_distribute(self, user_message: str) -> dict[str, Any] | None:
+        """
+        In multi-agent / multi-chat modes, auto-dispatch hard goals across
+        multiple models and API keys via the model fleet.
+        Skip for short greetings / simple questions.
+        """
+        msg = (user_message or "").strip()
+        if len(msg) < 40:
+            return None
+        # Explicit commands
+        lower = msg.lower()
+        force = any(
+            k in lower
+            for k in (
+                "multi model",
+                "multi-model",
+                "multiple models",
+                "multiple ai",
+                "fleet",
+                "fanout",
+                "debate",
+                "no matter how",
+                "use all keys",
+                "use multiple",
+            )
+        )
+        complexish = (
+            force or len(msg) > 120 or any(k in lower for k in ("research", "compare", "plan", "analyze", " and ", "1.", "2."))
+        )
+        if not complexish:
+            return None
+
+        try:
+            from .model_fleet import model_fleet
+
+            workers = model_fleet.list_workers().get("count", 0)
+            if workers < 2 and not force:
+                return None
+
+            strategy = "auto"
+            try:
+                # Deterministic orchestrator (Phase 4): table-driven strategy
+                from .counsel.router import router as _router
+
+                strategy = _router.fleet_strategy(msg, mode=self.mode.value)
+            except Exception:
+                strategy = "fanout" if self.mode == AgentMode.MULTI_CHAT else "auto"
+
+            logger.info(f"[Fleet] Multi-mode dispatch strategy={strategy} workers≈{workers}")
+            try:
+                task_tracker.update_agent(
+                    self.agent_tracker_id,
+                    status="running",
+                    progress=f"Fleet {strategy} across models/keys",
+                )
+            except Exception:
+                pass
+
+            result = model_fleet.auto_distribute(msg, strategy=strategy, max_workers=4)
+            final = result.get("consensus") or result.get("merged") or (result.get("winner") or {}).get("response") or ""
+            if not final and result.get("results"):
+                chunks = []
+                for r in result["results"]:
+                    if r.get("success") and r.get("response"):
+                        chunks.append(f"### {r.get('model')}\n{r['response'][:1500]}")
+                final = "\n\n".join(chunks) if chunks else str(result.get("error") or "Fleet finished with no text")
+
+            memory.add_session_message(self.session_id, "user", user_message)
+            memory.add_session_message(self.session_id, "assistant", final)
+            self.trajectory.append({"role": "user", "content": user_message, "tool_calls": []})
+            self.trajectory.append({"role": "assistant", "content": final, "tool_calls": []})
+
+            try:
+                task_tracker.update_agent(self.agent_tracker_id, status="idle", progress="Fleet done", task="idle")
+            except Exception:
+                pass
+
+            return {
+                "session_id": self.session_id,
+                "response": final,
+                "tool_results": [
+                    {
+                        "tool": "fleet_distribute_task",
+                        "args": {"goal": msg, "strategy": strategy},
+                        "result": {
+                            "mode": result.get("mode"),
+                            "success": result.get("success"),
+                            "workers_used": result.get("workers_used") or len(result.get("results") or []),
+                            "subtasks": result.get("subtasks"),
+                        },
+                    }
+                ],
+                "tool_calls": ["fleet_distribute_task"],
+                "steps": 1,
+                "max_steps": self.max_steps,
+                "fleet": result,
+                "mode": self.mode.value,
+                "tools_available": len(self.tools),
+            }
+        except Exception as e:
+            logger.warning(f"[Fleet] dispatch skipped: {e}")
+            return None
+
+    def new_session(self):
+        """Start fresh conversation - /new"""
+        self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
+        self.trajectory = []
+        logger.info(f"[Hermus] New session {self.session_id}")
+        return self.session_id
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Hermus Agent Free - Self-improving AI")
+    parser.add_argument(
+        "--model",
+        default=config.model,
+        help="Model: ollama/llama3.1:8b, groq/..., hf/..., mock/mock",
+    )
+    args = parser.parse_args()
+
+    agent = HermusAgent(model=args.model)
+    print(f"Hermus Free ready. Model {args.model}. Type /new, /skills, /model, /tools, /exit")
+    while True:
+        try:
+            user_input = input("\nYou> ").strip()
+            if not user_input:
+                continue
+            if user_input.lower() in ("/exit", "exit", "quit"):
+                break
+            if user_input.lower().startswith("/new"):
+                agent.new_session()
+                print("New session started")
+                continue
+            if user_input.lower().startswith("/skills"):
+                skills = skill_manager.list_skills()
+                print(f"Skills ({len(skills)}):")
+                for s in skills:
+                    print(f" - {s['name']}: {s['description'][:100]}")
+                continue
+            if user_input.lower().startswith("/tools"):
+                info = tool_registry.list_tools()
+                print(f"Tools: {info['count']}")
+                print(", ".join(info["tools"][:40]), "...")
+                continue
+            if user_input.lower().startswith("/model"):
+                parts = user_input.split()
+                if len(parts) > 1:
+                    agent = HermusAgent(model=parts[1])
+                    print(f"Switched to {parts[1]}")
+                else:
+                    print(f"Current model: {agent.model_name}")
+                continue
+
+            result = agent.chat(user_input)
+            print(f"\nHermus> {result['response']}")
+            if result["tool_results"]:
+                print(f"[Tools used ({result.get('steps')} steps): {', '.join([tr['tool'] for tr in result['tool_results']])}]")
+            if result["skill_created"] and result["skill_created"].get("created"):
+                print(f"[New skill created: {result['skill_created']['name']}]")
+
+        except KeyboardInterrupt:
+            print("\nUse /exit to quit")
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+# --------------------------------------------------------------------- helpers
+def _delta_sink(emit, step: int):
+    """on_delta callback: forward model tokens as llm_delta events."""
+
+    def _on_delta(piece: str) -> None:
+        emit("llm_delta", {"step": step, "text": (piece or "")[:2000]})
+
+    return _on_delta
+
+
+def _result_failed(result: Any) -> bool:
+    try:
+        from .tool_registry import tool_registry
+
+        return bool(tool_registry._looks_like_error(result))
+    except Exception:
+        if isinstance(result, dict):
+            return result.get("success") is False or bool(result.get("error"))
+        return False
+
+
+def _preview(result: Any, limit: int = 400) -> str:
+    try:
+        text = json.dumps(result, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(result)
+    return text[:limit]
+
+
+def _safe_trunc_args(args: Any, limit: int = 300) -> dict[str, Any]:
+    """Argument summary safe to publish to a dashboard (no long blobs)."""
+    if not isinstance(args, dict):
+        return {"value": str(args)[:limit]}
+    out: dict[str, Any] = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            out[k] = v[:160] + ("…" if len(v) > 160 else "")
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        else:
+            out[k] = str(v)[:120]
+    return out

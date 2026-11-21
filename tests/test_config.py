@@ -111,6 +111,7 @@ def test_env_lookup_is_case_sensitive(monkeypatch):
     monkeypatch.setenv("hermus_model", "must_be_ignored")
     assert Config().model == "mock/mock"
 
+
 def test_invalid_values_raise_validation_error(monkeypatch):
     import pydantic
 

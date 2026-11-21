@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <title>HERMUS — Harness</title>
+  <link rel="stylesheet" href="/static/harness.css">
+  <link rel="icon" href="/static/assets/favicon.svg">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">HERMUS<span class="brand-sub">harness</span></div>
+    <nav class="modes" aria-label="Mode">
+      <button type="button" class="mode on" data-mode="harness" aria-current="page">Harness</button>
+      <button type="button" class="mode" data-mode="agent" title="The agent cockpit, presence, approvals and subsystem console">Agent</button>
+    </nav>
+    <div class="bar-right">
+      <span class="pill" id="readyPill" title="gateway readiness">connecting…</span>
+      <span class="pill mono" id="modelPill" title="default model">model —</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <aside class="runs" aria-label="Runs">
+      <div class="runs-head">
+        <input id="runFilter" class="filter" type="search" placeholder="filter runs" aria-label="Filter runs">
+        <button id="newRun" class="btn" type="button" title="Start a new run">New</button>
+      </div>
+      <ol id="runList" class="run-list"></ol>
+      <p id="runsEmpty" class="empty">no runs yet — start one below</p>
+    </aside>
+
+    <section class="work" aria-label="Selected run">
+      <div class="work-head">
+        <div>
+          <h1 id="runTitle">No run selected</h1>
+          <p id="runMeta" class="meta">Pick a run on the left, or start a new one.</p>
+        </div>
+        <div class="work-actions">
+          <button id="interrupt" class="btn ghost" type="button" hidden>Interrupt</button>
+          <button id="refresh" class="btn ghost" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <ol id="transcript" class="transcript" aria-live="polite"></ol>
+
+      <form id="composer" class="composer" autocomplete="off">
+        <textarea id="task" rows="2" placeholder="Describe the task — what should change, and where. Ctrl+Enter to run." required></textarea>
+        <div class="composer-row">
+          <label class="field">
+            <span>target</span>
+            <input id="target" type="text" placeholder="path or repo (optional)">
+          </label>
+          <label class="field">
+            <span>model</span>
+            <select id="modelSelect"><option value="">default</option></select>
+          </label>
+          <button id="run" class="btn primary" type="submit">Run</button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="aside" aria-label="Changes and verification">
+      <div class="tabs" role="tablist" aria-label="Run detail">
+        <button role="tab" id="tab-diff" aria-controls="pane-diff" aria-selected="true" data-pane="diff" class="tab on">Changes</button>
+        <button role="tab" id="tab-verify" aria-controls="pane-verify" aria-selected="false" data-pane="verify" class="tab">Verification</button>
+      </div>
+      <div id="pane-diff" class="pane on" role="tabpanel" aria-labelledby="tab-diff">
+        <p class="empty">Select a run to see what it changed.</p>
+      </div>
+      <div id="pane-verify" class="pane" role="tabpanel" aria-labelledby="tab-verify">
+        <p class="empty">Select a run to see its verification.</p>
+      </div>
+    </aside>
+  </main>
+  <script src="/static/harness.js" defer></script>
+</body>
+</html>

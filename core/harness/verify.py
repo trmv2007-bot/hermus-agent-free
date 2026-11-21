@@ -18,7 +18,9 @@ File checks (paths are relative to the task workspace):
 
 * ``file_exists`` / ``file_not_exists`` {path}
 * ``file_contains``   {path, value}  — file text contains value (case-insensitive)
+* ``file_not_contains`` {path, value | values} — none of the needles appear
 * ``file_regex``      {path, pattern}
+* ``line_count``      {path, value}  — file has exactly this many lines
 
 Command checks (run with the shell inside the task workspace):
 
@@ -150,12 +152,31 @@ def _run_check(check: dict[str, Any], ctx: CheckContext, prefix: str = "") -> tu
             exists = p.exists()
             ok = exists if ctype == "file_exists" else not exists
             return CheckResult(label, ok, required, f"{p.name} exists={exists}"), nested
-        if ctype == "file_contains":
+        if ctype in ("file_contains", "file_not_contains"):
+            # ``values`` takes a list; ``value`` stays for the single-needle
+            # suites. ``file_not_contains`` is what a suite needs to say "none
+            # of these events fired" without a POSIX shell (`! grep -q`), so the
+            # builtin suites stay portable to Windows.
             p = _ws_path(ctx, check.get("path", ""))
             text = p.read_text(encoding="utf-8", errors="ignore") if p.is_file() else ""
-            needle = str(check.get("value", ""))
-            ok = needle.lower() in text.lower()
-            return CheckResult(label, ok, required, f"{check.get('path')} contains {needle[:60]!r}={ok}"), nested
+            needles = check.get("values")
+            if not isinstance(needles, list):
+                needles = [check.get("value", "")]
+            hits = [str(n) for n in needles if str(n).lower() in text.lower()]
+            want = ctype == "file_contains"
+            ok = bool(hits) if want else not hits
+            if want:
+                detail = f"{check.get('path')} contains {', '.join(repr(h[:40]) for h in hits) or repr(needles[0][:40])}={ok}"
+            else:
+                detail = f"{check.get('path')} clear of {', '.join(repr(str(n)[:40]) for n in needles)}={ok}"
+            return CheckResult(label, ok, required, detail), nested
+        if ctype in ("line_count", "file_line_count"):
+            p = _ws_path(ctx, check.get("path", ""))
+            want = int(check.get("value", 0))
+            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines() if p.is_file() else None
+            ok = lines is not None and len(lines) == want
+            detail = f"{check.get('path')} lines={len(lines) if lines is not None else 'missing'} (want {want})"
+            return CheckResult(label, ok, required, detail), nested
         if ctype == "file_regex":
             p = _ws_path(ctx, check.get("path", ""))
             text = p.read_text(encoding="utf-8", errors="ignore") if p.is_file() else ""

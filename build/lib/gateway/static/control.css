@@ -1,0 +1,27 @@
+/* HERMUS NEXUS — accessibility contract layer.
+
+   The visual interaction system lives in nexus.css; this file pins the two
+   non-negotiable affordances so they survive any restyle:
+   1. keyboard focus is always visible (outline, not just color);
+   2. animated affordances honour prefers-reduced-motion, including the
+      transient ones (pulses, skeleton shimmer, toasts).
+*/
+
+:focus-visible {
+  outline: 2px solid var(--accent, #4f46e5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse,
+  .state-dot,
+  .event i,
+  .skeleton,
+  .vram-fill,
+  .toast,
+  .ui-toast {
+    animation: none !important;
+    transition: none !important;
+  }
+}

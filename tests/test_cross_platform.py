@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_configure_stdio_turns_an_unencodable_glyph_into_output(tmp_path):
+def test_configure_stdio_keeps_a_glyph_a_plain_console_cannot_encode(tmp_path):
     """The doctor crash: cp1252 stdout + "✅" raised UnicodeEncodeError."""
     from core.stdio import configure_stdio
 
@@ -27,21 +27,21 @@ def test_configure_stdio_turns_an_unencodable_glyph_into_output(tmp_path):
     finally:
         stream.close()
 
-    assert "model ready" in path.read_text(encoding="cp1252")
+    assert path.read_text(encoding="utf-8") == "✅ model ready\n"
 
 
 def test_configure_stdio_leaves_plain_encodable_output_alone(tmp_path):
     from core.stdio import configure_stdio
 
     path = tmp_path / "out.txt"
-    stream = open(path, "w", encoding="cp1252")
+    stream = open(path, "w", encoding="utf-8")
     try:
         configure_stdio(stream)
         stream.write("hermus doctor: 12 checks\n")
     finally:
         stream.close()
 
-    assert path.read_text(encoding="cp1252") == "hermus doctor: 12 checks\n"
+    assert path.read_text(encoding="utf-8") == "hermus doctor: 12 checks\n"
 
 
 @pytest.mark.parametrize(

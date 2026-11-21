@@ -1,0 +1,980 @@
+"""The canonical ModelGateway.
+
+Centralizes provider discovery, credential resolution, health/rate state,
+capability negotiation, task-fit scoring, primary+fallback selection and outcome
+recording (Rebuild spec §11). It delegates to the real modules that already hold
+this logic (``provider_resolver``, ``model_capabilities``, ``router2``) — it does
+not reimplement them — but exposes ONE public entry point so no caller hand-rolls
+a fallback chain.
+
+Corrections the spec requires, honored here:
+* Model name keywords are only one score feature, never proof of capability.
+* A tool-required mission cannot select a model on name alone; capability is
+  probed/known before selection.
+* Distinguish "multimodal accepted" from "vision tool integration works".
+* Hard reliability requirements override price ranking.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from typing import Any
+
+from ..contracts import Capability, FailureClass, ModelGatewayResult, ModelRequirement, ModelSelection
+from ..errors import HermusError
+
+#: HTTP status per model failure class (for the gateway envelope).
+_STATUS_BY_FAILURE_CLASS = {
+    FailureClass.RATE_LIMIT.value: 429,
+    FailureClass.AUTH.value: 401,
+    FailureClass.TIMEOUT.value: 504,
+    FailureClass.INVALID_MODEL.value: 400,
+    FailureClass.TOOL_UNSUPPORTED.value: 400,
+    FailureClass.CONTEXT_OVERFLOW.value: 400,
+    FailureClass.POLICY_DENIED.value: 403,
+    FailureClass.NETWORK.value: 502,
+    FailureClass.PROVIDER_UNAVAILABLE.value: 502,
+    FailureClass.MODEL_UNAVAILABLE.value: 502,
+    FailureClass.CAPABILITY_MISMATCH.value: 400,
+    FailureClass.UNKNOWN.value: 502,
+}
+
+
+class ModelGatewayError(HermusError):
+    """A typed model-gateway error carrying a canonical ``failure_class``.
+
+    ``error_code`` is one of the structured codes the spec requires:
+    ``provider_unavailable``, ``rate_limited``, ``authentication_failed``,
+    ``model_unavailable``, ``timeout``, ``capability_mismatch``. Callers read
+    ``failure_class``/``error_code`` to decide recovery instead of parsing text.
+
+    Re-based onto :class:`HermusError` so the gateway renders these with the
+    canonical envelope (``code`` mirrors the legacy ``error_code``).
+    """
+
+    code = "model_error"
+    status = 502
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_class: str = FailureClass.UNKNOWN.value,
+        provider: str = "",
+        model: str = "",
+        retryable: bool | None = None,
+    ):
+        resolved_retryable = (
+            retryable
+            if retryable is not None
+            else (
+                failure_class
+                in (
+                    FailureClass.RATE_LIMIT.value,
+                    FailureClass.TIMEOUT.value,
+                    FailureClass.NETWORK.value,
+                    FailureClass.PROVIDER_UNAVAILABLE.value,
+                )
+            )
+        )
+        super().__init__(
+            message,
+            code=failure_class,
+            status=_STATUS_BY_FAILURE_CLASS.get(failure_class, 502),
+            retryable=resolved_retryable,
+            details={"provider": provider, "model": model} if (provider or model) else None,
+        )
+        self.failure_class = failure_class
+        self.error_code = failure_class
+        self.provider = provider
+        self.model = model
+
+
+class ModelGateway:
+    """One facade for provider discovery + model selection + completion."""
+
+    def __init__(self, *, resolver=None, capabilities=None, router=None, fleet=None, llm_builder=None):
+        self._resolver = resolver
+        self._capabilities = capabilities
+        self._router = router
+        self._fleet = fleet
+        self._llm_builder = llm_builder  # test seam: inject a deterministic FreeLLM
+        self._lock = threading.RLock()
+        # In-process circuit breaker / rate state keyed by provider.
+        self._circuit: dict[str, dict[str, Any]] = {}
+        self._model_stats: dict[str, dict[str, Any]] = {}
+        # Deterministic fallback ordering guards against infinite fallback loops.
+        self._fallback_visited: dict[str, int] = {}
+        self._fallback_max_depth = 5
+
+    # -- lazy deps -------------------------------------------------------------
+    def _resolver_mod(self):
+        if self._resolver is not None:
+            return self._resolver
+        from .. import provider_resolver  # type: ignore
+
+        return provider_resolver
+
+    def _capability_mod(self):
+        if self._capabilities is not None:
+            return self._capabilities
+        from .. import model_capabilities  # type: ignore
+
+        return model_capabilities
+
+    def _router_mod(self):
+        if self._router is not None:
+            return self._router
+        from .. import router2  # type: ignore
+
+        return router2
+
+    # --------------------------------------------------------------------------
+    def providers(self, *, probe: bool = False) -> list[dict[str, Any]]:
+        """One authoritative provider report (discovery + health + capability)."""
+        return self._resolver_mod().list_available_providers(probe=probe)
+
+    def inventory(self) -> list[dict[str, Any]]:
+        """Raw credential bundles available to the runtime."""
+        return self._resolver_mod().discover_runtime_bundles(include_local=True)
+
+    def catalog(self, *, probe: bool = False, refresh: bool = False) -> dict[str, Any]:
+        """Return the secret-free runtime model catalog used by the UI."""
+        from .model_catalog import model_catalog
+
+        return model_catalog.list(probe=probe, refresh=refresh)
+
+    def selected_models(self) -> dict[str, Any]:
+        """Return persisted role selections without exposing credentials."""
+        from .model_preferences import model_preferences
+
+        return model_preferences.snapshot()
+
+    def select_preference(self, role: str, model: str | None, *, validate: bool = True) -> dict[str, Any]:
+        """Persist a user-selected model after canonical catalog validation."""
+        from .model_preferences import model_preferences
+
+        result = model_preferences.set(role, model, validate=validate)
+        return {**result, "catalog": self.catalog(probe=False)}
+
+    def resolve_model(
+        self, role: str = "default", *, required: list[str] | None = None, provider: str | None = None
+    ) -> tuple[str | None, str | None]:
+        """Resolve a persisted model or dynamically choose a catalog deployment."""
+        from .model_preferences import model_preferences
+
+        preferred = model_preferences.get(role)
+        rows = list(self.catalog(probe=False).get("models") or [])
+
+        def split(ref: str) -> tuple[str, str]:
+            p, _, name = str(ref).partition("/")
+            return p, name
+
+        if preferred:
+            p, name = split(preferred)
+            if p and name and (provider is None or p == provider):
+                row = next((r for r in rows if r.get("ref") == preferred), None)
+                caps = (row or {}).get("capabilities") or {}
+                if row is not None and not any(caps.get(req) == "no" for req in (required or [])):
+                    return p, name
+
+        candidates = []
+        for row in rows:
+            p = str(row.get("provider") or "")
+            if provider and p != provider:
+                continue
+            caps = row.get("capabilities") or {}
+            if any(caps.get(req) == "no" for req in (required or [])):
+                continue
+            if row.get("reachable") is False:
+                continue
+            candidates.append(row)
+
+        if required:
+            exact = [r for r in candidates if all((r.get("capabilities") or {}).get(req) == "yes" for req in required)]
+            if exact:
+                candidates = exact
+
+        if candidates:
+            candidates.sort(
+                key=lambda r: (
+                    0 if r.get("source") == "live" else 1,
+                    -sum(1 for v in (r.get("capabilities") or {}).values() if v == "yes"),
+                    str(r.get("provider") or ""),
+                    str(r.get("id") or ""),
+                )
+            )
+            p, name = split(str(candidates[0].get("ref") or ""))
+            if p and name:
+                return p, name
+
+        # No hard-coded model is a valid runtime fallback. If discovery is
+        # empty, fail honestly instead of silently selecting an arbitrary model.
+        return None, None
+
+    # --------------------------------------------------------------------------
+    def select(self, req: ModelRequirement) -> list[ModelSelection]:
+        """Score and return ranked candidate model selections for a requirement.
+
+        Uses the real ``provider_resolver`` to pick the best available bundle and
+        ``model_capabilities`` to know, not guess, whether a deployment supports
+        the required capabilities. Returns zero or more ranked candidates.
+        """
+        mod = self._resolver_mod()
+        require_tools = req.requires_tools() or req.tools
+        # Primary bundle chosen by the resolver's own single fallback decision.
+        bundle = mod.select_usable_bundle(
+            require_tools=require_tools,
+            prefer=req.preferred_providers or None,
+        )
+        candidates: list[ModelSelection] = []
+        if bundle:
+            candidates.append(self._bundle_to_selection(bundle, req, reason="resolver.choice"))
+        # Add a capability-probed candidate when the resolver picked a model that
+        # cannot satisfy a requested capability.
+        if req.vision:
+            vision_sel = self._find_vision_candidate(req)
+            if vision_sel and not any(c.model == vision_sel.model for c in candidates):
+                candidates.append(vision_sel)
+        # Router2 keyword scoring becomes an additional, lower-weight input.
+        router_cand = self._router_candidate(req)
+        if router_cand and not any(c.model == router_cand.model for c in candidates):
+            candidates.append(router_cand)
+        # Sort: capability-satisfied first, then reliability over cost.
+        candidates.sort(
+            key=lambda c: (not c.tool_capable if require_tools else 0, not c.vision_capable if req.vision else 0, -c.score)
+        )
+        return candidates
+
+    def choose(self, req: ModelRequirement) -> ModelSelection | None:
+        sel = self.select(req)
+        return sel[0] if sel else None
+
+    # -- Section-4 public API ---------------------------------------------------
+    def select_model(self, req: ModelRequirement) -> ModelSelection | None:
+        """Alias of ``choose``: the one model-selection decision entry point."""
+        return self.choose(req)
+
+    def negotiate_capabilities(self, model: str, provider: str = "", required: list[str] | None = None) -> dict[str, Any]:
+        """Report (not guess) the capabilities a deployment supports.
+
+        Returns a dict with ``capabilities``, ``tools``, ``vision``, ``reasoning``,
+        ``context_window`` and an explicit ``capability_mismatch`` when a required
+        capability is not supported.
+        """
+        cap = self._probe_capability(model, provider) or {}
+        supported = set(cap.get("capabilities") or [])
+        out = {
+            "model": model,
+            "provider": provider,
+            "capabilities": sorted(supported),
+            "tools": cap.get("tools") is True,
+            "vision": cap.get("vision") is True,
+            "reasoning": cap.get("reasoning") is True,
+            "context_window": cap.get("context_window", 0),
+        }
+        missing = []
+        for req in required or []:
+            if req == "tools" and not out["tools"]:
+                missing.append("tools")
+            elif req == "vision" and not out["vision"]:
+                missing.append("vision")
+            elif req == "reasoning" and not out["reasoning"]:
+                missing.append("reasoning")
+            elif req not in supported:
+                missing.append(req)
+        out["capability_mismatch"] = bool(missing)
+        out["missing"] = missing
+        return out
+
+    def capabilities_for(self, model: str, provider: str = "") -> dict[str, Any]:
+        return self.negotiate_capabilities(model, provider)
+
+    def llm(
+        self,
+        model: str | None = None,
+        provider: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        temperature: float | None = None,
+        role: str = "default",
+    ):
+        """Build the concrete completion object for a model via the canonical path.
+
+        This is the ONE place application code obtains a model client. ``FreeLLM``
+        (the provider-call implementation) is created here and returned; the caller
+        never constructs a provider client or picks a provider/model itself. A test
+        seam (``llm_builder``) can inject a deterministic stub.
+        """
+        if model is None:
+            selected_provider, selected_model = self.resolve_model(role=role, provider=provider)
+            if selected_model:
+                model = selected_model
+                provider = selected_provider or provider
+        elif provider is None and "/" in str(model):
+            provider, model = str(model).split("/", 1)
+
+        if self._llm_builder is not None:
+            return self._llm_builder(model=model, provider=provider, api_key=api_key, base_url=base_url, temperature=temperature)
+        from .. import llm  # type: ignore
+
+        return llm.FreeLLM(model=model, api_key=api_key, base_url=base_url, provider=provider, temperature=temperature)
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        trace_id: str | None = None,
+        max_retries: int = 1,
+        role: str = "default",
+        **kw,
+    ):
+        """Real completion through the canonical boundary.
+
+        Resolves the model (default = configured/selected), invokes the provider
+        adapter, records a typed outcome, and returns the ``LLMResponse``
+        (content/tool_calls/usage) — or raises a :class:`ModelGatewayError` carrying
+        a structured ``failure_class``/``error_code`` so the caller can recover.
+        Never fabricates a response on failure.
+        """
+        llm_obj = self.llm(
+            model=model,
+            provider=provider,
+            role=role,
+            **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw},
+        )
+        started = time.time()
+        try:
+            resp = llm_obj.chat(messages, tools=tools)
+        except Exception as exc:
+            actual_provider = getattr(llm_obj, "provider", provider or "unknown")
+            actual_model = getattr(llm_obj, "model_name", model or "")
+            failed = self._failed_result(exc, trace_id)
+            failed.provider = actual_provider
+            failed.model = actual_model
+            self._record_outcome(actual_provider, failed)
+            raise ModelGatewayError(
+                str(exc),
+                failure_class=self._classify_failure(exc),
+                provider=actual_provider,
+                model=actual_model,
+            ) from exc
+        self._record_outcome(
+            getattr(llm_obj, "provider", provider or "unknown"),
+            ModelGatewayResult(
+                provider=getattr(llm_obj, "provider", provider or "unknown"),
+                model=getattr(llm_obj, "model_name", model or ""),
+                ok=True,
+                latency_ms=int((time.time() - started) * 1000),
+                content=resp.content,
+                tool_calls=resp.tool_calls,
+                trace_id=trace_id,
+            ),
+        )
+        return resp
+
+    def vision_complete(
+        self,
+        image_base64: str,
+        prompt: str,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        """Vision completion (image -> text) through the canonical boundary.
+
+        Resolves the configured/selected vision-capable deployment dynamically, builds the
+        provider client via ``llm()`` so the caller never constructs one, sends
+        the image, records a typed outcome, and returns the text. On failure it
+        raises a :class:`ModelGatewayError` carrying a structured ``failure_class``
+        (``model_unavailable`` for a missing Ollama model, ``network`` when Ollama
+        is not running). It never fabricates a description.
+        """
+
+        if model and "/" in str(model):
+            provider, model = str(model).split("/", 1)
+        if not model:
+            provider, model = self.resolve_model("vision", required=["vision"], provider=provider)
+        if not model or not provider:
+            raise ModelGatewayError(
+                "no dynamically discovered vision-capable model is available",
+                failure_class=FailureClass.CAPABILITY_MISMATCH.value,
+            )
+        llm_obj = self.llm(
+            model=model,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=temperature,
+            role="vision",
+        )
+        started = time.time()
+        try:
+            resp = llm_obj.generate_image(prompt, image_base64)
+        except Exception as exc:  # noqa: BLE001 - classified below
+            fc = self._classify_failure(exc)
+            self._record_outcome(
+                llm_obj.provider,
+                ModelGatewayResult(
+                    provider=llm_obj.provider,
+                    model=model,
+                    ok=False,
+                    failure_class=fc,
+                    error_message=str(exc),
+                    retryable=self._retryable_failure(fc),
+                    latency_ms=int((time.time() - started) * 1000),
+                ),
+            )
+            raise ModelGatewayError(str(exc), failure_class=fc, provider=llm_obj.provider, model=model) from exc
+        self._record_outcome(
+            llm_obj.provider,
+            ModelGatewayResult(
+                provider=llm_obj.provider,
+                model=model,
+                ok=True,
+                content=resp.content,
+                latency_ms=int((time.time() - started) * 1000),
+            ),
+        )
+        return resp.content
+
+    def vision_models(self, base_url: str | None = None) -> list[str]:
+        """List the models exposed by the configured free-local Ollama node.
+
+        This is discovery (not generation) and lives in the model subsystem;
+        callers go through this one entry point instead of issuing a request to
+        a model backend themselves.
+        """
+        from .. import llm  # type: ignore
+
+        try:
+            return llm.list_ollama_models(base_url=base_url)
+        except Exception as exc:  # noqa: BLE001 - classified below
+            fc = self._classify_failure(exc)
+            raise ModelGatewayError(str(exc), failure_class=fc, provider="ollama", model="") from exc
+
+    def stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        on_delta: Any | None = None,
+        **kw,
+    ):
+        """Streaming completion through the canonical boundary.
+
+        Adapts the provider adapter's ``stream_chat`` generator; on failure it
+        raises a typed :class:`ModelGatewayError`. ``on_delta`` is invoked per chunk
+        when the underlying adapter supports it (the returned generator still yields
+        text chunks regardless).
+        """
+        llm_obj = self.llm(
+            model=model, provider=provider, **{k: kw[k] for k in ("api_key", "base_url", "temperature") if k in kw}
+        )
+        try:
+            gen = llm_obj.stream_chat(messages, tools=tools, on_delta=on_delta)
+        except Exception as exc:
+            raise ModelGatewayError(
+                str(exc),
+                failure_class=self._classify_failure(exc),
+                provider=getattr(llm_obj, "provider", provider or "unknown"),
+                model=getattr(llm_obj, "model_name", model or ""),
+            ) from exc
+
+        # §4.3 A failure during *iteration* (not generation) must be classified too —
+        # a bare generator would let a late provider error propagate as a raw exception.
+        def _guarded() -> Any:
+            try:
+                yield from gen
+            except Exception as exc:  # noqa: BLE001 - classified below
+                raise ModelGatewayError(
+                    str(exc),
+                    failure_class=self._classify_failure(exc),
+                    provider=getattr(llm_obj, "provider", provider or "unknown"),
+                    model=getattr(llm_obj, "model_name", model or ""),
+                ) from exc
+
+        return _guarded()
+
+    def chat_with_fallback(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        req: ModelRequirement | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_retries: int = 2,
+        max_fallbacks: int = 3,
+        trace_id: str | None = None,
+    ) -> Any:
+        """Real retry + fallback execution (§4.2).
+
+        Given a task requirement, this actually *executes* the completion:
+          1. ranks candidates (primary selection first, then ordered fallbacks);
+          2. for each candidate, retries up to ``max_retries`` on a retryable failure;
+          3. if a candidate exhausts its retries, moves to the next candidate
+             (``used_fallback`` is recorded);
+          4. returns the first successful response, or raises a single
+             :class:`ModelGatewayError` listing every attempt (provider/model/failure).
+
+        This is NOT just a list of candidates — it drives real completion via
+        ``self.llm().chat()`` and records outcomes/circuit state per attempt. A test
+        injects a deterministic ``llm_builder`` to prove provider-A-unavailable ->
+        provider-B-selected -> response returned.
+        """
+        req = req or ModelRequirement(task="chat", tools=bool(tools))
+        order: list[tuple[str, str]] = []
+        primary = self.select(req)
+        if primary:
+            sel = primary[0]
+            order.append((sel.provider, sel.model))
+        for sel in self.fallback(req, max_depth=max_fallbacks, exclude=[p for p, _ in order]):
+            order.append((sel.provider, sel.model))
+        if not order:
+            raise ModelGatewayError(
+                "no candidate model available for the requirement", failure_class=FailureClass.PROVIDER_UNAVAILABLE.value
+            )
+
+        attempts: list[dict[str, Any]] = []
+        for i, (provider, model) in enumerate(order):
+            used_fallback = i > 0
+            llm_obj = self.llm(model=model, provider=provider)
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    # Only retry when the previous failure was retryable.
+                    prev = attempts[-1]
+                    if not prev["retryable"]:
+                        break
+                started = time.time()
+                try:
+                    resp = llm_obj.chat(messages, tools=tools)
+                    self._record_outcome(
+                        provider,
+                        ModelGatewayResult(
+                            provider=provider,
+                            model=model,
+                            ok=True,
+                            content=resp.content,
+                            tool_calls=resp.tool_calls,
+                            latency_ms=int((time.time() - started) * 1000),
+                            used_fallback=used_fallback,
+                            trace_id=trace_id,
+                        ),
+                    )
+                    return resp
+                except Exception as exc:
+                    fc = self._classify_failure(exc)
+                    retryable = self._retryable_failure(fc)
+                    attempts.append(
+                        {
+                            "provider": provider,
+                            "model": model,
+                            "failure_class": fc,
+                            "error": str(exc),
+                            "retryable": retryable,
+                            "attempt": attempt + 1,
+                            "retries": max_retries,
+                        }
+                    )
+                    self._record_outcome(
+                        provider,
+                        ModelGatewayResult(
+                            provider=provider,
+                            model=model,
+                            ok=False,
+                            failure_class=fc,
+                            error_message=str(exc),
+                            retryable=retryable,
+                            latency_ms=int((time.time() - started) * 1000),
+                            used_fallback=used_fallback,
+                            trace_id=trace_id,
+                        ),
+                    )
+                    if not retryable:
+                        break  # unrecoverable for this provider -> try next fallback
+
+        last = attempts[-1] if attempts else {}
+        raise ModelGatewayError(
+            f"all {len(attempts)} model attempt(s) failed: "
+            + "; ".join(f"{a['provider']}/{a['model']}={a['failure_class']}" for a in attempts),
+            failure_class=last.get("failure_class") or FailureClass.UNKNOWN.value,
+            provider=last.get("provider", ""),
+            model=last.get("model", ""),
+            retryable=any(a["retryable"] for a in attempts),
+        )
+
+    def fallback(
+        self, req: ModelRequirement, *, exclude: list[str] | None = None, max_depth: int | None = None
+    ) -> list[ModelSelection]:
+        """Deterministic ordered fallback candidates, avoiding infinite loops.
+
+        Returns a non-repeating ordered list (primary first); the caller tries each
+        in order. ``exclude`` lets a caller drop a provider that just failed, and a
+        per-run visit log prevents cycling, so a broken provider can never cause an
+        endless retry loop.
+        """
+        max_depth = max_depth or self._fallback_max_depth
+        exclude = set(exclude or [])
+        # `select()` surfaces the single resolver choice (+ vision/router candidates);
+        # `fallback()` must ALSO enumerate every other available bundle so a provider
+        # that just failed can genuinely be replaced by another, not by the same one.
+        cands = list(self.select(req))
+        cands += self._enumerate_bundle_candidates(req)
+        out: list[ModelSelection] = []
+        seen: set[str] = set()
+        for c in cands:
+            if c.provider in exclude or c.model in exclude or c.provider == "" or c.model == "":
+                continue
+            key = f"{c.provider}:{c.model}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+            if len(out) >= max_depth:
+                break
+        return out
+
+    def _enumerate_bundle_candidates(self, req: ModelRequirement) -> list[ModelSelection]:
+        """Build selection candidates from every resolver-reported bundle (not just the
+        single ``select_usable_bundle`` choice), so fallback has real alternatives."""
+        mod = self._resolver_mod()
+        bundles: list[dict[str, Any]] = []
+        for fn_name, kwargs in (("discover_runtime_bundles", {"include_local": True}), ("list_available_providers", {})):
+            fn = getattr(mod, fn_name, None)
+            if not callable(fn):
+                continue
+            try:
+                bundles = fn(**kwargs) or []
+            except Exception:
+                bundles = []
+            if bundles:
+                break
+        out: list[ModelSelection] = []
+        for b in bundles:
+            if not isinstance(b, dict):
+                continue
+            provider = b.get("provider") or ""
+            model = b.get("default_model") or ""
+            if not provider or not model:
+                continue
+            out.append(self._bundle_to_selection(b, req, reason="resolver.enumeration"))
+        return out
+
+    def health_check(self) -> dict[str, Any]:
+        """Aggregate health/status of the boundary (no fabrication)."""
+        return {
+            "providers": self.providers(probe=False),
+            "circuit": self.health(),
+        }
+
+    def provider_status(self) -> list[dict[str, Any]]:
+        """Per-provider status (discovery + circuit/health)."""
+        return self.providers(probe=False)
+
+    def model_status(self) -> dict[str, Any]:
+        """Model capability report from the canonical capability registry."""
+        cap_mod = self._capability_mod()
+        try:
+            discover = getattr(cap_mod, "discover_runtime_bundles", None) or getattr(cap_mod, "list_available_providers", None)
+            if callable(discover):
+                return {"models": discover()}
+        except Exception:
+            pass
+        return {"models": []}
+
+    def status(self) -> dict[str, Any]:
+        return self.health_check()
+
+    def _failed_result(self, exc: Exception, trace_id: str | None) -> ModelGatewayResult:
+        return ModelGatewayResult(
+            provider="",
+            model="",
+            ok=False,
+            failure_class=self._classify_failure(exc),
+            error_code=self._classify_failure(exc),
+            error_message=str(exc),
+            retryable=self._retryable_failure(self._classify_failure(exc)),
+            trace_id=trace_id,
+        )
+
+    # --------------------------------------------------------------------------
+    def complete(
+        self,
+        *,
+        provider: str,
+        model: str,
+        content: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        trace_id: str | None = None,
+        **kw,
+    ) -> ModelGatewayResult:
+        """Record a completion outcome and update circuit/rate state.
+
+        This is the observation hook: the actual provider call is delegated to the
+        existing LLM/OpenAI-compatible layer; the gateway records the typed outcome
+        and updates health/circuit-breaker state so a late failure breaks a flaky
+        provider before the next mission.
+        """
+        started = time.time()
+        try:
+            # Delegate the call to the canonical completion path if available.
+            content, tool_calls, extra = self._invoke_complete(provider, model, trace_id, **kw)
+            ok = True
+            failure_class = None
+            latency = int((time.time() - started) * 1000)
+        except Exception as exc:
+            content = None
+            tool_calls = None
+            failure_class = self._classify_failure(exc)
+            ok = False
+            latency = int((time.time() - started) * 1000)
+            extra = {"error_message": str(exc)}
+        result = ModelGatewayResult(
+            provider=provider,
+            model=model,
+            ok=ok,
+            failure_class=failure_class,
+            error_code=extra.get("error_code"),
+            error_message=extra.get("error_message"),
+            latency_ms=latency,
+            content=content,
+            tool_calls=tool_calls,
+            rate_state=extra.get("rate_state"),
+            trace_id=trace_id,
+            used_fallback=bool(extra.get("used_fallback")),
+            fallback_reason=extra.get("fallback_reason"),
+            retryable=self._retryable_failure(failure_class),
+        )
+        self._record_outcome(provider, result)
+        return result
+
+    # -- internals --------------------------------------------------------------
+    def _bundle_to_selection(self, bundle: dict[str, Any], req: ModelRequirement, reason: str) -> ModelSelection:
+        provider = bundle.get("provider") or "custom"
+        model = bundle.get("default_model") or ""
+        cap = self._probe_capability(model, provider)
+        tool_capable = cap.get("tools") is True
+        vision_capable = cap.get("vision") is True
+        return ModelSelection(
+            provider=provider,
+            model=model,
+            score=_score(cap, req),
+            reason=reason,
+            capabilities=cap.get("capabilities", []),
+            context_window=cap.get("context_window", 0),
+            tool_capable=tool_capable,
+            vision_capable=vision_capable,
+            base_url=bundle.get("base_url"),
+            api_key_ref=bundle.get("key_ref"),
+            free=bool(bundle.get("free")),
+        )
+
+    def _probe_capability(self, model: str, provider: str) -> dict[str, Any]:
+        cap_mod = self._capability_mod()
+        negotiate = getattr(cap_mod, "negotiate", None)
+        if negotiate is None:
+            return {}
+        try:
+            report = negotiate(model)
+            if report is None:
+                return {}
+            if isinstance(report, dict):
+                return report
+            to_dict = getattr(report, "to_dict", None)
+            return to_dict() if callable(to_dict) else {}
+        except Exception:
+            # Unknown capability: do not assume tool/vision support.
+            return {}
+
+    def _find_vision_candidate(self, req: ModelRequirement) -> ModelSelection | None:
+        cap_mod = self._capability_mod()
+        try:
+            model = cap_mod.select_compatible_model(None, require_vision=True)
+            if model:
+                return ModelSelection(
+                    provider="ollama",
+                    model=str(model),
+                    score=0.5,
+                    reason="vision.capability",
+                    vision_capable=True,
+                    tool_capable=False,
+                )
+        except Exception:
+            pass
+        return None
+
+    def _router_candidate(self, req: ModelRequirement) -> ModelSelection | None:
+        try:
+            router = self._router_mod()
+            # Router exposes a ModelRouter; we only borrow its keyword scoring as
+            # one low-weight score feature (not proof of capability).
+            if hasattr(router, "ModelRouter"):
+                obj = router.ModelRouter()
+                if hasattr(obj, "score"):
+                    scored = obj.score(req.task)
+                    return _router_to_selection(scored)
+        except Exception:
+            pass
+        return None
+
+    def _invoke_complete(self, provider, model, trace_id, **kw) -> tuple:
+        """Delegate to the real completion layer.
+
+        If no completion hook is configured we raise so the failure is typed.
+        """
+        hook = kw.get("_complete")
+        if hook is not None:
+            return hook(provider, model, trace_id=trace_id)
+        from .. import llm  # type: ignore
+
+        if hasattr(llm, "complete"):
+            res = llm.complete(provider=provider, model=model, trace_id=trace_id, **kw)
+            if isinstance(res, dict):
+                return res.get("content"), res.get("tool_calls"), res
+            return res, None, {}
+        raise RuntimeError("no completion backend configured")
+
+    def _classify_failure(self, exc: Exception) -> str:
+        txt = f"{type(exc).__name__} {exc}".lower()
+        if "429" in txt or "rate" in txt or "quota" in txt or "limit" in txt:
+            return FailureClass.RATE_LIMIT.value
+        if "401" in txt or "403" in txt or "auth" in txt or "unauthorized" in txt or "uknown key" in txt:
+            return FailureClass.AUTH.value  # authentication_failed
+        if "timeout" in txt or "timed out" in txt:
+            return FailureClass.TIMEOUT.value
+        if "context" in txt and ("length" in txt or "window" in txt or "overflow" in txt or "too long" in txt):
+            return FailureClass.CONTEXT_OVERFLOW.value
+        if "tool" in txt and ("unsupported" in txt or "not support" in txt):
+            return FailureClass.TOOL_UNSUPPORTED.value
+        if "capability" in txt or "does not support" in txt or "can't satisfy" in txt:
+            return FailureClass.CAPABILITY_MISMATCH.value
+        if "model" in txt and ("not found" in txt or "invalid" in txt or "unknown" in txt or "does not exist" in txt):
+            return FailureClass.MODEL_UNAVAILABLE.value
+        if "policy" in txt or "denied" in txt or "permission" in txt:
+            return FailureClass.POLICY_DENIED.value
+        if _is_network_error(exc):
+            return FailureClass.NETWORK.value  # transient connection error
+        if (
+            "no provider" in txt
+            or "no api key" in txt
+            or "not configured" in txt
+            or "provider unavailable" in txt
+            or "no bundle" in txt
+        ):
+            return FailureClass.PROVIDER_UNAVAILABLE.value  # not configured/available
+        return FailureClass.UNKNOWN.value
+
+    def _retryable_failure(self, fc: str | None) -> bool:
+        if fc is None:
+            return False
+        return fc in (
+            FailureClass.RATE_LIMIT.value,
+            FailureClass.TIMEOUT.value,
+            FailureClass.NETWORK.value,
+            FailureClass.CONTEXT_OVERFLOW.value,
+            FailureClass.PROVIDER_UNAVAILABLE.value,
+        )
+
+    def _record_outcome(self, provider: str, result: ModelGatewayResult) -> None:
+        with self._lock:
+            st = self._circuit.setdefault(provider, {"failures": 0, "opened_at": None})
+            if result.ok:
+                st["failures"] = 0
+            else:
+                st["failures"] += 1
+                if st["failures"] >= 3 and st["opened_at"] is None:
+                    st["opened_at"] = time.time()
+
+            if result.model:
+                key = f"{provider}/{result.model}"
+                metric = self._model_stats.setdefault(
+                    key,
+                    {"calls": 0, "successes": 0, "failures": 0, "latency_ms_total": 0, "last_used": None},
+                )
+                metric["calls"] += 1
+                metric["successes"] += 1 if result.ok else 0
+                metric["failures"] += 0 if result.ok else 1
+                metric["latency_ms_total"] += int(result.latency_ms or 0)
+                metric["last_used"] = time.time()
+
+    def health(self) -> dict[str, Any]:
+        """Expose provider circuits and per-model runtime telemetry."""
+        with self._lock:
+            models = {}
+            for ref, metric in self._model_stats.items():
+                calls = max(1, int(metric["calls"]))
+                models[ref] = {
+                    **metric,
+                    "success_rate": round(metric["successes"] / calls, 4),
+                    "avg_latency_ms": round(metric["latency_ms_total"] / calls, 1),
+                }
+            providers = {p: dict(v) for p, v in self._circuit.items()}
+            # Keep canonical nested telemetry while exposing provider keys at the
+            # top level for older callers that consumed health()["provider"].
+            return {"providers": providers, "models": models, **providers}
+
+
+_gateway: ModelGateway | None = None
+_gateway_lock = threading.Lock()
+
+
+def get_model_gateway() -> ModelGateway:
+    global _gateway
+    with _gateway_lock:
+        if _gateway is None:
+            _gateway = ModelGateway()
+        return _gateway
+
+
+# -- helpers -------------------------------------------------------------------
+def _score(cap: dict[str, Any], req: ModelRequirement) -> float:
+    score = 0.0
+    if cap.get("tools") is True and req.requires_tools():
+        score += 3
+    if cap.get("vision") is True and req.vision:
+        score += 2
+    if cap.get("reasoning") is True and Capability.REASONING.value in req.capabilities:
+        score += 1
+    if "chat" in cap.get("capabilities", []):
+        score += 1
+    return score
+
+
+def _router_to_selection(scored: Any) -> ModelSelection | None:
+    if isinstance(scored, dict):
+        if not scored:
+            return None
+        model = scored.get("model") or scored.get("name")
+        if not model:
+            return None
+        return ModelSelection(
+            provider=str(scored.get("provider") or "custom"),
+            model=str(model),
+            score=float(scored.get("score", 0.5)),
+            reason="router.keyword",
+            capabilities=[str(x) for x in scored.get("capabilities", [])],
+        )
+    if scored is None:
+        return None
+    model = getattr(scored, "model", None) or getattr(scored, "name", None)
+    if not model:
+        return None
+    return ModelSelection(
+        provider=str(getattr(scored, "provider", "custom")),
+        model=str(model),
+        score=float(getattr(scored, "score", 0.5)),
+        reason="router.keyword",
+    )
+
+
+def _is_network_error(exc: Exception) -> bool:
+    txt = f"{type(exc).__name__} {exc}".lower()
+    return any(k in txt for k in ("connection", "refused", "unreachable", "resolve", "ssl", "dns"))

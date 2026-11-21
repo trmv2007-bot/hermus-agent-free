@@ -1,0 +1,716 @@
+"""Architecture-upgrade integrations — wires the foundation subsystems into the
+live tool registry and agent loop.
+
+- `register_architecture_tools(registry)` adds research / screen / memory2 /
+  router / workspace tools to the central registry.
+- `resolve_active_project()` returns the effective project (config → workspace
+  current → default).
+- `maybe_self_heal(result)` runs the watchdog on a failed agent result and
+  attaches a `self_healing` block.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .config import config
+from .workspace import workspace
+
+
+def resolve_active_project() -> str:
+    try:
+        return workspace.active_project()
+    except Exception:
+        return getattr(config, "project", "default") or "default"
+
+
+def register_architecture_tools(registry) -> None:
+    """Register the upgrade tools. Safe to call multiple times (idempotent)."""
+
+    # ---- Research pipeline -------------------------------------------------
+    def research_deep(query: str, limit: int = 10) -> dict[str, Any]:
+        from .research import research_pipeline
+
+        return research_pipeline.run(query, limit=limit)
+
+    registry.register(
+        "research_deep",
+        research_deep,
+        {
+            "type": "function",
+            "function": {
+                "name": "research_deep",
+                "description": "Multi-source research: search → rank → extract claims → cross-check → contradictions → synthesis with citations, confidence and uncertain claims.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        source="core.integrations",
+    )
+
+    # ---- Memory 2.0 --------------------------------------------------------
+    def memory2_recall(query: str, limit: int = 10, kinds: str = "") -> dict[str, Any]:
+        from .memory import KINDS, memory
+
+        k = [x.strip() for x in (kinds or "").split(",") if x.strip()] or None
+        if k:
+            k = [x for x in k if x in KINDS]
+        project = resolve_active_project()
+        res = memory.recall(query, limit=limit, kinds=k, project=project)
+        return {"query": query, "project": project, "results": res, "count": len(res)}
+
+    registry.register(
+        "memory2_recall",
+        memory2_recall,
+        {
+            "type": "function",
+            "function": {
+                "name": "memory2_recall",
+                "description": "Ranked recall from typed long-term memory (episodic/semantic/procedural/project), scored by importance/recency/frequency/relevance/success.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "default": 10},
+                        "kinds": {
+                            "type": "string",
+                            "description": "comma-separated kinds: working,episodic,semantic,procedural,project",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        source="core.integrations",
+    )
+
+    def memory2_remember(kind: str, content: str, importance: float = 5.0, success: str = "none") -> dict[str, Any]:
+        from .memory import memory
+
+        s = None if success == "none" else (success == "true")
+        r = memory.remember(kind, content, importance=importance, success=s, project=resolve_active_project())
+        return r
+
+    registry.register(
+        "memory2_remember",
+        memory2_remember,
+        {
+            "type": "function",
+            "function": {
+                "name": "memory2_remember",
+                "description": "Persist a typed long-term memory (working/episodic/semantic/procedural/project).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"type": "string"},
+                        "content": {"type": "string"},
+                        "importance": {"type": "number", "default": 5.0},
+                        "success": {"type": "string", "description": "true|false|none"},
+                    },
+                    "required": ["kind", "content"],
+                },
+            },
+        },
+        source="core.integrations",
+    )
+
+    # ---- Model router ------------------------------------------------------
+    def router_choose(text: str) -> dict[str, Any]:
+        from .router2 import router2
+
+        return router2.select(text)
+
+    registry.register(
+        "router_choose",
+        router_choose,
+        {
+            "type": "function",
+            "function": {
+                "name": "router_choose",
+                "description": "Choose the best available model for a single step (task type, difficulty, context, provider health).",
+                "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            },
+        },
+        source="core.integrations",
+    )
+
+    # ---- Workspace ---------------------------------------------------------
+    def workspace_list_projects() -> dict[str, Any]:
+        return {"projects": workspace.list_projects(), "current": workspace.current_project()}
+
+    registry.register(
+        "workspace_list_projects",
+        workspace_list_projects,
+        {
+            "type": "function",
+            "function": {
+                "name": "workspace_list_projects",
+                "description": "List workspace projects and the current active project.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        source="core.integrations",
+    )
+
+    # ---- Shared dashboard ---------------------------------------------------
+    def dashboard_get_state() -> dict[str, Any]:
+        """Read the exact dashboard layout visible to the user."""
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.snapshot()
+
+    def dashboard_add_panel(
+        title: str,
+        content: str = "",
+        kind: str = "text",
+        order: int = -1,
+        width: int = 6,
+    ) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.add_panel(
+            title=title,
+            content=content,
+            kind=kind,
+            order=None if order < 0 else order,
+            width=width,
+            source="agent",
+        )
+
+    def dashboard_update_panel(
+        panel_id: str,
+        title: str = "",
+        content: str = "",
+        kind: str = "",
+        order: int = -1,
+        width: int = -1,
+        visible: str = "unchanged",
+    ) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        changes: dict[str, Any] = {}
+        if title:
+            changes["title"] = title
+        if content:
+            changes["content"] = content
+        if kind:
+            changes["kind"] = kind
+        if order >= 0:
+            changes["order"] = order
+        if width >= 0:
+            changes["width"] = width
+        if visible != "unchanged":
+            changes["visible"] = str(visible).lower() == "true"
+        return dashboard_state.update_panel(panel_id, **changes)
+
+    def dashboard_move_panel(panel_id: str, order: int, width: int = -1) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.move_panel(panel_id, order=order, width=None if width < 0 else width)
+
+    def dashboard_remove_panel(panel_id: str) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.remove_panel(panel_id)
+
+    def dashboard_update_tab(tab_id: str, label: str = "", visible: str = "unchanged", order: int = -1) -> dict[str, Any]:
+        from .dashboard_state import dashboard_state
+
+        return dashboard_state.update_tab(
+            tab_id,
+            label=label or None,
+            visible=None if visible == "unchanged" else str(visible).lower() == "true",
+            order=None if order < 0 else order,
+        )
+
+    dashboard_defs = [
+        (
+            "dashboard_get_state",
+            dashboard_get_state,
+            "Read the current shared dashboard: tabs, AI-managed panels, and the canonical systems inventory.",
+            {},
+            [],
+        ),
+        (
+            "dashboard_add_panel",
+            dashboard_add_panel,
+            "Add a safe persistent dashboard panel. Use text, kpi, feed, or link; never emit arbitrary HTML or JavaScript.",
+            {
+                "title": {"type": "string"},
+                "content": {"type": "string", "default": ""},
+                "kind": {"type": "string", "enum": ["text", "kpi", "feed", "link"], "default": "text"},
+                "order": {"type": "integer", "default": -1},
+                "width": {"type": "integer", "minimum": 3, "maximum": 12, "default": 6},
+            },
+            ["title"],
+        ),
+        (
+            "dashboard_update_panel",
+            dashboard_update_panel,
+            "Update an existing AI-managed dashboard panel's title, content, kind, visibility, width, or order.",
+            {
+                "panel_id": {"type": "string"},
+                "title": {"type": "string", "default": ""},
+                "content": {"type": "string", "default": ""},
+                "kind": {"type": "string", "default": ""},
+                "order": {"type": "integer", "default": -1},
+                "width": {"type": "integer", "default": -1},
+                "visible": {"type": "string", "enum": ["true", "false", "unchanged"], "default": "unchanged"},
+            },
+            ["panel_id"],
+        ),
+        (
+            "dashboard_move_panel",
+            dashboard_move_panel,
+            "Move an AI-managed panel in the shared dashboard layout.",
+            {"panel_id": {"type": "string"}, "order": {"type": "integer"}, "width": {"type": "integer", "default": -1}},
+            ["panel_id", "order"],
+        ),
+        (
+            "dashboard_remove_panel",
+            dashboard_remove_panel,
+            "Remove an AI-managed dashboard panel by id. Built-in tabs and systems panels cannot be removed this way.",
+            {"panel_id": {"type": "string"}},
+            ["panel_id"],
+        ),
+        (
+            "dashboard_update_tab",
+            dashboard_update_tab,
+            "Rename, show, hide, or reorder a built-in control-room tab.",
+            {
+                "tab_id": {"type": "string"},
+                "label": {"type": "string", "default": ""},
+                "visible": {"type": "string", "enum": ["true", "false", "unchanged"], "default": "unchanged"},
+                "order": {"type": "integer", "default": -1},
+            },
+            ["tab_id"],
+        ),
+    ]
+    for name, fn, description, properties, required in dashboard_defs:
+        registry.register(
+            name,
+            fn,
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {"type": "object", "properties": properties, "required": required},
+                },
+            },
+            source="core.integrations",
+        )
+
+    # ---- Computer control (screen) ----------------------------------------
+    def screen_record_start(
+        max_seconds: float = 30.0,
+        fps: float = 10.0,
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        from .computer import recording_policy
+
+        valid = recording_policy.validate_settings(fps, max_seconds)
+        if not valid.get("ok"):
+            return {"success": False, "error": valid["error"]}
+        path = None
+        if output_path:
+            try:
+                path = str(recording_policy.output_path(output_path))
+            except (ValueError, PermissionError) as exc:
+                return {"success": False, "error": str(exc)}
+        return _screen_recorder().start(max_seconds=max_seconds, fps=fps, output_path=path)
+
+    def screen_record_stop() -> dict[str, Any]:
+        return _screen_recorder().stop()
+
+    def screen_record_status() -> dict[str, Any]:
+        return _screen_recorder().status()
+
+    def screen_record_save(path: str = "recording.mp4", seconds: float = 0.0, task_id: str = "") -> dict[str, Any]:
+        from .computer import TaskArtifacts, VideoAnalyzer, recording_policy
+
+        rec = _screen_recorder()
+        if task_id:
+            safe = recording_policy.task_id(task_id)
+            target = recording_policy.output_path(f"{safe}/recording.mp4")
+        else:
+            try:
+                target = recording_policy.output_path(path)
+            except (ValueError, PermissionError) as exc:
+                return {"success": False, "error": str(exc)}
+        saved = rec.save(str(target), seconds=seconds if seconds > 0 else None)
+        if not saved.get("success") or not task_id:
+            return saved
+        frames = rec.recent(seconds) if seconds > 0 else rec.all_frames()
+        analysis = VideoAnalyzer().analyze(frames, task=task_id, recording=str(target))
+        bundle = TaskArtifacts(task_id, root=str(recording_policy.root)).write(
+            timeline=analysis.get("timeline"),
+            events=analysis.get("events"),
+            actions=rec.markers(),
+            result={"recording": saved, "analysis": {"semantic": analysis.get("semantic")}},
+            recording_path=str(target),
+        )
+        return {**saved, "bundle": bundle}
+
+    def screen_get_recent(seconds: float = 10.0) -> dict[str, Any]:
+        frames = _screen_recorder().recent(seconds=seconds)
+        return {
+            "frames": len(frames),
+            "sample": [f.get("ts") for f in frames[-5:]],
+            "buffer_bytes": sum(int(f.get("bytes") or 0) for f in frames),
+        }
+
+    def screen_analyze(
+        task: str = "",
+        seconds: float = 10.0,
+        max_events: int = 12,
+        use_vision: bool = True,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        from .computer import VideoAnalyzer
+
+        frames = _screen_recorder().recent(seconds=seconds)
+        analyzer = VideoAnalyzer.with_ollama(model) if use_vision else VideoAnalyzer()
+        return analyzer.analyze(frames, task=task, max_events=max_events)
+
+    def screen_understand(description: str, seconds: float = 10.0) -> dict[str, Any]:
+        from .computer import FrameSampler, ScreenVerifier
+
+        frames = _screen_recorder().recent(seconds=seconds)
+        summary = FrameSampler().summarize(frames)
+        verification = ScreenVerifier().verify_sequence(frames, expected_state=description)
+        return {"description": description, "summary": summary, "verification": verification}
+
+    def screen_verify(
+        expected_state: str,
+        seconds: float = 10.0,
+        action: str = "",
+        use_vision: bool = False,
+        remember: bool = False,
+    ) -> dict[str, Any]:
+        from .computer import ScreenVerifier, VideoAnalyzer
+
+        frames = _screen_recorder().recent(seconds=seconds)
+        analyzer = VideoAnalyzer.with_ollama() if use_vision else None
+        callback = analyzer.evaluate_condition if analyzer else None
+        transition = analyzer.evaluate_transition if analyzer else None
+        result = ScreenVerifier(vision_model=callback, transition_model=transition).verify_sequence(
+            frames, expected_state=expected_state, action=action
+        )
+        if remember and action and result.get("ok"):
+            try:
+                from .memory import memory as mem
+
+                mem.remember(
+                    "procedural",
+                    f"ACTION: {action}\nVISUAL RESULT: {result.get('visual_result')}\nCONFIDENCE: {result.get('confidence')}",
+                    importance=7.0,
+                    success=True,
+                    project=resolve_active_project(),
+                    metadata={"visual_evidence": result.get("evidence", {})},
+                )
+                result["remembered"] = True
+            except Exception as exc:
+                result["memory_error"] = str(exc)
+        return result
+
+    def screen_watch(
+        condition: str,
+        timeout: float = 60.0,
+        stable_matches: int = 1,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        from .computer import ScreenWatcher, VideoAnalyzer
+
+        analyzer = VideoAnalyzer.with_ollama(model)
+        return ScreenWatcher(_screen_recorder(), analyzer=analyzer).watch(
+            condition, timeout=timeout, stable_matches=stable_matches
+        )
+
+    def screen_action_before(action: str, expected_state: str = "") -> dict[str, Any]:
+        return _screen_action_manager().before(action, expected_state)
+
+    def screen_action_after(
+        action_id: str,
+        use_vision: bool = False,
+        model: str = "llava:7b",
+        remember: bool = False,
+    ) -> dict[str, Any]:
+        from .computer import ScreenVerifier, VideoAnalyzer
+
+        analyzer = VideoAnalyzer.with_ollama(model) if use_vision else None
+        verifier = ScreenVerifier(
+            vision_model=analyzer.evaluate_condition if analyzer else None,
+            transition_model=analyzer.evaluate_transition if analyzer else None,
+        )
+        result = _screen_action_manager().after(action_id, verifier=verifier)
+        verification = result.get("verification") or {}
+        memory = verification.get("memory") or {}
+        if remember and memory.get("success"):
+            try:
+                from .memory import memory as mem
+
+                mem.remember(
+                    "procedural",
+                    f"ACTION: {memory.get('action')}\nVISUAL RESULT: {memory.get('visual_result')}\nCONFIDENCE: {memory.get('confidence')}",
+                    importance=7.0,
+                    success=True,
+                    project=resolve_active_project(),
+                    metadata={"visual_evidence": memory.get("evidence", {})},
+                )
+                result["remembered"] = True
+            except Exception as exc:
+                result["memory_error"] = str(exc)
+        return result
+
+    definitions = [
+        (
+            "screen_record_start",
+            screen_record_start,
+            "Start compressed rolling capture; optionally stream the full session to MP4/WebM.",
+            {
+                "max_seconds": {"type": "number", "default": 30.0},
+                "fps": {"type": "number", "default": 10.0},
+                "output_path": {"type": "string", "default": ""},
+            },
+            [],
+        ),
+        ("screen_record_stop", screen_record_stop, "Stop capture and finalize any active video.", {}, []),
+        ("screen_record_status", screen_record_status, "Recorder, compressed-RAM, and video-writer status.", {}, []),
+        (
+            "screen_record_save",
+            screen_record_save,
+            "Save the rolling buffer as MP4/WebM, optionally as a task artifact bundle.",
+            {
+                "path": {"type": "string", "default": "recording.mp4"},
+                "seconds": {"type": "number", "default": 0.0},
+                "task_id": {"type": "string", "default": ""},
+            },
+            [],
+        ),
+        (
+            "screen_get_recent",
+            screen_get_recent,
+            "Get recent frame timestamps and compressed buffer size.",
+            {"seconds": {"type": "number", "default": 10.0}},
+            [],
+        ),
+        (
+            "screen_analyze",
+            screen_analyze,
+            "Detect important screen events and generate an agent-readable visual timeline.",
+            {
+                "task": {"type": "string", "default": ""},
+                "seconds": {"type": "number", "default": 10.0},
+                "max_events": {"type": "integer", "default": 12},
+                "use_vision": {"type": "boolean", "default": True},
+                "model": {"type": "string", "description": "Optional provider/model; omit for automatic vision selection."},
+            },
+            [],
+        ),
+        (
+            "screen_understand",
+            screen_understand,
+            "Summarize recent changes and compare the first/last screen.",
+            {"description": {"type": "string"}, "seconds": {"type": "number", "default": 10.0}},
+            ["description"],
+        ),
+        (
+            "screen_verify",
+            screen_verify,
+            "Before/after verification with optional semantic vision and procedural visual memory.",
+            {
+                "expected_state": {"type": "string"},
+                "seconds": {"type": "number", "default": 10.0},
+                "action": {"type": "string", "default": ""},
+                "use_vision": {"type": "boolean", "default": False},
+                "remember": {"type": "boolean", "default": False},
+            },
+            ["expected_state"],
+        ),
+        (
+            "screen_action_before",
+            screen_action_before,
+            "Capture the exact BEFORE frame for an upcoming GUI action.",
+            {"action": {"type": "string"}, "expected_state": {"type": "string", "default": ""}},
+            ["action"],
+        ),
+        (
+            "screen_action_after",
+            screen_action_after,
+            "Capture AFTER and verify it against a prior screen_action_before boundary.",
+            {
+                "action_id": {"type": "string"},
+                "use_vision": {"type": "boolean", "default": False},
+                "model": {"type": "string", "description": "Optional provider/model; omit for automatic vision selection."},
+                "remember": {"type": "boolean", "default": False},
+            },
+            ["action_id"],
+        ),
+        (
+            "screen_watch",
+            screen_watch,
+            "Watch changed frames until a visual condition is true or timeout expires.",
+            {
+                "condition": {"type": "string"},
+                "timeout": {"type": "number", "default": 60.0},
+                "stable_matches": {"type": "integer", "default": 1},
+                "model": {"type": "string", "default": "llava:7b"},
+            },
+            ["condition"],
+        ),
+    ]
+    for name, fn, desc, props, required in definitions:
+        registry.register(
+            name,
+            fn,
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": desc,
+                    "parameters": {"type": "object", "properties": props, "required": required},
+                },
+            },
+            source="core.integrations",
+        )
+
+
+def _screen_recorder():
+    # module-level singleton, created lazily to avoid a display grab at import time
+    from .computer import ImageGrabSource, NullSource, ScreenRecorder
+
+    if not hasattr(_screen_recorder, "rec"):
+        try:
+            source = ImageGrabSource()
+        except Exception:
+            source = NullSource()
+        _screen_recorder.rec = ScreenRecorder(source=source)
+    return _screen_recorder.rec
+
+
+def _screen_action_manager():
+    from .computer import ActionVerificationManager
+
+    recorder = _screen_recorder()
+    manager = getattr(_screen_action_manager, "manager", None)
+    if manager is None or manager.recorder is not recorder:
+        manager = ActionVerificationManager(recorder)
+        _screen_action_manager.manager = manager
+    return manager
+
+
+def maybe_self_heal(result: dict[str, Any]) -> dict[str, Any]:
+    """Attach a watchdog diagnosis when a task/tool result shows errors."""
+    if not getattr(config, "watchdog_enabled", True):
+        return result
+    try:
+        errors = []
+        for tr in result.get("tool_results") or []:
+            txt = str(tr.get("result", ""))
+            low = txt.lower()
+            if "error" in low[:300] or "failed" in low[:300]:
+                errors.append(txt[:300])
+        if errors:
+            from .watchdog import watchdog
+
+            healed = [watchdog.handle(e) for e in errors[:3]]
+            result["self_healing"] = healed
+    except Exception:
+        pass
+    return result
+
+
+# Explicit external-service catalog (kept separate from the legacy tool-registration
+# helpers above so existing integrations remain backwards compatible).
+import threading as _integration_threading
+import time as _integration_time
+from dataclasses import asdict as _integration_asdict
+from dataclasses import dataclass as _integration_dataclass
+from dataclasses import field as _integration_field
+
+
+@_integration_dataclass
+class ExternalIntegration:
+    id: str
+    name: str
+    category: str
+    capabilities: list[str] = _integration_field(default_factory=list)
+    enabled: bool = False
+    configured: bool = False
+    status: str = "unconfigured"
+    last_check: float | None = None
+    metadata: dict[str, Any] = _integration_field(default_factory=dict)
+
+    def snapshot(self) -> dict[str, Any]:
+        return _integration_asdict(self)
+
+
+class ExternalIntegrationRegistry:
+    def __init__(self) -> None:
+        self._lock = _integration_threading.RLock()
+        self._items: dict[str, ExternalIntegration] = {}
+        for row in (
+            ("calendar", "Calendar", "productivity", ["read", "create", "update"]),
+            ("email", "Email", "communication", ["read", "draft", "send"]),
+            ("messaging", "Messaging", "communication", ["read", "send"]),
+            ("files", "Files", "storage", ["read", "write", "search"]),
+            ("browser", "Browser", "web", ["navigate", "observe", "interact"]),
+            ("smart_home", "Smart Home", "devices", ["observe", "control"]),
+            ("development", "Development", "engineering", ["repo", "build", "test", "deploy"]),
+        ):
+            self.register(*row)
+
+    def register(self, integration_id: str, name: str, category: str, capabilities: list[str]) -> dict[str, Any]:
+        with self._lock:
+            x = ExternalIntegration(str(integration_id), str(name), str(category), sorted(set(capabilities)))
+            self._items[x.id] = x
+            return x.snapshot()
+
+    def configure(self, integration_id: str, *, enabled: bool = True, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        with self._lock:
+            x = self._items[str(integration_id)]
+            x.configured = True
+            x.enabled = bool(enabled)
+            x.status = "ready" if enabled else "disabled"
+            x.last_check = _integration_time.time()
+            if metadata:
+                x.metadata.update({str(k): v for k, v in metadata.items() if k not in {"token", "secret", "password", "api_key"}})
+            return x.snapshot()
+
+    def set_enabled(self, integration_id: str, enabled: bool) -> dict[str, Any]:
+        with self._lock:
+            x = self._items[str(integration_id)]
+            if enabled and not x.configured:
+                raise ValueError("integration is not configured")
+            x.enabled = bool(enabled)
+            x.status = "ready" if enabled else "disabled"
+            return x.snapshot()
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [x.snapshot() for x in self._items.values()]
+
+    def status(self) -> dict[str, Any]:
+        rows = self.list()
+        return {
+            "integrations": rows,
+            "configured": sum(x["configured"] for x in rows),
+            "enabled": sum(x["enabled"] for x in rows),
+        }
+
+    def health(self, integration_id: str) -> dict[str, Any]:
+        with self._lock:
+            x = self._items[str(integration_id)]
+            x.last_check = _integration_time.time()
+            x.status = "ready" if x.configured and x.enabled else ("disabled" if x.configured else "unconfigured")
+            return x.snapshot()
+
+
+external_integrations = ExternalIntegrationRegistry()

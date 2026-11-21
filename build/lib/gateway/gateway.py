@@ -1,0 +1,1534 @@
+"""Gateway - Single process for Telegram, Discord, Slack, WhatsApp, Signal, CLI - free, cross-platform continuity - Optimized with caching, compression, rate limiting
+
+Composition root: builds the FastAPI app, wires the lifespan (channels, job
+queue, watchdog, memory sweeps) and mounts the per-concern routers:
+
+    gateway/context.py           shared agent registry, auth, chat adapter
+    gateway/routes_channels.py   Telegram webhook + channel status/start/send
+    gateway/routes_registry.py   tools, public-APIs, MCP, embeddings, fleet, keys (read)
+    gateway/routes_management.py keys CRUD, custom APIs, updater, plugins
+    gateway/routes_subsystems.py background agents, workspace, memory2, permissions, screen
+    gateway/routes_computer.py   computer-agent dashboard API + remote control
+    gateway/routes_speech.py     Talking Mode (TTS/transcribe) + dashboard events WS
+    gateway/realtime.py          async job queue + SSE/WebSocket streaming
+
+Endpoint code moved verbatim; `from gateway.gateway import app|setup|start|
+get_agent_for_user` and `gateway.gateway.<attr>` monkeypatching keep working
+(the shared state is re-exported from gateway.context).
+"""
+
+import asyncio
+import os
+import sys
+import time
+from pathlib import Path
+
+# Direct execution (python gateway/gateway.py): put the repo root on sys.path
+# and drop the gateway/ directory itself, which otherwise shadows the stdlib
+# `queue` module (breaking logging/uvicorn/threading imports) and invites
+# ambiguous top-level imports like `import channels`.
+if __package__ in (None, ""):
+    _repo_root = str(Path(__file__).resolve().parent.parent)
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+    _here = str(Path(__file__).resolve().parent)
+    while _here in sys.path:
+        sys.path.remove(_here)
+
+from contextlib import asynccontextmanager
+
+import uvicorn
+from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+
+from core.config import config
+from core.log import get_logger, setup_logging
+from core.stdio import configure_stdio
+from core.task_tracker import task_tracker
+from gateway import lifecycle as _lifecycle
+from gateway.channels import get_channel_status, set_agent_factory, start_all_channels
+
+# Realtime layer: async job queue + SSE/WebSocket streaming (see gateway/realtime.py)
+try:
+    from core.run_events import run_bus as _run_bus
+    from gateway import realtime as _realtime
+    from gateway.queue import job_queue as _job_queue
+except ImportError:  # executed as a plain module (python gateway/gateway.py)
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core.run_events import run_bus as _run_bus  # type: ignore
+    from gateway import realtime as _realtime  # type: ignore
+    from gateway.queue import job_queue as _job_queue  # type: ignore
+
+# Store agents per user/platform for continuity
+
+# Shared runtime state (agent registry, auth, chat adapter) lives in
+# gateway.context; re-exported here so `from gateway.gateway import ...`
+# and `monkeypatch.setattr("gateway.gateway.get_agent_for_user", ...)`
+# keep working exactly as before the split.
+from gateway.context import (  # noqa: F401
+    AGENTS,
+    _agent_chat,
+    _agent_factory,  # noqa: F401
+    _check_gateway_auth,
+    _token_matches,
+    get_agent_for_user,
+)
+
+logger = get_logger(__name__)
+
+
+_sentinel_checkin_state: dict[str, float] = {"last": 0.0}
+
+
+def _sentinel_alert_checkin(env) -> dict | None:
+    """FAIRY handoff: when the sentinel ALERTS, queue one read-only check-in.
+
+    Opt-in (HERMUS_PRESENCE_PROACTIVE_CHECKINS=1), cooldown-limited, and always
+    through the canonical queue as a read-only runtime.turn — approvals stay
+    authoritative; the sentinel itself never calls the model.
+    """
+    try:
+        args = getattr(env, "args_redacted", None) or {}
+        if not isinstance(args, dict) or args.get("action") != "alert":
+            return None
+        if not getattr(config, "presence_proactive_checkins", False):
+            return None
+        cooldown = float(getattr(config, "sentinel_checkin_cooldown_seconds", 900) or 900)
+        now = time.time()
+        if now - _sentinel_checkin_state["last"] < cooldown:
+            return None
+        from gateway.queue import job_queue
+
+        if not job_queue.enabled or not job_queue._started:
+            return None
+        event_type = str(args.get("event_type") or "event")
+        salience = args.get("salience")
+        text = (
+            f"FAIRY sentinel flagged a high-salience event ({event_type}, salience={salience}). "
+            "Give the owner a concise, read-only status: what happened, what is queued, what is NOT done. "
+            "Use only real evidence; do not execute tools, send messages, or change anything — ask first."
+        )
+        job = job_queue.submit(
+            "runtime.turn",
+            {
+                "text": text,
+                "platform": "sentinel",
+                "user_id": "default",
+                "mode": "chat",
+                "prefer": "chat",
+                "read_only": True,
+                "stream": True,
+                "trigger": {"type": "sentinel.decision", "event_type": event_type},
+            },
+            session_key="sentinel:default",
+            run_id=f"run_sentinel_{os.urandom(4).hex()}",
+        )
+        _sentinel_checkin_state["last"] = now
+        return {"job_id": job.id, "run_id": job.run_id, "event_type": event_type}
+    except Exception as exc:
+        logger.warning(f"[Sentinel] check-in handoff skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _on_sentinel_decision(env) -> None:
+    r = _sentinel_alert_checkin(env)
+    if r:
+        logger.info(f"[Sentinel] alert -> proactive check-in queued: {r.get('job_id')} ({r.get('event_type')})")
+
+
+def _queue_due_presence_checkin(snapshot: dict) -> dict | None:
+    """Optionally turn one due goal into a normal, read-only chat job.
+
+    This path is opt-in via ``HERMUS_PRESENCE_PROACTIVE_CHECKINS=1``. It uses
+    the canonical queue rather than calling the model from the heartbeat thread,
+    and marks the goal before returning so repeated heartbeats cannot duplicate
+    the same check-in. The prompt explicitly forbids taking action without the
+    user's approval.
+    """
+    if not getattr(config, "presence_proactive_checkins", False):
+        return None
+    due = snapshot.get("check_ins_due") or []
+    if not due:
+        return None
+    try:
+        from core.presence import get_presence
+        from gateway.queue import job_queue
+
+        if not job_queue.enabled or not job_queue._started:
+            return None
+        # The background heartbeat has no authenticated owner. Keep opt-in
+        # automation confined to the default/local continuity scope; other
+        # users can request an explicit check-in with their own user_id.
+        scoped = get_presence().snapshot(user_id="default")
+        due = scoped.get("check_ins_due") or []
+        if not due:
+            return None
+        target = due[0]
+        goal_id = str(target.get("id") or "")
+        goals = get_presence().list_goals(status="active", user_id="default")
+        goal = next((g for g in goals if g.get("id") == goal_id), None)
+        if goal is None:
+            return None
+        title = str(goal.get("title") or "the ongoing goal")
+        text = (
+            f"Proactive check-in on the ongoing goal: {title}. Give the owner a concise "
+            "status update using only real evidence from memory and completed work. "
+            "Do not execute tools, send messages or change anything; ask the owner "
+            "before taking any action."
+        )
+        run_id = f"run_presence_{os.urandom(4).hex()}"
+        job = job_queue.submit(
+            "runtime.turn",
+            {
+                "text": text,
+                "platform": "presence",
+                "user_id": "default",
+                # Chat mode exposes no system tools; read_only also strips custom
+                # APIs, so proactive presence stays read-only on the queue.
+                "mode": "chat",
+                "prefer": "chat",
+                "read_only": True,
+                "stream": True,
+            },
+            session_key="presence:default",
+            run_id=run_id,
+        )
+        get_presence().mark_checkin(goal_id, user_id="default")
+        get_presence().record_moment(
+            "proactive_checkin",
+            f"Queued a safe status check on {title}",
+            run_id=job.run_id,
+            metadata={"goal_id": goal_id},
+            emit=False,
+        )
+        return {"job_id": job.id, "run_id": job.run_id, "goal_id": goal_id}
+    except Exception as exc:
+        logger.warning(f"[Presence] proactive check-in skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
+async def _presence_heartbeat_loop():
+    """Keep Hermus visibly present and optionally follow up on ongoing goals.
+
+    A heartbeat records the current operational state and surfaces overdue
+    user-approved goals. By default it does not call a model or perform actions;
+    with ``HERMUS_PRESENCE_PROACTIVE_CHECKINS=1`` it may queue one explicit,
+    read-only status check through the normal ``runtime.turn`` path.
+    """
+    from core.presence import get_presence
+
+    interval = max(5, int(getattr(config, "presence_heartbeat_seconds", 30) or 30))
+    while True:
+        try:
+            snapshot = await asyncio.to_thread(get_presence().heartbeat)
+            due = snapshot.get("check_ins_due") or []
+            if due:
+                logger.info(
+                    f"[Presence] heartbeat={snapshot.get('presence', {}).get('heartbeat_count')} "
+                    f"state={snapshot.get('presence', {}).get('state')} check_ins_due={len(due)}"
+                )
+                queued = await asyncio.to_thread(_queue_due_presence_checkin, snapshot)
+                if queued:
+                    logger.info(f"[Presence] proactive check-in queued: {queued.get('job_id')}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(f"[Presence] heartbeat error: {type(exc).__name__}: {exc}")
+        await asyncio.sleep(interval)
+
+
+async def _background_agent_watchdog():
+    """Periodically revive stale/dead persistent background agents."""
+    from core.agent_manager import agent_manager
+
+    while True:
+        try:
+            tick = agent_manager.watchdog_tick(restart=True)
+            if tick.get("revived") or tick.get("errors"):
+                logger.info(f"[Gateway] background agents tick: {tick}")
+        except Exception as e:
+            logger.error(f"[Gateway] background agents tick error: {e}")
+        await asyncio.sleep(30)
+
+
+async def _local_engine_watchdog():
+    """Keep the routed local engine alive, and let the doctor self-triage.
+
+    Two independent jobs on one slow tick:
+
+    * If the accelerator plan routes work to NoLlama and the server is
+      installed with a model on disk but not answering, restart it.  A dead
+      engine is otherwise silent until a user notices missing answers.
+    * If ``HERMUS_DOCTOR_AUTO=1``, run the doctor's bounded auto-triage
+      (cooldown + daily cap live in ``core.doctor``) so failures are explained
+      while the evidence is still fresh.
+    """
+    from core.accelerators import ENGINE_NOLLAMA, cached_plan
+    from core.nollama import nollama_manager
+
+    while True:
+        try:
+            plan = cached_plan()
+            wants_nollama = any(role.get("engine") == ENGINE_NOLLAMA for role in (plan.get("roles") or {}).values())
+            if wants_nollama and nollama_manager.installed() and nollama_manager.installed_models():
+                if not nollama_manager.running():
+                    device = ""
+                    for role in (plan.get("roles") or {}).values():
+                        if role.get("engine") == ENGINE_NOLLAMA:
+                            device = role.get("device") or ""
+                            break
+                    started = await asyncio.to_thread(nollama_manager.start, device=device)
+                    logger.info(f"[Gateway] local engine auto-start: {started.get('success')} (device={device or 'AUTO'})")
+        except Exception as e:
+            logger.error(f"[Gateway] local engine watchdog error: {e}")
+
+        if getattr(config, "doctor_enabled", True) and getattr(config, "doctor_auto", False):
+            try:
+                from core.doctor import doctor
+
+                report = await asyncio.to_thread(doctor.run, auto=True)
+                if report.get("status") not in (None, "skipped", "ok"):
+                    logger.info(
+                        f"[Gateway] hermus-doctor: {report.get('status')} "
+                        f"({report.get('finding_count', len(report.get('findings') or []))} findings) "
+                        f"-> {report.get('path', 'no report path')}"
+                    )
+            except Exception as e:
+                logger.error(f"[Gateway] hermus-doctor error: {e}")
+
+        await asyncio.sleep(120)
+
+
+async def _memory_maintenance_loop():
+    """Hourly decay/eviction pass so stale memories stop polluting prompts.
+
+    Archive/purge is conservative by default (see core.decay thresholds) and pinned
+    or high-importance memories are protected. Failures never take the gateway down.
+    """
+    minutes = max(1, int(getattr(config, "memory_sweep_minutes", 60)))
+    while True:
+        if not (_job_queue.enabled and _job_queue._started):
+            await asyncio.sleep(60)
+            continue
+        try:
+            await asyncio.sleep(minutes * 60)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        try:
+            report = await asyncio.to_thread(_job_queue.submit, "memory.sweep", {})
+            if report is not None:
+                logger.info(f"[Gateway] memory sweep queued as {getattr(report, 'id', '?')}")
+        except Exception as e:
+            logger.error(f"[Gateway] memory sweep failed: {e}")
+
+
+#: Keeps the warm-up task alive for the process lifetime.
+_WARM_TASK: asyncio.Task | None = None
+
+
+async def _warm_status_probes() -> None:
+    """Prime the expensive read-only probes before a browser asks for them.
+
+    Cold, each of these walks every subsystem and holds the process for 8-12 s,
+    which is why the Control Room felt broken for its first minute: the page
+    requests all of them at once and everything else queues behind. Warming them
+    off the request path means the first paint reads a cache. Failures are
+    logged and ignored — a cache that never fills must not break startup.
+    """
+    try:
+        from gateway.routes_console import PANELS_ALL, _probe_panels
+        from gateway.routes_engine import DOCTOR_STATUS, _doctor_status_probe
+        from gateway.routes_jarvis import _jarvis_status_probe
+
+        warmed = []
+        if await DOCTOR_STATUS.warm(_doctor_status_probe):
+            warmed.append("doctor.status")
+        try:
+            await _jarvis_status_probe()
+            warmed.append("jarvis.status")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Gateway] jarvis status warm-up failed: {exc}")
+        try:
+            # Warm the cache the route itself reads, not the route function: its
+            # parameters carry FastAPI Query defaults, which are not values.
+            if await PANELS_ALL.warm(lambda: _probe_panels([], 8)):
+                warmed.append("console.panels")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Gateway] console panel warm-up failed: {exc}")
+        logger.info(f"[Gateway] status probes warmed: {', '.join(warmed) or 'none'}")
+    except Exception as exc:  # noqa: BLE001 - warm-up must never take the process down
+        logger.warning(f"[Gateway] status warm-up skipped: {exc}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Modern lifespan handler replacing deprecated on_event."""
+    setup_logging()
+    set_agent_factory(_agent_factory)
+    _lifecycle.state.mark_started()
+    # Fire and forget: the first Control Room paint should find a warm cache,
+    # but readiness must not wait on the probes.
+    global _WARM_TASK
+    _WARM_TASK = asyncio.create_task(_warm_status_probes())
+    agent_pool_started = False
+    try:
+        from core.agents import init_pool
+
+        await init_pool()
+        agent_pool_started = True
+    except Exception as e:
+        logger.warning(f"[Gateway] persistent agent pool unavailable: {e}")
+    if getattr(config, "auto_start_channels", True):
+        mode = getattr(config, "telegram_mode", "auto")
+        started = start_all_channels(_agent_factory, telegram_mode=mode)
+        logger.info(f"[Gateway] Channels started: {started}")
+    # Async worker model: intake never blocks on a tool loop.
+    try:
+        await _realtime.startup(app, agent_getter=get_agent_for_user)
+    except Exception as e:
+        logger.warning(f"[Gateway] realtime layer unavailable ({e}) — /command runs inline")
+    presence_task = None
+    ambient_task = None
+    personal_space_task = None
+    sentinel_stop = None
+    if getattr(config, "sentinel_with_gateway", True):
+        try:
+            import threading as _threading
+
+            from core.sentinel import Sentinel, build_llm, default_recorder
+
+            sentinel_stop = _threading.Event()
+            _llm, _res = build_llm(getattr(config, "sentinel_model", "auto"))
+            _sentinel = Sentinel(
+                llm=_llm,
+                model=_res.get("ref"),
+                recorder=default_recorder(config.resolve_path("data/sentinel/decisions.jsonl")),
+            )
+            _sentinel_thread = _threading.Thread(
+                target=_sentinel.serve, kwargs={"stop": sentinel_stop.is_set}, daemon=True, name="hermus-sentinel"
+            )
+            _sentinel_thread.start()
+            logger.info("[Gateway] sentinel started — always-alert core inline on EventBus")
+            from core.events import get_bus as _get_bus
+
+            _get_bus().subscribe("sentinel.decision")(_on_sentinel_decision)
+        except Exception as e:
+            logger.error(f"[Gateway] sentinel failed to start: {type(e).__name__}: {e}")
+    if getattr(config, "presence_enabled", True):
+        try:
+            from core.ambient_loop import ambient_loop
+            from core.presence_kernel import presence_kernel
+
+            presence_kernel.start()
+            presence_task = asyncio.create_task(_presence_heartbeat_loop())
+            ambient_task = asyncio.create_task(ambient_loop.run())
+        except Exception as e:
+            logger.error(f"[Gateway] ambient presence failed to start: {type(e).__name__}: {e}")
+
+    if getattr(config, "personal_space_enabled", True):
+        try:
+            from core.personal_space import personal_space
+
+            personal_space_task = asyncio.create_task(personal_space.run())
+        except Exception as e:
+            logger.error(f"[Gateway] Personal Space failed to start: {type(e).__name__}: {e}")
+
+    maintenance_task = None
+    if getattr(config, "memory_sweep_minutes", 60) > 0:
+        try:
+            maintenance_task = asyncio.create_task(_memory_maintenance_loop())
+        except Exception as e:
+            logger.error(f"[Gateway] memory maintenance failed to start: {e}")
+    watchdog_task = None
+    if getattr(config, "background_agents_enabled", True):
+        try:
+            watchdog_task = asyncio.create_task(_background_agent_watchdog())
+        except Exception as e:
+            logger.error(f"[Gateway] background-agent watchdog failed to start: {e}")
+    engine_task = None
+    if getattr(config, "nollama_autostart", False) or getattr(config, "doctor_auto", False):
+        try:
+            engine_task = asyncio.create_task(_local_engine_watchdog())
+        except Exception as e:
+            logger.error(f"[Gateway] local-engine watchdog failed to start: {e}")
+    try:
+        yield
+    finally:
+        # Graceful drain: stop advertising readiness first (so a supervisor can
+        # route new traffic elsewhere), then give in-flight jobs a bounded
+        # window to finish before the process tears itself down.
+        _lifecycle.state.begin_drain("shutdown")
+        if presence_task and not presence_task.done():
+            presence_task.cancel()
+        if ambient_task and not ambient_task.done():
+            ambient_task.cancel()
+        if sentinel_stop is not None:
+            sentinel_stop.set()
+            try:
+                from core.events import get_bus
+
+                get_bus().unsubscribe(_sentinel.handle_event)  # detach immediately, don't wait for the thread
+            except Exception:
+                pass
+        try:
+            from core.events import get_bus
+
+            get_bus().unsubscribe(_on_sentinel_decision)
+        except Exception:
+            pass
+        if personal_space_task and not personal_space_task.done():
+            personal_space_task.cancel()
+        try:
+            from core.personal_space import personal_space
+
+            personal_space.stop()
+        except Exception:
+            pass
+        try:
+            from core.presence_kernel import presence_kernel
+
+            presence_kernel.stop()
+        except Exception:
+            pass
+        if maintenance_task and not maintenance_task.done():
+            maintenance_task.cancel()
+        if watchdog_task and not watchdog_task.done():
+            watchdog_task.cancel()
+        if engine_task and not engine_task.done():
+            engine_task.cancel()
+        # Drain in-flight work with a hard bound so SIGTERM can never hang the
+        # process (previously the queue stopped with a fixed 5s and ignored
+        # whether jobs were actually mid-flight).
+        try:
+            from gateway.queue import job_queue as _drain_queue
+
+            if getattr(_drain_queue, "_started", False):
+                await asyncio.wait_for(
+                    _drain_queue.stop(drain_timeout=_lifecycle.drain_timeout_seconds()),
+                    timeout=max(1.0, _lifecycle.drain_timeout_seconds() * 2),
+                )
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning("[Gateway] drain window expired — stopping anyway")
+        except Exception as e:  # noqa: BLE001 - shutdown must not raise
+            logger.error(f"[Gateway] queue drain failed: {e}")
+        try:
+            await _realtime.shutdown()
+        except Exception:
+            pass
+        if agent_pool_started:
+            try:
+                from core.agents import shutdown_pool
+
+                await shutdown_pool()
+            except Exception as e:
+                logger.warning(f"[Gateway] agent pool shutdown failed: {e}")
+        # Release the shared async HTTP pool (core.aio) so shutdown does not
+        # leave sockets in CLOSE_WAIT behind it.
+        try:
+            from core.aio import aclose_async_client as _aclose_http
+
+            await _aclose_http()
+        except Exception as e:  # noqa: BLE001 - shutdown must not raise
+            logger.debug(f"[Gateway] async http pool close skipped: {e}")
+        # Release every SQLite handle Hermus still owns (memory, memory2,
+        # hybrid index, web-read cache, engine state). Without this, Ctrl+C
+        # ended with a screenful of "ResourceWarning: unclosed database".
+        try:
+            from core.db_registry import close_all as _close_dbs
+
+            report = _close_dbs("gateway_shutdown")
+            if report.get("closed") or report.get("errors"):
+                logger.info(
+                    f"[Gateway] sqlite handles closed: {report.get('closed', 0)}"
+                    + (f" ({len(report['errors'])} errors)" if report.get("errors") else "")
+                )
+        except Exception as e:
+            logger.error(f"[Gateway] sqlite shutdown cleanup failed: {e}")
+        # Stop the local NoLlama engine we may have started, so the NPU/GPU
+        # side is never left running without its parent gateway.
+        try:
+            from core.nollama import nollama_manager
+
+            stopped = nollama_manager.stop_if_managed()
+            if stopped.get("stopped"):
+                logger.info(f"[Gateway] local engine stopped: {stopped.get('pid')}")
+        except Exception as e:
+            logger.error(f"[Gateway] local engine shutdown failed: {e}")
+
+
+app = FastAPI(title="Hermus Gateway Free", description="Single gateway for all platforms, free - Optimized", lifespan=lifespan)
+
+
+def register_error_handlers(target: FastAPI) -> None:
+    """Render all failures with the canonical ``core.errors`` envelope.
+
+    ``HermusError`` subclasses map to their own status/code; anything else
+    becomes a 500 that never leaks internals (the traceback is logged
+    server-side). ``HTTPException``/validation errors keep Starlette's
+    default handlers — this only adds the domain + catch-all layers.
+    """
+    from core.errors import HermusError
+
+    async def _hermus_error_handler(request: Request, exc: HermusError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status, content={"success": False, **exc.to_dict()})
+
+    async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.error("unhandled gateway error: %r", exc, exc_info=(type(exc), exc, exc.__traceback__))
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "internal",
+                "message": "Internal server error",
+                "retryable": False,
+                "details": {},
+            },
+        )
+
+    target.exception_handler(HermusError)(_hermus_error_handler)
+    target.exception_handler(Exception)(_unhandled_error_handler)
+
+
+register_error_handlers(app)
+
+
+# --- CORS: secure-by-default, configurable -------------------------------------
+# The control room is served same-origin (relative URLs), so browser CORS is not
+# required for the UI. Wildcard + credentials is an insecure combination (the
+# spec §32 forbids leaving it on without a documented, authenticated model), so we
+# default to a restricted allow-list and credentials OFF. Operators may opt into a
+# broader set via HERMUS_CORS_ORIGINS (comma-separated); explicit "*" is allowed
+# but forces credentials OFF.
+def _cors_origins() -> list[str]:
+    raw = os.environ.get("HERMUS_CORS_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+
+def _cors_credentials() -> bool:
+    # Credentials are only safe with an explicit (non-wildcard) origin allow-list.
+    raw = os.environ.get("HERMUS_CORS_ORIGINS", "").strip()
+    if "*" in [o.strip() for o in raw.split(",") if o.strip()]:
+        return False
+    return os.environ.get("HERMUS_CORS_CREDENTIALS", "0") not in ("0", "false", "False")
+
+
+# --- Cross-cutting HTTP middleware (see gateway/middleware.py) -----------------
+# Starlette footgun worth spelling out: ``add_middleware`` *inserts at index 0*
+# and ``build_middleware_stack`` then applies the stack in reverse, so the
+# **last** middleware registered is the **outermost**. The registrations below
+# are therefore written innermost-first, giving this effective order:
+#
+#   CORS             outermost - preflight short-circuits before any work
+#   RequestContext             - ids + timing for everything below, including
+#                                rate-limit rejections and unhandled 500s
+#   RateLimit                  - reject abuse before the app sees the request
+#   GZip                       - compresses what the app renders
+#   ErrorEnvelope    innermost - normalizes every 4xx/5xx JSON body it produces
+from gateway.middleware import (  # noqa: E402
+    ErrorEnvelopeMiddleware,
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+)
+
+# Every error response — including FastAPI's own {"detail": ...} — leaves with
+# the canonical envelope ({success, error, code, message, retryable, details}).
+app.add_middleware(ErrorEnvelopeMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=_cors_credentials(),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# The single production control room is served from /control (see control_room
+# below); it is a self-contained snapshot + replay projection with no external
+# assets. The legacy dashboard static-assets mount is removed.
+
+# Job queue + SSE + WebSocket + memory/skill/sandbox/delegation endpoints.
+# The agent getter is injected later, in the lifespan (get_agent_for_user is
+# defined further down this module).
+_realtime.install(app)
+
+# Per-concern routers (extracted from this module; see gateway/routes_*.py).
+# Mounted after the realtime layer so its routes keep precedence.
+from gateway.routes_agents import router as _agents_router  # noqa: E402
+from gateway.routes_android import router as _android_router  # noqa: E402
+from gateway.routes_canonical import router as _canonical_router  # noqa: E402
+from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
+from gateway.routes_channels import router as _channels_router  # noqa: E402
+from gateway.routes_computer import router as _computer_router  # noqa: E402
+from gateway.routes_computer import ws_router as _computer_ws_router  # noqa: E402
+from gateway.routes_config import router as _config_router  # noqa: E402
+from gateway.routes_console import router as _console_router  # noqa: E402
+from gateway.routes_context import router as _context_router  # noqa: E402
+from gateway.routes_dashboard import router as _dashboard_router  # noqa: E402
+from gateway.routes_devices import router as _devices_router  # noqa: E402
+from gateway.routes_engine import router as _engine_router  # noqa: E402
+from gateway.routes_focus import router as _focus_router  # noqa: E402
+from gateway.routes_harness import eval_router as _harness_eval_router  # noqa: E402
+from gateway.routes_harness import router as _harness_router  # noqa: E402
+from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
+from gateway.routes_learning import router as _learning_router  # noqa: E402
+from gateway.routes_management import router as _management_router  # noqa: E402
+from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
+from gateway.routes_presence import router as _presence_router  # noqa: E402
+from gateway.routes_registry import router as _registry_router  # noqa: E402
+from gateway.routes_routines import router as _routines_router  # noqa: E402
+from gateway.routes_sentinel import router as _sentinel_router  # noqa: E402
+from gateway.routes_speech import router as _speech_router  # noqa: E402
+from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
+from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
+from gateway.routes_teach import router as _teach_router  # noqa: E402
+from gateway.routes_voice import router as _voice_router  # noqa: E402
+from gateway.routes_workshop import router as _workshop_router  # noqa: E402
+
+# The channel *webhook* router is intentionally NOT gated: an external service
+# (Telegram/Discord) cannot attach an auth header, so gating it would break
+# inbound channel delivery. The channel *control* router (status/start/send) IS
+# gated like every other control-plane router, and each gated router opens when
+# HERMUS_GATEWAY_TOKEN is unset (local default).
+_gate_control = [Depends(_check_gateway_auth)]
+app.include_router(_channels_router)
+app.include_router(_channels_control_router, dependencies=_gate_control)
+app.include_router(_registry_router, dependencies=_gate_control)
+app.include_router(_sentinel_router, dependencies=_gate_control)
+app.include_router(_harness_router, dependencies=_gate_control)
+app.include_router(_harness_eval_router, dependencies=_gate_control)
+app.include_router(_management_router, dependencies=_gate_control)
+app.include_router(_subsystems_router, dependencies=_gate_control)
+app.include_router(_config_router, dependencies=_gate_control)
+app.include_router(_console_router, dependencies=_gate_control)
+app.include_router(_dashboard_router, dependencies=_gate_control)
+app.include_router(_computer_router, dependencies=_gate_control)
+app.include_router(_computer_ws_router)
+app.include_router(_speech_router, dependencies=_gate_control)
+app.include_router(_speech_ws_router)
+app.include_router(_jarvis_router, dependencies=_gate_control)
+app.include_router(_voice_router, dependencies=_gate_control)
+app.include_router(_engine_router, dependencies=_gate_control)
+app.include_router(_canonical_router, dependencies=_gate_control)
+app.include_router(_android_router, dependencies=_gate_control)
+app.include_router(_presence_router, dependencies=_gate_control)
+app.include_router(_agents_router, dependencies=_gate_control)
+app.include_router(_workshop_router, dependencies=_gate_control)
+app.include_router(_context_router, dependencies=_gate_control)
+app.include_router(_teach_router, dependencies=_gate_control)
+app.include_router(_devices_router, dependencies=_gate_control)
+app.include_router(_learning_router, dependencies=_gate_control)
+app.include_router(_routines_router, dependencies=_gate_control)
+app.include_router(_focus_router, dependencies=_gate_control)
+app.include_router(_personal_space_router, dependencies=_gate_control)
+
+
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
+    """Open the single canonical control room (spec §21 / Final One-Shot §7).
+
+    Explicitly allows HEAD so health checks / proxies that probe ``/`` with HEAD
+    no longer get a 405. Root opens /control; no legacy dashboard surface.
+    """
+    return RedirectResponse(url="/harness", status_code=307)
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve a tiny inline Hermus (caduceus-style) favicon so browsers stop
+    logging a 404 on every dashboard load."""
+    favicon_svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+        "<rect width='32' height='32' rx='7' fill='#02050e'/>"
+        "<text x='16' y='23' font-size='20' text-anchor='middle' fill='#00f2fe'>&#9764;</text>"
+        "</svg>"
+    )
+    return Response(
+        content=favicon_svg.encode("utf-8"),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/api/status")
+async def api_status():
+    """Machine-readable gateway status previously served from the root path."""
+    from core.cache import get_cache_stats
+
+    # Local engine summary (NPU/GPU routing). Probe is off here: /api/status is
+    # polled by the dashboard, and the reachable-check lives on /engine/status.
+    try:
+        from core.accelerators import cached_plan
+        from core.nollama import nollama_manager
+
+        plan = cached_plan()
+        local_engine = {
+            "mode": plan.get("mode"),
+            "hardware": {
+                "npu": [d["name"] for d in plan.get("hardware", {}).get("npu", [])],
+                "gpus": [d["name"] for d in plan.get("hardware", {}).get("gpus", [])],
+            },
+            "roles": {
+                role: {"engine": a.get("engine"), "device": a.get("device"), "model": a.get("model")}
+                for role, a in (plan.get("roles") or {}).items()
+            },
+            "nollama": {
+                "installed": nollama_manager.installed(),
+                "running": nollama_manager.running(),
+                "models": len(nollama_manager.installed_models()),
+                "port": nollama_manager.port,
+            },
+        }
+    except Exception as e:  # noqa: BLE001 - status must still answer
+        local_engine = {"error": str(e)}
+    try:
+        from core.presence import get_presence
+
+        # /api/status is intentionally a public transport probe. Do not expose
+        # identity, goal titles, user messages or turn results through it; the
+        # authenticated /presence endpoints carry the full continuity snapshot.
+        presence_snapshot = get_presence().public_status()
+    except Exception as exc:
+        presence_snapshot = {"error": f"presence unavailable: {type(exc).__name__}: {exc}"}
+    return {
+        "message": "Hermus Gateway Free - Single process for Telegram/Discord/Slack/CLI - Optimized",
+        "platforms": ["telegram", "discord", "cli"],
+        "agents": len(AGENTS),
+        "channels": get_channel_status(),
+        "presence": presence_snapshot,
+        "optimized": True,
+        "cache_stats": get_cache_stats(),
+        "local_engine": local_engine,
+        "features": [
+            "multi_step_agent_loop",
+            "tool_registry",
+            "telegram_send_and_poll",
+            "discord_bot",
+            "mcp_client",
+            "semantic_embeddings",
+            "public_api_discovery",
+            "memory2_typed_scored_memory",
+            "model_router2",
+            "autonomous_verify_repair_loop",
+            "persistent_background_agents",
+            "permission_manager",
+            "research_pipeline",
+            "computer_control_screen",
+            "computer_agent_dashboard",
+            "remote_control_approval",
+            "plugin_ecosystem",
+            "resource_monitoring",
+            "skill_optimization",
+            "multi_agent_delegation",
+            "self_healing_watchdog",
+            "workspace_projects",
+            "profiles_personas",
+            "durable_identity_presence_heartbeat",
+            "ongoing_goals_safe_checkins",
+            "bounded_autonomous_curiosity",
+            "personal_space_proposals",
+            "local_engine_routing_npu_gpu",
+            "nollama_openvino_engine",
+            "hermus_doctor_self_repair",
+            "sqlite_lifecycle_registry",
+        ],
+        "version": "2.2-free-architecture",
+    }
+
+
+@app.get("/harness", response_class=HTMLResponse)
+async def harness_view():
+    """The harness: a task in, a transcript and a diff out.
+
+    This is the home surface now. It reads the same canonical backend as the
+    cockpit — /runs, /runs/{id}, /runs/{id}/diff, POST /command — and owns no
+    truth of its own. ``/control`` keeps the ops view (presence, approvals,
+    subsystems) and is reachable from the mode switch in the header.
+    """
+    html_path = Path(__file__).parent / "harness.html"
+    if not html_path.exists():
+        return HTMLResponse("harness not found", status_code=404)
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/static/harness.css")
+async def harness_css():
+    """Harness stylesheet."""
+    return _serve_control_asset("harness.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/harness.js")
+async def harness_js():
+    """Harness application script (markup lives in harness.html)."""
+    return _serve_control_asset("harness.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/control", response_class=HTMLResponse)
+@app.get("/controlroom", response_class=HTMLResponse)
+async def control_room():
+    """Canonical single control room (Rebuild spec §21).
+
+    Pure snapshot + replay projection: state is either a live probe
+    (``/api/v1/system/*``, ``/jobs``, ``/queue/status``) or reconstructable from
+    the durable canonical event log (``/api/v1/runs/{id}/timeline``). It never
+    owns truth. This is the single UI surface the spec calls for.
+    """
+    html_path = Path(__file__).parent / "control.html"
+    if not html_path.exists():
+        return HTMLResponse("Control room not found", status_code=404)
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+def _serve_control_asset(name: str, media_type: str) -> Response:
+    """Read one control-room asset from ``gateway/static``.
+
+    Served from explicit routes rather than a ``StaticFiles`` mount: the control
+    room is the only UI surface and it is same-origin, so a fixed allow-list
+    keeps the gateway from exposing the whole directory (or anything else that
+    later lands in ``static/``).
+    """
+    path = Path(__file__).parent / "static" / name
+    if not path.exists():
+        return Response(f"{name} not found", status_code=404, media_type="text/plain")
+    return Response(
+        path.read_text(encoding="utf-8"),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/static/control-client.js")
+async def control_client_js():
+    """Browser client: typed SSE stream handling + the voice-first (Jarvis) flow."""
+    return _serve_control_asset("control-client.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-room.js")
+async def control_room_js():
+    """Control-room application script (markup lives in control.html)."""
+    return _serve_control_asset("control-room.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control.css")
+async def control_room_css():
+    """Control-room stylesheet."""
+    return _serve_control_asset("control.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/console.js")
+async def control_console_js():
+    """Generated Systems console: renders ``core/console.py`` (see routes_console)."""
+    return _serve_control_asset("console.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/nexus.css")
+async def nexus_css():
+    """Nexus dashboard stylesheet."""
+    return _serve_control_asset("nexus.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/nexus.js")
+async def nexus_js():
+    """Nexus dashboard application script."""
+    return _serve_control_asset("nexus.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/nexus-mock.js")
+async def nexus_mock_js():
+    """Nexus dashboard compatibility/mock layer."""
+    return _serve_control_asset("nexus-mock.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/personal-space.js")
+async def personal_space_js():
+    """Nexus Personal Space client."""
+    return _serve_control_asset("personal-space.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-core.js")
+async def control_core_js():
+    """Living-core canvas: a state projection over real gateway probes."""
+    return _serve_control_asset("control-core.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/control-agents.js")
+async def control_agents_js():
+    """Agents tab: fleet roster, crew mail, API keys, GPU telemetry."""
+    return _serve_control_asset("control-agents.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/hud.css")
+async def hud_css():
+    """Fairy Core skin: JARVIS hairlines x ZZZ street neon (cosmetic layer)."""
+    return _serve_control_asset("hud.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/hud.js")
+async def hud_js():
+    """Fairy Core runtime: boot ceremony, avatar moods, ticker (no backend calls)."""
+    return _serve_control_asset("hud.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/assets/{asset_name}")
+async def control_static_asset(asset_name: str):
+    """Static brand assets for the control room (logo, favicon)."""
+    if asset_name not in {"logo.svg", "favicon.svg"}:
+        return Response(f"{asset_name} not found", status_code=404, media_type="text/plain")
+    return _serve_control_asset(f"assets/{asset_name}", "image/svg+xml")
+
+
+@app.get("/cache/stats")
+async def cache_stats():
+    """Get cache stats - for optimization dashboard"""
+    from core.cache import get_cache_stats
+
+    return get_cache_stats()
+
+
+@app.post("/cache/clear")
+async def cache_clear():
+    """Clear all caches - for optimization"""
+    from core.cache import clear_all_caches
+
+    return clear_all_caches()
+
+
+@app.get("/agents/status")
+async def agents_status():
+    """Slide panel data - what agents/models are running or doing the task - free"""
+    return task_tracker.get_status()
+
+
+@app.post("/command")
+async def command_endpoint(request: Request):
+    """Run an agent command, optionally producing local Talking Mode audio.
+
+    Accepts either a JSON body (CLI/channels) or ``multipart/form-data`` (the
+    dashboard drag-and-drop chat). Attachments are processed by
+    ``core.document_ingest``: text files are inlined, and binary documents
+    (DOCX/XLSX/PPTX/PDF/ZIP/…) get their real contents extracted when possible
+    (plus the raw bytes persisted to the workspace uploads dir so vision/OCR
+    tools can open them) — previously binaries were reduced to name+size.
+
+    ``async``/``async_mode`` (sent by the dashboard) enqueues a
+    ``runtime.turn`` job instead of running inline, so the turn survives the
+    dashboard being closed and is executed queue-first exactly like every
+    other surface. ``talking``/``speak`` is additive: every existing
+    CLI/channel caller keeps the original JSON contract.
+    """
+    from core.dashboard_events import dashboard_event_bus
+    from core.document_ingest import attachment_prompt_block, extract_document
+
+    payload: dict = {}
+    attachments: list[dict] = []
+    ctype = request.headers.get("content-type", "")
+    if ctype.startswith("multipart/form-data"):
+        form = await request.form()
+        # Scalar fields (text, mode, model, ...) arrive as form strings.
+        for key in (
+            "platform",
+            "user_id",
+            "text",
+            "model",
+            "mode",
+            "api_key",
+            "base_url",
+            "provider",
+            "key_name",
+            "profile",
+            "run_id",
+            "autonomous",
+            "async",
+            "async_mode",
+            "talking",
+            "speak",
+            "stream",
+            "voice",
+            "speech_rate",
+            "timeout",
+            "prefer",
+            "preflight",
+            "allow_preflight_planning",
+        ):
+            val = form.get(key)
+            if val is not None and val != "":
+                payload[key] = val
+        uploads_dir = None
+        try:
+            from core.workspace import workspace
+
+            uploads_dir = workspace.dirs["uploads"]
+        except Exception:
+            uploads_dir = None
+        for upload in form.getlist("files"):
+            if not getattr(upload, "filename", None):
+                continue
+            content = await upload.read()
+            doc = await asyncio.to_thread(
+                extract_document,
+                upload.filename,
+                content,
+                upload.content_type or "",
+                save_binary_to=uploads_dir,
+            )
+            attachments.append(doc)
+    else:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+    payload = payload or {}
+
+    # Inject attachment contents into the prompt as an explicit context block.
+    if attachments:
+        blocks = [attachment_prompt_block(doc) for doc in attachments]
+        if blocks:
+            payload["text"] = (
+                f"{str(payload.get('text') or '').strip()}\n\nThe user attached {len(attachments)} file(s):\n"
+                + "\n\n".join(blocks)
+            )
+        payload["attachments"] = [doc.to_dict() for doc in attachments]
+
+    platform = payload.get("platform", "cli")
+    user_id = payload.get("user_id", "cli_user")
+    text = str(payload.get("text", ""))
+    if not text.strip():
+        return JSONResponse({"error": "text required"}, status_code=400)
+    model = payload.get("model")
+    mode = payload.get("mode", "agent")
+    api_key = payload.get("api_key")
+    base_url = payload.get("base_url")
+    provider = payload.get("provider")
+    key_name = payload.get("key_name")
+    autonomous = bool(payload.get("autonomous", False))
+    prefer = str(payload.get("prefer") or ("mission" if autonomous else "auto")).lower()
+    profile = payload.get("profile") or ""
+    as_async = bool(payload.get("async", payload.get("async_mode", False)))
+    talking = bool(payload.get("talking", payload.get("speak", False)))
+    run_id = str(payload.get("run_id") or f"run_{os.urandom(5).hex()}")
+
+    # Allow selecting a stored key by provider + key name (dashboard chat).
+    # The key itself is looked up server-side — never sent from the browser.
+    if key_name and provider:
+        try:
+            from core.multi_key import multi_key_manager
+
+            entry = multi_key_manager.get_entry(provider, key_name)
+            if entry:
+                api_key = api_key or entry.get("key")
+                base_url = base_url or entry.get("base_url")
+                if not model and entry.get("default_model"):
+                    model = f"{provider}/{entry['default_model']}"
+        except Exception:
+            pass
+
+    # Async path: hand the turn to the worker pool and answer with a job handle.
+    # This is the dashboard's default path (queue-first execution): the turn
+    # keeps running server-side even if the browser is closed, and its events
+    # stream over SSE via the run bus.
+    if as_async and _job_queue.enabled and _job_queue._started:
+        job = _job_queue.submit(
+            "runtime.turn",
+            {
+                "text": text,
+                "platform": platform,
+                "user_id": user_id,
+                "model": model,
+                "mode": mode,
+                "api_key": api_key,
+                "base_url": base_url,
+                "provider": provider,
+                "key_name": key_name,
+                "profile": profile,
+                "talking": talking,
+                "speech_rate": payload.get("speech_rate"),
+                "voice": payload.get("voice"),
+                "stream": bool(payload.get("stream", True)),
+                "prefer": prefer,
+                "max_repairs": payload.get("max_repairs"),
+                "budget_steps": payload.get("budget_steps"),
+                "preflight": payload.get("preflight"),
+                "allow_preflight_planning": payload.get("allow_preflight_planning"),
+            },
+            session_key=f"{platform}:{user_id}",
+            timeout=payload.get("timeout"),
+            run_id=run_id,
+        )
+        return {
+            "async": True,
+            "job_id": job.id,
+            "run_id": job.run_id,
+            "status": job.status,
+            "run_kind": "queued",
+            "status_url": f"/jobs/{job.id}",
+            "result_url": f"/jobs/{job.id}/result",
+            "events_url": f"/jobs/{job.id}/events",
+            "stream_url": f"/stream/run/{job.run_id}",
+        }
+
+    agent = get_agent_for_user(platform, user_id, model=model, mode=mode, api_key=api_key, base_url=base_url)
+    if profile:
+        agent.profile = profile
+
+    # Mirror the inline run onto the run bus so /stream/run/{run_id} works even
+    # when the caller did not use the queue.
+    _run_bus.start(run_id, label=f"command:{platform}:{user_id}")
+
+    def _bus_event(event_type: str, data: dict | None = None) -> None:
+        try:
+            _run_bus.publish(run_id, event_type, dict(data or {}))
+        except Exception:
+            pass
+
+    dashboard_event_bus.publish(
+        "session_started",
+        {
+            "run_id": run_id,
+            "text": text[:1000],
+            "mode": mode,
+            "model": model or agent.model_name,
+            "talking": talking,
+            "platform": platform,
+        },
+    )
+    try:
+        stream_tokens = bool(
+            getattr(config, "gateway_stream_enabled", True)
+            and getattr(config, "gateway_stream_tokens", True)
+            and payload.get("stream", True)
+        )
+
+        def _run() -> dict:
+            # Universal mission runtime: same core for inline /command turns as
+            # for queued jobs, the CLI and channels — with live streaming,
+            # cooperative cancellation and mid-run steering from the run bus.
+            from core.runtime import execute as runtime_execute
+
+            out = runtime_execute(
+                text,
+                agent=agent,
+                prefer=prefer,
+                on_event=_bus_event,
+                stream=stream_tokens,
+                should_cancel=lambda: _run_bus.is_cancelled(run_id),
+                steer_source=lambda: _run_bus.pending_steers(run_id),
+                max_repairs=int(payload.get("max_repairs") or 2),
+                preflight=payload.get("preflight"),
+                allow_preflight_planning=bool(
+                    str(payload.get("allow_preflight_planning", "false")).lower() in {"1", "true", "yes"}
+                ),
+            )
+            if isinstance(out, dict):
+                out.setdefault("steps", out.get("steps", 0))
+                if autonomous:
+                    out["autonomous"] = True
+                if stream_tokens:
+                    out["streamed"] = True
+            return out
+
+        result = await asyncio.to_thread(_run)
+        # Normalize the answer contract: chat returns "response", autonomous
+        # reports historically returned "final_answer" and missions use
+        # "final_proof". Promote whichever exists to canonical "response" so the
+        # dashboard, SSE events and TTS never see an empty answer.
+        if isinstance(result, dict) and not result.get("response"):
+            for alt in ("final_answer", "final_proof", "answer", "output"):
+                if result.get(alt):
+                    result["response"] = str(result[alt])
+                    break
+        if not autonomous:
+            # Self-healing watchdog (architecture upgrade)
+            from core.integrations import maybe_self_heal
+
+            result = maybe_self_heal(result)
+    except Exception as exc:
+        dashboard_event_bus.publish("session_failed", {"run_id": run_id, "error": str(exc)})
+        try:
+            _run_bus.finish(run_id, "error", None, str(exc))
+        except Exception:
+            pass
+        return JSONResponse({"error": str(exc), "run_id": run_id}, status_code=500)
+
+    # Include mode in response
+    result["mode"] = agent.mode.value
+    result["mode_config"] = {"name": agent.mode_config.name, "description": agent.mode_config.description[:200]}
+    result["model"] = agent.model_name
+    result["run_id"] = run_id
+    result["talking"] = talking
+    if attachments:
+        # attachment extraction report (inlined text? which method? saved path?)
+        result["attachments"] = payload.get("attachments") or [doc.to_dict() for doc in attachments]
+    try:
+        bundle = agent.llm._resolve_bundle()
+        result["resolved"] = {
+            "provider": bundle.get("provider") or agent.llm.provider,
+            "base_url": bundle.get("base_url") or None,
+            "default_model": bundle.get("default_model"),
+        }
+    except Exception:
+        pass
+
+    answer = str(result.get("response") or "")
+    dashboard_event_bus.publish(
+        "agent_response",
+        {
+            "run_id": run_id,
+            "text": answer[:12000],
+            "model": result.get("model"),
+            "mode": result.get("mode"),
+            "steps": result.get("steps"),
+            "tool_calls": list(result.get("tool_calls") or [])[:30],
+        },
+    )
+
+    if talking and answer:
+        from core.speech import speech_engine
+
+        speech = await asyncio.to_thread(
+            speech_engine.synthesize,
+            answer,
+            payload.get("voice"),
+            int(payload.get("speech_rate") or 165),
+        )
+        speech.pop("path", None)
+        if speech.get("success"):
+            speech["audio_url"] = f"/speech/audio/{speech['audio_id']}"
+            dashboard_event_bus.publish(
+                "speech_ready",
+                {
+                    "run_id": run_id,
+                    "text": answer[:12000],
+                    "audio_url": speech["audio_url"],
+                    "audio_id": speech["audio_id"],
+                    "backend": speech.get("backend"),
+                    "estimated_duration": speech.get("estimated_duration"),
+                },
+            )
+        else:
+            dashboard_event_bus.publish(
+                "speech_unavailable",
+                {
+                    "run_id": run_id,
+                    "error": speech.get("error"),
+                    "text": answer[:12000],
+                },
+            )
+        result["speech"] = speech
+
+    dashboard_event_bus.publish(
+        "session_finished",
+        {
+            "run_id": run_id,
+            "success": True,
+            "talking": talking,
+            "model": result.get("model"),
+            "steps": result.get("steps"),
+        },
+    )
+    try:
+        _run_bus.publish(
+            run_id, "agent_response", {"text": str(result.get("response") or "")[:8000], "steps": result.get("steps")}
+        )
+        _run_bus.finish(run_id, "finished", result)
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/run/cancel/{run_id}")
+async def run_cancel(run_id: str):
+    """Cooperatively cancel a real run and its owning queue job, if any."""
+    job_result = None
+    for job in _job_queue.list_jobs(limit=500):
+        if job.get("run_id") == run_id and job.get("status") in {"queued", "running"}:
+            job_result = _job_queue.cancel(job["id"])
+            break
+    cancelled = _run_bus.cancel(run_id)
+    if not cancelled and not (job_result and job_result.get("cancelled")):
+        return JSONResponse({"cancelled": False, "run_id": run_id, "error": "active run not found"}, status_code=404)
+    return {"cancelled": True, "run_id": run_id, "job": job_result, "stage": (job_result or {}).get("stage", "cooperative")}
+
+
+@app.post("/run/steer")
+async def run_steer(payload: dict = None):
+    """Send a mid-run constraint for an active run.
+
+    The instruction is queued on the run's steer inbox (``RunBus.steer``): the
+    executing agent loop drains it at its next step boundary and injects it
+    into the conversation as a user message, and the event is published on the
+    run's stream so dashboards/SSE see it live. Mid-token injection into an
+    in-flight model call is still not possible — steering applies at the next
+    step boundary — but it now genuinely reaches the model instead of only
+    being recorded.
+    """
+    payload = payload or {}
+    run_id = str(payload.get("run_id") or "").strip()
+    text = str(payload.get("text") or payload.get("steer") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text required"}, status_code=400)
+
+    delivered = False
+    queued = False
+    run = _run_bus.get(run_id) if run_id else None
+    if run is not None:
+        # queue on the inbox (the agent drains it) + publish on the stream
+        delivered = _run_bus.steer(run_id, text)
+        queued = delivered
+
+    # Also signal any matching queued job (used for cooperative cancel/control).
+    job_info = None
+    try:
+        from gateway.queue import job_queue
+
+        for job in job_queue.list_jobs() if hasattr(job_queue, "list_jobs") else []:
+            if run_id and getattr(job, "run_id", None) == run_id:
+                job_info = job.id
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "applied_to_stream": delivered,
+        "queued_for_agent": queued,
+        "job_id": job_info,
+        "note": (
+            "Steer queued for the active run: the agent applies it at its next step boundary and the event is on the run stream."
+            if delivered
+            else "No active run found for that run_id; the message was not applied."
+        ),
+    }
+
+
+@app.get("/platforms")
+async def platforms():
+    return {
+        "platforms": list(set([k.split(":")[0] for k in AGENTS.keys()])),
+        "active_agents": len(AGENTS),
+        "task_tracker": task_tracker.get_status(),
+    }
+
+
+# --- Health probes -------------------------------------------------------------
+# Distinct from /api/v1/system/health (which probes *capabilities* via the
+# doctor). These are the two answers a supervisor needs: is the process
+# serving, and may it be given traffic right now. They are deliberately
+# unauthenticated and uncached so a probe can never be blocked by a token
+# rotation, and they read real state (see gateway/lifecycle.py).
+@app.get("/healthz")
+@app.get("/livez")
+async def healthz():
+    """Liveness: the event loop is serving. Never gated, never cached."""
+    from gateway.envelope import ok
+
+    return ok(
+        {
+            "status": "ok",
+            "uptime": _lifecycle.uptime_seconds(),
+            "pid": os.getpid(),
+        }
+    )
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness: 200 when traffic may be routed here, 503 while draining."""
+    from gateway.envelope import error_body
+
+    ready, detail = _lifecycle.readiness()
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        **detail,
+    }
+    if ready:
+        return payload
+    return JSONResponse(
+        status_code=503,
+        content=error_body(
+            code="not_ready",
+            message="; ".join(detail.get("reasons") or ["not ready"]),
+            status=503,
+            retryable=True,
+            details=detail,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# CLI for gateway setup/start - free
+def setup(platform: str):
+    logger.info(f"[Gateway] Setup for {platform} - Free")
+    if platform == "telegram":
+        token = os.getenv("TELEGRAM_BOT_TOKEN") or config.telegram_bot_token
+        if not token:
+            logger.info("Set TELEGRAM_BOT_TOKEN env: https://t.me/BotFather /newbot (free)")
+            logger.info("Then: hermus gateway start  (auto long-poll) OR set webhook to /webhook/telegram")
+        else:
+            logger.info(f"Telegram token found: {token[:10]}... - Ready")
+            logger.info("Modes:")
+            logger.warning("  1) Long-polling (default, no public URL): hermus gateway start")
+            logger.info("  2) Webhook: export HERMUS_TELEGRAM_MODE=webhook")
+            logger.info(f"     https://api.telegram.org/bot{token}/setWebhook?url=https://yourdomain.com/webhook/telegram")
+            logger.warning("Bot will REALLY sendMessage replies (not stub).")
+    elif platform == "discord":
+        token = os.getenv("DISCORD_BOT_TOKEN") or config.discord_bot_token
+        if not token:
+            logger.info("Set DISCORD_BOT_TOKEN env: https://discord.com/developers/applications (free)")
+            logger.info("Enable Message Content Intent in the Discord developer portal.")
+        else:
+            logger.info("Discord token found - bot starts with gateway (mention or DM the bot)")
+    else:
+        logger.info(f"Platform {platform} setup - just set env token")
+
+
+def start(port: int = None):
+    port = port or config.gateway_port
+    configure_stdio()
+    logger.info(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
+    logger.info("Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
+    logger.info("Channels: /channels/status, /channels/start, /telegram/send")
+    logger.info("Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
+    logger.info(f"Docs: http://localhost:{port}/docs")
+    logger.info(f"Control room: http://localhost:{port}/control")
+    logger.info(f"Computer control (API): http://localhost:{port}/computer/status")
+    logger.info(f"Remote control (API): http://localhost:{port}/remote/status")
+    logger.info("Plugins: /plugins | Resources: /computer/resources | Delegation: /computer/delegate")
+    logger.info(
+        f"Telegram mode={getattr(config, 'telegram_mode', 'auto')} | auto_channels={getattr(config, 'auto_start_channels', True)}"
+    )
+    logger.info("Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Hermus Gateway Free")
+    parser.add_argument("action", choices=["setup", "start"], help="setup or start")
+    parser.add_argument("--platform", default="telegram", help="telegram, discord, etc.")
+    parser.add_argument("--port", type=int, default=config.gateway_port)
+    args = parser.parse_args()
+    if args.action == "setup":
+        setup(args.platform)
+    else:
+        start(args.port)

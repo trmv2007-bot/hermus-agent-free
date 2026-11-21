@@ -1,0 +1,51 @@
+{
+  "name": "fairy",
+  "description": "Fairy (proactive attention) suite — the agent plays the FAIRY layer from Zenless Zone Zero: triage world signals, prioritize, and report without being asked. Works with any configured model: hermus harness run fairy --model auto",
+  "tasks": [
+    {
+      "id": "fairy_idle",
+      "category": "triage",
+      "prompt": "You are FAIRY, the proactive attention layer. Current signals: none urgent (all clear). When nothing is urgent you must reply with exactly: IDLE",
+      "checks": [
+        {"type": "regex", "value": "\\bIDLE\\b"}
+      ]
+    },
+    {
+      "id": "fairy_triage",
+      "category": "triage",
+      "prompt": "You are FAIRY, the proactive attention layer. Triage these world signals and reply with exactly one line in the format TOP: <signal_id> choosing the highest-severity signal. Signals: [{\"id\": \"sig_low\", \"severity\": \"info\", \"text\": \"disk usage 61%\"}, {\"id\": \"sig_critical\", \"severity\": \"critical\", \"text\": \"circuit breaker OPEN on provider groq\"}, {\"id\": \"sig_warn\", \"severity\": \"warn\", \"text\": \"3 tasks queued\"}]",
+      "checks": [
+        {"type": "regex", "value": "TOP:\\s*sig_critical"}
+      ]
+    },
+    {
+      "id": "fairy_json_report",
+      "category": "report",
+      "prompt": "You are FAIRY, the proactive attention layer. Produce a JSON report of these signals as a fenced ```json block with keys \"top\" (the highest-severity signal id) and \"count\" (number of signals). Signals: [{\"id\": \"sig_low\", \"severity\": \"info\"}, {\"id\": \"sig_critical\", \"severity\": \"critical\"}, {\"id\": \"sig_warn\", \"severity\": \"warn\"}]",
+      "checks": [
+        {"type": "json", "key": "top", "value": "sig_critical"},
+        {"type": "json", "key": "count", "value": "3"}
+      ]
+    },
+    {
+      "id": "fairy_summary",
+      "category": "report",
+      "prompt": "You are FAIRY, the proactive attention layer. Summarize the current attention state in one line. Your reply must start with the prefix FAIRY: and mention the most urgent signal id, which is sig_critical (circuit breaker OPEN on provider groq); the other signals are sig_low (disk 61%) and sig_warn (3 queued).",
+      "checks": [
+        {"type": "substring", "value": "FAIRY:"},
+        {"type": "substring", "value": "sig_critical"}
+      ]
+    },
+    {
+      "id": "fairy_attention_file",
+      "category": "file",
+      "prompt": "You are FAIRY, the proactive attention layer. Write the current attention report to a file named attention.md in the current directory. It must contain the line: top priority: sig_critical (circuit breaker OPEN on provider groq). Other signals: sig_low, sig_warn.",
+      "max_steps": 6,
+      "checks": [
+        {"type": "file_exists", "path": "attention.md"},
+        {"type": "file_regex", "path": "attention.md", "pattern": "top priority:\\s*sig_critical"}
+      ],
+      "metadata": {"difficulty": "medium"}
+    }
+  ]
+}

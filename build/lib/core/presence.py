@@ -1,0 +1,796 @@
+"""Hermus presence: a small, durable continuity layer for the agent.
+
+Presence is deliberately different from the model, memory and world state:
+
+* **identity** is the stable, user-editable description of who Hermus is;
+* **presence** is the current operational state (idle, thinking, working, ...);
+* **goals** are the user's ongoing commitments that Hermus can safely follow up;
+* **moments** are short local-only continuity notes, not a second chat history.
+
+The module gives Hermus a visible sense of continuity without pretending that an
+LLM is conscious. It is safe by default: the heartbeat updates status and emits
+check-in suggestions, but it never starts model calls or performs actions on its
+own. Any proactive work must still go through the normal queue, permissions and
+emergency-stop paths.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import os
+import re
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .config import config
+
+PRESENCE_STATES = (
+    "offline",
+    "idle",
+    "thinking",
+    "working",
+    "verifying",
+    "learning",
+    "waiting_approval",
+    "error",
+    "sleeping",
+)
+
+_ACTIVE_STATES = {"thinking", "working", "verifying", "learning", "waiting_approval"}
+
+_SECRET_PATTERNS = (
+    (re.compile(r"(?i)(api[_ -]?key|access[_ -]?token|password|secret|token)\s*[:=]\s*[^\s,;]+"), r"\1=[redacted]"),
+    (re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_-]{12,})\b"), "[redacted-token]"),
+)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _safe_text(value: Any, limit: int = 400) -> str:
+    """Bound local continuity text and remove obvious credential-shaped values."""
+    text = " ".join(str(value or "").split())
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _safe_int(value: Any, default: int = 0, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        result = default
+    if minimum is not None:
+        result = max(minimum, result)
+    if maximum is not None:
+        result = min(maximum, result)
+    return result
+
+
+def _clone(value: Any) -> Any:
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return value
+
+
+def _redact_value(value: Any, *, limit: int = 500) -> Any:
+    """Copy a small JSON-shaped value while redacting credential-like strings."""
+    if isinstance(value, str):
+        return _safe_text(value, limit)
+    if isinstance(value, dict):
+        result = {}
+        for key, item in list(value.items())[:32]:
+            key_text = str(key)[:80]
+            if re.search(r"(?i)(password|api[_ -]?key|access[_ -]?token|secret|token|authorization|cookie)", key_text):
+                result[key_text] = "[redacted]"
+            else:
+                result[key_text] = _redact_value(item, limit=limit)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(item, limit=limit) for item in list(value)[:32]]
+    return _clone(value)
+
+
+def _visible_to_user(item: dict[str, Any], user_id: str | None) -> bool:
+    """Global continuity is visible to everyone; scoped continuity is private."""
+    if user_id is None:
+        return True
+    owner = str(item.get("user_id") or "")
+    requested = str(user_id or "")
+    return not owner or owner == requested
+
+
+def _id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+class PresenceManager:
+    """Thread-safe, atomically persisted identity/presence/goal state."""
+
+    def __init__(self, state_path: str | os.PathLike[str] | None = None):
+        raw = state_path or getattr(config, "presence_state_path", "data/presence.json")
+        path = Path(os.path.expanduser(str(raw)))
+        if not path.is_absolute():
+            path = config.resolve_path(str(path))
+        self.path = path
+        self._lock = threading.RLock()
+        self._data = self._defaults()
+        self._load()
+
+    # ------------------------------------------------------------------ storage
+    @staticmethod
+    def _defaults() -> dict[str, Any]:
+        now = _now()
+        return {
+            "schema_version": 1,
+            "identity": {
+                "name": "Hermus",
+                "role": "a local-first AI partner for coding, research and automation",
+                "tone": "warm, concise, honest and proactive only within approved boundaries",
+                "values": ["honesty", "continuity", "curiosity", "user control"],
+                "greeting": "I'm here. What should we work on?",
+                "created_at": now,
+                "updated_at": now,
+            },
+            "presence": {
+                "state": "idle",
+                "detail": "ready",
+                "session_id": None,
+                "run_id": None,
+                "user_id": None,
+                "active_goal": None,
+                "last_goal": None,
+                "last_result": None,
+                "last_error": None,
+                "changed_at": now,
+                "last_seen": now,
+                "last_heartbeat": None,
+                "heartbeat_count": 0,
+            },
+            "goals": [],
+            "moments": [],
+        }
+
+    def _load(self) -> None:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+            with self._lock:
+                for key in ("identity", "presence"):
+                    if isinstance(raw.get(key), dict):
+                        self._data[key].update(raw[key])
+                if isinstance(raw.get("goals"), list):
+                    self._data["goals"] = [g for g in raw["goals"][-100:] if isinstance(g, dict)]
+                if isinstance(raw.get("moments"), list):
+                    self._data["moments"] = [m for m in raw["moments"][-80:] if isinstance(m, dict)]
+                # Older/manual state files may predate redaction. Sanitize the
+                # loaded copy before any API or prompt can expose it.
+                self._data["identity"] = _redact_value(self._data["identity"], limit=500)
+                self._data["presence"] = _redact_value(self._data["presence"], limit=500)
+                self._data["goals"] = [_redact_value(g, limit=500) for g in self._data["goals"]]
+                self._data["moments"] = [_redact_value(m, limit=500) for m in self._data["moments"]]
+                try:
+                    self._data["schema_version"] = int(raw.get("schema_version", 1) or 1)
+                except (TypeError, ValueError):
+                    self._data["schema_version"] = 1
+                identity = self._data["identity"]
+                if not isinstance(identity.get("values"), list):
+                    identity["values"] = []
+                identity["values"] = [_safe_text(v, 80) for v in identity["values"] if str(v).strip()][:12]
+                presence_state = self._data["presence"]
+                loaded_state = str(presence_state.get("state") or "idle").lower()
+                presence_state["state"] = loaded_state if loaded_state in PRESENCE_STATES else "idle"
+                for key in ("detail", "active_goal", "last_goal", "last_result", "last_error", "user_id"):
+                    if presence_state.get(key) is not None:
+                        presence_state[key] = _safe_text(
+                            presence_state[key], 500 if key in {"last_result", "last_error"} else 240
+                        )
+                presence_state["heartbeat_count"] = _safe_int(presence_state.get("heartbeat_count"), minimum=0)
+                now = _now()
+                normalized_goals = []
+                for raw_goal in self._data["goals"]:
+                    goal = dict(raw_goal)
+                    goal["id"] = _safe_text(goal.get("id"), 80) or _id("goal")
+                    goal["title"] = _safe_text(goal.get("title"), 240) or "Untitled goal"
+                    goal["status"] = _safe_text(goal.get("status"), 40).lower() or "active"
+                    goal["priority"] = _safe_int(goal.get("priority"), 3, minimum=1, maximum=5)
+                    goal["due_at"] = _safe_text(goal.get("due_at"), 80) if goal.get("due_at") else None
+                    goal["source"] = _safe_text(goal.get("source"), 80) or "user"
+                    goal["notes"] = _safe_text(goal.get("notes"), 300)
+                    goal["user_id"] = _safe_text(goal.get("user_id"), 80) or None
+                    for key in ("created_at", "updated_at", "last_touched_at", "last_checkin_at", "completed_at"):
+                        goal[key] = _safe_text(goal.get(key), 80) if goal.get(key) else None
+                    goal["created_at"] = goal["created_at"] or now
+                    goal["updated_at"] = goal["updated_at"] or goal["created_at"]
+                    goal["last_touched_at"] = goal["last_touched_at"] or goal["created_at"]
+                    goal["checkin_count"] = _safe_int(goal.get("checkin_count"), minimum=0)
+                    normalized_goals.append(goal)
+                self._data["goals"] = normalized_goals[-100:]
+                normalized_moments = []
+                for raw_moment in self._data["moments"]:
+                    moment = dict(raw_moment)
+                    moment["id"] = _safe_text(moment.get("id"), 80) or _id("moment")
+                    moment["kind"] = _safe_text(moment.get("kind"), 60) or "note"
+                    moment["summary"] = _safe_text(moment.get("summary"), 420)
+                    moment["at"] = _safe_text(moment.get("at"), 80) or now
+                    for key in ("session_id", "run_id", "user_id"):
+                        moment[key] = _safe_text(moment.get(key), 160 if key != "user_id" else 80) or None
+                    if not isinstance(moment.get("metadata"), (dict, list)):
+                        moment["metadata"] = {}
+                    normalized_moments.append(moment)
+                self._data["moments"] = normalized_moments[-80:]
+                # A process cannot still be thinking after a restart. Preserve
+                # the fact that it resumed, but never display stale active work.
+                if self._data["presence"].get("state") in _ACTIVE_STATES:
+                    self._data["presence"].update(
+                        {
+                            "state": "idle",
+                            "detail": "resumed after restart",
+                            "session_id": None,
+                            "run_id": None,
+                            "user_id": None,
+                            "active_goal": None,
+                            "changed_at": _now(),
+                            "last_seen": _now(),
+                        }
+                    )
+        except (OSError, ValueError, TypeError):
+            # Presence is helpful state, never a reason for Hermus not to boot.
+            return
+
+    def _save_locked(self) -> None:
+        """Atomically replace the state file so a crash cannot leave half JSON."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError:
+            # The runtime can keep an in-memory presence if the disk is read-only.
+            try:
+                if "tmp" in locals() and tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+
+    # ------------------------------------------------------------------ events
+    def _emit(self, event_kind: str, payload: dict[str, Any], *, actor: str = "agent") -> None:
+        """Publish a canonical, redacted presence event without breaking a turn."""
+        try:
+            from .contracts import EventEnvelope
+            from .events import get_bus
+
+            data = _redact_value(payload or {}, limit=500)
+            with self._lock:
+                state = _clone(self._data.get("presence", {}))
+                identity = _clone(self._data.get("identity", {}))
+            env = EventEnvelope(
+                run_id=state.get("run_id") or None,
+                session_id=state.get("session_id") or "default",
+                actor=actor,
+                source="presence",
+                type=f"presence.{event_kind}",
+                command=f"presence.{event_kind}",
+                target=identity.get("name") or "Hermus",
+                args_redacted=data,
+                status=str(state.get("state") or "idle"),
+            )
+            get_bus().publish(env)
+        except Exception:
+            # Presence is observability/continuity; it must never break the agent.
+            pass
+
+    # ------------------------------------------------------------------ snapshots
+    def snapshot(self, *, user_id: str | None = None) -> dict[str, Any]:
+        """Return a copy of presence, optionally scoped to one continuity owner."""
+        with self._lock:
+            data = _clone(self._data)
+            data["goals"] = [g for g in data.get("goals", []) if isinstance(g, dict)]
+            data["moments"] = [m for m in data.get("moments", []) if isinstance(m, dict)]
+            if user_id is not None:
+                data["goals"] = [g for g in data["goals"] if _visible_to_user(g, user_id)]
+                data["moments"] = [m for m in data["moments"] if _visible_to_user(m, user_id)]
+                owner = str(data.get("presence", {}).get("user_id") or "")
+                if owner != str(user_id or ""):
+                    # Operational state is global, but the active goal, session,
+                    # result and error can contain another user's private text.
+                    # Keep a useful aggregate state without crossing continuity
+                    # boundaries in scoped snapshots or model prompts.
+                    for key in ("session_id", "run_id", "user_id", "active_goal", "last_goal", "last_result", "last_error"):
+                        data["presence"][key] = None
+                    data["presence"]["detail"] = "busy" if data["presence"].get("state") in _ACTIVE_STATES else "ready"
+            due = self._check_ins_due_locked(user_id=user_id)
+            data["check_ins_due"] = due
+            data["heartbeat"] = {
+                "enabled": bool(getattr(config, "presence_enabled", True)),
+                "interval_seconds": _safe_int(getattr(config, "presence_heartbeat_seconds", 30), 30, minimum=1),
+                "last_at": data["presence"].get("last_heartbeat"),
+                "count": _safe_int(data["presence"].get("heartbeat_count"), minimum=0),
+            }
+            data["active_goal_count"] = sum(1 for g in data.get("goals", []) if g.get("status") == "active")
+            return data
+
+    def identity(self) -> dict[str, Any]:
+        with self._lock:
+            return _clone(self._data["identity"])
+
+    def current(self) -> dict[str, Any]:
+        with self._lock:
+            return _clone(self._data["presence"])
+
+    def public_status(self) -> dict[str, Any]:
+        """Return only non-content operational fields for an unauthenticated probe."""
+        with self._lock:
+            current = self._data.get("presence", {})
+            heartbeat_count = _safe_int(current.get("heartbeat_count"), minimum=0)
+            return {
+                "state": str(current.get("state") or "idle"),
+                "changed_at": current.get("changed_at"),
+                "last_seen": current.get("last_seen"),
+                "last_heartbeat": current.get("last_heartbeat"),
+                "heartbeat_count": heartbeat_count,
+            }
+
+    # ---------------------------------------------------------------- identity
+    def update_identity(
+        self,
+        *,
+        name: str | None = None,
+        role: str | None = None,
+        tone: str | None = None,
+        values: list[str] | None = None,
+        greeting: str | None = None,
+    ) -> dict[str, Any]:
+        """Update only user-editable identity fields; returns the new identity."""
+        with self._lock:
+            identity = self._data["identity"]
+            if name is not None and str(name).strip():
+                identity["name"] = _safe_text(name, 80)
+            if role is not None:
+                identity["role"] = _safe_text(role, 240)
+            if tone is not None:
+                identity["tone"] = _safe_text(tone, 240)
+            if values is not None:
+                identity["values"] = [_safe_text(v, 80) for v in values if str(v).strip()][:12]
+            if greeting is not None:
+                identity["greeting"] = _safe_text(greeting, 240)
+            identity["updated_at"] = _now()
+            self._save_locked()
+            result = _clone(identity)
+        self._emit("identity_changed", result, actor="user")
+        return result
+
+    # --------------------------------------------------------------- transitions
+    def set_state(
+        self,
+        state: str,
+        *,
+        detail: str = "",
+        session_id: str | None = None,
+        run_id: str | None = None,
+        user_id: str | None = None,
+        goal: str | None = None,
+        last_result: str | None = None,
+        last_error: str | None = None,
+        force_event: bool = False,
+    ) -> dict[str, Any]:
+        state = str(state or "idle").strip().lower()
+        if state not in PRESENCE_STATES:
+            state = "idle"
+        with self._lock:
+            current = self._data["presence"]
+            old_state = current.get("state")
+            changed = old_state != state or bool(detail)
+            current["state"] = state
+            if detail:
+                current["detail"] = _safe_text(detail, 240)
+            if session_id is not None:
+                current["session_id"] = _safe_text(session_id, 160) or None
+            if run_id is not None:
+                current["run_id"] = _safe_text(run_id, 160) or None
+            if user_id is not None:
+                current["user_id"] = _safe_text(user_id, 80) or None
+            if goal is not None:
+                current["active_goal"] = _safe_text(goal, 240) if goal else None
+                if goal:
+                    current["last_goal"] = _safe_text(goal, 240)
+            if last_result is not None:
+                current["last_result"] = _safe_text(last_result, 500) if last_result else None
+            if last_error is not None:
+                current["last_error"] = _safe_text(last_error, 500) if last_error else None
+            current["last_seen"] = _now()
+            if changed:
+                current["changed_at"] = current["last_seen"]
+            self._save_locked()
+            result = _clone(current)
+        if changed or force_event:
+            self._emit("changed", result)
+        return result
+
+    def touch(self, *, detail: str | None = None, user_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            state = self._data["presence"]
+            if user_id is not None:
+                state["user_id"] = _safe_text(user_id, 80) or None
+            state["last_seen"] = _now()
+            if detail is not None:
+                state["detail"] = _safe_text(detail, 240)
+            self._save_locked()
+            return _clone(state)
+
+    def begin_turn(self, goal: str, *, session_id: str = "", run_id: str = "", user_id: str = "") -> dict[str, Any]:
+        detail = "listening" if not goal else f"focusing on {_safe_text(goal, 150)}"
+        state = self.set_state(
+            "thinking",
+            detail=detail,
+            session_id=session_id,
+            run_id=run_id,
+            user_id=user_id,
+            goal=goal,
+        )
+        self.record_moment(
+            "focus_started",
+            f"Started working on {_safe_text(goal, 220) or 'a new request'}",
+            session_id=session_id,
+            run_id=run_id,
+            user_id=user_id,
+            metadata={"user_id": _safe_text(user_id, 80)} if user_id else None,
+            emit=False,
+        )
+        return state
+
+    def activity(
+        self,
+        state: str,
+        *,
+        detail: str = "",
+        session_id: str = "",
+        run_id: str = "",
+        user_id: str = "",
+        goal: str = "",
+    ) -> dict[str, Any]:
+        return self.set_state(
+            state,
+            detail=detail,
+            session_id=session_id or None,
+            run_id=run_id or None,
+            user_id=user_id or None,
+            goal=goal or None,
+        )
+
+    def finish_turn(
+        self,
+        *,
+        goal: str,
+        response: str = "",
+        session_id: str = "",
+        run_id: str = "",
+        user_id: str = "",
+        success: bool = True,
+        waiting_for_approval: bool = False,
+        error: str = "",
+    ) -> dict[str, Any]:
+        if waiting_for_approval:
+            state = self.set_state(
+                "waiting_approval",
+                detail="waiting for your approval",
+                session_id=session_id or None,
+                run_id=run_id or None,
+                user_id=user_id or None,
+                goal=goal,
+            )
+            kind = "approval_waiting"
+        else:
+            detail = "ready" if success else "ready · last run failed"
+            state = self.set_state(
+                "idle",
+                detail=detail,
+                session_id=session_id or None,
+                run_id="",
+                user_id=user_id or None,
+                # "" clears active_goal (the turn is over); None would mean
+                # "keep the old value" and left "focusing on <old goal>"
+                # next to an idle "ready" line forever.
+                goal="",
+                last_result=response,
+                last_error=error if not success else None,
+            )
+            kind = "turn_completed" if success else "turn_failed"
+        summary = _safe_text(response or error or "No response generated", 360)
+        self.record_moment(
+            kind,
+            f"{_safe_text(goal, 180)} — {summary}",
+            session_id=session_id,
+            run_id=run_id,
+            user_id=user_id,
+            emit=False,
+        )
+        return state
+
+    # ------------------------------------------------------------------ moments
+    def record_moment(
+        self,
+        kind: str,
+        summary: str,
+        *,
+        session_id: str = "",
+        run_id: str = "",
+        user_id: str = "",
+        metadata: dict[str, Any] | None = None,
+        emit: bool = True,
+    ) -> dict[str, Any]:
+        moment = {
+            "id": _id("moment"),
+            "kind": _safe_text(kind, 60),
+            "summary": _safe_text(summary, 420),
+            "at": _now(),
+            "session_id": _safe_text(session_id, 160) or None,
+            "run_id": _safe_text(run_id, 160) or None,
+            "user_id": _safe_text(user_id, 80) or None,
+            "metadata": _redact_value(metadata or {}, limit=500),
+        }
+        with self._lock:
+            self._data["moments"].append(moment)
+            self._data["moments"] = self._data["moments"][-80:]
+            self._save_locked()
+        if emit:
+            self._emit("moment", moment)
+        return moment
+
+    # -------------------------------------------------------------------- goals
+    def add_goal(
+        self,
+        title: str,
+        *,
+        priority: int = 3,
+        due_at: str | None = None,
+        source: str = "user",
+        notes: str = "",
+        user_id: str = "",
+    ) -> dict[str, Any]:
+        title = _safe_text(title, 240)
+        if not title:
+            return {"success": False, "error": "goal title required"}
+        try:
+            priority = max(1, min(5, int(priority)))
+        except (TypeError, ValueError):
+            priority = 3
+        now = _now()
+        goal = {
+            "id": _id("goal"),
+            "title": title,
+            "status": "active",
+            "priority": priority,
+            "due_at": _safe_text(due_at, 80) if due_at else None,
+            "source": _safe_text(source, 80),
+            "notes": _safe_text(notes, 300),
+            "user_id": _safe_text(user_id, 80) or None,
+            "created_at": now,
+            "updated_at": now,
+            "last_touched_at": now,
+            "last_checkin_at": None,
+            "checkin_count": 0,
+        }
+        with self._lock:
+            self._data["goals"].append(goal)
+            self._data["goals"] = self._data["goals"][-100:]
+            self._save_locked()
+        self.record_moment("goal_added", f"New ongoing goal: {title}", user_id=user_id, emit=False)
+        self._emit("goal_added", goal, actor="user")
+        return {"success": True, "goal": _clone(goal)}
+
+    def list_goals(self, status: str | None = None, user_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            goals = [g for g in _clone(self._data["goals"]) if isinstance(g, dict)]
+        if status:
+            goals = [g for g in goals if g.get("status") == status]
+        if user_id is not None:
+            goals = [g for g in goals if _visible_to_user(g, user_id)]
+        return list(reversed(goals))
+
+    def complete_goal(
+        self,
+        goal_id: str,
+        *,
+        note: str = "",
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            found = None
+            for goal in self._data["goals"]:
+                if goal.get("id") == str(goal_id) and _visible_to_user(goal, user_id):
+                    goal["status"] = "completed"
+                    goal["updated_at"] = _now()
+                    goal["completed_at"] = goal["updated_at"]
+                    if note:
+                        goal["notes"] = _safe_text(note, 300)
+                    found = _clone(goal)
+                    break
+            if found is None:
+                return {"success": False, "error": f"goal '{goal_id}' not found"}
+            self._save_locked()
+        self.record_moment(
+            "goal_completed",
+            f"Completed goal: {found['title']}",
+            user_id=str(found.get("user_id") or ""),
+            emit=False,
+        )
+        self._emit("goal_completed", found, actor="user")
+        return {"success": True, "goal": found}
+
+    def touch_goal(self, goal_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            for goal in self._data["goals"]:
+                if goal.get("id") == str(goal_id) and _visible_to_user(goal, user_id):
+                    goal["last_touched_at"] = _now()
+                    goal["updated_at"] = goal["last_touched_at"]
+                    self._save_locked()
+                    return {"success": True, "goal": _clone(goal)}
+        return {"success": False, "error": f"goal '{goal_id}' not found"}
+
+    def mark_checkin(self, goal_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            for goal in self._data["goals"]:
+                if goal.get("id") == str(goal_id) and _visible_to_user(goal, user_id):
+                    now = _now()
+                    goal["last_checkin_at"] = now
+                    goal["checkin_count"] = _safe_int(goal.get("checkin_count"), minimum=0) + 1
+                    goal["updated_at"] = now
+                    self._save_locked()
+                    result = _clone(goal)
+                    break
+            else:
+                return {"success": False, "error": f"goal '{goal_id}' not found"}
+        self._emit("goal_checkin", result)
+        return {"success": True, "goal": result}
+
+    def _check_ins_due_locked(self, *, user_id: str | None = None) -> list[dict[str, Any]]:
+        try:
+            after_minutes = max(1, int(getattr(config, "presence_checkin_after_minutes", 240)))
+        except (TypeError, ValueError):
+            after_minutes = 240
+        now = datetime.now(timezone.utc)
+        due = []
+        for goal in self._data.get("goals", []):
+            if not isinstance(goal, dict) or goal.get("status") != "active":
+                continue
+            if not _visible_to_user(goal, user_id):
+                continue
+            last_activity = goal.get("last_checkin_at") or goal.get("last_touched_at") or goal.get("created_at")
+            try:
+                activity_at = datetime.fromisoformat(str(last_activity).replace("Z", "+00:00"))
+                if activity_at.tzinfo is None:
+                    activity_at = activity_at.replace(tzinfo=timezone.utc)
+                age = (now - activity_at).total_seconds() / 60
+            except (TypeError, ValueError):
+                activity_at = None
+                age = 0
+
+            # An explicit deadline is a one-shot due point. A touch/check-in
+            # after that point acknowledges it; otherwise fall back to the
+            # rolling inactivity threshold for goals without a valid deadline.
+            due_at_text = goal.get("due_at")
+            explicit_due = False
+            valid_due_at = False
+            try:
+                if due_at_text:
+                    due_at = datetime.fromisoformat(str(due_at_text).replace("Z", "+00:00"))
+                    if due_at.tzinfo is None:
+                        due_at = due_at.replace(tzinfo=timezone.utc)
+                    valid_due_at = True
+                    explicit_due = now >= due_at and (activity_at is None or activity_at < due_at)
+            except (TypeError, ValueError):
+                pass
+            if explicit_due or (not valid_due_at and age >= after_minutes):
+                due.append(
+                    {
+                        "id": goal.get("id"),
+                        "title": goal.get("title"),
+                        "priority": goal.get("priority", 3),
+                        "age_minutes": round(age, 1),
+                        "due_at": due_at_text,
+                    }
+                )
+
+        def sort_key(item: dict[str, Any]) -> tuple[int, float]:
+            try:
+                priority = int(item.get("priority") or 0)
+            except (TypeError, ValueError):
+                priority = 0
+            try:
+                age = float(item.get("age_minutes") or 0)
+            except (TypeError, ValueError):
+                age = 0.0
+            return -priority, -age
+
+        return sorted(due, key=sort_key)
+
+    def check_ins_due(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._check_ins_due_locked(user_id=user_id)
+
+    # ---------------------------------------------------------------- heartbeat
+    def heartbeat(self, *, force_event: bool = False) -> dict[str, Any]:
+        """Record a beat and return the current continuity snapshot.
+
+        Heartbeats are intentionally side-effect-light. They update presence,
+        emit an occasional canonical event and expose due check-ins. They never
+        call an LLM, execute a tool or bypass permissions.
+        """
+        with self._lock:
+            now = _now()
+            state = self._data["presence"]
+            state["last_heartbeat"] = now
+            state["last_seen"] = now
+            state["heartbeat_count"] = _safe_int(state.get("heartbeat_count"), minimum=0) + 1
+            due = self._check_ins_due_locked()
+            if state.get("state") == "idle":
+                state["detail"] = f"ready · {len(due)} check-in(s) due" if due else "ready"
+            self._save_locked()
+            beat = int(state["heartbeat_count"])
+            payload = {
+                "state": state.get("state"),
+                "detail": state.get("detail"),
+                "heartbeat_count": beat,
+                "check_ins_due": due[:12],
+                "last_heartbeat": now,
+            }
+        every = _safe_int(getattr(config, "presence_event_every", 5), 5, minimum=1)
+        if force_event or beat == 1 or beat % every == 0 or due:
+            self._emit("heartbeat", payload, actor="system")
+        return self.snapshot()
+
+    # -------------------------------------------------------------- prompt text
+    def prompt_block(self, *, session_id: str = "", user_id: str = "") -> str:
+        """Stable identity + short continuity context for the model prompt."""
+        snap = self.snapshot(user_id=user_id or None)
+        identity = snap.get("identity") or {}
+        current = snap.get("presence") or {}
+        goals = [g for g in snap.get("goals", []) if g.get("status") == "active"][:5]
+        moments = list(reversed(snap.get("moments") or []))[:4]
+        lines = [
+            "Hermus identity and continuity (local operational state):",
+            f"- Name: {identity.get('name') or 'Hermus'}",
+            f"- Role: {identity.get('role') or 'AI partner'}",
+            f"- Tone: {identity.get('tone') or 'warm and honest'}",
+            f"- Values: {', '.join(identity.get('values') or [])}",
+            f"- Current state: {current.get('state', 'idle')} — {current.get('detail', 'ready')}",
+        ]
+        if goals:
+            lines.append("- Ongoing user-approved goals:")
+            lines.extend(f"  - {g.get('title')} (priority {g.get('priority', 3)})" for g in goals)
+        if moments:
+            lines.append("- Recent continuity moments:")
+            lines.extend(f"  - {m.get('summary')}" for m in moments)
+        lines.extend(
+            [
+                "- Speak warmly and naturally, referring back to relevant continuity when useful.",
+                "- Operational state is not proof of consciousness: never claim feelings, sentience or actions you did not actually perform.",
+            ]
+        )
+        return "\n".join(lines)
+
+
+_manager: PresenceManager | None = None
+_manager_lock = threading.Lock()
+
+
+def get_presence() -> PresenceManager:
+    """Return the process-wide canonical presence manager."""
+    global _manager
+    with _manager_lock:
+        if _manager is None:
+            _manager = PresenceManager()
+        return _manager
+
+
+presence = get_presence()
+
+__all__ = ["PRESENCE_STATES", "PresenceManager", "get_presence", "presence"]

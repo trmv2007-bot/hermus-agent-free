@@ -38,6 +38,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -534,7 +535,7 @@ class Sandbox:
                     ):
                         continue  # refuse ../ escapes out of the scratch dir
                     safe.parent.mkdir(parents=True, exist_ok=True)
-                    safe.write_text(str(content))
+                    safe.write_text(str(content), encoding="utf-8")
                     staged += 1
                 except Exception:
                     continue
@@ -595,27 +596,7 @@ class Sandbox:
             # shell form failed with "filename, directory name, or volume label
             # syntax is incorrect". Run the interpreter directly: no shell
             # interpolation, same timeout, explicit UTF-8.
-            timeout = int(kw.get("timeout") or 30)
-            try:
-                proc = subprocess.run(
-                    [sys.executable or "python", "-c", code],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=timeout,
-                )
-                return {
-                    "success": proc.returncode == 0,
-                    "stdout": (proc.stdout or "")[:8000],
-                    "stderr": (proc.stderr or "")[:4000],
-                    "returncode": proc.returncode,
-                    "backend": "local-direct",
-                }
-            except subprocess.TimeoutExpired:
-                return {"success": False, "error": f"timed out after {timeout}s", "returncode": 124, "backend": "local-direct"}
-            except Exception as exc:  # pragma: no cover - defensive
-                return {"success": False, "error": str(exc), "returncode": 1, "backend": "local-direct"}
+            return self._run_python_direct(code, kw.get("timeout"), kw.get("files"), kw.get("cwd"))
         quoted = shlex.quote(code)
         requested_backend = str(kw.get("backend") or "").lower()
         policy = kw.get("policy") or {}
@@ -627,6 +608,55 @@ class Sandbox:
         # absolute Python path into the container namespace.
         executable = "python3" if chosen in ("docker", "podman") else (sys.executable or "python3")
         return self.run(f"{shlex.quote(executable)} -c {quoted}", **kw)
+
+    def _run_python_direct(
+        self,
+        code: str,
+        timeout: float | None,
+        files: dict[str, str] | None,
+        cwd: str | None,
+    ) -> dict[str, Any]:
+        """Run a snippet with no shell in between (the Windows path).
+
+        ``files`` and ``cwd`` are honoured here for the same reason the POSIX
+        backend honours them: a skill probe imports ``skill.py`` by relative
+        path, so it has to run in a directory that contains it. Dropping them
+        made every skill validation fail on Windows with ``FileNotFoundError``.
+        """
+        timeout = int(timeout or 30)
+        staged: tempfile.TemporaryDirectory | None = None
+        try:
+            if files:
+                staged = tempfile.TemporaryDirectory(prefix="hermus-probe-")
+                base = Path(staged.name)
+                for name, content in files.items():
+                    target = base / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content, encoding="utf-8")
+                cwd = str(base)
+            proc = subprocess.run(
+                [sys.executable or "python", "-c", code],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                cwd=cwd,
+            )
+            return {
+                "success": proc.returncode == 0,
+                "stdout": (proc.stdout or "")[:8000],
+                "stderr": (proc.stderr or "")[:4000],
+                "returncode": proc.returncode,
+                "backend": "local-direct",
+            }
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": f"timed out after {timeout}s", "returncode": 124, "backend": "local-direct"}
+        except Exception as exc:  # pragma: no cover - defensive
+            return {"success": False, "error": str(exc), "returncode": 1, "backend": "local-direct"}
+        finally:
+            if staged is not None:
+                staged.cleanup()
 
     def run_wasm(self, module_path: str, *, args: Sequence[str] = (), timeout: int = 20) -> dict[str, Any]:
         """Optional WASI path: run a .wasm module with wasmtime (strictly isolated, no fs/net)."""

@@ -1,0 +1,184 @@
+Metadata-Version: 2.4
+Name: hermus-agent-free
+Version: 0.1.0
+Summary: A free, open-source, self-hosted AI agent for coding, research, automation and multi-agent work.
+License: MIT
+Project-URL: Homepage, https://github.com/trmv2007-bot/hermus-agent-free
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: pydantic-settings>=2.0.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: tiktoken>=0.5.0
+Requires-Dist: ddgs>=9.0.0
+Requires-Dist: playwright>=1.40.0
+Requires-Dist: scrapling[fetchers]<0.5,>=0.3.10
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: imageio-ffmpeg>=0.5.1
+Requires-Dist: feedparser>=6.0.0
+Requires-Dist: pypdf>=4.0.0
+Requires-Dist: PyYAML>=6.0.0
+Requires-Dist: faster-whisper>=0.9.0
+Requires-Dist: fastapi>=0.104.0
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: psutil>=5.9.0
+Requires-Dist: uvicorn[standard]>=0.24.0
+Requires-Dist: websockets>=12.0
+Requires-Dist: APScheduler>=3.10.0
+Requires-Dist: prompt_toolkit>=3.0.41
+Requires-Dist: rich>=13.0.0
+Requires-Dist: httpx>=0.24.0
+Dynamic: license-file
+
+# HERMUS
+
+**A self-hosted agent harness.** Give it a task, watch it work, read the diff, see whether it
+actually verified the result. Runs on your machine with local models (Ollama, NoLlama, LM Studio)
+or any OpenAI-compatible provider you have a key for. MIT licensed, no account, no paywall.
+
+<p align="center">
+<a href="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/test.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&label=CI"></a>
+</p>
+
+---
+
+## Quick start
+
+**Windows** (from PowerShell, with the repo cloned):
+
+    .\setup.cmd
+    .\.venv\Scripts\python.exe hermus.py gateway start
+
+**Linux / macOS / Termux:**
+
+    ./setup.sh
+    ./.venv/bin/python hermus.py gateway start
+
+**Or install it as a package:**
+
+    pip install .
+    hermus gateway start
+
+Then open **http://localhost:8000** — that is the harness.
+
+`setup.cmd` / `setup.sh` create a project-local `.venv`, install the runtime and optional
+dependencies, initialise the layout, and finish by running the doctor. They are safe to re-run and
+never delete your memory, projects, logs or credentials. `./setup.cmd -VerifyOnly` checks an
+existing install without changing it.
+
+---
+
+## Running a task
+
+The home screen is a task view, not a dashboard:
+
+- **Left** — your runs: status, task, steps, age.
+- **Middle** — the transcript, one line per event: model turns streaming, `▶ architect: …` /
+  `◀ architect: executed · 1 tools · 23.8s` for mission nodes, tool calls, verification and repair
+  rounds.
+- **Right** — what the run changed (unified diff), and how it was verified.
+- **Bottom** — the composer: task, target, model, Run. Ctrl+Enter starts it.
+
+A run either produces a diff you can read and a verdict you can trust, or it says plainly that it
+changed nothing and that nobody verified it. Those are different sentences on purpose.
+
+**The agent cockpit is still there**, one click away in the header (or at `/control`): presence,
+approvals and red-line policy, the capability ledger, memory, and the 59-panel subsystem console.
+That is the ops room; the harness is where work happens.
+
+---
+
+## Choosing a model
+
+Three ways, in order of convenience:
+
+1. **The Model Core panel** in the cockpit — pick a model per role (`default`, `reasoning`,
+   `vision`, `coding`, `background`, `doctor`, `voice`), or leave a role on `auto`.
+2. **The Settings panel** in Systems — writes `HERMUS_MODEL` (and port, sandbox limits, log level)
+   into `.env` for you. Restart the gateway to apply.
+3. **The CLI** — `hermus multikey add --provider groq --key …`, or a local engine with
+   `hermus engine`.
+
+Local models need nothing but Ollama running. Provider keys in the environment (`OPENAI_API_KEY`,
+`GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, …) are discovered automatically. Nothing is
+bundled with the repository.
+
+---
+
+## What runs, and what is verified
+
+The suite (`python -m pytest tests/ -q`) exercises the engine, the gateway, the harness and the
+cockpit; CI runs it on Linux, Windows and macOS.
+
+| Capability | Covered by the suite |
+|---|:---:|
+| Agent loop, planning, verification and repair | ✅ |
+| Harness view: runs, transcript, diff, verdict | ✅ |
+| Job queue, retries, leases, restart recovery | ✅ |
+| Tools, policies, approvals, red lines | ✅ |
+| Memory, recall, lessons, skill forging | ✅ |
+| Model routing and provider resolution | ✅ |
+| Scheduling and event-driven automation | ✅ |
+| Control Room / subsystem console | ✅ |
+| Voice, speech and avatar paths | ✅ optional backends |
+| Real-world provider/device deployment | 🔧 needs hardware + credentials |
+
+### What the suite cannot cover
+
+- **Provider end-to-end.** CI has no API keys. A turn against your provider is the first thing to
+  try after setup; `hermus multikey health` shows key and model health.
+- **Host computer control.** The controller is tested against a simulated display; the host test
+  skips without `pyautogui` and a real display.
+- **Android control.** The transports and the on-device loop are proven against a simulated
+  device; a physical handset is untested.
+- **Off-site operations.** mTLS between nodes, backup/restore drills and failure injection on real
+  hardware are deployment work.
+
+---
+
+## Safety
+
+Autonomy means more execution, not fewer brakes. `RED_LINES.md` and `policies/red_lines.json` define
+green / yellow / red actions; yellow actions need a scoped grant you can see and revoke in the
+cockpit's Approvals and Safety tabs; an emergency stop is always one click away. Commands run
+through a sandbox with a policy-controlled backend (`auto`, `local`, `docker`, `podman`, `off`).
+Memory and the sandbox limits are configurable from the dashboard.
+
+See [`RED_LINES.md`](RED_LINES.md) and [`AUTONOMY_BOUNDARIES.md`](AUTONOMY_BOUNDARIES.md).
+
+---
+
+## CLI cheatsheet
+
+```bash
+hermus doctor                          # health and installation check
+hermus check --no-ping                 # offline selfcheck with a scoreboard
+hermus harness run smoke --model mock/mock   # measure the agent on a task suite
+hermus multikey health                 # keys, rate limits, discovered models
+hermus mission start "ship the thing"  # objective-driven run with verification
+hermus sentinel run --model auto       # always-alert event reactor
+hermus tools | hermus powers | hermus safety report
+```
+
+Windows: prefix with `.\.venv\Scripts\python.exe ` or use `.\setup.cmd` wrappers.
+
+---
+
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| `QUICKSTART.md` | install, verify, repair |
+| `ARCHITECTURE.md` | what owns what, and the gates that enforce it |
+| `docs/HARNESS.md` | using Hermus as a measurable agent harness |
+| `RED_LINES.md` / `AUTONOMY_BOUNDARIES.md` | what it may do without asking |
+| `CAPABILITY_LEDGER.md` | powers it has, lacks, and what each would need |
+| `docs/archive/README.md` | the old design and phase notes, kept for the record |
+
+---
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).

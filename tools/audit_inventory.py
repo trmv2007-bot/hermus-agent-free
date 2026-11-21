@@ -117,7 +117,7 @@ inv = {
     "tool_count": len(tool_refs),
     "provider_seams": provider_refs,
 }
-(ROOT / "artifacts" / "inventory.json").write_text(json.dumps(inv, indent=2))
+(ROOT / "artifacts" / "inventory.json").write_text(json.dumps(inv, indent=2), encoding="utf-8")
 logger.info(f"modules={len(imports)} routes={len(routes)} tools={len(tool_refs)} providers_seams={len(provider_refs)}")
 logger.info("routes by prefix:")
 

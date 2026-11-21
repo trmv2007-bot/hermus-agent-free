@@ -1,0 +1,22 @@
+"""Computer Control Benchmark — measure Hermus's real ability on desktop tasks.
+
+Provides:
+- 30 curated computer tasks across 7 categories
+- A benchmark runner that executes tasks and records metrics
+- Per-task and aggregate scoring
+- Integration with the episode store for historical comparison
+"""
+
+from .runner import BenchmarkResult, BenchmarkRunner, run_benchmark
+from .tasks import COMPUTER_TASKS, TaskSpec, get_categories, get_task, list_tasks
+
+__all__ = [
+    "COMPUTER_TASKS",
+    "TaskSpec",
+    "get_task",
+    "list_tasks",
+    "get_categories",
+    "BenchmarkRunner",
+    "BenchmarkResult",
+    "run_benchmark",
+]
