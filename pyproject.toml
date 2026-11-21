@@ -8,6 +8,42 @@ version = "0.1.0"
 description = "A free, open-source, self-hosted AI agent for coding, research, automation and multi-agent work."
 requires-python = ">=3.10"
 readme = "README.md"
+license = { text = "MIT" }
+
+# Same set as requirements.txt, minus pytest (the suite is not shipped). Both
+# lists exist on purpose: the installers are repo-shaped (they clone, then run
+# setup.sh), while this list is what `pip install hermus-agent-free` resolves.
+dependencies = [
+  "pydantic>=2.0.0",
+  "pydantic-settings>=2.0.0",
+  "python-dotenv>=1.0.0",
+  "requests>=2.31.0",
+  "tiktoken>=0.5.0",
+  "ddgs>=9.0.0",
+  "playwright>=1.40.0",
+  "scrapling[fetchers]>=0.3.10,<0.5",
+  "Pillow>=10.0.0",
+  "imageio-ffmpeg>=0.5.1",
+  "feedparser>=6.0.0",
+  "pypdf>=4.0.0",
+  "PyYAML>=6.0.0",
+  "faster-whisper>=0.9.0",
+  "fastapi>=0.104.0",
+  "python-multipart>=0.0.9",
+  "psutil>=5.9.0",
+  "uvicorn[standard]>=0.24.0",
+  "websockets>=12.0",
+  "APScheduler>=3.10.0",
+  "prompt_toolkit>=3.0.41",
+  "rich>=13.0.0",
+  "httpx>=0.24.0",
+]
+
+[project.scripts]
+hermus = "hermus_cli:main"
+
+[project.urls]
+Homepage = "https://github.com/trmv2007-bot/hermus-agent-free"
 
 [tool.setuptools.packages.find]
 include = [
@@ -24,7 +60,20 @@ include = [
   "pentest*",
   "android_companion*",
   "presence_app*",
+  "harness*",
 ]
+
+# Hermus reads this data relative to `config.base_dir` — the repository root in
+# a checkout, the install root once pip-installed — so every one of these trees
+# has to reach the wheel. Without them an installed `hermus` starts and then
+# fails to find the Control Room markup, the red-line policy, the API catalog
+# or the builtin suites.
+[tool.setuptools.package-data]
+gateway = ["control.html", "static/*.js", "static/*.css", "static/assets/*"]
+policies = ["*.json"]
+resources = ["*.json"]
+harness = ["suites/*.json"]
+skills = ["*.py", "*/*.md", "*/*.py"]
 
 [tool.ruff]
 # Hermus requires Python 3.10+ (see README); declaring it lets ruff apply

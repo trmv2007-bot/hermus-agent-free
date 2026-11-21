@@ -76,6 +76,18 @@ Linux / macOS / Termux:
 
     ./setup.sh
 
+### Install as a Python package
+
+From a clone:
+
+    pip install .
+    hermus doctor
+
+The wheel carries what the checkout carries — the Control Room markup and assets, the
+red-line policy, the API catalog and the builtin harness suites — so an installed
+`hermus` behaves like a clone. Runtime state (memory, jobs, logs, skills it writes) lives
+in `~/.hermus`, or wherever `HERMUS_HOME` points.
+
 ### Verify or repair
 
 Windows:
