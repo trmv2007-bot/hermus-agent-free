@@ -87,24 +87,28 @@ def _available_workers(models: list[str] = None, providers: list[str] = None, li
     except Exception:
         pass
 
-    # Always offer ollama if reachable
-    try:
-        from .openai_compat import list_models
+    # Offer ollama if it is reachable — but only when the caller did not ask for
+    # a specific provider set. Adding it unconditionally put local models ahead
+    # of an explicit ``providers=["custom"]`` request and consumed the worker
+    # slots that request was meant to fill.
+    if not providers or "ollama" in providers:
+        try:
+            from .openai_compat import list_models
 
-        ol = list_models("ollama", api_key="")
-        if ol.get("success") and ol.get("models"):
-            for m in ol["models"][:3]:
-                workers.append(
-                    {
-                        "provider": "ollama",
-                        "model": m["id"],
-                        "key": "",
-                        "base_url": get_provider("ollama").get("base_url"),
-                        "name": f"ollama:{m['id']}",
-                    }
-                )
-    except Exception:
-        pass
+            ol = list_models("ollama", api_key="")
+            if ol.get("success") and ol.get("models"):
+                for m in ol["models"][:3]:
+                    workers.append(
+                        {
+                            "provider": "ollama",
+                            "model": m["id"],
+                            "key": "",
+                            "base_url": get_provider("ollama").get("base_url"),
+                            "name": f"ollama:{m['id']}",
+                        }
+                    )
+        except Exception:
+            pass
 
     for e in entries:
         p = (e.get("provider") or "").lower()

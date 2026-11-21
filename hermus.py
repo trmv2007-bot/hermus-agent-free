@@ -12,7 +12,9 @@ from pathlib import Path
 # Ensure imports work when invoked as `python hermus.py` (bin/hermus also sets PYTHONPATH).
 sys.path.insert(0, str(Path(__file__).parent))
 
-from hermus_cli import main
+from core.stdio import configure_stdio  # noqa: E402  (needs the repo root on sys.path)
+from hermus_cli import main  # noqa: E402
 
 if __name__ == "__main__":
+    configure_stdio()
     main()

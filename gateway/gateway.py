@@ -45,6 +45,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from core.config import config
 from core.log import get_logger, setup_logging
+from core.stdio import configure_stdio
 from core.task_tracker import task_tracker
 from gateway import lifecycle as _lifecycle
 from gateway.channels import get_channel_status, set_agent_factory, start_all_channels
@@ -1499,6 +1500,7 @@ def setup(platform: str):
 
 def start(port: int = None):
     port = port or config.gateway_port
+    configure_stdio()
     logger.info(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
     logger.info("Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
     logger.info("Channels: /channels/status, /channels/start, /telegram/send")

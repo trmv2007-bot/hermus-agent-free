@@ -6,6 +6,8 @@ fresh ``Config()`` honors the current environment; invalid values raise a
 ``ValidationError`` instead of crashing the import with a bare ValueError).
 """
 
+import sys
+
 import pytest
 
 
@@ -97,13 +99,17 @@ def test_non_prefixed_provider_keys_keep_exact_names(monkeypatch):
     assert fresh.groq_api_key == "real_key"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows environment variables are case-insensitive, so the OS cannot hold "
+    "HERMUS_MODEL and hermus_model as distinct entries; the property is untestable there",
+)
 def test_env_lookup_is_case_sensitive(monkeypatch):
     from core.config import Config
 
     monkeypatch.setenv("HERMUS_MODEL", "mock/mock")
     monkeypatch.setenv("hermus_model", "must_be_ignored")
     assert Config().model == "mock/mock"
-
 
 def test_invalid_values_raise_validation_error(monkeypatch):
     import pydantic

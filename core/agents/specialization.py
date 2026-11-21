@@ -10,6 +10,7 @@ Each role has:
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from core.log import get_logger
@@ -497,37 +498,37 @@ class ToolRunner(SpecializedAgent):
 # Factory functions for creating specialized agents
 async def create_researcher(name: str = None, **kwargs) -> Researcher:
     """Create a Researcher agent."""
-    return Researcher(name=name or f"Researcher-{uuid.uuid4()[:8]}", **kwargs)
+    return Researcher(name=name or f"Researcher-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 async def create_coder(name: str = None, **kwargs) -> Coder:
     """Create a Coder agent."""
-    return Coder(name=name or f"Coder-{uuid.uuid4()[:8]}", **kwargs)
+    return Coder(name=name or f"Coder-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 async def create_verifier(name: str = None, **kwargs) -> Verifier:
     """Create a Verifier agent."""
-    return Verifier(name=name or f"Verifier-{uuid.uuid4()[:8]}", **kwargs)
+    return Verifier(name=name or f"Verifier-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 async def create_chair(name: str = None, **kwargs) -> Chair:
     """Create a Chair agent."""
-    return Chair(name=name or f"Chair-{uuid.uuid4()[:8]}", **kwargs)
+    return Chair(name=name or f"Chair-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 async def create_critic(name: str = None, **kwargs) -> Critic:
     """Create a Critic agent."""
-    return Critic(name=name or f"Critic-{uuid.uuid4()[:8]}", **kwargs)
+    return Critic(name=name or f"Critic-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 async def create_synthesizer(name: str = None, **kwargs) -> Synthesizer:
     """Create a Synthesizer agent."""
-    return Synthesizer(name=name or f"Synthesizer-{uuid.uuid4()[:8]}", **kwargs)
+    return Synthesizer(name=name or f"Synthesizer-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 async def create_tool_runner(name: str = None, **kwargs) -> ToolRunner:
     """Create a Tool Runner agent."""
-    return ToolRunner(name=name or f"ToolRunner-{uuid.uuid4()[:8]}", **kwargs)
+    return ToolRunner(name=name or f"ToolRunner-{str(uuid.uuid4())[:8]}", **kwargs)
 
 
 # Role to class mapping

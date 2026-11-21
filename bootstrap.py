@@ -37,6 +37,8 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.stdio import configure_stdio  # noqa: E402  (needs ROOT on sys.path)
+
 # These names are the canonical import contract used by Doctor.  The package
 # source of truth for installation is requirements.txt; these are intentionally
 # kept as import-name -> capability checks because pip names and import names
@@ -1092,6 +1094,7 @@ def first_run(*, interactive: bool | None = None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_stdio()
     parser = argparse.ArgumentParser(description="Hermus canonical setup/repair/verification")
     parser.add_argument("command", nargs="?", choices=("bootstrap", "verify", "doctor", "model"), default="bootstrap")
     parser.add_argument("--verify-only", action="store_true", help="do not install or create a venv; run live checks only")
