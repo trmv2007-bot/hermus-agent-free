@@ -56,9 +56,12 @@ def _asset(name: str, media_type: str) -> Response:
 
 
 def redirect_target() -> str:
-    """Where ``/`` goes: the companion when set up, the welcome screen otherwise."""
+    """Where ``/`` goes: the harness once set up, the welcome screen until then."""
     state = onboarding.load()
-    return "/companion" if onboarding.is_complete(state) else "/welcome"
+    # The harness is the product's home; the companion view sits behind its mode
+    # switch. Onboarding still runs first, so a fresh install is never dropped
+    # into a task box with no model.
+    return "/harness" if onboarding.is_complete(state) else "/welcome"
 
 
 def state_payload() -> dict[str, Any]:
