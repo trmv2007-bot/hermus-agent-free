@@ -1,0 +1,8 @@
+{
+  "name": "hermus-presence-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HERMUS floating presence shell — transparent, always-on-top, click-through",
+  "main": "main.js",
+  "license": "MIT"
+}

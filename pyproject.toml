@@ -23,6 +23,7 @@ include = [
   "skills*",
   "pentest*",
   "android_companion*",
+  "presence_app*",
 ]
 
 [tool.ruff]

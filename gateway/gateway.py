@@ -658,6 +658,7 @@ from gateway.routes_management import router as _management_router  # noqa: E402
 from gateway.routes_onboarding import router as _onboarding_router  # noqa: E402
 from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
+from gateway.routes_presence_overlay import router as _presence_overlay_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
 from gateway.routes_routines import router as _routines_router  # noqa: E402
 from gateway.routes_sentinel import router as _sentinel_router  # noqa: E402
@@ -707,6 +708,7 @@ app.include_router(_personal_space_router, dependencies=_gate_control)
 # person who just installed HERMUS has no token yet, and the first screen they
 # are supposed to see cannot sit behind one.
 app.include_router(_onboarding_router)
+app.include_router(_presence_overlay_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
