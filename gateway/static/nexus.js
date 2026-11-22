@@ -19,15 +19,26 @@
     headers.set('Accept','application/json');
     if (token) headers.set('X-Hermus-Token', token);
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type','application/json');
-    const r = await fetch(path, {...options, headers});
-    const text = await r.text(); let data={};
-    try { data=text?JSON.parse(text):{} } catch { data={message:text}; }
-    if (!r.ok) {
-      const raw=String(data.message || data.detail || data.error || '').trim();
-      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || text.trim().startsWith('<!');
-      throw new Error(htmlError ? `HERMUS service returned an unexpected page (HTTP ${r.status})` : (raw || `HTTP ${r.status}`));
+    // Reads go through the room's one scheduler: first-screen state comes from
+    // the console state bundle, everything else from one bounded queue. Writes
+    // keep their own socket so a submit never waits behind a poll.
+    const method = String(options.method || 'GET').toUpperCase();
+    let ok, status, data, text;
+    if (method === 'GET' && window.HermusBus) {
+      const res = await window.HermusBus.get(path, {...options, headers});
+      ok = res.ok; status = res.status; data = res.data; text = res.text || '';
+    } else {
+      const r = await fetch(path, {...options, headers});
+      ok = r.ok; status = r.status; text = await r.text();
+      try { data = text ? JSON.parse(text) : {}; } catch { data = {message:text}; }
     }
-    return data;
+    if (!ok) {
+      const body = (data && typeof data === 'object') ? data : {};
+      const raw=String(body.message || body.detail || body.error || '').trim();
+      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || String(text || '').trim().startsWith('<!');
+      throw new Error(htmlError ? `HERMUS service returned an unexpected page (HTTP ${status})` : (raw || `HTTP ${status}`));
+    }
+    return data && typeof data === 'object' ? data : {};
   }
 
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -476,7 +487,9 @@
   });
   $('#command')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendCommand();}});
   window.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#palette')?.classList.contains('open')){showPalette(false);}else{$('#overlay')?.classList.remove('open');$('#overlay')?.setAttribute('aria-hidden','true');}}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#command')?.focus();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='p'){e.preventDefault();showPalette(true);}});
-  refresh(); setInterval(refresh,10000);
+  // One scheduler owns every timer in the room (scheduler.js).
+  if (window.HermusBus) window.HermusBus.every('nexus-refresh', 10000, refresh, {immediate:false});
+  refresh();
   transcriptRestore();
 
   // Discoverable capability vocabulary for contextual HERMUS surfaces:
@@ -858,8 +871,10 @@
 
   refreshModels(false);
   refreshKernel();
-  setInterval(()=>refreshModels(false),30000);
-  setInterval(refreshKernel,2500);
+  if (window.HermusBus) {
+    window.HermusBus.every('models', 30000, ()=>refreshModels(false), {immediate:false});
+    window.HermusBus.every('kernel', 2500, refreshKernel, {immediate:false});
+  }
 
   // -------------------------------------------------------------- CONVERSATION + VOICE
   async function startVoice(){
@@ -1205,5 +1220,5 @@
 
   syncGreeting();
   refreshAgentRoster();
-  setInterval(refreshAgentRoster, 15000);
+  if (window.HermusBus) window.HermusBus.every('agent-roster', 15000, refreshAgentRoster, {immediate:false});
 })();

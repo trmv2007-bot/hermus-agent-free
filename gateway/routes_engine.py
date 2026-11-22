@@ -19,6 +19,7 @@ lands on disk.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter
@@ -26,19 +27,40 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 router = APIRouter()
 
+#: Diagnostics are behind a door and answered from a short-lived cache: one
+#: examination per minute is the same truth for every panel that asks.
+DOCTOR_STATUS_TTL_SECONDS = 60.0
+_DOCTOR_STATUS_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
+ENGINE_STATUS_TTL_SECONDS = 30.0
+_ENGINE_STATUS_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
+
 
 # ---------------------------------------------------------------------------
 # Local engine: detection, routing, NoLlama lifecycle
 # ---------------------------------------------------------------------------
 @router.get("/engine/status")
 async def engine_status(probe: bool = True, refresh: bool = False):
-    """Hardware, routing plan, engine reachability and what is still missing."""
+    """Hardware, routing plan, engine reachability and what is still missing.
+
+    A probe forks hardware detection and asks each local engine over HTTP. It
+    runs off the event loop and a probed answer is reused briefly, so opening
+    the diagnostics surface twice does not re-detect the machine twice.
+    ``refresh=true`` (the Refresh button, ``POST /engine/refresh``) always
+    re-probes.
+    """
+    if probe and not refresh:
+        hit = _ENGINE_STATUS_CACHE.get("data")
+        if hit is not None and time.monotonic() - float(_ENGINE_STATUS_CACHE.get("at") or 0.0) < ENGINE_STATUS_TTL_SECONDS:
+            return hit
     try:
         from core.accelerators import state as engine_state
 
-        return await asyncio.to_thread(engine_state, refresh=refresh, probe=probe)
+        result = await asyncio.to_thread(engine_state, refresh=refresh, probe=probe)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc), "status": "unknown"}, status_code=500)
+    if probe and isinstance(result, dict):
+        _ENGINE_STATUS_CACHE.update(at=time.monotonic(), data=result)
+    return result
 
 
 @router.post("/engine/refresh")
@@ -198,13 +220,26 @@ def events_recent(limit: int = 30):
 # ---------------------------------------------------------------------------
 @router.get("/doctor/status")
 async def doctor_status():
-    """Cheap status: engine, findings by severity, stuck work, recent reports."""
+    """Cheap status: engine, findings by severity, stuck work, recent reports.
+
+    Diagnostics, not first-screen state: the Control Room only asks for this
+    when the person opens the diagnostics surface. It still costs ~10s on a
+    cold machine (it probes engines and reads every diagnostic), so the answer
+    is reused for a minute — reopening a panel must not re-run the examination.
+    """
+    now = time.monotonic()
+    hit = _DOCTOR_STATUS_CACHE.get("data")
+    if hit is not None and now - float(_DOCTOR_STATUS_CACHE.get("at") or 0.0) < DOCTOR_STATUS_TTL_SECONDS:
+        return hit
     try:
         from core.doctor import doctor
 
-        return await asyncio.to_thread(doctor.status)
+        result = await asyncio.to_thread(doctor.status)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=500)
+    if isinstance(result, dict):
+        _DOCTOR_STATUS_CACHE.update(at=time.monotonic(), data=result)
+    return result
 
 
 @router.post("/doctor/run")

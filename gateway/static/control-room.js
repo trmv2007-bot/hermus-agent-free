@@ -55,27 +55,37 @@ function setPill(id, text, cls){ const el = $(id); if (el) { el.textContent = te
  * ======================================================================== */
 function requestJSON(url, opts) {
   const options = Object.assign({ headers: { "Accept": "application/json" } }, opts || {});
+  const method = String(options.method || "GET").toUpperCase();
   const t0 = Date.now();
-  return fetch(url, options).then((r) => {
-    const ms = Date.now() - t0;
-    const requestId = r.headers ? r.headers.get("x-request-id") : null;
-    return r.text().then((text) => {
+  // Reads go through the one scheduler (see scheduler.js): first-screen state
+  // comes from the console state bundle, everything else from a bounded,
+  // deduplicated queue. Only this page's writes use fetch directly.
+  const bus = window.HermusBus;
+  const transport = (method === "GET" && bus)
+    ? bus.get(url, options)
+    : fetch(url, options).then((r) => r.text().then((text) => {
       let body = null;
       try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
-      if (r.ok) {
-        return { ok: true, data: body, ms: ms, status: r.status, requestId: requestId };
-      }
-      // Canonical envelope (ErrorEnvelopeMiddleware guarantees these keys on
-      // every 4xx/5xx JSON response), with a fallback for non-JSON errors.
-      const env = (body && typeof body === "object") ? body : {};
-      return {
-        ok: false, data: null, ms: ms, status: r.status, requestId: requestId,
-        code: env.code || env.error || ("http_" + r.status),
-        message: env.message || env.detail || env.error || ("Request failed (" + r.status + ")"),
-        retryable: env.retryable === true,
-        details: env.details || {},
-      };
-    });
+      return { ok: Boolean(r.ok), status: r.status, data: body, text: text,
+        requestId: r.headers ? r.headers.get("x-request-id") : null };
+    }));
+  return transport.then((res) => {
+    const ms = Date.now() - t0;
+    const requestId = res.requestId || null;
+    const body = res.data;
+    if (res.ok) {
+      return { ok: true, data: body, ms: ms, status: res.status, requestId: requestId };
+    }
+    // Canonical envelope (ErrorEnvelopeMiddleware guarantees these keys on
+    // every 4xx/5xx JSON response), with a fallback for non-JSON errors.
+    const env = (body && typeof body === "object") ? body : {};
+    return {
+      ok: false, data: null, ms: ms, status: res.status, requestId: requestId,
+      code: env.code || env.error || ("http_" + res.status),
+      message: env.message || env.detail || env.error || res.error || ("Request failed (" + res.status + ")"),
+      retryable: env.retryable === true,
+      details: env.details || {},
+    };
   }).catch((e) => ({
     // Network-level failure: no response, so no envelope. Always retryable —
     // the gateway may simply be restarting.
@@ -331,8 +341,22 @@ function refreshTab(name){
   else if (name === "approvals") { refreshSafety(); refreshRemote(); }
   else if (name === "capabilities") { refreshCaps(); refreshSafety(); }
   else if (name === "memory") refreshMemory();
-  else if (name === "systems") { if (window.HermusConsole) window.HermusConsole.refresh(); }
+  else if (name === "systems") refreshDiagnostics();
   else if (name === "presence") refreshPresence();
+}
+
+/* Diagnostics are behind a door. /doctor/status (~10s: it probes every engine
+ * and reads every diagnostic) and /engine/status (~8s: hardware detection) are
+ * never asked for while the room opens — only when someone opens the Systems
+ * surface. Both sides cache the answer for a minute (scheduler.js DIRECT_TTL,
+ * gateway/routes_engine.py), so reopening the surface is instant. */
+function loadDiagnostics(){
+  return Promise.all([requestJSON("/doctor/status"), requestJSON("/engine/status")])
+    .then((results) => results.every((res) => res.ok));
+}
+function refreshDiagnostics(){
+  if (window.HermusConsole) window.HermusConsole.refresh();
+  return loadDiagnostics();
 }
 
 // ---------- PRESENCE / CONTINUITY ----------
@@ -864,7 +888,7 @@ function openTmStream(){
     };
   } catch(e){ /* poll fallback below */ }
   // poll fallback in case the WS is unavailable (e.g. static preview / no token)
-  setInterval(() => { try { refreshTelemetry(false); } catch(e){} }, 5000);
+  if (window.HermusBus) window.HermusBus.every("telemetry", 5000, () => { try { return refreshTelemetry(false); } catch(e) { return false; } });
 }
 
 // ---------- COMPUTER ----------
@@ -1436,10 +1460,18 @@ initVoice();
 async function boot(){
   // Every panel loads independently. Serialising them meant a slow probe (the
   // doctor-backed health card) delayed readiness, presence and jobs behind it.
+  // All four read from the one state bundle, so this is a single request.
   await Promise.allSettled([refreshOverview(), refreshPresence(), refreshJobs(), refreshMissions()]);
   refreshTelemetry(true);
   openTmStream();
+  // Registered, not started: the diagnostics door opens with the Systems tab.
+  if (window.HermusBus) window.HermusBus.every("diagnostics", 60000, loadDiagnostics, { immediate: false });
 }
 boot();
-setInterval(() => { refreshOverview(); refreshPresence(); refreshJobs(); try { refreshMissions(); } catch(e){} try { refreshTelemetry(false); } catch(e){} }, 8000);
+// One scheduler for the whole room: no script owns an interval any more.
+if (window.HermusBus) {
+  window.HermusBus.every("first-screen", 8000, () => Promise.allSettled([
+    refreshOverview(), refreshPresence(), refreshJobs(), refreshMissions(), refreshTelemetry(false),
+  ]), { immediate: false });
+}
 RETRY_ACTIONS.overview = refreshOverview;

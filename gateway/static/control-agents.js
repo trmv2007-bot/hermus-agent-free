@@ -160,11 +160,24 @@ function stopAllAgents() {
   });
 }
 
+// Every read on this tab goes through the room's one scheduler (scheduler.js):
+// the console state bundle already carries agents, messages, keys and VRAM, so
+// these polls cost no extra sockets. A failed read rejects, exactly as the old
+// fetch().then() chain did, so each caller keeps its own fallback.
+function agentsGet(path) {
+  const bus = window.HermusBus;
+  const transport = bus ? bus.get(path, { headers: { Accept: 'application/json' } })
+    : fetch(path).then(r => r.text().then(t => ({ ok: r.ok, status: r.status, data: t ? JSON.parse(t) : {} })));
+  return transport.then(res => {
+    if (!res.ok) throw new Error(path + ' -> ' + res.status);
+    return res.data || {};
+  });
+}
+
 // Refresh Agents — a transient gateway restart must degrade to a note, not an
 // unhandled pageerror from an uncaught rejection inside a 5s poller.
 function refreshAgents() {
-  fetch('/api/v1/agents/list')
-    .then(r => r.json())
+  return agentsGet('/api/v1/agents/list')
     .then(data => {
       agentSystem.agents = data.agents || [];
       updateAgentUI();
@@ -179,8 +192,7 @@ function refreshAgents() {
 
 // Refresh API Keys
 function refreshApiKeys() {
-  fetch('/api/v1/agents/api-keys/list')
-    .then(r => r.json())
+  return agentsGet('/api/v1/agents/api-keys/list')
     .then(data => {
       agentSystem.apiKeys = data.keys || {};
       updateApiKeysUI();
@@ -190,8 +202,7 @@ function refreshApiKeys() {
 
 // Refresh Agent Messages
 function refreshAgentMessages() {
-  fetch('/api/v1/agents/messages')
-    .then(r => r.json())
+  return agentsGet('/api/v1/agents/messages')
     .then(data => {
       agentSystem.messages = data.messages || [];
       updateMessagesUI();
@@ -321,12 +332,20 @@ function updateVRAMMonitor() {
 
   if (!fill || !percent || !used) return;
 
-  fetch('/api/v1/agents/vram/status')
-    .then((r) => {
-      if (!r.ok) throw new Error('vram status ' + r.status);
-      return r.json();
-    })
+  return agentsGet('/api/v1/agents/vram/status')
     .then((data) => {
+      if (data && data.warming) {
+        // The gateway is still probing this machine's hardware for the first
+        // time. Saying "no GPU" here would be a lie, and asking the endpoint
+        // directly would cost the same ~10s probe the state bundle exists to
+        // keep off the first screen.
+        fill.style.width = '0%';
+        percent.textContent = 'warming';
+        used.textContent = 'probing the GPU';
+        if (pill) { pill.textContent = 'GPU: …'; pill.className = 'pill unavailable'; }
+        if (note) note.textContent = 'The gateway is still measuring this machine. This panel fills in within a minute.';
+        return;
+      }
       const vram = data.vram || {};
       const total = Number(vram.total || (data.gpu && data.gpu.vram_total) || 0);
       const value = Number(vram.used || 0);
@@ -377,11 +396,15 @@ function showToast(message, type = 'info') {
 
 // Initialize on load
 window.addEventListener('load', () => {
-  // Start periodic updates
-  setInterval(refreshAgents, 5000);
-  setInterval(refreshApiKeys, 15000);
-  setInterval(refreshAgentMessages, 6000);
-  setInterval(updateVRAMMonitor, 5000);
+  // One scheduler owns every timer in the room (scheduler.js); these four
+  // cadences are registrations, not intervals.
+  const bus = window.HermusBus;
+  if (bus) {
+    bus.every('agents', 5000, refreshAgents, { immediate: false });
+    bus.every('agent-keys', 15000, refreshApiKeys, { immediate: false });
+    bus.every('agent-messages', 6000, refreshAgentMessages, { immediate: false });
+    bus.every('agent-vram', 5000, updateVRAMMonitor, { immediate: false });
+  }
 
   // Initial updates
   refreshAgents();

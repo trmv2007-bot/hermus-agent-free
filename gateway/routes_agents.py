@@ -12,7 +12,10 @@ Provides REST API endpoints for:
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -696,26 +699,16 @@ async def remove_api_key(request: Request, payload: dict) -> dict:
 
 @router.get("/vram/status")
 async def get_vram_status(request: Request) -> dict:
-    """Get current VRAM usage for RTX 3050."""
+    """Current VRAM usage for RTX 3050, with the local-provider recommendation.
+
+    ``get_recommended_setup()`` probes every known local engine over HTTP with a
+    multi-second timeout. Running it inline froze the gateway's event loop for
+    ~13s — every other request, including a person's typed question, queued
+    behind it. It now runs off the loop and its answer is reused briefly: the
+    hardware in this machine does not change between two page loads.
+    """
     try:
-        lfp = get_local_first()
-        gpu_info = lfp.detect_gpu()
-
-        # Get VRAM usage
-        vram_info = lfp.get_vram_usage()
-        setup = lfp.get_recommended_setup()
-        rtx = setup.get("rtx3050", {})
-
-        return {
-            "status": "ok",
-            "gpu": gpu_info,
-            "vram": vram_info,
-            "recommended": setup.get("recommended", {}),
-            "limits": {
-                "vram_safe": rtx.get("vram_safe_limit"),
-                "max_models": 1 if rtx else None,
-            },
-        }
+        return await asyncio.to_thread(_vram_status_cached)
     except Exception as e:
         logger.error(f"Error getting VRAM status: {e}")
         # Return an explicit unavailable response rather than inventing hardware.
@@ -726,6 +719,36 @@ async def get_vram_status(request: Request) -> dict:
             "recommended": {},
             "limits": {},
         }
+
+
+VRAM_TTL_SECONDS = 60.0
+_VRAM_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
+_VRAM_LOCK = threading.Lock()
+
+
+def _vram_status_cached() -> dict:
+    """One recommended-setup probe per minute, shared by every caller."""
+    with _VRAM_LOCK:
+        hit = _VRAM_CACHE.get("data")
+        if hit is not None and (time.monotonic() - float(_VRAM_CACHE.get("at") or 0.0)) < VRAM_TTL_SECONDS:
+            return dict(hit)
+        lfp = get_local_first()
+        gpu_info = lfp.detect_gpu()
+        vram_info = lfp.get_vram_usage()
+        setup = lfp.get_recommended_setup()
+        rtx = setup.get("rtx3050", {})
+        payload = {
+            "status": "ok",
+            "gpu": gpu_info,
+            "vram": vram_info,
+            "recommended": setup.get("recommended", {}),
+            "limits": {
+                "vram_safe": rtx.get("vram_safe_limit"),
+                "max_models": 1 if rtx else None,
+            },
+        }
+        _VRAM_CACHE.update(at=time.monotonic(), data=payload)
+        return dict(payload)
 
 
 @router.get("/vram/monitor")
