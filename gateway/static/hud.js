@@ -30,9 +30,47 @@
 
   /* ------------------------------------------------------------------ *
    * 1. Boot sequence.
-   * Full ceremony on the first load of a session; a quick blink after
-   * that (same-tab navigations shouldn't pay the toll twice). */
+   * One real question — "is this gateway ready?" — answered by /readyz and
+   * printed as it came back. No scripted ticks: a boot line that claims a
+   * check the code never ran is the cheapest lie in the product.
+   * Full ceremony on the first load of a session; a quick blink after that
+   * (same-tab navigations shouldn't pay the toll twice). */
   var BOOT_KEY = "hermus_fairy_booted";
+
+  /* The last line the boot ceremony shows. It is whatever /readyz said, held
+     so the fairy's "boot" quip repeats the truth instead of inventing one. */
+  var bootLine = "";
+
+  function checkReady() {
+    /* Returns a promise of one honest sentence about this gateway. */
+    return fetch("/readyz", { cache: "no-store", headers: { Accept: "application/json" } })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (body) {
+          if (r.ok && body && body.status === "ready") {
+            var q = body.queue ? " / queue " + body.queue : "";
+            return "core READY " + String(body.uptime == null ? "" : "· up " + Math.round(body.uptime) + "s") + q;
+          }
+          var reasons = (body && body.details && body.details.reasons) || (body && body.message ? [body.message] : []);
+          return "core NOT READY — " + (reasons.join("; ") || ("HTTP " + r.status));
+        });
+      })
+      .catch(function (err) {
+        return "gateway UNREACHABLE — " + (err && err.message ? err.message : "no response");
+      });
+  }
+
+  function bootRow(host, label, value, ok) {
+    var row = el("div");
+    row.appendChild(document.createTextNode("> " + label + " "));
+    var pad = el("span");
+    pad.textContent = new Array(Math.max(2, 16 - label.length)).join(".");
+    pad.style.color = "rgba(160,220,255,0.3)";
+    row.appendChild(pad);
+    var b = el("b", null, value);
+    if (ok === false) b.style.color = "rgba(255,140,165,0.95)";
+    row.appendChild(b);
+    host.appendChild(row);
+  }
 
   function boot() {
     if (reduced()) { markBooted(); return; }
@@ -52,13 +90,6 @@
     wrap.appendChild(el("div", "boot-skip", "press any key to skip"));
     document.body.appendChild(wrap);
 
-    var SCRIPT = [
-      ["holo core", "ONLINE"],
-      ["model fleet", "LINKED"],
-      ["safety interlocks", "ARMED"],
-      ["fairy consciousness", "AWAKE"],
-      ["all systems", "NOMINAL"]
-    ];
     var timers = [];
     var finished = false;
 
@@ -69,7 +100,7 @@
       wrap.classList.add("done");
       later(function () { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }, 550);
       markBooted();
-      quip("boot");
+      if (bootLine) quip("boot");
     }
     function markBooted() {
       try { sessionStorage.setItem(BOOT_KEY, "1"); } catch (e) { /* ignore */ }
@@ -79,24 +110,26 @@
       lines.innerHTML = "<b>CORE ONLINE</b>";
       bar.style.width = "100%";
       timers.push(later(finish, 650));
-    } else {
-      var t = 240;
-      SCRIPT.forEach(function (pair) {
-        timers.push(later(function () {
-          var row = el("div");
-          row.appendChild(document.createTextNode("> " + pair[0] + " "));
-          var pad = el("span");
-          pad.textContent = new Array(Math.max(2, 22 - pair[0].length)).join(".");
-          pad.style.color = "rgba(160,220,255,0.3)";
-          row.appendChild(pad);
-          row.appendChild(el("b", null, pair[1]));
-          lines.appendChild(row);
-          bar.style.width = Math.round(((SCRIPT.indexOf(pair) + 1) / SCRIPT.length) * 100) + "%";
-        }, t));
-        t += 330;
+      checkReady().then(function (line) { bootLine = line; });
+      wrap.addEventListener("click", finish);
+      window.addEventListener("keydown", function onKey(e) {
+        window.removeEventListener("keydown", onKey);
+        finish();
       });
-      timers.push(later(finish, t + 420));
+      return;
     }
+
+    lines.innerHTML = "";
+    bootRow(lines, "readiness", "asking /readyz", null);
+    checkReady().then(function (line) {
+      lines.innerHTML = "";
+      bootLine = line;
+      var ok = line.indexOf("READY") !== -1 && line.indexOf("NOT READY") === -1 && line.indexOf("UNREACHABLE") === -1;
+      bootRow(lines, "readiness", line.replace(/^core /, ""), ok);
+      bar.style.width = "100%";
+      /* Long enough to read one line, short enough not to be in the way. */
+      timers.push(later(finish, ok ? 900 : 1900));
+    });
 
     wrap.addEventListener("click", finish);
     window.addEventListener("keydown", function onKey(e) {
@@ -145,7 +178,10 @@
     '</svg>';
 
   var QUIPS = {
-    boot: "Boot complete. Every system checked — twice.",
+    /* No line here claims a check. "boot" is filled in from the real /readyz
+       answer the ceremony just printed; when that answer never arrived the
+       quip stays silent rather than guessing. */
+    boot: null,
     busy: "Working. Try not to touch anything.",
     done: "Done. It was trivial, really.",
     error: "That failed. I'd fix it myself, but you hold the permissions.",
@@ -156,7 +192,7 @@
   var lastQuipAt = 0;
 
   function quip(kind) {
-    var line = QUIPS[kind];
+    var line = kind === "boot" ? bootLine : QUIPS[kind];
     var host = $(".fairy-quip");
     if (!line || !host) return;
     var now = Date.now();

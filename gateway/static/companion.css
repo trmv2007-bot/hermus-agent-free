@@ -1,0 +1,154 @@
+/* HERMUS — the companion screen. One character, one line, nothing shouting.
+   Tokens come from nexus.css; this file owns only the composition. */
+
+body.companion {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 40px 20px 72px;
+  overflow-x: hidden;
+}
+
+.stage {
+  width: min(680px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  animation: appear 900ms var(--ease) both;
+}
+
+@keyframes appear {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* the character ------------------------------------------------------- */
+.being {
+  width: 176px;
+  height: 176px;
+  position: relative;
+  animation: float 7s ease-in-out infinite;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.being .fairy { width: 100%; height: 100%; display: block; overflow: visible; }
+
+.being .orb-ring { transform-origin: 60px 60px; animation: spin 26s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.being .wing { transform-origin: 60px 58px; animation: breathe 3.4s ease-in-out infinite; }
+.being .wing.w-r { animation-delay: -0.6s; }
+@keyframes breathe {
+  0%, 100% { transform: scaleX(1); opacity: 0.85; }
+  50% { transform: scaleX(0.9); opacity: 0.6; }
+}
+
+.being .orb-core { filter: drop-shadow(0 0 12px rgba(95, 216, 255, 0.5)); }
+.being .spark { animation: twinkle 5s ease-in-out infinite; }
+.being .spark:nth-child(2) { animation-delay: -1.2s; }
+.being .spark:nth-child(3) { animation-delay: -2.4s; }
+.being .spark:nth-child(4) { animation-delay: -3.1s; }
+@keyframes twinkle {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.95; }
+}
+
+.being[data-mood="busy"] .orb-ring { animation-duration: 6s; }
+.being[data-mood="busy"] .orb-core { filter: drop-shadow(0 0 22px rgba(95, 216, 255, 0.8)); }
+.being[data-mood="error"] .orb-core { filter: drop-shadow(0 0 16px rgba(255, 101, 132, 0.55)); }
+.being[data-mood="error"] .orb-ring { stroke: rgba(255, 101, 132, 0.5); }
+
+/* words --------------------------------------------------------------- */
+.greeting {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+  letter-spacing: -0.005em;
+}
+.greeting:empty { display: none; }
+
+.words {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+}
+.words:empty { display: none; }
+
+.words .said,
+.words .reply { margin: 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
+.words .said { color: var(--acc-tint, var(--dim)); font-family: var(--mono); font-size: 12px; }
+.words .reply { color: var(--ink); }
+
+/* one line ------------------------------------------------------------ */
+.line {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  background: var(--glass);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  transition: border-color 220ms var(--ease), box-shadow 220ms var(--ease);
+}
+.line:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 4px rgba(95, 216, 255, 0.07);
+}
+.line .prefix { color: var(--accent); font-family: var(--mono); user-select: none; }
+.line input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  padding: 7px 0;
+}
+.line input:focus { outline: none; }
+.line input::placeholder { color: var(--dim); }
+.line .btn { padding: 8px 16px; }
+
+.model-line {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  min-height: 14px;
+}
+
+/* the one quiet control ---------------------------------------------- */
+.systems {
+  position: fixed;
+  right: 22px;
+  bottom: 20px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 6px 2px;
+  border-bottom: 1px solid transparent;
+  transition: color 200ms var(--ease), border-color 200ms var(--ease);
+}
+.systems:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+
+@media (max-width: 560px) {
+  .being { width: 136px; height: 136px; }
+  .systems { right: 12px; bottom: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage, .being, .being .orb-ring, .being .wing, .being .spark { animation: none; }
+}

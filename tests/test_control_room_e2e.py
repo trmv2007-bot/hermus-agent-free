@@ -27,13 +27,35 @@ def _client():
 # ---------------------------------------------------------------------------
 # Routing: root + the ONE production control room
 # ---------------------------------------------------------------------------
-def test_root_redirects_to_control():
+def test_root_redirects_to_the_first_screen():
+    """Root is the entrance, and the entrance depends on whether setup is real.
+
+    A fresh install has no model and no choices recorded, so ``/`` must open the
+    welcome flow. Once a real answer has been recorded, ``/`` opens the
+    companion. ``/control`` keeps its own address either way.
+    """
+    from core import onboarding
+
     c = _client()
+    state = onboarding.load()
+    onboarding.save(onboarding.record_brain(state, {"kind": "stub", "model": "mock/mock", "source": "test"}))
     r = c.get("/", follow_redirects=False)
     assert r.status_code in (307, 302)
-    assert r.headers.get("location") == "/control"
+    assert r.headers.get("location") == "/welcome"
     # HEAD is allowed on root (health checks / proxies).
     assert c.head("/", follow_redirects=False).status_code in (307, 302)
+    assert c.get("/welcome").status_code == 200
+    assert c.get("/control").status_code == 200
+
+    done = onboarding.load()
+    onboarding.record_brain(done, {"kind": "local", "provider": "ollama", "name": "test:1b", "model": "ollama/test:1b", "source": "test"})
+    done["permissions"] = "ask"
+    done["name"] = "Hermus"
+    done["check"] = {"ok": True, "model": "test:1b", "reason": "", "at": None, "ms": 1}
+    onboarding.save(done)
+    r = c.get("/", follow_redirects=False)
+    assert r.headers.get("location") == "/companion"
+    assert c.get("/companion").status_code == 200
 
 
 def test_control_room_serves_from_real_backend_seeds():

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#040912">
+  <title>HERMUS</title>
+  <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
+  <link rel="stylesheet" href="/static/nexus.css">
+  <link rel="stylesheet" href="/static/welcome.css">
+  <link rel="stylesheet" href="/static/companion.css">
+</head>
+<body class="companion">
+
+<main class="stage">
+  <div class="being" id="being" data-mood="idle" aria-hidden="true">
+    <svg class="fairy" viewBox="0 0 120 120" aria-hidden="true">
+      <defs>
+        <radialGradient id="hudOrb" cx="42%" cy="38%" r="70%">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="45%" stop-color="#9beaff"/>
+          <stop offset="100%" stop-color="#2f9ce8"/>
+        </radialGradient>
+        <linearGradient id="hudWingL" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="rgba(167,235,255,0.55)"/>
+          <stop offset="100%" stop-color="rgba(95,216,255,0.06)"/>
+        </linearGradient>
+        <linearGradient id="hudWingR" x1="100%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="rgba(167,235,255,0.55)"/>
+          <stop offset="100%" stop-color="rgba(95,216,255,0.06)"/>
+        </linearGradient>
+      </defs>
+      <g class="wings">
+        <path class="wing w-l" fill="url(#hudWingL)" stroke="rgba(95,216,255,0.5)" stroke-width="0.8"
+              d="M52 56 C 40 30, 16 26, 10 42 C 6 56, 22 62, 40 60 C 30 68, 34 76, 44 74 C 50 72, 52 64, 52 56 Z"/>
+        <path class="wing w-r" fill="url(#hudWingR)" stroke="rgba(95,216,255,0.5)" stroke-width="0.8"
+              d="M68 56 C 80 30, 104 26, 110 42 C 114 56, 98 62, 80 60 C 90 68, 86 76, 76 74 C 70 72, 68 64, 68 56 Z"/>
+      </g>
+      <g class="orb">
+        <circle class="orb-halo" cx="60" cy="60" r="30" fill="none" stroke="rgba(95,216,255,0.4)" stroke-width="1"/>
+        <circle class="orb-ring" cx="60" cy="60" r="23" fill="none" stroke="rgba(95,216,255,0.65)" stroke-width="1" stroke-dasharray="10 14"/>
+        <circle class="orb-core" cx="60" cy="60" r="15" fill="url(#hudOrb)"/>
+        <circle cx="54" cy="54" r="4.4" fill="rgba(255,255,255,0.9)"/>
+      </g>
+      <g class="sparks">
+        <circle class="spark" cx="34" cy="34" r="1.4" fill="rgba(167,235,255,0.85)"/>
+        <circle class="spark" cx="88" cy="40" r="1.2" fill="rgba(95,216,255,0.8)"/>
+        <circle class="spark" cx="30" cy="72" r="1" fill="rgba(142,162,255,0.7)"/>
+        <circle class="spark" cx="92" cy="70" r="1.4" fill="rgba(167,235,255,0.75)"/>
+      </g>
+    </svg>
+  </div>
+
+  <p class="greeting" id="greeting">Hello.</p>
+
+  <div class="words" id="words" aria-live="polite"></div>
+
+  <div class="line">
+    <span class="prefix" aria-hidden="true">›</span>
+    <input id="say" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Say something" aria-label="Say something to your companion" autofocus>
+    <button id="go" class="btn primary" type="button">Send</button>
+  </div>
+
+  <p class="model-line" id="modelLine"></p>
+</main>
+
+<a class="systems" href="/control" title="Panels, approvals, logs — everything the companion can do">Systems</a>
+
+<script src="/static/companion.js" defer></script>
+</body>
+</html>

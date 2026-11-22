@@ -45,3 +45,5 @@ if($VerifyOnly){Info 'Running canonical Doctor in verification-only mode';& $ven
 if($LASTEXITCODE -ne 0){Fail 'HERMUS Doctor reported an incomplete installation. Fix the reported item and re-run setup.ps1.'}
 Good 'HERMUS fresh-machine setup completed.'
 Good "Runtime: $venvPy"
+Info 'What will answer you (one line, sourced from what is actually installed)'
+& $venvPy (Join-Path $Root 'bootstrap.py') model

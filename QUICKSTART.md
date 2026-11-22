@@ -1,227 +1,157 @@
-# ☤ Hermus Agent Free — Quickstart & Installation Guide
+# Hermus Agent Free — quickstart
 
-Get up and running with Hermus on **Linux, macOS, or Android/Termux** in 3 simple steps. Windows users can use WSL2 and run the Linux path.
+A free desktop companion that runs on your own computer. This page is enough to
+install it and get a real answer. The developer path is at the bottom.
 
 ---
 
-## ⚡ 3-Step Fast Installation (Linux / WSL / macOS)
+## 1. Install
 
-## Easy mode (one command, fully offline)
+**Windows 10/11** — open PowerShell and paste this one line:
 
-```bash
-hermus check                 # env sanity + always-on suites on mock/mock + scoreboard (exit 1 on any failure; CI-ready)
-make selfcheck               # same thing
-hermus harness run           # no args = run ALL builtin suites, then a scoreboard
-hermus harness run fairy --model groq/... --strict   # one suite, one model, CI gate
-hermus doctor --harness      # is the always-on core healthy? suites, sentinel, last runs
+```powershell
+$p = Join-Path $env:TEMP "hermus-install.ps1"; Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p
 ```
 
-### Step 1: Clone the Repository
+**macOS or Linux** — paste this one line in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash
+```
+
+It takes a few minutes. It installs into its own folder and never touches your
+documents. Running it twice is safe.
+
+## 2. Answer one question
+
+Near the end, the installer asks whether it should install a small language model
+on your computer:
+
+```
+No model was found on this machine. Install Ollama (free, no account) and
+download llama3.2:1b?  [Y/n]
+```
+
+Say yes. That downloads about 0.6 GB once, stays on your computer, needs no
+account, and costs nothing. If you would rather not, press `n` and it offers a
+free-tier key instead (Groq, Mistral or OpenRouter — all free, no card). Decline
+both and it tells you plainly that it will answer with an offline stub, plus the
+one command that fixes it later.
+
+## 3. Open it
+
+```bash
+hermus gateway start
+```
+
+Then open **http://localhost:8000/** in your browser.
+
+The first screen asks three things, each with an answer already chosen, so you
+can press Enter three times:
+
+- **What should answer you** — the model on your machine, a free key, or nothing.
+- **What may it do** — Watch only, Ask first, or Act freely.
+- **What should it be called** — `Hermus` unless you have a better idea.
+
+The last step types a real question to the model you chose and streams the
+answer back. That is the proof it works. If no model can answer, it says so once
+and gives you the command that fixes it — it does not pretend.
+
+## 4. Use it
+
+After that, http://localhost:8000/ opens the companion: one character and one
+input line. Type, press Enter, read.
+
+Every operator panel — jobs, approvals, memory, the whole Control Room — is
+behind the quiet **Systems** control in the bottom-right corner. You do not need
+it to use the product.
+
+---
+
+## Common questions
+
+**Does it cost anything?** No. Local models are free. The free-tier keys are
+free plans with no card. There is no paid tier in this build.
+
+**Does my data leave my computer?** Not with a local model. Only a free-tier key
+sends your words to that provider, and never in the default setup.
+
+**Where are my files?** Hermus keeps everything in `~/.hermus` (Windows:
+`C:\Users\<you>\.hermus`). Deleting that folder resets it completely, and
+nothing outside it is touched.
+
+**How do I change the model or its permissions later?** Open the welcome screen
+at http://localhost:8000/welcome, or the Control Room at `/control`. The choice
+is written into permission overrides you can edit by hand.
+
+**Nothing answers.** Run `hermus bootstrap model` — it prints the model that will
+answer, where that choice came from, and the one command to fix it if there is
+none.
+
+---
+
+# Developer path
+
+Everything below assumes you are changing the code.
+
+## From a clone
+
 ```bash
 git clone https://github.com/trmv2007-bot/hermus-agent-free.git
 cd hermus-agent-free
+./setup.sh            # Windows: .\setup.cmd
 ```
 
-### Step 2: Bootstrap with One Command
-```bash
-./setup.sh
-```
-*(No need to `source` multiple files. `setup.sh` detects Linux, macOS and
-Android/Termux, installs missing host tools where supported, then delegates all
-Python/dependency/layout/Chromium/Scrapling/live-Doctor work to this canonical
-bootstrap.)*
-
-**What the canonical bootstrap does (idempotent — safe to run again):**
-1. Detects OS / Python / permissions.
-2. Creates or updates the Python virtual environment (`.venv`).
-3. Installs the pinned runtime dependencies (required set gate the exit code).
-4. Initializes the canonical data/home layout (`data`, `workspace`, `artifacts`, `skills`, `migrations`, `logs`).
-5. Migrates legacy memory/state if present.
-6. Runs health probes and prints one capability summary.
-7. Performs real local Scrapling and headless-Chromium checks, gateway route/
-   JobQueue startup checks, security checks and backend initialization.
-8. Exits `0` only when **required** capabilities are ready. Optional desktop
-   control, TTS/model weights, provider credentials and platform-specific
-   channels degrade into an explicit state with the exact reason — never a fake
-   success.
-
-Recommended commands:
-```bash
-./hermus bootstrap            # one-command setup + health
-./hermus doctor               # health/diagnostics report
-./hermus start                # dashboard + gateway
-./hermus mission "goal"       # autonomous mission
-./hermus status --live        # live capability state
-```
-
----
-
-### Step 3: Launch the Server & Open Your Dashboard
-```bash
-./hermus-gateway
-```
-*(Or `./bin/hermus-gateway` or `source activate.sh && hermus-gateway`)*
-
-Open in your browser:
-* **🎛️ Control Room (single production UI):** [`http://localhost:8000/control`](http://localhost:8000/control) — root `/` redirects here. The legacy `/dashboard`, `/jarvis`, `/computer/dashboard`, `/remote` surfaces were folded into it.
-
----
-
-## 🧙‍♂️ 4-Step Interactive Onboarding Wizard
-
-When you open the dashboard for the first time, the interactive wizard walks you through:
-
-1. **AI Brain & Key Connection:**
-   * Select **⚡ Groq (Free Tier)**, **🌪️ Mistral (`devstral-latest` Free Tier)**, **🧠 OpenAI**, or **💻 Local Ollama (100% Offline)**.
-   * Or click **`✨ 1-Click Activate Free Fleet`** to auto-provision 12+ free models from OpenRouter Free and Mistral Devstral!
-2. **Mobile Remote & Tailscale Mesh Pairing:**
-   * Instant scannable vector SVG QR Code to pair your iPhone/Android camera.
-   * Auto-detects Tailscale WireGuard VPN (`100.x.y.z`) to control Hermus from anywhere outside home Wi-Fi.
-3. **Local Workspace & Semantic RAG Indexer:**
-   * 1-click vector memory indexing into local SQLite (`data/memory2.db`).
-4. **Autonomy & Safety Policy:**
-   * Choose between Supervised (confirm shell edits), Autonomous (smart auto-run with pocket push notifications), or Full Auto.
-
----
-
-## ⌨️ Using Hermus in the Terminal (CLI)
+`setup.sh` / `setup.ps1` own host detection and packages; `bootstrap.py` owns the
+virtualenv, dependencies, data layout and the live Doctor. Useful forms:
 
 ```bash
-# Chat with default free AI brain
-./hermus
-
-# Distribute hard coding & research tasks across the multi-model fleet
-./hermus fleet run "Analyze this repository and refactor routes"
+./setup.sh --verify-only     # change nothing, just run the Doctor
+./setup.sh --repair          # repair a broken .venv and retry
+./setup.sh --skip-optional   # required packages only
 ```
 
----
-
-## 📱 Android Agent Companion (on-device)
-
-Hermus can observe and drive an Android device through a **user-consented** on-device
-companion app. It does **not** bypass Android security — it uses the documented
-accessibility + MediaProjection APIs.
+## Checks
 
 ```bash
-cd android_companion
-./gradlew assembleDebug                      # needs Android SDK + JDK 17
-adb install app/build/outputs/apk/debug/app-debug.apk
-adb reverse tcp:8080 tcp:8080
-# On the device, in the Pairing screen: enable the accessibility service,
-# grant screen capture, then start the bridge.
+make test        # pytest tests/ (skips tests/eval), ~1 min
+make lint        # ruff, whole tree, line length 130
+make typecheck
+make selfcheck   # offline self-test on mock/mock with a scoreboard
 ```
 
-> ⚠️ **Status: reference implementation — NOT verified on a device.** The host-side
-> Android backend, consent, audit and secure pairing are unit-tested, and a deterministic
-> simulated device drives the full agentic loop. Building the companion and running the
-> real device/with-emulator E2E here was **not possible** (no Android SDK / device). See
-> `docs/archive/FINAL_REPORT.md` §50–§52 for exact verification steps and the honest capability matrix.
+`test`, `lint` and `typecheck` must stay green. New behaviour gets a test; the
+README's build-status table cites the test behind every row.
 
-### Backend-only / autonomous operation
-
-Hermus is backend-first: give it a high-level goal and the backend plans, observes, acts,
-verifies and continues **without the dashboard being open**. Closing/reloading the control
-room during a mission recovers state from the backend (there is no client-owned mission
-state). Battery — the control room is a *client* of backend state, never the owner of the
-autonomy loop, tool execution or device state.
-
-
----
-
-## 🎛️ The Control Room (single production UI)
-
-The canonical control room is at **`http://localhost:8000/control`** (root `/` redirects
-here). It is a single self-contained surface streamed from backend state + event
-replay — it is a *projection*, not a separate store. It covers chat, the multi-model
-fleet, key vault, semantic RAG memory, tools registry, channel webhooks, computer/agent
-autonomy and remote-pocket control, reconstructed from durable backend state. The
-older `/dashboard`, `/jarvis`, `/computer/dashboard` and `/remote` surfaces and their
-assets were removed and folded into `/control`.
-
----
-
----
-
-## 🤖 What Can Hermus Do?
-
-### 💬 Chat, Memory & Skill Forge
-* **Persistent Memory:** SQLite FTS5 + semantic vector embeddings store project context, code snippets, and user preferences with exponential decay.
-* **Skill Forge:** Automatically packages multi-step trajectories into reusable skills (`skills/name/`) so repetitive tasks cost zero tokens in the future.
-
-### 🌪️ Free Model Fleet & Consensus
-* **Groq LPU:** 300+ tokens/sec lightning-fast responses for daily conversation.
-* **Mistral Devstral:** Free developer tier model (`devstral-latest`) with a 256k context window for code analysis and deep refactoring.
-* **DeepThink Council:** Fan-out prompts to multiple models simultaneously and synthesize final consensus.
-
-### 🖥️ Computer Agent Automation
-* Uses Playwright and Chromium to navigate web apps, click UI elements, fill forms, and take screenshot trajectories autonomously.
-
-### 📡 Remote Mesh Access via Tailscale
-* Pair your phone and PC over an encrypted WireGuard mesh without opening router ports or exposing your IP to the public internet.
-
----
-
----
-
-## ⌨️ Command Line (CLI) Cheatsheet
+## Runtime
 
 ```bash
-# Chat in terminal
-./hermus
-
-# API keys in .env are auto-discovered (OPENROUTER_API_KEY, GEMINI_API_KEY,
-# NVIDIA_API_KEY, ...) — you do NOT have to add them again with `multikey add`.
-# Optional: show which providers Hermus sees as configured/usable.
-./hermus multikey providers
-
-# Add API keys
-./hermus multikey add --provider mistral --key YOUR_KEY --model devstral-latest
-./hermus multikey add --provider groq --key YOUR_KEY
-
-# Check fleet status
-./hermus multikey health
-
-# Run autonomous mission
-./hermus mission start "Build a Python CLI for file search"
+./hermus bootstrap              # setup + health in one command
+./hermus bootstrap model        # which model will answer, and why
+./hermus doctor                 # full diagnostics
+./hermus gateway start          # gateway + companion UI
+./hermus mission "goal"         # autonomous mission
+./hermus status --live          # live capability state
 ```
 
----
+## Surfaces
 
-## 🧪 Run HERMUS as an Agent Harness (measure the agent, not vibes)
+| Address | What it is |
+|---|---|
+| `/` | Welcome while setup is incomplete, companion once it is |
+| `/welcome` | The three first-run choices and the model proof |
+| `/companion` | The companion: character, one input line |
+| `/control` | The Control Room — eleven operator panels |
+| `/docs` | OpenAPI |
+| `/readyz` | Real readiness, the same answer the boot line prints |
 
-```bash
-./hermus harness suites                                  # committed task suites (smoke, fairy)
-./hermus harness tasks smoke                             # tasks + checks in a suite
-./hermus harness models                                  # every model it can see: API-key/auth providers + local (ollama) + mock
-./hermus harness ping groq/llama-3.3-70b-versatile      # live one-shot check of one model
-./hermus harness run smoke --model auto --tag ci         # any model: auto | role | provider/model | bare provider | mock/mock
-./hermus harness run smoke --models auto,groq,mock/mock  # same suite across models + comparison table
-./hermus harness run fairy --model auto                  # Fairy (proactive ZZZ-style) suite
-./hermus harness run path/to/suite.json --limit 5        # any JSON suite works too
-./hermus harness runs                                    # past runs
-./hermus harness show <run_id>                           # per-task results
-./hermus harness report <run_id>                         # markdown report
-./hermus harness compare <run_a> <run_b>                 # A/B: regressions, fixes, winner
-```
+## Optional integrations
 
----
+Optional packages degrade to an explicit `unavailable` state with a reason; they
+never break import, startup or a test. `requirements-optional.txt` lists them.
 
-## ⚡ The Sentinel — HERMUS that never sits idle (FAIRY side)
+## Environment
 
-```bash
-./hermus sentinel run --model auto            # daemon: reacts to every event INSTANTLY (inline on the event bus)
-./hermus sentinel run --once --dry-run        # replay recent events, decide, record, change nothing
-./hermus sentinel test '{"type":"incident","command":"circuit_open","status":"failed","args":{"severity":"critical"}}'
-./hermus sentinel status                      # thresholds + recent decisions
-./hermus sentinel install                     # autostart on boot: systemd user unit / Termux boot / cron @reboot
-./hermus harness run sentinel --model mock/mock   # measure the always-on behavior itself (offline, 6/6)
-```
-
-The sentinel scores each event (severity, failures, your current focus/goals),
-then decides instantly: `ignore` / `note` / `enqueue` a job / `alert` you —
-optionally asking any configured model for act/ignore triage. It never runs
-tools directly; approvals and red lines stay in charge. See `docs/SENTINEL.md`.
-
-Each task runs in its own isolated workspace under `data/harness/runs/<run_id>/`
-with step/time budgets; checks (response, file, command, tool-called) decide
-pass/fail. Suite format + check reference: `docs/HARNESS.md`.
+Every field is overridable with a `HERMUS_` prefix (`HERMUS_MODEL`,
+`HERMUS_HOME`, `HERMUS_GATEWAY_PORT`, …). `HERMUS_MOCK_UI=1` enables the
+dashboard's mock fixture layer, which is a design tool and is disabled otherwise.
