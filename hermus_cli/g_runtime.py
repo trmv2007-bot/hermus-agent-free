@@ -1180,6 +1180,112 @@ def _run_check(args, ctx: CLIContext) -> None:
     raise SystemExit(1 if (not env_ok) or bad else 0)
 
 
+def _configure_awareness(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "awareness", help="Read-only PC awareness: what Hermus sees, the pause switch, and the poll cost"
+    )
+    parser.add_argument("--json", action="store_true", help="Print the whole snapshot as JSON")
+    parser.add_argument("--pause", action="store_true", help="Stop every desktop read until --resume")
+    parser.add_argument("--resume", action="store_true", help="Resume desktop reads")
+    parser.add_argument("--exclude", action="append", default=[], help="Keep an app out of every snapshot (repeatable)")
+    parser.add_argument("--clipboard", choices=["on", "off"], default=None, help="Read the clipboard kind and hash, or not")
+    parser.add_argument(
+        "--quiet-hours", default=None, metavar="HH:MM-HH:MM", help="Window where nothing proactive is shown; 'off' disables"
+    )
+    parser.add_argument("--measure", type=float, default=0.0, metavar="SECONDS", help="Sample the poll loop and report its CPU cost")
+    parser.add_argument("--forget", action="store_true", help="Delete the 24h rolling summary")
+
+
+def _run_awareness(args, ctx: CLIContext) -> None:
+    from core.awareness import get_awareness
+
+    service = get_awareness()
+    patch: dict = {}
+    if args.pause:
+        patch["paused"] = True
+    if args.resume:
+        patch["paused"] = False
+    if args.exclude:
+        patch["excluded_apps"] = sorted({*service.settings().excluded_apps, *(item.lower() for item in args.exclude)})
+    if args.clipboard:
+        patch["clipboard"] = args.clipboard == "on"
+    if args.quiet_hours:
+        if args.quiet_hours.strip().lower() in {"off", "none", "0"}:
+            patch["quiet_hours"] = None
+        else:
+            start, _, end = args.quiet_hours.partition("-")
+            patch["quiet_hours"] = {"start": start.strip(), "end": end.strip()}
+    if patch:
+        service.update_settings(patch)
+
+    if args.forget:
+        cleared = service.journal.clear()
+        print(f"Rolling summary deleted: {cleared['path']} ({cleared['bytes_removed']} bytes)" if cleared["cleared"] else str(cleared))
+        return
+
+    if args.measure > 0:
+        print(_measure_poll_cost(service, args.measure))
+        return
+
+    snapshot = service.public_snapshot(fresh=True)
+    if args.json:
+        print(json.dumps(snapshot, indent=2, ensure_ascii=False, default=str))
+        return
+    print(_awareness_human_block(snapshot))
+
+
+def _awareness_human_block(snapshot: dict) -> str:
+    from core.awareness.render import render_snapshot
+
+    settings = snapshot.get("settings") or {}
+    if snapshot.get("paused"):
+        reason = snapshot.get("reason") or "reading is switched off"
+        return f"Awareness is paused: {reason}.\nRun `hermus awareness --resume` to turn reads back on."
+
+    lines = [render_snapshot(snapshot) or "Desktop (nothing readable):"]
+    unavailable = snapshot.get("unavailable") or {}
+    if unavailable:
+        lines.append("")
+        lines.append("Not readable here:")
+        for field, reason in unavailable.items():
+            lines.append(f"  {field:<10} {reason}")
+    lines.append("")
+    lines.append(
+        "Settings: "
+        + f"excluded={settings.get('excluded_apps') or 'none'}, clipboard={'on' if settings.get('clipboard') else 'off'}, "
+        + f"quiet_hours={settings.get('quiet_hours') or 'off'}"
+    )
+    cadence = "the poll loop is running" if snapshot.get("polling") else "on demand, when asked"
+    lines.append(f"Reading: {cadence}")
+    return "\n".join(lines)
+
+
+def _measure_poll_cost(service, seconds: float) -> str:
+    """Idle cost of the poll loop: process CPU seconds / wall seconds, one core = 100%."""
+    import time
+
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return "psutil is not installed, so the poll cost cannot be measured here."
+
+    process = psutil.Process()
+    cpu_before = sum(process.cpu_times()[:2])
+    wall_start = time.perf_counter()
+    service.ensure_poller()
+    time.sleep(max(1.0, seconds))
+    wall = time.perf_counter() - wall_start
+    cpu_after = sum(process.cpu_times()[:2])
+    running = service.poller_running
+    service.stop_poller()
+    percent = (cpu_after - cpu_before) / wall * 100.0
+    return (
+        f"Poll loop: {service.poll_interval:.1f}s interval, one read per tick.\n"
+        f"CPU: {percent:.3f}% of one core over {wall:.1f}s wall clock "
+        f"(psutil process cpu_times delta / wall time, single process, loop running={running})."
+    )
+
+
 COMMANDS: tuple[Command, ...] = (
     Command(
         name="gateway", help="Gateway - single process for Telegram/Discord/CLI", configure=_configure_gateway, run=_run_gateway
@@ -1230,6 +1336,12 @@ COMMANDS: tuple[Command, ...] = (
         help="Always-alert core - instant event reaction (FAIRY side), LLM triage, autostart",
         configure=_configure_sentinel,
         run=_run_sentinel,
+    ),
+    Command(
+        name="awareness",
+        help="Read-only PC awareness - focused window, power, idle, displays, clipboard kind; pause switch",
+        configure=_configure_awareness,
+        run=_run_awareness,
     ),
 )
 

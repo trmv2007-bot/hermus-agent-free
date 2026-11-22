@@ -654,6 +654,7 @@ _realtime.install(app)
 # Mounted after the realtime layer so its routes keep precedence.
 from gateway.routes_agents import router as _agents_router  # noqa: E402
 from gateway.routes_android import router as _android_router  # noqa: E402
+from gateway.routes_awareness import router as _awareness_router  # noqa: E402
 from gateway.routes_canonical import router as _canonical_router  # noqa: E402
 from gateway.routes_channels import control_router as _channels_control_router  # noqa: E402
 from gateway.routes_channels import router as _channels_router  # noqa: E402
@@ -724,6 +725,7 @@ app.include_router(_personal_space_router, dependencies=_gate_control)
 # are supposed to see cannot sit behind one.
 app.include_router(_onboarding_router)
 app.include_router(_presence_overlay_router, dependencies=_gate_control)
+app.include_router(_awareness_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

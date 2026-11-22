@@ -406,6 +406,17 @@ class HermusAgent:
         except Exception as exc:
             record_issue("presence", "prompt_block", exc, retryable=False, fallback="turn continues without presence context")
 
+        # Desktops awareness: a read-only picture of what is on this PC right
+        # now, rendered once per change and capped (core/awareness). Chat mode
+        # only, and off when the person paused awareness or set the env flag.
+        desktop_block = ""
+        try:
+            from .awareness import get_awareness
+
+            desktop_block = "\n" + get_awareness().context_block(mode=self.mode.value) + "\n"
+        except Exception as exc:
+            record_issue("awareness", "desktop_context", exc, retryable=False, fallback="turn continues without desktop context")
+
         dashboard_block = ""
         try:
             from .dashboard_state import dashboard_state
@@ -456,6 +467,7 @@ Periodic Nudges:
 {presence_block}
 {persona_block}
 {dashboard_block}
+{desktop_block}
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
 - After tools return, continue reasoning; call more tools if needed

@@ -7,6 +7,7 @@ browser, or contact a network service.
 
 from .base import Connector, ConnectorContext, ConnectorStatus
 from .control_center import IntegrationControlCenter, integration_center
+from .desktop import DesktopConnector, read_desktop
 from .filesystem import FilesystemConnector
 from .registry import ConnectorRegistry, connector_registry, register_builtin_connectors
 from .runtime import RuntimeConnector
@@ -17,7 +18,9 @@ __all__ = [
     "ConnectorContext",
     "ConnectorStatus",
     "ConnectorRegistry",
+    "DesktopConnector",
     "FilesystemConnector",
+    "read_desktop",
     "RuntimeConnector",
     "connector_registry",
     "register_builtin_connectors",
