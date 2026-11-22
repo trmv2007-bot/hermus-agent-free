@@ -23,6 +23,7 @@
     poll: null,
     lastRunId: null,
     lastError: null,
+    eventCount: {},
   };
 
   // ------------------------------------------------------------------ helpers
@@ -36,6 +37,14 @@
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  }
+
+  function beat() {
+    document.body.classList.remove("beat");
+    // reflow so the animation restarts even when events arrive back to back
+    void document.body.offsetWidth;
+    document.body.classList.add("beat");
+    setTimeout(() => document.body.classList.remove("beat"), 600);
   }
 
   function ago(ts) {
@@ -128,8 +137,9 @@
     $("#transcript").hidden = idle;
     placeComposer();
     if (idle) {
-      $("#hudLine").innerHTML = "<b>FAIRY</b> · idle · listening on the event bus";
+      $("#hudLine").innerHTML = "<b>HERMUS</b> · idle · waiting for a task";
       $("#roomTitle").textContent = "Nothing running";
+      document.body.dataset.state = state.lastError ? "failed" : "idle";
       $("#roomLine").textContent = state.lastError
         ? `The last run failed: ${state.lastError}`
         : "Ask for a change, point it at a path, and it plans, acts and verifies. You get the diff and the verdict.";
@@ -189,8 +199,17 @@
       ? String(last.data.text || last.data.status || last.data.state || last.type || "")
       : "";
     const label = detail.status === "running" || detail.status === "queued" ? "running" : detail.status === "failed" ? "failed" : "finished";
-    $("#hudLine").innerHTML = `<b>FAIRY</b> · ${esc(label)}${lastText ? " · " + esc(lastText).slice(0, 96) : ""}`;
+    $("#hudLine").innerHTML = `<b>HERMUS</b> · ${esc(label)}${lastText ? " · " + esc(lastText).slice(0, 96) : ""}`;
     if (detail.status === "failed") state.lastError = result && result.error ? String(result.error).slice(0, 120) : "the run failed";
+
+    // The orb is alive: it reflects whether anything is happening, and it beats
+    // once each time the run produces a new event.
+    document.body.dataset.state =
+      detail.status === "failed" ? "failed" : detail.status === "running" || detail.status === "queued" ? "working" : "idle";
+    const seen = (state.eventCount && state.eventCount[detail.run_id]) || 0;
+    if (events.length > seen) beat();
+    state.eventCount = state.eventCount || {};
+    state.eventCount[detail.run_id] = events.length;
   }
 
   function renderTranscript(events, result) {

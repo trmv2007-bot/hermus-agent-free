@@ -244,6 +244,11 @@ code, pre, .mono { font-family: var(--mono); font-size: 12px; }
   0%, 100% { opacity: .45; transform: scale(.86); }
   50% { opacity: 1; transform: scale(1); }
 }
+/* the orb breathes slowly when idle and quickens when there is work */
+@keyframes orb-breathe { 0%, 100% { opacity: .38; transform: scale(.84); } 50% { opacity: 1; transform: scale(1.04); } }
+@keyframes orb-work { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.12); } }
+@keyframes orb-ripple { 0% { transform: scale(.72); opacity: .5; } 70% { opacity: 0; } 100% { transform: scale(1.28); opacity: 0; } }
+@keyframes orb-beat { 0% { transform: scale(1); } 35% { transform: scale(1.07); } 100% { transform: scale(1); } }
 @keyframes core-orbit { to { transform: rotate(360deg); } }
 @keyframes baton-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -283,8 +288,19 @@ body[data-view="room"] .work-head { display: none; }
 .room .core-lg { width: 112px; height: 112px; color: var(--accent); flex: none; }
 .room .core-lg .ring-outer { opacity: .3; }
 .room .core-lg .ring-mid { opacity: .55; }
-.room .core-lg .pulse { transform-origin: 56px 56px; animation: core-pulse 3.4s ease-in-out infinite; }
-.room .core-lg .orbit { transform-origin: 56px 56px; animation: core-orbit 26s linear infinite; opacity: .5; }
+.room .core-lg .pulse { transform-origin: 56px 56px; animation: orb-breathe 3.8s ease-in-out infinite; }
+.room .core-lg .orbit { transform-origin: 56px 56px; animation: core-orbit 30s linear infinite; opacity: .5; }
+.room .core-lg .ripple { transform-origin: 56px 56px; opacity: 0; }
+body[data-state="working"] .room .core-lg .pulse { animation: orb-work 1.15s ease-in-out infinite; }
+body[data-state="working"] .room .core-lg .orbit { animation-duration: 6s; opacity: .8; }
+body[data-state="working"] .room .core-lg .ripple-1 { animation: orb-ripple 1.15s ease-out infinite; }
+body[data-state="working"] .room .core-lg .ripple-2 { animation: orb-ripple 1.15s ease-out .55s infinite; }
+body[data-state="failed"] .room .core-lg { color: var(--warn); }
+body[data-state="failed"] .room .core-lg .pulse { animation-duration: 5s; }
+body.beat .room .core-lg .pulse { animation: orb-beat .55s ease-out 1; }
+.hud .core .pulse { animation: orb-breathe 3.8s ease-in-out infinite; }
+body[data-state="working"] .hud .core .pulse { animation: orb-work 1.15s ease-in-out infinite; }
+body.beat .hud .core .pulse { animation: orb-beat .55s ease-out 1; }
 
 .room h2 { margin: 0; font-size: 16px; font-weight: 500; }
 .room p { margin: 0; font-size: 12px; color: var(--muted); max-width: 46ch; }
