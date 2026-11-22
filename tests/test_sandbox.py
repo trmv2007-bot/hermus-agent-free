@@ -32,7 +32,12 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only sand
 from core.config import config  # noqa: E402
 
 config.model = "mock/mock"
-config.sandbox_mode = "auto"
+# Respect a backend the environment asked for. This used to force "auto", which
+# on a CI runner that happens to ship a docker daemon picked the container
+# backend and failed every local-contract assertion with "docker: Error response
+# from daemon" — the tests were asserting the POSIX local contract all along, so
+# auto was never the thing under test.
+config.sandbox_mode = os.environ.get("HERMUS_SANDBOX", "auto") or "auto"
 config.sandbox_timeout = 20
 config.sandbox_memory_mb = 512
 
