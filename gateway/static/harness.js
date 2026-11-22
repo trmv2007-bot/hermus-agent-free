@@ -22,6 +22,7 @@
     detail: null,
     poll: null,
     lastRunId: null,
+    lastError: null,
   };
 
   // ------------------------------------------------------------------ helpers
@@ -31,6 +32,10 @@
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.message || body.detail || `HTTP ${res.status}`);
     return body;
+  }
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   }
 
   function ago(ts) {
@@ -90,6 +95,8 @@
       .forEach((run) => {
         const li = el("li", "run-item" + (run.run_id === state.selected ? " on" : ""));
         li.dataset.runId = run.run_id;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", run.run_id === state.selected ? "true" : "false");
         li.append(el("span", `dot ${statusClass(run.status)}`));
         const box = el("div");
         const label = (run.result && run.result.response ? String(run.result.response).slice(0, 60) : run.label) || run.run_id;
@@ -103,10 +110,39 @@
 
   // ---------------------------------------------------------------- run detail
 
+  /** The composer is one element, moved between the idle room and the run footer. */
+  function placeComposer() {
+    const composer = $("#composer");
+    if (!composer) return;
+    const idle = !state.selected;
+    const slot = idle ? $("#composerSlot") : $("#runComposerSlot");
+    if (slot && composer.parentElement !== slot) slot.append(composer);
+    $("#task").placeholder = idle ? "What should change? Ctrl+Enter to run." : "Ask a follow-up, or start another run";
+  }
+
+  function setView() {
+    const idle = !state.selected;
+    document.body.dataset.view = idle ? "room" : "run";
+    $("#room").hidden = !idle;
+    $("#runHead").hidden = idle;
+    $("#transcript").hidden = idle;
+    placeComposer();
+    if (idle) {
+      $("#hudLine").innerHTML = "<b>FAIRY</b> · idle · listening on the event bus";
+      $("#roomTitle").textContent = "Nothing running";
+      $("#roomLine").textContent = state.lastError
+        ? `The last run failed: ${state.lastError}`
+        : "Ask for a change, point it at a path, and it plans, acts and verifies. You get the diff and the verdict.";
+      $("#pane-diff").innerHTML = '<p class="empty">Nothing to review yet. Changes from a run land here.</p>';
+      $("#pane-verify").innerHTML = '<p class="empty">Nothing verified yet. A verdict from a run lands here.</p>';
+    }
+  }
+
   async function selectRun(runId) {
-    state.selected = runId;
+    state.selected = runId || null;
+    setView();
     renderRuns();
-    await loadDetail(runId);
+    if (runId) await loadDetail(runId);
   }
 
   async function loadDetail(runId) {
@@ -146,6 +182,15 @@
 
     renderTranscript(detail.events || [], result);
     renderVerification(result);
+
+    const events = detail.events || [];
+    const last = events.slice(-1)[0];
+    const lastText = last && last.data
+      ? String(last.data.text || last.data.status || last.data.state || last.type || "")
+      : "";
+    const label = detail.status === "running" || detail.status === "queued" ? "running" : detail.status === "failed" ? "failed" : "finished";
+    $("#hudLine").innerHTML = `<b>FAIRY</b> · ${esc(label)}${lastText ? " · " + esc(lastText).slice(0, 96) : ""}`;
+    if (detail.status === "failed") state.lastError = result && result.error ? String(result.error).slice(0, 120) : "the run failed";
   }
 
   function renderTranscript(events, result) {
@@ -403,6 +448,12 @@
   });
 
   $("#runFilter").addEventListener("input", renderRuns);
+  $("#roomChips").addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-chip]");
+    if (!chip) return;
+    $("#task").value = chip.dataset.chip;
+    $("#task").focus();
+  });
   $("#composer").addEventListener("submit", submit);
   $("#task").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) submit(event);
@@ -412,14 +463,16 @@
     await loadRuns();
     if (state.selected) await loadDetail(state.selected);
   });
-  $("#newRun").addEventListener("click", () => $("#task").focus());
+  $("#newRun").addEventListener("click", () => {
+    selectRun(null);
+    $("#task").focus();
+  });
 
   localStorage.setItem("hermus.mode", "harness");
   readiness();
   setInterval(readiness, 5000);
   loadModels();
-  loadRuns().then(() => {
-    if (state.runs.length) selectRun(state.runs[0].run_id);
-  });
+  setView();
+  loadRuns().then(() => setView());
   setInterval(loadRuns, 8000);
 })();
