@@ -106,7 +106,9 @@ class PresenceBridge:
                 "version": self._version,
                 "state": self._state,
                 "previous": self._history[-2]["state"] if len(self._history) > 1 else None,
-                "transition_ms": transition_duration_ms(self._history[-2]["state"] if len(self._history) > 1 else self._state, self._state),
+                "transition_ms": transition_duration_ms(
+                    self._history[-2]["state"] if len(self._history) > 1 else self._state, self._state
+                ),
                 "state_age_ms": int((now - self._state_since) * 1000),
                 "state_ttl_ms": self._state_ttl_ms,
                 "rationale": self._rationale,

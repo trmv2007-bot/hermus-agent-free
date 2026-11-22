@@ -172,9 +172,7 @@ def label_box(
 
 def overlaps(a: Mapping[str, float], b: Mapping[str, float]) -> bool:
     """True when two rects share any area (edge contact is not overlap)."""
-    return not (
-        a["x"] + a["w"] <= b["x"] or b["x"] + b["w"] <= a["x"] or a["y"] + a["h"] <= b["y"] or b["y"] + b["h"] <= a["y"]
-    )
+    return not (a["x"] + a["w"] <= b["x"] or b["x"] + b["w"] <= a["x"] or a["y"] + a["h"] <= b["y"] or b["y"] + b["h"] <= a["y"])
 
 
 # ---------------------------------------------------------------- displays
@@ -254,7 +252,9 @@ def physical_to_dip(rect: Mapping[str, float], displays: Iterable[Mapping[str, A
     return {key: float(value) for key, value in rect.items()}, False
 
 
-def normalize_space(rect: Mapping[str, float], space: str, displays: Iterable[Mapping[str, Any]]) -> tuple[dict[str, float], bool]:
+def normalize_space(
+    rect: Mapping[str, float], space: str, displays: Iterable[Mapping[str, Any]]
+) -> tuple[dict[str, float], bool]:
     """Apply :func:`physical_to_dip` only for physical payloads; DIP passes through."""
     if str(space).lower() in ("physical", "px", "device"):
         return physical_to_dip(rect, displays)

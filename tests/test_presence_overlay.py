@@ -19,7 +19,12 @@ from presence_app.states import resolve_transition, transition_duration_ms
 # coordinates start where the previous panel ended, so the second monitor's
 # physical origin (1920) is not its DIP origin (1920) × its scale.
 FULL_HD = [
-    {"index": 0, "bounds": {"x": 0, "y": 0, "w": 1920, "h": 1080}, "scale": 1.0, "physical": {"x": 0, "y": 0, "w": 1920, "h": 1080}},
+    {
+        "index": 0,
+        "bounds": {"x": 0, "y": 0, "w": 1920, "h": 1080},
+        "scale": 1.0,
+        "physical": {"x": 0, "y": 0, "w": 1920, "h": 1080},
+    },
     {
         "index": 1,
         "bounds": {"x": 1920, "y": 0, "w": 2560, "h": 1440},
@@ -323,7 +328,7 @@ def test_stream_emits_snapshots_then_releases_its_client_slot():
     first, second = asyncio.run(consume_two_frames())
     assert first.startswith("retry:")
     assert second.startswith("data: ")
-    snapshot = json.loads(second[len("data: "):])
+    snapshot = json.loads(second[len("data: ") :])
     assert snapshot["state"] in ("idle", "sleeping")
     assert "states" in snapshot and "point" in snapshot
     assert bridge.snapshot()["clients"] == 0
@@ -343,7 +348,7 @@ def test_stream_only_sends_when_the_version_moves():
         return initial, changed
 
     initial, changed = asyncio.run(frames())
-    assert json.loads(initial[len("data: "):])["version"] < json.loads(changed[len("data: "):])["version"]
+    assert json.loads(initial[len("data: ") :])["version"] < json.loads(changed[len("data: ") :])["version"]
 
 
 # ---------------------------------------------------------------------- seam

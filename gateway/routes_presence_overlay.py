@@ -170,7 +170,9 @@ async def presence_point(payload: dict[str, Any] | None = None):
     if label is not None and not isinstance(label, str):
         return _bad("label must be a string")
     try:
-        return get_presence_bridge().point(payload, label=label or "", ttl_ms=int(ttl or 0), space=space, source=str(payload.get("source") or "api"))
+        return get_presence_bridge().point(
+            payload, label=label or "", ttl_ms=int(ttl or 0), space=space, source=str(payload.get("source") or "api")
+        )
     except PresencePayloadError as exc:
         return _bad(str(exc))
 
