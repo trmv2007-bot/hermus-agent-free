@@ -895,7 +895,15 @@ def _ask(question: str, *, default: bool = True, interactive: bool) -> bool:
 def _install_ollama() -> dict[str, Any]:
     """Install Ollama with the platform's own package channel. Free, no card."""
     if sys.platform == "win32":
-        cmd = ["winget", "install", "--id", "Ollama.Ollama", "--exact", "--accept-source-agreements", "--accept-package-agreements"]
+        cmd = [
+            "winget",
+            "install",
+            "--id",
+            "Ollama.Ollama",
+            "--exact",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+        ]
     elif sys.platform == "darwin":
         cmd = ["brew", "install", "ollama"]
     else:

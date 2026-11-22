@@ -48,7 +48,9 @@ def test_root_redirects_to_the_first_screen():
     assert c.get("/control").status_code == 200
 
     done = onboarding.load()
-    onboarding.record_brain(done, {"kind": "local", "provider": "ollama", "name": "test:1b", "model": "ollama/test:1b", "source": "test"})
+    onboarding.record_brain(
+        done, {"kind": "local", "provider": "ollama", "name": "test:1b", "model": "ollama/test:1b", "source": "test"}
+    )
     done["permissions"] = "ask"
     done["name"] = "Hermus"
     done["check"] = {"ok": True, "model": "test:1b", "reason": "", "at": None, "ms": 1}

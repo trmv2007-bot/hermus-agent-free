@@ -355,9 +355,7 @@ def warm(model: str, *, timeout: float = 120.0) -> dict[str, Any]:
         return {"warmed": False, "reason": f"warm-up only applies to Ollama (got {provider})"}
     started = time.time()
     body = json.dumps({"model": name, "prompt": "", "keep_alive": "30m"}).encode()
-    req = urllib.request.Request(
-        f"{OLLAMA_BASE}/api/generate", data=body, headers={"Content-Type": "application/json"}
-    )
+    req = urllib.request.Request(f"{OLLAMA_BASE}/api/generate", data=body, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed localhost URL
             resp.read()

@@ -121,7 +121,9 @@ def record_brain(state: dict[str, Any], brain: dict[str, Any]) -> dict[str, Any]
     return state
 
 
-def record_check(state: dict[str, Any], *, ok: bool, model: str | None, reason: str = "", ms: int | None = None) -> dict[str, Any]:
+def record_check(
+    state: dict[str, Any], *, ok: bool, model: str | None, reason: str = "", ms: int | None = None
+) -> dict[str, Any]:
     state["check"] = {
         "ok": bool(ok),
         "model": model,

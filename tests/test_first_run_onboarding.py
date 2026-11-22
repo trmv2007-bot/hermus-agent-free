@@ -245,8 +245,16 @@ def test_a_real_streamed_answer_is_what_completes_the_run():
             yield "I can look, "
             yield "answer and remember."
 
-    served = {"kind": "local", "provider": "ollama", "name": "llama3.2:1b", "model": "ollama/llama3.2:1b",
-              "source": "Ollama on your machine (1 model(s) pulled)", "reachable": True, "present": True, "reason": ""}
+    served = {
+        "kind": "local",
+        "provider": "ollama",
+        "name": "llama3.2:1b",
+        "model": "ollama/llama3.2:1b",
+        "source": "Ollama on your machine (1 model(s) pulled)",
+        "reachable": True,
+        "present": True,
+        "reason": "",
+    }
     original_status = brain.local_status
     original_resolve = brain.resolve_brain
     original_gateway = gateway_module._gateway
@@ -399,7 +407,7 @@ def test_no_static_string_claims_a_check_the_code_does_not_run():
     assert "NOT READY" in hud
     # no scripted tick list survives in the boot ceremony
     assert "safety interlocks" not in hud
-    assert "model fleet\", \"LINKED" not in hud
+    assert 'model fleet", "LINKED' not in hud
 
 
 def test_readme_build_table_cites_a_test_that_exists():
