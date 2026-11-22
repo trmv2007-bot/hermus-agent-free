@@ -460,9 +460,7 @@ class WindowsDesktopProvider(DesktopProvider):
         try:
             dpi_x = ctypes.c_uint(96)
             dpi_y = ctypes.c_uint(96)
-            result = self._shcore.GetDpiForMonitor(
-                ctypes.c_void_p(monitor), 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)
-            )
+            result = self._shcore.GetDpiForMonitor(ctypes.c_void_p(monitor), 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y))
             return int(dpi_x.value) if result == 0 else None
         except Exception:
             return None
@@ -589,9 +587,7 @@ def _apply_privacy(snapshot: dict[str, Any], policy: PrivacyPolicy) -> None:
         if policy.is_excluded(process, title):
             snapshot["focused"] = Reading(True, {"excluded": True, "fullscreen": False}).to_dict()
         elif policy.is_private(process, title):
-            snapshot["focused"] = Reading(
-                True, {**value, "title": "[private]", "private": True}
-            ).to_dict()
+            snapshot["focused"] = Reading(True, {**value, "title": "[private]", "private": True}).to_dict()
         else:
             snapshot["focused"] = Reading(True, {**value, "title": redact_text(title, TITLE_LIMIT)}).to_dict()
 
@@ -702,11 +698,41 @@ class DesktopConnector(Connector):
         windows = snapshot["windows"]
         displays = snapshot["displays"]
         facts.append({"subject": "desktop", "predicate": "focused_process", "value": process})
-        facts.append({"subject": "desktop", "predicate": "window_count", "value": len(windows.get("value") or []) if windows.get("ok") else None})
-        facts.append({"subject": "desktop", "predicate": "fullscreen", "value": snapshot["fullscreen"].get("value") if snapshot["fullscreen"].get("ok") else None})
-        facts.append({"subject": "desktop", "predicate": "power", "value": power.get("value") if power.get("ok") else {"unavailable": power.get("reason")}})
-        facts.append({"subject": "desktop", "predicate": "idle_seconds", "value": (idle.get("value") or {}).get("seconds") if idle.get("ok") else None})
-        facts.append({"subject": "desktop", "predicate": "display_count", "value": len(displays.get("value") or []) if displays.get("ok") else None})
+        facts.append(
+            {
+                "subject": "desktop",
+                "predicate": "window_count",
+                "value": len(windows.get("value") or []) if windows.get("ok") else None,
+            }
+        )
+        facts.append(
+            {
+                "subject": "desktop",
+                "predicate": "fullscreen",
+                "value": snapshot["fullscreen"].get("value") if snapshot["fullscreen"].get("ok") else None,
+            }
+        )
+        facts.append(
+            {
+                "subject": "desktop",
+                "predicate": "power",
+                "value": power.get("value") if power.get("ok") else {"unavailable": power.get("reason")},
+            }
+        )
+        facts.append(
+            {
+                "subject": "desktop",
+                "predicate": "idle_seconds",
+                "value": (idle.get("value") or {}).get("seconds") if idle.get("ok") else None,
+            }
+        )
+        facts.append(
+            {
+                "subject": "desktop",
+                "predicate": "display_count",
+                "value": len(displays.get("value") or []) if displays.get("ok") else None,
+            }
+        )
         for fact in facts:
             fact["permission_scope"] = "desktop.read"
         return facts

@@ -148,7 +148,9 @@ class AwarenessService:
         """The snapshot plus what the person is allowed to know about the layer."""
         settings = self.settings()
         snapshot = self.snapshot(fresh=fresh)
-        readable = [key for key in ("focused", "windows", "power", "idle", "displays", "clipboard") if snapshot.get(key, {}).get("ok")]
+        readable = [
+            key for key in ("focused", "windows", "power", "idle", "displays", "clipboard") if snapshot.get(key, {}).get("ok")
+        ]
         unavailable = {
             key: snapshot[key]["reason"]
             for key in ("focused", "windows", "power", "idle", "displays", "clipboard")

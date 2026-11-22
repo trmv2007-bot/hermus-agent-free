@@ -1192,7 +1192,9 @@ def _configure_awareness(subparsers) -> None:
     parser.add_argument(
         "--quiet-hours", default=None, metavar="HH:MM-HH:MM", help="Window where nothing proactive is shown; 'off' disables"
     )
-    parser.add_argument("--measure", type=float, default=0.0, metavar="SECONDS", help="Sample the poll loop and report its CPU cost")
+    parser.add_argument(
+        "--measure", type=float, default=0.0, metavar="SECONDS", help="Sample the poll loop and report its CPU cost"
+    )
     parser.add_argument("--forget", action="store_true", help="Delete the 24h rolling summary")
 
 
@@ -1220,7 +1222,11 @@ def _run_awareness(args, ctx: CLIContext) -> None:
 
     if args.forget:
         cleared = service.journal.clear()
-        print(f"Rolling summary deleted: {cleared['path']} ({cleared['bytes_removed']} bytes)" if cleared["cleared"] else str(cleared))
+        print(
+            f"Rolling summary deleted: {cleared['path']} ({cleared['bytes_removed']} bytes)"
+            if cleared["cleared"]
+            else str(cleared)
+        )
         return
 
     if args.measure > 0:

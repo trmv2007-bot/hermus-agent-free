@@ -216,7 +216,11 @@ def test_connector_facts_carry_no_window_titles():
 def test_context_block_is_capped_and_costs_nothing_when_unchanged():
     provider = FakeDesktop()
     provider.windows_value = [
-        {"title": f"document {index} — a very long window title meant to push the block past its cap", "process": f"app{index}.exe", "pid": index}
+        {
+            "title": f"document {index} — a very long window title meant to push the block past its cap",
+            "process": f"app{index}.exe",
+            "pid": index,
+        }
         for index in range(40)
     ]
     snapshot = read_desktop(provider)
