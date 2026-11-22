@@ -2,7 +2,7 @@
   const $ = (s) => document.querySelector(s);
   const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('hermus_gateway_token') || '';
   if (token) localStorage.setItem('hermus_gateway_token', token);
-  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, workshop:false, workshopProject:null, workshopFile:null, workshopDirty:false, sessionId:localStorage.getItem('hermus_session_id')||'', mediaRecorder:null, voiceChunks:[], voiceActive:false, _kernelEvents:new Set() };
+  const state = { online:false, busy:false, mission:null, kernel:null, runStream:null, missionLive:false, missionData:null, workshop:false, workshopProject:null, workshopFile:null, workshopDirty:false, sessionId:localStorage.getItem('hermus_session_id')||'', mediaRecorder:null, voiceChunks:[], voiceActive:false, _kernelEvents:new Set(), streamWatchdog:null, firstRunEventAt:0 };
 
   async function ensureSession(){
     if(state.sessionId) return state.sessionId;
@@ -289,6 +289,10 @@
   }
 
   function handleRunEvent(type, event){
+    if(!state.firstRunEventAt){
+      state.firstRunEventAt=Date.now();
+      if(state.streamWatchdog){ clearTimeout(state.streamWatchdog); state.streamWatchdog=null; }
+    }
     let payload={};
     try{ payload=JSON.parse(event.data||'{}'); }catch{}
     const data=(payload && payload.data) || {};
@@ -362,10 +366,14 @@
     }
   }
 
+  const STREAM_FIRST_EVENT_MS = 20000;
+
   function connectRun(runId){
     if(!runId) return;
     if(state.runStream){ try{state.runStream.close();}catch{} }
+    if(state.streamWatchdog){ clearTimeout(state.streamWatchdog); state.streamWatchdog=null; }
     state.missionLive=true;
+    state.firstRunEventAt=0;
     state.missionData={status:'WORKING',detail:'connecting to execution',progress:'Opening live stream',step:0,total:0,terminal:false};
     renderMission(state.missionData);
     const query=token ? `?token=${encodeURIComponent(token)}` : '';
@@ -377,6 +385,19 @@
     source.onerror=()=>{
       if(state.missionLive) addEvent('Mission stream reconnecting','error');
     };
+    // A stream that never delivers a single event must not leave the core
+    // saying WORKING forever with nothing in the conversation. Say what
+    // happened, say where the answer is, and stop pretending to be live.
+    state.streamWatchdog=setTimeout(()=>{
+      if(state.runStream!==source || state.firstRunEventAt || !state.busy) return;
+      try{ source.close(); }catch{}
+      state.runStream=null; state.missionLive=false; state.busy=false; state.commandInFlight='';
+      renderMission({status:'ATTENTION',detail:'live stream did not connect',
+        progress:'the run is still recorded server-side',step:0,total:0,terminal:true});
+      addEvent('run stream delivered no events in '+Math.round(STREAM_FIRST_EVENT_MS/1000)+'s','error');
+      addMessage('hermus','The live stream for this run delivered no events, so the answer is not in this conversation. The run itself is recorded: open Jobs and click the newest job row to read its result.',{error:true});
+      setState('ATTENTION','live stream did not connect');
+    }, STREAM_FIRST_EVENT_MS);
   }
 
   async function sendCommand(value=null) {
@@ -507,7 +528,7 @@
   // Command palette: PALETTE_ITEMS, Ctrl K focus, Ctrl P palette, e.key.toLowerCase()==='p'.
   window.HermusNexus = { api, sendCommand, contextualAction, actions, state,
     // Exposed for the Node test harness; not part of the page contract.
-    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent, addEvent, setState, badgeTitle, healthFacts, renderCapabilities } };
+    __test: { addMessage, transcriptLoad, transcriptRestore, renderPalette, paletteMove, paletteRunActive, messageEl, attentionKey, attentionDismissed, dismissAttention, handleRunEvent, connectRun, addEvent, setState, badgeTitle, healthFacts, renderCapabilities } };
 
   const MODEL_ROLES = new Set(['default','reasoning','vision','coding','background','doctor','voice']);
   const modelState = { catalog:null, selected:null, health:null, inFlight:false };

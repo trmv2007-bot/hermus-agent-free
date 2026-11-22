@@ -1,227 +1,107 @@
-# Architecture & Ownership Inventory
+# Architecture inventory — measured, not claimed
 
-Reproducible baseline for the clean-slate single-canonical-owner contract.
-Generated from the actual tree (`trmv2007-bot/hermus-agent-free`), not an old
-report. **One canonical production owner per responsibility; every other
-implementation is either (a) a private backend owned by the canonical facade,
-(b) an active compatibility facade that forwards to the canonical owner, or
-(c) dead — and removed.**
+Replaces the previous version of this file, which listed canonical owners and
+then reported progress ("58/58 verified", "1354 passed") that no longer matched
+what a person can run. This version answers three questions per subsystem:
+**does it exist, does it run, and how do we know?** Every row was checked on
+2026-11-23 against `main` @ `3046846` with the gateway running on port 8123
+(isolated `HERMUS_HOME`, no `.env`, no model provider).
 
-Gates enforcing these claims live in `tests/test_architecture_gates.py`.
+Sizes are `git ls-files` line counts, not estimates.
 
----
+## Shape of the repository
 
-## Canonical ownership table (one owner per responsibility)
-
-| Responsibility | Canonical owner | Distinguished private backends / facades it owns |
+| Piece | Size | Notes |
 |---|---|---|
-| Autonomy / mission | `core/mission.MissionEngine` | — (single autonomy engine) |
-| Durable event authority | `core/events.EventBus` (`get_bus`/`publish`) | — |
-| Run live-stream / steer / cancel | `core/run_events.RunBus` (singleton `run_bus`) | mirrors onto canonical `EventBus` |
-| Dict event projection (gateway) | `core.dashboard_events.dashboard_event_bus` | mirrors onto canonical `EventBus` |
-| Computer event projection | `core.computer.events.computer_event_bus` | mirrors onto canonical `EventBus` (added in Phase 1) + cross-process JSONL journal |
-| Typed long-term memory | `core.memory2` | — |
-| Memory public writer | `core.memory.MemoryFacade` (`get_memory`/`memory`) | owns `core.memory2` (typed) + `core.compat.legacy_memory.Memory` (session/curated/user-model/token) |
-| World state public path | `core.state.WorldStateFacade` (`get_world_state`) | owns `core.computer.world_state.WorldState` (backend) |
-| Model selection / health boundary | `core.models.ModelGateway` (`get_model_gateway`) | delegates to `provider_resolver` / `model_capabilities` / `router2` |
-| Model completion facade | `core.llm.FreeLLM` | uses `providers` / `multi_key` / `openai_compat` / `custom_api` / `model_fleet` |
-| Job execution | `gateway.queue.JobQueue` / `Job` | — (AgentManager is a registry + delegation facade, owns no workers) |
-| Agent registry + delegation facade | `core.agent_manager.AgentManager` | no job/worker lifecycle (migrated to canonical queue) |
-| Sub-agent orchestration | `core.delegation` (JSON-RPC 2.0) | — |
-| Sub-agent compat facade | `subagents.subagent` | forwards to `core.delegation` (active callers) |
-| Computer agent | `core.computer.ComputerAgent` | — |
-| Computer state machine / repair | `core.computer.state_machine` / `core.computer.repair`, `core.computer.verifier` | — |
-| Marker verifier (post-hoc) | `core.verifiers.MarkerVerifier` | — |
-| Domain verification registry | `core.verifier_registry.VerifierRegistry` | — |
-| Control-room UI | `gateway/control.html` + `/control` | single production UI; root `/` → `/control` |
-| Speech | `core.speech` | — |
-| Doctor/diagnostics | `core.doctor` | — |
-| Situational awareness model | `core.world_model.WorldModel` (facts/events for connectors) | distinct from persisted `WorldStateFacade` |
-| Android boundary | `core.android.tool.AndroidTool` (`get_android_tool`) | reaches via `tool_registry` → `ToolGateway` → `android_*` tools; consent + allowlist + audit |
+| Python | 140,002 lines / 544 files | `core/` alone is 81,599 lines in 256 modules |
+| `gateway/` | 12,674 lines Python + 7,537 lines JS/CSS static | 41 routers, **424 route paths / 444 operations** (`/openapi.json`) |
+| Control Room UI | `control.html` 888 + `nexus.css` 1,859 + `nexus.js` 1,209 + `control-room.js` ~1,500 + 5 more scripts | 11 tabs, 58 console panels, 203 tools behind `/tools` |
+| Tests | 30,489 lines / 166 files, **1,627 collected** | UI tests use a Node + DOM-stub harness |
+| Docs | 75 markdown files, 10,005 lines | `README.md` claims 16 of 18 capabilities "Complete" |
 
----
+## Runtime truth (measured on this machine)
 
-## Every implementation performing each responsibility
+Started with `python hermus.py gateway start --port 8123`,
+`HERMUS_MODEL=mock/mock`, `HERMUS_AUTO_CHANNELS=0`. Cold start to
+`/control` returning 200: ~12 s.
 
-### Events
-- `core/events/bus.py` — canonical durable `EventBus` (append-only JSONL + replay + subscribe).
-- `core/run_events.py` — `RunBus` **run lifecycle + live SSE/WS streaming + cancel + steer + issue recording**. Distinct capability (per-run orchestration) retained; mirror onto canonical bus.
-- `core/dashboard_events.py` — dict event bus for gateway realtime; bridges to canonical bus.
-- `core/computer/events.py` — computer event bus + JSONL journal; bridges to canonical bus (Phase 1).
-- **REMOVED (Phase 1): `core/events/legacy.py`** — the `publish_legacy`/`LegacyEventBridge` dead compatibility layer. Zero production consumers; only one test referenced it (migrated to canonical `publish`). Not a capability owner.
-
-### Memory
-- `core/memory/__init__.py`, `core/memory/store.py` — canonical `MemoryFacade` (single public writer).
-- `core/memory/migration.py` — legacy-data migration reader (`MigrationReader`, `migrate_legacy`).
-- `core/memory2.py` — typed memory (semantic/working/procedural/hybrid) backend. **Internal to `core.memory`** — app-level `memory2` imports are forbidden by gate (`test_no_app_level_memory2_direct_access` now matches absolute *and* resolved-relative imports by final module segment; all app-level callers route through the facade: `tool_registry`, `gateway/handlers`, `gateway/realtime`, `gateway/routes_subsystems`).
-- `core/compat/legacy_memory.py` — session history / curated memory / user model / token usage **backend**. Retained as a private backend owned by the facade — it owns a real SQLite schema (sessions FTS5, curated_memory, skill_usage, trajectories, token_usage) and a user-model JSON file. This is a **distinct capability** from memory2, not a duplicate, so it is intentionally retained behind the single public facade. It is no longer a second public `Memory` singleton.
-
-### Model
-- `core/models/gateway.py` — `ModelGateway` (selection + health + outcome recording). Stateless facade; delegates.
-- `core/llm.py` — `FreeLLM` completion facade.
-- `core/providers.py`, `core/multi_key.py`, `core/openai_compat.py`, `core/custom_api.py`, `core/provider_resolver.py`, `core/model_fleet.py`, `core/router2.py`, `core/model_capabilities.py`, `core/free_keys.py`, `core/nollama.py` — model/provider implementation layers under the facade.
-
-### World state
-- `core/state/world.py` — public boundary: `create_world_state` /
-  `world_state_from_dict` / `load_world_state` (the only construction paths),
-  `WorldStateFacade` + `get_world_state` (wrapper + process-wide accessor), and
-  `migrate_world_state` / `detect_legacy` (non-destructive load + integrity check).
-- `core/computer/world_state.py` — `WorldState` backend owned by the facade.
-
-### Android
-- `core/android/tool.py` — `AndroidTool` facade (single Android boundary); `get_android_tool()`.
-- `core/android/transport.py` — `AndroidTransport` ABC, `AdbAndroidTransport` (real device), `BridgeAndroidTransport` (companion), `detect_capability`, `AndroidUnavailable`.
-- `core/android/permissions.py` — `AndroidPermissionManager` (consent denied-by-default + allowed-ops allowlist), `PermissionDenied`.
-- `core/android/secure.py` — HMAC-SHA256 pairing secret, sign/verify.
-- `core/android/audit.py` — append-only audit record + EventBus mirror.
-- `core/android/observe.py` / `verify.py` — semantic observation builder + before/action/after verifier.
-- `core/android/simulate.py` — deterministic simulated device (real `AndroidTransport` interface) for off-line E2E.
-- `core/android/agent.py` — deterministic goal-driven controller (observe → act → verify loop via real `ToolGateway`).
-- `android_companion/` — on-device native companion (signed bridge, accessibility `DeviceController`, MediaProjection `ScreenCapture`, consent `PairingActivity`). **NOT built/run here** (no SDK/device) — reference implementation.
-
-### Jobs / agents
-- `gateway/queue.py` — `JobQueue`/`Job` (single job execution owner).
-- `core/agent_manager.py` — `AgentManager` registry + delegation facade; owns **no** job/worker lifecycle.
-
----
-
-## Callers / importers
-
-Gathered by static import scan (see `tests/test_architecture_gates.py` and the
-`_prod_files`/`_imports` helpers for the reproducible mechanism).
-
-- **Canonical EventBus** (`get_bus/publish`): `dashboard_events`, `computer/events`
-  , `tools/gateway`, `gateway/routes_canonical`.
-- **RunBus / run_events**: `core/agent`, `core/mission`, `core/mission_files`,
-  `core/runtime`, `core/doctor`, `gateway/gateway`, `gateway/queue`,
-  `gateway/realtime`, `gateway/routes_jarvis`.
-- **dashboard_events**: `core/counsel/council`, `gateway/gateway`,
-  `gateway/routes_engine`, `gateway/routes_speech`.
-- **Memory facade** (`core.memory.memory/get_memory`): `core/tool_registry`,
-  `tui/tui`.  **memory2** (typed): `core/agent`, `core/config`,
-  `core/delegation`, `core/harness/memory_graph`, `core/integrations`,
-  `gateway/handlers`, `gateway/realtime`, `gateway/routes_subsystems`.
-- **ModelGateway**: `gateway/routes_canonical`. **FreeLLM**: `core/agent`,
-  `core/computer/*`, `core/counsel/*`, `core/reasoning/*`, `core/multi_ai`,
-  `core/self_improvement`, `core/skill_forge`, `core/skill_manager`,
-  `core/model_fleet`, `core/multi_key`, `core/doctor`, `tui/tui`, `core/compat/legacy_memory`.
-- **WorldStateFacade**: `core/state`. **WorldModel**: `core/connectors/base`.
-- **VerifierRegistry**: `core/mission`, `core/swe_mode`, `gateway/realtime`,
-  `tools/mission_tools`. **MarkerVerifier**: `core/agent`. **computer.verifier**:
-  `core/computer/computer_agent`, `core/computer/__init__`.
-- **JobQueue**: `core/agent_manager` (via `_queue()`).
-- **subagents.subagent** (facade → core.delegation): `core/tool_registry`,
-  `core/trajectory`, `hermus.py`, `tui/tui`.
-
----
-
-## Compatibility wrappers / bridges (active)
-
-| Module | Kind | Forwards to | Why retained |
+| Surface | Endpoint | Measured | Verdict |
 |---|---|---|---|
-| `subagents/subagent.py` | API-stable facade | `core.delegation` | active callers (`tool_registry`, `trajectory`, `hermus.py`, `tui`) |
-| `core/dashboard_events.py` | dict projection | canonical `EventBus` | gateway WS / speech consume dict shape |
-| `core/computer/events.py` | dict projection + journal | canonical `EventBus` | computer feed / cross-process tail |
-| `core/run_events.py` | run orchestration | canonical `EventBus` (mirror) | per-run live stream / steer / cancel |
+| Gateway boots | `/readyz` | 200, 3–5 ms warm | real |
+| Control Room | `/control` | 200, zero console errors, zero page errors, all 11 panels render | real |
+| System health | `/api/v1/system/health` | 200, 6 ms warm / 640–1,118 ms cold; **honest** | real; reports `computer.mouse unavailable` with the install command when `pyautogui` is missing |
+| Capabilities | `/api/v1/system/capabilities` | 200; 29 of 41 ready on a dev install | real |
+| Doctor | `/doctor/status` | 200 **14.4 s** | real but far too slow for a polled panel |
+| Local engine | `/engine/status` | 200 **8.5 s**, `needs_install` | real, honest, slow |
+| Console manifest | `/api/v1/console/manifest` | 58 panels, every endpoint present in the route table | manifest real; **0 panels probed** in a fresh session |
+| Jobs / runs | `POST /jobs`, `/stream/run/{id}` | job succeeds (13.8 s cold, 131 ms warm); SSE replay works for live runs | real |
+| Chat turn | Control Room hero input | job succeeds server-side; **the browser never receives the stream** (see PRODUCT_V2 §2.3) | broken end to end |
+| Presence | `/presence`, `/presence/kernel` | 200, 26 ms; identity/goals/moments present | real |
+| Personal space | `/personal-space` | 200 | real |
+| Memory | `/memory/stats`, `/memory2/*` | 200; FTS5 on, 0 memories | real, empty |
+| Red lines / safety | `/red-lines/policy`, `/safety/*` | 11 red lines, `/reliability/status` healthy | real |
+| Computer control | `/computer/status` | `backends.mouse: pyautogui` once installed; dry-run otherwise | real, host-dependent |
+| Screen capture | `/screen/status` | `running:false, fps:10, buffer 128 MB` | real, opt-in |
+| Voice | `/voice/status` | `enabled:false` (needs `HERMUS_VOICE_ENABLED`), `ack_mode: canned` | partial: TTS unavailable without `pyttsx3` |
+| Models | `/models/catalog`, `/models/health` | catalog of providers; `models:{}` with no provider | real; nothing reachable by default |
+| MCP / tools | `/tools`, `/mcp/servers` | 203 tools registered | real |
+| Android | `/android/*` | `AndroidUnavailable` | contract only |
+| Avatar | `/speech/avatar/status` | unavailable (needs a HeyGem service) | not usable |
 
-No **persistent** event store competes with the canonical EventBus: the dict
-buses are in-memory projections that mirror onto it, and the computer JSONL
-journal is a cross-process tail feed, not a competing authority.
+## Canonical ownership (from the previous inventory, checked)
 
----
+The one-owner-per-responsibility claims still hold in the import graph; the
+gate `tests/test_architecture_gates.py` enforces several of them. Abbreviated to
+what a reviewer needs:
 
-## Safe to delete (dead / no production consumer)
+| Responsibility | Owner | Checked |
+|---|---|---|
+| Autonomy / missions | `core/mission.MissionEngine` | yes, single engine |
+| Durable events | `core/events.EventBus` | yes; other buses are projections |
+| Live run stream | `core/run_events.RunBus` | yes; **replay after a gateway restart is broken** (PRODUCT_V2 G7) |
+| Memory | `core/memory` facade over `core/memory2` | yes |
+| Model selection | `core/models.ModelGateway` | yes |
+| Tool boundary | `core/tool_registry` → `ToolGateway` | yes; agent does not bypass it |
+| Jobs | `gateway/queue.JobQueue` | yes |
+| Computer action | `core/computer/controller.ComputerActionController` | yes, single gated path |
+| Safety | `core/permissions`, `core/emergency_stop`, `policies/` | yes |
+| Control Room | `gateway/control.html` + `/control` | yes, single UI |
 
-- `core/events/legacy.py` — **DELETED (Phase 1)**. Only a single test referenced it.
+## Dead / unreachable in production
 
-## Unique behavior that MUST be ported before any further deletion
+| Module | Lines | Evidence |
+|---|---|---|
+| `core/voice/executive_bridge.py` | 66 | constructed only in `tests/test_voice_executive_bridge.py` |
+| `core/computer/execution_loop.py` | — | imported only by its test |
+| `core/plugins/example_plugin.py` | — | referenced only by a test fixture |
+| `core/avatar.py` | 416 | needs `heygem_tts_url` / `heygem_face2face_url`; absent → permanent `unavailable` |
+| `core/free_keys.py` | — | used by `/keys/auto-provision-free`; works, but nothing calls it on the install path |
+| `android_companion/` | native | never built here; transport degrades explicitly |
+| `core/distributed*.py` + `/distributed/*` | — | single-process; no peer transport exercised |
 
-- `core/run_events.RunBus` — run lifecycle, cancel, steer-inbox, SSE/WS replay.
-  If it is ever removed its capability must be reproduced (it is a genuine owner).
-- `core/compat/legacy_memory.Memory` — session/curated/user-model/token schema.
-  Retained as a private backend; porting it requires reproducing a real SQLite
-  FTS5 schema + user-model file (not a duplicate).
+Low-reference scan (a module referenced by ≤ 1 file across the tree) returned
+exactly these seven plus `core/local_first.py` and `core/web_status.py`, which
+*are* wired (`core/diagnostics.py` and the local-first path) — so the dead list
+above is the accurate subset.
 
-## Files NOT deleted that are genuine capability owners (no duplicate)
+## What the docs claim vs. what runs
 
-`core/verifiers.py`, `core/verifier_registry.py`, `core/computer/verifier.py`
-(three distinct verification concerns), `core/delegation.py`,
-`core/computer/delegation.py` (dependency-graph desktop delegation - distinct),
-`core/world_model.py` (situational awareness vs persisted world state),
-`tests/test_computer_agent_v1.py` (recording/verification) and
-`tests/test_computer_agent_v2.py` (agent/state-machine/repair) — distinct tests,
-not duplicate implementations.
+- `README.md` marks 16 capabilities "✅ Complete". Verified true for: safety,
+  memory, jobs, tool gateway, control room, scheduling. Not true as written for:
+  distributed, multimodal, avatar, fresh-machine installation (installers never
+  install a model).
+- `docs/PHASE_9..18_*.md` describe intent. They are history, not status.
+- `docs/ARCHITECTURE_INVENTORY.md` (this file) is the status file.
 
----
+## Re-running this inventory
 
-## Verified progress (this consolidation pass)
+```
+python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
+HERMUS_HOME=<scratch> HERMUS_DATA_DIR=<scratch> HERMUS_GATEWAY_PORT=8123 \
+  HERMUS_MODEL=mock/mock .venv/Scripts/python hermus.py gateway start --port 8123
+curl -s localhost:8123/api/v1/system/health
+python ../drive/audit.py <tag> 1440   # Playwright, writes renders + json
+```
 
-### Capability manifest + manifest-driven Systems tab
-- `core/console.py` is the single declaration table for the control room's
-  Systems tab: 58 panels / 54 actions / 7 groups, each panel naming its owner
-  probe, HTTP endpoint, actions and confirmation level. All 58 probes return
-  live data (unavailable owners report an explicit `unavailable` + error, never
-  a fabricated ready state).
-- `gateway/routes_console.py` serves it at `/api/v1/console/{manifest,panels,
-  projection/{panel_id},action/{panel_id}/{action}}`; the manifest annotates
-  every declared endpoint against the app's live route table (265 routes, 58/58
-  verified) and panels are probed through a bounded thread fan-out.
-- `gateway/static/console.js` renders whatever the manifest contains, so a new
-  subsystem needs one manifest row and no new UI code; `/control` remains the
-  only production UI. `tests/test_console_manifest.py` (78 tests) pins probes,
-  endpoints and actions to the live route table.
-
-### CLI — 46 command modules → 10 files
-- `hermus_cli/` is now group modules (`g_runtime`, `g_agents`, `g_memory`,
-  `g_models`, `g_safety`, `g_workspace`) plus `_spec.py` (the `Command` spec and
-  the `CommandModule` adapter that preserves the per-command `register()` /
-  `run()` interface), `_common.py` and `repl.py`: 3,212 lines, the same 43
-  commands with byte-identical help text. `tests/test_cli_dispatch.py` and
-  `tests/test_perf_budgets.py` pass unchanged (110 tests).
-
-### Skills — 21 identical copies → one runner + 21 declarations
-- `skills/_free_clone.py` holds the free-clone procedure once (search + local
-  free LLM + honest fallback); every `skills/NN_*/skill.py` is a 26-line
-  declaration of its identity. 1,365 → 927 lines.
-- Each skill now declares `CAPABILITIES = ["read", "network"]` explicitly
-  instead of the loader inferring them from the URL text, so capability
-  reporting is exact.
-
-Suite after this pass: **1354 passed / 0 failed / 2 skipped** (86s); the two
-baseline failures were fixed (missing `pytest-asyncio`; `powers registry`
-printed nothing when empty).
-
-### Tool boundary — agent now routes through the canonical ToolGateway
-- `core/agent._execute_tool` now delegates every tool invocation to
-  `get_tool_gateway().execute()` (descriptor resolution, policy gating, typed
-  `ToolResult`, timeout handling, canonical event emission + trace correlation),
-  still backed by the same `core.tool_registry`. The runtime no longer calls
-  `tool_registry.execute()` directly.
-
-### Architecture gates (21 total in `tests/test_architecture_gates.py`)
-- `test_one_tool_gateway_agent_runtime_uses_it` / `..._control_room_uses_it` /
-  `..._no_duplicate_invoke_path` — one tool boundary, no agent bypass.
-- `test_autonomy_never_silently_falls_back_to_chat` /
-  `test_autonomy_crash_records_failed_not_completed` — autonomy reports explicit
-  BLOCKED/FAILED, never a silent downgrade or fabricated completion.
-- `test_runtime_uses_canonical_model_gateway` — capability surface uses ModelGateway.
-- `test_no_committed_secrets_in_production` — security gate.
-- `test_health_endpoint_probes_not_fabricated` / `test_doctor_reports_explicit_states_not_fake_ok`
-  — honesty gate.
-
-### Capability-flow integration tests (`tests/test_capability_flows.py`, 15 tests)
-Realistic offline flows through the canonical owners, mapped to spec Tasks 1-8:
-- T1 ModelGateway select + typed outcome recording (never fake success)
-- T2 ToolGateway execute + canonical event emission + typed failure; MissionEngine
-  drives a node through the gateway
-- T3 failure recovery: JobQueue retries a transient failure; exhausted retries
-  surface FAILED/BLOCKED (never 'completed')
-- T4 canonical JobQueue runs a job to a result; AgentManager surfaces queue='canonical'
-- T5 long-running backend: mission persists + EventBus durable log replays after a
-  new bus (reconnect)
-- T6 computer events bridge onto the canonical EventBus; verifier records
-  before/after evidence
-- T7 MemoryFacade round-trip: typed recall + session search + token usage
-- T8 ModelGateway fallback classifies a rate-limit as retryable (not fake ok)
-
-Suite: **626 passed** (baseline 590 → +36). Module import scan: 167 modules, 0 failures.
+Nothing above writes to `~/.hermus`, and no route in this inventory mutates
+state (all probes are GETs).
