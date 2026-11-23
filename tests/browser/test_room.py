@@ -557,9 +557,7 @@ class TestKeyboardFirst:
             walked = ["skipToInput"]
             for _ in range(12):
                 page.keyboard.press("Tab")
-                active = page.evaluate(
-                    "() => { const a = document.activeElement; return a ? (a.id || a.tagName) : 'none'; }"
-                )
+                active = page.evaluate("() => { const a = document.activeElement; return a ? (a.id || a.tagName) : 'none'; }")
                 if active == "skipToInput":
                     break
                 if active != "BODY":
