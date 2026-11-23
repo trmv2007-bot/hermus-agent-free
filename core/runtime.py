@@ -413,6 +413,57 @@ def _resolve_agent(
     return HermusAgent(model=model, mode=mode or "agent", api_key=api_key, base_url=base_url)
 
 
+def _repair_enabled() -> bool:
+    try:
+        return bool(getattr(config, "thinking_repair_enabled", True))
+    except Exception:
+        return True
+
+
+def _turn_mind(
+    agent: Any,
+    text: str,
+    *,
+    mode: str | None = None,
+    on_event=None,
+    read_only: bool = False,
+    with_plan: bool = True,
+):
+    """Routing, plan and receipt for this turn — or ``None`` when it is off.
+
+    A read-only turn never gets one: routing could swap the model and the plan
+    invites action, and neither belongs in a bounded status check.
+    """
+    if read_only or agent is None:
+        return None
+    try:
+        if not bool(getattr(config, "thinking_enabled", True)):
+            return None
+        from .thinking.turn import TurnMind
+
+        def emit(event_type: str, data: dict | None = None) -> None:
+            if on_event is not None:
+                try:
+                    on_event(event_type, data or {})
+                except Exception:
+                    pass
+
+        mind = TurnMind(
+            agent,
+            text,
+            mode=str(mode or "agent"),
+            session_id=str(getattr(agent, "session_id", "") or ""),
+            emit=emit,
+            with_plan=with_plan,
+        )
+        mind.prepare()
+        return mind
+    except Exception:
+        # The thinking layer is an accessory: it must never be the reason a
+        # turn cannot run.
+        return None
+
+
 def _chat_with_compat(
     agent: Any, text: str, *, on_event=None, stream: bool = False, should_cancel=None, steer_source=None
 ) -> dict[str, Any]:
@@ -791,10 +842,12 @@ def execute(
 
     if kind == "chat" or resolved_agent is None:
         chat_runner = _read_only_chat if read_only else _chat_with_compat
+        mind = _turn_mind(resolved_agent, text, mode=mode, on_event=on_event, read_only=read_only)
+        chat_events = mind.wrap(on_event) if mind is not None else on_event
         result = chat_runner(
             resolved_agent,
             text,
-            on_event=on_event,
+            on_event=chat_events,
             stream=stream,
             should_cancel=should_cancel,
             steer_source=steer_source,
@@ -803,6 +856,37 @@ def execute(
             result = {"response": str(result or "")}
         result.setdefault("response", "")
         result.setdefault("run_kind", "chat")
+
+        if mind is not None:
+            from .thinking.turn import evidence_line
+
+            receipt = mind.finish(result)
+            if mind.should_repair() and _repair_enabled():
+                # Exactly one repair attempt. An under-routed local turn retries
+                # on the free hosted tier when one is configured; otherwise the
+                # same model gets one chance to produce evidence.
+                mind.escalate_for_repair()
+                first_results = list(result.get("tool_results") or [])
+                first_steps = int(result.get("steps") or 0)
+                repair = chat_runner(
+                    resolved_agent,
+                    mind.repair_prompt(),
+                    on_event=chat_events,
+                    stream=stream,
+                    should_cancel=should_cancel,
+                    steer_source=steer_source,
+                )
+                if isinstance(repair, dict) and str(repair.get("response") or "").strip():
+                    repair["tool_results"] = first_results + list(repair.get("tool_results") or [])
+                    repair["steps"] = first_steps + int(repair.get("steps") or 0)
+                    repair.setdefault("run_kind", "chat")
+                    repair["repaired"] = True
+                    result = repair
+                receipt = mind.finish(result, attempt=1)
+            suffix = evidence_line(receipt) or mind.unverified_line()
+            if suffix and suffix.strip() not in str(result.get("response") or ""):
+                result["response"] = str(result.get("response") or "") + suffix
+
         if on_event is not None:
             try:
                 on_event(
@@ -829,6 +913,10 @@ def execute(
                 pass
 
     _emit("mission_runtime_started", {"goal": text[:200], "prefer": prefer})
+
+    # The mission engine owns planning and verification for a goal; routing is
+    # still this turn's decision and is recorded the same way a chat turn's is.
+    mission_mind = _turn_mind(resolved_agent, text, mode=mode, on_event=on_event, with_plan=False)
 
     # ---- pre-flight: does the selected model support what a mission needs? ----
     _emit_model_capability_warning(resolved_agent, prefer, _emit)
@@ -936,6 +1024,11 @@ def execute(
         return failure
 
     result = mission_report_to_result(report)
+    if mission_mind is not None:
+        try:
+            mission_mind.finish(result)
+        except Exception:
+            pass
     _emit(
         "agent_response",
         {
