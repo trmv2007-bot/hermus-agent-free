@@ -24,13 +24,13 @@ these skip when Node is absent rather than failing an unrelated environment.
 
 from __future__ import annotations
 
-import json
 import shutil
-import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests._node_harness import last_json_line, run_node
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOM_JS = ROOT / "gateway" / "static" / "control-room.js"
@@ -116,18 +116,11 @@ def run_in_node(body: str) -> dict:
         + "\n"
         + body
     )
-    proc = subprocess.run(
-        ["node", "-e", harness],
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT),
-        timeout=60,
-    )
+    proc = run_node(harness, cwd=ROOT, timeout=60)
     if proc.returncode != 0:
         raise AssertionError(f"node failed ({proc.returncode}):\n{proc.stderr}")
     # The last line is the JSON result; anything before it is script output.
-    lines = [ln for ln in proc.stdout.strip().split("\n") if ln.strip()]
-    return json.loads(lines[-1])
+    return last_json_line(proc.stdout)
 
 
 @pytest.fixture(scope="module")

@@ -28,13 +28,13 @@ Node is optional — like the existing JS tests these skip when Node is absent.
 
 from __future__ import annotations
 
-import json
 import shutil
-import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests._node_harness import last_json_line, run_node
 
 ROOT = Path(__file__).resolve().parents[1]
 NEXUS_JS = ROOT / "gateway" / "static" / "nexus.js"
@@ -185,24 +185,24 @@ global.toast = (message, kind) => { global.toasts.push([message, kind]); };
 """
 
 
-def run_node(source: Path, body: str, extra_setup: str = "") -> dict:
+def boot(source: Path, body: str, extra_setup: str = "") -> dict:
     """Boot a real frontend file in Node with the stub, then evaluate body.
 
     The body is an async IIFE whose return value is printed as the last line
     of stdout and parsed as JSON, so tests read like plain expressions.
     """
     harness = STUB + "\n" + extra_setup + "\n" + source.read_text(encoding="utf-8") + "\n" + textwrap.dedent(body)
-    proc = subprocess.run(["node", "-e", harness], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+    proc = run_node(harness, cwd=ROOT, timeout=60)
     if proc.returncode != 0:
         raise AssertionError(f"node failed ({proc.returncode}) for {source.name}:\n{proc.stderr}")
-    lines = [ln for ln in proc.stdout.strip().split("\n") if ln.strip()]
-    if not lines:
-        raise AssertionError(f"no output from node for {source.name} — did the body print its result?")
-    return json.loads(lines[-1])
+    try:
+        return last_json_line(proc.stdout)
+    except AssertionError as exc:
+        raise AssertionError(f"{exc} for {source.name}") from None
 
 
 def job(source: Path, body: str, extra_setup: str = "") -> dict:
-    """run_node, with the body wrapped so its LAST expression is the result.
+    """boot, with the body wrapped so its LAST expression is the result.
 
     The body runs inside an async IIFE; the final ``JSON.stringify(...)``
     expression becomes the resolved value that gets printed and parsed, so
@@ -217,7 +217,7 @@ def job(source: Path, body: str, extra_setup: str = "") -> dict:
         + text
         + "\n})().then((r) => console.log(JSON.stringify(r)), (e) => { console.error(e && e.stack || e); process.exit(1); });"
     )
-    return run_node(source, wrapped, extra_setup)
+    return boot(source, wrapped, extra_setup)
 
 
 # --------------------------------------------------------------------------
