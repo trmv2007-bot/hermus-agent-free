@@ -50,7 +50,9 @@ EXACT = "exact"
 ESTIMATED = "estimated"
 UNKNOWN = "unknown"
 
-_SHELL_WRITERS = frozenset({"rm", "rmdir", "mv", "cp", "mkdir", "touch", "tee", "truncate", "unzip", "tar", "ln", "chmod", "chown"})
+_SHELL_WRITERS = frozenset(
+    {"rm", "rmdir", "mv", "cp", "mkdir", "touch", "tee", "truncate", "unzip", "tar", "ln", "chmod", "chown"}
+)
 _GIT_WRITERS = frozenset({"checkout", "restore", "reset", "clean", "apply", "rm", "stash", "switch", "revert"})
 
 
@@ -227,9 +229,7 @@ def shell_targets(command: str, cwd: Path | str | None = None) -> tuple[list[Cha
                 redirect_targets.append(token[1:].lstrip(">"))
         for item in redirect_targets:
             target = _resolve(base, item)
-            changes.append(
-                Change(old=str(target), new=str(target), before=_exists_kind(target), after="file", detail="redirect")
-            )
+            changes.append(Change(old=str(target), new=str(target), before=_exists_kind(target), after="file", detail="redirect"))
         verb = os.path.basename(argv[0]).lower()
         if verb == "git" and len(argv) > 1:
             sub = argv[1].lower()
@@ -260,7 +260,21 @@ def shell_targets(command: str, cwd: Path | str | None = None) -> tuple[list[Cha
                     )
                 )
             continue
-        if verb not in {"echo", "echo.", "printf", "cat", "ls", "grep", "find", "true", "sleep", "python", "python3", "pytest", "pip"}:
+        if verb not in {
+            "echo",
+            "echo.",
+            "printf",
+            "cat",
+            "ls",
+            "grep",
+            "find",
+            "true",
+            "sleep",
+            "python",
+            "python3",
+            "pytest",
+            "pip",
+        }:
             unrecognized = True
     if not changes:
         return [], UNKNOWN

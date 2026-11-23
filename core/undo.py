@@ -452,7 +452,13 @@ class UndoJournal:
         if not source.exists():
             if dest.exists():
                 return {"op": "move", "src": str(source), "dst": str(dest), "ok": True, "note": "already back"}
-            return {"op": "move", "src": str(source), "dst": str(dest), "ok": False, "error": "neither the moved file nor its original path exists"}
+            return {
+                "op": "move",
+                "src": str(source),
+                "dst": str(dest),
+                "ok": False,
+                "error": "neither the moved file nor its original path exists",
+            }
         if not _matches(source, step.get("expected")) and not force:
             return {
                 "op": "move",
@@ -462,7 +468,13 @@ class UndoJournal:
                 "error": f"{source} changed after the move (sha256 mismatch); rerun with force to move it back anyway",
             }
         if dest.exists() and not force:
-            return {"op": "move", "src": str(source), "dst": str(dest), "ok": False, "error": f"{dest} exists again; refusing to overwrite it"}
+            return {
+                "op": "move",
+                "src": str(source),
+                "dst": str(dest),
+                "ok": False,
+                "error": f"{dest} exists again; refusing to overwrite it",
+            }
         for directory in _missing_ancestors(dest):
             directory.mkdir(exist_ok=True)
         os.replace(source, dest)
@@ -497,7 +509,13 @@ class UndoJournal:
         tmp = path.with_name(f".{path.name}.undo-{os.getpid()}.tmp")
         tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, path)
-        return {"op": "set_setting", "path": str(path), "ok": True, "value": step.get("value"), "present": bool(step.get("present"))}
+        return {
+            "op": "set_setting",
+            "path": str(path),
+            "ok": True,
+            "value": step.get("value"),
+            "present": bool(step.get("present")),
+        }
 
     # -- pruning --------------------------------------------------------
     def prune(self) -> dict[str, int]:
@@ -666,7 +684,11 @@ def capture_git_pre_state(journal: UndoJournal, cwd: Path | str) -> dict[str, An
     head_sha = str(head).strip() if head else ""
     status = _status(root)
     if len(status) > MAX_GIT_PATHS:
-        return {"root": str(root), "head": head_sha, "error": f"{len(status)} changed paths exceed the {MAX_GIT_PATHS} journaling cap"}
+        return {
+            "root": str(root),
+            "head": head_sha,
+            "error": f"{len(status)} changed paths exceed the {MAX_GIT_PATHS} journaling cap",
+        }
     blobs: dict[str, str] = {}
     modes: dict[str, int] = {}
     unrestorable: list[str] = []
