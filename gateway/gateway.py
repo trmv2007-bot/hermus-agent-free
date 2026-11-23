@@ -693,6 +693,7 @@ from gateway.routes_teach import router as _teach_router  # noqa: E402
 from gateway.routes_thinking import router as _thinking_router  # noqa: E402
 from gateway.routes_undo import router as _undo_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
+from gateway.routes_voice_live import router as _voice_live_router  # noqa: E402
 from gateway.routes_workshop import router as _workshop_router  # noqa: E402
 
 # The channel *webhook* router is intentionally NOT gated: an external service
@@ -738,6 +739,7 @@ app.include_router(_presence_overlay_router, dependencies=_gate_control)
 app.include_router(_awareness_router, dependencies=_gate_control)
 app.include_router(_undo_router, dependencies=_gate_control)
 app.include_router(_thinking_router, dependencies=_gate_control)
+app.include_router(_voice_live_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

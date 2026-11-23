@@ -637,3 +637,70 @@ against a scripted agent, none of them calling a model.
 
 **Docs.** `docs/thinking.md` carries the decision table, the verdicts, the
 benchmark and what a 1B local model can and cannot do.
+
+---
+
+## 16 · Voice that works the first time — press to talk, speak back, stop on a word (G8)
+
+The room had no microphone at all, and the speech it did have failed on the
+first attempt in the two ways G8 measured: the mic control did nothing useful,
+and speech out was `unavailable` without an optional package with no line
+saying which one.
+
+**Press to talk.** One control in the companion room. Hold it, or tap it and
+talk. While the person speaks the browser streams 16 kHz mono PCM16 to
+`POST /voice/live/chunk`, and the partial transcript types itself into the same
+input line the keyboard uses; releasing submits that text as the turn. Live
+partials run on a small Whisper model and the committed transcript on a larger
+one — both faster-whisper on the CPU, which is a core dependency, so the
+microphone works on a stock install with no key and no cloud.
+
+**Speak back, and stop mid-sentence.** Each sentence of a streaming answer is
+synthesized as soon as it is complete, so the first words play while the rest is
+still arriving. Piper speaks through a local neural voice (137 ms for a
+sentence, 24 ms warm on this PC); pyttsx3's OS voice remains the fallback and now
+runs in its own process with a deadline, because its `runAndWait` was observed
+to hang after the first call and used to be able to wedge every later
+synthesis. Speech is cut off the moment the person presses the mic or Stop: the
+clip queue is dropped, the element paused, and any clip still being synthesized
+comes back marked stale against the shared `output_generation` counter. The
+character's speaking state follows the media element's own `playing` and
+`paused` events, not a timer.
+
+**Secrets are never spoken.** Speech text is redacted before any audio exists —
+`password is …`, `api key: …`, bearer tokens, private key blocks, credential-shaped
+`sk-…` strings and card-shaped digit groups all become `[hidden]`. Reading a
+password aloud into a room is a password that has left the machine.
+
+**Degradation that tells the truth.** No speech-to-text: the mic is disabled in
+the markup before any click, with one sentence naming the exact install command.
+No voice: answers stay on screen and the room says so once. Neither blocks the
+text path.
+
+**Measured on this PC** (Rishi's Windows 11, 20 logical cores, CPU only; every
+number below comes from the running gateway with 16 kHz fixture WAVs pushed
+through the same endpoints the room calls):
+
+| what | number |
+| --- | --- |
+| first partial transcript | 1.29 s from the first spoken frame (target 0.7 s — missed, see below) |
+| partial decode | 0.37–0.41 s each, refreshed every 0.7 s while speaking |
+| final transcript | 2.70 s after release (`small`); 0.83 s with `HERMUS_VOICE_STT_MODEL=base` |
+| first audio out | 0.11–0.23 s after the sentence exists (Piper, voice kept loaded) |
+| first audio out, voice not warmed | 2.4 s (one-time voice load per process) |
+
+The partial misses its 0.7 s target by about half a second, and the honest split
+is 0.48 s of speech it waits for before the first request plus 0.4 s of decode.
+Waiting less produced hallucinated first words — `tiny` answered a 0.3 s
+fragment with "Clear." — so the earlier partial would have been faster and
+wrong. Speed and honesty traded, honesty won.
+
+Model choice is measured rather than assumed: on the long fixture `tiny` heard
+"still cured", `base` heard "metal download", `small` heard "model download", so
+the final pass defaults to `small`; the live partial keeps `tiny` because it is
+the only one fast enough to keep up. Both are multilingual, downloaded once from
+a public hub with no account, and cached in the Hugging Face cache.
+
+**Tests:** 4 new tests (relative ages incl. epoch + clock-skew clamp, mission buckets, mission-tools wiring, tablist tabindex pin updated to 2 with a comment). Full suite: **1566 passed, 2 skipped, 0 failed**. `node --check` clean on all touched JS; zero browser console errors; live-gateway verification of every behavior above.
+
+---

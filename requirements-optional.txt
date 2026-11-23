@@ -17,6 +17,18 @@ discord.py>=2.3.0
 pyautogui>=0.9.54; platform_system=="Linux" or platform_system=="Darwin" or platform_system=="Windows"
 pygetwindow>=0.0.9; platform_system=="Windows"
 
+# Speech in and out. Speech-to-text is the core dependency faster-whisper
+# (requirements.txt): it runs Whisper on the CPU, needs no account, and fetches
+# its model once on first use (~75 MB for the live partial, ~145 MB for the
+# final transcript, from a public hub with no credentials).
+#
+# Speech out needs a voice. piper-tts speaks through a local neural voice with
+# no account; fetch one voice once and the room's speaker turns on:
+#   python -m piper.download_voices en_US-lessac-medium --download-dir data/speech/voices
+# Without it, pyttsx3 uses the OS voice, and without either the room says
+# answers stay on screen.
+piper-tts>=1.2.0
+
 # TTS fallbacks and optional web output formats
 pyttsx3>=2.90
 soundfile>=0.12.1

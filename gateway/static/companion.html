@@ -66,6 +66,15 @@
 
 <footer class="dock">
   <form class="line" id="line" autocomplete="off" novalidate>
+    <button class="mic" id="mic" type="button" data-state="off"
+            aria-label="Hold to talk" aria-disabled="true"
+            title="Voice is loading">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4.2a2.6 2.6 0 0 0-2.6 2.6v5.1a2.6 2.6 0 0 0 5.2 0V6.8A2.6 2.6 0 0 0 12 4.2Z"/>
+        <path class="mic-arc" d="M6.6 11.2a5.4 5.4 0 0 0 10.8 0M12 16.9v3"/>
+      </svg>
+      <span class="mic-bar" aria-hidden="true"></span>
+    </button>
     <span class="prefix" aria-hidden="true">›</span>
     <label class="sr-only" for="say">Say something to your companion</label>
     <input id="say" type="text" autocomplete="off" spellcheck="false"

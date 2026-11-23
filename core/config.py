@@ -431,7 +431,10 @@ class Config(BaseSettings):
     # job result; only the spoken clip is shortened so replies stay listenable.
     voice_answer_max_chars: int = Field(default=900, validation_alias="HERMUS_VOICE_ANSWER_MAX_CHARS")
     # Whisper model for inbound microphone audio.
-    voice_stt_model: str = Field(default="base", validation_alias="HERMUS_VOICE_STT_MODEL")
+    # "small" is the smallest Whisper that transcribes a whole sentence without
+    # dropping a word on CPU (measured here: tiny said "still cured", base said
+    # "metal download", small was exact) and still finishes in about a second.
+    voice_stt_model: str = Field(default="small", validation_alias="HERMUS_VOICE_STT_MODEL")
 
     # ---- Tool sandboxing ---------------------------------------------------
     # auto | docker | podman | gvisor | local | off
