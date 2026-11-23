@@ -215,7 +215,7 @@ class TrajectoryManager:
         compressed_path = config.resolve_path("data/trajectories_compressed.jsonl")
         compressed_count = 0
         if compressed_path.exists():
-            with open(compressed_path) as f:
+            with open(compressed_path, encoding="utf-8") as f:
                 for _ in f:
                     compressed_count += 1
 

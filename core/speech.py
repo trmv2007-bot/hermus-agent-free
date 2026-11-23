@@ -322,10 +322,13 @@ class SpeechEngine:
                             command.extend(["--speaker", str(int(voice))])
                         except (TypeError, ValueError):
                             pass
+                    # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
                     subprocess.run(
                         command,
                         input=spoken,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
                         capture_output=True,
                         check=True,
                         timeout=180,

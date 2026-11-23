@@ -126,7 +126,7 @@ class ConstitutionManager:
 
     def load(self) -> dict:
         try:
-            doc = json.loads(self.path.read_text())
+            doc = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(doc, dict) or "version" not in doc:
                 raise ValueError("bad constitution")
             return doc
@@ -140,7 +140,7 @@ class ConstitutionManager:
         doc["version"] = int(doc.get("version", 1))
         doc["updated_at"] = datetime.now().isoformat()
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(doc, indent=2))
+        tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
         shutil.move(str(tmp), str(self.path))
         # Snapshot for rollback
         snap = self.dir / f"constitution_v{doc['version']}.json"
@@ -160,14 +160,14 @@ class ConstitutionManager:
 
     def _load_log(self) -> list[dict]:
         try:
-            return json.loads(self.log_path.read_text())
+            return json.loads(self.log_path.read_text(encoding="utf-8"))
         except Exception:
             return []
 
     def _append_log(self, entry: dict):
         log = self._load_log()
         log.append(entry)
-        self.log_path.write_text(json.dumps(log[-200:], indent=2))
+        self.log_path.write_text(json.dumps(log[-200:], indent=2), encoding="utf-8")
 
     def upgrade_log(self) -> list[dict]:
         return self._load_log()
@@ -279,7 +279,7 @@ class ConstitutionManager:
         snap = self.dir / f"constitution_v{version}.json"
         if not snap.exists():
             return {"success": False, "error": f"no snapshot for version {version}"}
-        doc = json.loads(snap.read_text())
+        doc = json.loads(snap.read_text(encoding="utf-8"))
         doc["version"] = version
         self.save(doc, log=True, reason=f"rollback to v{version}")
         self._append_log({"event": "rollback", "to_version": version, "timestamp": datetime.now().isoformat()})
@@ -289,12 +289,12 @@ class ConstitutionManager:
 
     def _load_pending(self) -> list[dict]:
         try:
-            return json.loads(self.pending_path.read_text())
+            return json.loads(self.pending_path.read_text(encoding="utf-8"))
         except Exception:
             return []
 
     def _save_pending(self, items: list[dict]):
-        self.pending_path.write_text(json.dumps(items, indent=2))
+        self.pending_path.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
     def propose(self, amendment: dict, source: str = "meta") -> dict:
         """Store an amendment. Low risk -> apply now (auto). High risk -> pending approval."""

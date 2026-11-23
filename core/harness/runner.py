@@ -182,8 +182,8 @@ class HarnessRunner:
         report["report_json"] = str(run_dir / "report.json")
         report["report_md"] = str(run_dir / "report.md")
 
-        (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str))
-        (run_dir / "report.md").write_text(render_markdown(report))
+        (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        (run_dir / "report.md").write_text(render_markdown(report), encoding="utf-8")
         # ---- product hooks: cost estimate, regression vs previous run, bus events
         s = report["summary"]
         try:
@@ -399,7 +399,10 @@ class HarnessRunner:
         for cmd in task.setup:
             t0 = time.time()
             try:
-                proc = subprocess.run(cmd, shell=True, cwd=str(ws), capture_output=True, text=True, timeout=120)
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+                proc = subprocess.run(
+                    cmd, shell=True, cwd=str(ws), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
+                )
                 entry = {
                     "cmd": cmd,
                     "returncode": proc.returncode,
@@ -567,7 +570,7 @@ class HarnessRunner:
 
         task_dir.mkdir(parents=True, exist_ok=True)
         task_file = task_dir / "task.json"
-        task_file.write_text(json.dumps(task.to_dict(), default=str))
+        task_file.write_text(json.dumps(task.to_dict(), default=str), encoding="utf-8")
         cmd = [
             _sys.executable,
             "-m",
@@ -588,6 +591,8 @@ class HarnessRunner:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout_s + 60,  # grace beyond the harness timeout
             )
         except _sp.TimeoutExpired:
@@ -648,10 +653,10 @@ class HarnessRunner:
 
     def _save_task(self, task_dir: Path, task: Task, result: dict[str, Any], trajectory: list | None) -> None:
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "task.json").write_text(json.dumps(task.to_dict(), indent=2, default=str))
-        (task_dir / "result.json").write_text(json.dumps(result, indent=2, default=str))
+        (task_dir / "task.json").write_text(json.dumps(task.to_dict(), indent=2, default=str), encoding="utf-8")
+        (task_dir / "result.json").write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
         if trajectory is not None:
-            (task_dir / "trajectory.json").write_text(json.dumps(trajectory, indent=2, default=str))
+            (task_dir / "trajectory.json").write_text(json.dumps(trajectory, indent=2, default=str), encoding="utf-8")
 
     def _index_path(self) -> Path:
         return self.runs_dir / "index.json"
@@ -681,7 +686,7 @@ class HarnessRunner:
                 "regression": bool(s.get("regression")),
             }
         )
-        self._index_path().write_text(json.dumps(index[-200:], indent=2))
+        self._index_path().write_text(json.dumps(index[-200:], indent=2), encoding="utf-8")
 
     def _summarize(self, results: list[dict[str, Any]], wall_s: float) -> dict[str, Any]:
         total = len(results)

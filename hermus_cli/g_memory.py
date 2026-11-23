@@ -249,12 +249,12 @@ def _run_forge(args, ctx: CLIContext) -> None:
             rep = q / n / "report.json"
             if rep.exists():
                 try:
-                    print(f"  - {n}: {__import__('json').loads(rep.read_text()).get('error', '')[:120]}")
+                    print(f"  - {n}: {__import__('json').loads(rep.read_text(encoding='utf-8')).get('error', '')[:120]}")
                 except Exception:
                     pass
     elif action == "log":
         log = Path(skill_forge.skills_dir) / "forge_log.jsonl"
-        lines = log.read_text().splitlines() if log.exists() else []
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
         if not lines:
             print(f"no forge log yet ({log})")
         for line in lines[-args.limit :]:

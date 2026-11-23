@@ -181,8 +181,14 @@ class CapabilityProbe:
         ok = False
         if self.binary("docker"):
             try:
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
                 r = subprocess.run(
-                    ["docker", "info", "--format", "{{.ServerVersion}}"], capture_output=True, text=True, timeout=6
+                    ["docker", "info", "--format", "{{.ServerVersion}}"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=6,
                 )
                 ok = r.returncode == 0 and bool(r.stdout.strip())
             except Exception:
@@ -198,7 +204,12 @@ class CapabilityProbe:
         if self.docker_daemon():
             try:
                 r = subprocess.run(
-                    ["docker", "info", "--format", "{{json .Runtimes}}"], capture_output=True, text=True, timeout=8
+                    ["docker", "info", "--format", "{{json .Runtimes}}"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=8,
                 )
                 return "runsc" in (r.stdout or "")
             except Exception:
@@ -534,7 +545,7 @@ class Sandbox:
                     ):
                         continue  # refuse ../ escapes out of the scratch dir
                     safe.parent.mkdir(parents=True, exist_ok=True)
-                    safe.write_text(str(content))
+                    safe.write_text(str(content), encoding="utf-8")
                     staged += 1
                 except Exception:
                     continue
@@ -634,7 +645,7 @@ class Sandbox:
             return {"success": False, "error": "wasmtime not installed", "backend": "wasm"}
         cmd = ["wasmtime", "run", "--dir=.", "--env=", "-S", "threads=false", str(module_path), *args]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=int(timeout))
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=int(timeout))
             return {
                 "success": r.returncode == 0,
                 "stdout": r.stdout[:4000],
@@ -741,6 +752,8 @@ class Sandbox:
                 args,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=pol.timeout,
                 input=input_text or "",
             )
@@ -1005,7 +1018,15 @@ class Sandbox:
     ) -> SandboxResult:
         try:
             proc = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=pol.timeout, cwd=str(workdir), input=input_text or ""
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=pol.timeout,
+                cwd=str(workdir),
+                input=input_text or "",
             )
             return SandboxResult(
                 success=proc.returncode == 0,

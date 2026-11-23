@@ -35,11 +35,14 @@ def shell_execute(
         import subprocess
 
         try:
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=int(timeout),
                 cwd=cwd or None,
             )
@@ -62,7 +65,16 @@ def shell_execute(
         import subprocess
 
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=int(timeout), cwd=cwd or None)
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=int(timeout),
+                cwd=cwd or None,
+            )
             return {
                 "command": command,
                 "stdout": result.stdout[:5000],

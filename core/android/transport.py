@@ -103,7 +103,8 @@ class AdbAndroidTransport(AndroidTransport):
     # -- helpers ------------------------------------------------------------
     def _default_runner(self, cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
         # Text commands: decode stdout as UTF-8 (safe for shell/am/uiautomator/input).
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
     def _default_runner_binary(self, cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
         # Binary commands (e.g. `exec-out screencap -p`): NEVER decode stdout as text —

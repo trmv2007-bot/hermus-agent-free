@@ -793,7 +793,7 @@ async def sandbox_recent(limit: int = 20):
         from core.workspace import workspace
 
         path = workspace.dirs["logs"] / "sandbox.jsonl"
-        lines = path.read_text(errors="ignore").splitlines()[-limit:] if path.exists() else []
+        lines = path.read_text(errors="ignore", encoding="utf-8").splitlines()[-limit:] if path.exists() else []
         return {"entries": [json.loads(x) for x in reversed(lines) if x.strip()], "path": str(path)}
     except Exception as e:
         return {"error": str(e), "entries": []}

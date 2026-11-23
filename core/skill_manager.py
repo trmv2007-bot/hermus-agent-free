@@ -296,11 +296,14 @@ def test_{name}_entrypoint():
                 continue
 
             try:
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
                 res = subprocess.run(
                     [sys.executable, "-m", "pytest", "-v", str(test_file)],
                     cwd=str(self.skills_dir.parent),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=15,
                 )
                 if res.returncode == 0:

@@ -729,7 +729,7 @@ class JobQueue:
             if not self.persist_path.exists():
                 return None
             found: dict[str, Any] | None = None
-            for line in reversed(self.persist_path.read_text(errors="ignore").splitlines()[-4000:]):
+            for line in reversed(self.persist_path.read_text(errors="ignore", encoding="utf-8").splitlines()[-4000:]):
                 try:
                     rec = json.loads(line)
                 except Exception:
@@ -753,7 +753,7 @@ class JobQueue:
             found["recovered"] = True
             if result_file.exists():
                 try:
-                    found["result"] = _trim(json.loads(result_file.read_text()), limit=4000)
+                    found["result"] = _trim(json.loads(result_file.read_text(encoding="utf-8")), limit=4000)
                 except Exception:
                     pass
             found.setdefault("payload", {})
@@ -769,7 +769,7 @@ class JobQueue:
         path = self.results_dir / f"{job_id}.json"
         if path.exists():
             try:
-                stored = json.loads(path.read_text())
+                stored = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 return None
             # the on-disk record is a small envelope; callers want the payload
@@ -797,7 +797,8 @@ class JobQueue:
                     {"job_id": job.id, "kind": job.kind, "status": job.status, "finished": _now(), "result": job.result},
                     default=str,
                     indent=2,
-                )
+                ),
+                encoding="utf-8",
             )
         except Exception:
             pass
@@ -825,7 +826,7 @@ class JobQueue:
         if not path.exists():
             return latest, order, 0
         try:
-            lines = path.read_text(errors="ignore").splitlines()[-max(1, int(tail)) :]
+            lines = path.read_text(errors="ignore", encoding="utf-8").splitlines()[-max(1, int(tail)) :]
         except Exception:
             return latest, order, 0
         for line in lines:

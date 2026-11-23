@@ -162,11 +162,14 @@ class RollbackManager:
         git_branch = None
         git_commit = None
         try:
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
             res = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=5,
             )
             if res.returncode == 0:
@@ -176,6 +179,8 @@ class RollbackManager:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=5,
             )
             if res2.returncode == 0:
@@ -333,6 +338,8 @@ class RollbackManager:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=5,
                 check=True,
             )
@@ -343,6 +350,8 @@ class RollbackManager:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
                 check=True,
             )
@@ -386,6 +395,8 @@ class RollbackManager:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
             )
 
@@ -396,6 +407,8 @@ class RollbackManager:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=15,
             )
             subprocess.run(["git", "branch", "-D", tx_branch], cwd=str(root), capture_output=True)

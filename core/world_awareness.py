@@ -161,7 +161,17 @@ class WorldAwareness:
         }
         for predicate, command in commands.items():
             try:
-                result = subprocess.run(command, cwd=str(root), capture_output=True, text=True, timeout=5, check=False)
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+                result = subprocess.run(
+                    command,
+                    cwd=str(root),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=5,
+                    check=False,
+                )
                 if result.returncode != 0:
                     continue
                 value = result.stdout

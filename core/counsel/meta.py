@@ -54,18 +54,18 @@ class MetaCounsel:
 
     def _ensure_log(self):
         if not self.log_path.exists():
-            self.log_path.write_text("[]")
+            self.log_path.write_text("[]", encoding="utf-8")
 
     def _load_log(self) -> list[dict]:
         try:
-            return json.loads(self.log_path.read_text())
+            return json.loads(self.log_path.read_text(encoding="utf-8"))
         except Exception:
             return []
 
     def _append_log(self, entry: dict):
         log = self._load_log()
         log.append(entry)
-        self.log_path.write_text(json.dumps(log[-100:], indent=2))
+        self.log_path.write_text(json.dumps(log[-100:], indent=2), encoding="utf-8")
 
     # ------------------------------------------------------------ session review
 
@@ -134,7 +134,7 @@ class MetaCounsel:
             return []
         path = config.resolve_path(f"data/counsel/transcripts/{session_id}.jsonl")
         try:
-            return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+            return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
         except Exception:
             return []
 

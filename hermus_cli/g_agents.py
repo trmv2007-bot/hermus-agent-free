@@ -727,7 +727,7 @@ def _run_counsel(args, ctx: CLIContext) -> None:
                 sys.exit(1)
             session_id = Path(files[-1]).stem
 
-        summary = _json.loads(Path(config.resolve_path(f"data/counsel/sessions/{session_id}.json")).read_text())
+        summary = _json.loads(Path(config.resolve_path(f"data/counsel/sessions/{session_id}.json")).read_text(encoding="utf-8"))
         res = meta_counsel.review_session(summary)
         print(f"Meta-Counsel review of {session_id}: proposed {res['proposed']} amendment(s)")
         for r in res.get("results", []):

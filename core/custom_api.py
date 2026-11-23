@@ -21,16 +21,16 @@ class CustomAPIManager:
         self.db_path = Path(db_path or config.resolve_path("data/custom_apis.json"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.db_path.exists():
-            self.db_path.write_text("[]")
+            self.db_path.write_text("[]", encoding="utf-8")
 
     def _load(self) -> list[dict]:
         try:
-            return json.loads(self.db_path.read_text())
+            return json.loads(self.db_path.read_text(encoding="utf-8"))
         except Exception:
             return []
 
     def _save(self, apis: list[dict]):
-        self.db_path.write_text(json.dumps(apis, indent=2))
+        self.db_path.write_text(json.dumps(apis, indent=2), encoding="utf-8")
 
     def _invalidate_tool_registry(self):
         """Custom API changes must be visible to agents immediately (the tool
