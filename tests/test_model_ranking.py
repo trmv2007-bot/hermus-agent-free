@@ -81,7 +81,7 @@ def test_a_retired_model_is_kept_for_migration_but_never_offered():
 def test_every_rank_carries_the_reason_it_holds():
     for row in model_catalog.as_rows():
         assert len(row["why"]) > 30, row["ref"]
-        assert row["size"] if "size" in row else True
+        assert row["size"], row["ref"]
 
 
 def test_no_catalog_default_can_route_to_a_paid_model():

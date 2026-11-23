@@ -86,6 +86,7 @@ class Model:
             "family": self.family,
             "params_b": self.params_b,
             "context": self.context,
+            "size": self.size,
             "tools": self.tools,
             "why": self.why,
             "strength": strength(self),
