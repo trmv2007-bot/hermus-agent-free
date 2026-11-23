@@ -17,10 +17,12 @@ PY = sys.executable  # works in CI (system python) and locally (.venv)
 def _cli(*argv, timeout=300):
     env = dict(os.environ)
     env["HERMUS_NO_DOTENV"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"  # child writes UTF-8 to a pipe, not cp1252
     return subprocess.run(
         [PY, str(REPO / "hermus.py"), *argv],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=timeout,
         env=env,
         cwd=str(REPO),

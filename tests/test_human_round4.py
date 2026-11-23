@@ -131,7 +131,7 @@ def run_node(scripts: list[Path], body: str) -> dict:
         fh.write(harness)
         path = fh.name
     try:
-        proc = subprocess.run(["node", path], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        proc = subprocess.run(["node", path], capture_output=True, text=True, encoding="utf-8", cwd=str(ROOT), timeout=60)
     finally:
         os.unlink(path)
     if proc.returncode != 0:

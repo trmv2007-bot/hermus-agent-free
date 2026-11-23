@@ -109,6 +109,31 @@ pytest tests/test_file.py
 pytest --cov=core --cov-report=html
 ```
 
+**On Windows** — the platform HERMUS ships to — the same suite runs with the
+Python you already have (3.10 or newer):
+
+```powershell
+py -3 -m pytest tests -q --ignore=tests/eval
+```
+
+That is the whole command; nothing about the suite is Linux-only. Two rules keep
+it that way, and both are enforced by tests rather than by convention:
+
+- **A script goes in a file, never on the command line.** The Node-backed tests
+  (the Control Room harnesses in `tests/test_control_room_ux.py` and
+  `tests/test_command_answer_loop.py`) boot the real frontend sources, which
+  assemble to roughly 90 KB of JavaScript. Windows caps a whole command line at
+  32,767 characters, so `node -e <script>` failed with
+  `FileNotFoundError: [WinError 206]` before the first assertion ran and the
+  suite merely looked short. Use `tests/_node_harness.run_node`, which writes the
+  script to a UTF-8 temp file and runs `node <file>`;
+  `tests/test_harness_platform.py` fails on any test that passes an inline
+  script through argv again.
+- **Child processes are spoken to in UTF-8.** `text=True` alone decodes with the
+  console code page, which is cp1252 here, so an em dash in an assertion message
+  arrives as `â€”` or raises `UnicodeDecodeError`. Every harness read and write
+  names UTF-8 explicitly.
+
 ## 📝 Commit Message Guidelines
 
 We follow conventional commit messages for consistency. Each commit message should:

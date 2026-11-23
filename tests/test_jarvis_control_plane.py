@@ -121,7 +121,14 @@ def test_control_room_javascript_parses_with_node():
     if not shutil.which("node"):
         return
     script = Path("gateway/static/nexus.js").read_text(encoding="utf-8")
-    with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
-        fh.write(script)
-        fh.flush()
-        subprocess.run(["node", "--check", fh.name], check=True)
+    with tempfile.TemporaryDirectory(prefix="hermus-node-check-") as workdir:
+        path = Path(workdir) / "nexus.js"
+        path.write_text(script, encoding="utf-8", newline="\n")
+        proc = subprocess.run(
+            ["node", "--check", str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+        )
+    assert proc.returncode == 0, proc.stderr

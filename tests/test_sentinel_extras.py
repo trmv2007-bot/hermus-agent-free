@@ -5,6 +5,7 @@ parallel workers with token accounting, and the sentinel read API."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -195,7 +196,9 @@ def test_worker_subprocess_protocol(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-m", "core.harness.worker", "--task", str(tf), "--workspace", str(ws), "--model", "mock/mock"],
         capture_output=True,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     line = [ln for ln in proc.stdout.splitlines() if ln.startswith("HARNESS_RESULT ")]

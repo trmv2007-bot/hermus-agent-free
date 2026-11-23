@@ -170,12 +170,14 @@ def test_harness_schedule_cli_registers_and_removes():
 
     env.update({k: v for k, v in os.environ.items() if k.startswith("HERMUS_")})
     env["HERMUS_NO_DOTENV"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"  # child writes UTF-8 to a pipe, not cp1252
     py = sys.executable  # CI has no .venv; use the running interpreter
     suite = "zz_sched_test"
     r = subprocess.run(
         [py, str(REPO / "hermus.py"), "harness", "schedule", "--suite", suite, "--at", "4:00 am"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
         env=env,
         cwd=str(REPO),
@@ -190,6 +192,7 @@ def test_harness_schedule_cli_registers_and_removes():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
         env=env,
         cwd=str(REPO),
@@ -199,6 +202,7 @@ def test_harness_schedule_cli_registers_and_removes():
         [py, str(REPO / "hermus.py"), "harness", "schedule", "--suite", suite, "--remove"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
         env=env,
         cwd=str(REPO),

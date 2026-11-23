@@ -70,6 +70,7 @@ class TestSchedulerBehaviour:
             ["node", "--test", str(JS_TESTS / "scheduler.test.js")],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(ROOT),
             timeout=120,
         )

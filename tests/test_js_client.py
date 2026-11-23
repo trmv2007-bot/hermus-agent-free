@@ -38,6 +38,7 @@ def test_browser_client_js_tests_pass():
         cwd=str(ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
     output = (result.stdout or "") + (result.stderr or "")

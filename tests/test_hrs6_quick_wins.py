@@ -122,7 +122,7 @@ def run(source: Path, body: str) -> dict:
         fh.write(harness)
         path = fh.name
     try:
-        proc = subprocess.run(["node", path], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        proc = subprocess.run(["node", path], capture_output=True, text=True, encoding="utf-8", cwd=str(ROOT), timeout=60)
     finally:
         Path(path).unlink(missing_ok=True)
     assert proc.returncode == 0, f"node failed for {source.name}:\n{proc.stderr}"
