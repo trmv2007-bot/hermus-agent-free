@@ -15,13 +15,13 @@ import argparse
 from core.config import config
 from core.log import setup_logging
 
-from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_workspace
+from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_undo, g_workspace
 from . import repl as repl_cmd
 from ._common import CLIContext
 from ._spec import Command, CommandModule
 
 #: Ordered group modules. Order only affects ``--help`` listing.
-_GROUPS = (g_runtime, g_agents, g_memory, g_models, g_safety, g_workspace)
+_GROUPS = (g_runtime, g_agents, g_memory, g_models, g_safety, g_undo, g_workspace)
 
 SPECS: tuple[Command, ...] = tuple(command for group in _GROUPS for command in group.COMMANDS)
 
@@ -68,6 +68,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     setup_logging()
+    # The interactive product may drive the real pointer and keyboard; every
+    # other process (tests, CI, imports) keeps the fake controller.
+    try:
+        from core.computer.input_guard import declare_interactive
+
+        declare_interactive("hermus-cli")
+    except Exception:
+        pass
     parser = build_parser()
     args = parser.parse_args()
     ctx = CLIContext(parser=parser)

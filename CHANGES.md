@@ -296,3 +296,82 @@ An `AttentionGate` is the single place a proactive surface must pass. It suppres
 `GET /api/v1/awareness/snapshot|settings|suggestions|journal`, `PUT /api/v1/awareness/settings`, `POST /api/v1/awareness/suggestions/{id}`, `DELETE /api/v1/awareness/journal` on `gateway/routes_awareness.py`, gated like every other control route. `hermus awareness` prints the live snapshot as a short human block and says plainly what is unavailable and why; `--pause`, `--resume`, `--exclude APP`, `--clipboard on|off`, `--quiet-hours 22:00-07:00` and `--measure SECONDS` (the poll loop's CPU cost) are on the same command.
 
 On disk: the settings file and a 24-hour rolling summary of focus minutes and suggestion counts (process names and counts only — never a title), which `DELETE /journal` deletes outright.
+
+---
+
+---
+
+## 14 · Safety: every mutation previewed, journaled and undoable
+
+Undo used to be a feature of whichever subsystem remembered to implement it. It is
+now a property of the tool path itself, so no tool can perform a mutation the
+product cannot take back — and the ones it cannot take back say so *before* they
+run.
+
+### Undo is a guarantee (`core/undo.py`, `hermus undo`, `/api/v1/undo`)
+
+Every mutating call through `tool_registry.execute` (and therefore through the
+ToolGateway) is journaled **before** it happens: the exact prior bytes go into a
+content-addressed blob store, the inverse steps go into an entry, and only then
+does the tool run. Five classes are covered, each with a test that performs the
+action, undoes it and compares the bytes:
+
+| Class | Inverse |
+|---|---|
+| file write / append / edit | prior bytes restored at the same path (mode included) |
+| file delete | the deleted bytes restored at the same path |
+| file move | the file returned to its old name, destination left absent |
+| directory create / remove | directories the action created are removed again, deepest first; directories that already existed are left alone |
+| shell command in a git work tree | pre-state captured through `git status`, every touched path restored from journaled bytes or `HEAD`; `HEAD` moving, an oversized file, or a path outside the work tree makes the entry `not_reversible` with the reason |
+| settings / policy change | the prior value of the changed key, and the overrides file removed again if it did not exist before |
+| computer control | declared not reversible **before** the pointer moves |
+
+The store is bounded (200 entries, 64 MB, 8 MB per file) and prunes oldest-first,
+garbage-collecting blobs nothing references. `hermus undo` takes back the last
+action, `hermus undo --list` shows the journal with the reason for anything not
+undoable, and `hermus undo <id>` takes back one entry. `GET /api/v1/undo`,
+`POST /api/v1/undo/{id}` and `POST /api/v1/undo/last` are the same three.
+
+An undo *verifies* before it writes: if the file changed after the action, it
+refuses and says so rather than overwriting a newer edit — `force` is the explicit
+override.
+
+### Preview before mutation (`core/dry_run.py`, `/api/v1/preview`)
+
+`plan_tool()` describes the consequence in the terms a person reads: for a file
+batch the old name → new name of every path with the count, for a shell command in
+a repo the files it would touch, for a settings change the old value → new value.
+`POST /api/v1/preview` returns that plan plus a single-use token; `POST
+/api/v1/preview/{token}` is the one keystroke that acts, and it acts through the
+same journaled tool path. An action that cannot be described — a write with no
+path, a move whose source does not exist, a shell command whose working directory
+is gone — is **refused** (`unpreviewable_action`) instead of attempted blind.
+
+### Real input is default-deny (`core/computer/input_guard.py`, RIS-12)
+
+`pyautogui` reaches whichever window has focus, so a test process has no business
+holding it. Real backends now exist only in a process that declared itself the
+interactive product (`hermus` CLI, the gateway lifespan); tests, CI, imports and
+scripts get the dry-run backend, and constructing a real backend there raises
+`RealInputDisabled` with "real input disabled: …" instead of silently doing
+nothing. `HERMUS_REAL_INPUT=off` forbids it outright, and a process with a running
+pytest in it never counts as interactive. The host-E2E test is now opt-in
+(`HERMUS_REAL_INPUT=on`), and its `DISPLAY` check no longer accepts a placeholder
+word. `test_computer_action_explicit_dry_run_works_offline` — the RIS-12 test that
+typed into a focused window on a real desktop — asserts the dry-run backend now.
+
+### The emergency stop actually stops computer control
+
+The controller honoured its own halt latch but not the workspace-wide Red Line 1
+brake, so `/emergency/stop` (the control room's red button) stopped the rest of the
+product and left the mouse running. It now checks both, treats an unreadable brake
+file as halted, and journals every refused step as `aborted` with the reason — a
+test drives a multi-step action, fires the brake mid-way, and asserts nothing
+further reaches the backend.
+
+**New endpoints:** `GET /api/v1/undo`, `POST /api/v1/undo/{id}`,
+`POST /api/v1/undo/last`, `POST /api/v1/preview`, `POST /api/v1/preview/{token}`.
+**New tools:** `append_file`, `delete_file`, `move_file` (ASK by default, journaled
+like every other mutation). **Tests:** 56 new across `test_undo_guarantee.py`,
+`test_dry_run_preview.py`, `test_undo_routes.py`, `test_real_input_guard.py` and
+`test_emergency_stop_stops_computer.py`.

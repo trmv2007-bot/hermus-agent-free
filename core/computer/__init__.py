@@ -45,6 +45,12 @@ from .grounding import (
     VisualGrounder,
     create_grounding_system,
 )
+from .input_guard import (
+    RealInputDisabledError,
+    declare_interactive,
+    guard_state,
+    real_input_enabled,
+)
 from .keyboard import DryRunKeyboard, KeyboardBackend, PyAutoGUIKeyboard, default_keyboard
 from .mouse import DryRunMouse, MouseBackend, PyAutoGUIMouse, default_mouse
 from .permissions import (
@@ -154,6 +160,10 @@ __all__ = [
     "PyAutoGUIMouse",
     "DryRunMouse",
     "default_mouse",
+    "RealInputDisabledError",
+    "declare_interactive",
+    "guard_state",
+    "real_input_enabled",
     "KeyboardBackend",
     "PyAutoGUIKeyboard",
     "DryRunKeyboard",

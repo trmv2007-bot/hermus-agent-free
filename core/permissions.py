@@ -154,6 +154,16 @@ DEFAULT_RISK = Risk.READ
 DEFAULT_CAPS = [Capability.READ]
 
 
+def _nested(data: dict[str, Any], keys: list[str]) -> Any:
+    """Read one nested value from a policy overrides document."""
+    current: Any = data
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
 class PermissionManager:
     def __init__(self, overrides_path: Path | None = None, approvals_path: Path | None = None):
         self.overrides_path = overrides_path or (workspace.dirs["memory"] / "permissions.json")
@@ -389,12 +399,50 @@ class PermissionManager:
     ) -> dict[str, Any]:
         if decision not in (Decision.ALLOW.value, Decision.ASK.value, Decision.DENY.value):
             return {"success": False, "error": f"decision must be allow/ask/deny, got '{decision}'"}
+        keys = ["agents", str(agent), str(tool_name)] if agent else ["tools", str(tool_name)]
+        prior = _nested(self.overrides, keys)
+        entry, journal = self._journal_setting(tool_name, decision, agent, keys, prior)
         if agent:
             self.overrides.setdefault("agents", {}).setdefault(agent, {})[tool_name] = decision
         else:
             self.overrides.setdefault("tools", {})[tool_name] = decision
         self._save_overrides()
-        return {"success": True, "tool": tool_name, "decision": decision, "agent": agent}
+        self._journal_setting_done(journal, entry, decision)
+        result = {"success": True, "tool": tool_name, "decision": decision, "agent": agent}
+        if entry is not None:
+            result["undo_id"] = entry.id
+        return result
+
+    def _journal_setting(self, tool_name: str, decision: str, agent: str | None, keys: list[str], prior: Any):
+        """Journal the prior value of a policy decision before it changes."""
+        try:
+            from .undo import get_undo_journal, journal_setting
+
+            journal = get_undo_journal()
+            where = f" (agent {agent})" if agent else ""
+            entry = journal_setting(
+                journal,
+                tool="perms_set",
+                description=f"permission for {tool_name}{where}: {prior or 'default'} -> {decision}",
+                path=self.overrides_path,
+                keys=keys,
+                value=prior,
+                present=prior is not None,
+                drop_if_empty=not Path(self.overrides_path).exists(),
+            )
+            return entry, journal
+        except Exception:  # noqa: BLE001 - journaling never blocks a policy change
+            return None, None
+
+    def _journal_setting_done(self, journal: Any, entry: Any, decision: str) -> None:
+        if journal is None or entry is None:
+            return
+        try:
+            from .undo import finish_setting
+
+            finish_setting(journal, entry, decision)
+        except Exception:  # noqa: BLE001
+            pass
 
     def audit(
         self,
