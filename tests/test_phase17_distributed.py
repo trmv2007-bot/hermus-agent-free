@@ -25,8 +25,18 @@ def test_distributed_does_not_route_missing_capability(tmp_path):
     assert result["error"] == "no_healthy_node_with_capability"
 
 
-def test_stale_nodes_are_not_selected(tmp_path):
-    coordinator = DistributedCoordinator(tmp_path / "nodes.json", heartbeat_timeout=0)
+def test_stale_nodes_are_not_selected(tmp_path, monkeypatch):
+    coordinator = DistributedCoordinator(tmp_path / "nodes.json", heartbeat_timeout=1)
     coordinator.register_node("Old node", capabilities=["vision"])
+
+    # Move the clock past the heartbeat window instead of relying on real time
+    # elapsing between registering and assigning: staleness is
+    # `now - last_heartbeat > timeout`, so on a fast runner both calls landed in
+    # the same tick and the node stayed healthy.
+    import core.distributed as distributed
+
+    real_time = distributed.time.time
+    monkeypatch.setattr(distributed.time, "time", lambda: real_time() + 5)
+
     result = coordinator.assign("job_3", capability="vision")
     assert result["success"] is False
