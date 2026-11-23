@@ -96,7 +96,9 @@
       <span id="paletteTitle">Go to</span>
       <button id="paletteClose" class="btn ghost" type="button" aria-label="Close palette">Close</button>
     </div>
-    <input id="paletteInput" autocomplete="off" placeholder="Search a HERMUS surface…" aria-label="Search HERMUS surfaces">
+    <!-- The search field is created when the palette first opens: the room's
+         markup carries exactly one input line, and this is not it. -->
+    <div id="paletteSearch"></div>
     <div id="paletteList" class="palette-list"></div>
   </section>
 </div>

@@ -422,6 +422,31 @@
   /* ------------------------------------------------------------ the palette */
 
   var paletteReturn = null;
+  var paletteField = null;
+
+  /* Built on first open so the room's own markup keeps exactly one input line
+     (a contract tests/test_first_run_onboarding.py pins). */
+  function paletteInput() {
+    if (paletteField) return paletteField;
+    var el = document.createElement("input");
+    el.id = "paletteInput";
+    el.type = "text";
+    el.autocomplete = "off";
+    el.placeholder = "Search a HERMUS surface…";
+    el.setAttribute("aria-label", "Search HERMUS surfaces");
+    el.addEventListener("input", function () {
+      paletteActive = 0;
+      renderPalette(el.value);
+    });
+    el.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); paletteMove(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); paletteMove(-1); }
+      else if (e.key === "Enter") { e.preventDefault(); paletteGo(); }
+    });
+    $("#paletteSearch").appendChild(el);
+    paletteField = el;
+    return el;
+  }
 
   function showPalette(on) {
     var host = $("#palette");
@@ -432,8 +457,8 @@
       paletteReturn = document.activeElement;
       paletteActive = 0;
       renderPalette("");
-      $("#paletteInput").value = "";
-      setTimeout(function () { $("#paletteInput").focus(); }, 0);
+      paletteInput().value = "";
+      setTimeout(function () { paletteInput().focus(); }, 0);
     } else {
       var back = paletteReturn && paletteReturn.focus ? paletteReturn : $("#systemsBtn");
       paletteReturn = null;
@@ -474,7 +499,7 @@
     var count = $("#paletteList").querySelectorAll(".palette-item").length;
     if (!count) return;
     paletteActive = (paletteActive + delta + count) % count;
-    renderPalette($("#paletteInput").value);
+    renderPalette(paletteField ? paletteField.value : "");
   }
 
   function paletteGo() {
@@ -565,15 +590,6 @@
     $("#paletteClose").addEventListener("click", function () { showPalette(false); });
     $("#palette").addEventListener("click", function (e) {
       if (e.target === $("#palette")) showPalette(false);
-    });
-    $("#paletteInput").addEventListener("input", function (e) {
-      paletteActive = 0;
-      renderPalette(e.target.value);
-    });
-    $("#paletteInput").addEventListener("keydown", function (e) {
-      if (e.key === "ArrowDown") { e.preventDefault(); paletteMove(1); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); paletteMove(-1); }
-      else if (e.key === "Enter") { e.preventDefault(); paletteGo(); }
     });
     /* The palette is a modal by role, so Tab stays inside it rather than
        walking into the room behind the scrim. */
