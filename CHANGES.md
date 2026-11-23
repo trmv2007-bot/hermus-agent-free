@@ -513,3 +513,47 @@ when the stream is trimmed to nothing, an inline approval card that never opens
 a dialog, the enumeration of all twelve destinations from Systems and from the
 palette, a deep link selecting the panel it names, `Ctrl P`/`Esc`, the tab order,
 and a focus ring on every control.
+
+# IO · Every text read and write declares UTF-8 (2026-11-23)
+
+`open()`, `Path.read_text`, `Path.write_text` and `subprocess.run(text=True)` all
+fall back to the **locale encoding** when no encoding is given. On a default
+Windows install that is cp1252. A report, memory file, event log or generated
+skill carrying an em dash, a Cyrillic name or an emoji therefore either raised
+`UnicodeEncodeError` on write or produced bytes that only cp1252 could read
+back — in both cases a product that looks broken to the one person using it, and
+a class of failure Linux CI cannot see.
+
+**What changed.** Every text open in `core/`, `gateway/`, `hermus_cli/`,
+`tools/`, `scheduler/` and `subagents/` now states `encoding="utf-8"`
+(85 file call sites), and every `subprocess` call that asked for text decodes as
+UTF-8 (44 sites). Subprocess output is bytes from an arbitrary external program,
+so those pass `errors="replace"`: an undecodable byte becomes U+FFFD instead of
+crashing a tool call. Binary paths (22 in `core/`, 3 in `gateway/`, 1 in
+`tools/`) keep their `"b"` mode and were left alone.
+
+**What keeps it fixed.** `tests/test_utf8_io.py` walks the ASTs rather than
+grepping, so it sees a new call site wherever it appears, and fails on any
+`open`/`read_text`/`write_text` or text-mode subprocess call without an encoding.
+Four descriptor and non-filesystem opens are allowlisted with the reason they
+are exempt (`os.open` lock/fsync descriptors, `PIL.Image.open` on an in-memory
+buffer, `MissionFileScope.open` building a scope). It runs in CI on Linux, where
+the bug is invisible, so the gate is green precisely where the defect is not.
+
+**Measured on this Windows 11 PC** (`locale.getpreferredencoding()` = cp1252),
+`python -m pytest tests/ -q --ignore=tests/eval`, isolated `HERMUS_HOME` and
+`HERMUS_DATA_DIR`: **48 failed / 1774 passed** before, **29 failed / 1802
+passed** after, with 19 baseline ids moving to green and no new failure. The
+remaining 29 are not encoding defects; the largest groups are `sandbox.run_python`
+ignoring `cwd`/`files` on Windows when it stages a generated skill for the
+import probe (7 ids), harness suite checks written as POSIX shell (`test`, `wc`,
+`grep`, `!` — 4 ids), and POSIX path/permission assumptions in the tests
+themselves.
+
+**Round-trip proof** on the same machine: writing `"dash — name Голованов emoji
+🧠\n"` with no encoding raises `UnicodeEncodeError: 'charmap' codec can't encode
+characters in position 12-20`; with `encoding="utf-8"` it writes 45 bytes
+(`e2 80 94` for the em dash, `d0 93 d0 be ...` for the Cyrillic, `f0 9f a7 a0`
+for the emoji) and reads back byte-identical. The same bytes read back without
+an encoding decode to mojibake, or raise
+`UnicodeDecodeError: ... byte 0x81` when the text contains `Ё`.
