@@ -57,6 +57,13 @@ def test_every_runtime_data_tree_is_a_package_with_its_data():
         assert f"{tree}*" in included, f"{tree}* is not in the find-packages include list"
 
 
+def test_gateway_ships_the_harness_page():
+    """The harness is the home now, so a wheel without it installs no home page."""
+    patterns = " ".join(_pyproject()["tool"]["setuptools"]["package-data"]["gateway"])
+    assert "harness.html" in patterns
+    assert (ROOT / "gateway" / "harness.html").is_file()
+
+
 def test_gateway_ships_its_control_room_assets():
     project = _pyproject()
     gateway_data = project["tool"]["setuptools"]["package-data"]["gateway"]

@@ -898,6 +898,36 @@ async def api_status():
     }
 
 
+@app.get("/harness", response_class=HTMLResponse)
+async def harness_view():
+    """The harness: a task in, a transcript and a diff out.
+
+    This is the home surface now. It reads the same canonical backend as the
+    cockpit — /runs, /runs/{id}, /runs/{id}/diff, POST /command — and owns no
+    truth of its own. ``/control`` keeps the ops view (presence, approvals,
+    subsystems) and is reachable from the mode switch in the header.
+    """
+    html_path = Path(__file__).parent / "harness.html"
+    if not html_path.exists():
+        return HTMLResponse("harness not found", status_code=404)
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/static/harness.css")
+async def harness_css():
+    """Harness stylesheet."""
+    return _serve_control_asset("harness.css", "text/css; charset=utf-8")
+
+
+@app.get("/static/harness.js")
+async def harness_js():
+    """Harness application script (markup lives in harness.html)."""
+    return _serve_control_asset("harness.js", "application/javascript; charset=utf-8")
+
+
 @app.get("/control", response_class=HTMLResponse)
 @app.get("/controlroom", response_class=HTMLResponse)
 async def control_room():

@@ -41,6 +41,8 @@ def test_root_redirects_to_the_first_screen():
     onboarding.save(onboarding.record_brain(state, {"kind": "stub", "model": "mock/mock", "source": "test"}))
     r = c.get("/", follow_redirects=False)
     assert r.status_code in (307, 302)
+    # A stub brain is not a finished setup, so the entrance is still the welcome
+    # flow; the harness is where a completed install lands (asserted below).
     assert r.headers.get("location") == "/welcome"
     # HEAD is allowed on root (health checks / proxies).
     assert c.head("/", follow_redirects=False).status_code in (307, 302)
@@ -56,7 +58,8 @@ def test_root_redirects_to_the_first_screen():
     done["check"] = {"ok": True, "model": "test:1b", "reason": "", "at": None, "ms": 1}
     onboarding.save(done)
     r = c.get("/", follow_redirects=False)
-    assert r.headers.get("location") == "/companion"
+    assert r.headers.get("location") == "/harness"
+    assert c.get("/harness").status_code == 200
     assert c.get("/companion").status_code == 200
 
 

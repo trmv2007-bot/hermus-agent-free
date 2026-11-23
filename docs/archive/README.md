@@ -1,23 +1,30 @@
-# Documentation archive
+# Archive
 
-Historical documents kept for provenance. **Nothing here is the current
-reference** — each file carries a banner pointing at the document that
-supersedes it, and the content below those banners is preserved verbatim.
+These documents are kept for the record, not as a description of the product.
 
-| File | Why it is here | Current reference |
-|---|---|---|
-| `ARCHITECTURE_UPGRADES.md` | foundation narrative, explicitly superseded | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
-| `FINAL_REPORT.md` | branch-reconciliation record for a merge that has since landed | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
-| `PRODUCTION_READINESS_REPORT.md` | audit report pinned to one commit | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
-| `PHASE_A_ROADMAP.md` | completed work plan | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
-| `PHASE_C_D.md` | completed work plan | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
-| `THINKING_SYSTEM_PLAN.md` | design record for the counsel subsystem, now built | [`README.md`](../../README.md) |
-| `SIMPLE_GUIDE.md` | second getting-started guide; unique sections merged out | [`QUICKSTART.md`](../../QUICKSTART.md) |
+They are the design and phase notes from when this repository was being built out
+as a JARVIS/FAIRY-style personal agent: the control-room narrative, the phase
+plan (world awareness, long-horizon planning, specialist ecosystem, distributed
+nodes, and so on) and the environment specs that went with the cockpit.
 
-Three repository-root documents are **load-bearing** and must stay where they
-are — code and tests read them by name:
+That work is still in the code — the mission engine, the sentinel, the presence
+kernel, the approval surface — but the product's home screen is now the harness
+(`/harness`: a task in, a transcript and a diff out), and the cockpit moved to
+`/control` as the ops view. Documentation that describes the old centre of
+gravity would be misleading as a starting point, so it lives here.
 
-- `RED_LINES.md` — the autonomy constitution (`core/evolution.py` protects it;
-  `tests/test_red_lines_policy.py` asserts its contents).
-- `AUTONOMY_BOUNDARIES.md` — the derived boundary policy.
-- `CAPABILITY_LEDGER.md` — written at runtime by `core/capability_ledger.py`.
+The documents that stay load-bearing — `RED_LINES.md`, `AUTONOMY_BOUNDARIES.md` and
+`CAPABILITY_LEDGER.md` — were never archived: they describe what the agent may do, which did not
+change when the home screen did.
+
+What to read instead:
+
+| Question | Document |
+|---|---|
+| What is this and how do I run a task? | [`../../README.md`](../../README.md) |
+| How is the code organised, and what owns what? | [`../ARCHITECTURE.md`](../../ARCHITECTURE.md) |
+| How do I measure the agent on a task suite? | [`../HARNESS.md`](../HARNESS.md) |
+| What may it do without asking me? | [`../../RED_LINES.md`](../../RED_LINES.md) and [`../../AUTONOMY_BOUNDARIES.md`](../../AUTONOMY_BOUNDARIES.md) |
+| How do I install, verify or repair it? | [`../../QUICKSTART.md`](../../QUICKSTART.md) |
+
+Nothing here is deleted, and nothing here is claimed to be current.

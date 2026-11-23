@@ -1,3 +1,9 @@
+> **Archived — historical document.**
+> This is a design/phase note from the JARVIS/FAIRY era of this project, superseded by the
+> harness-first product described in [`README.md`](../../README.md). It is **not** the current
+> reference; the code it describes still exists, the centre of gravity it assumes does not.
+> Content below is preserved verbatim.
+>
 # Phase 8 — Scheduling & Time Awareness
 
 Status: Complete

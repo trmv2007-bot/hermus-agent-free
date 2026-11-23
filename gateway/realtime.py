@@ -24,6 +24,7 @@ import json
 import os
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
@@ -876,6 +877,120 @@ async def get_run(run_id: str, limit: int = 200):
     if "exists" in snap and not snap["exists"]:
         return JSONResponse(snap, status_code=404)
     return snap
+
+
+def _collect_paths(node: Any, out: set[str], depth: int = 0) -> None:
+    """Every plausible file path recorded anywhere in a run's payloads."""
+    if depth > 6:
+        return
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(value, str) and key in ("path", "file", "filename", "target_path", "file_path"):
+                out.add(value.strip())
+            elif key in ("paths", "files") and isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        out.add(item.strip())
+                    elif isinstance(item, dict):
+                        _collect_paths(item, out, depth + 1)
+            else:
+                _collect_paths(value, out, depth + 1)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_paths(item, out, depth + 1)
+
+
+def _parse_unified(diff_text: str) -> list[dict[str, Any]]:
+    """Split ``git diff`` output into per-file hunks the UI can render."""
+    files: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    hunk: dict[str, Any] | None = None
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            if current:
+                files.append(current)
+            target = line.split(" b/", 1)[1] if " b/" in line else line.split(" ")[-1]
+            current = {"path": target, "additions": 0, "deletions": 0, "hunks": []}
+            hunk = None
+        elif current is None:
+            continue
+        elif line.startswith("@@"):
+            hunk = {"header": line, "lines": []}
+            current["hunks"].append(hunk)
+        elif hunk is not None:
+            hunk["lines"].append(line)
+            if line.startswith("+") and not line.startswith("+++"):
+                current["additions"] += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                current["deletions"] += 1
+    if current:
+        files.append(current)
+    return files
+
+
+@router.get("/runs/{run_id}/diff")
+async def run_diff(run_id: str):
+    """What this run changed, as unified hunks — or an honest "nothing to show".
+
+    The paths come from the run's own recorded payloads; the hunks come from git
+    in the repository the paths live in. A run that edited nothing inside a git
+    worktree gets ``available: false`` and the reason, never an invented diff.
+    """
+    snap = run_bus.snapshot(run_id)
+    if "exists" in snap and not snap["exists"]:
+        return JSONResponse({"available": False, "reason": "no such run", "files": []}, status_code=404)
+
+    paths: set[str] = set()
+    for event in run_bus.history(run_id, limit=400):
+        _collect_paths(event.get("data") or {}, paths)
+    _collect_paths(snap.get("result") or {}, paths)
+
+    root = Path(config.base_dir)
+    resolved: list[str] = []
+    for raw in sorted(paths):
+        candidate = Path(raw)
+        full = candidate if candidate.is_absolute() else (root / candidate)
+        try:
+            full.resolve().relative_to(root.resolve())
+        except (ValueError, OSError):
+            continue  # outside the repository: we cannot diff what we do not own
+        if full.exists() or full.is_symlink():
+            resolved.append(str(full.relative_to(root)).replace("\\", "/"))
+
+    if not resolved:
+        return {
+            "available": False,
+            "reason": "This run recorded no file changes inside the repository.",
+            "files": [],
+            "paths_seen": sorted(paths)[:20],
+        }
+
+    def _git_diff() -> tuple[int, str, str]:
+        import subprocess
+
+        proc = subprocess.run(
+            ["git", "-C", str(root), "diff", "--unified=3", "--", *resolved],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    code, out, err = await asyncio.to_thread(_git_diff)
+    if code != 0:
+        return {
+            "available": False,
+            "reason": f"git diff failed: {err.strip()[:200] or 'unknown error'}",
+            "files": [{"path": p, "source": "run evidence"} for p in resolved],
+        }
+    files = _parse_unified(out)
+    if not files:
+        return {
+            "available": False,
+            "reason": "Those paths are recorded by the run but match no change in the worktree.",
+            "files": [{"path": p, "source": "run evidence"} for p in resolved],
+        }
+    return {"available": True, "run_id": run_id, "files": files, "paths": resolved}
 
 
 # ---- missions & DAG -----------------------------------------------------------

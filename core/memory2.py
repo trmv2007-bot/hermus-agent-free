@@ -1135,8 +1135,14 @@ class Memory2:
     def stats(self) -> dict[str, Any]:
         by_kind: dict[str, int] = {}
         bands: dict[str, int] = {}
-        with self.store._lock:
-            conn = self.store.conn()
+        # A short-lived connection, opened and used on this thread: the console
+        # probes run in a worker pool, and two threads driving the store's shared
+        # handle at once segfaulted the interpreter on macOS (CPython 3.11 arm64,
+        # system sqlite). The shared handle stays for the write path it was built
+        # for; a read-only stats query does not need it.
+        from .db_registry import using
+
+        with using(self.store.db_path, owner="memory2:stats", timeout=15.0, check_same_thread=False) as conn:
             for row in conn.execute("SELECT kind, COUNT(*) c FROM memories WHERE archived=0 GROUP BY kind"):
                 by_kind[row["kind"]] = row["c"]
             for row in conn.execute(
