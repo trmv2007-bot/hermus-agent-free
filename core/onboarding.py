@@ -123,7 +123,9 @@ def record_brain(state: dict[str, Any], brain: dict[str, Any]) -> dict[str, Any]
     return state
 
 
-def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: str, reason: str) -> dict[str, Any]:
+def record_upgrade(
+    state: dict[str, Any], brain: dict[str, Any], *, previous: str | None, reason: str
+) -> dict[str, Any]:
     """Replace a recorded model with a stronger one, keeping the run finished.
 
     A migration, not a new first run: the person's name and permission choice
@@ -147,7 +149,7 @@ def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: st
     history = [row for row in (state.get("upgrade_history") or []) if isinstance(row, dict)]
     state["upgrade_history"] = (history + [dict(state["upgrade"])])[-10:]
     check = state.get("check") or {}
-    if check.get("ok"):
+    if check.get("ok") or previous is None:
         state["check"] = {
             "ok": False,
             "model": None,
@@ -157,6 +159,24 @@ def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: st
         state["completed_at"] = None
     save(state)
     return state
+
+
+def install_has_history() -> bool:
+    """Has this workspace been used before, even if its onboarding state is gone?
+
+    Distinguishes a real first run from an install whose state file was lost or
+    restored from elsewhere. The workspace's own folders are the evidence: a
+    directory that only a used install has, with something in it.
+    """
+    root = state_path().parent
+    for name in ("sessions", "memory", "missions", "checkpoints"):
+        folder = root / name
+        try:
+            if folder.is_dir() and any(folder.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def upgrade_pending(state: dict[str, Any]) -> bool:

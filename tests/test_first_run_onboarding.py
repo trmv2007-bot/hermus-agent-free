@@ -133,8 +133,18 @@ def test_recording_a_new_brain_invalidates_the_previous_proof():
 
 
 def test_root_redirects_to_welcome_while_incomplete():
+    """An install with nothing to answer with opens first run.
+
+    A model that is merely reachable no longer counts when the workspace has never
+    been used, and the inverse matters too: patched here so a machine actually
+    running Ollama cannot change what this asserts.
+    """
     _reset_state()
-    r = _client().get("/", follow_redirects=False)
+    original = _brain(NO_LOCAL)
+    try:
+        r = _client().get("/", follow_redirects=False)
+    finally:
+        brain.local_status = original
     assert r.status_code in (302, 307)
     assert r.headers["location"] == "/welcome"
 

@@ -344,6 +344,76 @@ def test_a_recorded_model_below_the_best_is_upgraded_and_the_run_stays_finished(
     assert "strongest" in again["reason"]
 
 
+def test_the_migration_opens_the_companion_and_names_what_it_replaced(monkeypatch, tmp_path):
+    """A pending first answer is not an unfinished install (regression from #90)."""
+    from gateway import routes_onboarding
+
+    state_file = tmp_path / "onboarding.json"
+    monkeypatch.setattr(onboarding, "state_path", lambda: state_file)
+    _write_state(state_file, "mistral/open-mistral-nemo")
+    monkeypatch.setattr(brain, "local_status", lambda force=False: SERVING)
+
+    from core.config import config
+
+    monkeypatch.setattr(config, "model", "mistral/open-mistral-nemo", raising=False)
+    brain.apply_resolved_default()
+
+    state = onboarding.load()
+    assert state["upgrade"]["from"] == "mistral/open-mistral-nemo"
+    assert state["upgrade"]["to"] == "ollama/lfm2.5:8b"
+    assert routes_onboarding.redirect_target() == "/companion"
+    assert routes_onboarding.state_payload()["upgrade"]["from"] == "mistral/open-mistral-nemo"
+
+
+def test_an_install_with_no_recorded_model_adopts_the_best_and_still_opens(monkeypatch, tmp_path):
+    from gateway import routes_onboarding
+
+    state_file = tmp_path / "onboarding.json"
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "facts.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(onboarding, "state_path", lambda: state_file)
+    monkeypatch.setattr(brain, "local_status", lambda force=False: SERVING)
+
+    from core.config import config
+
+    monkeypatch.setattr(config, "model", "ollama/llama3.1:8b", raising=False)
+    picked = brain.apply_resolved_default()
+    assert picked["recorded"] is True
+    assert picked["model"] == "ollama/lfm2.5:8b"
+
+    state = onboarding.load()
+    assert state["brain"]["model"] == "ollama/lfm2.5:8b"
+    assert state["upgrade"]["from"] is None
+    assert onboarding.upgrade_pending(state) is True
+    assert routes_onboarding.redirect_target() == "/companion"
+
+
+def test_a_real_first_run_is_not_hijacked_by_a_pulled_model(monkeypatch, tmp_path):
+    from gateway import routes_onboarding
+
+    state_file = tmp_path / "onboarding.json"
+    monkeypatch.setattr(onboarding, "state_path", lambda: state_file)
+    monkeypatch.setattr(brain, "local_status", lambda force=False: SERVING)
+
+    from core.config import config
+
+    monkeypatch.setattr(config, "model", "ollama/llama3.1:8b", raising=False)
+    picked = brain.apply_resolved_default()
+    assert picked["model"] == "ollama/lfm2.5:8b"
+    assert "recorded" not in picked
+    assert onboarding.load()["brain"] is None
+    assert routes_onboarding.redirect_target() == "/welcome"
+
+
+def test_an_install_with_nothing_to_answer_with_still_opens_the_first_screen(monkeypatch, tmp_path):
+    from gateway import routes_onboarding
+
+    state_file = tmp_path / "onboarding.json"
+    monkeypatch.setattr(onboarding, "state_path", lambda: state_file)
+    monkeypatch.setattr(brain, "local_status", lambda force=False: NO_LOCAL)
+    assert routes_onboarding.redirect_target() == "/welcome"
+
+
 def test_a_model_the_key_is_rate_limiting_is_not_migrated_away(monkeypatch):
     """429 is capacity. Recording it as a retirement is the bug this pins."""
     _with_key(monkeypatch, "mistral")

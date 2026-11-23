@@ -470,9 +470,12 @@ def apply_resolved_default(*, status: dict[str, Any] | None = None) -> dict[str,
       adopt the strongest reachable model;
     * the configured model is the one onboarding recorded and it is now below the
       strongest reachable one — its runtime lost it, the provider no longer serves
-      it to this key, or a stronger free model answered when probed. Upgrade it in place, record the change in the
-      onboarding state, and report the reason. Onboarding does not run again and
-      the person's name and permission choice are untouched.
+      it to this key, or a stronger free model answered when probed.
+
+    Either way the choice is written into the onboarding state, because a model
+    the gateway is using but the state does not know about reads as an unfinished
+    install on the first screen. Onboarding does not run again and the person's
+    name and permission choice are untouched.
 
     A model pinned with ``HERMUS_MODEL``, and one that is already the best
     available, are left alone.
@@ -504,14 +507,18 @@ def apply_resolved_default(*, status: dict[str, Any] | None = None) -> dict[str,
     picked = {
         "applied": True,
         "model": target,
-        "from": current or None,
+        "from": stored or current or None,
         "source": best["source"],
         "reason": offer.get("reason") or best["reason"],
         "model_reason": best["reason"],
         "upgraded": bool(offer.get("needed")),
     }
-    if stored and onboarding.record_upgrade(onboarding.load(), best, previous=stored, reason=picked["reason"]):
-        picked["recorded"] = True
+    # Record the choice when there is something to record against: a model the
+    # person already had, or a workspace that has been used before. A genuine
+    # first run keeps its welcome screen, which is where the model gets chosen.
+    if stored or onboarding.install_has_history():
+        if onboarding.record_upgrade(onboarding.load(), best, previous=stored, reason=picked["reason"]):
+            picked["recorded"] = True
     return picked
 
 
