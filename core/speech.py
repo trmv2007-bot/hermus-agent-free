@@ -60,6 +60,31 @@ def prepare_speech_text(text: str) -> str:
     return value[:_MAX_SPEECH_CHARS]
 
 
+def wav_bytes(pcm: bytes, rate: int = 24000) -> bytes:
+    """Wrap raw 16-bit mono PCM in a RIFF header.
+
+    Written by hand rather than through ``wave``: the module takes no encoding
+    argument, and a project rule requires every text-capable file call to state
+    one. This is byte I/O from end to end, so it never touches a text codec.
+    """
+    channels, width = 1, 2
+    return (
+        b"RIFF"
+        + (36 + len(pcm)).to_bytes(4, "little")
+        + b"WAVEfmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + rate.to_bytes(4, "little")
+        + (rate * channels * width).to_bytes(4, "little")
+        + (channels * width).to_bytes(2, "little")
+        + (width * 8).to_bytes(2, "little")
+        + b"data"
+        + len(pcm).to_bytes(4, "little")
+        + pcm
+    )
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -424,10 +449,13 @@ class SpeechEngine:
         The package ships the same models and needs no external process, so a
         stock ``pip install piper-tts`` plus one voice file is enough.
         """
-        import wave
-
-        with wave.open(str(path), "wb") as handle:
-            self._piper_voice(model).synthesize_wav(text, handle)
+        piper_voice = self._piper_voice(model)
+        rate = 22050
+        frames = bytearray()
+        for chunk in piper_voice.synthesize(text):
+            frames.extend(chunk.audio_int16_bytes)
+            rate = int(getattr(chunk, "sample_rate", rate) or rate)
+        path.write_bytes(wav_bytes(bytes(frames), rate))
 
     def warm(self) -> dict[str, Any]:
         """Load the selected local voice now, so the first sentence is not slow.

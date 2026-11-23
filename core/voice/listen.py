@@ -23,7 +23,6 @@ import os
 import threading
 import time
 import uuid
-import wave
 from array import array
 from dataclasses import dataclass, field
 from typing import Any
@@ -205,14 +204,10 @@ def trim_silence(pcm: bytes, *, threshold: float = _SILENCE_RMS, pad_ms: int = 1
 
 
 def pcm_to_wav(pcm: bytes) -> bytes:
-    """Wrap PCM16 mono in a RIFF header — faster-whisper reads files, not streams."""
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as handle:
-        handle.setnchannels(_CHANNELS)
-        handle.setsampwidth(SAMPLE_WIDTH)
-        handle.setframerate(PCM_RATE)
-        handle.writeframes(pcm)
-    return buffer.getvalue()
+    """Wrap PCM16 mono in a RIFF header for the paths that need a stream."""
+    from core.speech import wav_bytes
+
+    return wav_bytes(pcm, PCM_RATE)
 
 
 def duration_ms(pcm: bytes) -> int:
