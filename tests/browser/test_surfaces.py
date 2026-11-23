@@ -188,6 +188,9 @@ class TestTheLanding:
             text = page.inner_text("body")
             _assert_no_status_board(text, f"the landing at {width}px")
             assert page.evaluate("() => document.querySelectorAll('.console-card, #consolePanels, .kpi').length") == 0
+            # The room's own first-screen guard matches classes containing
+            # "telemetry": the Diagnostics door must not wear that name.
+            assert page.evaluate("() => document.querySelectorAll(\"[class*='telemetry']\").length") == 0
             page.screenshot(path=str(shots / f"room-after-onboarding-{width}.png"))
         finally:
             context.close()
@@ -216,9 +219,12 @@ class TestSystemsIsAnAnswer:
 
             # The grid is not in the sheet, and not in the DOM behind it either.
             assert page.evaluate("() => document.querySelectorAll('#systems #consolePanels, #systems .console-card').length") == 0
-            assert page.evaluate("() => document.querySelector('#systemsTelemetry').open === false"), (
+            assert page.evaluate("() => document.querySelector('#systemsDiagnostics').open === false"), (
                 "Diagnostics is open by default"
             )
+            assert page.evaluate("() => document.querySelectorAll(\"[class*='telemetry']\").length") == 0
+            # The door is styled as part of the sheet, not left as raw chrome.
+            assert page.evaluate("() => getComputedStyle(document.querySelector('#systemsDiagnostics')).borderTopWidth") == "1px"
             page.screenshot(path=str(shots / f"systems-{width}.png"))
         finally:
             context.close()
@@ -287,18 +293,20 @@ class TestDiagnosticsIsDeliberate:
         context, page = _open(browser, gateway, width)
         try:
             _open_sheet(page)
-            assert page.evaluate("() => document.querySelector('#systemsTelemetry').open === false")
+            assert page.evaluate("() => document.querySelector('#systemsDiagnostics').open === false")
 
-            page.click("#systemsTelemetry summary")
+            page.click("#systemsDiagnostics summary")
             page.wait_for_timeout(250)
-            opened = page.evaluate("() => document.querySelector('#systemsTelemetry').open")
+            opened = page.evaluate("() => document.querySelector('#systemsDiagnostics').open")
             assert opened is True, "the Diagnostics control did not open"
 
-            body = page.evaluate("() => document.querySelector('.sheet-telemetry-body').innerText").lower()
+            body = page.evaluate("() => document.querySelector('.sheet-diagnostics-body').innerText").lower()
             assert "developer" in body, f"Diagnostics does not say who it is for: {body!r}"
             assert "nothing here is needed" in body, "Diagnostics does not say it is optional"
-            href = page.evaluate("() => document.querySelector('.sheet-telemetry-link').getAttribute('href')")
+            href = page.evaluate("() => document.querySelector('.sheet-diagnostics-link').getAttribute('href')")
             assert href == "/control?tab=systems", href
+            marked = page.evaluate("""() => getComputedStyle(document.querySelector('.sheet-diagnostics-mark')).transform""")
+            assert marked not in ("", "none"), "the chevron does not turn when the door opens"
             assert (
                 page.evaluate("() => document.querySelectorAll('#systems #consolePanels, #systems .console-card').length") == 0
             ), "the panel grid rendered inside the room"

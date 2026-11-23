@@ -429,8 +429,8 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 }
 
 /* Diagnostics: the only door to the gateway's probe grid, closed by default. */
-.sheet-telemetry { margin-top: 16px; border-top: 1px solid var(--line); }
-.sheet-telemetry summary {
+.sheet-diagnostics { margin-top: 16px; border-top: 1px solid var(--line); }
+.sheet-diagnostics summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -442,9 +442,9 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
   color: var(--muted);
   transition: color 160ms var(--ease), opacity 120ms var(--ease);
 }
-.sheet-telemetry summary::-webkit-details-marker { display: none; }
-.sheet-telemetry summary:active { opacity: 0.7; }
-.sheet-telemetry-mark {
+.sheet-diagnostics summary::-webkit-details-marker { display: none; }
+.sheet-diagnostics summary:active { opacity: 0.7; }
+.sheet-diagnostics-mark {
   width: 11px;
   height: 11px;
   fill: none;
@@ -454,18 +454,18 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
   stroke-linejoin: round;
   transition: transform 180ms var(--ease);
 }
-.sheet-telemetry[open] .sheet-telemetry-mark { transform: rotate(90deg); }
-.sheet-telemetry-body { padding-bottom: 6px; animation: settle 180ms var(--ease) both; }
-.sheet-telemetry-body p {
+.sheet-diagnostics[open] .sheet-diagnostics-mark { transform: rotate(90deg); }
+.sheet-diagnostics-body { padding-bottom: 6px; animation: settle 180ms var(--ease) both; }
+.sheet-diagnostics-body p {
   margin: 0 0 10px;
   max-width: 46ch;
   font-size: 12.5px;
   line-height: 1.65;
   color: var(--dim);
 }
-.sheet-telemetry-link { font-size: 12.5px; color: var(--accent); }
+.sheet-diagnostics-link { font-size: 12.5px; color: var(--accent); }
 @media (hover: hover) and (pointer: fine) {
-  .sheet-telemetry summary:hover { color: var(--accent-ink); }
+  .sheet-diagnostics summary:hover { color: var(--accent-ink); }
 }
 
 .sheet-foot {
@@ -503,9 +503,9 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 @media (prefers-reduced-motion: reduce) {
   .being, .being .orb-ring, .being .wing, .being .spark,
   .hello, .exchange, .reply[data-streaming="true"]::after, .sheet[open],
-  .sheet-rows[data-settled="true"], .sheet-telemetry-body {
+  .sheet-rows[data-settled="true"], .sheet-diagnostics-body {
     animation: none !important;
   }
-  .sheet-telemetry-mark { transition: none !important; }
+  .sheet-diagnostics-mark { transition: none !important; }
   .being, .skip, .line, .systems { transition: none !important; }
 }
