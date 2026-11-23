@@ -196,7 +196,7 @@ def approve_proposal(proposal_id: str) -> dict[str, Any]:
     )
     prop["approved"] = True
     prop["rule_id"] = rule.id
-    proposals_path().write_text(json.dumps(proposals, indent=2, default=str))
+    proposals_path().write_text(json.dumps(proposals, indent=2, default=str), encoding="utf-8")
     return {"ok": True, "rule_id": rule.id, "proposal": prop}
 
 
@@ -392,7 +392,7 @@ class Sentinel:
             try:
                 existing_rows.append(proposal)
                 self._proposals_path.parent.mkdir(parents=True, exist_ok=True)
-                self._proposals_path.write_text(json.dumps(existing_rows, indent=2, default=str))
+                self._proposals_path.write_text(json.dumps(existing_rows, indent=2, default=str), encoding="utf-8")
             except Exception as e:
                 logger.warning(f"[Sentinel] could not persist rule proposal: {e}")
                 return None

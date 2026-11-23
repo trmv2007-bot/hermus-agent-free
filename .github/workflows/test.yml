@@ -53,6 +53,44 @@ jobs:
         run: node --check gateway/static/nexus.js
 
 
+  # Windows is a first-class install target (`install.ps1`, `setup.cmd`) and the
+  # suite only ever ran on Linux, which is how a cp1252 stdout crash in
+  # `hermus doctor` and two undefined names survived. The full suite runs here
+  # too; the shell is bash on every runner so the tee/summary steps behave the
+  # same way.
+  cross-platform:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      HERMUS_HOME: /tmp/hermus-ci-home
+      HERMUS_SANDBOX: local
+      HERMUS_SANDBOX_NETWORK: "false"
+      HERMUS_ASK_POLICY: allow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m compileall -q core gateway tools hermus_cli scheduler
+      - name: Test suite
+        run: |
+          python -m pytest tests/ -q --ignore=tests/eval --tb=short -rf | tee /tmp/pytest.log
+      - name: Pytest failure summary
+        if: failure()
+        run: tail -n 150 /tmp/pytest.log >> "$GITHUB_STEP_SUMMARY"
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+
+
   ui-qa:
     runs-on: ubuntu-latest
     timeout-minutes: 12

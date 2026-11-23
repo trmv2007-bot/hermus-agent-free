@@ -593,7 +593,7 @@ class SkillForge:
         try:
             self.skills_dir.mkdir(parents=True, exist_ok=True)
             tmp = self.registry_path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True))
+            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True), encoding="utf-8")
             tmp.replace(self.registry_path)
         except Exception:
             pass
@@ -1046,16 +1046,16 @@ class SkillForge:
         staging = self.skills_dir / f".staging_{cand.name}"
         try:
             staging.mkdir(parents=True, exist_ok=True)
-            (staging / "SKILL.md").write_text(self.skill_md(cand))
-            (staging / "skill.py").write_text(self.skill_py(cand))
-            (staging / "test_skill.py").write_text(self.smoke_test(cand))
+            (staging / "SKILL.md").write_text(self.skill_md(cand), encoding="utf-8")
+            (staging / "skill.py").write_text(self.skill_py(cand), encoding="utf-8")
+            (staging / "test_skill.py").write_text(self.smoke_test(cand), encoding="utf-8")
             report = self.validate(staging) if validate else {"valid": True, "skipped": True}
             if not report.get("valid"):
                 self.quarantine_dir.mkdir(parents=True, exist_ok=True)
                 bad = self.quarantine_dir / f"{cand.name}_{datetime.now().strftime('%H%M%S')}"
                 shutil.move(str(staging), str(bad))
                 try:
-                    (bad / "VALIDATION_ERROR.txt").write_text(json.dumps(report, indent=2, default=str))
+                    (bad / "VALIDATION_ERROR.txt").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
                 except Exception:
                     pass
                 return {"installed": False, "quarantined": str(bad), "report": report}

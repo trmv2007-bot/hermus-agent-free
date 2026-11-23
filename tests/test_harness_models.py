@@ -144,6 +144,38 @@ def test_json_check_failures(tmp_path):
     assert not v3["success"]
 
 
+# --------------------------------------------------------------------------- portable file checks
+
+
+def test_file_not_contains_and_line_count(tmp_path):
+    """Portable replacements for the POSIX shell the builtin suites used to need
+    (`! grep -q`, `wc -l`), so `hermus check` can be green on Windows."""
+    (tmp_path / "events.jsonl").write_text(
+        "\n".join([json.dumps({"type": "note"}), json.dumps({"type": "alert"})]), encoding="utf-8"
+    )
+
+    quiet = verify_task(
+        {"checks": [{"type": "file_not_contains", "path": "events.jsonl", "values": ["regression", "fix_failed"]}]},
+        workspace=tmp_path,
+    )
+    assert quiet["success"], quiet["checks"]
+
+    noisy = verify_task(
+        {"checks": [{"type": "file_not_contains", "path": "events.jsonl", "values": ["alert"]}]},
+        workspace=tmp_path,
+    )
+    assert not noisy["success"] and "clear of" in noisy["checks"][0]["detail"]
+
+    counted = verify_task({"checks": [{"type": "line_count", "path": "events.jsonl", "value": 2}]}, workspace=tmp_path)
+    assert counted["success"], counted["checks"]
+
+    wrong = verify_task({"checks": [{"type": "line_count", "path": "events.jsonl", "value": 3}]}, workspace=tmp_path)
+    assert not wrong["success"] and "lines=2" in wrong["checks"][0]["detail"]
+
+    missing = verify_task({"checks": [{"type": "line_count", "path": "nope.jsonl", "value": 0}]}, workspace=tmp_path)
+    assert not missing["success"], "a missing file proves nothing"
+
+
 # --------------------------------------------------------------------------- fairy suite
 
 

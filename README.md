@@ -76,6 +76,18 @@ Linux / macOS / Termux:
 
     ./setup.sh
 
+### Install as a Python package
+
+From a clone:
+
+    pip install .
+    hermus doctor
+
+The wheel carries what the checkout carries — the Control Room markup and assets, the
+red-line policy, the API catalog and the builtin harness suites — so an installed
+`hermus` behaves like a clone. Runtime state (memory, jobs, logs, skills it writes) lives
+in `~/.hermus`, or wherever `HERMUS_HOME` points.
+
 ### Verify or repair
 
 Windows:
@@ -103,6 +115,8 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 > **Autonomy should mean more useful execution, not fewer safety controls.**
 
 ---
+
+## Build status
 
 ## Build status
 
@@ -136,6 +150,20 @@ command line that Windows would refuse to build.
 | Fresh-machine installation | `tests/test_bootstrap_runtime.py` |
 | First run: model resolution, `/welcome`, no fake boot claims | `tests/test_first_run_onboarding.py` |
 | Real-world provider/device deployment | deployment-dependent; `tests/test_model_gateway_fallback.py` covers the fallback path only |
+
+### What the suite cannot cover
+
+Four things are deliberately not claimed as verified, because they need hardware,
+credentials or a second machine. `ARCHITECTURE.md` §4 lists the same gaps:
+
+- **Provider end-to-end.** CI has no API keys; the suite drives the mock and local
+  paths only. A turn against a real provider is your first step after setup.
+- **Host computer control.** `tests/` exercises the controller with a simulated
+  display; the host-level test skips unless `pyautogui` and a real display exist.
+- **Android control.** The ADB and companion-bridge transports and the on-device
+  agentic loop are proven against a simulated device; a physical handset is untested.
+- **Off-site operations.** mTLS between nodes, backup/restore drills and failure
+  injection on real hardware are deployment work, not something a repo can assert.
 
 ---
 

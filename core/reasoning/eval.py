@@ -189,7 +189,7 @@ class EvalHarness:
 
     def _ensure_history(self):
         if not self.history_path.exists():
-            self.history_path.write_text("[]")
+            self.history_path.write_text("[]", encoding="utf-8")
 
     def _load_history(self) -> list[dict]:
         try:
@@ -200,7 +200,7 @@ class EvalHarness:
     def _save_run(self, run: dict):
         history = self._load_history()
         history.append(run)
-        self.history_path.write_text(json.dumps(history[-100:], indent=2))
+        self.history_path.write_text(json.dumps(history[-100:], indent=2), encoding="utf-8")
 
     def history(self, limit: int = 20) -> list[dict]:
         h = self._load_history()

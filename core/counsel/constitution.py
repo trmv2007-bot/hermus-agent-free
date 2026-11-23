@@ -140,7 +140,7 @@ class ConstitutionManager:
         doc["version"] = int(doc.get("version", 1))
         doc["updated_at"] = datetime.now().isoformat()
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(doc, indent=2))
+        tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
         shutil.move(str(tmp), str(self.path))
         # Snapshot for rollback
         snap = self.dir / f"constitution_v{doc['version']}.json"
@@ -167,7 +167,7 @@ class ConstitutionManager:
     def _append_log(self, entry: dict):
         log = self._load_log()
         log.append(entry)
-        self.log_path.write_text(json.dumps(log[-200:], indent=2))
+        self.log_path.write_text(json.dumps(log[-200:], indent=2), encoding="utf-8")
 
     def upgrade_log(self) -> list[dict]:
         return self._load_log()
@@ -294,7 +294,7 @@ class ConstitutionManager:
             return []
 
     def _save_pending(self, items: list[dict]):
-        self.pending_path.write_text(json.dumps(items, indent=2))
+        self.pending_path.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
     def propose(self, amendment: dict, source: str = "meta") -> dict:
         """Store an amendment. Low risk -> apply now (auto). High risk -> pending approval."""

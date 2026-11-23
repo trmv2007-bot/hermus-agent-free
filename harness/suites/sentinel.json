@@ -79,7 +79,11 @@
         {"type": "json", "key": "decisions.0.action", "value": "ignore"},
         {"type": "json", "key": "decisions.1.action", "value": "alert"},
         {"type": "json", "key": "decisions.2.action", "value": "ignore"},
-        {"type": "command", "cmd": "test \"$(wc -l < sentinel_decisions.jsonl)\" -eq 3"}
+        {
+      "type": "line_count",
+      "path": "sentinel_decisions.jsonl",
+      "value": 3
+    }
       ]
     }
   ]

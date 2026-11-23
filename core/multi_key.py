@@ -78,7 +78,7 @@ class MultiKeyManager:
         concurrent reader can never observe a truncated/partial JSON file.
         """
         tmp = self.db_path.parent / (self.db_path.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(tmp, self.db_path)
 
     def _update(self, mutator: Callable[[dict], None]) -> dict:

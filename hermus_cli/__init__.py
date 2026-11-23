@@ -14,6 +14,7 @@ import argparse
 
 from core.config import config
 from core.log import setup_logging
+from core.stdio import configure_stdio
 
 from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_undo, g_workspace
 from . import repl as repl_cmd
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    configure_stdio()
     setup_logging()
     # The interactive product may drive the real pointer and keyboard; every
     # other process (tests, CI, imports) keeps the fake controller.

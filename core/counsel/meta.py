@@ -54,7 +54,7 @@ class MetaCounsel:
 
     def _ensure_log(self):
         if not self.log_path.exists():
-            self.log_path.write_text("[]")
+            self.log_path.write_text("[]", encoding="utf-8")
 
     def _load_log(self) -> list[dict]:
         try:
@@ -65,7 +65,7 @@ class MetaCounsel:
     def _append_log(self, entry: dict):
         log = self._load_log()
         log.append(entry)
-        self.log_path.write_text(json.dumps(log[-100:], indent=2))
+        self.log_path.write_text(json.dumps(log[-100:], indent=2), encoding="utf-8")
 
     # ------------------------------------------------------------ session review
 

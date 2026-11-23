@@ -50,7 +50,10 @@ def test_computer_capability_is_honest(tmp_path):
     # If pyautogui is absent, availability MUST be false with a reason.
     if not _has_pyautogui():
         assert cap["available"] is False
-        assert cap["reason"].lower().startswith("pyautogui unavailable") or "pyautogui" in cap["reason"].lower()
+        reason = cap["reason"].lower()
+        # Either the real control path is missing, or the input guard refused first
+        # because this is a test runner — both are honest, neither may be empty.
+        assert "pyautogui" in reason or reason.startswith("real input disabled"), cap["reason"]
 
 
 def test_computer_action_reports_unavailable_on_fallback(tmp_path):

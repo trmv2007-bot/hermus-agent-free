@@ -174,6 +174,10 @@ def open_db(
     return db_registry.register(conn, path=str(path), owner=owner or Path(str(path)).name)
 
 
+#: Serialises short-lived connections (see :func:`using`).
+_SHORT_CONN_LOCK = threading.RLock()
+
+
 @contextmanager
 def using(path: Any, *, owner: str = "", **kwargs: Any) -> Iterator[sqlite3.Connection]:
     """Short-lived connection that is closed even when the body raises.
@@ -183,16 +187,22 @@ def using(path: Any, *, owner: str = "", **kwargs: Any) -> Iterator[sqlite3.Conn
     missing table, a ``KeyboardInterrupt``), which is how a busy gateway
     accumulated unclosed connections in the first place.
     """
-    conn = sqlite3.connect(str(path), **kwargs)
-    db_registry.register(conn, path=str(path), owner=owner or Path(str(path)).name)
-    try:
-        yield conn
-    finally:
+    # One short-lived connection at a time across the process. The console probes
+    # open these from a worker pool, and on macOS two of them touching sqlite3 at
+    # once crashed the interpreter (SIGSEGV inside the C module, in lessons and
+    # memory stats). The lock costs microseconds per read and removes the race;
+    # long-lived handles keep their own locks.
+    with _SHORT_CONN_LOCK:
+        conn = sqlite3.connect(str(path), **kwargs)
+        db_registry.register(conn, path=str(path), owner=owner or Path(str(path)).name)
         try:
-            conn.close()
-        except Exception:  # noqa: BLE001
-            pass
-        db_registry.unregister(conn)
+            yield conn
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            db_registry.unregister(conn)
 
 
 def close_all(reason: str = "shutdown") -> dict[str, Any]:

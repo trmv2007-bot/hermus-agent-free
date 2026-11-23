@@ -175,7 +175,7 @@ class ProactiveAutomation:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            tmp.write_text(json.dumps([r.as_dict() for r in self.rules.values()], indent=2))
+            tmp.write_text(json.dumps([r.as_dict() for r in self.rules.values()], indent=2), encoding="utf-8")
             tmp.replace(self.path)
         except OSError:
             # Automation state must never break the event path.

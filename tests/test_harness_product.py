@@ -165,11 +165,14 @@ def test_harness_api_routes(tmp_path, monkeypatch):
 
 
 def test_harness_schedule_cli_registers_and_removes():
-    env = {"HERMUS_NO_DOTENV": "1", "PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO)}
     import os
 
-    env.update({k: v for k, v in os.environ.items() if k.startswith("HERMUS_")})
+    # Start from the real environment and strip credentials: a bare POSIX PATH
+    # makes Windows fail to initialise asyncio's windows_events (and Winsock
+    # before it), and an inherited provider key would make the run non-hermetic.
+    env = {k: v for k, v in os.environ.items() if not k.endswith(("_API_KEY", "_TOKEN"))}
     env["HERMUS_NO_DOTENV"] = "1"
+    env["PYTHONPATH"] = str(REPO)
     env["PYTHONIOENCODING"] = "utf-8"  # child writes UTF-8 to a pipe, not cp1252
     py = sys.executable  # CI has no .venv; use the running interpreter
     suite = "zz_sched_test"

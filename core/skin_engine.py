@@ -166,7 +166,7 @@ class SkinEngine:
                 "branding": {"agent_name": "Cyber Agent", "response_label": " ⚡ Cyber ", "tool_prefix": " "},
             }
             try:
-                with open(example_path, "w") as f:
+                with open(example_path, "w", encoding="utf-8") as f:
                     yaml.safe_dump(example, f)
             except Exception:
                 pass
@@ -276,7 +276,7 @@ class SkinEngine:
 
         yaml_path = self.skins_dir / f"{name}.yaml"
         try:
-            with open(yaml_path, "w") as f:
+            with open(yaml_path, "w", encoding="utf-8") as f:
                 yaml.safe_dump(skin_data, f)
             return {"success": True, "path": str(yaml_path), "name": name}
         except Exception as e:

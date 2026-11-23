@@ -23,7 +23,7 @@ class SelfImprovement:
         self.reflection_log_path = config.resolve_path("data/self_improvement.json")
         self.reflection_log_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.reflection_log_path.exists():
-            self.reflection_log_path.write_text("[]")
+            self.reflection_log_path.write_text("[]", encoding="utf-8")
 
         # Background thread for idle reflection
         self.idle_check_interval = 30  # Check every 30 sec if idle
@@ -39,7 +39,7 @@ class SelfImprovement:
 
     def _save_history(self, history: list[dict]):
         try:
-            self.reflection_log_path.write_text(json.dumps(history[-20:], indent=2))  # Keep last 20
+            self.reflection_log_path.write_text(json.dumps(history[-20:], indent=2), encoding="utf-8")  # Keep last 20
         except Exception:
             pass
 
