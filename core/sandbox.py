@@ -534,7 +534,7 @@ class Sandbox:
                     ):
                         continue  # refuse ../ escapes out of the scratch dir
                     safe.parent.mkdir(parents=True, exist_ok=True)
-                    safe.write_text(str(content))
+                    safe.write_text(str(content), encoding="utf-8")
                     staged += 1
                 except Exception:
                     continue

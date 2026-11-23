@@ -68,7 +68,7 @@ def encode_image(image: Any, quality: int = 70, max_width: int | None = None) ->
         try:
             from PIL import Image
 
-            with Image.open(io.BytesIO(raw)) as opened:
+            with Image.open(io.BytesIO(raw), encoding="utf-8") as opened:
                 image = opened.convert("RGB").copy()
         except Exception:
             return None
@@ -105,7 +105,7 @@ def decode_frame(frame: Any) -> Any:
     try:
         from PIL import Image
 
-        with Image.open(io.BytesIO(bytes(value))) as img:
+        with Image.open(io.BytesIO(bytes(value)), encoding="utf-8") as img:
             return img.convert("RGB").copy()
     except Exception:
         return None

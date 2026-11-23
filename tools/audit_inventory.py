@@ -50,7 +50,7 @@ def resolve_imports(mod_path, node):
 imports = {}
 for f in list(iter_py("core")) + list(iter_py("gateway")) + list(iter_py("tools")):
     try:
-        tree = ast.parse(f.read_text())
+        tree = ast.parse(f.read_text(encoding="utf-8"))
     except Exception as e:
         imports[str(f.relative_to(ROOT))] = {"error": str(e)}
         continue
@@ -64,7 +64,7 @@ for f in list(iter_py("core")) + list(iter_py("gateway")) + list(iter_py("tools"
 routes = []
 for f in iter_py("gateway"):
     try:
-        tree = ast.parse(f.read_text())
+        tree = ast.parse(f.read_text(encoding="utf-8"))
     except Exception:
         continue
     for fn in func_nodes(tree):
@@ -86,7 +86,7 @@ for f in iter_py("gateway"):
 tool_refs = []
 for f in iter_py("core"):
     try:
-        tree = ast.parse(f.read_text())
+        tree = ast.parse(f.read_text(encoding="utf-8"))
     except Exception:
         continue
     for fn in func_nodes(tree):
@@ -97,7 +97,7 @@ for f in iter_py("core"):
 # Provider/credential seams
 provider_refs = []
 for f in list(iter_py("core")):
-    s = f.read_text()
+    s = f.read_text(encoding="utf-8")
     for pat, label in [
         (r"OPENROUTER|OPENAI|GROQ|OLLAMA|GEMINI|DEEPSEEK|HF_|HUGGINGFACE", "env-key"),
         (r"def .*provider|class .*Provider", "provider-def"),
@@ -117,7 +117,7 @@ inv = {
     "tool_count": len(tool_refs),
     "provider_seams": provider_refs,
 }
-(ROOT / "artifacts" / "inventory.json").write_text(json.dumps(inv, indent=2))
+(ROOT / "artifacts" / "inventory.json").write_text(json.dumps(inv, indent=2), encoding="utf-8")
 logger.info(f"modules={len(imports)} routes={len(routes)} tools={len(tool_refs)} providers_seams={len(provider_refs)}")
 logger.info("routes by prefix:")
 

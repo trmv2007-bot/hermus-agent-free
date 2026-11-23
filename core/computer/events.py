@@ -230,7 +230,7 @@ class ComputerEventBus:
                 start = 0  # journal rotated or truncated - resync
             if start == size:
                 return [], size
-            with self.journal_path.open("rb") as handle:
+            with self.journal_path.open("rb", encoding="utf-8") as handle:
                 handle.seek(start)
                 chunk = handle.read(size - start)
         except OSError:

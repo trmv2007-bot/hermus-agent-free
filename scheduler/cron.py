@@ -377,7 +377,7 @@ class CronManager:
 
     def _load(self) -> None:
         try:
-            rows = json.loads(self.db_path.read_text())
+            rows = json.loads(self.db_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             rows = []
         if not isinstance(rows, list):
@@ -407,7 +407,7 @@ class CronManager:
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.db_path.with_suffix(self.db_path.suffix + ".tmp")
-            tmp.write_text(json.dumps(list(self._jobs.values()), indent=2, default=str))
+            tmp.write_text(json.dumps(list(self._jobs.values()), indent=2, default=str), encoding="utf-8")
             tmp.replace(self.db_path)
         except OSError:
             pass

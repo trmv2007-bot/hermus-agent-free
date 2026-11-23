@@ -94,7 +94,7 @@ class Plan:
     def save(self, path: str | None = None) -> Path:
         p = Path(path) if path else config.resolve_path(f"data/plans/plan_{self.session_id or uuid.uuid4().hex[:8]}.json")
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(self.to_dict(), indent=2))
+        p.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
         return p
 
     @classmethod
@@ -103,7 +103,7 @@ class Plan:
         if not p.exists():
             return None
         try:
-            return cls.from_dict(json.loads(p.read_text()))
+            return cls.from_dict(json.loads(p.read_text(encoding="utf-8")))
         except Exception:
             return None
 

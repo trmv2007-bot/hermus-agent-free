@@ -244,7 +244,7 @@ class IncidentLedger:
 
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
-    with path.open("rb") as f:
+    with path.open("rb", encoding="utf-8") as f:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()

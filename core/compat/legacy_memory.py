@@ -364,14 +364,14 @@ class Memory:
         if not path.exists():
             return {"preferences": {}, "projects": [], "workflows": [], "created": datetime.now().isoformat()}
         try:
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
 
     def save_user_model(self, model: dict):
         path = self.get_user_model_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(model, indent=2))
+        path.write_text(json.dumps(model, indent=2), encoding="utf-8")
 
     @staticmethod
     def _dedupe_preserving_types(items: list[Any]) -> list[Any]:

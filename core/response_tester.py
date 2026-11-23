@@ -18,16 +18,16 @@ class ResponseTimeTester:
         self.results_path = config.resolve_path("data/response_times.json")
         self.results_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.results_path.exists():
-            self.results_path.write_text("[]")
+            self.results_path.write_text("[]", encoding="utf-8")
 
     def _load(self) -> list[dict]:
         try:
-            return json.loads(self.results_path.read_text())
+            return json.loads(self.results_path.read_text(encoding="utf-8"))
         except Exception:
             return []
 
     def _save(self, data: list[dict]):
-        self.results_path.write_text(json.dumps(data, indent=2))
+        self.results_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def test_llm_key(
         self,

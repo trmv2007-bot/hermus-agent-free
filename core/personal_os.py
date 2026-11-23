@@ -201,7 +201,7 @@ class PersonalOS:
 
     def _load(self) -> None:
         try:
-            rows = json.loads(self.path.read_text())
+            rows = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             rows = []
         if not isinstance(rows, list):
@@ -225,7 +225,7 @@ class PersonalOS:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            tmp.write_text(json.dumps([t.to_dict() for t in self.tasks.values()], indent=2, default=str))
+            tmp.write_text(json.dumps([t.to_dict() for t in self.tasks.values()], indent=2, default=str), encoding="utf-8")
             tmp.replace(self.path)
         except OSError:
             pass

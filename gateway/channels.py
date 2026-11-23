@@ -231,7 +231,7 @@ def start_telegram_polling(agent_factory: Callable = None, offset_file: str = No
         offset = 0
         if offset_path.exists():
             try:
-                offset = int(offset_path.read_text().strip() or "0")
+                offset = int(offset_path.read_text(encoding="utf-8").strip() or "0")
             except Exception:
                 offset = 0
         # Drop webhook so polling works
@@ -250,7 +250,7 @@ def start_telegram_polling(agent_factory: Callable = None, offset_file: str = No
                 for upd in data.get("result") or []:
                     offset = max(offset, int(upd.get("update_id", 0)) + 1)
                     try:
-                        offset_path.write_text(str(offset))
+                        offset_path.write_text(str(offset), encoding="utf-8")
                     except Exception:
                         pass
                     handle_telegram_update(upd, agent_factory=factory)

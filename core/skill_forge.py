@@ -584,7 +584,7 @@ class SkillForge:
 
     def _registry(self) -> dict[str, Any]:
         try:
-            return json.loads(self.registry_path.read_text())
+            return json.loads(self.registry_path.read_text(encoding="utf-8"))
         except Exception:
             return {"version": 1, "updated": None, "skills": {}}
 
@@ -593,7 +593,7 @@ class SkillForge:
         try:
             self.skills_dir.mkdir(parents=True, exist_ok=True)
             tmp = self.registry_path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True))
+            tmp.write_text(json.dumps(reg, indent=2, sort_keys=True), encoding="utf-8")
             tmp.replace(self.registry_path)
         except Exception:
             pass
@@ -618,7 +618,7 @@ class SkillForge:
                 if not md.exists():
                     continue
                 try:
-                    doc = md.read_text(errors="ignore")[:4000]
+                    doc = md.read_text(errors="ignore", encoding="utf-8")[:4000]
                 except Exception:
                     continue
                 out.append({"name": d.name, "doc": doc, "summary": _frontmatter_summary(doc) or d.name})
@@ -944,7 +944,7 @@ class SkillForge:
             return {**report, "valid": False, "error": "SKILL.md missing"}
         if not py.exists():
             return {**report, "valid": False, "error": "skill.py missing"}
-        text = md.read_text(errors="ignore")
+        text = md.read_text(errors="ignore", encoding="utf-8")
         report["checks"].append(
             {
                 "name": "frontmatter",
@@ -1046,16 +1046,16 @@ class SkillForge:
         staging = self.skills_dir / f".staging_{cand.name}"
         try:
             staging.mkdir(parents=True, exist_ok=True)
-            (staging / "SKILL.md").write_text(self.skill_md(cand))
-            (staging / "skill.py").write_text(self.skill_py(cand))
-            (staging / "test_skill.py").write_text(self.smoke_test(cand))
+            (staging / "SKILL.md").write_text(self.skill_md(cand), encoding="utf-8")
+            (staging / "skill.py").write_text(self.skill_py(cand), encoding="utf-8")
+            (staging / "test_skill.py").write_text(self.smoke_test(cand), encoding="utf-8")
             report = self.validate(staging) if validate else {"valid": True, "skipped": True}
             if not report.get("valid"):
                 self.quarantine_dir.mkdir(parents=True, exist_ok=True)
                 bad = self.quarantine_dir / f"{cand.name}_{datetime.now().strftime('%H%M%S')}"
                 shutil.move(str(staging), str(bad))
                 try:
-                    (bad / "VALIDATION_ERROR.txt").write_text(json.dumps(report, indent=2, default=str))
+                    (bad / "VALIDATION_ERROR.txt").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
                 except Exception:
                     pass
                 return {"installed": False, "quarantined": str(bad), "report": report}
@@ -1316,7 +1316,7 @@ class SkillForge:
             pass
         outcomes: list[bool] = []
         try:
-            for line in (self.skills_dir / "forge_log.jsonl").read_text().splitlines()[-200:]:
+            for line in (self.skills_dir / "forge_log.jsonl").read_text(encoding="utf-8").splitlines()[-200:]:
                 outcomes.append(bool(json.loads(line).get("success")))
         except Exception:
             pass

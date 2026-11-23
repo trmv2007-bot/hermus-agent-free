@@ -547,7 +547,7 @@ def _run_sentinel(args, ctx: CLIContext) -> None:
             print(f"event bus: unavailable ({e})")
         p = config.resolve_path("data/sentinel/decisions.jsonl")
         if p.is_file():
-            rows = [r for r in p.read_text().splitlines() if r.strip()][-10:]
+            rows = [r for r in p.read_text(encoding="utf-8").splitlines() if r.strip()][-10:]
             print(f"last {len(rows)} decisions ({p}):")
             for r in rows:
                 try:
@@ -601,7 +601,7 @@ def _run_sentinel(args, ctx: CLIContext) -> None:
         return
     if action == "alerts":
         p = config.resolve_path("data/sentinel/alerts.jsonl")
-        rows = [r for r in p.read_text().splitlines() if r.strip()] if p.is_file() else []
+        rows = [r for r in p.read_text(encoding="utf-8").splitlines() if r.strip()] if p.is_file() else []
         print(f"Alerts ({len(rows)}): {p}")
         for r in rows[-20:]:
             print(" - " + r[:200])

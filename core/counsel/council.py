@@ -655,8 +655,8 @@ class CouncilSession:
         transcripts_dir = base / "transcripts"
         for d in (sessions_dir, transcripts_dir):
             d.mkdir(parents=True, exist_ok=True)
-        (sessions_dir / f"{self.session_id}.json").write_text(json.dumps(self.summary(), indent=2))
-        with open(transcripts_dir / f"{self.session_id}.jsonl", "w") as f:
+        (sessions_dir / f"{self.session_id}.json").write_text(json.dumps(self.summary(), indent=2), encoding="utf-8")
+        with open(transcripts_dir / f"{self.session_id}.jsonl", "w", encoding="utf-8") as f:
             for t in self.transcript:
                 f.write(json.dumps(t) + "\n")
         try:

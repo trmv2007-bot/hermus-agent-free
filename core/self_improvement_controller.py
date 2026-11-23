@@ -102,7 +102,7 @@ class SelfImprovementController:
     def history(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             try:
-                rows = [json.loads(line) for line in self._history_path.read_text().splitlines() if line.strip()]
+                rows = [json.loads(line) for line in self._history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             except (OSError, ValueError):
                 rows = []
         return rows[-max(1, min(100, int(limit))) :][::-1]

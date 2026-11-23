@@ -216,7 +216,7 @@ def probe_linux_accel() -> tuple[list[Device], str]:
     for entry in entries:
         vendor_id = ""
         try:
-            vendor_id = (entry / "device" / "vendor").read_text().strip()
+            vendor_id = (entry / "device" / "vendor").read_text(encoding="utf-8").strip()
         except OSError:
             pass
         details.append(entry.name)
