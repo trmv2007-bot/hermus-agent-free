@@ -46,9 +46,15 @@ NO_LOCAL = {
 
 @pytest.fixture(autouse=True)
 def _no_free_keys(monkeypatch):
-    """No real key can leak in from the developer's environment or key store."""
+    """No real key, and no named model, can leak in from elsewhere in the suite.
+
+    ``tests/test_delegation.py`` sets ``HERMUS_MODEL=mock/mock`` at import and
+    never clears it, so resolution has to be pinned here or this file only passes
+    when it runs alone.
+    """
     for env_key in model_catalog.FREE_KEYS.values():
         monkeypatch.delenv(env_key, raising=False)
+    monkeypatch.delenv("HERMUS_MODEL", raising=False)
     monkeypatch.setattr(brain, "_key_in_ui_store", lambda provider: False)
 
 
