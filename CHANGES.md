@@ -388,6 +388,35 @@ and 420×900 across all eleven surfaces. Nothing was written to `~/.hermus`, no
 `.env` was created, and with no local model installed the model path ran on
 `mock/mock` so no paid API was called.
 
+## 15 · Tests that run on the platform the product ships to (G9)
+
+The suite's browser-code proofs assembled the real Control Room sources into one
+JavaScript script and handed it to `node -e`. That script is about 89 KB, and
+Windows caps a whole command line at 32,767 characters, so `subprocess` raised
+`FileNotFoundError: [WinError 206] The filename or extension is too long` before
+the first assertion. Thirty-four tests never ran on Windows, and because a
+harness that dies before it asserts still shows up as *something else*, the
+blind spot was invisible: every Control Room change merged so far was verified on
+the target platform by nothing.
+
+| Defect | Where | Fix |
+|---|---|---|
+| A 89 KB script through `node -e` | `tests/test_control_room_ux.py`, `tests/test_command_answer_loop.py` | `tests/_node_harness.run_node` writes the script to a UTF-8 temp file and runs `node <file>`; no argument limit on any platform |
+| cp1252 decoding child output | 14 `subprocess.run(..., text=True)` call sites in `tests/` | `encoding="utf-8"` on every read; `PYTHONIOENCODING=utf-8` for children that are themselves Python |
+| cp1252 encoding a temp copy of `nexus.js` | `tests/test_jarvis_control_plane.py` | the temp file is written UTF-8 with `\n` newlines |
+
+A guard keeps it fixed: `tests/test_harness_platform.py` walks every test module's
+AST and fails on any `node -e`/`--eval` or any argv element over 4,000 characters
+or containing a newline, and proves both shapes by running a 240 KB script and a
+non-ASCII string through the harness. There is no platform branch to test twice —
+the same code path runs on Linux CI and Windows.
+
+Contributor documentation now names the Windows command
+(`py -3 -m pytest tests -q --ignore=tests/eval`) in `CONTRIBUTING.md`, and the
+README's build-status line no longer implies `make test` is the only way in.
+
+---
+
 ## Documents
 
 - **`docs/PRODUCT_V2.md`** — the first hour of a new person minute by minute, the

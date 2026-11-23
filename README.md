@@ -107,7 +107,11 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 ## Build status
 
 Every row names the test that backs it. If a claim has no test, it is not here.
-The same suite runs with `make test` (~1 min) and on every pull request.
+The same suite runs with `make test` on Linux and macOS and with
+`py -3 -m pytest tests -q --ignore=tests/eval` on Windows, and on every pull
+request. The suite is platform-neutral by construction: browser code is proven by
+running the real frontend files in Node from a temporary file, never through a
+command line that Windows would refuse to build.
 
 | Capability | Evidence |
 |---|---|

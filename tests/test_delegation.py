@@ -209,8 +209,9 @@ def test_worker_self_test_answers_ping():
         cwd=str(Path(__file__).parent.parent),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
-        env={**os.environ, "HERMUS_HOME": _TMP, "HERMUS_MODEL": "mock/mock"},
+        env={**os.environ, "HERMUS_HOME": _TMP, "HERMUS_MODEL": "mock/mock", "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     frame = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -234,6 +235,7 @@ def test_unknown_method_and_bad_frame_are_answered_not_fatal():
         cwd=str(Path(__file__).parent.parent),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
         env={**os.environ, "HERMUS_HOME": _TMP, "HERMUS_MODEL": "mock/mock"},
     )

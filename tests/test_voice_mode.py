@@ -481,13 +481,14 @@ def test_wake_aliases_are_read_from_the_environment_at_import_time():
     import sys
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env = dict(os.environ, HERMUS_VOICE_WAKE_ALIASES=" jervis , ,jarviss ,")
+    env = dict(os.environ, HERMUS_VOICE_WAKE_ALIASES=" jervis , ,jarviss ,", PYTHONIOENCODING="utf-8")
     out = subprocess.run(
         [sys.executable, "-c", "from core.config import config; print(config.voice_wake_aliases)"],
         cwd=root,
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     assert out.returncode == 0, out.stderr[-2000:]

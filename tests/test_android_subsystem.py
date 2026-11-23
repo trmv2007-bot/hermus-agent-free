@@ -436,7 +436,7 @@ def _has_adb_and_device() -> bool:
     if not shutil.which("adb"):
         return False
     try:
-        out = subprocess.run(["adb", "get-state"], capture_output=True, text=True, timeout=5)
+        out = subprocess.run(["adb", "get-state"], capture_output=True, text=True, encoding="utf-8", timeout=5)
         return out.returncode == 0 and out.stdout.strip() == "device"
     except Exception:
         return False
