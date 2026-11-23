@@ -23,6 +23,27 @@ def _isolate_task_control_state():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_permission_overrides():
+    """Keep one test's allow/deny decision out of every later test.
+
+    ``permission_manager.overrides`` is process-wide. A test that denies a tool
+    and does not undo it left the rest of the suite denied for that tool, which
+    showed up as "Permission DENIED for tool 'shell_execute'" in unrelated files
+    — reliably on macOS and Windows runners, never on Linux, because the order the
+    files run in differs. Snapshot and restore around every test.
+    """
+    import copy
+
+    from core.permissions import permission_manager
+
+    saved = copy.deepcopy(permission_manager.overrides)
+    try:
+        yield
+    finally:
+        permission_manager.overrides = saved
+
+
 @pytest.fixture(scope="session")
 def _ledger_tmp_path(tmp_path_factory: pytest.TempPathFactory):
     return tmp_path_factory.mktemp("capability_ledger") / "CAPABILITY_LEDGER.md"
