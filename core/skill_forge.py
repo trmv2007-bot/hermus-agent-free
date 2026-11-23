@@ -1013,10 +1013,13 @@ class SkillForge:
         except Exception:
             pass
         try:
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
             proc = subprocess.run(
                 [sys.executable, "-c", code],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 cwd=probe_cwd,
             )

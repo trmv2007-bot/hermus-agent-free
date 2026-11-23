@@ -284,11 +284,14 @@ def _command_check(command: str, *args: str) -> tuple[bool, str]:
     if not path:
         return False, f"{command} executable not found"
     try:
+        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
         result = subprocess.run(
             [path, *args],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -334,6 +337,8 @@ def _dependency_runtime_check() -> tuple[bool, str, dict[str, Any]]:
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
                 check=False,
             )

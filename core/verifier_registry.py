@@ -110,11 +110,14 @@ class PythonVerifier(BaseVerifier):
         if test_files:
             behav_total += 1
             try:
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
                 res = subprocess.run(
                     [sys.executable, "-m", "pytest", "-v"] + [str(p) for p in test_files],
                     cwd=str(root_dir),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=20,
                 )
                 if res.returncode == 0:
@@ -315,7 +318,15 @@ class GitVerifier(BaseVerifier):
         behav_ok = True
 
         try:
-            res = subprocess.run(["git", "status", "--porcelain"], cwd=str(root_dir), capture_output=True, text=True, timeout=5)
+            res = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(root_dir),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            )
             if res.returncode == 0:
                 uncommitted = [line for line in res.stdout.splitlines() if line.strip()]
                 evidence.append({"type": "behavioral", "check": "git_status", "uncommitted_files": len(uncommitted)})

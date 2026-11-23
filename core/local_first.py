@@ -334,7 +334,10 @@ class LocalFirstProvider:
         """Automatically start Ollama if installed but not running."""
         # Check if Ollama is installed
         try:
-            result = subprocess.run(["ollama", "--version"], capture_output=True, text=True, timeout=5)
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+            result = subprocess.run(
+                ["ollama", "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
+            )
             if result.returncode == 0:
                 logger.info("🔄 Ollama is installed but not running. Starting it...")
 

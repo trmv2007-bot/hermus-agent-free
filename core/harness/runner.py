@@ -399,7 +399,10 @@ class HarnessRunner:
         for cmd in task.setup:
             t0 = time.time()
             try:
-                proc = subprocess.run(cmd, shell=True, cwd=str(ws), capture_output=True, text=True, timeout=120)
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+                proc = subprocess.run(
+                    cmd, shell=True, cwd=str(ws), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
+                )
                 entry = {
                     "cmd": cmd,
                     "returncode": proc.returncode,
@@ -588,6 +591,8 @@ class HarnessRunner:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout_s + 60,  # grace beyond the harness timeout
             )
         except _sp.TimeoutExpired:

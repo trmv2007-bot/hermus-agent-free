@@ -797,7 +797,8 @@ class JobQueue:
                     {"job_id": job.id, "kind": job.kind, "status": job.status, "finished": _now(), "result": job.result},
                     default=str,
                     indent=2,
-                ), encoding="utf-8"
+                ),
+                encoding="utf-8",
             )
         except Exception:
             pass

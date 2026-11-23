@@ -249,7 +249,7 @@ def _run_forge(args, ctx: CLIContext) -> None:
             rep = q / n / "report.json"
             if rep.exists():
                 try:
-                    print(f"  - {n}: {__import__('json').loads(rep.read_text(encoding="utf-8")).get('error', '')[:120]}")
+                    print(f"  - {n}: {__import__('json').loads(rep.read_text(encoding='utf-8')).get('error', '')[:120]}")
                 except Exception:
                     pass
     elif action == "log":

@@ -1358,7 +1358,7 @@ class MissionEngine:
         """Open (and cache per thread) the mission's isolated file scope."""
         scope = getattr(self._tls, "scope", None)
         if scope is None or scope.mission_id != mission_id:
-            scope = MissionFileScope.open(mission_id, encoding="utf-8")
+            scope = MissionFileScope.open(mission_id)
             self._tls.scope = scope
         return scope
 

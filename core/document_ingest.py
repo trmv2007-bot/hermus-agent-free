@@ -327,7 +327,7 @@ def _extract_image(data: bytes, filename: str) -> tuple[str | None, str, str | N
     try:
         from PIL import Image  # type: ignore
 
-        with Image.open(__import__("io").BytesIO(data), encoding="utf-8") as im:
+        with Image.open(__import__("io").BytesIO(data)) as im:
             meta.append(f"format={im.format} size={im.size[0]}x{im.size[1]} mode={im.mode}")
     except Exception:
         meta.append("image (metadata unavailable)")

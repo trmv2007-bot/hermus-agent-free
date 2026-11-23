@@ -163,12 +163,15 @@ def _run_check(check: dict[str, Any], ctx: CheckContext, prefix: str = "") -> tu
             return CheckResult(label, ok, required, f"{check.get('path')} regex {'matched' if ok else 'no match'}"), nested
         if ctype == "command":
             cmd = str(check.get("cmd", ""))
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
             proc = subprocess.run(
                 cmd,
                 shell=True,
                 cwd=str(ctx.workspace),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=float(check.get("timeout", 30)),
             )
             expect_exit = int(check.get("expect_exit", 0))

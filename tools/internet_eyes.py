@@ -174,7 +174,10 @@ def youtube_transcript(video_url: str) -> dict:
     # Try yt-dlp
     try:
         # Check if yt-dlp available
-        result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=5)
+        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+        result = subprocess.run(
+            ["yt-dlp", "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
+        )
         if result.returncode != 0:
             raise FileNotFoundError("yt-dlp not found")
 
@@ -189,7 +192,7 @@ def youtube_transcript(video_url: str) -> dict:
             "%(title)s|%(description)s|%(duration)s|%(uploader)s",
             video_url,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         if result.returncode == 0:
             parts = result.stdout.strip().split("|")
             title = parts[0] if len(parts) > 0 else ""
@@ -227,7 +230,7 @@ def youtube_search(query: str, max_results: int = 5) -> dict:
             "%(title)s|%(webpage_url)s|%(duration)s",
             "--no-warnings",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
         if result.returncode == 0:
             videos = []
             for line in result.stdout.strip().split("\n"):
@@ -261,7 +264,7 @@ def github_read(repo: str, path: str = "") -> dict:
         cmd = ["gh", "repo", "view", repo, "--json", "description,url,issues,readme"]
         if path:
             cmd = ["gh", "api", f"/repos/{repo}/contents/{path}"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
         if result.returncode == 0:
             return {"success": True, "repo": repo, "path": path, "data": result.stdout[:10000], "method": "gh_cli_free"}
     except Exception:
@@ -344,7 +347,7 @@ def bilibili_search(query: str, max_results: int = 5) -> dict:
 
         if shutil.which("bili-cli"):
             cmd = ["bili-cli", "search", query, "--limit", str(max_results)]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
             if result.returncode == 0:
                 return {"success": True, "query": query, "results": result.stdout[:5000], "method": "bili-cli_free_no_login"}
     except Exception:

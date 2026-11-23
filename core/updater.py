@@ -20,8 +20,15 @@ class Updater:
     def get_local_commit(self) -> dict:
         """Get local current commit via git rev-parse HEAD"""
         try:
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
             result = subprocess.run(
-                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, cwd=str(config.resolve_path("."))
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                cwd=str(config.resolve_path(".")),
             )
             if result.returncode == 0:
                 commit = result.stdout.strip()
@@ -30,6 +37,8 @@ class Updater:
                     ["git", "log", "-1", "--format=%H|%s|%an|%ad", "--date=short"],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=5,
                     cwd=str(config.resolve_path(".")),
                 )
@@ -75,7 +84,14 @@ class Updater:
                 }
             elif resp.status_code == 404:
                 # Try via git ls-remote as fallback
-                result = subprocess.run(["git", "ls-remote", self.repo_url, "main"], capture_output=True, text=True, timeout=10)
+                result = subprocess.run(
+                    ["git", "ls-remote", self.repo_url, "main"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=10,
+                )
                 if result.returncode == 0 and result.stdout:
                     commit = result.stdout.split()[0]
                     return {"commit": commit, "short": commit[:7], "method": "git ls-remote"}
@@ -136,6 +152,8 @@ class Updater:
                     ["git", "rev-list", "--count", f"{local_commit}..{remote_commit}"],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=10,
                     cwd=str(config.resolve_path(".")),
                 )
@@ -162,7 +180,13 @@ class Updater:
         try:
             # Git pull
             result_pull = subprocess.run(
-                ["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=60, cwd=str(config.resolve_path("."))
+                ["git", "pull", "origin", "main"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+                cwd=str(config.resolve_path(".")),
             )
 
             # Pip install requirements
@@ -170,6 +194,8 @@ class Updater:
                 ["pip", "install", "-r", "requirements.txt", "--quiet"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=120,
                 cwd=str(config.resolve_path(".")),
             )
@@ -201,7 +227,13 @@ def get_updater_for_current_repo() -> Updater:
     """Try to detect current repo owner/name from git remote origin"""
     try:
         result = subprocess.run(
-            ["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=5, cwd=str(config.resolve_path("."))
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            cwd=str(config.resolve_path(".")),
         )
         if result.returncode == 0:
             url = result.stdout.strip()

@@ -911,7 +911,10 @@ def _which(name: str) -> str:
 def _shell(cmd: list[str], timeout: int = 120) -> tuple[int, str]:
     """Run a command, returning (code, combined output). Never raises."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(Path.cwd()))
+        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, cwd=str(Path.cwd())
+        )
     except subprocess.TimeoutExpired:
         return 124, f"timed out after {timeout}s: {' '.join(cmd)}"
     except Exception as exc:  # noqa: BLE001

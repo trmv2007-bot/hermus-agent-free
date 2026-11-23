@@ -278,11 +278,14 @@ class SoftwareEngineerMode:
 
             # Run Python or toolchain tests
             if toolchain.language == "python":
+                # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
                 test_res = subprocess.run(
                     [sys.executable, "-m", "pytest", "-v"],
                     cwd=str(root),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=30,
                 )
                 test_success = test_res.returncode == 0
@@ -297,6 +300,8 @@ class SoftwareEngineerMode:
                     cwd=str(root),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=45,
                 )
                 test_success = test_res.returncode == 0

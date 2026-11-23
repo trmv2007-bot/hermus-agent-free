@@ -85,10 +85,13 @@ def _run(cmd: list[str], timeout: float = 4.0) -> str:
     if not exe:
         return ""
     try:
+        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
         proc = subprocess.run(
             [exe, *cmd[1:]],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except Exception:  # noqa: BLE001 - a probe must never break detection

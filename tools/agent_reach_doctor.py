@@ -9,7 +9,8 @@ import requests
 def probe_command(cmd: list[str], timeout: int = 10) -> dict:
     """Real probing - actually executes upstream commands and tells apart missing/broken/timeout - free"""
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         if result.returncode == 0:
             return {"status": "available", "output": result.stdout[:500], "cmd": " ".join(cmd)}
         else:

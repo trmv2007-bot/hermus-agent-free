@@ -97,10 +97,13 @@ def get_pairing_info() -> dict[str, Any]:
 
     if tailscale_installed:
         try:
+            # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
             res = subprocess.run(
                 ["tailscale", "status", "--json"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=2,
             )
             if res.returncode == 0:
