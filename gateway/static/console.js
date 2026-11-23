@@ -79,16 +79,15 @@
     return { text: text || raw, title: raw };
   }
 
+  /* One sentence rather than a strip of counters. This surface exists to
+   * answer "is anything not answering", and the probes themselves are below. */
   function summaryHtml() {
     const m = state.manifest || {};
-    const views = Object.keys(state.views).length;
-    const ready = Object.values(state.views).filter((v) => v.status === 'ready').length;
-    const down = views - ready;
-    return kpi(String(m.panel_count || 0), 'panels')
-      + kpi(String(m.verified_panels == null ? '—' : m.verified_panels), 'endpoints verified')
-      + kpi(String(m.action_count || 0), 'declared actions')
-      + kpi(String(views), 'probed')
-      + kpi(String(down), 'unavailable');
+    const views = Object.values(state.views);
+    const total = (m.panels || []).length;
+    if (!views.length) return 'Reading the panels…';
+    const down = views.filter((v) => v.status !== 'ready').length;
+    return down ? down + ' of ' + total + ' probes did not answer.' : 'All ' + total + ' probes answered.';
   }
 
   function chipsHtml(lists) {
@@ -130,7 +129,6 @@
   }
 
   function bodyHtml(panel, view) {
-    if (!view) return '<div class="note">not probed yet — press “Refresh panels”.</div>';
     if (view.status !== 'ready') {
       return '<div class="panel-state error">' + esc(view.error || 'unavailable') + '</div>';
     }
@@ -169,13 +167,10 @@
     }).join('');
   }
 
-  function cardHtml(panel) {
-    const view = state.views[panel.id];
-    const state_ = view ? view.status : 'pending';
-    return '<section class="console-card ' + (state_ === 'ready' ? 'ok' : (state_ === 'unavailable' ? 'bad' : '')) + '" data-panel-card="' + esc(panel.id) + '">'
+  function cardHtml(panel, view) {
+    return '<section class="console-card ' + (view.status === 'ready' ? 'ok' : 'bad') + '" data-panel-card="' + esc(panel.id) + '">'
       + '<div class="card-head"><div><div class="card-title">' + esc(panel.label) + '</div>'
-      + '<div class="card-sub">' + esc(panel.group) + ' · ' + esc(panel.source) + '</div></div>'
-      + '<span class="tag">' + esc(state_) + '</span></div>'
+      + '<div class="card-sub">' + esc(panel.group) + ' · ' + esc(panel.source) + '</div></div></div>'
       + '<div class="card-sum">' + esc(panel.summary) + '</div>'
       + bodyHtml(panel, view)
       + endpointsHtml(panel)
@@ -200,15 +195,35 @@
     const m = state.manifest;
     if (!m) return;
     const summary = document.querySelector('#consoleSummary');
-    if (summary) summary.innerHTML = summaryHtml();
     const host = HOST();
     if (!host) return;
     const panels = (m.panels || []).filter(visible);
     if (!panels.length) {
-      host.innerHTML = '<div class="note">no panel matches this filter.</div>';
+      if (summary) summary.textContent = '';
+      host.innerHTML = '<div class="note">No panel matches this filter.</div>';
       return;
     }
-    host.innerHTML = panels.map(cardHtml).join('');
+    /* Nothing is listed before it has been read: a card is a result, never a
+     * placeholder. Until the probes answer, the surface says it is reading. */
+    const probed = panels.filter((p) => state.views[p.id]);
+    if (!probed.length) {
+      if (summary) summary.textContent = 'Reading the panels…';
+      host.innerHTML = '<div class="note">Reading the panels…</div>';
+      return;
+    }
+    if (summary) summary.textContent = summaryHtml();
+    const ready = probed.filter((p) => state.views[p.id].status === 'ready');
+    const quiet = probed.filter((p) => state.views[p.id].status !== 'ready');
+    /* A missing optional integration is not a failure of the product, so the
+     * panels that are not answering fold into one line a person can open. */
+    host.innerHTML = ready.map((p) => cardHtml(p, state.views[p.id])).join('')
+      + (quiet.length
+        ? '<details class="console-quiet"><summary>' + quiet.length + ' not answering right now</summary>'
+          + '<p class="note">Most of these are optional parts of the gateway that are not installed on this machine. '
+          + 'They stay listed so a real failure is never lost here.</p>'
+          + quiet.map((p) => cardHtml(p, state.views[p.id])).join('')
+          + '</details>'
+        : '');
   }
 
   function syncGroups() {

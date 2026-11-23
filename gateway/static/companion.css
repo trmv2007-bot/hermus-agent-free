@@ -61,9 +61,12 @@ body.room {
   border: 0;
   border-bottom: 1px solid transparent;
   padding: 5px 1px;
-  transition: color 200ms var(--ease), border-color 200ms var(--ease);
+  transition: color 200ms var(--ease), border-color 200ms var(--ease), transform 120ms var(--ease);
 }
-.systems:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+.systems:active { transform: scale(0.97); }
+@media (hover: hover) and (pointer: fine) {
+  .systems:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+}
 .systems[aria-expanded="true"] { color: var(--accent-ink); border-color: var(--accent-line); }
 
 /* the stage: character above, words under it --------------------------- */
@@ -395,36 +398,83 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
   color: var(--dim);
 }
 .sheet-close:hover { color: var(--accent-ink); }
-.sheet-sub { margin: 10px 0 16px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+.sheet-sub { margin: 8px 0 16px; font-size: 12.5px; line-height: 1.6; color: var(--dim); }
+.sheet-wait { margin: 2px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--dim); }
 
-.sheet-list {
+/* The four rows are the whole answer: label in a fixed gutter, one sentence of
+   state in the column beside it, and a command underneath only when something
+   is missing. Health stays quiet; attention gets ink and the one accent. */
+.sheet-rows { margin: 0; border-top: 1px solid var(--line); }
+.sheet-rows[data-settled="true"] { animation: settle 220ms var(--ease) both; }
+@keyframes settle { from { opacity: 0; } to { opacity: 1; } }
+.sheet-row {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
-  border-top: 1px solid var(--line);
-}
-.sheet-list a {
-  display: flex;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 16px;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 10px 2px;
+  padding: 11px 0;
   border-bottom: 1px solid var(--line);
-  color: var(--ink-2);
-  transition: color 160ms var(--ease), background 160ms var(--ease);
 }
-.sheet-list a:hover, .sheet-list a:focus-visible { color: var(--accent-ink); background: var(--accent-soft); text-decoration: none; }
-.sheet-list b { font-size: 13px; font-weight: 600; letter-spacing: 0; }
-.sheet-list span { font-size: 11.5px; color: var(--dim); text-align: right; }
+.sheet-label { font-size: 12px; color: var(--muted); }
+.sheet-value p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.sheet-row[data-state="off"] .sheet-value p:first-child { color: var(--ink); }
+.sheet-row[data-state="unknown"] .sheet-value p:first-child { color: var(--muted); }
+.sheet-value .sheet-fix {
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--accent-ink);
+  overflow-wrap: anywhere;
+}
 
-.sheet-foot {
+/* Diagnostics: the only door to the gateway's probe grid, closed by default. */
+.sheet-telemetry { margin-top: 16px; border-top: 1px solid var(--line); }
+.sheet-telemetry summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 16px;
+  padding: 12px 0 10px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  transition: color 160ms var(--ease), opacity 120ms var(--ease);
 }
-.sheet-all { font-size: 12.5px; color: var(--accent); }
+.sheet-telemetry summary::-webkit-details-marker { display: none; }
+.sheet-telemetry summary:active { opacity: 0.7; }
+.sheet-telemetry-mark {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 180ms var(--ease);
+}
+.sheet-telemetry[open] .sheet-telemetry-mark { transform: rotate(90deg); }
+.sheet-telemetry-body { padding-bottom: 6px; animation: settle 180ms var(--ease) both; }
+.sheet-telemetry-body p {
+  margin: 0 0 10px;
+  max-width: 46ch;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--dim);
+}
+.sheet-telemetry-link { font-size: 12.5px; color: var(--accent); }
+@media (hover: hover) and (pointer: fine) {
+  .sheet-telemetry summary:hover { color: var(--accent-ink); }
+}
+
+.sheet-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+}
 .sheet-hint { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
 
 /* ================= phone ================= */
@@ -436,8 +486,8 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
   .thread { width: 100%; }
   .reply { font-size: 14px; }
   .sheet { padding: 18px 16px 14px; }
-  .sheet-list a { flex-direction: column; align-items: flex-start; gap: 2px; }
-  .sheet-list span { text-align: left; }
+  .sheet-row { grid-template-columns: 1fr; gap: 2px; padding: 12px 0; }
+  .sheet-label { font-size: 11.5px; color: var(--dim); }
 }
 
 @media (max-width: 420px) {
@@ -452,8 +502,10 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 /* motion is optional ------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .being, .being .orb-ring, .being .wing, .being .spark,
-  .hello, .exchange, .reply[data-streaming="true"]::after, .sheet[open] {
+  .hello, .exchange, .reply[data-streaming="true"]::after, .sheet[open],
+  .sheet-rows[data-settled="true"], .sheet-telemetry-body {
     animation: none !important;
   }
+  .sheet-telemetry-mark { transition: none !important; }
   .being, .skip, .line, .systems { transition: none !important; }
 }

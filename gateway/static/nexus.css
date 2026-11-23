@@ -1212,6 +1212,33 @@ meter#hfLevel::-moz-meter-bar { background: linear-gradient(90deg, #5fd8ff, #3f9
   padding: 14px;
 }
 .console-card.ok { border-color: var(--good-line); }
+/* Panels that did not answer fold into one openable line: a missing optional
+   integration is not a failure of the product, but a real one is never hidden. */
+.console-quiet {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.console-quiet summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--muted);
+  list-style: none;
+  transition: color 160ms var(--ease);
+}
+.console-quiet summary::-webkit-details-marker { display: none; }
+.console-quiet summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--dim);
+  transition: transform 180ms var(--ease);
+}
+.console-quiet[open] summary::before { transform: rotate(90deg); }
+.console-quiet[open] .console-card { margin-top: 12px; }
+.console-quiet .note { margin: 8px 0 0; font-size: 12px; color: var(--dim); max-width: 62ch; }
 .console-card.bad { border-color: var(--bad-line); }
 .console-card .card-title { font-size: 13.5px; font-weight: 650; }
 .console-card .card-sub { color: var(--muted); font-size: 11.5px; margin-top: 1px; }

@@ -90,10 +90,25 @@
     <h2 id="systemsTitle">Systems</h2>
     <button class="sheet-close" id="systemsClose" type="button" aria-label="Close Systems">Close</button>
   </div>
-  <p class="sheet-sub">Every panel the room keeps out of your way. Nothing here is required.</p>
-  <nav class="sheet-list" id="systemsList" aria-label="Systems sections"></nav>
+  <p class="sheet-sub">What it can do here.</p>
+  <p class="sheet-wait" id="systemsWait">Checking what is available on this machine…</p>
+  <ul class="sheet-rows" id="systemsRows" aria-label="What Hermus can do here" hidden>
+    <li class="sheet-row" data-row="model"><span class="sheet-label">Model</span><div class="sheet-value"></div></li>
+    <li class="sheet-row" data-row="voice"><span class="sheet-label">Voice</span><div class="sheet-value"></div></li>
+    <li class="sheet-row" data-row="computer"><span class="sheet-label">Computer</span><div class="sheet-value"></div></li>
+    <li class="sheet-row" data-row="memory"><span class="sheet-label">Memory</span><div class="sheet-value"></div></li>
+  </ul>
+  <details class="sheet-telemetry" id="systemsTelemetry">
+    <summary>
+      <span class="sheet-telemetry-label">Diagnostics</span>
+      <svg class="sheet-telemetry-mark" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.2 2.6 8.2 6.4 4.2 10.2"/></svg>
+    </summary>
+    <div class="sheet-telemetry-body">
+      <p>The gateway's own probe panels, engine detail and the doctor, for developers and bug reports. They run only when you open them, and nothing here is needed to use the room.</p>
+      <a class="sheet-telemetry-link" href="/control?tab=systems">Open the system console</a>
+    </div>
+  </details>
   <div class="sheet-foot">
-    <a class="sheet-all" href="/control">Open the whole control room</a>
     <span class="sheet-hint"><kbd>Esc</kbd> closes</span>
   </div>
 </dialog>
