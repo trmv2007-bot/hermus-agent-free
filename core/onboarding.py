@@ -121,6 +121,59 @@ def record_brain(state: dict[str, Any], brain: dict[str, Any]) -> dict[str, Any]
     return state
 
 
+def record_upgrade(
+    state: dict[str, Any], brain: dict[str, Any], *, previous: str, reason: str
+) -> dict[str, Any]:
+    """Replace a recorded model with a stronger one, keeping the run finished.
+
+    A migration, not a new first run: the person's name and permission choice
+    stay, and the new model is not treated as proven. ``upgrade.pending_check``
+    says a fresh answer is still owed and the next real round trip clears it, so
+    the only thing the person redoes is the one step that cannot be skipped.
+    """
+    at = _now()
+    state["brain"] = {
+        "kind": brain.get("kind"),
+        "provider": brain.get("provider"),
+        "name": brain.get("name"),
+        "model": brain.get("model"),
+        "source": brain.get("source"),
+        "reason": reason,
+        "upgraded_from": previous,
+        "upgraded_at": at,
+        "chosen_at": at,
+    }
+    state["upgrade"] = {"from": previous, "to": brain.get("model"), "reason": reason, "at": at, "pending_check": True}
+    history = [row for row in (state.get("upgrade_history") or []) if isinstance(row, dict)]
+    state["upgrade_history"] = (history + [dict(state["upgrade"])])[-10:]
+    check = state.get("check") or {}
+    if check.get("ok"):
+        state["check"] = {
+            "ok": False,
+            "model": None,
+            "reason": f"the model changed from {previous}; it has not answered yet",
+            "at": None,
+        }
+        state["completed_at"] = None
+    save(state)
+    return state
+
+
+def upgrade_pending(state: dict[str, Any]) -> bool:
+    """Is a recorded model awaiting its first proven answer after an upgrade?"""
+    return bool((state.get("upgrade") or {}).get("pending_check"))
+
+
+def is_usable(state: dict[str, Any]) -> bool:
+    """Can the app open on this install?
+
+    A finished run, or one whose model was just upgraded and is about to answer
+    for the first time. Kept separate from :func:`is_complete`, which stays
+    strict: "the app may open" is not the same claim as "the model has answered".
+    """
+    return is_complete(state) or upgrade_pending(state)
+
+
 def record_check(
     state: dict[str, Any], *, ok: bool, model: str | None, reason: str = "", ms: int | None = None
 ) -> dict[str, Any]:
@@ -131,6 +184,8 @@ def record_check(
         "at": _now(),
         "ms": ms,
     }
+    if ok and upgrade_pending(state):
+        state["upgrade"]["pending_check"] = False
     if ok and is_complete(state):
         state["completed_at"] = _now()
     elif not ok:

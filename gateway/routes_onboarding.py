@@ -56,9 +56,13 @@ def _asset(name: str, media_type: str) -> Response:
 
 
 def redirect_target() -> str:
-    """Where ``/`` goes: the companion when set up, the welcome screen otherwise."""
+    """Where ``/`` goes: the companion when set up, the welcome screen otherwise.
+
+    An install whose model was just upgraded opens the companion too: a migration
+    is not a reason to walk somebody through first run again.
+    """
     state = onboarding.load()
-    return "/companion" if onboarding.is_complete(state) else "/welcome"
+    return "/companion" if onboarding.is_usable(state) else "/welcome"
 
 
 def state_payload() -> dict[str, Any]:
@@ -66,8 +70,14 @@ def state_payload() -> dict[str, Any]:
     status = brain_mod.local_status()
     stored = (state.get("brain") or {}).get("model")
     resolved = brain_mod.resolve_brain(preferred=stored, status=status)
+    upgrade = brain_mod.upgrade_offer(recorded=stored, status=status)
     return {
-        "complete": onboarding.is_complete(state),
+        "complete": onboarding.is_usable(state),
+        "upgrade_pending": onboarding.upgrade_pending(state),
+        "upgrade": {key: value for key, value in upgrade.items() if key != "best"},
+        "model_reason": resolved.get("reason") or "",
+        "skipped": resolved.get("skipped") or [],
+        "catalog": brain_mod.model_catalog.catalog_payload(),
         "reason": onboarding.incomplete_reason(state),
         "name": state.get("name") or onboarding.DEFAULT_NAME,
         "permissions": state.get("permissions") or onboarding.DEFAULT_PROFILE,
