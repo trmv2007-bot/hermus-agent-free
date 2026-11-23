@@ -520,24 +520,63 @@ class TestKeyboardFirst:
         finally:
             room.close()
 
+    #: The order a person meets the controls: top to bottom, then left to right
+    #: along the dock. The skip link first (it jumps the chrome), then the
+    #: header's one control, then the microphone — which sits to the left of the
+    #: input line on screen, so it comes before it — then the input and Send.
+    #: Nothing in the room sets tabindex, so this is the DOM order exactly.
+    FOCUS_ORDER = ["skipToInput", "systemsBtn", "mic", "say", "go"]
+
     def test_tab_order_follows_the_screen(self, browser, gateway):
+        """Tab from the top of the page; the walk is exactly ``FOCUS_ORDER``.
+
+        The walk runs until it closes the cycle back at the skip link, so a
+        control inserted anywhere — before the microphone, or after Send — fails
+        here instead of hiding behind a prefix comparison.
+
+        A microphone that cannot open keeps its place in the order rather than
+        skipping out of it. It stays focusable because its label and title are
+        how it says what is missing ("voice needs …", the one command that
+        installs it), and because the room's keyboard shape should not change
+        with what this particular machine happens to have installed. The check
+        below proves the disabled path still explains itself.
+        """
         room = room_at(browser, gateway, 1440)
         try:
-            room.page.evaluate("() => document.activeElement && document.activeElement.blur()")
-            order = []
-            for _ in range(8):
-                room.page.keyboard.press("Tab")
-                order.append(
-                    room.page.evaluate("() => { const a = document.activeElement; return a ? (a.id || a.tagName) : 'none'; }")
+            page = room.page
+            page.evaluate("() => document.activeElement && document.activeElement.blur()")
+            # Chrome resumes tabbing from whatever last held focus (the input,
+            # by autofocus), so walk forward to the top of the page first.
+            for _ in range(16):
+                page.keyboard.press("Tab")
+                if page.evaluate("() => (document.activeElement && document.activeElement.id) || ''") == "skipToInput":
+                    break
+            else:
+                pytest.fail("the skip link never came up: the top of the page is not first in the tab order")
+
+            walked = ["skipToInput"]
+            for _ in range(12):
+                page.keyboard.press("Tab")
+                active = page.evaluate(
+                    "() => { const a = document.activeElement; return a ? (a.id || a.tagName) : 'none'; }"
                 )
-            # Chrome resumes from the last focused element (the input, by
-            # autofocus) instead of restarting, so the assertion is the order of
-            # the sequence, not its starting index.
-            expected = ["skipToInput", "systemsBtn", "say", "go"]
-            start = order.index(expected[0]) if expected[0] in order else -1
-            assert start >= 0, f"the skip link is not in the tab order: {order}"
-            rotated = order[start:] + order[:start]
-            assert rotated[: len(expected)] == expected, f"tab order is {order}"
+                if active == "skipToInput":
+                    break
+                if active != "BODY":
+                    walked.append(active)
+            assert walked == self.FOCUS_ORDER, f"the tab walk is {walked}"
+
+            mic = page.evaluate(
+                "() => { const m = document.querySelector('#mic');"
+                " return { disabled: m.getAttribute('aria-disabled'), title: (m.title || '').trim() }; }"
+            )
+            if mic["disabled"] == "true":
+                assert mic["title"], "a microphone that cannot open must say why, not just refuse"
+                page.focus("#mic")
+                page.keyboard.press("Space")
+                page.wait_for_timeout(150)
+                said = page.evaluate("() => (document.querySelector('#under').innerText || '').trim()")
+                assert "voice needs" in said, f"a disabled microphone answered {said!r} instead of naming the gap"
         finally:
             room.close()
 

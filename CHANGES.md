@@ -757,3 +757,33 @@ closed by default and reaches `/control?tab=systems`, that a missing capability
 carries exactly one command, and that `/control` still opens on Overview.
 `tests/browser/test_room.py` keeps its contract for the palette (every surface
 still has a door) and now pins the sheet as four answers.
+
+## 18 · The keyboard order a person actually meets
+
+Voice put a microphone in the dock, to the left of the input line, and the room's
+keyboard-order test still expected the order from before voice existed. The
+assertion was the thing that was wrong, not the markup: the order a person meets
+the controls is the order they are drawn in, and nothing in the room sets
+`tabindex`, so the DOM *is* the tab order.
+
+**The order, written down.** Skip link → Systems → microphone → input line →
+Send: down the page, then left to right across the dock. The microphone comes
+before the input because that is where it sits on screen, so a person tabbing
+along the dock meets the controls where their eye already put them.
+
+**The test is a walk, not a list.** `test_tab_order_follows_the_screen` now tabs
+from the top of the page to the skip link, then walks the full cycle until focus
+wraps back to the skip link, and asserts the whole cycle. The old version
+rotated the sequence and compared a four-element prefix, so a control inserted
+anywhere after Send would have slid through unnoticed. Inserting one in the dock
+now fails the test with the control's own name in the message.
+
+**A microphone without voice keeps its place.** When local speech-to-text is
+missing the microphone is dimmed and `aria-disabled`, but it stays focusable and
+stays in the order, because its title and the sentence it prints when pressed
+("voice needs …") are how a keyboard user learns what is missing and the one
+command that installs it. Hiding it would make the room's keyboard shape depend
+on which machine it is running on, and would leave the disabled state with
+nothing to explain itself. The test pins both halves: the walk includes `mic`
+whatever the state, and a disabled `mic` must answer a Space press with "voice
+needs …" rather than refusing silently.
