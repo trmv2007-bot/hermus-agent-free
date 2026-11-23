@@ -557,3 +557,32 @@ characters in position 12-20`; with `encoding="utf-8"` it writes 45 bytes
 for the emoji) and reads back byte-identical. The same bytes read back without
 an encoding decode to mojibake, or raise
 `UnicodeDecodeError: ... byte 0x81` when the text contains `Ё`.
+
+# Windows · Staged files and a working directory on every platform (2026-11-23)
+
+**Why:** `sandbox.run_python` carried an `os.name == "nt"` branch that ran
+`[sys.executable, "-c", code]` directly. That bypassed `run()` — the only place
+a `files=` payload is staged and `cwd` applied — so on Windows every skill
+validation, delegated task and sandboxed toolcall that relied on staged files
+ran from the repository root with an empty scratch dir. The skill-import probe
+raised `FileNotFoundError`; the encoding sweep is what finally made it visible.
+
+**What changed.** `run()` now takes a shell line *or* an argv sequence and
+stages both identically: files land in the scratch dir, `cwd` becomes the
+process working directory (confined to the workspace, ignored by a jail with
+`workspace_mode: none`), the scrubbed environment is handed over, and output,
+timeout and the audit record are shared. The only platform fork left is how a
+shell line becomes an argv — cmd.exe takes one string, POSIX takes
+`/bin/sh -c` — and `run_python` avoids that layer entirely by passing the
+snippet to the interpreter as its own argv element.
+
+**Suite assertions.** Four harness checks were POSIX shell (`test "$(wc -l <
+f)" -eq 3`, `! grep -q …`) executed through cmd.exe. They now use two new
+verifier check types, `line_count` and `file_not_regex`, which are plain Python
+and mean the same thing on both platforms; a test keeps suites from shelling
+out to POSIX again.
+
+**Tests:** `tests/test_sandbox.py` stages two files, imports one, and asserts
+the contents and the directory the snippet ran in; a second test pins an
+explicit `cwd`. `tests/test_harness_runner.py` covers the new check types and
+the suite-portability guard.

@@ -19,6 +19,13 @@ File checks (paths are relative to the task workspace):
 * ``file_exists`` / ``file_not_exists`` {path}
 * ``file_contains``   {path, value}  — file text contains value (case-insensitive)
 * ``file_regex``      {path, pattern}
+* ``file_not_regex``  {path, pattern} — no match; a missing file passes
+* ``line_count``      {path, value}   — newline-terminated lines equals value (``wc -l``)
+
+The file checks are plain Python, so a suite says the same thing on every
+platform. ``command`` runs the platform's shell, so a POSIX one-liner
+(``test "$(wc -l < f)" -eq 3``, ``! grep -q``) means something different in
+cmd.exe; prefer the file checks above for suite assertions.
 
 Command checks (run with the shell inside the task workspace):
 
@@ -161,6 +168,18 @@ def _run_check(check: dict[str, Any], ctx: CheckContext, prefix: str = "") -> tu
             text = p.read_text(encoding="utf-8", errors="ignore") if p.is_file() else ""
             ok = bool(re.search(str(check.get("pattern", check.get("value", ""))), text, re.I | re.S))
             return CheckResult(label, ok, required, f"{check.get('path')} regex {'matched' if ok else 'no match'}"), nested
+        if ctype == "file_not_regex":
+            p = _ws_path(ctx, check.get("path", ""))
+            text = p.read_text(encoding="utf-8", errors="ignore") if p.is_file() else ""
+            ok = not re.search(str(check.get("pattern", check.get("value", ""))), text, re.I | re.S)
+            return CheckResult(label, ok, required, f"{check.get('path')} regex {'absent' if ok else 'present'}"), nested
+        if ctype == "line_count":
+            p = _ws_path(ctx, check.get("path", ""))
+            # wc -l counts newline characters, so count those rather than split.
+            lines = p.read_text(encoding="utf-8", errors="ignore").count("\n") if p.is_file() else -1
+            want = int(check.get("value", check.get("eq", 0)))
+            ok = lines == want
+            return CheckResult(label, ok, required, f"{check.get('path')} lines={lines} (want {want})"), nested
         if ctype == "command":
             cmd = str(check.get("cmd", ""))
             # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.

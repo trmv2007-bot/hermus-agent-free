@@ -182,6 +182,47 @@ def test_run_python_evaluates_under_the_same_boundary():
     assert bad["returncode"] == 3 and bad["success"] is False
 
 
+def test_run_python_stages_files_and_runs_in_the_scratch_dir():
+    """A staged payload and the working directory reach the snippet on every platform.
+
+    The snippet imports one staged file, reads another, and reports the
+    directory it ran in: the three things a skill validation or a delegated
+    task depends on. Windows used to skip all three by bypassing ``run``.
+    """
+    code = (
+        "import json, os;"
+        "import helper;"
+        "print(json.dumps({'cwd': os.getcwd(), 'value': helper.VALUE, 'note': open('note.txt', encoding='utf-8').read()}))"
+    )
+    res = sandbox.run_python(code, files={"helper.py": "VALUE = 'staged'\n", "note.txt": "second file\n"}, purpose="test:staged")
+    assert res["returncode"] == 0, res
+    payload = json.loads(res["stdout"].strip().splitlines()[-1])
+    assert payload["value"] == "staged"
+    assert payload["note"] == "second file\n"
+    ran_in = Path(payload["cwd"]).resolve()
+    scratch = Path(res["workdir"]).resolve()
+    # A container stages the payload at /hermus; every host backend uses the scratch dir.
+    assert ran_in == scratch or (res["backend"] in ("docker", "podman") and str(ran_in) == "/hermus"), (
+        ran_in,
+        scratch,
+        res["backend"],
+    )
+
+
+def test_run_python_runs_in_an_explicit_cwd():
+    """``cwd`` is honoured, not silently replaced by the host's default directory."""
+    target = Path(tempfile.mkdtemp(prefix="hermus_cwd_"))
+    res = sandbox.run_python(
+        "import os; print(os.getcwd())", cwd=str(target), policy={"confine_to_workspace": False}, purpose="test:cwd"
+    )
+    assert res["returncode"] == 0, res
+    ran_in = str(Path(res["stdout"].strip()).resolve())
+    if res["backend"] in ("docker", "podman"):
+        assert ran_in == "/workspace", res  # the container binds the cwd there
+    else:
+        assert ran_in == str(target.resolve()), res
+
+
 @posix_only
 def test_timeout_kills_the_process():
     if not JAIL_LIMITS:
