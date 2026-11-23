@@ -444,7 +444,7 @@ class TestSystemsStillReachesEverything:
                 room.page.evaluate("() => document.querySelectorAll('#systems #consolePanels, #systems .console-card').length")
                 == 0
             ), "the panel grid rendered inside the Systems sheet"
-            href = room.page.evaluate("() => document.querySelector('.sheet-telemetry-link').getAttribute('href')")
+            href = room.page.evaluate("() => document.querySelector('.sheet-diagnostics-link').getAttribute('href')")
             assert href == "/control?tab=systems", "Diagnostics no longer reaches the console"
             room.page.screenshot(path=str(shots / "systems-sheet-1440.png"))
         finally:
