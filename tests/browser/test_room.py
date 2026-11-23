@@ -410,7 +410,26 @@ class TestTheConversationIsThePage:
 
 
 class TestSystemsStillReachesEverything:
-    def test_the_sheet_lists_every_surface_the_product_had(self, browser, gateway, shots):
+    """The sheet answers what the room can do; the palette stays the index of
+    every surface. Nothing the product had may become unreachable because the
+    sheet stopped being a link list."""
+
+    def test_the_palette_still_names_every_surface_the_product_had(self, browser, gateway):
+        room = room_at(browser, gateway, 1440)
+        try:
+            room.page.keyboard.press("Control+p")
+            room.page.wait_for_timeout(300)
+            hrefs = room.page.evaluate(
+                "() => [...document.querySelectorAll('#palette .palette-item')].map(a => a.getAttribute('href'))"
+            )
+            for tab, name in SURFACES:
+                assert any(f"tab={tab}" in h for h in hrefs), f"{name} (/control?tab={tab}) has no door"
+            for tab, name, href in EXTRA:
+                assert href in hrefs, f"{name} has no door"
+        finally:
+            room.close()
+
+    def test_the_sheet_answers_instead_of_listing_the_grid(self, browser, gateway, shots):
         room = room_at(browser, gateway, 1440)
         try:
             room.page.click("#systemsBtn")
@@ -418,14 +437,15 @@ class TestSystemsStillReachesEverything:
             assert room.page.evaluate("() => document.querySelector('#systems').open === true"), (
                 "the Systems control opened nothing"
             )
-            hrefs = room.page.evaluate("() => [...document.querySelectorAll('#systemsList a')].map(a => a.getAttribute('href'))")
-            listed = room.page.evaluate("() => [...document.querySelectorAll('#systemsList a b')].map(b => b.innerText.trim())")
-            for tab, name in SURFACES:
-                assert any(f"tab={tab}" in h for h in hrefs), f"{name} (/control?tab={tab}) is not reachable from Systems"
-                assert name in listed, f"{name} is not named in the Systems list"
-            for tab, name, href in EXTRA:
-                assert href in hrefs, f"{name} is not reachable from Systems"
-                assert name in listed
+            room.page.wait_for_selector("#systemsRows:not([hidden])", timeout=30000)
+            rows = room.page.evaluate("() => document.querySelectorAll('#systemsRows .sheet-row').length")
+            assert rows == 4, f"Systems lists {rows} rows instead of four answers"
+            assert (
+                room.page.evaluate("() => document.querySelectorAll('#systems #consolePanels, #systems .console-card').length")
+                == 0
+            ), "the panel grid rendered inside the Systems sheet"
+            href = room.page.evaluate("() => document.querySelector('.sheet-telemetry-link').getAttribute('href')")
+            assert href == "/control?tab=systems", "Diagnostics no longer reaches the console"
             room.page.screenshot(path=str(shots / "systems-sheet-1440.png"))
         finally:
             room.close()

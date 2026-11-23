@@ -973,10 +973,11 @@
     var indexed = !!(memory && memory.index && memory.index.available);
     if (!memory) {
       fillRow("memory", "unknown", "The gateway did not answer this one.");
-    } else if (!indexed) {
-      fillRow("memory", "off", total + " memories are stored, but recall is not indexed.", "hermus mem2 reindex");
     } else if (!total) {
       fillRow("memory", "on", "Nothing remembered yet.");
+    } else if (!indexed) {
+      fillRow("memory", "off", total + (total === 1 ? " thing is" : " things are") + " stored, but recall is not indexed.",
+        "hermus mem2 reindex");
     } else {
       fillRow("memory", "on", "Remembering " + total + (total === 1 ? " thing." : " things."));
     }
