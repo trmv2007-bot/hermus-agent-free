@@ -171,6 +171,48 @@ def test_verify_file_checks(tmp_path):
     assert v["success"], json.dumps(v["checks"], indent=2)
 
 
+def test_verify_line_count_and_absent_regex(tmp_path):
+    """Suite assertions that would be POSIX shell one-liners, as plain Python."""
+    decisions = tmp_path / "decisions.jsonl"
+    decisions.write_text('{"action": "alert"}\n{"action": "enqueue"}\n{"action": "ignore"}\n', encoding="utf-8")
+    (tmp_path / "quiet.jsonl").write_text('{"signal": "other"}\n', encoding="utf-8")
+    (tmp_path / "noisy.jsonl").write_text('{"signal": "attention.raised"}\n', encoding="utf-8")
+
+    v = verify_task(
+        {
+            "checks": [
+                {"type": "line_count", "path": "decisions.jsonl", "value": 3},
+                {"type": "file_not_regex", "path": "quiet.jsonl", "pattern": "attention\\.raised|attention\\.cleared"},
+                {"type": "file_not_regex", "path": "absent.jsonl", "pattern": "anything"},
+            ]
+        },
+        workspace=tmp_path,
+    )
+    assert v["success"], json.dumps(v["checks"], indent=2)
+
+    bad = verify_task(
+        {
+            "checks": [
+                {"type": "line_count", "path": "decisions.jsonl", "value": 4},
+                {"type": "line_count", "path": "missing.jsonl", "value": 3},
+                {"type": "file_not_regex", "path": "noisy.jsonl", "pattern": "attention\\.raised"},
+            ]
+        },
+        workspace=tmp_path,
+    )
+    assert not bad["success"] and bad["checks_passed"] == 0, bad["checks"]
+
+
+def test_builtin_suites_assert_without_a_posix_shell():
+    """A suite check must mean the same thing in cmd.exe as in /bin/sh."""
+    for suite_path in sorted((Path(__file__).resolve().parents[1] / "harness" / "suites").glob("*.json")):
+        suite = json.loads(suite_path.read_text(encoding="utf-8"))
+        for task in suite.get("tasks", []):
+            for check in task.get("checks", []):
+                cmd = str(check.get("cmd", ""))
+                assert "wc -l" not in cmd and "grep" not in cmd, f"{suite_path.name}:{task['id']} shells out to POSIX"
+
+
 def test_verify_command_check(tmp_path):
     (tmp_path / "f.txt").write_text("x")
     v = verify_task(

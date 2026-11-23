@@ -41,7 +41,7 @@
         [{"id": "sig_a", "severity": "low", "title": "same"}]
       ],
       "checks": [
-        {"type": "command", "cmd": "! grep -q 'attention.raised\\|attention.cleared' ambient_events.jsonl", "expect_exit": 0},
+        {"type": "file_not_regex", "path": "ambient_events.jsonl", "pattern": "attention\\.raised|attention\\.cleared"},
         {"type": "json", "key": "ticks.1.attention_changed", "value": "false"}
       ]
     }

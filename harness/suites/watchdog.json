@@ -22,9 +22,9 @@
           "value": "enqueue"
         },
         {
-          "type": "command",
-          "cmd": "! grep -q watchdog alerts.jsonl",
-          "expect_exit": 0
+          "type": "file_not_regex",
+          "path": "alerts.jsonl",
+          "pattern": "watchdog"
         },
         {
           "type": "file_contains",
@@ -196,9 +196,9 @@
           "value": "enqueue"
         },
         {
-          "type": "command",
-          "cmd": "! grep -q 'harness.run.failed' alerts.jsonl",
-          "expect_exit": 0
+          "type": "file_not_regex",
+          "path": "alerts.jsonl",
+          "pattern": "harness\\.run\\.failed"
         },
         {
           "type": "file_contains",
