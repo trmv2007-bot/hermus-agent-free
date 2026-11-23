@@ -705,7 +705,60 @@ a public hub with no account, and cached in the Hugging Face cache.
 
 ---
 
-## 17 · Model choice — the strongest free model wins, and says why
+## 17 · Surfaces: nothing on first open looks like a status board
+
+The room's one control, **Systems**, opened onto a twelve-link index of the control
+room, and one step behind that sat a grid of 58 generated panel cards reading
+`pending` / "not probed yet — press Refresh panels", above counters that read
+`58 PANELS · 58 ENDPOINTS VERIFIED · 55 DECLARED ACTIONS`. That is a
+refurbishment site's status board, one click from the landing. It is now a
+summary of what the room can actually do, and the grid is developer telemetry
+behind one closed door.
+
+**Systems answers instead of listing.** Four rows — Model, Voice, Computer,
+Memory — each one sentence and, only where something is missing, the single
+command that fixes it (`ollama pull llama3.2:1b`, `pip install faster-whisper`,
+`hermus emergency resume`, `hermus mem2 reindex`). The checks run when the sheet
+opens, are cached for a minute, and are never a button a person has to find.
+
+**Diagnostics is one disclosure, closed by default.** It says what it is — the
+gateway's probe panels, for developers and bug reports, not needed to use the
+room — and it does not render the grid inline; the grid keeps its own address at
+`/control?tab=systems`. The palette still reaches every surface the product had,
+so nothing deep became unreachable.
+
+**The deliberate grid stopped reading as unfinished.** Cards are drawn only after
+their probe answers, so a card is always a result; the "pending" chip and the
+"not probed yet" body are gone; the counter strip is one sentence ("All 58 probes
+answered."); and panels that are not answering fold into one collapsed line,
+because a missing optional integration is not a failure of the product.
+
+| Before | After | Why |
+| --- | --- | --- |
+| Systems = 12 links to the control room | Four sentences: model, voice, computer control, memory | A person asks "does it work", not "which panel" |
+| `pending` chip on every card before the probe returns | Cards are drawn only from a probe that answered | A card is a result, never a placeholder |
+| "not probed yet — press Refresh panels" | "Reading the panels…" while it probes, then the answer | Never hand the work back to the person |
+| `58 PANELS · 58 ENDPOINTS VERIFIED · 55 DECLARED ACTIONS` | "All 58 probes answered." | Counters of machinery are not information |
+| 58 cards, missing optionals mixed in as red | Ready cards, then one collapsed "N not answering right now" | Optional-not-installed is not a failure |
+| Room sheet → "Open the whole control room" | Room sheet → closed **Diagnostics** disclosure that says it is developer telemetry | Telemetry stays reachable, off by default, and says so |
+| Systems tab labelled like a product surface | Diagnostics tab, with a line saying it is developer telemetry | One name per thing |
+
+Motion follows the room's existing rules: the sheet still enters on `appear`,
+the Diagnostics body fades in over 180ms with a rotating chevron, the summary and
+the Systems control gained `:active` press states, and `prefers-reduced-motion`
+removes the movement while keeping the layout. No `transition: all`.
+
+**Tests.** `tests/browser/test_surfaces.py` (9 tests, self-contained gateway, no
+model needed) asserts at 1440 and 420 that the landing and Systems contain none
+of `pending` / `not probed` / `needs_install` / `endpoints verified` /
+`declared actions`, no `N panels` counter, that Systems is exactly four
+non-empty rows, that the grid is not in the sheet's DOM, that Diagnostics is
+closed by default and reaches `/control?tab=systems`, that a missing capability
+carries exactly one command, and that `/control` still opens on Overview.
+`tests/browser/test_room.py` keeps its contract for the palette (every surface
+still has a door) and now pins the sheet as four answers.
+
+## 18 · Model choice — the strongest free model wins, and says why
 
 An install on a machine holding a 4B and an 8B recorded `mistral/open-mistral-nemo`:
 Mistral's smallest model, picked because the free-tier table named it, and because
