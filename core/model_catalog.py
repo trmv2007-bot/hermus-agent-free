@@ -22,12 +22,13 @@ model's size is unpublished the figure is authored from its family and position.
 Within one provider the authored list order is authoritative; ``strength`` only
 decides comparisons *across* providers (this machine versus that free tier).
 
-Retired models
---------------
-Providers retire models, and a retired name is exactly how an install keeps
-calling something that no longer exists. Retired entries stay in the catalog —
-so a recorded choice can be explained and migrated — but :func:`ranked` never
-returns them and nothing is ever picked from them.
+What this module does *not* claim
+---------------------------------
+Availability. A free tier rate-limits per model, retires names without notice and
+serves different models to different plans, so "this model works on your key" is a
+fact only a request can establish. :mod:`core.model_health` makes that request;
+this module ranks what the models *are*. No `why` below says a model is dead, and
+none says it is reachable — both would be guesses wearing the clothes of data.
 """
 
 from __future__ import annotations
@@ -65,7 +66,6 @@ class Model:
     tools: bool
     why: str
     strength: float | None = None
-    retired: bool = False
 
     @property
     def ref(self) -> str:
@@ -90,7 +90,6 @@ class Model:
             "tools": self.tools,
             "why": self.why,
             "strength": strength(self),
-            "retired": self.retired,
         }
 
 
@@ -121,6 +120,16 @@ _MISTRAL = (
     ),
     Model(
         "mistral",
+        "open-mistral-nemo",
+        "mistral-nemo",
+        12,
+        128_000,
+        True,
+        "an older 12B: ranked below the newer Ministrals on generation, and only a probe can say whether a given key still reaches it",
+        strength=7,
+    ),
+    Model(
+        "mistral",
         "ministral-3b-latest",
         "ministral",
         3,
@@ -128,17 +137,6 @@ _MISTRAL = (
         True,
         "the smallest current Ministral: kept for machines that cannot hold anything bigger",
         strength=3,
-    ),
-    Model(
-        "mistral",
-        "open-mistral-nemo",
-        "mistral-nemo",
-        12,
-        128_000,
-        True,
-        "retired by Mistral on 2026-07-31; kept only so an install that recorded it is migrated and told why",
-        strength=7,
-        retired=True,
     ),
 )
 
@@ -256,9 +254,8 @@ _GEMINI = (
         None,
         1_000_000,
         True,
-        "deprecated and closed to new accounts (requests reroute after 2026-12-01); kept for installs that reached it",
+        "the previous Flash: Google lists it as deprecated for new accounts, so it ranks last; a probe decides whether this key still reaches it",
         strength=14,
-        retired=True,
     ),
 )
 
@@ -405,7 +402,7 @@ def inferred(provider: str, name: str) -> Model:
 
 
 def find(ref: str) -> Model | None:
-    """The catalog row for one reference, retired rows included."""
+    """The catalog row for one reference, if the catalog knows it."""
     provider, name = provider_of(ref), name_of(ref)
     for entry in CATALOG.get(provider, ()):
         if entry.name == name:
@@ -421,9 +418,9 @@ def describe(ref: str) -> Model:
     return inferred(provider_of(ref), name_of(ref))
 
 
-def ranked(provider: str, *, include_retired: bool = False) -> list[Model]:
-    """One provider's list, strongest first. Retired models are never offered."""
-    return [entry for entry in CATALOG.get(provider, ()) if include_retired or not entry.retired]
+def ranked(provider: str) -> list[Model]:
+    """One provider's list, strongest first."""
+    return list(CATALOG.get(provider, ()))
 
 
 def default_model(provider: str) -> str | None:
@@ -570,10 +567,14 @@ def short_reason(winner: Model, others: list[Model]) -> str:
     return f"strongest reachable, ahead of {nearest.name} ({size_phrase(nearest)})"
 
 
-def upgrade_reason(old: Model, new: Model, *, retired: bool) -> str:
-    """Why a recorded model is being replaced, in words the person can check."""
-    if retired:
-        return f"{old.ref} has been retired by {old.provider}, so it is replaced by {new.name} ({size_phrase(new)})"
+def upgrade_reason(old: Model, new: Model, *, gone: str = "") -> str:
+    """Why a recorded model is being replaced, in words the person can check.
+
+    ``gone`` is a measured cause ("HTTP 404 — this key cannot call the name",
+    "Ollama is not running"); when it is empty the reason is capability alone.
+    """
+    if gone:
+        return f"{old.ref} cannot answer any more ({gone}), so it is replaced by {new.name} ({size_phrase(new)})"
     return (
         f"the recorded {old.ref} ({size_phrase(old)}) is weaker than {new.ref} ({size_phrase(new)}), "
         "which is reachable now, so it is upgraded"
@@ -597,7 +598,7 @@ def as_rows() -> list[dict[str, Any]]:
     """Every catalog row, in rank order, for a table in a report or the API."""
     rows: list[dict[str, Any]] = []
     for provider in CATALOG:
-        for position, entry in enumerate(ranked(provider, include_retired=True), start=1):
+        for position, entry in enumerate(ranked(provider), start=1):
             row = entry.to_dict()
             row["rank"] = position
             rows.append(row)
@@ -606,4 +607,4 @@ def as_rows() -> list[dict[str, Any]]:
 
 def catalog_payload() -> dict[str, Any]:
     """The catalog as the API serves it: one ranked list per provider."""
-    return {provider: [entry.to_dict() for entry in ranked(provider, include_retired=True)] for provider in CATALOG}
+    return {provider: [entry.to_dict() for entry in ranked(provider)] for provider in CATALOG}

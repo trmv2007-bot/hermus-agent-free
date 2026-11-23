@@ -11,6 +11,12 @@ import os
 
 os.environ["HERMUS_NO_DOTENV"] = "1"
 
+# Model availability is probed by real requests in production (see
+# core/model_health.py). A test must never reach a provider, so probing is off
+# for the whole suite; the tests that exercise it inject a fake transport and
+# switch it back on themselves.
+os.environ["HERMUS_MODEL_PROBE"] = "0"
+
 import pytest  # noqa: E402
 
 from core.computer.task_control import get_task_control  # noqa: E402

@@ -36,6 +36,7 @@ import urllib.request
 from typing import Any
 
 from . import model_catalog as catalog
+from . import model_health
 
 OLLAMA_BASE = "http://localhost:11434"
 LMSTUDIO_BASE = "http://localhost:1234/v1"
@@ -303,17 +304,57 @@ def _local_refs(st: dict[str, Any]) -> list[str]:
     return refs
 
 
-def _hosted_refs() -> list[str]:
-    """Each configured free tier's own best model, with tool calling required."""
+def free_key_value(provider: str) -> str:
+    """The key itself, from the environment or the store the control room writes.
+
+    Resolution needs it to ask the provider a real question; nothing here logs,
+    stores or returns it anywhere but the header of that one request.
+    """
+    env_key = catalog.FREE_KEYS.get(provider, "")
+    value = os.environ.get(env_key) if env_key else ""
+    if value:
+        return value
+    try:
+        from .multi_key import multi_key_manager
+
+        entries = (multi_key_manager.list_keys(provider) or {}).get(provider) or []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("key"):
+                return str(entry["key"])
+    except Exception:  # noqa: BLE001 - no store is "no key"
+        return ""
+    return ""
+
+
+def _hosted_refs(need_tools: bool = True) -> tuple[list[str], list[dict[str, Any]]]:
+    """Each keyed free tier's best candidate *this key can reach*, plus the refusals.
+
+    The catalog says which model would be strongest; the probe says which ones
+    answer. A model that is refused with HTTP 429 is recorded as capacity — it is
+    not gone, and it is not a reason to migrate anything — and the next candidate
+    down the ranking is offered instead.
+    """
     refs: list[str] = []
+    refused: list[dict[str, Any]] = []
     keys = free_key_status()
     for provider, _env_key, _url in _FREE_KEYS:
         if not keys.get(provider):
             continue
-        picked = catalog.pick(provider)
-        if picked.choice is not None:
-            refs.append(picked.choice.ref)
-    return refs
+        key = free_key_value(provider)
+        chosen = False
+        for state in model_health.rank(provider, key):
+            entry = catalog.find(state.ref)
+            if need_tools and entry is not None and not entry.tools:
+                refused.append({"ref": state.ref, "why": "no function calling, and this product drives tools"})
+                continue
+            if state.state in (model_health.OK, model_health.UNKNOWN):
+                refs.append(state.ref)
+                chosen = True
+                break
+            refused.append({"ref": state.ref, "why": state.detail or state.state})
+        if not chosen and not refused:
+            refused.append({"ref": f"{provider}/?", "why": "no candidate answered"})
+    return refs, refused
 
 
 def local_origin(provider: str, st: dict[str, Any]) -> str:
@@ -339,7 +380,8 @@ def resolve_brain(
         return _probe_named(named)
 
     st = status or local_status()
-    picked = catalog.best_of(_local_refs(st) + _hosted_refs(), need_tools=need_tools)
+    hosted, refused = _hosted_refs(need_tools=need_tools)
+    picked = catalog.best_of(_local_refs(st) + hosted, need_tools=need_tools)
     if picked.choice is None:
         if st["ollama"]["installed"]:
             return stub_brain("Ollama is installed but not running")
@@ -354,15 +396,18 @@ def resolve_brain(
     else:
         brain = free_brain(entry.provider, entry.name, catalog.FREE_KEYS[entry.provider], reason=reason)
     brain["source"] = f"{brain['source']}; {catalog.short_reason(entry, list(picked.runners))}"
-    brain["skipped"] = [{"ref": skipped.ref, "why": why} for skipped, why in picked.skipped]
+    brain["skipped"] = refused + [{"ref": skipped.ref, "why": why} for skipped, why in picked.skipped]
     return brain
 
 
 def _recorded_gone(recorded: str, st: dict[str, Any]) -> str:
-    """Why a recorded model cannot answer any more, or '' when it still can."""
-    entry = catalog.find(recorded)
-    if entry is not None and entry.retired:
-        return f"{entry.provider} retired it"
+    """Why a recorded model cannot answer any more, or '' when it still can.
+
+    For a hosted model the answer comes from the provider, not from the catalog: a
+    429 is capacity (the model stays), and only a 404 or a key that no longer
+    exists counts as gone. Treating a rate limit as a retirement would migrate a
+    person off a model that works the next minute.
+    """
     provider, name = catalog.provider_of(recorded), catalog.name_of(recorded)
     if provider == "ollama":
         info = st.get("ollama") or {}
@@ -377,8 +422,16 @@ def _recorded_gone(recorded: str, st: dict[str, Any]) -> str:
         if not info.get("serving"):
             return f"{provider} is not serving"
         return "" if name in (info.get("models") or []) else "the runtime no longer lists it"
-    if provider in catalog.FREE_KEYS and not free_key_status().get(provider):
+    if provider not in catalog.FREE_KEYS:
+        return ""
+    key = free_key_value(provider)
+    if not key:
         return f"{catalog.FREE_KEYS[provider]} is not configured"
+    state = model_health.probe(provider, key, name)
+    if state.state == model_health.GONE:
+        return state.detail or "the provider no longer serves it to this key"
+    if state.state == model_health.DENIED:
+        return state.detail or "the key was refused"
     return ""
 
 
@@ -387,10 +440,10 @@ def upgrade_offer(
 ) -> dict[str, Any]:
     """The recorded model against the strongest one reachable now.
 
-    A model the provider retired, one its runtime no longer holds, one whose key
-    is gone, and one that is simply weaker than something reachable all count as
-    below best. This decides and explains; :func:`apply_resolved_default`
-    performs the change at startup.
+    A model whose key or runtime no longer serves it, one the provider answers with
+    HTTP 404, and one that is simply weaker than something reachable all count as
+    below best. A 429 does not: that is capacity, and the model stays. This decides
+    and explains; :func:`apply_resolved_default` performs the change at startup.
     """
     st = status or local_status()
     best = resolve_brain(status=st, need_tools=need_tools)
@@ -399,7 +452,6 @@ def upgrade_offer(
             "needed": False,
             "from": recorded,
             "to": None,
-            "retired": False,
             "gone": "",
             "reason": f"nothing better is reachable: {best['reason']}",
             "best": best,
@@ -409,7 +461,6 @@ def upgrade_offer(
             "needed": True,
             "from": None,
             "to": best["model"],
-            "retired": False,
             "gone": "",
             "reason": f"no model is recorded; {best['model']} is the strongest reachable one",
             "best": best,
@@ -422,14 +473,13 @@ def upgrade_offer(
     if gone:
         reason = f"{recorded} cannot answer any more ({gone}); {best['model']} is the strongest reachable"
     elif weaker:
-        reason = catalog.upgrade_reason(old, new, retired=old.retired)
+        reason = catalog.upgrade_reason(old, new, gone=gone)
     else:
         reason = f"{recorded} is still at least as strong as {best['model']}, so it stays"
     return {
         "needed": bool(gone or weaker),
         "from": recorded,
         "to": best["model"] if (gone or weaker) else recorded,
-        "retired": bool(old.retired),
         "gone": gone,
         "reason": reason,
         "from_strength": round(catalog.strength(old), 2),
@@ -469,8 +519,8 @@ def apply_resolved_default(*, status: dict[str, Any] | None = None) -> dict[str,
     * the configured model is still the untouched shipment default (or empty) —
       adopt the strongest reachable model;
     * the configured model is the one onboarding recorded and it is now below the
-      strongest reachable one — the provider retired it, its runtime lost it, or
-      a stronger free model exists. Upgrade it in place, record the change in the
+      strongest reachable one — its runtime lost it, the provider no longer serves
+      it to this key, or a stronger free model answered when probed. Upgrade it in place, record the change in the
       onboarding state, and report the reason. Onboarding does not run again and
       the person's name and permission choice are untouched.
 
