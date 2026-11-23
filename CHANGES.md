@@ -227,3 +227,48 @@ Tests: `tests/test_presence_overlay.py` (45 tests) covers rect validation
 including NaN/bool/huge, DPI mapping across a 100 %/150 % pair, ring and label
 never overlapping the target, bridge TTL expiry, state transitions, the SSE
 stream, and the controller seam.
+## 12 · One scheduler and one state bundle (G1 — the first answer arrives)
+
+The defect this round attacks was measured, not guessed: with the Control Room open, a person typed a question and **waited 50 seconds** for an answer that the job had produced in under a second. Three things combined to cause it, and all three are now gone.
+
+### What the old page did
+
+| Symptom | Cause |
+|---------|-------|
+| ~20 requests fired on load | Six scripts each fetched their own first-screen state, none aware of the others |
+| Only 6 sockets, so requests queued | Chrome keeps six sockets per host; fourteen independent pollers saturated them permanently |
+| A typed question waited ~9s for a socket | `POST /jobs` queued behind diagnostics nobody had opened |
+| Some requests never finished | `/doctor/status` (~10s) and `/api/v1/agents/vram/status` (~13s) ran their probes inline, on the event loop |
+| The whole gateway froze for 13–14s once | `get_recommended_setup()` in the vram handler is a synchronous multi-second HTTP probe; it blocked every other request |
+
+### What replaces it
+
+- **`gateway/static/scheduler.js` — the room's only timer.** Every script registers cadences with `HermusBus.every()` instead of owning `setInterval`. The scheduler applies per-task exponential backoff, caps concurrent GETs at three, deduplicates by URL, and stops entirely while the document is hidden. There are now zero `setInterval` calls in the room's scripts.
+- **`GET /api/v1/console/state` — one request for the first screen.** `core/console_state.py` assembles 21 sections from the *same handlers their endpoints serve* (so it cannot become a second source of truth) on a background daemon thread, at per-tier cadences. The route returns the latest snapshot and does no probing of its own. The client's `get()` serves any covered path from it, so twenty reads cost one socket.
+- **Heavy sections are honest about warming.** `jarvis`, `vram` and `computer` fork processes or probe localhost, so they are built only by the refresher and answer `{"warming": true}` until they land. The client renders that as warming rather than falling through to the probe — which is what kept a 10-second request on the first screen.
+- **Diagnostics moved behind a door.** `/doctor/status` and `/engine/status` are asked for only when the person opens the Systems surface, and both are cached (60s / 30s) on both sides, so reopening costs nothing.
+- **The vram probe left the event loop** and reuses its answer for a minute (`asyncio.to_thread` + TTL cache), so hardware detection can never freeze a person's request again.
+- **`/readyz` reports warm-up progress** (`warmup.state`, per-steps) instead of hiding it. It never gates readiness: a gateway serving traffic is ready while a section warms.
+
+### Measured on this Windows 11 PC
+
+Cold gateway (`mock/mock`, isolated `HERMUS_HOME`/`HERMUS_DATA_DIR`), same instrument (`scripts/measure_first_screen.py`) both sides:
+
+| | before | after |
+|---|---|---|
+| requests on load | 57 | 20 |
+| still open after 10s idle | 22 | 0 |
+| sockets held | 6 (pegged) | 2 |
+| slowest request in the first 3s | 9,849ms | 101ms |
+| first-screen p95 | 5,622ms | 101ms |
+| in-page `POST /jobs` | 9,260ms | 16ms |
+| **typed question → answer on screen** | **49,814ms** | **275ms** |
+
+Page load now issues exactly one state request: `GET /api/v1/console/state`.
+
+### Tests
+
+- `tests/js/scheduler.test.js` — 13 Node tests: one bundle request for the first screen, bounded sockets, dedupe, per-task backoff, silence while hidden, version refusal, and that a warming heavy section never runs its probe.
+- `tests/test_scheduler_contract.py` — 6 tests: no room script owns a network interval, the page loads the scheduler before every panel script, and every first-screen path is bundle-served.
+- `tests/test_console_state.py` — 40 tests, including that a 1-second vram probe no longer blocks the event loop and that three panel refreshes cost one probe.
+- `tests/browser/test_first_answer.py` — 5 Playwright tests against a real gateway: a typed command is answered in the conversation within 5s, nothing hangs after 10 idle seconds, every first-screen request is under 300ms, the screen is one bundle rather than a storm, and diagnostics were not touched by a page load. Chromium is optional; the tests skip without it.

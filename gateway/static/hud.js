@@ -229,11 +229,15 @@
       else setMood("idle");
     });
     // Nexus owns run liveness; it outranks the poller while a run is live.
-    window.setInterval(function () {
+    // No timer of its own: the room's one scheduler (scheduler.js) runs this
+    // purely local mood sync, so a hidden tab spends nothing on it either.
+    var syncMood = function () {
       var nx = window.HermusNexus && window.HermusNexus.state;
       if (nx && (nx.busy || nx.missionLive)) setMood("busy");
       else if (mood === "busy") setMood("idle");
-    }, 1200);
+    };
+    if (window.HermusBus) window.HermusBus.every("hud-mood", 1200, syncMood, {network: false});
+    else window.setInterval(syncMood, 1200);
   }
 
   /* ------------------------------------------------------------------ *

@@ -345,6 +345,15 @@ async def lifespan(app: FastAPI):
             logger.info(f"[Gateway] model unchanged: {picked.get('model')} ({picked.get('reason', '')})")
     except Exception as e:
         logger.warning(f"[Gateway] model resolution skipped: {type(e).__name__}: {e}")
+    # Warm the first screen's state bundle in the background before anything
+    # else starts: every section a page load reads is then already built, so no
+    # person-facing request ever triggers a one-time initialisation.
+    try:
+        from core.console_state import console_state
+
+        console_state.start()
+    except Exception as e:
+        logger.warning(f"[Gateway] console state warm-up unavailable: {e}")
     agent_pool_started = False
     try:
         from core.agents import init_pool
@@ -433,6 +442,12 @@ async def lifespan(app: FastAPI):
         # route new traffic elsewhere), then give in-flight jobs a bounded
         # window to finish before the process tears itself down.
         _lifecycle.state.begin_drain("shutdown")
+        try:
+            from core.console_state import console_state
+
+            console_state.stop()
+        except Exception:
+            pass
         if presence_task and not presence_task.done():
             presence_task.cancel()
         if ambient_task and not ambient_task.done():
@@ -873,6 +888,12 @@ async def control_client_js():
 async def control_room_js():
     """Control-room application script (markup lives in control.html)."""
     return _serve_control_asset("control-room.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/static/scheduler.js")
+async def control_scheduler_js():
+    """The room's one scheduler and one state bundle client (see scheduler.js)."""
+    return _serve_control_asset("scheduler.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/static/control.css")
@@ -1405,13 +1426,23 @@ async def healthz():
 
 @app.get("/readyz")
 async def readyz():
-    """Readiness: 200 when traffic may be routed here, 503 while draining."""
+    """Readiness: 200 when traffic may be routed here, 503 while draining.
+
+    ``warmup`` is the honest progress of the one-time initialisation the first
+    screen reads (see :mod:`core.console_state`). It never gates readiness: a
+    gateway that serves traffic is ready, and a section that has not warmed yet
+    says so instead of making the person wait behind it.
+    """
     from gateway.envelope import error_body
 
     ready, detail = _lifecycle.readiness()
+    from core.console_state import console_state
+
+    warmup = console_state.progress()
     payload = {
         "status": "ready" if ready else "not_ready",
         **detail,
+        "warmup": warmup,
     }
     if ready:
         return payload
@@ -1422,7 +1453,7 @@ async def readyz():
             message="; ".join(detail.get("reasons") or ["not ready"]),
             status=503,
             retryable=True,
-            details=detail,
+            details=payload,
         ),
         headers={"Cache-Control": "no-store"},
     )

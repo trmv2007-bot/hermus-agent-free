@@ -7,15 +7,25 @@
     headers.set('Accept','application/json');
     if(token) headers.set('X-Hermus-Token', token);
     if(options.body && !headers.has('Content-Type')) headers.set('Content-Type','application/json');
-    const r=await fetch(path,{...options,headers});
-    const text=await r.text(); let data={};
-    try{ data=text?JSON.parse(text):{} }catch{ data={message:text}; }
-    if(!r.ok){
-      const raw=String(data.message||data.detail||data.error||'').trim();
-      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || text.trim().startsWith('<!');
-      throw new Error(htmlError ? 'Personal Space is temporarily unavailable.' : (raw||('HTTP '+r.status)));
+    // Reads go through the room's one scheduler (scheduler.js); writes keep
+    // their own socket so an approval never waits behind a poll.
+    const method=String(options.method||'GET').toUpperCase();
+    let ok, status, data, text;
+    if(method==='GET' && window.HermusBus){
+      const res=await window.HermusBus.get(path,{...options,headers});
+      ok=res.ok; status=res.status; data=res.data; text=res.text||'';
+    }else{
+      const r=await fetch(path,{...options,headers});
+      ok=r.ok; status=r.status; text=await r.text();
+      try{ data=text?JSON.parse(text):{} }catch{ data={message:text}; }
     }
-    return data;
+    if(!ok){
+      const body=(data&&typeof data==='object')?data:{};
+      const raw=String(body.message||body.detail||body.error||'').trim();
+      const htmlError=raw.startsWith('<!') || raw.toLowerCase().includes('<html') || String(text||'').trim().startsWith('<!');
+      throw new Error(htmlError ? 'Personal Space is temporarily unavailable.' : (raw||('HTTP '+status)));
+    }
+    return data&&typeof data==='object'?data:{};
   }
 
   const esc=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -120,7 +130,7 @@
     if(e.target.closest('#personalSpaceOpen') || e.target.closest('#personalSpaceOpenDock')) openSpace();
   });
   refresh();
-  setInterval(refresh,15000);
+  if(window.HermusBus) window.HermusBus.every('personal-space',15000,refresh,{immediate:false});
 
   window.HermusPersonalSpace={refresh,open:openSpace,api,get snapshot(){return snapshot;}};
 })();

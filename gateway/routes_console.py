@@ -14,6 +14,11 @@ Two things are never faked here:
   ``verified: false`` for that panel instead of a dead button.
 * **Probe honesty.** A panel whose owner raises reports ``unavailable`` with the
   error text. Nothing is substituted to make the console look complete.
+
+``GET /state`` is the one bundle the first screen loads (see
+:mod:`core.console_state`): every section is produced by its endpoint's own
+handler and served from a background-refreshed snapshot, so opening the Control
+Room costs one request instead of twenty.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from core import console
+from core.console_state import BACKGROUND_ONLY, console_state
 
 router = APIRouter(prefix="/api/v1/console", tags=["console"])
 
@@ -88,6 +94,21 @@ async def console_manifest() -> dict[str, Any]:
     data["verified_panels"] = sum(1 for p in data["panels"] if p["verified"])
     data["route_count"] = len(known)
     return data
+
+
+@router.get("/state")
+async def console_state_bundle(include: str = Query("", description="Comma-separated section names; empty for every section")):
+    """Everything the first screen and the tab rail read, in one response.
+
+    Served from the snapshot :mod:`core.console_state` keeps warm, so this
+    handler does no probing of its own. A section that has never been built
+    answers ``{"warming": true}`` — the payload never invents state, and
+    ``/readyz`` reports the same progress.
+    """
+    wanted = {name.strip() for name in include.split(",") if name.strip()}
+    if wanted:
+        await console_state.ensure_sections(wanted - BACKGROUND_ONLY)
+    return console_state.snapshot()
 
 
 @router.get("/panels")

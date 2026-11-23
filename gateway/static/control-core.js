@@ -247,10 +247,11 @@
 
   function getJSON(url) {
     // A hung probe must not stall the whole core. Abort after 4s and let the
-    // caller decide what an unknown value should look like.
+    // caller decide what an unknown value should look like. Reads go through
+    // the one scheduler so they share the console state bundle and its bounds.
+    var options = { headers: { Accept: "application/json" } };
     var controller = null;
     var timer = null;
-    var options = { headers: { Accept: "application/json" } };
     try {
       if (window.AbortController) {
         controller = new AbortController();
@@ -258,19 +259,20 @@
         timer = window.setTimeout(function () { try { controller.abort(); } catch (e) {} }, 4000);
       }
     } catch (e) { /* older browser */ }
-
-    return fetch(url, options)
-      .then(function (r) {
+    var transport = window.HermusBus
+      ? window.HermusBus.get(url, options)
+      : fetch(url, options).then(function (r) {
         return r.text().then(function (text) {
           var body = null;
           try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
-          return { ok: r.ok, status: r.status, body: body };
+          return { ok: r.ok, status: r.status, data: body };
         });
-      })
-      .catch(function () { return { ok: false, status: 0, body: null }; })
+      });
+    return transport
+      .catch(function () { return { ok: false, status: 0, data: null }; })
       .then(function (result) {
         if (timer) window.clearTimeout(timer);
-        return result;
+        return { ok: result.ok, status: result.status, body: result.data == null ? null : result.data };
       });
   }
 
@@ -325,16 +327,16 @@
     if (coreBusy) return Promise.resolve();
     coreBusy = true;
     // Show "gateway is up" as soon as /readyz answers, instead of holding the
-    // core offline until the slowest probe in the batch returns.
-    fetch("/readyz", { headers: { Accept: "application/json" } })
+    // core offline until the slowest probe in the batch returns. Both reads
+    // come from the console state bundle, so this is not a second request.
+    getJSON("/readyz")
       .then(function (r) {
         if (r.ok && state === "offline") {
           setState("idle", { now: "Reading gateway state…", progress: 0.1 });
         }
-      })
-      .catch(function () {});
+      });
     return Promise.all([
-      fetch("/readyz", { headers: { Accept: "application/json" } }).catch(function () { return { ok: false }; }),
+      getJSON("/readyz").catch(function () { return { ok: false }; }),
       getJSON("/api/jarvis/status"),
       getJSON("/api/v1/harness/overview"),
       getJSON("/computer/status"),
@@ -499,8 +501,12 @@
     requestDraw();
     pollCore();
     pollEvents();
-    window.setInterval(pollCore, 5000);
-    window.setInterval(pollEvents, 2500);
+    // One scheduler owns every timer in the room (scheduler.js). The core
+    // registers its two cadences instead of keeping intervals of its own.
+    if (window.HermusBus) {
+      window.HermusBus.every("core", 5000, pollCore, { immediate: false });
+      window.HermusBus.every("core-events", 2500, pollEvents, { immediate: false });
+    }
   }
 
   window.addEventListener("resize", function () {
