@@ -50,7 +50,7 @@
   <div class="shell">
 
     <!-- The real ARIA tablist: roving tabindex, arrow-key navigation.
-         Eleven sections; the Doctor capability lives inside the Systems console. -->
+         Eleven sections; the Doctor capability lives inside Diagnostics. -->
     <nav class="tabrail" role="tablist" aria-label="HERMUS contextual surfaces">
       <button id="tabbtn-overview"     role="tab" aria-controls="tab-overview"     aria-selected="true"  tabindex="0"  data-tab="overview"     class="on" type="button"><span class="tab-ico" aria-hidden="true">◉</span>Overview</button>
       <button id="tabbtn-jobs"         role="tab" aria-controls="tab-jobs"         aria-selected="false" tabindex="-1" data-tab="jobs"         type="button"><span class="tab-ico" aria-hidden="true">≡</span>Jobs</button>
@@ -62,7 +62,7 @@
       <button id="tabbtn-presence"     role="tab" aria-controls="tab-presence"     aria-selected="false" tabindex="-1" data-tab="presence"     type="button"><span class="tab-ico" aria-hidden="true">☾</span>Presence</button>
       <button id="tabbtn-computer"     role="tab" aria-controls="tab-computer"     aria-selected="false" tabindex="-1" data-tab="computer"     type="button"><span class="tab-ico" aria-hidden="true">▣</span>Computer</button>
       <button id="tabbtn-agents"       role="tab" aria-controls="tab-agents"       aria-selected="false" tabindex="-1" data-tab="agents"       type="button"><span class="tab-ico" aria-hidden="true">⬡</span>Agents</button>
-      <button id="tabbtn-systems"      role="tab" aria-controls="tab-systems"      aria-selected="false" tabindex="-1" data-tab="systems"      type="button"><span class="tab-ico" aria-hidden="true">⌁</span>Systems</button>
+      <button id="tabbtn-systems"      role="tab" aria-controls="tab-systems"      aria-selected="false" tabindex="-1" data-tab="systems"      type="button"><span class="tab-ico" aria-hidden="true">⌁</span>Diagnostics</button>
     </nav>
 
     <main class="content">
@@ -674,16 +674,16 @@
         </div>
       </section>
 
-      <!-- ============ SYSTEMS / CONSOLE ============ -->
+      <!-- ============ DIAGNOSTICS / CONSOLE ============ -->
       <section id="tab-systems" class="tab" role="tabpanel" aria-labelledby="tabbtn-systems" hidden>
         <div class="page-head">
-          <h2>Systems console</h2>
-          <p class="meta">Generated from the server-side manifest: every panel names a real probe — the doctor panel reads <code>/doctor/status</code> and runs <code>/doctor/run</code>. The console never simulates success.</p>
+          <h2>Diagnostics</h2>
+          <p class="meta">Developer telemetry. Each panel reads one real endpoint of the gateway through the server-side manifest; nothing here is simulated, and nothing here is needed to use Hermus.</p>
         </div>
 
         <div class="card console-toolbar">
           <div class="card-head">
-            <h2>Panels</h2>
+            <h2>Probes</h2>
             <div class="card-actions">
               <input id="consoleFilter" class="input" placeholder="filter panels" aria-label="Filter console panels">
               <select id="consoleGroup" class="input" aria-label="Panel group"></select>
@@ -691,7 +691,7 @@
               <button id="consoleProbeAll" class="btn primary" type="button">Probe all</button>
             </div>
           </div>
-          <p class="meta" id="consoleSummary">manifest loading…</p>
+          <p class="meta" id="consoleSummary"></p>
         </div>
 
         <!-- the generated console mounts here (core/console.py manifest) -->

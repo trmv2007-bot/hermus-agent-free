@@ -11,9 +11,10 @@
 (function () {
   "use strict";
 
-  /* Every destination the product had before the room existed. The Systems
-     sheet and the palette are both built from this one list, so a surface can
-     never be listed in one and missing from the other. */
+  /* Every destination the product had before the room existed. The palette is
+     built from this list, so a deep surface can never become unreachable. The
+     Systems sheet deliberately does not list them: it answers what the room can
+     do here, and hands developer telemetry to one disclosure. */
   var SECTIONS = [
     { tab: "overview", name: "Overview", note: "the core · mission · live channel" },
     { tab: "jobs", name: "Jobs", note: "every run and its result" },
@@ -878,27 +879,146 @@
 
   /* ------------------------------------------------------------ the systems */
 
-  function sectionsMarkup(items) {
-    return items.map(function (s) {
-      var href = "/control?tab=" + encodeURIComponent(s.tab) + (s.anchor ? "#" + s.anchor : "");
-      return '<a href="' + href + '"><b>' + s.name + '</b><span>' + s.note + "</span></a>";
-    }).join("");
+  /* The sheet answers one question — what can it do here — and nothing else.
+     It runs its own checks the moment it opens, so a person never waits behind
+     a button, and it shows plain sentences rather than probe states. The
+     gateway's 58-panel grid is developer telemetry: it lives one deliberate
+     disclosure below, closed by default. */
+
+  var systems = { at: 0, data: null, busy: false };
+
+  function readJSON(url) {
+    return fetch(url, { headers: headers() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
   }
 
-  function buildSystems() {
-    $("#systemsList").innerHTML = sectionsMarkup(SECTIONS);
+  function fillRow(id, state, sentence, fix) {
+    var row = document.querySelector('#systemsRows [data-row="' + id + '"]');
+    if (!row) return;
+    row.setAttribute("data-state", state);
+    var value = row.querySelector(".sheet-value");
+    while (value.firstChild) value.removeChild(value.firstChild);
+    var line = document.createElement("p");
+    line.textContent = sentence;
+    value.appendChild(line);
+    if (fix) {
+      var command = document.createElement("p");
+      command.className = "sheet-fix";
+      command.textContent = fix;
+      value.appendChild(command);
+    }
+  }
+
+  /* A reason arrives as a sentence fragment from the engine ("local
+     speech-to-text is not installed"); read it inside our sentence without
+     doubling its full stop. */
+  function clause(text) {
+    var s = String(text || "").trim().replace(/[.!]+$/, "");
+    return s ? s.charAt(0).toLowerCase() + s.slice(1) : "";
+  }
+
+  function renderSystems(res) {
+    var onboarding = res[0];
+    var voice = res[1];
+    var computer = res[2];
+    var memory = res[3];
+    var wait = $("#systemsWait");
+    var rows = $("#systemsRows");
+
+    if (!onboarding && !voice && !computer && !memory) {
+      if (rows) rows.hidden = true;
+      if (wait) {
+        wait.hidden = false;
+        wait.textContent = "The gateway is not answering, so there is nothing to report yet.";
+      }
+      return;
+    }
+
+    var resolved = (onboarding && onboarding.resolved) || {};
+    if (!onboarding) {
+      fillRow("model", "unknown", "The gateway did not answer this one.");
+    } else if (resolved.kind === "stub") {
+      fillRow("model", "off", "No model yet, so answers come from an offline placeholder.", onboarding.fix);
+    } else if (resolved.reachable === false) {
+      fillRow("model", "off", resolved.name + " is set but not answering.", onboarding.fix);
+    } else {
+      var where = resolved.kind === "freekey"
+        ? " from the " + resolved.provider + " free tier."
+        : resolved.kind === "local" ? " on this machine." : ".";
+      fillRow("model", "on", "Answering with " + resolved.name + where);
+    }
+
+    if (!voice) {
+      fillRow("voice", "unknown", "The gateway did not answer this one.");
+    } else {
+      var stt = voice.stt || {};
+      var tts = voice.tts || {};
+      if (!stt.available) {
+        fillRow("voice", "off", "Off: " + clause(stt.reason || "local speech-to-text is not installed") + ".", stt.fix);
+      } else {
+        fillRow("voice", "on", tts.available ? "Listening, and answers are spoken." : "Listening, with answers on the screen.");
+      }
+    }
+
+    if (!computer) {
+      fillRow("computer", "unknown", "The gateway did not answer this one.");
+    } else if (computer.halted) {
+      fillRow("computer", "off", "Paused by the emergency stop, so it cannot touch the screen.", "hermus emergency resume");
+    } else {
+      fillRow("computer", "on", "Can see this screen and click.");
+    }
+
+    var total = memory && typeof memory.total === "number" ? memory.total : null;
+    var indexed = !!(memory && memory.index && memory.index.available);
+    if (!memory) {
+      fillRow("memory", "unknown", "The gateway did not answer this one.");
+    } else if (!indexed) {
+      fillRow("memory", "off", total + " memories are stored, but recall is not indexed.", "hermus mem2 reindex");
+    } else if (!total) {
+      fillRow("memory", "on", "Nothing remembered yet.");
+    } else {
+      fillRow("memory", "on", "Remembering " + total + (total === 1 ? " thing." : " things."));
+    }
+
+    if (wait) wait.hidden = true;
+    if (rows) {
+      rows.hidden = false;
+      rows.setAttribute("data-settled", "true");
+    }
+  }
+
+  function checkSystems() {
+    if (systems.busy) return;
+    systems.busy = true;
+    Promise.all([
+      readJSON("/api/v1/onboarding/state"),
+      readJSON("/voice/live/status"),
+      readJSON("/computer/status"),
+      readJSON("/memory/stats")
+    ]).then(function (res) {
+      systems.busy = false;
+      systems.at = Date.now();
+      if (res[0] || res[1] || res[2] || res[3]) systems.data = res;
+      renderSystems(res);
+    }).catch(function () {
+      systems.busy = false;
+    });
   }
 
   function openSystems() {
     var sheet = $("#systems");
     $("#systemsBtn").setAttribute("aria-expanded", "true");
+    /* The answer is read when the surface opens and kept for a minute, so
+       reopening is instant and nothing probes in the background. */
+    if (!systems.data || Date.now() - systems.at > 60000) checkSystems();
     if (typeof sheet.showModal === "function") {
       if (!sheet.open) sheet.showModal();
     } else {
       sheet.setAttribute("open", "");
       sheet.classList.add("on");
     }
-    var first = sheet.querySelector("a, button");
+    var first = sheet.querySelector("summary, button");
     if (first) first.focus();
   }
 
@@ -1031,7 +1151,6 @@
   }
 
   window.addEventListener("DOMContentLoaded", function () {
-    buildSystems();
     document.body.setAttribute("data-busy", "false");
     document.body.setAttribute("data-said", "false");
 
@@ -1113,6 +1232,7 @@
   /* The room's own contract, exposed for the Node harness; not a page API. */
   window.HermusRoom = {
     sections: SECTIONS,
-    plain: plain
+    plain: plain,
+    checkSystems: checkSystems
   };
 })();
