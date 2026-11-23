@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -115,6 +116,12 @@ class LessonsStore:
             pass
         return conn
 
+    # One SQLite transaction at a time for this store. The console probes run in a
+    # worker pool, and two of them reading the lessons database at once crashed the
+    # interpreter on macOS (SIGSEGV inside sqlite3). Serialising here costs a few
+    # milliseconds and removes the race entirely.
+    _db_lock = threading.RLock()
+
     @contextmanager
     def _db(self):
         """Commit-on-success transaction on a *closed-after-use* connection.
@@ -124,7 +131,7 @@ class LessonsStore:
         lesson read/write leaked a handle for the life of the process and
         Python reported each one as an unclosed database at shutdown.
         """
-        with using(self.db_path, owner="lessons") as conn:
+        with self._db_lock, using(self.db_path, owner="lessons") as conn:
             try:
                 conn.execute("PRAGMA journal_mode=WAL;")
             except Exception:
