@@ -272,3 +272,27 @@ Page load now issues exactly one state request: `GET /api/v1/console/state`.
 - `tests/test_scheduler_contract.py` — 6 tests: no room script owns a network interval, the page loads the scheduler before every panel script, and every first-screen path is bundle-served.
 - `tests/test_console_state.py` — 40 tests, including that a 1-second vram probe no longer blocks the event loop and that three panel refreshes cost one probe.
 - `tests/browser/test_first_answer.py` — 5 Playwright tests against a real gateway: a typed command is answered in the conversation within 5s, nothing hangs after 10 idle seconds, every first-screen request is under 300ms, the screen is one bundle rather than a storm, and diagnostics were not touched by a page load. Chromium is optional; the tests skip without it.
+
+## 13 · PC awareness — a read-only picture of the desktop, and proactivity that stays quiet
+
+Rishi asked for two things the product did not have: *"it should have awareness of all things that is going on the pc"* and *"it should be actively proactive and its proactiveness shouldn't disturb user"*. Before this, the awareness layer read one folder, CPU/RAM and which env keys exist; there was no focused window, no idle time, no monitor geometry, and nothing anywhere suppressed a proactive surface while someone typed, took a call or went fullscreen. "Never interrupt" was a policy with no code behind it.
+
+### What Hermus can now see (`core/connectors/desktop.py`, `core/awareness/`)
+
+A `ctypes` reader — no new dependency — reports six fields: the focused window (title, owning process, pid), visible top-level windows, battery/AC, idle seconds, each monitor's geometry and DPI scale, and the clipboard's *kind and a one-way hash*. Each field is either a value or `{"ok": false, "reason": "…"}`; a Windows API that refuses, a non-Windows platform (CI's Linux runner), or a locked clipboard degrades to the reason and never raises. The clipboard is hashed and released immediately — contents are never stored, logged, rendered or sent anywhere, and a single switch turns even that off.
+
+Privacy is applied inside the snapshot, so no caller can leak past it: a per-app exclusion list removes an app from every field (an excluded app never appears at all), a private-window heuristic blanks titles for banking, password managers and incognito/InPrivate windows while keeping the process family, and credential-shaped strings (`sk-…`, `ghp_…`, `password=…`) are redacted before a title can reach a prompt. The one table of exactly what is collected, what reaches a prompt, and what reaches disk lives in the `core/awareness/__init__.py` docstring.
+
+### What reaches the model, and what it costs
+
+One pure function turns a snapshot into a block capped at 1200 characters, with app names de-duplicated and the focused title not repeated in the window list. A renderer remembers the last block's signature and returns nothing when the desktop has not moved, so an unchanged desktop costs zero tokens. It is wired into the chat turn's context path (`core/agent.py`) behind `HERMUS_AWARENESS_CONTEXT`, on by default for chat mode only, and injects nothing at all when awareness is paused.
+
+### Judgement (`core/attention.py`)
+
+An `AttentionGate` is the single place a proactive surface must pass. It suppresses while the person is typing (input within 3 s), in a call (a meeting window has focus), fullscreen, outside quiet hours (default 22:00–07:00), or inside a hard rate limit (two per hour, never within twenty minutes). Suppressed items are not dropped — they wait in one digest the person pulls when they are back, never a modal, never a focus steal. One-click accept hands a normal `runtime.turn` to the queue (so approval and red-line policy still apply); "not now" mutes that pattern for seven days. Two honest sources ship: `power.low_battery` and `focus.long_session`.
+
+### Routes and CLI
+
+`GET /api/v1/awareness/snapshot|settings|suggestions|journal`, `PUT /api/v1/awareness/settings`, `POST /api/v1/awareness/suggestions/{id}`, `DELETE /api/v1/awareness/journal` on `gateway/routes_awareness.py`, gated like every other control route. `hermus awareness` prints the live snapshot as a short human block and says plainly what is unavailable and why; `--pause`, `--resume`, `--exclude APP`, `--clipboard on|off`, `--quiet-hours 22:00-07:00` and `--measure SECONDS` (the poll loop's CPU cost) are on the same command.
+
+On disk: the settings file and a 24-hour rolling summary of focus minutes and suggestion counts (process names and counts only — never a title), which `DELETE /journal` deletes outright.

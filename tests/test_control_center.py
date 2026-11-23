@@ -9,8 +9,10 @@ def test_control_center_installs_all_connectors_disabled_by_default(tmp_path):
     center.install_defaults(workspace_root=Path(tmp_path))
     overview = center.overview()
     names = {item["name"] for item in overview["connectors"]}
-    assert {"runtime", "filesystem", "calendar", "email", "github", "wallet", "hosting"} <= names
-    assert overview["disabled"] == 7
+    # The desktop connector joined the built-ins with read-only PC awareness;
+    # it installs disabled like every other connector here.
+    assert {"runtime", "filesystem", "desktop", "calendar", "email", "github", "wallet", "hosting"} <= names
+    assert overview["disabled"] == 8
 
 
 def test_control_center_can_enable_and_refresh_local_connectors(tmp_path):

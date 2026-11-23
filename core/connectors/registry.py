@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import Connector, ConnectorContext
+from .desktop import DesktopConnector
 from .filesystem import FilesystemConnector
 from .runtime import RuntimeConnector
 
@@ -76,6 +77,11 @@ def register_builtin_connectors(
     if target.get("filesystem") is None:
         root = workspace_root or Path.cwd()
         target.register(FilesystemConnector(root, target.context))
+    if target.get("desktop") is None:
+        # Read-only and off until enabled: a person opts in to desktop
+        # observations reaching the world model, exactly like every other
+        # connector here.
+        target.register(DesktopConnector(target.context))
     return target
 
 
