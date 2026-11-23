@@ -32,13 +32,14 @@ from fastapi.responses import JSONResponse
 
 from core import console
 from core.console_state import BACKGROUND_ONLY, console_state
+from gateway.probe_cache import ProbeCache, fresh_requested
 
 router = APIRouter(prefix="/api/v1/console", tags=["console"])
 
 #: Panel probes touch SQLite, the filesystem and (for a few) subprocess
 #: discovery. Reusing one result briefly turns a 20s probe storm on every page
 #: load into a single pass, while every value is still a real probe result.
-PANEL_TTL_SECONDS = 8.0
+PANEL_TTL_SECONDS = 30.0
 _PANEL_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -111,21 +112,14 @@ async def console_state_bundle(include: str = Query("", description="Comma-separ
     return console_state.snapshot()
 
 
-@router.get("/panels")
-async def console_panels(
-    ids: str = Query("", description="Comma-separated panel ids; empty probes every panel"),
-    workers: int = Query(8, ge=1, le=16, description="Concurrent probe limit"),
-) -> dict[str, Any]:
-    """Live state of every panel, read from each panel's canonical owner.
+#: A full ``/panels`` call walks all 58 owners and measured 11.4 s cold on a live
+#: install, on a request the Systems tab makes every time it opens. The default
+#: (every panel) answer is cached; a caller that names ids still probes those
+#: panels directly, because that is a targeted question, not a page load.
+PANELS_ALL = ProbeCache("console.panels", ttl=30.0)
 
-    Probes touch SQLite, the filesystem and (for a few) the local engine, so the
-    work runs off the event loop with a bounded fan-out.
-    """
-    selected = [i.strip() for i in ids.split(",") if i.strip()]
-    unknown = [i for i in selected if console.get(i) is None]
-    if unknown:
-        raise HTTPException(status_code=404, detail=f"unknown panel(s): {', '.join(unknown)}")
 
+async def _probe_panels(selected: list[str], workers: int) -> dict[str, Any]:
     started = asyncio.get_running_loop().time()
     limit = asyncio.Semaphore(workers)
 
@@ -151,6 +145,28 @@ async def console_panels(
         "groups": console.groups(),
         "panels": results,
     }
+
+
+@router.get("/panels")
+async def console_panels(
+    ids: str = Query("", description="Comma-separated panel ids; empty probes every panel"),
+    workers: int = Query(8, ge=1, le=16, description="Concurrent probe limit"),
+    fresh: str = Query("", description="1 = bypass the cached all-panel projection"),
+) -> dict[str, Any]:
+    """Live state of every panel, read from each panel's canonical owner.
+
+    Probes touch SQLite, the filesystem and (for a few) the local engine, so the
+    work runs off the event loop with a bounded fan-out. The all-panels answer is
+    cached for :data:`PANELS_ALL` seconds — it is the page-load shape.
+    """
+    selected = [i.strip() for i in ids.split(",") if i.strip()]
+    unknown = [i for i in selected if console.get(i) is None]
+    if unknown:
+        raise HTTPException(status_code=404, detail=f"unknown panel(s): {', '.join(unknown)}")
+
+    if selected:
+        return await _probe_panels(selected, workers)
+    return await PANELS_ALL.get(lambda: _probe_panels([], workers), fresh=fresh_requested(fresh))
 
 
 @router.get("/projection/{panel_id}")

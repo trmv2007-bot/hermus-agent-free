@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from core.nexus.service import nexus
 from core.orchestrator import orchestrator
 from core.run_events import run_bus
+from gateway.probe_cache import ProbeCache, fresh_requested
 
 router = APIRouter()
 _STARTED = time.monotonic()
@@ -28,8 +29,21 @@ def _active_count(rows: list[dict]) -> int:
     return sum(1 for row in rows if row.get("status") in {"queued", "running"})
 
 
+#: ``mission_capability_gate`` asks the selected provider whether this model can
+#: actually run a mission. That round trip measured 8.1 s and was the entire
+#: latency of this endpoint (queue, agents, tools and the GPU sample together cost
+#: 0.3 s). Its answer only changes when the model does, so it is cached while
+#: everything else here stays live — caching the whole status instead would have
+#: made the queue counts lie.
+CAPABILITY_GATE = ProbeCache("jarvis.capability_gate", ttl=30.0)
+
+
 @router.get("/api/jarvis/status")
-async def jarvis_status():
+async def jarvis_status(fresh: str = ""):
+    return await _jarvis_status_probe(fresh=fresh_requested(fresh))
+
+
+async def _jarvis_status_probe(fresh: bool = False):
     from core.agent_manager import agent_manager
     from core.artifact_manager import artifact_manager
     from core.computer.resources import get_resource_monitor
@@ -48,7 +62,7 @@ async def jarvis_status():
     channels = get_channel_status()
     artifacts = artifact_manager.list_artifacts()
     model_ref = str(getattr(config, "model", "") or "")
-    capability = await asyncio.to_thread(mission_capability_gate, model_ref)
+    capability = await CAPABILITY_GATE.get(lambda: asyncio.to_thread(mission_capability_gate, model_ref), fresh=fresh)
     telemetry = await asyncio.to_thread(get_resource_monitor().sample)
     providers = list_providers()
     return {

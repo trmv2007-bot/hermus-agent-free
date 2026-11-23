@@ -171,9 +171,9 @@ class TestVramStaysOffTheLoop:
             time.sleep(1.0)
             return {"status": "ok", "gpu": {"detected": False}, "vram": {"available": False}, "recommended": {}, "limits": {}}
 
-        original = routes_agents._vram_status_cached
-        routes_agents._vram_status_cached = slow_probe
-        routes_agents._VRAM_CACHE.update(at=0.0, data=None)
+        original = routes_agents._sample_vram
+        routes_agents._sample_vram = slow_probe
+        routes_agents.VRAM_STATUS._value = None
         app = FastAPI()
         app.include_router(routes_agents.router)
 
@@ -192,8 +192,8 @@ class TestVramStaysOffTheLoop:
         try:
             total, tick = asyncio.run(scenario())
         finally:
-            routes_agents._vram_status_cached = original
-            routes_agents._VRAM_CACHE.update(at=0.0, data=None)
+            routes_agents._sample_vram = original
+            routes_agents.VRAM_STATUS._value = None
 
         assert total >= 1.0
         assert tick < 0.9, f"event loop was blocked for {tick:.2f}s while vram probed"
@@ -217,13 +217,16 @@ class TestVramStaysOffTheLoop:
 
         original = routes_agents.get_local_first
         routes_agents.get_local_first = lambda: FakeLocalFirst()
-        routes_agents._VRAM_CACHE.update(at=0.0, data=None)
+        routes_agents.VRAM_STATUS._value = None
+        app = FastAPI()
+        app.include_router(routes_agents.router)
+        client = TestClient(app)
         try:
             for _ in range(3):
-                assert routes_agents._vram_status_cached()["status"] == "ok"
+                assert client.get("/api/v1/agents/vram/status").json()["status"] == "ok"
         finally:
             routes_agents.get_local_first = original
-            routes_agents._VRAM_CACHE.update(at=0.0, data=None)
+            routes_agents.VRAM_STATUS._value = None
         assert calls["n"] == 1
 
 

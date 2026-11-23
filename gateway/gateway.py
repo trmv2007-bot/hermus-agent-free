@@ -328,6 +328,44 @@ async def _memory_maintenance_loop():
             logger.error(f"[Gateway] memory sweep failed: {e}")
 
 
+#: Keeps the warm-up task alive for the process lifetime.
+_WARM_TASK: asyncio.Task | None = None
+
+
+async def _warm_status_probes() -> None:
+    """Prime the expensive read-only probes before a browser asks for them.
+
+    Cold, each of these walks every subsystem and holds the process for 8-12 s,
+    which is why the Control Room felt broken for its first minute: the page
+    requests all of them at once and everything else queues behind. Warming them
+    off the request path means the first paint reads a cache. Failures are
+    logged and ignored — a cache that never fills must not break startup.
+    """
+    try:
+        from gateway.routes_console import PANELS_ALL, _probe_panels
+        from gateway.routes_engine import DOCTOR_STATUS, _doctor_status_probe
+        from gateway.routes_jarvis import _jarvis_status_probe
+
+        warmed = []
+        if await DOCTOR_STATUS.warm(_doctor_status_probe):
+            warmed.append("doctor.status")
+        try:
+            await _jarvis_status_probe()
+            warmed.append("jarvis.status")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Gateway] jarvis status warm-up failed: {exc}")
+        try:
+            # Warm the cache the route itself reads, not the route function: its
+            # parameters carry FastAPI Query defaults, which are not values.
+            if await PANELS_ALL.warm(lambda: _probe_panels([], 8)):
+                warmed.append("console.panels")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Gateway] console panel warm-up failed: {exc}")
+        logger.info(f"[Gateway] status probes warmed: {', '.join(warmed) or 'none'}")
+    except Exception as exc:  # noqa: BLE001 - warm-up must never take the process down
+        logger.warning(f"[Gateway] status warm-up skipped: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
@@ -363,6 +401,10 @@ async def lifespan(app: FastAPI):
         console_state.start()
     except Exception as e:
         logger.warning(f"[Gateway] console state warm-up unavailable: {e}")
+    # Fire and forget: the first Control Room paint should find a warm cache,
+    # but readiness must not wait on the probes.
+    global _WARM_TASK
+    _WARM_TASK = asyncio.create_task(_warm_status_probes())
     agent_pool_started = False
     try:
         from core.agents import init_pool

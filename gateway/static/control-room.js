@@ -1038,63 +1038,80 @@ async function refreshSafetyReport(){
     { label: "safety report", onRetryId: "safetyReport" }); }
 }
 async function refreshSafety(){
-  try {
-    const { j: policy } = await getJSON("/red-lines/policy");
-    const rules = policy.rules || [];
-    $("#safetySummary").innerHTML = kpi(rules.length, "red lines") + kpi("green", "safe actions") + kpi("yellow", "scoped approvals") + kpi("red", "blocked");
-    const body = $("#redLines tbody");
-    body.innerHTML = rules.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.title)}</td><td>${esc(r.rule)}</td></tr>`).join("")
-      || '<tr><td colspan="3" class="hint">policy unavailable</td></tr>';
-  } catch(e){ $("#safetySummary").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">red-line policy unavailable</div></div>'; }
-  try {
-    const { j: bundles } = await getJSON("/permissions/bundles");
-    const rows = bundles.bundles || [];
-    const body = $("#approvalBundles tbody");
-    body.innerHTML = rows.map((b) => `<tr>
-      <td><code>${esc(b.id)}</code></td><td>${esc(b.mission_id || "")}</td><td>${esc((b.request_ids||[]).length)}</td><td>${esc(b.title || "")}</td>
-      <td><button class="ghost" data-bundle-act="approve" data-bundle-id="${esc(b.id)}">approve all</button>
-      <button class="ghost" data-bundle-act="deny" data-bundle-id="${esc(b.id)}">deny all</button></td>
-    </tr>`).join("") || '<tr><td colspan="5" class="hint">no pending approval bundles</td></tr>';
-    body.querySelectorAll("button[data-bundle-id]").forEach((b) => b.addEventListener("click", () => resolveBundle(b.dataset.bundleId, b.dataset.bundleAct)));
-  } catch(e){ $("#approvalBundles tbody").innerHTML = `<tr><td colspan="5" class="hint">approval bundles unavailable: ${esc(e.message)}</td></tr>`; }
-  try {
-    const { j: pending } = await getJSON("/permissions/pending");
-    const rows = pending.pending || [];
-    const body = $("#pendingApprovals tbody");
-    setPill("#pendingCount", "approvals: " + rows.length, rows.length ? "warn" : "ok");
-    updateSafetyCore();
-    body.innerHTML = rows.map((p) => `<tr>
-      <td><code>${esc(p.id)}</code></td><td>${esc(p.tool)}</td><td>${esc((p.safety?.red_lines||[]).join(","))}</td>
-      <td>${esc((p.suggested_resources||[]).join(", "))}</td><td>${esc(p.suggested_purpose || "")}</td><td>${esc(p.created_at || "")}</td>
-      <td><button class="ghost" data-pending-act="approve" data-pending-id="${esc(p.id)}">approve</button>
-      <button class="ghost" data-pending-act="deny" data-pending-id="${esc(p.id)}">deny</button></td>
-    </tr>`).join("") || '<tr><td colspan="7" class="hint">no pending yellow actions</td></tr>';
-    body.querySelectorAll("button[data-pending-id]").forEach((b) => b.addEventListener("click", () => resolvePending(b.dataset.pendingId, b.dataset.pendingAct)));
-  } catch(e){ setPill("#pendingCount", "approvals: ?", "warn"); updateSafetyCore(); $("#pendingApprovals tbody").innerHTML = `<tr><td colspan="7" class="hint">pending prompts unavailable: ${esc(e.message)}</td></tr>`; }
-  try {
-    const { j: grants } = await getJSON("/permissions/approvals");
-    const rows = grants.approvals || [];
-    const body = $("#approvalGrants tbody");
-    body.innerHTML = rows.map((g) => `<tr>
-      <td><code>${esc(g.id)}</code></td><td>${esc(g.tool)}</td><td>${esc((g.red_lines||[]).join(","))}</td>
-      <td>${esc((g.resources||[]).join(", "))}</td><td>${esc(g.purpose || "")}</td>
-      <td>${esc(g.uses)}/${esc(g.max_uses ?? "∞")}</td><td>${esc(g.expires_at || "never")}</td>
-      <td><button class="ghost" data-revoke="${esc(g.id)}">revoke</button></td>
-    </tr>`).join("") || '<tr><td colspan="8" class="hint">no active scoped grants</td></tr>';
-    body.querySelectorAll("button[data-revoke]").forEach((b) => b.addEventListener("click", () => revokeGrant(b.dataset.revoke)));
-  } catch(e){ $("#approvalGrants tbody").innerHTML = `<tr><td colspan="8" class="hint">approvals unavailable: ${esc(e.message)}</td></tr>`; }
-  try {
-    const { j: ledger } = await getJSON("/capabilities/ledger");
-    $("#capLedger").innerHTML = mdLite(ledger.markdown || "");
-  } catch(e){ $("#capLedger").innerHTML = '<div class="note">ledger unavailable: ' + esc(e.message) + '</div>'; }
-  try { await refreshCapabilityRegistry(); } catch(e){}
-  try { await refreshSafetyEvents(); } catch(e){}
-  try { await refreshUndo(); } catch(e){}
+  // Five independent reads, so they run together: sequentially they cost the
+  // sum of their latency, and the ledger — last in the chain — sat on
+  // "ledger loading…" for the best part of a minute on a loaded gateway.
+  // Each loader keeps its own catch, so one failing call cannot hide the rest.
+  const loadPolicy = async () => {
+    try {
+      const { j: policy } = await getJSON("/red-lines/policy");
+      const rules = policy.rules || [];
+      $("#safetySummary").innerHTML = kpi(rules.length, "red lines") + kpi("green", "safe actions") + kpi("yellow", "scoped approvals") + kpi("red", "blocked");
+      const body = $("#redLines tbody");
+      body.innerHTML = rules.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.title)}</td><td>${esc(r.rule)}</td></tr>`).join("")
+        || '<tr><td colspan="3" class="hint">policy unavailable</td></tr>';
+    } catch(e){ $("#safetySummary").innerHTML = '<div class="kpi"><div class="v">—</div><div class="l">red-line policy unavailable</div></div>'; }
+  };
+  const loadBundles = async () => {
+    try {
+      const { j: bundles } = await getJSON("/permissions/bundles");
+      const rows = bundles.bundles || [];
+      const body = $("#approvalBundles tbody");
+      body.innerHTML = rows.map((b) => `<tr>
+        <td><code>${esc(b.id)}</code></td><td>${esc(b.mission_id || "")}</td><td>${esc((b.request_ids||[]).length)}</td><td>${esc(b.title || "")}</td>
+        <td><button class="ghost" data-bundle-act="approve" data-bundle-id="${esc(b.id)}">approve all</button>
+        <button class="ghost" data-bundle-act="deny" data-bundle-id="${esc(b.id)}">deny all</button></td>
+      </tr>`).join("") || '<tr><td colspan="5" class="hint">no pending approval bundles</td></tr>';
+      body.querySelectorAll("button[data-bundle-id]").forEach((b) => b.addEventListener("click", () => resolveBundle(b.dataset.bundleId, b.dataset.bundleAct)));
+    } catch(e){ $("#approvalBundles tbody").innerHTML = `<tr><td colspan="5" class="hint">approval bundles unavailable: ${esc(e.message)}</td></tr>`; }
+  };
+  const loadPending = async () => {
+    try {
+      const { j: pending } = await getJSON("/permissions/pending");
+      const rows = pending.pending || [];
+      const body = $("#pendingApprovals tbody");
+      setPill("#pendingCount", "approvals: " + rows.length, rows.length ? "warn" : "ok");
+      updateSafetyCore();
+      body.innerHTML = rows.map((p) => `<tr>
+        <td><code>${esc(p.id)}</code></td><td>${esc(p.tool)}</td><td>${esc((p.safety?.red_lines||[]).join(","))}</td>
+        <td>${esc((p.suggested_resources||[]).join(", "))}</td><td>${esc(p.suggested_purpose || "")}</td><td>${esc(p.created_at || "")}</td>
+        <td><button class="ghost" data-pending-act="approve" data-pending-id="${esc(p.id)}">approve</button>
+        <button class="ghost" data-pending-act="deny" data-pending-id="${esc(p.id)}">deny</button></td>
+      </tr>`).join("") || '<tr><td colspan="7" class="hint">no pending yellow actions</td></tr>';
+      body.querySelectorAll("button[data-pending-id]").forEach((b) => b.addEventListener("click", () => resolvePending(b.dataset.pendingId, b.dataset.pendingAct)));
+    } catch(e){ setPill("#pendingCount", "approvals: ?", "warn"); updateSafetyCore(); $("#pendingApprovals tbody").innerHTML = `<tr><td colspan="7" class="hint">pending prompts unavailable: ${esc(e.message)}</td></tr>`; }
+  };
+  const loadGrants = async () => {
+    try {
+      const { j: grants } = await getJSON("/permissions/approvals");
+      const rows = grants.approvals || [];
+      const body = $("#approvalGrants tbody");
+      body.innerHTML = rows.map((g) => `<tr>
+        <td><code>${esc(g.id)}</code></td><td>${esc(g.tool)}</td><td>${esc((g.red_lines||[]).join(","))}</td>
+        <td>${esc((g.resources||[]).join(", "))}</td><td>${esc(g.purpose || "")}</td>
+        <td>${esc(g.uses)}/${esc(g.max_uses ?? "∞")}</td><td>${esc(g.expires_at || "never")}</td>
+        <td><button class="ghost" data-revoke="${esc(g.id)}">revoke</button></td>
+      </tr>`).join("") || '<tr><td colspan="8" class="hint">no active scoped grants</td></tr>';
+      body.querySelectorAll("button[data-revoke]").forEach((b) => b.addEventListener("click", () => revokeGrant(b.dataset.revoke)));
+    } catch(e){ $("#approvalGrants tbody").innerHTML = `<tr><td colspan="8" class="hint">approvals unavailable: ${esc(e.message)}</td></tr>`; }
+  };
+  const loadLedger = async () => {
+    try {
+      const { j: ledger } = await getJSON("/capabilities/ledger");
+      $("#capLedger").innerHTML = mdLite(ledger.markdown || "");
+    } catch(e){ $("#capLedger").innerHTML = '<div class="note">ledger unavailable: ' + esc(e.message) + '</div>'; }
+  };
+  await Promise.all([
+    loadPolicy(),
+    loadBundles(),
+    loadPending(),
+    loadGrants(),
+    loadLedger(),
+    refreshCapabilityRegistry().catch(() => {}),
+    refreshSafetyEvents().catch(() => {}),
+    refreshUndo().catch(() => {}),
+  ]);
 }
-
-/* The undo journal is the product's promise in one table: every mutating action
- * recorded before it ran, and a button that puts it back. It lives here in
- * Safety because that is what it is. */
 async function refreshUndo(){
   const body = $("#undoEntries tbody");
   const status = $("#undoStatus");
