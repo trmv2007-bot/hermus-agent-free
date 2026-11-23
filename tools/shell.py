@@ -89,8 +89,10 @@ def shell_execute(
     overrides = {}
     if sandbox:
         overrides["backend"] = str(sandbox).lower()
-    if cwd:
-        overrides["workspace_root"] = cwd
+    # ``cwd`` is handed to run() below, which is the one place a working
+    # directory is staged. Putting it into the policy dict as ``workspace_root``
+    # raised TypeError on every call that named a cwd: SandboxPolicy has no such
+    # field, and the policy is rebuilt field-by-field.
     res = jail.run(
         command,
         timeout=int(timeout),

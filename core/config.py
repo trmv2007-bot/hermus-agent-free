@@ -239,6 +239,16 @@ class Config(BaseSettings):
     memory2_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_MEMORY2_ENABLED")
     # Model Router 2.0: per-turn model selection.
     router2_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_ROUTER2_ENABLED")
+    # ---- Thinking layer: routing, a visible plan, verification ---------------
+    # Every chat turn is routed (local model or free hosted tier) with the reason
+    # recorded, gets a visible plan when it needs more than one action, and
+    # leaves a receipt proving what it changed — or says it could not.
+    thinking_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_THINKING_ENABLED")
+    thinking_routing_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_THINKING_ROUTING_ENABLED")
+    # auto | local | free_hosted — pins the tier when a person wants it pinned.
+    route_tier: str = Field(default="auto", validation_alias="HERMUS_ROUTE_TIER")
+    # One repair turn after a failed verification. Never a second.
+    thinking_repair_enabled: EnvFlag = Field(default=True, validation_alias="HERMUS_THINKING_REPAIR_ENABLED")
     # Autonomous verify/repair gate applied after the ReAct loop.
     autonomous_enabled: EnvFlag = Field(default=False, validation_alias="HERMUS_AUTONOMOUS_ENABLED")
     # Self-healing watchdog on task/tool failures (gateway + agent).

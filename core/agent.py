@@ -261,6 +261,18 @@ class HermusAgent:
         Returns the selection dict on success, or None when routing is skipped
         (mock provider, no workers, or same model).
         """
+        thinking_route = getattr(self, "_thinking_route", None)
+        if thinking_route:
+            # The thinking layer already decided this turn's tier with a reason
+            # and recorded it. A second selector must not overrule a decision
+            # the receipt and the ledger are attached to.
+            return {
+                "success": True,
+                "model": self.model_name,
+                "task_type": "thinking_route",
+                "tier": thinking_route.get("tier"),
+                "reason": thinking_route.get("reason", ""),
+            }
         try:
             if getattr(self.llm, "provider", "") == "mock":
                 return None
