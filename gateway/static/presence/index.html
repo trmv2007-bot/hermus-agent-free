@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>HERMUS · presence</title>
+    <link rel="stylesheet" href="/presence/overlay/app.css__TOKEN_QUERY__" />
+  </head>
+  <body>
+    <canvas id="stage" aria-hidden="true"></canvas>
+
+    <div id="bubble" class="bubble" data-visible="false">
+      <span class="bubble__text" id="bubble-text"></span>
+    </div>
+
+    <div id="point-label" class="point-label" data-visible="false" data-tone="idle">
+      <span class="point-label__dot" aria-hidden="true"></span>
+      <span class="point-label__text" id="point-label-text"></span>
+    </div>
+
+    <p class="sr-only" id="sr" role="status" aria-live="polite"></p>
+
+    <script src="/presence/overlay/app.js__TOKEN_QUERY__" defer></script>
+  </body>
+</html>

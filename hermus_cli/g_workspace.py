@@ -95,12 +95,20 @@ def _configure_presence(subparsers) -> None:
     presence_goal.add_argument("--priority", type=int, default=3)
     presence_goal.add_argument("--note", default="")
     presence_sub.add_parser("heartbeat", help="Record one safe presence heartbeat")
+    from .presence_cmd import configure_overlay_subcommands
+
+    configure_overlay_subcommands(presence_sub)
 
 
 def _run_presence(args, ctx: CLIContext) -> None:
     import json as _json
 
     from core.presence import get_presence
+
+    from .presence_cmd import run_overlay
+
+    if run_overlay(args):
+        return
 
     pm = get_presence()
     if args.presence_action in (None, "status"):

@@ -1,0 +1,215 @@
+/* ===========================================================================
+   HERMUS presence — the floating companion.
+
+   One accent family (ice cyan over nothing), hairline detail, generous space.
+   The page paints only the character, its arrow, its ring and its two bits of
+   text; everything is transparent so the person's desktop shows through.
+
+   Two hard rules encoded here:
+   * the bubble never takes a click (pointer-events: none everywhere);
+   * the point ring and label are drawn outside the target rect, so the thing
+     being pointed at stays fully visible and clickable.
+   =========================================================================== */
+
+:root {
+  --ice: #7fe3ff;
+  --ice-soft: rgba(127, 227, 255, 0.72);
+  --ice-dim: rgba(127, 227, 255, 0.34);
+  --ember: #ffb08a;
+  --ink: rgba(226, 246, 255, 0.94);
+  --glass: rgba(6, 18, 30, 0.62);
+  --hairline: rgba(127, 227, 255, 0.28);
+  --shadow: 0 18px 46px -18px rgba(0, 0, 0, 0.72);
+  --font: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Cascadia Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font);
+  color: var(--ink);
+  /* The whole page is a picture of a desktop; nothing here may eat a click. */
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- subtitle */
+.bubble {
+  position: fixed;
+  left: 0;
+  top: 0;
+  max-width: min(380px, 62vw);
+  padding: 9px 13px 10px;
+  border-radius: 13px;
+  border: 1px solid var(--hairline);
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  font-size: 13.5px;
+  line-height: 1.42;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+  opacity: 0;
+  transform: translate3d(0, 6px, 0) scale(0.985);
+  transition: opacity 200ms ease, transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.bubble[data-visible="true"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+.bubble__text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: 2.9em;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------- label */
+.point-label {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 320px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 227, 255, 0.34);
+  background: rgba(4, 15, 26, 0.74);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(196, 240, 255, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translate3d(0, 0, 0) scale(0.96);
+  transition: opacity 220ms ease, transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.point-label[data-visible="true"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+.point-label__dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ice);
+  box-shadow: 0 0 8px 1px rgba(127, 227, 255, 0.78);
+}
+
+.point-label__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.point-label[data-tone="error"] {
+  border-color: rgba(255, 176, 138, 0.4);
+  color: #ffd8c4;
+}
+
+.point-label[data-tone="error"] .point-label__dot {
+  background: var(--ember);
+  box-shadow: 0 0 8px 1px rgba(255, 176, 138, 0.7);
+}
+
+/* ------------------------------------------------------------------ a11y */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* A real page in a browser tab has no desktop behind it: this backdrop stands
+   in for one so the character is legible (and so screenshots read honestly as
+   "this is the overlay art", not "this is your wallpaper"). */
+body[data-backdrop="desktop"] {
+  background:
+    radial-gradient(120% 80% at 78% 12%, rgba(28, 62, 92, 0.55) 0%, rgba(8, 14, 24, 0) 58%),
+    radial-gradient(90% 70% at 12% 92%, rgba(20, 46, 70, 0.42) 0%, rgba(8, 14, 24, 0) 62%),
+    linear-gradient(158deg, #0a1018 0%, #0d1723 44%, #070d14 100%);
+}
+
+body[data-backdrop="desktop"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(160, 230, 255, 0.016) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(95, 216, 255, 0.012) 0 1px, transparent 1px 84px);
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------- motion */
+@media (prefers-reduced-motion: reduce) {
+  .bubble,
+  .point-label {
+    transition: opacity 120ms linear;
+    transform: none;
+  }
+
+  .bubble[data-visible="true"] {
+    transform: none;
+  }
+}
+
+body[data-reduced="true"] .bubble,
+body[data-reduced="true"] .point-label {
+  transition: opacity 120ms linear;
+  transform: none;
+}
+
+/* Narrow windows: the bubble stays inside the screen and shrinks its type one
+   step rather than pushing its own edges off-screen. */
+@media (max-width: 520px) {
+  .bubble {
+    max-width: min(300px, 74vw);
+    font-size: 12.5px;
+    padding: 8px 11px 9px;
+  }
+
+  .point-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    max-width: 62vw;
+  }
+}

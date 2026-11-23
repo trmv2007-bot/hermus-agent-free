@@ -188,3 +188,42 @@ install records no choice nobody made, and that no static string claims a check
 the code does not run.
 `tests/test_control_room_e2e.py::test_root_redirects_to_the_first_screen` was
 updated because the root contract itself changed.
+## 11 · Presence overlay — a floating character that points (this commit)
+
+HERMUS was a browser tab. It now also has a face on the desktop: a holographic
+character (hairline rings, ice-cyan glow, layered parallax — never a cartoon)
+that breathes while idle, changes mood through seven real states, says one
+sentence at a time, and draws a travelling arrow to the exact rect it is about
+to click or type in.
+
+- **Renderer** — `gateway/static/presence/` at `/presence/overlay`: one canvas,
+  vanilla JS, no build step. States: idle, listening, thinking, acting,
+  speaking, error, sleeping, each a cross-fade of colour, radius and speed
+  (380–950 ms), with `prefers-reduced-motion` honoured.
+- **Choreography** — a `{x, y, w, h, label, ttl}` rect grows by a 7 px gap and
+  is ringed *outside* that box, so the target is never covered; the arrow stops
+  at the ring; the ring pulses; everything retracts before the TTL ends.
+  Multi-monitor and per-display DPI are handled through a registered display
+  layout (`physical` → DIP, per monitor, test-covered).
+- **Native shell** — `presence_app/shell/` (Electron): transparent, frameless,
+  always-on-top, click-through except over the character, spanning the virtual
+  desktop. Installed under `data/presence_shell` (never into the checkout),
+  launched by `hermus presence start`, closed by `hermus presence stop`.
+  Optional: without it the renderer is a normal browser page.
+- **Bridge** — `gateway/routes_presence_overlay.py`: `/api/presence/{state,point,say,hide,show,retract,input,displays}`,
+  a server-sent snapshot stream, and total payload validation (a malformed rect
+  answers 400 and can never reach the render loop).
+- **Wired actions** — `core/presence_pointer.py` is called from
+  `ComputerActionController._perform` immediately before (and after) every gated
+  action: clicks point at the cursor, typing points at the measured focused
+  window, failures flash `error`. `HERMUS_PRESENCE_POINTER=0` unhooks it;
+  `HERMUS_PRESENCE_LEAD_MS` opts into waiting for the arrow.
+- **CLI** — `hermus presence start|stop|install|shell|demo|point|say|overlay|hide|show`.
+- **Docs** — `docs/presence.md` covers the API, the choreography invariants and
+  the honest platform matrix (Windows verified; macOS/Linux are the same code
+  path but were not run).
+
+Tests: `tests/test_presence_overlay.py` (45 tests) covers rect validation
+including NaN/bool/huge, DPI mapping across a 100 %/150 % pair, ring and label
+never overlapping the target, bridge TTL expiry, state transitions, the SSE
+stream, and the controller seam.

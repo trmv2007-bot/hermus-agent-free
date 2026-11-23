@@ -15,6 +15,9 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from core.presence_pointer import announce as _presence_announce
+from core.presence_pointer import announce_result as _presence_result
+
 from .keyboard import KeyboardBackend, default_keyboard
 from .mouse import MouseBackend, default_mouse
 from .permissions import ComputerPolicy, EmergencyStop, computer_policy, emergency_stop
@@ -144,13 +147,16 @@ class ComputerActionController:
         gate = self._gate(action, args)
         if not gate.get("allowed"):
             return self._record(action, description, args, gate, error=gate.get("reason"))
+        _presence_announce(action, args)
         try:
             result = fn()
             if result.get("dry_run"):
                 result.setdefault("ok", True)
             result["backend"] = self._backend_for(action).name
+            _presence_result(action, result)
             return self._record(action, description, args, gate, backend_result=result)
         except Exception as exc:  # noqa: BLE001
+            _presence_result(action, {"ok": False, "error": str(exc)})
             return self._record(action, description, args, gate, error=str(exc))
 
     # -- mouse ----------------------------------------------------------
