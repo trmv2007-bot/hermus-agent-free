@@ -31,10 +31,12 @@ def test_the_harness_is_the_home_surface(client):
         assert required in body, f"the harness shell is missing {required}"
 
 
-def test_root_redirects_to_the_harness(client):
+def test_root_enters_through_onboarding_then_the_harness(client):
+    """Root is the entrance: the welcome flow until setup is complete, the
+    harness after. Either way the harness itself must serve."""
     response = client.get("/", follow_redirects=False)
     assert response.status_code in (307, 308)
-    assert response.headers["location"].endswith("/harness")
+    assert response.headers["location"].endswith(("/welcome", "/harness"))
 
 
 def test_the_cockpit_is_still_there(client):
