@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b0d10">
+  <meta name="theme-color" content="#080b0f">
   <title>HERMUS — Harness</title>
   <link rel="stylesheet" href="/static/harness.css">
   <link rel="icon" href="/static/assets/favicon.svg">
 </head>
-<body>
+<body data-view="room">
   <header class="bar">
     <div class="brand">HERMUS<span class="brand-sub">harness</span></div>
     <nav class="modes" aria-label="Mode">
       <button type="button" class="mode on" data-mode="harness" aria-current="page">Harness</button>
-      <button type="button" class="mode" data-mode="agent" title="The agent cockpit, presence, approvals and subsystem console">Agent</button>
+      <button type="button" class="mode" data-mode="agent" title="The agent cockpit: presence, approvals, subsystem console">Agent</button>
     </nav>
     <div class="bar-right">
       <span class="pill" id="readyPill" title="gateway readiness">connecting…</span>
@@ -28,37 +28,60 @@
         <button id="newRun" class="btn" type="button" title="Start a new run">New</button>
       </div>
       <ol id="runList" class="run-list"></ol>
-      <p id="runsEmpty" class="empty">no runs yet — start one below</p>
+      <p id="runsEmpty" class="empty">no runs yet — ask for one below</p>
     </aside>
 
-    <section class="work" aria-label="Selected run">
-      <div class="work-head">
-        <div>
+    <section class="work" aria-label="Workspace">
+      <div class="hud">
+        <svg class="core" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle class="ring-outer" cx="11" cy="11" r="9.5"/>
+          <circle class="ring-mid" cx="11" cy="11" r="6.5"/>
+          <circle class="pulse" cx="11" cy="11" r="3" fill="currentColor" stroke="none"/>
+          <path d="M11 1.5v2M11 18.5v2M1.5 11h2M18.5 11h2" opacity=".5"/>
+        </svg>
+        <p class="hud-line" id="hudLine"><b>HERMUS</b> · idle · waiting for a task</p>
+      </div>
+
+      <div class="work-head" id="runHead" hidden>
+        <div class="head-row">
+          <svg class="core-sm" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="11" cy="11" r="9.5" opacity=".3"/>
+            <circle cx="11" cy="11" r="6.5" opacity=".55"/>
+            <circle cx="11" cy="11" r="3" fill="currentColor" stroke="none"/>
+          </svg>
           <h1 id="runTitle">No run selected</h1>
-          <p id="runMeta" class="meta">Pick a run on the left, or start a new one.</p>
         </div>
+        <p id="runMeta" class="meta"></p>
         <div class="work-actions">
           <button id="interrupt" class="btn ghost" type="button" hidden>Interrupt</button>
           <button id="refresh" class="btn ghost" type="button">Refresh</button>
         </div>
       </div>
 
-      <ol id="transcript" class="transcript" aria-live="polite"></ol>
-
-      <form id="composer" class="composer" autocomplete="off">
-        <textarea id="task" rows="2" placeholder="Describe the task — what should change, and where. Ctrl+Enter to run." required></textarea>
-        <div class="composer-row">
-          <label class="field">
-            <span>target</span>
-            <input id="target" type="text" placeholder="path or repo (optional)">
-          </label>
-          <label class="field">
-            <span>model</span>
-            <select id="modelSelect"><option value="">default</option></select>
-          </label>
-          <button id="run" class="btn primary" type="submit">Run</button>
+      <div class="room" id="room">
+        <svg class="core-lg" viewBox="0 0 112 112" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle class="ring-outer" cx="56" cy="56" r="52"/>
+          <circle class="ring-mid" cx="56" cy="56" r="38"/>
+          <circle cx="56" cy="56" r="24" opacity=".8"/>
+          <circle class="pulse" cx="56" cy="56" r="13" fill="currentColor" stroke="none"/>
+          <circle class="ripple ripple-1" cx="56" cy="56" r="20"/>
+          <circle class="ripple ripple-2" cx="56" cy="56" r="20"/>
+          <g class="orbit"><circle cx="56" cy="4" r="2.5" fill="currentColor" stroke="none"/></g>
+          <path class="ticks" d="M56 0v6M56 106v6M0 56h6M106 56h6" opacity=".45"/>
+        </svg>
+        <h2 id="roomTitle">Nothing running</h2>
+        <p id="roomLine">Ask for a change, point it at a path, and it plans, acts and verifies. You get the diff and the verdict.</p>
+        <div class="chips" id="roomChips">
+          <button type="button" class="chip" data-chip="Fix the flaky test in tests/test_queue.py">Fix a flaky test</button>
+          <button type="button" class="chip" data-chip="Write the API reference for the harness routes">Write docs</button>
+          <button type="button" class="chip" data-chip="Add a --json flag to the doctor command">Add a flag</button>
         </div>
-      </form>
+        <div id="composerSlot" class="composer-slot"></div>
+      </div>
+
+      <ol id="transcript" class="transcript" aria-live="polite" hidden></ol>
+
+      <div id="runComposerSlot" class="composer-slot bottom"></div>
     </section>
 
     <aside class="aside" aria-label="Changes and verification">
@@ -74,6 +97,21 @@
       </div>
     </aside>
   </main>
+
+  <form id="composer" class="composer" autocomplete="off">
+    <textarea id="task" rows="2" placeholder="What should change? Ctrl+Enter to run." required></textarea>
+    <div class="composer-row">
+      <label class="field">
+        <span>target</span>
+        <input id="target" type="text" placeholder="path or repo (optional)">
+      </label>
+      <label class="field">
+        <span>model</span>
+        <select id="modelSelect"><option value="">default</option></select>
+      </label>
+      <button id="run" class="btn primary" type="submit">Run</button>
+    </div>
+  </form>
   <script src="/static/harness.js" defer></script>
 </body>
 </html>
