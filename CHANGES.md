@@ -787,3 +787,122 @@ on which machine it is running on, and would leave the disabled state with
 nothing to explain itself. The test pins both halves: the walk includes `mic`
 whatever the state, and a disabled `mic` must answer a Space press with "voice
 needs …" rather than refusing silently.
+## 19 · The test suite cannot write into the real home
+
+On 2026-11-23 our own browser tests wrote a fake onboarding record into Rishi's
+`~/.hermus`, and his real `onboarding.json` — his setup record — was destroyed
+with it. Nothing in the suite asked where a home resolved to, so a run that
+inherited the real one wrote into the product.
+
+**The guard is a refusal, not a convention.** `tests/conftest.py` stops the
+session at start when `HERMUS_HOME` (or, when unset, the product's own
+`~/.hermus`) or `HERMUS_DATA_DIR` resolves into the real home, naming the path
+and the two ways out: point it at a temporary directory, or set
+`HERMUS_ALLOW_REAL_HOME=1` on purpose. Nothing in the repository sets that flag.
+
+**The fixtures cannot escape either.** `tests/_real_home_guard.py` carries the
+rule, and the two browser fixtures now build their homes through `temp_home()`,
+which proves the path sits inside the session temp tree — so neither can be
+handed a home outside `tmp_path` however the path was computed.
+
+The rule catches `~/.hermus` and everything inside it, and the profile root only
+when it *is* the path: on Windows pytest's own `tmp_path` lives under
+`%LOCALAPPDATA%\Temp`, inside the profile, and a prefix rule there would refuse
+every test in the suite.
+
+`tests/test_real_home_guard.py` proves it rather than describing it: refused on
+the real home, allowed on a temp one, the override works, a fixture path outside
+the temp tree is refused, and a real `pytest` session pointed at `~/.hermus`
+never collects a single test.
+
+## 20 · Model choice — the strongest free option wins, and says why
+
+An install on a machine holding a 4B and an 8B recorded `mistral/open-mistral-nemo`:
+Mistral's smallest model, picked because the free-tier table named it in code, and
+because the local picker deliberately took the *cheapest* model it recognised. Three
+separate rules produced one failure — cheapest local, first-named hosted, first-item
+fallback — and none of them recorded a reason.
+
+**The catalog is the one place a model is named** (`core/model_catalog.py`). Each free
+provider has an authored, strongest-first list, and every position carries why it holds
+it: parameter count, family and generation, context, and whether the model can call
+tools. No entry claims a model is reachable or dead, because neither is something a
+table can know.
+
+| Provider | 1 | 2 | 3 | then |
+|---|---|---|---|---|
+| Mistral (free mode) | `mistral-small-latest` — Small 4, 24B, 128k, tools | `ministral-8b-latest` — 8B, 128k, tools | `open-mistral-nemo` — older 12B, ranked below the newer Ministrals on generation | `ministral-3b-latest` |
+| Groq (free plan) | `openai/gpt-oss-120b` — 120B MoE, 131k, tools | `qwen/qwen3.8-27b` — 27B, 131k, tools | `openai/gpt-oss-20b` — 20B, larger free request budget | — |
+| OpenRouter (`:free` only) | `nvidia/nemotron-3-ultra-550b-a55b:free` — 550B MoE, 1M, tools | `nvidia/nemotron-3.5-lightning:free` — 1M, tools | `recursive/flint-v1.0:free` — coding agent, 262k | `gemma-4-26b-a4b:free` (no tools), `lfm-3-1.7b:free` |
+| Gemini (free tier) | `gemini-3.8-flash` — 1M, tools | `gemini-3.5-flash-lite` — 1M, higher request budget | `gemini-2.5-flash` — previous Flash, deprecated for new accounts | — |
+
+**Availability is measured, not assumed** (`core/model_health.py`). A catalog can say
+what a model is; only a request can say whether a given key reaches it. Candidates are
+probed in rank order with a single-token request, and five states are kept apart:
+
+| state | meaning | what the picker does |
+|---|---|---|
+| `ok` | it answered this key | offered |
+| `busy` | HTTP 429 — capacity, the model exists | ranked below the ones that answered, never called a retirement |
+| `gone` | 404, or a 400 naming the model | skipped, reason recorded |
+| `denied` | 401/403 — the key itself is unusable | provider skipped after one request |
+| `unknown` | offline, timeout or 5xx | offered, labelled "not probed" |
+
+Outcomes are cached for their own TTL (10 min ok, 15 min busy, 1 h gone, 30 min denied),
+so resolution spends at most one request per provider per ten minutes and a wrong key
+costs one request rather than one per candidate. A rate limit can never migrate a person
+off a model that works the next minute.
+
+**Resolution is a comparison, not a queue.** Every reachable candidate — each pulled
+local model plus each keyed free tier's best candidate that key answers — is ordered on
+catalog data, and the strongest wins. A local model wins a tie because it costs nothing;
+it does not win by being local. A model without tool calling is skipped when a step needs
+tools, and the skip is recorded (`gemma2:27b` next to `llama3.2:1b` resolves to the 1B
+*and* says why). Local names keep their namespace, so `SparkLLM/Spark-X2.6-4B` is now
+`ollama/SparkLLM/Spark-X2.6-4B:q4_k_m` rather than a reference the runtime cannot answer.
+
+**The reason travels with the choice.** `resolved["reason"]` carries the deciding
+sentence, `source` carries the short form the room shows beside the model badge,
+onboarding's payload gains `model_reason`, `skipped`, `catalog` and `upgrade`, and the
+turn's routing record gains `model_reason`; `FREE_HOSTED_DEFAULT_MODELS` is read from the
+catalog so escalation and onboarding cannot disagree.
+
+**Existing installs migrate at startup.** A recorded model whose key or runtime no longer
+serves it, one the provider answers with 404, and one weaker than what is reachable are
+replaced, with `brain.upgraded_from` and an `upgrade` block holding the measured reason.
+`HERMUS_MODEL` is never overridden. The new model is not treated as proven —
+`upgrade.pending_check` keeps `is_complete` false until it answers — while `is_usable`
+opens the companion instead of onboarding again.
+
+**Measured on this PC** (Windows 11, Ollama serving `llama3.2:1b`,
+`SparkLLM/Spark-X2.6-4B:q4_k_m`, `lfm2.5:8b`):
+
+| | before | after |
+|---|---|---|
+| resolved model | `mistral/open-mistral-nemo` | `ollama/lfm2.5:8b` |
+| reason | none — the field did not exist | `mistral/open-mistral-nemo cannot answer any more (MISTRAL_API_KEY is not configured); ollama/lfm2.5:8b is the strongest reachable` |
+| room badge | `answering with open-mistral-nemo from the free tier` | `answering with lfm2.5:8b on your machine · Ollama on your machine (3 model(s) pulled); strongest of 3 pulled, ahead of SparkLLM/Spark-X2.6-4B:q4_k_m (4B)` |
+
+Live probe of the keys found on this machine (`C:\Users\rishi\.env`, and the store the
+control room writes), one token per candidate:
+
+| provider | model | state | detail |
+|---|---|---|---|
+| mistral | `mistral-small-latest` | denied | HTTP 401 — Invalid API Key |
+| mistral | `ministral-8b-latest`, `open-mistral-nemo`, `ministral-3b-latest` | denied | not tried: the key was refused once, so the provider is skipped |
+| groq | `openai/gpt-oss-120b` | denied | HTTP 403 (error code 1010) |
+
+Which is the point of the change: the recorded Mistral model never could have answered
+on this machine, and now the app says so in one sentence instead of failing mid-turn.
+
+**Tests:** 19 new in `tests/test_model_ranking.py` — ranking order stability and strength
+ordering, no rank claiming reachability or death, a 429 falling through to the next
+candidate with the refusal recorded as capacity, a 404 skipped as gone, the probe cache
+spending no second request, a refused key stopping after one request, both directions of
+the local-versus-hosted comparison, discovery order changing nothing, the tool-capability
+skip, migration from a weaker or 404'd recorded model, a 429'd recorded model *not* being
+migrated, the `HERMUS_MODEL` pin, and the nothing-reachable stub with its reason.
+`tests/conftest.py` turns probing off for the whole suite, so no test reaches a provider;
+the probe tests inject a fake transport. One existing assertion was updated because it
+pinned the bug: two models pulled (`llama3.2:1b`, `mistral:7b`) used to resolve to the 1B
+and now resolve to the 7B.
