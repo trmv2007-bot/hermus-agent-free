@@ -174,7 +174,10 @@ def test_welcome_offers_every_choice_with_one_already_selected():
 
 def test_companion_screen_keeps_the_panels_behind_one_control():
     html = (ROOT / "gateway/static/companion.html").read_text(encoding="utf-8")
-    assert 'href="/control"' in html
+    # The panels are one deliberate step away: the Systems sheet's closed
+    # Diagnostics door, which names the console tab rather than its front page.
+    assert 'href="/control?tab=systems"' in html
+    assert 'class="sheet-diagnostics"' in html and "<details" in html
     assert html.count("<input") == 1  # one input line, nothing else to configure
     assert "fairy" in html  # the same character the HUD draws
 
