@@ -31,11 +31,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from core import console
-<<<<<<< HEAD
 from core.console_state import BACKGROUND_ONLY, console_state
-=======
 from gateway.probe_cache import ProbeCache, fresh_requested
->>>>>>> b9df785f (Stop the gateway blocking itself while the dashboard loads)
 
 router = APIRouter(prefix="/api/v1/console", tags=["console"])
 
@@ -100,7 +97,6 @@ async def console_manifest() -> dict[str, Any]:
     return data
 
 
-<<<<<<< HEAD
 @router.get("/state")
 async def console_state_bundle(include: str = Query("", description="Comma-separated section names; empty for every section")):
     """Everything the first screen and the tab rail read, in one response.
@@ -116,19 +112,11 @@ async def console_state_bundle(include: str = Query("", description="Comma-separ
     return console_state.snapshot()
 
 
-@router.get("/panels")
-async def console_panels(
-    ids: str = Query("", description="Comma-separated panel ids; empty probes every panel"),
-    workers: int = Query(8, ge=1, le=16, description="Concurrent probe limit"),
-) -> dict[str, Any]:
-    """Live state of every panel, read from each panel's canonical owner.
-=======
 #: A full ``/panels`` call walks all 58 owners and measured 11.4 s cold on a live
 #: install, on a request the Systems tab makes every time it opens. The default
 #: (every panel) answer is cached; a caller that names ids still probes those
 #: panels directly, because that is a targeted question, not a page load.
 PANELS_ALL = ProbeCache("console.panels", ttl=30.0)
->>>>>>> b9df785f (Stop the gateway blocking itself while the dashboard loads)
 
 
 async def _probe_panels(selected: list[str], workers: int) -> dict[str, Any]:

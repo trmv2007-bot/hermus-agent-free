@@ -380,7 +380,6 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[Gateway] real input guard unavailable: {e}")
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
-<<<<<<< HEAD
     # A shipped default that nothing installed used to decide the first answer.
     # Resolve once, loudly, so the model the gateway actually calls exists.
     try:
@@ -402,12 +401,10 @@ async def lifespan(app: FastAPI):
         console_state.start()
     except Exception as e:
         logger.warning(f"[Gateway] console state warm-up unavailable: {e}")
-=======
     # Fire and forget: the first Control Room paint should find a warm cache,
     # but readiness must not wait on the probes.
     global _WARM_TASK
     _WARM_TASK = asyncio.create_task(_warm_status_probes())
->>>>>>> b9df785f (Stop the gateway blocking itself while the dashboard loads)
     agent_pool_started = False
     try:
         from core.agents import init_pool
