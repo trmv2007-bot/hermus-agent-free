@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from core import brain, model_catalog, model_health, onboarding
+from core import brain, key_sources, model_catalog, model_health, onboarding
 from core.thinking import routing
 
 SERVING = {
@@ -59,17 +59,20 @@ def _clean_environment(monkeypatch):
     for env_key in model_catalog.FREE_KEYS.values():
         monkeypatch.delenv(env_key, raising=False)
     monkeypatch.delenv("HERMUS_MODEL", raising=False)
-    monkeypatch.setattr(brain, "_key_in_ui_store", lambda provider: False)
-    monkeypatch.setattr(brain, "free_key_value", lambda provider: "")
+    monkeypatch.setattr(key_sources, "store_keys", lambda provider: [])
+    monkeypatch.setattr(key_sources, "home_env_path", lambda: Path("no-such-home-env-file"))
+    monkeypatch.setattr(key_sources, "checkout_env_path", lambda: Path("no-such-checkout-env-file"))
     model_health.reset_cache()
+    key_sources.reset_cache()
     yield
     model_health.reset_cache()
+    key_sources.reset_cache()
 
 
 def _with_key(monkeypatch, provider: str, value: str = "test-key-not-real") -> None:
     monkeypatch.setenv(model_catalog.FREE_KEYS[provider], value)
     monkeypatch.setenv("HERMUS_MODEL_PROBE", "1")
-    monkeypatch.setattr(brain, "free_key_value", lambda name: value if name == provider else "")
+    key_sources.reset_cache()
 
 
 def _transport(answers: dict[str, tuple[int, str]]):
@@ -163,6 +166,59 @@ def test_a_model_missing_from_the_key_is_gone_and_skipped(monkeypatch):
     assert "404" in reasons["mistral/mistral-small-latest"]
     assert "404" in reasons["mistral/ministral-8b-latest"]
     assert "404" in reasons["mistral/open-mistral-nemo"]
+
+
+def _transport_by_key(answers: dict[str, dict[str, tuple[int, str]]]):
+    """A fake provider that answers differently per key, and counts every request."""
+    calls: list[tuple[str, str]] = []
+
+    def send(request, timeout):
+        auth = request.headers.get("Authorization", "")
+        key = auth.replace("Bearer ", "")
+        payload = getattr(request, "data", None)
+        name = json.loads(payload)["model"] if payload else "listing"
+        calls.append((key, name))
+        return answers.get(key, {}).get(name, (200, OK_BODY))
+
+    return send, calls
+
+
+def test_a_dead_key_does_not_win_over_the_working_one_beside_it(monkeypatch, tmp_path):
+    """Two keys for one provider: the one that answers is used, and named."""
+    monkeypatch.setenv("MISTRAL_API_KEY", "dead-key")
+    home = tmp_path / ".env"
+    home.write_text("MISTRAL_API_KEY=live-key" + chr(10), encoding="utf-8")
+    monkeypatch.setattr(key_sources, "home_env_path", lambda: home)
+    monkeypatch.setenv("HERMUS_MODEL_PROBE", "1")
+    monkeypatch.delenv("HERMUS_NO_DOTENV", raising=False)
+    key_sources.reset_cache()
+    unauth = json.dumps({"detail": "Invalid API Key"})
+    send, _calls = _transport_by_key(
+        {
+            "dead-key": {"mistral-small-latest": (401, unauth)},
+            "live-key": {"mistral-small-latest": (200, OK_BODY)},
+        }
+    )
+    monkeypatch.setattr(model_health, "transport", send)
+
+    resolved = brain.resolve_brain(status=SERVING)
+    assert resolved["model"] == "mistral/mistral-small-latest"
+    resolution = key_sources.resolve("mistral")
+    assert resolution.source == str(home)
+    assert resolution.key == "live-key"
+
+
+def test_a_refused_key_says_which_path_it_came_from(monkeypatch):
+    monkeypatch.setenv("MISTRAL_API_KEY", "dead-key")
+    monkeypatch.setenv("HERMUS_MODEL_PROBE", "1")
+    key_sources.reset_cache()
+    unauth = json.dumps({"detail": "Invalid API Key"})
+    send, _calls = _transport_by_key({"dead-key": {"mistral-small-latest": (401, unauth)}})
+    monkeypatch.setattr(model_health, "transport", send)
+    resolved = brain.resolve_brain(status=SERVING)
+    refusal = next(skip for skip in resolved["skipped"] if skip["ref"] == "mistral/mistral-small-latest")
+    assert "401" in refusal["why"]
+    assert "your environment" in refusal["why"]
 
 
 def test_a_probe_is_cached_so_resolution_does_not_spend_requests(monkeypatch):

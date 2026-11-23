@@ -35,8 +35,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from . import key_sources, model_health
 from . import model_catalog as catalog
-from . import model_health
 
 OLLAMA_BASE = "http://localhost:11434"
 LMSTUDIO_BASE = "http://localhost:1234/v1"
@@ -173,26 +173,8 @@ def local_status(force: bool = False) -> dict[str, Any]:
 
 
 def free_key_status() -> dict[str, bool]:
-    """Which free tiers are usable: an env key, or one pasted through the UI."""
-    status: dict[str, bool] = {}
-    for provider, env_key, _, _ in FREE_TIER:
-        if os.environ.get(env_key):
-            status[provider] = True
-            continue
-        status[provider] = _key_in_ui_store(provider)
-    return status
-
-
-def _key_in_ui_store(provider: str) -> bool:
-    """A key added through the control room lives in core.multi_key, not the env."""
-    try:
-        from .multi_key import multi_key_manager
-
-        keys = multi_key_manager.list_keys(provider)
-        entries = keys.get(provider) if isinstance(keys, dict) else None
-        return bool(entries)
-    except Exception:  # noqa: BLE001 - an absent key store is "no key", never a crash
-        return False
+    """Which free tiers have a key configured, from any of the places one can live."""
+    return {provider: key_sources.available(provider) for provider, _env_key, _url in _FREE_KEYS}
 
 
 def _pick_pulled(models: list[str]) -> str | None:
@@ -250,6 +232,7 @@ def stub_brain(reason: str) -> dict[str, Any]:
         "reachable": False,
         "present": None,
         "reason": reason,
+        "skipped": [],
     }
 
 
@@ -304,56 +287,22 @@ def _local_refs(st: dict[str, Any]) -> list[str]:
     return refs
 
 
-def free_key_value(provider: str) -> str:
-    """The key itself, from the environment or the store the control room writes.
-
-    Resolution needs it to ask the provider a real question; nothing here logs,
-    stores or returns it anywhere but the header of that one request.
-    """
-    env_key = catalog.FREE_KEYS.get(provider, "")
-    value = os.environ.get(env_key) if env_key else ""
-    if value:
-        return value
-    try:
-        from .multi_key import multi_key_manager
-
-        entries = (multi_key_manager.list_keys(provider) or {}).get(provider) or []
-        for entry in entries:
-            if isinstance(entry, dict) and entry.get("key"):
-                return str(entry["key"])
-    except Exception:  # noqa: BLE001 - no store is "no key"
-        return ""
-    return ""
-
-
 def _hosted_refs(need_tools: bool = True) -> tuple[list[str], list[dict[str, Any]]]:
     """Each keyed free tier's best candidate *this key can reach*, plus the refusals.
 
     The catalog says which model would be strongest; the probe says which ones
-    answer. A model that is refused with HTTP 429 is recorded as capacity — it is
-    not gone, and it is not a reason to migrate anything — and the next candidate
-    down the ranking is offered instead.
+    answer, and which of the person's keys answers. A model refused with HTTP 429
+    is recorded as capacity — it is not gone, and it is not a reason to migrate
+    anything — and the next candidate down the ranking is offered instead. Every
+    refusal names the key's path, so a dead key is one edit away from working.
     """
     refs: list[str] = []
     refused: list[dict[str, Any]] = []
-    keys = free_key_status()
     for provider, _env_key, _url in _FREE_KEYS:
-        if not keys.get(provider):
-            continue
-        key = free_key_value(provider)
-        chosen = False
-        for state in model_health.rank(provider, key):
-            entry = catalog.find(state.ref)
-            if need_tools and entry is not None and not entry.tools:
-                refused.append({"ref": state.ref, "why": "no function calling, and this product drives tools"})
-                continue
-            if state.state in (model_health.OK, model_health.UNKNOWN):
-                refs.append(state.ref)
-                chosen = True
-                break
-            refused.append({"ref": state.ref, "why": state.detail or state.state})
-        if not chosen and not refused:
-            refused.append({"ref": f"{provider}/?", "why": "no candidate answered"})
+        resolution = key_sources.resolve(provider, need_tools=need_tools)
+        if resolution.usable:
+            refs.append(resolution.ref)
+        refused.extend(resolution.refusals)
     return refs, refused
 
 
@@ -424,14 +373,15 @@ def _recorded_gone(recorded: str, st: dict[str, Any]) -> str:
         return "" if name in (info.get("models") or []) else "the runtime no longer lists it"
     if provider not in catalog.FREE_KEYS:
         return ""
-    key = free_key_value(provider)
-    if not key:
-        return f"{catalog.FREE_KEYS[provider]} is not configured"
-    state = model_health.probe(provider, key, name)
+    resolution = key_sources.resolve(provider)
+    if not resolution.key:
+        return f"{catalog.FREE_KEYS[provider]} is not configured anywhere this app reads keys"
+    state = model_health.probe(provider, resolution.key, name)
+    where = f" (key from {resolution.source})" if resolution.source else ""
     if state.state == model_health.GONE:
-        return state.detail or "the provider no longer serves it to this key"
+        return f"{state.detail or 'the provider does not serve it to this key'}{where}"
     if state.state == model_health.DENIED:
-        return state.detail or "the key was refused"
+        return f"{state.detail or 'the key was refused'}{where}"
     return ""
 
 

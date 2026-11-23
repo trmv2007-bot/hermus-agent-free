@@ -23,6 +23,20 @@ from core.computer.task_control import get_task_control  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _no_key_store(monkeypatch):
+    """No test may read the keys a developer keeps in the control-room store.
+
+    Model resolution asks every configured key a real question in production; in
+    a test run that would both reach a provider and make the result depend on the
+    machine, so the store is empty for every test and each one opts in instead.
+    """
+    from core import key_sources
+
+    monkeypatch.setattr(key_sources, "store_keys", lambda provider: [])
+    key_sources.reset_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_task_control_state():
     """Reset the process-wide TaskControl singleton before each test."""
     get_task_control().reset()
