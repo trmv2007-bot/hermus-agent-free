@@ -123,9 +123,7 @@ def record_brain(state: dict[str, Any], brain: dict[str, Any]) -> dict[str, Any]
     return state
 
 
-def record_upgrade(
-    state: dict[str, Any], brain: dict[str, Any], *, previous: str | None, reason: str
-) -> dict[str, Any]:
+def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: str | None, reason: str) -> dict[str, Any]:
     """Replace a recorded model with a stronger one, keeping the run finished.
 
     A migration, not a new first run: the person's name and permission choice

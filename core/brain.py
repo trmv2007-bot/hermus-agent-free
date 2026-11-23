@@ -375,7 +375,16 @@ def _recorded_gone(recorded: str, st: dict[str, Any]) -> str:
         return ""
     resolution = key_sources.resolve(provider)
     if not resolution.key:
-        return f"{catalog.FREE_KEYS[provider]} is not configured anywhere this app reads keys"
+        # No key, and no attempt either: nothing is configured. A key that exists
+        # but answered nothing is a different story, and only a refusal (401/403 or
+        # 404) counts as disappearance — a 429 means come back in a minute.
+        if not resolution.refusals:
+            return f"{catalog.FREE_KEYS[provider]} is not configured anywhere this app reads keys"
+        states = {str(row.get("state") or "") for row in resolution.refusals}
+        if model_health.DENIED in states or model_health.GONE in states:
+            first = next(row for row in resolution.refusals if row.get("state") in (model_health.DENIED, model_health.GONE))
+            return str(first.get("why") or "")
+        return ""
     state = model_health.probe(provider, resolution.key, name)
     where = f" (key from {resolution.source})" if resolution.source else ""
     if state.state == model_health.GONE:

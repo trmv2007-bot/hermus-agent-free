@@ -89,7 +89,9 @@ def state_payload() -> dict[str, Any]:
         # for one that has not.
         "upgrade": state.get("upgrade"),
         "upgrade_offer": {key: value for key, value in upgrade.items() if key != "best"},
-        "model_reason": resolved.get("reason") or "",
+        # A recorded model resolves as itself and has no comparison to make, so the
+        # reason it was recorded with is the one worth showing.
+        "model_reason": resolved.get("reason") or (state.get("brain") or {}).get("reason") or "",
         "skipped": resolved.get("skipped") or [],
         "catalog": model_catalog.catalog_payload(),
         "reason": onboarding.incomplete_reason(state),
