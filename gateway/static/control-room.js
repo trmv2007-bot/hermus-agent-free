@@ -24,6 +24,10 @@ async function refreshReadiness(){
   if (res.ok) {
     conn.textContent = "live"; conn.className = "pill ok";
     conn.title = "gateway ready — accepting traffic";
+    // The header readout is a round trip to a cheap endpoint. It used to print
+    // the duration of the full /api/v1/system/health probe, which reads like a
+    // 27-second network and made a healthy gateway look broken.
+    if (rtt) { rtt.textContent = res.ms + " ms"; rtt.title = "gateway round trip (/readyz)"; }
     return;
   }
   if (res.status === 503) {
@@ -55,6 +59,11 @@ function setPill(id, text, cls){ const el = $(id); if (el) { el.textContent = te
  * ======================================================================== */
 function requestJSON(url, opts) {
   const options = Object.assign({ headers: { "Accept": "application/json" } }, opts || {});
+  // A request that never settles must not paint "loading…" forever: the panel
+  // would sit there looking alive while the person waits for an answer that is
+  // never coming. Bound every call, and report the timeout as a retryable
+  // failure through the same envelope shape the server uses.
+  const REQUEST_TIMEOUT_MS = 30000;
   const method = String(options.method || "GET").toUpperCase();
   const t0 = Date.now();
   // Reads go through the one scheduler (see scheduler.js): first-screen state
@@ -69,30 +78,40 @@ function requestJSON(url, opts) {
       return { ok: Boolean(r.ok), status: r.status, data: body, text: text,
         requestId: r.headers ? r.headers.get("x-request-id") : null };
     }));
-  return transport.then((res) => {
-    const ms = Date.now() - t0;
-    const requestId = res.requestId || null;
-    const body = res.data;
-    if (res.ok) {
-      return { ok: true, data: body, ms: ms, status: res.status, requestId: requestId };
-    }
-    // Canonical envelope (ErrorEnvelopeMiddleware guarantees these keys on
-    // every 4xx/5xx JSON response), with a fallback for non-JSON errors.
-    const env = (body && typeof body === "object") ? body : {};
-    return {
-      ok: false, data: null, ms: ms, status: res.status, requestId: requestId,
-      code: env.code || env.error || ("http_" + res.status),
-      message: env.message || env.detail || env.error || res.error || ("Request failed (" + res.status + ")"),
-      retryable: env.retryable === true,
-      details: env.details || {},
-    };
-  }).catch((e) => ({
-    // Network-level failure: no response, so no envelope. Always retryable —
-    // the gateway may simply be restarting.
-    ok: false, data: null, ms: Date.now() - t0, status: 0, requestId: null,
-    code: "network_error", message: (e && e.message) ? e.message : "Network error",
-    retryable: true, details: {},
-  }));
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({
+      ok: false, data: null, ms: Date.now() - t0, status: 0, requestId: null,
+      code: "client_timeout",
+      message: "no answer within " + (REQUEST_TIMEOUT_MS / 1000) + "s — the gateway may be busy",
+      retryable: true, details: {},
+    }), REQUEST_TIMEOUT_MS);
+    const settle = (value) => { clearTimeout(timer); resolve(value); };
+    transport.then((res) => {
+      const ms = Date.now() - t0;
+      const requestId = res.requestId || null;
+      const body = res.data;
+      if (res.ok) {
+        settle({ ok: true, data: body, ms: ms, status: res.status, requestId: requestId });
+        return;
+      }
+      // Canonical envelope (ErrorEnvelopeMiddleware guarantees these keys on
+      // every 4xx/5xx JSON response), with a fallback for non-JSON errors.
+      const env = (body && typeof body === "object") ? body : {};
+      settle({
+        ok: false, data: null, ms: ms, status: res.status, requestId: requestId,
+        code: env.code || env.error || ("http_" + res.status),
+        message: env.message || env.detail || env.error || res.error || ("Request failed (" + res.status + ")"),
+        retryable: env.retryable === true,
+        details: env.details || {},
+      });
+    }).catch((e) => settle({
+      // Network-level failure: no response, so no envelope. Always retryable —
+      // the gateway may simply be restarting.
+      ok: false, data: null, ms: Date.now() - t0, status: 0, requestId: null,
+      code: "network_error", message: (e && e.message) ? e.message : "Network error",
+      retryable: true, details: {},
+    }));
+  });
 }
 
 /* getJSON keeps its historical {j, ms} shape so the ~15 existing call sites
@@ -303,6 +322,11 @@ function selectTab(name, opts) {
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.id === "tab-" + name;
     t.classList.toggle("on", on);
+    // The panels ship with a literal `hidden` attribute in control.html. CSS
+    // only ever overrode it, so the DOM kept claiming the visible panel was
+    // hidden and the hidden ones were not. Keep the attribute in step with the
+    // class so tooling, screen readers and tests read the same truth the screen does.
+    t.hidden = !on;
     if (on) t.removeAttribute("aria-hidden");
     else t.setAttribute("aria-hidden", "true");
   });
@@ -545,7 +569,7 @@ async function refreshOverview(){
   // Readiness first: the connection pill must not wait behind the slowest
   // capability probe. bootstrap.doctor() can take seconds on a cold machine.
   try { await refreshReadiness(); } catch(e){}
-  try { const { j, ms } = await getJSON("/api/v1/system/health"); renderHealth(j); rtt.textContent = ms + "ms"; }
+  try { const { j } = await getJSON("/api/v1/system/health"); renderHealth(j); }
   catch(e){ $("#health").innerHTML = stateHtml({ error: e.envelope || { message: e.message } },
     { label: "system health", onRetryId: "overview" }); }
   // The capability summary KPIs (#caps) now live on the Capabilities tab and

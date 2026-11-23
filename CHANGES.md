@@ -375,3 +375,47 @@ further reaches the backend.
 like every other mutation). **Tests:** 56 new across `test_undo_guarantee.py`,
 `test_dry_run_preview.py`, `test_undo_routes.py`, `test_real_input_guard.py` and
 `test_emergency_stop_stops_computer.py`.
+
+# HRS-6 · Product recon and the v2 spec (2026-11-23)
+
+**Why:** the repository claims 16 of 18 capabilities are complete across 140k
+lines and 13 status documents. Before another wave of building, someone had to
+check which of those claims survive a running gateway and a real browser.
+
+**What was done:** the gateway was run from a throwaway worktree on port 8123 with
+`HERMUS_HOME`/`HERMUS_DATA_DIR` isolated, then driven with Playwright at 1440×900
+and 420×900 across all eleven surfaces. Nothing was written to `~/.hermus`, no
+`.env` was created, and with no local model installed the model path ran on
+`mock/mock` so no paid API was called.
+
+## Documents
+
+- **`docs/PRODUCT_V2.md`** — the first hour of a new person minute by minute, the
+  twelve asks marked exists / runs / evidence, the dead code and the false
+  claims, and a ranked gap list where every gap names its files and a proof.
+- **`docs/ARCHITECTURE_INVENTORY.md`** — rewritten from a claim table into a
+  measured one: 424 routes / 444 operations, 203 tools, 1,627 tests, per-endpoint
+  latency, and the modules nothing constructs.
+
+## Five fixes a new person feels immediately
+
+| Fix | File | Before → after |
+|---|---|---|
+| Tab panels stop lying about visibility | `gateway/static/control-room.js` (`selectTab`) | the visible panel kept `hidden = true`, so the DOM, screen readers and tests disagreed with the screen → the attribute now follows the class |
+| A request that never settles fails out loud | `gateway/static/control-room.js` (`requestJSON`) | "loading…" forever → a 30 s bound that returns a retryable `client_timeout` envelope |
+| A silent run stream says where the answer is | `gateway/static/nexus.js` (`connectRun`) | the core said WORKING forever with an empty transcript → a 20 s watchdog that stops, explains, and points at Jobs |
+| Phone-width tables fit | `gateway/static/nexus.css` (≤760 px) | Approvals had 12 elements past a 420 px viewport → 0; the jobs table now measures 306 px inside a 340 px card |
+| The latency readout tells the truth | `gateway/static/control-room.js` (`refreshReadiness`) | printed the 27 s duration of the health probe as "rtt" → a real `/readyz` round trip, labelled as such |
+
+Tests: `tests/test_hrs6_quick_wins.py` — six behaviour tests that boot the real
+frontend files in Node. The harness is written to a temp file rather than passed
+to `node -e`, because Windows rejects a command line over 32,767 characters
+(`WinError 206`) and the existing harness has that ceiling.
+
+## Measured defects left for wave 2
+
+Opening the Control Room makes the browser hold six sockets permanently; 19–25
+of ~75 page requests never complete, and requests sit unsent for 12–26 s while
+the server answers in 8 ms. The run stream is the request that loses, so a typed
+question gets no answer in the conversation even though the job succeeds. Ranked
+first in `docs/PRODUCT_V2.md` (G1), with the numbers and the files.

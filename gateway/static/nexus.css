@@ -1793,6 +1793,14 @@ meter#hfLevel::-moz-meter-bar { background: linear-gradient(90deg, #5fd8ff, #3f9
   .jw-rail { grid-template-columns: repeat(2, 1fr); }
   .tabrail { width: 52px; }
   .core-stage { width: 220px; height: 220px; }
+  /* Approval tables carry long ids, red-line lists and tool names. At phone
+   * width they used to run 118px past the viewport and get clipped by the
+   * card, with no way to read the right-hand columns. Let the cell content
+   * wrap, then let the card scroll if it still has to. */
+  .card table { font-size: 11.5px; table-layout: fixed; width: 100%; }
+  .card th, .card td { padding: 6px 6px; }
+  .card th, .card td code, .card td { white-space: normal; overflow-wrap: anywhere; }
+  .card { overflow-x: auto; }
 }
 
 /* ============ calm mode + reduced motion ============ */
