@@ -475,7 +475,7 @@ class Sandbox:
 
     def run(
         self,
-        command: str,
+        command: str | Sequence[str],
         *,
         timeout: int | None = None,
         cwd: str | None = None,
@@ -488,8 +488,16 @@ class Sandbox:
         allow_dangerous: bool = False,
         purpose: str = "shell",
     ) -> dict[str, Any]:
-        """Execute ``command`` inside an ephemeral sandbox. Never raises."""
+        """Execute ``command`` inside an ephemeral sandbox. Never raises.
+
+        ``command`` is a shell line (run through the platform's shell) or a
+        sequence, which is executed directly with no shell in between. Both
+        kinds share one staging path on every backend: ``files`` land in the
+        scratch dir, ``cwd`` becomes the working directory, the scrubbed
+        environment is handed over, and stdout/stderr are captured identically.
+        """
         t0 = time.time()
+        command_text = command if isinstance(command, str) else shlex.join(command)
         pol = replace(self.policy, **(policy or {}))
         if backend:
             pol.backend = str(backend).lower()
@@ -506,14 +514,14 @@ class Sandbox:
             chosen = "local"
             reason = f"{reason}; explicit dangerous override → hardened local backend"
 
-        denied = scan_command(command, pol.deny_patterns)
+        denied = scan_command(command_text, pol.deny_patterns)
         if denied and not allow_dangerous:
             self._audit(
                 {
                     "sandbox_id": sandbox_id,
                     "backend": chosen,
                     "purpose": purpose,
-                    "command": command[:400],
+                    "command": command_text[:400],
                     "blocked": True,
                     "matched": denied,
                 }
@@ -532,6 +540,9 @@ class Sandbox:
             ).to_dict()
 
         workdir, mounted_cwd = self._workdirs(pol, cwd, sandbox_id)
+        # Where the command actually runs. An explicit ``cwd`` wins (or the
+        # scratch dir when confinement refuses it), otherwise the jail default.
+        exec_cwd = mounted_cwd if cwd and pol.workspace_mode != "none" else self._exec_cwd(pol, workdir)
         if files:
             staged = 0
             for name, content in (files or {}).items():
@@ -550,11 +561,15 @@ class Sandbox:
                 except Exception:
                     continue
             if staged:
-                # Staged input means "work on these files": run with the scratch dir
-                # as cwd (the container path when a container backend is in play),
-                # otherwise the jail's default cwd would not see them at all.
-                base = "/hermus" if chosen in ("docker", "podman") else str(workdir)
-                command = f"cd {shlex.quote(str(base))} && {command}"
+                # Staged input means "work on these files": the scratch dir is the
+                # working directory (the container path when a container backend is
+                # in play), otherwise the jail's default cwd would not see them at
+                # all. Argv commands get it as their process cwd; a container has
+                # no such knob, so its shell line is prefixed instead.
+                container = chosen in ("docker", "podman")
+                exec_cwd = "/hermus" if container else str(workdir)
+                if container and isinstance(command, str):
+                    command = f"cd {shlex.quote(exec_cwd)} && {command}"
 
         if not self._sem.acquire(timeout=max(1.0, pol.timeout)):
             return SandboxResult(
@@ -563,14 +578,18 @@ class Sandbox:
         try:
             with self._lock:
                 self._active[sandbox_id] = {"started": _now(), "backend": chosen, "purpose": purpose}
+            if not isinstance(command, str) and chosen in ("docker", "podman", "bwrap"):
+                command = shlex.join(command)  # these jails exec through /bin/sh
             if chosen in ("docker", "podman"):
                 res = self._run_container(chosen, command, pol, workdir, mounted_cwd, sandbox_id, env, input_text, reason)
             elif chosen == "bwrap":
-                res = self._run_bwrap(command, pol, workdir, sandbox_id, env, input_text, reason, allow_dangerous=allow_dangerous)
+                res = self._run_bwrap(
+                    command, pol, workdir, sandbox_id, env, input_text, reason, exec_cwd=exec_cwd, allow_dangerous=allow_dangerous
+                )
             elif chosen == "off":
-                res = self._run_raw(command, pol, workdir, sandbox_id, env, input_text, reason)
+                res = self._run_raw(command, pol, workdir, sandbox_id, env, input_text, reason, exec_cwd)
             else:
-                res = self._run_local(command, pol, workdir, sandbox_id, env, input_text, reason)
+                res = self._run_local(command, pol, workdir, sandbox_id, env, input_text, reason, exec_cwd)
         except Exception as e:
             res = SandboxResult(success=False, error=f"sandbox failure: {e}", backend=chosen, sandbox_id=sandbox_id)
         finally:
@@ -588,7 +607,7 @@ class Sandbox:
                 "sandbox_id": sandbox_id,
                 "backend": out.get("backend"),
                 "purpose": purpose,
-                "command": command[:400],
+                "command": command_text[:400],
                 "returncode": out.get("returncode"),
                 "timeout": out.get("timeout"),
                 "blocked": False,
@@ -599,45 +618,29 @@ class Sandbox:
         return out
 
     def run_python(self, code: str, **kw) -> dict[str, Any]:
-        """Run a Python snippet under the same boundary (used by skill validation)."""
+        """Run a Python snippet under the same boundary (used by skill validation).
+
+        The snippet travels as its own argv element, never interpolated into a
+        shell line: no quoting layer can mangle it, and a cmd.exe metacharacter
+        in the code cannot change what runs. Everything else — staged ``files``,
+        ``cwd``, the scrubbed environment, output capture, the timeout and the
+        audit record — is the shared ``run`` path, so a snippet on Windows sees
+        the same scratch dir and working directory a snippet does on POSIX.
+        """
         kw.setdefault("purpose", "python")
-        if os.name == "nt":
-            # cmd.exe does not honour POSIX quoting (``shlex.quote``), so the
-            # shell form failed with "filename, directory name, or volume label
-            # syntax is incorrect". Run the interpreter directly: no shell
-            # interpolation, same timeout, explicit UTF-8.
-            timeout = int(kw.get("timeout") or 30)
-            try:
-                proc = subprocess.run(
-                    [sys.executable or "python", "-c", code],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=timeout,
-                )
-                return {
-                    "success": proc.returncode == 0,
-                    "stdout": (proc.stdout or "")[:8000],
-                    "stderr": (proc.stderr or "")[:4000],
-                    "returncode": proc.returncode,
-                    "backend": "local-direct",
-                }
-            except subprocess.TimeoutExpired:
-                return {"success": False, "error": f"timed out after {timeout}s", "returncode": 124, "backend": "local-direct"}
-            except Exception as exc:  # pragma: no cover - defensive
-                return {"success": False, "error": str(exc), "returncode": 1, "backend": "local-direct"}
-        quoted = shlex.quote(code)
         requested_backend = str(kw.get("backend") or "").lower()
         policy = kw.get("policy") or {}
         probe_policy = replace(self.policy, **policy) if isinstance(policy, dict) else self.policy
         chosen, _ = self._resolve_backend(probe_policy)
         if requested_backend:
             chosen = requested_backend
-        # Container images have their own interpreter; never pass the host runner's
-        # absolute Python path into the container namespace.
-        executable = "python3" if chosen in ("docker", "podman") else (sys.executable or "python3")
-        return self.run(f"{shlex.quote(executable)} -c {quoted}", **kw)
+        if chosen in ("docker", "podman", "bwrap"):
+            # These jails run a shell line, and a container image has its own
+            # interpreter: never hand the host runner's absolute Python path to
+            # the container namespace.
+            executable = "python3" if chosen in ("docker", "podman") else (sys.executable or "python3")
+            return self.run(f"{shlex.quote(executable)} -c {shlex.quote(code)}", **kw)
+        return self.run([sys.executable or "python3", "-c", code], **kw)
 
     def run_wasm(self, module_path: str, *, args: Sequence[str] = (), timeout: int = 20) -> dict[str, Any]:
         """Optional WASI path: run a .wasm module with wasmtime (strictly isolated, no fs/net)."""
@@ -830,24 +833,25 @@ class Sandbox:
 
     def _run_local(
         self,
-        command: str,
+        command: str | Sequence[str],
         pol: SandboxPolicy,
         workdir: Path,
         sandbox_id: str,
         env: dict[str, str] | None,
         input_text: str | None,
         reason: str,
+        exec_cwd: str | None = None,
     ) -> SandboxResult:
         """Hardened local execution: rlimits + new session + no new privs."""
-        if os.name == "nt":
-            # cmd.exe must receive the whole command as one string (shell=True).
-            # Passing it as an argv element mangled quoted commands into
-            # "filename, directory name, or volume label syntax is incorrect".
-            argv: list[str] | str = command
-            shell = True
+        exec_cwd = exec_cwd or self._exec_cwd(pol, workdir)
+        if isinstance(command, str):
+            # The one genuine platform difference: a shell line is one string to
+            # cmd.exe (shell=True) and an explicit `/bin/sh -c` argv on POSIX.
+            # Everything below — staging, cwd, env, capture — is shared.
+            argv: list[str] | str = command if os.name == "nt" else ["/bin/sh", "-c", command]
+            shell = os.name == "nt"
         else:
-            argv = ["/bin/sh", "-c", command]
-            shell = False
+            argv, shell = list(command), False
         if not pol.network and self.probe.unshare_net():
             # A real network cut (empty netns), not just an env hint.
             argv = [self.probe.binary("unshare"), "-n", *argv]
@@ -861,14 +865,14 @@ class Sandbox:
             "rlimits": resource is not None,
             "no_new_privs": pol.soft_no_new_privs,
             "setsid": os.name == "posix",
-            "cwd": self._exec_cwd(pol, workdir),
+            "cwd": exec_cwd,
             "reason": reason,
         }
         return self._exec(argv, "local", pol, workdir, sandbox_id, env, input_text, limits, shell=shell)
 
     def _run_bwrap(
         self,
-        command: str,
+        command: str | Sequence[str],
         pol: SandboxPolicy,
         workdir: Path,
         sandbox_id: str,
@@ -876,10 +880,11 @@ class Sandbox:
         input_text: str | None,
         reason: str,
         *,
+        exec_cwd: str | None = None,
         allow_dangerous: bool = False,
     ) -> SandboxResult:
         """bubblewrap jail: read-only /, writable scratch, no network, clean env."""
-        exec_cwd = self._exec_cwd(pol, workdir)
+        exec_cwd = exec_cwd or self._exec_cwd(pol, workdir)
         # An explicit dangerous override is still audited and policy-gated; make
         # host /tmp visible so trusted commands using absolute temp paths can run.
         tmp_mount = ["--bind", "/tmp", "/tmp"] if allow_dangerous else ["--tmpfs", "/tmp"]
@@ -919,7 +924,7 @@ class Sandbox:
             "reason": reason,
             "tool": "bubblewrap",
         }
-        argv += ["/bin/sh", "-c", command]
+        argv += ["/bin/sh", "-c", command if isinstance(command, str) else shlex.join(command)]
         return self._exec(argv, "bwrap", pol, workdir, sandbox_id, env, input_text, limits)
 
     def _exec(
@@ -1008,24 +1013,25 @@ class Sandbox:
 
     def _run_raw(
         self,
-        command: str,
+        command: str | Sequence[str],
         pol: SandboxPolicy,
         workdir: Path,
         sandbox_id: str,
         env: dict[str, str] | None,
         input_text: str | None,
         reason: str,
+        exec_cwd: str | None = None,
     ) -> SandboxResult:
         try:
             proc = subprocess.run(
-                command,
-                shell=True,
+                command if isinstance(command, str) else list(command),
+                shell=isinstance(command, str),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=pol.timeout,
-                cwd=str(workdir),
+                cwd=exec_cwd or str(workdir),
                 input=input_text or "",
             )
             return SandboxResult(
