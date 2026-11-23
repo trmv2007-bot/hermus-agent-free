@@ -174,6 +174,9 @@
     var reply = exchange(text).reply;
     setBusy(true);
     under("");
+    player.reset();
+    speak.spoken = 0;
+    speak.source = "";
 
     if (modelInfo.kind === "stub") {
       answer(reply, "I cannot answer — no model is reachable on this machine. " +
@@ -224,13 +227,19 @@
           seen = true;
           raw += d.text;
           answer(reply, plain(raw));
+          speak.stream(raw);
           toBottom(true);
           return;
         }
         if (ev === "agent_response") {
           /* The runtime's own answer wins over the delta accumulation: deltas
              can be cut mid-sentence by a step boundary. */
-          if (d.text) { seen = true; answer(reply, plain(d.text)); }
+          if (d.text) {
+            seen = true;
+            answer(reply, plain(d.text));
+            speak.stream(raw);
+            speak.remainder(d.text);
+          }
           if (d.model) modelLabel = d.model;
           return;
         }
@@ -287,6 +296,7 @@
       reply.dataset.streaming = "false";
       setBusy(false);
       if (!reply.textContent && !sawApproval) answer(reply, "Nothing came back.", "quiet");
+      if (!sawApproval) speak.flush();
       if (reply.dataset.tone === "quiet") mood("error");
       under(modelLabel);
       $("#say").focus();
@@ -298,6 +308,7 @@
   function stop() {
     if (!busy) return;
     if (abort) abort.abort();
+    player.reset();
     if (jobId) {
       fetch("/jobs/" + encodeURIComponent(jobId) + "/cancel", { method: "POST", headers: headers() })
         .catch(function () { /* the abort already ended the socket */ });
@@ -305,6 +316,485 @@
     under("stopped");
     setBusy(false);
     $("#say").focus();
+  }
+
+  /* ------------------------------------------------------------------ voice */
+
+  /* Speech is an enhancement, never a dependency: if any piece of it is missing
+     the room says which piece in one sentence and the text path is untouched.
+
+     Three moving parts:
+       player  — one <audio> element and a queue of clips, cut off at once when
+                 the person speaks or presses stop;
+       speak   — asks the gateway for a clip per sentence as the answer streams,
+                 so the first words play while the rest is still arriving;
+       ear     — microphone capture, 16 kHz PCM16 straight from an AudioWorklet
+                 or a ScriptProcessor, with live partial text on the way.
+  */
+
+  var voice = { stt: null, tts: null, reason: "", note: "" };
+
+  var player = (function () {
+    var el = null;
+    var queue = [];
+    var generation = 0;
+    return {
+      element: function () {
+        if (!el) {
+          el = new Audio();
+          el.preload = "auto";
+          el.addEventListener("playing", function () {
+            mood("speaking");
+            notePlaying(true);
+          });
+          el.addEventListener("ended", function () { next(); });
+          el.addEventListener("pause", function () { notePlaying(false); });
+        }
+        return el;
+      },
+      push: function (clip, gen) {
+        if (gen < generation) return;              /* already interrupted */
+        generation = gen;
+        queue.push(clip);
+        if (queue.length === 1) this.start();
+        return queue.length;
+      },
+      start: function () {
+        var clip = queue[0];
+        if (!clip) return;
+        var audio = this.element();
+        audio.src = clip.audio_url;
+        var played = audio.play();
+        if (played && played.catch) played.catch(function () { /* autoplay refused; text remains */ });
+      },
+      next: function () {
+        queue.shift();
+        if (!queue.length) { mood(busy ? "busy" : "idle"); return; }
+        this.start();
+      },
+      reset: function () {
+        queue = [];
+        generation += 1;
+        if (el) { el.pause(); el.removeAttribute("src"); el.load(); }
+        mood(busy ? "busy" : "idle");
+      },
+      busy: function () { return queue.length > 0; }
+    };
+  })();
+
+  function notePlaying(playing) {
+    if (!voice.tts || !voice.tts.available) return;
+    fetch("/voice/live/playing", {
+      method: "POST",
+      headers: headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ session_id: sessionId, playing: !!playing })
+    }).catch(function () { /* the mood is cosmetic; never a failure */ });
+  }
+
+  var speak = {
+    spoken: 0,       /* characters of the current answer already handed to the gateway */
+    source: "",      /* the text those characters came from */
+    off: false,      /* set once when there is no local voice at all */
+    generation: 0,
+
+    /* Speak whatever complete sentences have arrived, and nothing twice. */
+    stream: function (text) {
+      if (this.off || !voice.tts || !voice.tts.available) return;
+      var body = String(text || "");
+      if (body.length <= this.spoken) return;
+      var pending = body.slice(this.spoken);
+      var cut = -1;
+      for (var i = 0; i < pending.length - 1; i++) {
+        var ch = pending.charAt(i);
+        if (ch === "." || ch === "?" || ch === "!" || ch === "\n") {
+          if (pending.charAt(i + 1) === " ") { cut = i + 1; break; }
+        }
+      }
+      if (cut === -1) return;
+      var sentence = pending.slice(0, cut).trim();
+      if (!sentence) { this.spoken += cut; return; }
+      this.spoken += cut;
+      this.source = body.slice(0, this.spoken);
+      this.ask(sentence);
+    },
+
+    /* The final answer can differ from the deltas; speak only what is new. */
+    remainder: function (finalText) {
+      if (this.off || !voice.tts || !voice.tts.available) return;
+      var body = String(finalText || "");
+      if (!this.spoken) return;
+      var heard = plain(this.source || "").slice(-24);
+      if (!heard) return;
+      if (body.indexOf(heard) === -1) return;
+      var tail = plain(body).slice(plain(this.source).length).trim();
+      if (tail) this.ask(tail);
+      this.spoken = body.length;
+    },
+
+    /* Anything still unspoken when the turn ends is worth saying. */
+    flush: function () {
+      if (this.off || !voice.tts || !voice.tts.available) return;
+      if (this.spoken) return;
+      var text = $("#thread .exchange:last-child .reply");
+      var body = text ? text.textContent : "";
+      if (body) this.ask(body);
+    },
+
+    ask: function (text) {
+      var self = this;
+      var gen = player.generation;
+      fetch("/voice/speak", {
+        method: "POST",
+        headers: headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ text: text, session_id: sessionId })
+      }).then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (body) {
+          if (body && body.redacted) under("kept a secret out of speech", "");
+          if (!body || !body.success) {
+            if (body && body.error && !self.off) {
+              self.off = true;
+              under("speech stays on screen — " + body.error, "bad");
+            }
+            return;
+          }
+          (body.clips || []).forEach(function (clip) { player.push(clip, gen); });
+        })
+        .catch(function () { /* the answer is already on screen */ });
+    }
+  };
+
+  /* the microphone ------------------------------------------------------- */
+
+  var ear = {
+    state: "off",
+    listenId: "",
+    ctx: null,
+    node: null,
+    sink: null,
+    stream: null,
+    source: null,
+    rate: 16000,
+    pending: [],
+    pendingSamples: 0,
+    sentSamples: 0,
+    totalSamples: 0,
+    inFlight: false,
+    speechHeardAt: 0,
+    lastVoiceAt: 0,
+    startedAt: 0,
+    latched: false,
+    text: "",
+
+    supported: function () {
+      return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia &&
+        (window.AudioContext || window.webkitAudioContext));
+    },
+
+    start: function () {
+      var self = this;
+      if (this.state !== "off") return Promise.resolve();
+      if (!voice.stt || !voice.stt.available) return Promise.reject(new Error(voice.reason || "no local speech-to-text"));
+      /* Speaking first, listening second: the person interrupting is the point. */
+      player.reset();
+      fetch("/voice/speak/stop", {
+        method: "POST",
+        headers: headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ session_id: sessionId })
+      }).catch(function () {});
+
+      return fetch("/voice/live/start", {
+        method: "POST",
+        headers: headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ session_id: sessionId })
+      }).then(function (r) { return r.json(); }).then(function (body) {
+        if (!body || !body.success) throw new Error(body && (body.error || body.fix) || "the microphone could not open");
+        self.listenId = body.id;
+        return navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+      }).then(function (stream) {
+        self.stream = stream;
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        var ctx;
+        try { ctx = new Ctx({ sampleRate: 16000 }); } catch (e) { ctx = new Ctx(); }
+        self.ctx = ctx;
+        self.rate = ctx.sampleRate;
+        self.source = ctx.createMediaStreamSource(stream);
+        self.node = ctx.createScriptProcessor(2048, 1, 1);
+        self.node.onaudioprocess = function (event) { self.frame(event.inputBuffer.getChannelData(0)); };
+        /* A ScriptProcessor only runs while it reaches the destination, and the
+           microphone must never reach the speakers — hence a silent sink. */
+        self.sink = ctx.createGain();
+        self.sink.gain.value = 0;
+        self.source.connect(self.node);
+        self.node.connect(self.sink);
+        self.sink.connect(ctx.destination);
+        self.pending = [];
+        self.pendingSamples = 0;
+        self.sentSamples = 0;
+        self.totalSamples = 0;
+        self.text = "";
+        self.startedAt = Date.now();
+        self.speechHeardAt = 0;
+        self.lastVoiceAt = 0;
+        self.state = "listening";
+        micState("listening");
+        mood("listening");
+        $("#say").value = "";
+        under("listening — hold, or talk and pause", "");
+        return true;
+      }).catch(function (err) {
+        self.teardown();
+        var message = err && err.name === "NotAllowedError"
+          ? "microphone permission was refused — allow it in the address bar to talk"
+          : (err && err.message) || "the microphone could not open";
+        under(message, "bad");
+        micState("off");
+        mood("idle");
+        throw err;
+      });
+    },
+
+    /* One 2048-sample block of real microphone audio. */
+    frame: function (samples) {
+      var now = Date.now();
+      var level = 0;
+      for (var i = 0; i < samples.length; i++) level += samples[i] * samples[i];
+      level = Math.sqrt(level / samples.length);
+      barLevel(level);
+      if (level > 0.012) {
+        if (!this.speechHeardAt) this.speechHeardAt = now;
+        this.lastVoiceAt = now;
+      }
+      var pcm = toPcm16(samples, this.rate, 16000);
+      if (pcm.length) {
+        this.pending.push(pcm);
+        this.pendingSamples += pcm.length / 2;
+        this.totalSamples += pcm.length / 2;
+      }
+      /* Partial cadence: soon after speech starts, then steady. */
+      var target = this.sentSamples === 0 ? 480 : 700;
+      var waited = ((this.totalSamples - this.sentSamples) / 16000) * 1000;
+      if (!this.inFlight && waited >= target) this.send();
+      if (this.speechHeardAt && now - this.lastVoiceAt > 900) this.finish();
+      else if (now - this.startedAt > 30000) this.finish();
+    },
+
+    send: function () {
+      var self = this;
+      if (!this.pending.length) return;
+      var blob = concatBytes(this.pending);
+      this.pending = [];
+      this.sentSamples = this.totalSamples;
+      this.inFlight = true;
+      fetch("/voice/live/chunk", {
+        method: "POST",
+        headers: headers({ "X-Hermus-Listen": this.listenId, "Content-Type": "application/octet-stream" }),
+        body: blob
+      }).then(function (r) { return r.json(); }).then(function (body) {
+        self.inFlight = false;
+        if (body && body.text && body.text !== self.text) {
+          self.text = body.text;
+          $("#say").value = self.text;
+        }
+        if (self.state === "stopping") self.close();
+      }).catch(function () {
+        self.inFlight = false;
+        if (self.state === "stopping") self.close();
+      });
+    },
+
+    finish: function () {
+      if (this.state !== "listening") return;
+      this.state = "stopping";
+      micState("transcribing");
+      mood(busy ? "busy" : "idle");
+      if (this.pending.length) this.send();
+      else this.close();
+    },
+
+    close: function () {
+      var self = this;
+      var id = this.listenId;
+      this.state = "closed";
+      this.teardown();
+      fetch("/voice/live/stop", {
+        method: "POST",
+        headers: headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ id: id })
+      }).then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (body) {
+          self.state = "off";
+          micState("off");
+          if (!body || !body.success) {
+            under(body && body.error === "no speech detected" ? "heard nothing — try again" : (body && body.error) || "nothing was heard", "quiet");
+            return;
+          }
+          var text = String(body.text || self.text || "").trim();
+          $("#say").value = "";
+          if (!text) { under("heard nothing", "quiet"); return; }
+          under("");
+          /* Talking over an answer is an interruption: end the turn first so the
+             person's words become the next turn instead of being dropped. */
+          if (busy) stop();
+          say(text);
+        })
+        .catch(function () {
+          self.state = "off";
+          micState("off");
+          under("the transcript did not come back", "bad");
+        });
+    },
+
+    teardown: function () {
+      if (this.node) { try { this.node.disconnect(); } catch (e) {} this.node.onaudioprocess = null; }
+      if (this.source) { try { this.source.disconnect(); } catch (e) {} }
+      if (this.sink) { try { this.sink.disconnect(); } catch (e) {} }
+      if (this.stream) this.stream.getTracks().forEach(function (t) { t.stop(); });
+      if (this.ctx) { try { this.ctx.close(); } catch (e) {} }
+      this.node = this.source = this.sink = this.stream = this.ctx = null;
+      this.inFlight = false;
+      this.speechHeardAt = 0;
+      this.listenId = "";
+      barLevel(0);
+    },
+
+    abort: function () {
+      var id = this.listenId;
+      this.state = "off";
+      this.teardown();
+      micState("off");
+      mood(busy ? "busy" : "idle");
+      if (id) {
+        fetch("/voice/live/cancel", {
+          method: "POST",
+          headers: headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ id: id })
+        }).catch(function () {});
+      }
+    }
+  };
+
+  function toPcm16(samples, fromRate, toRate) {
+    var ratio = fromRate / toRate;
+    var count = Math.floor(samples.length / ratio);
+    var out = new DataView(new ArrayBuffer(count * 2));
+    for (var i = 0; i < count; i++) {
+      var pos = i * ratio;
+      var low = Math.floor(pos);
+      var frac = pos - low;
+      var value = samples[low] * (1 - frac) + (samples[low + 1] !== undefined ? samples[low + 1] : samples[low]) * frac;
+      value = Math.max(-1, Math.min(1, value));
+      out.setInt16(i * 2, value < 0 ? value * 0x8000 : value * 0x7fff, true);
+    }
+    return new Uint8Array(out.buffer);
+  }
+
+  function concatBytes(list) {
+    var size = 0;
+    list.forEach(function (part) { size += part.length; });
+    var out = new Uint8Array(size);
+    var at = 0;
+    list.forEach(function (part) { out.set(part, at); at += part.length; });
+    return out;
+  }
+
+  function micState(state) {
+    var mic = $("#mic");
+    if (!mic) return;
+    mic.setAttribute("data-state", state);
+    mic.setAttribute("aria-label",
+      state === "listening" ? "Stop listening" :
+        state === "transcribing" ? "Transcribing" : "Hold to talk");
+    if (voice.stt && voice.stt.available) mic.setAttribute("aria-disabled", "false");
+  }
+
+  function barLevel(level) {
+    var bar = document.querySelector("#mic .mic-bar");
+    if (!bar) return;
+    var scale = 1 + Math.min(0.45, level * 3.2);
+    bar.style.transform = "scale(" + scale.toFixed(3) + ")";
+  }
+
+  /* The control's whole contract: it is disabled *before* the click, with the
+     one sentence that would enable it. */
+  function voiceStatus() {
+    return fetch("/voice/live/status", { headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (body) {
+        voice.stt = (body && body.stt) || { available: false };
+        voice.tts = (body && body.tts) || { available: false };
+        var mic = $("#mic");
+        if (!mic) return body;
+        if (!ear.supported()) {
+          mic.setAttribute("aria-disabled", "true");
+          mic.title = "This browser cannot open a microphone";
+          return body;
+        }
+        if (!voice.stt.available) {
+          voice.reason = voice.stt.fix || voice.stt.reason || "local speech-to-text is not installed";
+          mic.setAttribute("aria-disabled", "true");
+          mic.title = "Voice is off: " + voice.reason;
+          under("voice needs " + voice.reason, "");
+          return body;
+        }
+        mic.setAttribute("aria-disabled", "false");
+        mic.title = "Hold to talk";
+        if (voice.stt.first_use_download) {
+          under(voice.stt.first_use_download, "");
+        } else if (!voice.tts.available) {
+          under("answers stay on screen — " + (voice.tts.fix || voice.tts.reason || "no local voice"), "");
+        }
+        return body;
+      })
+      .catch(function () {
+        var mic = $("#mic");
+        if (mic) { mic.setAttribute("aria-disabled", "true"); mic.title = "Voice is off: the gateway did not answer"; }
+        return null;
+      });
+  }
+
+  /* Press and hold, or press once and talk. A quick tap latches the microphone
+     open until the next press or the silence detector closes it. */
+  function wireMic() {
+    var mic = $("#mic");
+    if (!mic) return;
+    var pressedAt = 0;
+
+    function begin(event) {
+      if (event) event.preventDefault();
+      if (mic.getAttribute("aria-disabled") === "true") {
+        under("voice needs " + (voice.reason || "a local speech recognizer"), "bad");
+        return;
+      }
+      if (ear.state === "listening") { ear.finish(); return; }
+      if (ear.state === "transcribing") return;
+      pressedAt = Date.now();
+      ear.latched = false;
+      ear.start().catch(function () {});
+    }
+
+    function end(event) {
+      if (event) event.preventDefault();
+      if (ear.state !== "listening") return;
+      var held = Date.now() - pressedAt;
+      if (held < 300) { ear.latched = true; return; }
+      ear.finish();
+    }
+
+    mic.addEventListener("pointerdown", begin);
+    mic.addEventListener("pointerup", end);
+    mic.addEventListener("pointerleave", function () { if (!ear.latched) end(); });
+    mic.addEventListener("click", function (e) {
+      /* A latched press (quick tap) ends on the next click. */
+      if (ear.latched && ear.state === "listening") { e.preventDefault(); ear.finish(); }
+    });
+    mic.addEventListener("keydown", function (e) {
+      if (e.key === " " || e.key === "Enter") { e.preventDefault(); begin(e); }
+    });
+    mic.addEventListener("keyup", function (e) {
+      if (e.key === " " || e.key === "Enter") end(e);
+    });
   }
 
   /* ------------------------------------------------------------- approvals */
@@ -580,6 +1070,9 @@
     $("#go").addEventListener("click", function (e) {
       if (busy) { e.preventDefault(); stop(); }
     });
+
+    wireMic();
+    voiceStatus();
 
     $("#systemsBtn").addEventListener("click", openSystems);
     $("#systemsClose").addEventListener("click", closeSystems);

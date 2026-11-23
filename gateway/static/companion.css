@@ -127,6 +127,22 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 .being[data-mood="error"] .orb-core { filter: drop-shadow(0 0 16px rgba(255, 101, 132, 0.55)); }
 .being[data-mood="error"] .orb-ring { stroke: rgba(255, 101, 132, 0.5); }
 
+/* Listening and speaking are states of the body, not decorations: the ring
+   tightens while the microphone is open and the orb settles while sound is
+   actually leaving the speakers. */
+.being[data-mood="listening"] .orb-ring {
+  animation-duration: 3.4s;
+  stroke: rgba(167, 235, 255, 0.9);
+}
+.being[data-mood="listening"] .orb-core { filter: drop-shadow(0 0 18px rgba(167, 235, 255, 0.75)); }
+.being[data-mood="speaking"] .orb-core { filter: drop-shadow(0 0 26px rgba(95, 216, 255, 0.85)); }
+.being[data-mood="speaking"] .orb-halo { animation: speakHalo 1.6s ease-in-out infinite; }
+
+@keyframes speakHalo {
+  0%, 100% { opacity: 0.35; r: 30; }
+  50% { opacity: 0.75; r: 33; }
+}
+
 /* words --------------------------------------------------------------- */
 .thread {
   width: min(660px, 100%);
@@ -253,8 +269,7 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
   border-color: var(--accent-line);
   box-shadow: 0 0 0 4px rgba(95, 216, 255, 0.07);
 }
-.line .prefix { color: var(--accent); font-family: var(--mono); user-select: none; }
-.line input {
+.line .prefix { color: var(--accent); font-family: var(--mono); user-select: none; }.line input {
   flex: 1;
   min-width: 0;
   border: 0;
@@ -285,6 +300,61 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
   color: var(--dim);
   text-align: center;
   overflow-wrap: anywhere;
+}
+/* the microphone: one control, three honest states ---------------------- */
+.mic {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 200ms var(--ease), border-color 200ms var(--ease), background 200ms var(--ease);
+}
+.mic svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.mic svg path:first-child { fill: currentColor; stroke: none; }
+.mic:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+.mic:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(95, 216, 255, 0.18); }
+.mic[aria-disabled="true"] {
+  color: var(--dim);
+  border-color: var(--line);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.mic[data-state="listening"] {
+  color: var(--accent-strong);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+/* The bar is driven by real microphone level, not a timer: it is the honest
+   answer to "is it hearing me". */
+.mic-bar {
+  position: absolute;
+  inset: -1px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transform: scale(1);
+  transition: transform 90ms linear, border-color 120ms linear;
+  pointer-events: none;
+}
+.mic[data-state="listening"] .mic-bar { border-color: var(--accent-line); }
+.mic[data-state="transcribing"] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  cursor: progress;
 }
 .under[data-tone="bad"] { color: var(--bad); }
 

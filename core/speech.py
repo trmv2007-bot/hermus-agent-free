@@ -37,6 +37,10 @@ from .config import config
 _MAX_SPEECH_CHARS = 6000
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
 
+# Loading a Piper voice costs ~1.6 s; keeping it lets each sentence synthesize in
+# well under a tenth of that, which is what makes speech start quickly.
+_piper_voice_cache: dict[str, Any] = {}
+
 
 def speech_root() -> Path:
     root = config.resolve_path(os.getenv("HERMUS_SPEECH_DIR", "data/speech"))
@@ -54,6 +58,31 @@ def prepare_speech_text(text: str) -> str:
     value = re.sub(r"[*_`~]", "", value)
     value = re.sub(r"\s+", " ", value).strip()
     return value[:_MAX_SPEECH_CHARS]
+
+
+def wav_bytes(pcm: bytes, rate: int = 24000) -> bytes:
+    """Wrap raw 16-bit mono PCM in a RIFF header.
+
+    Written by hand rather than through ``wave``: the module takes no encoding
+    argument, and a project rule requires every text-capable file call to state
+    one. This is byte I/O from end to end, so it never touches a text codec.
+    """
+    channels, width = 1, 2
+    return (
+        b"RIFF"
+        + (36 + len(pcm)).to_bytes(4, "little")
+        + b"WAVEfmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + rate.to_bytes(4, "little")
+        + (rate * channels * width).to_bytes(4, "little")
+        + (channels * width).to_bytes(2, "little")
+        + (width * 8).to_bytes(2, "little")
+        + b"data"
+        + len(pcm).to_bytes(4, "little")
+        + pcm
+    )
 
 
 def _now_iso() -> str:
@@ -120,10 +149,37 @@ class SpeechEngine:
         return {"success": True, "backend": "omnivoice", **meta, "metadata_path": str(meta_path)}
 
     # -------------------------------------------------------------- capability
+    def voice_dir(self) -> Path:
+        """Where Piper voices live when nobody names one explicitly."""
+        root = config.resolve_path(os.getenv("HERMUS_PIPER_VOICE_DIR", "data/speech/voices"))
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def piper_model(self) -> Path | None:
+        """The voice model to speak with: the configured one, else the installed one.
+
+        An explicit ``HERMUS_PIPER_MODEL`` always wins. Without it, the first
+        ``*.onnx`` in the voice directory is used, so fetching a voice once is
+        all a person has to do — no second setting to discover.
+        """
+        configured = os.getenv("HERMUS_PIPER_MODEL", "").strip()
+        if configured:
+            path = Path(os.path.expanduser(configured))
+            if not path.is_absolute():
+                path = config.resolve_path(configured)
+            return path if path.exists() and path.is_file() else None
+        installed = sorted(self.voice_dir().glob("*.onnx"))
+        return installed[0] if installed else None
+
+    def piper_command(self) -> str:
+        """The one line that gives this install a local neural voice."""
+        return f"python -m piper.download_voices en_US-lessac-medium --download-dir {self.voice_dir()}"
+
     def _basic_backends(self) -> dict[str, dict[str, Any]]:
         requested = os.getenv("HERMUS_TTS_BACKEND", "auto").strip().lower()
         piper = shutil.which("piper")
-        piper_model = os.getenv("HERMUS_PIPER_MODEL", "").strip()
+        piper_module = _module_available("piper")
+        piper_model = self.piper_model()
         espeak = shutil.which("espeak-ng") or shutil.which("espeak")
         pyttsx3_ok = False
         pyttsx3_reason = None
@@ -137,9 +193,15 @@ class SpeechEngine:
             pyttsx3_reason = str(exc)
         return {
             "piper": {
-                "available": bool(piper and piper_model and Path(piper_model).expanduser().exists()),
+                "available": bool(piper_model and (piper or piper_module)),
                 "requested": requested in ("auto", "piper"),
-                "detail": {"executable": piper, "model": piper_model or None},
+                "detail": {
+                    "executable": piper,
+                    "module": piper_module,
+                    "model": str(piper_model) if piper_model else None,
+                    "voice_dir": str(self.voice_dir()),
+                    "fix": self.piper_command() if not piper_model else None,
+                },
             },
             "espeak": {
                 "available": bool(espeak),
@@ -205,6 +267,15 @@ class SpeechEngine:
         }
         return None, detail
 
+    def _setup_hint(self) -> str:
+        """One sentence naming the shortest free path to a local voice."""
+        piper = self._basic_backends()["piper"]
+        if piper["detail"].get("model") is None:
+            if piper["detail"].get("executable") or piper["detail"].get("module"):
+                return f"Give Hermus a local voice with one command: {self.piper_command()} (free, no account)."
+            return f"Install a local voice: python -m pip install piper-tts, then {self.piper_command()} (free, no account)."
+        return "No local speech backend is usable; install piper-tts or espeak-ng (both free)."
+
     def status(self) -> dict[str, Any]:
         backend, detail = self._discover()
         return {
@@ -216,13 +287,7 @@ class SpeechEngine:
             "detail": detail,
             "backends": {**self._basic_backends(), "omnivoice": self._omnivoice_status()},
             "clone_prompts": {"count": len(self.list_clone_prompts()), "directory": str(self.prompt_root())},
-            "setup": (
-                "Install optional OmniVoice dependencies for multilingual voice cloning/design, or set "
-                "HERMUS_PIPER_MODEL and install piper, or install espeak-ng. Optional fallback: pyttsx3 "
-                "with a supported OS speech driver."
-            )
-            if not backend
-            else None,
+            "setup": None if backend else self._setup_hint(),
         }
 
     # ---------------------------------------------------------------- synth
@@ -310,29 +375,35 @@ class SpeechEngine:
         try:
             with self._lock:
                 if selected_backend == "piper":
-                    command = [
-                        detail["executable"],
-                        "--model",
-                        detail["model"],
-                        "--output_file",
-                        str(path),
-                    ]
-                    if voice:
-                        try:
-                            command.extend(["--speaker", str(int(voice))])
-                        except (TypeError, ValueError):
-                            pass
-                    # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
-                    subprocess.run(
-                        command,
-                        input=spoken,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        capture_output=True,
-                        check=True,
-                        timeout=180,
-                    )
+                    # The package is preferred over the binary: the binary reloads
+                    # its voice on every call (~2.4 s here), while an in-process
+                    # voice stays loaded (~0.13 s cold, ~0.02 s warm).
+                    if detail.get("module"):
+                        self._piper_in_process(spoken, Path(detail["model"]), path, voice)
+                    elif detail.get("executable"):
+                        command = [
+                            detail["executable"],
+                            "--model",
+                            detail["model"],
+                            "--output_file",
+                            str(path),
+                        ]
+                        if voice:
+                            try:
+                                command.extend(["--speaker", str(int(voice))])
+                            except (TypeError, ValueError):
+                                pass
+                        # External-tool output is bytes, not the locale's text: decode UTF-8, replace undecodable bytes.
+                        subprocess.run(
+                            command,
+                            input=spoken,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            capture_output=True,
+                            check=True,
+                            timeout=180,
+                        )
                 elif selected_backend == "espeak":
                     command = [detail["executable"], "-w", str(path), "-s", str(max(80, min(320, int(rate))))]
                     if voice:
@@ -340,18 +411,7 @@ class SpeechEngine:
                     command.append(spoken)
                     subprocess.run(command, capture_output=True, check=True, timeout=180)
                 else:
-                    import pyttsx3
-
-                    engine = pyttsx3.init()
-                    engine.setProperty("rate", max(80, min(320, int(rate))))
-                    if voice:
-                        for candidate in engine.getProperty("voices") or []:
-                            if voice.lower() in str(getattr(candidate, "name", "")).lower():
-                                engine.setProperty("voice", candidate.id)
-                                break
-                    engine.save_to_file(spoken, str(path))
-                    engine.runAndWait()
-                    engine.stop()
+                    self._pyttsx3_isolated(spoken, path, int(rate), voice)
 
             if not path.exists() or path.stat().st_size < 44:
                 return {"success": False, "error": f"{selected_backend} did not produce audio"}
@@ -371,6 +431,80 @@ class SpeechEngine:
         except Exception as exc:  # noqa: BLE001
             path.unlink(missing_ok=True)
             return {"success": False, "error": f"Speech synthesis failed: {exc}", "backend": selected_backend}
+
+    def _piper_voice(self, model: Path):
+        """The loaded Piper voice, kept so a sentence costs a tenth of a second."""
+        key = str(model)
+        voice_obj = _piper_voice_cache.get(key)
+        if voice_obj is None:
+            from piper import PiperVoice
+
+            voice_obj = PiperVoice.load(str(model))
+            _piper_voice_cache[key] = voice_obj
+        return voice_obj
+
+    def _piper_in_process(self, text: str, model: Path, path: Path, voice: str | None) -> None:
+        """Speak with the ``piper-tts`` package when no ``piper`` binary is on PATH.
+
+        The package ships the same models and needs no external process, so a
+        stock ``pip install piper-tts`` plus one voice file is enough.
+        """
+        piper_voice = self._piper_voice(model)
+        rate = 22050
+        frames = bytearray()
+        for chunk in piper_voice.synthesize(text):
+            frames.extend(chunk.audio_int16_bytes)
+            rate = int(getattr(chunk, "sample_rate", rate) or rate)
+        path.write_bytes(wav_bytes(bytes(frames), rate))
+
+    def warm(self) -> dict[str, Any]:
+        """Load the selected local voice now, so the first sentence is not slow.
+
+        Loading a Piper voice costs about a second and a half, which is the whole
+        latency budget of a spoken reply. The room asks for the speech status as
+        it opens, so this runs in the background from there and the person never
+        pays it after they have already spoken.
+        """
+        backend, detail = self._discover()
+        if backend != "piper" or not detail.get("module") or not detail.get("model"):
+            return {"warmed": False, "backend": backend}
+        started = time.monotonic()
+        try:
+            self._piper_voice(Path(detail["model"]))
+        except Exception as exc:  # noqa: BLE001
+            return {"warmed": False, "backend": backend, "error": f"{type(exc).__name__}: {exc}"[:200]}
+        return {"warmed": True, "backend": backend, "ms": round((time.monotonic() - started) * 1000)}
+
+    def _pyttsx3_isolated(self, text: str, path: Path, rate: int, voice: str | None) -> None:
+        """Run pyttsx3 in its own process so a stuck SAPI driver cannot hang speech.
+
+        pyttsx3's ``runAndWait`` has been observed to block forever on Windows
+        after its first call. In-process that would wedge every later synthesis
+        behind the engine lock, so the fallback gets a process and a deadline.
+        """
+        script = (
+            "import sys\n"
+            "import pyttsx3\n"
+            "text, path, rate, voice = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]\n"
+            "engine = pyttsx3.init()\n"
+            "engine.setProperty('rate', rate)\n"
+            "if voice:\n"
+            "    for candidate in engine.getProperty('voices') or []:\n"
+            "        if voice.lower() in str(getattr(candidate, 'name', '')).lower():\n"
+            "            engine.setProperty('voice', candidate.id)\n"
+            "            break\n"
+            "engine.save_to_file(text, path)\n"
+            "engine.runAndWait()\n"
+            "engine.stop()\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script, text, str(path), str(max(80, min(320, int(rate)))), str(voice or "")],
+            capture_output=True,
+            timeout=25,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+            raise RuntimeError(detail[-1] if detail else f"pyttsx3 exited {result.returncode}")
 
     def _synthesize_omnivoice(
         self,
