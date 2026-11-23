@@ -351,9 +351,23 @@ document.querySelectorAll("nav [role=tab]").forEach((b) => {
 });
 
 // Mark the initially hidden panels without triggering a refresh on load.
+// A deep link (`/control?tab=safety#undoJournal`) from the room's Systems sheet
+// wins over the default tab, so one click from the room lands on the surface it
+// named rather than on Overview.
 (function initTabs(){
-  const active = document.querySelector("nav [role=tab].on");
-  selectTab(active ? active.dataset.tab : "overview", { noRefresh: true });
+  var wanted = "";
+  try { wanted = new URLSearchParams(location.search).get("tab") || ""; } catch (e) { wanted = ""; }
+  var tabbed = Array.prototype.slice.call(document.querySelectorAll("nav [role=tab]"));
+  var target = tabbed.filter(function (b) { return b.dataset.tab === wanted; })[0];
+  var active = document.querySelector("nav [role=tab].on");
+  var name = target ? wanted : (active ? active.dataset.tab : "overview");
+  selectTab(name, { noRefresh: true });
+  if (target) setTimeout(function () { refreshTab(name); }, 0);
+  var hash = String(location.hash || "").replace("#", "");
+  if (hash) {
+    var card = document.getElementById(hash);
+    if (card && card.scrollIntoView) setTimeout(function () { card.scrollIntoView({ block: "center" }); }, 80);
+  }
 })();
 function refreshTab(name){
   if (name === "jobs") { refreshJobs(); refreshRemote(); }
@@ -1075,6 +1089,70 @@ async function refreshSafety(){
   } catch(e){ $("#capLedger").innerHTML = '<div class="note">ledger unavailable: ' + esc(e.message) + '</div>'; }
   try { await refreshCapabilityRegistry(); } catch(e){}
   try { await refreshSafetyEvents(); } catch(e){}
+  try { await refreshUndo(); } catch(e){}
+}
+
+/* The undo journal is the product's promise in one table: every mutating action
+ * recorded before it ran, and a button that puts it back. It lives here in
+ * Safety because that is what it is. */
+async function refreshUndo(){
+  const body = $("#undoEntries tbody");
+  const status = $("#undoStatus");
+  if (!body) return;
+  try {
+    const { j } = await getJSON("/api/v1/undo?limit=25");
+    const rows = j.entries || [];
+    if (status) status.textContent = rows.length
+      ? `${j.undoable || 0} of ${rows.length} recent actions can be put back`
+      : "";
+    body.innerHTML = rows.map((e) => {
+      const when = String(e.created_at || "").replace("T", " ").slice(0, 19);
+      const canUndo = e.reversible && e.state === "applied";
+      const act = canUndo
+        ? `<button class="ghost" data-undo-id="${esc(e.id)}">undo</button>`
+        : `<span class="hint">${esc(e.state === "undone" ? "undone" : (e.reason || "not reversible"))}</span>`;
+      return `<tr>
+        <td class="hint">${esc(when)}</td>
+        <td>${esc(e.description || e.tool || "")}</td>
+        <td class="hint">${esc((e.targets || []).slice(0, 3).join(", "))}</td>
+        <td><span class="tag">${esc(e.state || "")}</span></td>
+        <td>${act}</td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="5" class="hint">nothing has been changed yet — the journal is empty</td></tr>';
+    body.querySelectorAll("button[data-undo-id]").forEach((b) => {
+      b.addEventListener("click", () => undoEntry(b.dataset.undoId));
+    });
+  } catch(e){
+    body.innerHTML = `<tr><td colspan="5" class="hint">journal unavailable: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+async function undoEntry(entryId){
+  const status = $("#undoStatus");
+  if (status) status.textContent = "putting it back…";
+  try {
+    const r = await fetch("/api/v1/undo/" + encodeURIComponent(entryId), { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const d = await r.json();
+    if (status) status.textContent = d.success ? ("put back: " + String(d.message || d.description || entryId)) : ("could not undo: " + String(d.error || r.status));
+  } catch(e){
+    if (status) status.textContent = "could not undo: " + e.message;
+  }
+  refreshUndo();
+  refreshSafetyEvents();
+}
+
+async function undoLast(){
+  const status = $("#undoStatus");
+  if (status) status.textContent = "putting the last change back…";
+  try {
+    const r = await fetch("/api/v1/undo/last", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const d = await r.json();
+    if (status) status.textContent = d.success ? ("put back: " + String(d.message || d.description || "the last change")) : ("nothing to undo: " + String(d.error || "none"));
+  } catch(e){
+    if (status) status.textContent = "could not undo: " + e.message;
+  }
+  refreshUndo();
+  refreshSafetyEvents();
 }
 async function refreshCapabilityRegistry(){
   const feed = $("#capRegistry");
@@ -1272,6 +1350,7 @@ $("#memoryStatsRefresh").addEventListener("click", refreshMemory);
 $("#memoryRecallBtn").addEventListener("click", recallMemory);
 $("#memoryRecallQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") recallMemory(); });
 $("#safetyEventsRefresh").addEventListener("click", refreshSafetyEvents);
+$("#undoLast").addEventListener("click", undoLast);
 $("#safetyReportBtn").addEventListener("click", refreshSafetyReport);
 $("#preflightRun").addEventListener("click", runPreflight);
 $("#preflightApprovals").addEventListener("click", createPreflightApprovals);

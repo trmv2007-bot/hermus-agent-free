@@ -42,6 +42,8 @@
       <span aria-hidden="true">⌘</span> Palette
       <kbd>Ctrl P</kbd>
     </button>
+
+    <a class="btn ghost" id="roomLink" href="/" title="Back to the room">Room</a>
   </header>
 
   <!-- ================= shell ================= -->
@@ -377,6 +379,21 @@
             <thead><tr><th>#</th><th>red line</th><th>rule</th></tr></thead>
             <tbody><tr><td colspan="3" class="note">loading policy…</td></tr></tbody>
           </table>
+        </div>
+
+        <div class="card" id="undoJournal">
+          <div class="card-head">
+            <h2>Undo journal</h2>
+            <div class="card-actions">
+              <button id="undoLast" class="btn ghost" type="button" title="Put the most recent change back">Undo last change</button>
+            </div>
+          </div>
+          <p class="meta">Every mutating action is recorded before it runs, and can be put back from here.</p>
+          <table id="undoEntries">
+            <thead><tr><th>when</th><th>action</th><th>what it touched</th><th>state</th><th></th></tr></thead>
+            <tbody><tr><td colspan="5" class="note">loading the journal…</td></tr></tbody>
+          </table>
+          <p class="meta" id="undoStatus"></p>
         </div>
 
         <div class="card">
