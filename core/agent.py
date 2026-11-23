@@ -1048,11 +1048,17 @@ Rules:
 
         # Background self-improvement
         try:
+            # Always-on for a real install; never inside the test process. The
+            # checker is a daemon thread that keeps probing state on its own
+            # schedule, and one left running across tests crashed the interpreter
+            # on macOS (SIGSEGV inside a test that had nothing to do with it).
+            import sys as _sys
             import threading
 
             from .self_improvement import self_improvement
 
-            if not self_improvement.background_thread or not self_improvement.background_thread.is_alive():
+            _in_tests = _sys.modules.get("pytest") is not None
+            if not _in_tests and (not self_improvement.background_thread or not self_improvement.background_thread.is_alive()):
                 self_improvement.start_background_idle_checker()
 
             def background_reflection():
