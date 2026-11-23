@@ -58,7 +58,8 @@ def test_root_redirects_to_the_first_screen():
     done["check"] = {"ok": True, "model": "test:1b", "reason": "", "at": None, "ms": 1}
     onboarding.save(done)
     r = c.get("/", follow_redirects=False)
-    assert r.headers.get("location") == "/companion"
+    assert r.headers.get("location") == "/harness"
+    assert c.get("/harness").status_code == 200
     assert c.get("/companion").status_code == 200
 
 
