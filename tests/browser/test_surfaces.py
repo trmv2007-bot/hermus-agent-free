@@ -223,6 +223,8 @@ class TestSystemsIsAnAnswer:
                 "Diagnostics is open by default"
             )
             assert page.evaluate("() => document.querySelectorAll(\"[class*='telemetry']\").length") == 0
+            # The door is styled as part of the sheet, not left as raw chrome.
+            assert page.evaluate("() => getComputedStyle(document.querySelector('#systemsDiagnostics')).borderTopWidth") == "1px"
             page.screenshot(path=str(shots / f"systems-{width}.png"))
         finally:
             context.close()
@@ -303,6 +305,8 @@ class TestDiagnosticsIsDeliberate:
             assert "nothing here is needed" in body, "Diagnostics does not say it is optional"
             href = page.evaluate("() => document.querySelector('.sheet-diagnostics-link').getAttribute('href')")
             assert href == "/control?tab=systems", href
+            marked = page.evaluate("""() => getComputedStyle(document.querySelector('.sheet-diagnostics-mark')).transform""")
+            assert marked not in ("", "none"), "the chevron does not turn when the door opens"
             assert (
                 page.evaluate("() => document.querySelectorAll('#systems #consolePanels, #systems .console-card').length") == 0
             ), "the panel grid rendered inside the room"
