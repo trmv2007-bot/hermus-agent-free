@@ -479,6 +479,7 @@ def pick(provider: str, *, need_tools: bool = True) -> Pick:
         return Pick(entry, tuple(skipped), note="")
     return Pick(
         entries[0],
+        # The chosen model was skipped first on this list, so it is not a skip.
         tuple(skipped[1:]),
         note=f"no free model on {provider} calls tools; {entries[0].name} is the strongest anyway",
     )
@@ -523,7 +524,7 @@ def best_of(refs: list[str], *, need_tools: bool = True) -> Pick:
 
 
 def size_phrase(entry: Model) -> str:
-    """``24B`` / ``120B (MoE)`` — the short form a reason sentence uses."""
+    """``24B``, or ``unpublished size`` — the short form a reason sentence uses."""
     if entry.params_b is None:
         return "unpublished size"
     return f"{entry.params_b:g}B"
@@ -538,6 +539,11 @@ def comparison_reason(winner: Model, others: list[Model]) -> str:
     nearest = others[0] if others else None
     if nearest is None:
         return f"{winner.name} is the only free model reachable right now"
+    if is_local(winner.ref) and is_local(nearest.ref):
+        return (
+            f"{winner.name} on your machine ({size_phrase(winner)}) is the strongest of "
+            f"{len(others) + 1} pulled models, ahead of {nearest.name} ({size_phrase(nearest)})"
+        )
     if is_local(winner.ref):
         return (
             f"{winner.name} on your machine ({size_phrase(winner)}) is at least as strong as "
