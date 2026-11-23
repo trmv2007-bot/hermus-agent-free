@@ -8,12 +8,28 @@ explicitly retired instead of being allowed to fail every hosted run.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ["HERMUS_NO_DOTENV"] = "1"
 
 import pytest  # noqa: E402
+from _real_home_guard import refuse_real_home  # noqa: E402
 
 from core.computer.task_control import get_task_control  # noqa: E402
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Refuse a session that would write into the person's own home.
+
+    The suite destroyed a real ``~/.hermus/onboarding.json`` on 2026-11-23,
+    because nothing here checked where the home resolved to. This does: an
+    unset ``HERMUS_HOME`` means the product's own ``~/.hermus``, which is not a
+    place a test may run, so the session stops before any test does.
+    """
+    refuse_real_home(os.environ.get("HERMUS_HOME") or str(Path.home() / ".hermus"), "HERMUS_HOME")
+    data_dir = os.environ.get("HERMUS_DATA_DIR")
+    if data_dir:
+        refuse_real_home(data_dir, "HERMUS_DATA_DIR")
 
 
 @pytest.fixture(autouse=True)
