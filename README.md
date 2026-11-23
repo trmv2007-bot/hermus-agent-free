@@ -27,7 +27,7 @@ HERMUS ships one canonical installer path per platform. The installer obtains th
 
 It is safe to re-run. It does not delete HERMUS memory, projects, workspace data, logs, credentials or model files.
 
-It does not download AI model weights or create provider credentials. Local models and hosted-provider keys remain operator-configured.
+**It will offer you a brain.** At the end of the install one question asks whether to install Ollama and download `llama3.2:1b` (about 0.6 GB, once, on your machine, no account). Say yes and the first answer comes from a real model. Say no and it offers a free-tier key instead. Decline both and it says plainly that it will answer with the offline stub, and gives you the one command that fixes it. Nothing is downloaded without that answer.
 
 #### Windows 10/11
 
@@ -92,7 +92,8 @@ Linux / macOS / Termux:
 
     ./hermus gateway start
 
-Open **http://localhost:8000/control** for the Control Room.
+Open **http://localhost:8000/** — the first screen asks three questions (what answers you, what it may do, its name), then proves the model works by answering you once, streaming.
+When setup is done, `/` opens the companion: one character and one input line. The eleven operator panels of the Control Room live at **http://localhost:8000/control**, one quiet control away.
 ## 🧠 What is HERMUS?
 
 **HERMUS** is a general-purpose personal AI agent: a persistent system that can understand objectives, plan work, delegate to specialist capabilities, operate tools, verify results, recover from failures, remember what it learns, and safely become more useful over time.
@@ -103,30 +104,34 @@ The architecture is inspired by the idea of a persistent personal assistant—a 
 
 ---
 
-## 🚧 Build Status
+## Build status
 
-| Capability | Status |
-|---|:---:|
-| Verified computer-control execution | ✅ Complete |
-| Voice presence + executive integration | ✅ Complete |
-| Control Room / system observability | ✅ Complete |
-| Learning, memory + reusable skills | ✅ Complete |
-| End-to-end autonomy + safety hardening | ✅ Complete |
-| Runtime reliability + observability | ✅ Complete |
-| Proactive event-driven automation | ✅ Complete |
-| Scheduling + time awareness | ✅ Complete |
-| Persistent personal context | ✅ Complete |
-| Live world awareness | ✅ Complete |
-| Advanced long-horizon planning | ✅ Complete |
-| Specialist agent ecosystem | ✅ Complete |
-| Multimodal intelligence | ✅ Complete |
-| Natural conversation + interruption | ✅ Complete |
-| Personal operating system | ✅ Complete |
-| Self-improving agent | ✅ Complete |
-| Distributed HERMUS | ✅ Complete |
-| Reliability & recovery | ✅ Complete |
-| Fresh-machine installation | ✅ Complete |
-| Real-world provider/device deployment | 🔧 Deployment-dependent |
+Every row names the test that backs it. If a claim has no test, it is not here.
+The same suite runs with `make test` (~1 min) and on every pull request.
+
+| Capability | Evidence |
+|---|---|
+| Verified computer-control execution | `tests/test_computer_agent_v2.py` |
+| Voice presence + executive integration | `tests/test_voice_executive_bridge.py` |
+| Control Room / system observability | `tests/test_control_room_e2e.py` |
+| Learning, memory + reusable skills | `tests/test_learning_loop.py` |
+| End-to-end autonomy + safety hardening | `tests/test_autonomy_safety_contract.py` |
+| Runtime reliability + observability | `tests/test_runtime_health.py` |
+| Proactive event-driven automation | `tests/test_proactive.py` |
+| Scheduling + time awareness | `tests/test_phase8_scheduler.py` |
+| Persistent personal context | `tests/test_phase9_personal_context.py` |
+| Live world awareness | `tests/test_world_awareness.py` |
+| Long-horizon autonomous loop | `tests/test_autonomous_loop.py` |
+| Specialist agent delegation | `tests/test_agent_delegation.py` |
+| Multimodal intelligence | `tests/test_phase13_multimodal.py` |
+| Natural conversation + interruption | `tests/test_phase14_conversation.py` |
+| Personal operating system | `tests/test_phase15_personal_os.py` |
+| Self-improving agent | `tests/test_phase16_self_improvement.py` |
+| Distributed HERMUS | `tests/test_phase17_distributed.py` |
+| Reliability & recovery | `tests/test_phase18_reliability.py` |
+| Fresh-machine installation | `tests/test_bootstrap_runtime.py` |
+| First run: model resolution, `/welcome`, no fake boot claims | `tests/test_first_run_onboarding.py` |
+| Real-world provider/device deployment | deployment-dependent; `tests/test_model_gateway_fallback.py` covers the fallback path only |
 
 ---
 

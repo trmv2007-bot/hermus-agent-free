@@ -333,6 +333,18 @@ async def lifespan(app: FastAPI):
     setup_logging()
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
+    # A shipped default that nothing installed used to decide the first answer.
+    # Resolve once, loudly, so the model the gateway actually calls exists.
+    try:
+        from core.brain import apply_resolved_default
+
+        picked = apply_resolved_default()
+        if picked.get("applied"):
+            logger.info(f"[Gateway] model: {picked['model']} — {picked.get('source', 'resolved')}")
+        else:
+            logger.info(f"[Gateway] model unchanged: {picked.get('model')} ({picked.get('reason', '')})")
+    except Exception as e:
+        logger.warning(f"[Gateway] model resolution skipped: {type(e).__name__}: {e}")
     agent_pool_started = False
     try:
         from core.agents import init_pool
@@ -643,6 +655,7 @@ from gateway.routes_harness import router as _harness_router  # noqa: E402
 from gateway.routes_jarvis import router as _jarvis_router  # noqa: E402
 from gateway.routes_learning import router as _learning_router  # noqa: E402
 from gateway.routes_management import router as _management_router  # noqa: E402
+from gateway.routes_onboarding import router as _onboarding_router  # noqa: E402
 from gateway.routes_personal_space import router as _personal_space_router  # noqa: E402
 from gateway.routes_presence import router as _presence_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
@@ -690,16 +703,22 @@ app.include_router(_learning_router, dependencies=_gate_control)
 app.include_router(_routines_router, dependencies=_gate_control)
 app.include_router(_focus_router, dependencies=_gate_control)
 app.include_router(_personal_space_router, dependencies=_gate_control)
+# First run is deliberately ungated, exactly like /control and its assets: a
+# person who just installed HERMUS has no token yet, and the first screen they
+# are supposed to see cannot sit behind one.
+app.include_router(_onboarding_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    """Open the single canonical control room (spec §21 / Final One-Shot §7).
+    """The first screen: the welcome flow until setup is real, then the companion.
 
-    Explicitly allows HEAD so health checks / proxies that probe ``/`` with HEAD
-    no longer get a 405. Root opens /control; no legacy dashboard surface.
+    The Control Room keeps its own address (``/control``) and everything the
+    operator panels can do stays one quiet control away from the companion.
     """
-    return RedirectResponse(url="/control", status_code=307)
+    from gateway.routes_onboarding import redirect_target
+
+    return RedirectResponse(url=redirect_target(), status_code=307)
 
 
 @app.get("/favicon.ico")
@@ -880,7 +899,14 @@ async def nexus_js():
 
 @app.get("/static/nexus-mock.js")
 async def nexus_mock_js():
-    """Nexus dashboard compatibility/mock layer."""
+    """Nexus mock layer — development only.
+
+    ``?mock=1`` swaps the dashboard's network responses for fixtures, which is a
+    useful design tool and a lie on a live install. The route itself is gated on
+    ``HERMUS_MOCK_UI=1`` so the file cannot be reached by URL alone.
+    """
+    if os.getenv("HERMUS_MOCK_UI", "").strip() not in ("1", "true", "yes"):
+        return Response("mock UI is disabled; set HERMUS_MOCK_UI=1 for design work", status_code=404, media_type="text/plain")
     return _serve_control_asset("nexus-mock.js", "application/javascript; charset=utf-8")
 
 

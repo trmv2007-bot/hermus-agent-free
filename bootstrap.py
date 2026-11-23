@@ -846,6 +846,13 @@ def run(
         print("HERMUS SETUP: READY" if report.get("overall", {}).get("required") else "HERMUS SETUP: INCOMPLETE — FIX REQUIRED")
     else:
         print_installation_report(report, optional_install=optional_result)
+    # The install report proved the environment. This answers the only question
+    # a new person actually asks: what will answer me? Non-fatal by design.
+    if not verify_only and not json_output:
+        try:
+            first_run()
+        except Exception as e:  # noqa: BLE001 - setup must finish even if this cannot
+            print(f"First run skipped (non-fatal): {type(e).__name__}: {e}")
     # Best-effort autostart: a fresh, healthy machine should be alert from boot.
     # Never fatal, never prints READY, skipped in verify-only mode.
     if not verify_only and not os.environ.get("HERMUS_SKIP_AUTOSTART") and report.get("overall", {}).get("required"):
@@ -870,9 +877,223 @@ def run(
     return 0 if report.get("overall", {}).get("required") else 1
 
 
+def _ask(question: str, *, default: bool = True, interactive: bool) -> bool:
+    """One yes/no question, one keystroke. Never blocks a non-interactive run."""
+    if not interactive:
+        return False
+    suffix = "[Y/n]" if default else "[y/N]"
+    try:
+        answer = input(f"{question} {suffix} ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    if not answer:
+        return default
+    return answer in ("y", "yes")
+
+
+def _install_ollama() -> dict[str, Any]:
+    """Install Ollama with the platform's own package channel. Free, no card."""
+    if sys.platform == "win32":
+        cmd = [
+            "winget",
+            "install",
+            "--id",
+            "Ollama.Ollama",
+            "--exact",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+        ]
+    elif sys.platform == "darwin":
+        cmd = ["brew", "install", "ollama"]
+    else:
+        cmd = ["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"]
+    if not shutil.which(cmd[0]):
+        return {"ok": False, "detail": f"{cmd[0]} is not available; install Ollama from https://ollama.com/download"}
+    print(f"  installing with: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, check=False, timeout=900)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+    if result.returncode != 0:
+        return {"ok": False, "detail": f"installer exited {result.returncode}"}
+    return {"ok": True, "detail": "Ollama installed"}
+
+
+def _start_ollama() -> bool:
+    """Start the local server so the model can answer without a reboot."""
+    try:
+        creationflags = 0x08000000 if sys.platform == "win32" else 0
+        subprocess.Popen(  # noqa: S603 - fixed argv, the binary we just installed
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+    except OSError:
+        return False
+    for _ in range(30):
+        time.sleep(1)
+        if _ollama_up():
+            return True
+    return False
+
+
+def _ollama_up() -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=1.5) as resp:  # noqa: S310
+            return resp.status == 200
+    except Exception:  # noqa: BLE001 - detection only
+        return False
+
+
+def _pull_model(model: str) -> dict[str, Any]:
+    print(f"  downloading {model} (about 0.6 GB, once, stays on this machine)")
+    try:
+        result = subprocess.run(["ollama", "pull", model], check=False, timeout=1800)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+    if result.returncode != 0:
+        return {"ok": False, "detail": f"'ollama pull {model}' exited {result.returncode}"}
+    return {"ok": True, "detail": f"{model} is ready"}
+
+
+def _store_free_key(provider: str, env_key: str, key: str) -> bool:
+    env_path = ROOT / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    except OSError:
+        lines = []
+    out, replaced = [], False
+    for line in lines:
+        if line.strip().startswith(f"{env_key}="):
+            out.append(f"{env_key}={key}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append(f"{env_key}={key}")
+    try:
+        env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"  could not write .env: {exc}")
+        return False
+    os.environ[env_key] = key
+    return True
+
+
+def first_run(*, interactive: bool | None = None) -> dict[str, Any]:
+    """Give the fresh install a brain that exists — one question, then honesty.
+
+    Runs after the installation report. Never fails the install: whatever the
+    person chooses, the last thing printed says which model will answer and
+    where it came from, and the stub is named as the stub.
+    """
+    from core import brain as brain_mod
+    from core import onboarding
+
+    if interactive is None:
+        interactive = sys.stdin.isatty() and os.getenv("HERMUS_FIRST_RUN", "1") not in ("0", "false", "False")
+
+    state = onboarding.load()
+    if onboarding.is_complete(state):
+        print(f"Model: {brain_mod.pickup_line(brain_mod.resolve_brain())} — already set up.")
+        return {"ok": True, "skipped": "onboarding already complete"}
+
+    print("-" * 78)
+    print("FIRST RUN — what will answer you")
+    print("-" * 78)
+
+    status = brain_mod.local_status()
+    if status["ollama"]["serving"] and status["ollama"]["models"]:
+        resolved = brain_mod.resolve_brain()
+        onboarding.save(onboarding.record_brain(state, resolved))
+        print(f"Model: {brain_mod.pickup_line(resolved)}")
+        print("Source:", resolved["source"])
+        return {"ok": True, "model": resolved["model"], "source": resolved["source"]}
+
+    if status["lmstudio"]["serving"] or status["nollama"]["serving"]:
+        resolved = brain_mod.resolve_brain(status=status)
+        onboarding.save(onboarding.record_brain(state, resolved))
+        print(f"Model: {brain_mod.pickup_line(resolved)}")
+        print("Source:", resolved["source"])
+        return {"ok": True, "model": resolved["model"], "source": resolved["source"]}
+
+    installed = status["ollama"]["installed"]
+    offer = (
+        "Ollama is installed but not running. Start it and download the small model"
+        if installed
+        else f"No model was found on this machine. Install Ollama (free, no account) and download {brain_mod.SMALLEST_LOCAL_MODEL}"
+    )
+    if not installed and status.get("lmstudio", {}).get("installed"):
+        offer = (
+            "LM Studio is installed but not serving, and Ollama is not here. "
+            f"Install Ollama (free) and download {brain_mod.SMALLEST_LOCAL_MODEL}, or start LM Studio's local server instead"
+        )
+    print(offer + "?")
+    print("  It stays on your computer and costs nothing. Skip it and the first answer will be a stub.")
+
+    if not interactive:
+        # Nobody is at the keyboard, so nothing was declined: say what would
+        # answer right now and leave the choice to the first screen, instead of
+        # recording a stub the person never chose.
+        resolved = brain_mod.resolve_brain(status=status)
+        print(f"Model: {brain_mod.pickup_line(resolved)}")
+        print("Source:", resolved["source"])
+        print(f"  Fix later with one command: {brain_mod.fix_command(resolved, status=status)}")
+        print("  Or answer the same question on the first screen when HERMUS opens.")
+        return {"ok": True, "model": resolved["model"], "source": resolved["source"], "unchosen": True}
+
+    if _ask("Install it now?", default=True, interactive=interactive):
+        if not installed:
+            result = _install_ollama()
+            print("  " + result["detail"])
+            if not result["ok"]:
+                installed = False
+        if not _ollama_up() and not _start_ollama():
+            print("  Ollama did not start. Run 'ollama serve' yourself and re-run setup.")
+        if _ollama_up():
+            if _pull_model(brain_mod.SMALLEST_LOCAL_MODEL)["ok"]:
+                resolved = brain_mod.resolve_brain()
+                onboarding.save(onboarding.record_brain(state, resolved))
+                print(f"Model: {brain_mod.pickup_line(resolved)}")
+                print("Source:", resolved["source"])
+                return {"ok": True, "model": resolved["model"], "source": resolved["source"]}
+
+    print("")
+    print("Use a free-tier key instead? Groq, Mistral and OpenRouter all have no-card free plans.")
+    if _ask("Paste a key now?", default=True, interactive=interactive):
+        for provider, env_key, model, url in brain_mod.FREE_TIER:
+            print(f"  {provider}: {url}")
+        try:
+            key = input("  paste the key (or press Enter to skip): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            key = ""
+        if key:
+            provider = "groq"
+            env_key = next(k for p, k, _, _ in brain_mod.FREE_TIER if p == provider)
+            if _store_free_key(provider, env_key, key):
+                resolved = brain_mod.free_brain(provider, model, env_key)
+                onboarding.save(onboarding.record_brain(state, resolved))
+                print(f"Model: {brain_mod.pickup_line(resolved)}")
+                print("Source:", resolved["source"])
+                return {"ok": True, "model": resolved["model"], "source": resolved["source"]}
+
+    resolved = brain_mod.stub_brain("declined every free option during install")
+    onboarding.record_brain(state, resolved)
+    state["declined_all"] = True
+    onboarding.save(state)
+    print("Model: answering with the offline stub — no model installed.")
+    print(f"  Fix later with one command: {brain_mod.fix_command(resolved)}")
+    print("  Or finish the first-run screen in the app: it will offer the same choices again.")
+    return {"ok": True, "model": resolved["model"], "source": resolved["source"], "stub": True}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Hermus canonical setup/repair/verification")
-    parser.add_argument("command", nargs="?", choices=("bootstrap", "verify", "doctor"), default="bootstrap")
+    parser.add_argument("command", nargs="?", choices=("bootstrap", "verify", "doctor", "model"), default="bootstrap")
     parser.add_argument("--verify-only", action="store_true", help="do not install or create a venv; run live checks only")
     parser.add_argument("--repair", action="store_true", help="repair broken venv/dependencies and retry browser setup")
     parser.add_argument(
@@ -881,6 +1102,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-optional", action="store_true", help="do not install optional requirements")
     parser.add_argument("--json", action="store_true", help="emit the deep installation report as JSON")
     args = parser.parse_args(argv)
+    if args.command == "model":
+        from core import brain as brain_mod
+        from core import onboarding
+
+        state = onboarding.load()
+        stored = (state.get("brain") or {}).get("model")
+        resolved = brain_mod.resolve_brain(preferred=stored)
+        print(f"Model: {brain_mod.pickup_line(resolved)}")
+        print(f"Source: {resolved['source']}")
+        if resolved["kind"] == "stub":
+            print(f"Fix: {brain_mod.fix_command(resolved)}")
+        return 0 if resolved["kind"] != "stub" else 1
     if args.command == "doctor":
         report = doctor()
         print(json.dumps(report, indent=2, default=str) if args.json else json.dumps(report, indent=2, default=str))

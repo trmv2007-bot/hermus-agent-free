@@ -148,3 +148,43 @@ Two pollers owned the same pixels: the label could say **THINKING** while the li
 - **Harness context numbers agree with the words**: `6.1k/6.0k` now flags amber with a tooltip and the line says *"over budget (trimmed next turn)"* instead of contradicting itself with "within budget"; KPI labels read "66 / 797 live sessions", "recall mode".
 
 **Tests:** 18 new tests (`tests/test_command_answer_loop.py`) evaluate the real `nexus.js` / `control-room.js` / `control-core.js` in Node: agent_response → transcript, honest no-response and error paths, transcript persistence, palette keyboard nav, attention dismissal persistence, job row expansion + real queue fields, telemetry humanization + filter, mission blocker CTA, budget honesty, and the single-writer hero rule — plus a regression pin that the command bar POSTs `runtime.turn` to `/jobs` and never the ledger endpoint again. Full suite: **1584 passed, 2 skipped, 0 failed**. Every behavior above was additionally verified by hand against a live gateway (command → streamed answer, job expansion, palette Enter, CTA navigation, dismissal, reload persistence).
+
+---
+
+## 10 · First run — a brain that exists, and a first screen that is the companion
+
+Before: a fresh install had no model. `core/config.py` defaulted to
+`ollama/llama3.1:8b`, no installer installed or mentioned Ollama, so the first
+answer a new person received was `[MOCK mock] Echo: …`. `/` opened eleven tabs
+of operator panels, and the boot caption said *"Boot complete. Every system
+checked — twice."* whether or not anything had been checked.
+
+| Change | File | Effect |
+|---|---|---|
+| Model resolution that reports its source | `core/brain.py` (new) | Probes Ollama / LM Studio / NoLlama, then the free-tier keys, then the stub. `pickup_line()` says "answering with llama3.2:1b on your machine"; `fix_command()` is the one command that turns a stub into a model. |
+| First-run state machine | `core/onboarding.py` (new) | `~/.hermus/onboarding.json`. Complete only when a real round trip succeeded — a declined install, an offline machine or a broken key leaves it incomplete with the stated reason. |
+| The three choices and the proof | `gateway/routes_onboarding.py`, `gateway/static/welcome.*` (new) | Brain / what it may do / its name, each with a default already selected so Enter finishes. The last step streams a real answer against the resolved model. |
+| Companion-first screen | `gateway/static/companion.*` (new) | One character, one input line, the reply streaming in place. The eleven tabs are one quiet **Systems** control away at `/control`. |
+| `/` is the entrance, not the dashboard | `gateway/gateway.py` | `/` redirects to `/welcome` while setup is incomplete and to `/companion` once a real answer is recorded. |
+| The installer offers a brain | `bootstrap.py`, `setup.ps1`, `setup.sh` | Detects local runtimes; one prompt (default yes) installs Ollama and pulls `llama3.2:1b`; declining offers one free-tier key field; declining both records the stub and says so. `bootstrap.py model` prints the resolved model and its source. |
+| Permissions, mapped not reinvented | `core/onboarding.py` | Watch only / Ask first / Act freely become `deny` / `ask` / `allow` decisions on the tool policy that already exists, chosen from each tool's declared risk and capability. |
+| No fake boot | `gateway/static/hud.js` | The boot ceremony asks `/readyz` and prints the answer verbatim. The scripted ONLINE / LINKED / ARMED / NOMINAL list and the "checked — twice" quip are gone. |
+| Mock layer is development-only | `gateway/gateway.py` | `/static/nexus-mock.js` returns 404 unless `HERMUS_MOCK_UI=1`. |
+| The Doctor names the model and its source | `core/diagnostics.py` | The `LLM/model providers` row now carries `resolved_brain` and the pickup sentence. |
+| README table cites evidence | `README.md` | Every build-status row names the test that backs it, or states that it is deployment-dependent. |
+| Installer docs for a non-developer | `QUICKSTART.md` | One page: install, answer one question, open it, use it. Developer material moved below. |
+| Nothing downloads unannounced | `gateway/static/welcome.js` | The 0.6 GB pull sits behind a visible step that names the size before it starts; a missing Ollama offers *Check again* rather than a button that can never work. |
+| One failure statement | `gateway/static/welcome.js` | The `error` event carries the reason and the command; the later `done` event no longer overwrites it with the bare reason. |
+| The answer, not the scratchpad | `gateway/static/companion.js` | Reasoning-model `think` blocks are stripped before render, and the runtime's final answer replaces the delta accumulation so a step boundary cannot leave a half sentence on screen. |
+| No model, no send | `gateway/static/companion.js` | With no reachable brain the companion refuses the turn and names the command instead of forwarding to the runtime. |
+| The companion actually loads its stylesheet | `gateway/routes_onboarding.py` | `/static/companion.css` was linked but never served; the screen rendered unstyled until this route existed. |
+
+**Tests:** `tests/test_first_run_onboarding.py` (29 tests) covers the state
+machine, both redirect states, model resolution and its source, the free-tier and
+stub fallbacks, the permission profiles, a stubbed-gateway proof that a streamed
+answer is what completes the run, the SSE failure path, the mock gate, that every
+`/static/` asset the two screens reference is served, that a non-interactive
+install records no choice nobody made, and that no static string claims a check
+the code does not run.
+`tests/test_control_room_e2e.py::test_root_redirects_to_the_first_screen` was
+updated because the root contract itself changed.

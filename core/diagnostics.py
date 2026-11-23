@@ -759,6 +759,7 @@ def _verify_voice() -> dict[str, Any]:
 
 def _verify_model_provider() -> dict[str, Any]:
     try:
+        from core.brain import pickup_line, resolve_brain
         from core.config import config
         from core.model_capabilities import negotiate
         from core.models import get_model_gateway
@@ -766,6 +767,7 @@ def _verify_model_provider() -> dict[str, Any]:
         gateway = get_model_gateway()
         providers = gateway.providers(probe=False)
         configured = [p for p in providers if p.get("configured")]
+        brain = resolve_brain(status=None)
         capability = negotiate(str(config.model), probe=True)
         if capability.reachable is True and capability.present is not False:
             status = INSTALLED_VERIFIED
@@ -785,10 +787,12 @@ def _verify_model_provider() -> dict[str, Any]:
         return _subsystem(
             "LLM/model providers",
             status,
-            detail,
+            f"{detail} — {pickup_line(brain)} (source: {brain['source']})",
             hint="Start Ollama and pull the selected model, or configure a provider in .env / the Control Room",
             evidence={
                 "selected_model": str(config.model),
+                "resolved_brain": brain,
+                "pickup": pickup_line(brain),
                 "configured_providers": [p.get("provider") for p in configured],
                 "selected_capability": capability.to_dict(),
             },

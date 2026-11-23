@@ -292,5 +292,20 @@ fi
 
 say "${C_CYAN}➜${C_RESET} Delegating to canonical bootstrap/Doctor (same interpreter used by Hermus launchers)"
 # Keep this as the one canonical entry point. bootstrap.py re-execs into .venv
-# when setup was started with a system Python.
-exec "./bin/hermus" bootstrap "${BOOTSTRAP_ARGS[@]}"
+# when setup was started with a system Python. Not exec'd: the last thing this
+# script does is answer, from what is really installed, what will answer you.
+set +e
+"./bin/hermus" bootstrap "${BOOTSTRAP_ARGS[@]}"
+BOOTSTRAP_STATUS=$?
+set -e
+
+if [ "$VERIFY_ONLY" -eq 0 ]; then
+  say "${C_CYAN}➜${C_RESET} What will answer you"
+  if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/bootstrap.py" model || true
+  elif [ -x "$SCRIPT_DIR/.venv/Scripts/python.exe" ]; then
+    "$SCRIPT_DIR/.venv/Scripts/python.exe" "$SCRIPT_DIR/bootstrap.py" model || true
+  fi
+fi
+
+exit "$BOOTSTRAP_STATUS"

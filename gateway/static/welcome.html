@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#040912">
+  <title>HERMUS — first run</title>
+  <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
+  <link rel="stylesheet" href="/static/nexus.css">
+  <link rel="stylesheet" href="/static/welcome.css">
+</head>
+<body class="first-run">
+
+<main class="frame" id="frame">
+  <header class="frame-head">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" fill="none" stroke="rgba(95,216,255,0.35)" stroke-width="1"/>
+        <circle cx="20" cy="20" r="8" fill="none" stroke="rgba(95,216,255,0.7)" stroke-width="1" stroke-dasharray="6 9"/>
+        <circle cx="20" cy="20" r="3.4" fill="#a7ebff"/>
+      </svg>
+    </div>
+    <p class="eyebrow">first run</p>
+    <h1 class="lede">Three quiet choices, then it answers you.</h1>
+    <p class="sub" id="lede-sub">Nothing here leaves your machine unless you choose a free-tier key.</p>
+  </header>
+
+  <div class="steps" id="steps" role="group" aria-label="Setup steps">
+    <span class="dot on" data-dot="brain"></span>
+    <span class="dot" data-dot="permissions"></span>
+    <span class="dot" data-dot="name"></span>
+    <span class="dot" data-dot="first"></span>
+  </div>
+
+  <!-- 1. brain -->
+  <section class="step on" id="step-brain" aria-labelledby="brain-title">
+    <h2 id="brain-title" class="ask">What should answer you?</h2>
+    <p class="hint" id="brain-situation">Looking for a model on this machine…</p>
+
+    <div class="choices" role="radiogroup" aria-labelledby="brain-title" id="brain-choices">
+      <button type="button" class="choice" role="radio" aria-checked="false" data-choice="local">
+        <span class="choice-head">A model on this machine <span class="tag">default</span></span>
+        <span class="choice-body" id="local-body">Free, private, works offline.</span>
+        <span class="choice-foot" id="local-foot"></span>
+      </button>
+
+      <button type="button" class="choice" role="radio" aria-checked="false" data-choice="freekey">
+        <span class="choice-head">A free-tier key</span>
+        <span class="choice-body">Groq, Mistral or OpenRouter — free plans, no card. Needs the internet.</span>
+        <span class="choice-foot" id="freekey-foot"></span>
+      </button>
+
+      <button type="button" class="choice" role="radio" aria-checked="false" data-choice="stub">
+        <span class="choice-head">Nothing for now</span>
+        <span class="choice-body">It will say plainly that it has no model, and give you the one command that fixes it.</span>
+        <span class="choice-foot"></span>
+      </button>
+    </div>
+
+    <div class="field hidden" id="freekey-field">
+      <label for="provider">Which free plan?</label>
+      <div class="seg" id="provider-seg" role="radiogroup" aria-label="Free plan">
+        <button type="button" role="radio" aria-checked="true" data-provider="groq">Groq</button>
+        <button type="button" role="radio" aria-checked="false" data-provider="mistral">Mistral</button>
+        <button type="button" role="radio" aria-checked="false" data-provider="openrouter">OpenRouter</button>
+      </div>
+      <label for="keyinput" class="mt">Paste the key</label>
+      <input id="keyinput" type="password" autocomplete="off" spellcheck="false" placeholder="paste it here">
+      <p class="hint" id="key-hint">Stored in <code>.env</code> on this machine, never sent anywhere else.</p>
+    </div>
+
+    <div class="field hidden" id="prepare-field">
+      <p class="hint" id="prepare-line">Ollama is installed but not running.</p>
+      <button type="button" class="btn ghost" id="prepare-btn">Start it and download the small model</button>
+      <pre class="log hidden" id="prepare-log" aria-live="polite"></pre>
+    </div>
+
+    <nav class="frame-foot">
+      <button type="button" class="btn ghost" id="back-brain" hidden>Back</button>
+      <span class="spacer"></span>
+      <span class="foot-note" id="brain-note">Press Enter to keep the highlighted choice.</span>
+      <button type="button" class="btn primary" id="next-brain">Continue</button>
+    </nav>
+  </section>
+
+  <!-- 2. permissions -->
+  <section class="step" id="step-permissions" aria-labelledby="perm-title">
+    <h2 id="perm-title" class="ask">What may it do?</h2>
+    <p class="hint">You can change this at any time. Every action with a preview stays previewable.</p>
+
+    <div class="choices" role="radiogroup" aria-labelledby="perm-title" id="perm-choices">
+      <button type="button" class="choice" role="radio" aria-checked="false" data-profile="watch">
+        <span class="choice-head">Watch only</span>
+        <span class="choice-body">It can look and answer, but it changes nothing on your machine.</span>
+      </button>
+      <button type="button" class="choice" role="radio" aria-checked="true" data-profile="ask">
+        <span class="choice-head">Ask first <span class="tag">default</span></span>
+        <span class="choice-body">It asks before anything touches a file or runs a command.</span>
+      </button>
+      <button type="button" class="choice" role="radio" aria-checked="false" data-profile="act">
+        <span class="choice-head">Act freely</span>
+        <span class="choice-body">It does file work in its own folders on its own, and still asks before running commands.</span>
+      </button>
+    </div>
+
+    <nav class="frame-foot">
+      <button type="button" class="btn ghost" id="back-perm">Back</button>
+      <span class="spacer"></span>
+      <span class="foot-note">Press Enter to continue.</span>
+      <button type="button" class="btn primary" id="next-perm">Continue</button>
+    </nav>
+  </section>
+
+  <!-- 3. name -->
+  <section class="step" id="step-name" aria-labelledby="name-title">
+    <h2 id="name-title" class="ask">What should it be called?</h2>
+    <p class="hint">The default is fine. Change it whenever you like.</p>
+    <div class="field">
+      <label for="nameinput" class="sr">Its name</label>
+      <input id="nameinput" type="text" maxlength="40" value="Hermus" autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="frame-foot">
+      <button type="button" class="btn ghost" id="back-name">Back</button>
+      <span class="spacer"></span>
+      <span class="foot-note">Press Enter to continue.</span>
+      <button type="button" class="btn primary" id="next-name">Continue</button>
+    </nav>
+  </section>
+
+  <!-- 4. first words -->
+  <section class="step" id="step-first" aria-labelledby="first-title">
+    <h2 id="first-title" class="ask">Say something to it.</h2>
+    <p class="hint" id="first-model">Resolving the model…</p>
+
+    <div class="square">
+      <div class="square-log" id="square-log" aria-live="polite"></div>
+      <div class="square-line">
+        <span class="prefix" aria-hidden="true">›</span>
+        <input id="firstinput" type="text" autocomplete="off" spellcheck="false" value="What can you do?" aria-label="First message">
+        <button type="button" class="btn primary" id="send-first">Send</button>
+      </div>
+    </div>
+
+    <p class="hint hidden" id="first-fix"></p>
+
+    <nav class="frame-foot">
+      <button type="button" class="btn ghost" id="back-first">Back</button>
+      <span class="spacer"></span>
+      <span class="foot-note" id="first-note">This is a real call to the model you chose.</span>
+      <button type="button" class="btn primary" id="enter-companion" disabled>Open the companion</button>
+    </nav>
+  </section>
+</main>
+
+<script src="/static/welcome.js" defer></script>
+</body>
+</html>
