@@ -313,6 +313,24 @@
       status='WORKING'; detail='tool result received'; progress=String(data.ok===false?'tool reported an issue':'tool completed');
     } else if(type==='subagent'){
       status='WORKING'; detail='specialist agent active'; progress=String(data.role||data.name||'delegated worker');
+    } else if(type==='plan_ready'){
+      const planSteps=(data.steps||[]);
+      status='WORKING'; detail='plan ready'; progress=planSteps.length?`${planSteps.length} steps`:'plan';
+      if(planSteps.length) addEvent('Plan: '+planSteps.map((s,i)=>`${i+1}. ${s.goal}`).join(' · '));
+    } else if(type==='plan_step'){
+      status='WORKING';
+      detail=String(data.status==='done'?'step verified':'step needs attention');
+      progress=`Step ${data.step||'?'} / ${data.of||'?'} · ${data.status||''}`;
+    } else if(type==='routing_decision'){
+      progress=`model ${data.model||''} (${data.tier||''})`;
+    } else if(type==='receipt'){
+      if(data.verified){
+        addEvent('Verified: '+String(data.claim||'the change reads back'),'info');
+      } else {
+        status='ATTENTION';
+        detail='the turn could not verify its work';
+        addEvent('Not verified: '+String((data.problems||[]).join('; ')||data.claim||''),'error');
+      }
     } else if(type==='verification' || type==='mission_verification'){
       status='VERIFYING'; detail='checking evidence'; progress=String(data.message||data.status||'Verification in progress');
     } else if(type==='cancel_requested' || type==='run_cancelled'){
@@ -379,7 +397,7 @@
     const query=token ? `?token=${encodeURIComponent(token)}` : '';
     const source=new EventSource('/stream/run/'+encodeURIComponent(runId)+query);
     state.runStream=source;
-    const types=['run_started','job_started','step_started','llm_delta','llm_finished','tool_call','tool_result','subagent','verification','mission_verification','cancel_requested','run_cancelled','run_error','mission_error','run_finished','mission_finished','stream_end','agent_response','job_status'];
+    const types=['run_started','job_started','step_started','llm_delta','llm_finished','tool_call','tool_result','subagent','verification','mission_verification','plan_ready','plan_step','routing_decision','receipt','cancel_requested','run_cancelled','run_error','mission_error','run_finished','mission_finished','stream_end','agent_response','job_status'];
     types.forEach(type=>source.addEventListener(type,e=>handleRunEvent(type,e)));
     source.onopen=()=>{ addEvent('Mission stream connected'); };
     source.onerror=()=>{

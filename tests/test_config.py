@@ -15,7 +15,9 @@ def test_singleton_exposes_all_settings():
     # Field-count pin: update when you add/remove a setting on purpose.
     # 194 → 202: the harness-remodel merge landed 8 additional settings
     # (model fleet / voice ack / personal-space knobs) without refreshing this pin.
-    assert len(Config.model_fields) == 202
+    # 202 → 206: the thinking layer added thinking_enabled,
+    # thinking_routing_enabled, route_tier and thinking_repair_enabled.
+    assert len(Config.model_fields) == 206
     assert {
         "personal_space_enabled",
         "personal_space_state_path",

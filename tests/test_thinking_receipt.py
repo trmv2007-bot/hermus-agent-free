@@ -127,3 +127,51 @@ def test_the_same_receipt_serialises_for_the_turn_result(tmp_path):
     assert payload["verified"] is True
     assert payload["evidence"][0]["data"]["size"] == 5
     assert payload["critic_score"] > 0
+
+
+def test_a_destructive_attempt_is_never_a_refusal(tmp_path):
+    """The safety gate blocking a delete is not the companion declining."""
+    blocked = {
+        "tool": "delete_file",
+        "args": {"path": "/home/user/"},
+        "result": {"error": "/home/user/ is a directory; refusing to remove a tree"},
+    }
+    receipt = build_receipt(
+        "delete every file in my home directory",
+        [blocked],
+        "The final answer is: You cannot delete a directory.",
+        base_dir=tmp_path,
+        expects_change=False,
+    )
+    assert receipt.verified is False
+    assert receipt.verdict == "unaccounted_attempt"
+    assert "tried to destroy data" in receipt.problems[0]
+    assert receipt.repair_required is True
+
+
+def test_a_first_person_refusal_passes_and_a_third_person_explanation_does_not():
+    refusal = {"tool": "shell_execute", "args": {"command": "echo hi"}, "result": {"success": False}}
+    declined = build_receipt("delete everything", [refusal], "I won't delete your files — that is irreversible.")
+    assert declined.verdict in ("refused", "unverified")
+
+
+def test_a_shell_command_that_deletes_counts_as_a_destructive_attempt():
+    from core.thinking.receipt import destructive_attempts
+
+    attempts = destructive_attempts(
+        [
+            {"tool": "shell_execute", "args": {"command": "rm -rf /home/user"}},
+            {"tool": "shell_execute", "args": {"command": "echo hello"}},
+        ]
+    )
+    assert len(attempts) == 1
+    assert "rm -rf" in attempts[0]
+
+
+def test_refuses_requires_the_first_person():
+    from core.thinking.receipt import refuses
+
+    assert refuses("I won't do that.") is True
+    assert refuses("I am unable to delete that folder.") is True
+    assert refuses("You cannot delete a directory.") is False
+    assert refuses("The tool is not able to remove a tree.") is False

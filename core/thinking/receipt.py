@@ -60,10 +60,21 @@ _INTENT_CLAIM_RE = re.compile(
     re.I,
 )
 
-#: an explicit refusal is a legitimate end to an action request
+#: an explicit, first-person refusal is a legitimate end to an action request.
+#: Third-person statements ("you cannot delete a directory") explain what a tool
+#: did; they are not the companion declining, so they never match here.
 _REFUSAL_RE = re.compile(
-    r"\b(?:i (?:won't|will not|cannot|can't|am not able to|refuse)|not able to|refusing to|"
-    r"(?:this|that) (?:is|would be) (?:not safe|irreversible|destructive))\b",
+    r"\b(?:i (?:won't|will not|cannot|can't|am not able to|am unable to|refuse to|am declining|decline to)|"
+    r"i'd rather not|i would not)\b",
+    re.I,
+)
+
+#: tools whose *attempt* on a person's data must be accounted for
+DESTRUCTIVE_TOOLS = frozenset({"delete_file"})
+
+#: shell commands that destroy data
+_DESTRUCTIVE_CMD_RE = re.compile(
+    r"\b(?:rm\s+-[rf]{1,2}|del\s+/[fsq]|rmdir\s+/s|format\s+[a-z]:|remove-item\b.*-recurse|truncate)\b",
     re.I,
 )
 
@@ -193,8 +204,24 @@ def claims_change(answer: str) -> bool:
 
 
 def refuses(answer: str) -> bool:
-    """Does the answer decline, with a reason, instead of pretending?"""
+    """Does the answer decline in the first person, instead of pretending?"""
     return bool(_REFUSAL_RE.search(str(answer or "")))
+
+
+def destructive_attempts(tool_results: list[dict[str, Any]] | None) -> list[str]:
+    """Tool names that were pointed at destroying data, whatever the outcome."""
+    attempts: list[str] = []
+    for entry in tool_results or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("tool") or "")
+        if name in DESTRUCTIVE_TOOLS:
+            attempts.append(f"{name}({str((entry.get('args') or {}).get('path') or '')[:60]})")
+        elif name in ("shell_execute", "sandbox_run"):
+            command = str((entry.get("args") or {}).get("command") or "")
+            if _DESTRUCTIVE_CMD_RE.search(command):
+                attempts.append(f"{name}({command[:60]})")
+    return attempts
 
 
 @dataclass
@@ -255,7 +282,19 @@ def build_receipt(
     )
     claimed = claims_change(answer)
     declined = refuses(answer)
+    attempts = destructive_attempts(tool_results)
     wants_change = claims_change(task) if expects_change is None else bool(expects_change)
+
+    if attempts and not declined:
+        return Receipt(
+            verified=False,
+            verdict="unaccounted_attempt",
+            claim="a destructive action was attempted",
+            evidence=evidence,
+            problems=[f"tried to destroy data without saying why: {', '.join(attempts[:3])}"],
+            changed=changed,
+            repair_required=attempt < MAX_REPAIR_ATTEMPTS,
+        )
 
     if not changed and declined:
         return Receipt(

@@ -586,3 +586,54 @@ out to POSIX again.
 the contents and the directory the snippet ran in; a second test pins an
 explicit `cwd`. `tests/test_harness_runner.py` covers the new check types and
 the suite-portability guard.
+
+# Thinking · Routing, a visible plan, and a verification receipt (2026-11-23)
+
+**Why:** `core/reasoning/*`, `core/critic.py`, `core/counsel/` and the DeepThink
+planner all existed, with tests, and none of it reached a turn. The model router
+swapped models with no recorded reason, a plan was returned *after* the work but
+never shown before it, and `agent._verify_final` was a text-marker check that
+could not fail a turn. "Advanced thinking" was a claim, not a property.
+
+**What changed.** A new `core/thinking/` package, wired through
+`core.runtime.execute` — the one turn path — in three pieces:
+
+- **Measurable routing** (`core/thinking/routing.py`). A pure, zero-token
+  decision per turn: the local model or a configured free-tier key, with the
+  reason recorded on the result, in a `routing_decision` event and in
+  `data/thinking/routing.jsonl`. Paid and unknown providers are dropped before
+  the decision, so a stray env var cannot route a turn to a paid API. After the
+  turn the decision is scored: a hosted turn that finished in ≤ 2 steps is
+  **over-routed** (wasted capacity), a local turn with ≥ 2 failed tool calls is
+  **under-routed**. `GET /api/v1/thinking/routing` totals both. When the older
+  task-type router also wants the turn, it stands down — one recorded decision,
+  one owner.
+- **A visible plan** (`core/thinking/plan.py`). A request that changes something,
+  or has more than one clause, gets a plan *before the first model call*:
+  deterministic, from the request's own clauses, zero tokens. It is emitted as a
+  `plan_ready` event and advanced by `plan_step` events as tool results arrive; a
+  step is `done` only when a tool of its category succeeded, `skipped` (with
+  evidence saying nothing backed it) when nothing touched it.
+- **A receipt** (`core/thinking/receipt.py`). Every mutating tool result becomes
+  checkable evidence — a file read back and hashed, a command with its exit
+  status, a URL with what came back — and the verdict is `core/critic.py`'s
+  outcome verifier fed those facts. `unverified`, `unproven_claim` (the answer
+  claims work that left no trace), `unmet` (a change was asked for and none
+  happened) and `refused` are distinct, and a failed receipt earns exactly one
+  repair turn. An unverified answer ends with `Not verified: …`; it can no longer
+  read as success.
+
+**Benchmark.** `tests/eval/thinking_bench.py` runs 15 fixed tasks (file, shell,
+web, multi-step, refusal, plain answer, honesty) through the same turn path
+against a real model, each task in its own process with its own `HERMUS_HOME`,
+and only a deterministic check on the world can pass it:
+
+```
+python tests/eval/thinking_bench.py --model ollama/llama3.2:1b --work .bench
+```
+
+**Tests.** `tests/test_thinking_{routing,plan,receipt,turn,bench}.py` — 69 tests
+against a scripted agent, none of them calling a model.
+
+**Docs.** `docs/thinking.md` carries the decision table, the verdicts, the
+benchmark and what a 1B local model can and cannot do.

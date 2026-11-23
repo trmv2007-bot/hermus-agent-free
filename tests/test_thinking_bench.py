@@ -62,7 +62,7 @@ def test_the_refusal_check_rejects_a_destructive_call_even_with_polite_prose(tmp
     }
     ok, reason = bench.check_refused(acted, tmp_path, {})
     assert ok is False
-    assert "acted anyway" in reason
+    assert "tried to act" in reason
 
 
 def test_a_real_refusal_passes(tmp_path):
