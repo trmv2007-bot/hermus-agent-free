@@ -772,9 +772,19 @@ class ToolRegistry:
                 "hint": "Tool not registered. Check tool_registry DISCOVER_MODULES.",
             }
 
-        # Phase 4 (P3): registry-level fallback chains
+        # ---- Preview gate: an action that cannot be described is refused -----
+        # A mutating action the product cannot put in front of a person is never
+        # attempted blind. Read-only and unclassified tools have no plan and are
+        # unaffected; the permission gate above still applies to them.
+        plan_blocked = self._check_preview(name, args)
+        if plan_blocked is not None:
+            return plan_blocked
+
+        # Phase 4 (P3): registry-level fallback chains. Every mutating call runs
+        # with its inverse journaled first (core.undo), so an undo is a guarantee
+        # rather than a feature of whichever tool happened to implement it.
         try:
-            result = fn(**args)
+            result = self._journaled(name, args, fn)
             if not self._looks_like_error(result):
                 return result
             trail = self._walk_fallback(name, args, result)
@@ -786,6 +796,40 @@ class ToolRegistry:
             if trail:
                 return trail
             return {"error": f"{name} failed: {e}"}
+
+    def _check_preview(self, name: str, args: dict) -> dict | None:
+        """Refuse a mutating action that cannot be previewed; ``None`` otherwise."""
+        try:
+            from .dry_run import plan_tool
+
+            plan = plan_tool(name, args)
+        except Exception:  # noqa: BLE001 - previewing must never crash a tool call
+            return None
+        if plan is None or plan.previewable:
+            return None
+        return {
+            "error": "unpreviewable_action",
+            "reason": plan.refusal,
+            "plan": plan.to_dict(),
+            "hint": "Describe the action with a path/command the preview can read, or run it outside the agent.",
+        }
+
+    @staticmethod
+    def _journaled(name: str, args: dict, fn):
+        """Run ``fn`` through the undo journal when the tool is a known mutation.
+
+        A journal that cannot be opened or written is a stop condition: the tool
+        does not run, because the product never acts without an undo record.
+        """
+        try:
+            from .undo import UndoJournalUnavailableError, get_undo_journal, journaled_tool_call
+
+            journal = get_undo_journal()
+            return journaled_tool_call(journal, name, args, lambda: fn(**args))
+        except UndoJournalUnavailableError as exc:
+            return {"error": "undo_journal_unavailable", "reason": exc.reason, "tool": name}
+        except ImportError:  # noqa: BLE001 - a build without the journal keeps its old behavior
+            return fn(**args)
 
     def _check_permission(self, name: str, args: dict) -> dict | None:
         """Return a denial result dict to short-circuit execution, or None to allow."""
@@ -836,7 +880,7 @@ class ToolRegistry:
                 fn2 = self.executors.get(name)
                 if fn2:
                     try:
-                        res = fn2(**args)
+                        res = self._journaled(name, args, lambda fn2=fn2, args=args: fn2(**args))
                         if not self._looks_like_error(res):
                             trail.append(f"{name}: retry ok")
                             return self._with_trail(res, trail)
@@ -858,7 +902,7 @@ class ToolRegistry:
             if not isinstance(fargs, dict):
                 continue
             try:
-                res = fn2(**fargs)
+                res = self._journaled(tool, fargs, lambda fn2=fn2, fargs=fargs: fn2(**fargs))
                 if not self._looks_like_error(res):
                     trail.append(f"{tool}: ok")
                     # Feed the lessons loop: this tool needed a fallback

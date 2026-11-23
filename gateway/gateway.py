@@ -331,6 +331,14 @@ async def _memory_maintenance_loop():
 async def lifespan(app: FastAPI):
     """Modern lifespan handler replacing deprecated on_event."""
     setup_logging()
+    # This process is the product: it may drive the real pointer and keyboard.
+    # Every other process (tests, CI, imports) stays on the fake controller.
+    try:
+        from core.computer.input_guard import declare_interactive
+
+        declare_interactive("hermus-gateway")
+    except Exception as e:  # noqa: BLE001 - the guard is default-deny on its own
+        logger.warning(f"[Gateway] real input guard unavailable: {e}")
     set_agent_factory(_agent_factory)
     _lifecycle.state.mark_started()
     # A shipped default that nothing installed used to decide the first answer.
@@ -682,6 +690,7 @@ from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
 from gateway.routes_subsystems import router as _subsystems_router  # noqa: E402
 from gateway.routes_teach import router as _teach_router  # noqa: E402
+from gateway.routes_undo import router as _undo_router  # noqa: E402
 from gateway.routes_voice import router as _voice_router  # noqa: E402
 from gateway.routes_workshop import router as _workshop_router  # noqa: E402
 
@@ -726,6 +735,7 @@ app.include_router(_personal_space_router, dependencies=_gate_control)
 app.include_router(_onboarding_router)
 app.include_router(_presence_overlay_router, dependencies=_gate_control)
 app.include_router(_awareness_router, dependencies=_gate_control)
+app.include_router(_undo_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

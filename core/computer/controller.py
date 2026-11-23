@@ -29,6 +29,24 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _global_brake() -> dict[str, Any]:
+    """The workspace-wide Red Line 1 brake, as the controller consumes it.
+
+    ``/emergency/stop`` (and ``hermus emergency stop``) set this brake; before
+    this check the computer path only honoured its own halt latch, so the big red
+    button stopped the rest of the product but not the mouse.
+    """
+    try:
+        from ..emergency_stop import get_emergency_stop
+
+        state = get_emergency_stop().state()
+        if state.active:
+            return {"halted": True, "error": f"emergency stop active: {state.reason or 'global brake'}"}
+    except Exception:  # noqa: BLE001 - a brake we cannot read must never read as clear
+        return {"halted": True, "error": "emergency stop state unavailable; treating control as halted"}
+    return {"halted": False}
+
+
 class ComputerActionController:
     """Gated, injectable desktop action engine."""
 
@@ -44,6 +62,7 @@ class ComputerActionController:
         target_detector: TargetDetector | None = None,
         scope: str = "default",
         approval: Any | None = None,
+        journal: Any | None = None,
     ):
         self.mouse = mouse or default_mouse()
         self.keyboard = keyboard or default_keyboard()
@@ -62,11 +81,16 @@ class ComputerActionController:
 
             approval = remote_approval
         self.approval = approval
+        # Undo journal: every desktop action is recorded as not reversible
+        # *before* the pointer moves (core.undo).
+        self.journal = journal
         self.history: list[dict[str, Any]] = []
 
     # -- safety ---------------------------------------------------------
     def _gate(self, action: str, args: dict[str, Any]) -> dict[str, Any]:
         halt = self.emergency.check()
+        if not halt.get("halted"):
+            halt = _global_brake()
         if halt.get("halted"):
             return {"allowed": False, "decision": "deny", "risk": "n/a", "reason": halt["error"]}
         policy = self.policy.check(action, args, scope=self.scope)
@@ -146,7 +170,13 @@ class ComputerActionController:
     ) -> dict[str, Any]:
         gate = self._gate(action, args)
         if not gate.get("allowed"):
-            return self._record(action, description, args, gate, error=gate.get("reason"))
+            entry = self._journal_abort(action, args, str(gate.get("reason") or "denied"))
+            record = self._record(action, description, args, gate, error=gate.get("reason"))
+            if entry is not None:
+                record["undo_id"] = entry.id
+                record["journal"] = "aborted"
+            return record
+        entry = self._journal_begin(action, args)
         _presence_announce(action, args)
         try:
             result = fn()
@@ -154,10 +184,56 @@ class ComputerActionController:
                 result.setdefault("ok", True)
             result["backend"] = self._backend_for(action).name
             _presence_result(action, result)
-            return self._record(action, description, args, gate, backend_result=result)
+            record = self._record(action, description, args, gate, backend_result=result)
         except Exception as exc:  # noqa: BLE001
+            self._journal_finish(entry, ok=False, note=str(exc))
             _presence_result(action, {"ok": False, "error": str(exc)})
             return self._record(action, description, args, gate, error=str(exc))
+        self._journal_finish(entry, ok=True)
+        if entry is not None:
+            record["undo_id"] = entry.id
+        return record
+
+    # -- undo journal ---------------------------------------------------
+    def _journal(self) -> Any | None:
+        if self.journal is not None:
+            return self.journal
+        try:
+            from ..undo import get_undo_journal
+
+            self.journal = get_undo_journal()
+        except Exception:  # noqa: BLE001 - journaling never blocks control
+            return None
+        return self.journal
+
+    def _journal_begin(self, action: str, args: dict[str, Any]) -> Any | None:
+        journal = self._journal()
+        if journal is None:
+            return None
+        try:
+            from ..undo import begin_computer_action
+
+            return begin_computer_action(journal, action, args)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _journal_finish(self, entry: Any | None, *, ok: bool, note: str = "") -> None:
+        if entry is None:
+            return
+        try:
+            self._journal().finalize(entry, ok=ok, note=note)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _journal_abort(self, action: str, args: dict[str, Any], reason: str) -> Any | None:
+        entry = self._journal_begin(action, args)
+        if entry is None:
+            return None
+        try:
+            self._journal().abort(entry, reason)
+        except Exception:  # noqa: BLE001
+            pass
+        return entry
 
     # -- mouse ----------------------------------------------------------
     def move_mouse(self, x: float, y: float) -> dict[str, Any]:
@@ -282,11 +358,18 @@ class ComputerActionController:
         real = all(b["real"] for b in backends.values())
         fallback_reasons = [b["fallback_reason"] for b in backends.values() if b["fallback_reason"]]
         reasons = list(dict.fromkeys(fallback_reasons))
+        try:
+            from .input_guard import guard_state
+
+            guard = guard_state()
+        except Exception:  # noqa: BLE001
+            guard = {}
         return {
             "available": real,
             "dry_run_only": not real,
             "reason": "" if real else (reasons[0] if reasons else "real computer control unavailable"),
             "backends": backends,
+            "input_guard": guard,
         }
 
 

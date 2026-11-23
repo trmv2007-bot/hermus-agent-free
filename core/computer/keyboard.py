@@ -10,6 +10,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from .input_guard import RealInputDisabledError
+from .input_guard import disabled_reason as guard_disabled_reason
+from .input_guard import real_input_enabled as guard_real_input_enabled
+
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
@@ -34,13 +38,22 @@ class KeyboardBackend:
 
 
 class PyAutoGUIKeyboard(KeyboardBackend):
-    """Real keyboard control through the optional ``pyautogui`` dependency."""
+    """Real keyboard control through the optional ``pyautogui`` dependency.
+
+    Only constructible inside a process that declared itself the interactive
+    product (:mod:`core.computer.input_guard`). Everywhere else the guard keeps
+    keystrokes out of whatever window happens to have focus.
+    """
 
     name = "pyautogui"
 
     def __init__(self) -> None:
         self._gui = None
         self._error: str | None = None
+        self._disabled = not guard_real_input_enabled()
+        if self._disabled:
+            self._error = guard_disabled_reason()
+            return
         try:
             import pyautogui  # type: ignore
 
@@ -53,6 +66,8 @@ class PyAutoGUIKeyboard(KeyboardBackend):
         return {"available": self._gui is not None, "error": self._error}
 
     def _require(self) -> None:
+        if self._disabled:
+            raise RealInputDisabledError(self._error or guard_disabled_reason())
         if self._gui is None:
             raise RuntimeError(self._error or "pyautogui unavailable")
 

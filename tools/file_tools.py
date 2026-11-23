@@ -69,6 +69,49 @@ def file_search(query: str, directory: str = ".") -> dict:
         return {"error": str(e)}
 
 
+def append_file(path: str, content: str) -> dict:
+    """Append to a file, creating it when absent. Journaled by the tool registry."""
+    try:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+        file_cache.cache.pop(path, None)
+        return {"success": True, "path": path, "appended": len(content), "size": p.stat().st_size}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def delete_file(path: str) -> dict:
+    """Delete one file. Journaled by the tool registry before the unlink."""
+    try:
+        p = Path(path)
+        if not p.exists():
+            return {"error": f"File not found: {path}"}
+        if p.is_dir():
+            return {"error": f"{path} is a directory; refusing to remove a tree"}
+        p.unlink()
+        file_cache.cache.pop(path, None)
+        return {"success": True, "path": path}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def move_file(path: str, destination: str) -> dict:
+    """Move one file. Journaled by the tool registry before the rename."""
+    try:
+        p = Path(path)
+        dest = Path(destination)
+        if not p.exists():
+            return {"error": f"File not found: {path}"}
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        p.replace(dest)
+        file_cache.cache.pop(path, None)
+        return {"success": True, "path": path, "destination": str(dest)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 TOOLS = [
     {
         "type": "function",
@@ -99,6 +142,38 @@ TOOLS = [
                 "type": "object",
                 "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}},
                 "required": ["path", "old_text", "new_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_file",
+            "description": "Append content to a file, creating it when absent",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "Delete one file (journaled; undoable)",
+            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_file",
+            "description": "Move one file to a new path (journaled; undoable)",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "destination": {"type": "string"}},
+                "required": ["path", "destination"],
             },
         },
     },

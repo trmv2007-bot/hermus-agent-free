@@ -159,6 +159,7 @@ class Workspace:
             "root": self.base_dir,
             "agents": self.base_dir / "agents",
             "checkpoints": self.base_dir / "checkpoints",
+            "undo": self.base_dir / "undo",
             "artifacts": self.base_dir / "artifacts",
             "missions": self.base_dir / "missions",
             "projects": self.base_dir / "projects",

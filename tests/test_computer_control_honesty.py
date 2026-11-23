@@ -25,7 +25,10 @@ def _has_pyautogui():
 def _has_display():
     import os
 
-    return bool(os.environ.get("DISPLAY"))
+    value = str(os.environ.get("DISPLAY") or "").strip()
+    # A placeholder is not a display: CI images and dev boxes sometimes set
+    # DISPLAY to a word like "needs-to-be-defined", which proves nothing.
+    return bool(value) and ":" in value
 
 
 def test_computer_tools_registered():
@@ -66,13 +69,22 @@ def test_computer_action_reports_unavailable_on_fallback(tmp_path):
 
 
 def test_computer_action_explicit_dry_run_works_offline():
-    """Explicit allow_dry_run=True is the offline audit/verify mode (ok=True, dry_run=True)."""
+    """Explicit allow_dry_run=True is the offline audit/verify mode (ok=True, dry_run=True).
+
+    RIS-12: on a machine where pyautogui *is* installed this used to inject real
+    keystrokes into whichever window had focus. The real-input guard means a test
+    process can never reach the host, and the reported backend proves it stayed
+    offline instead of asserting it.
+    """
+    from core.computer.input_guard import real_input_enabled
     from core.tool_registry import tool_registry
 
     tool_registry.load(force=True)
     r = tool_registry.execute("computer_action", {"action": "type", "args": {"text": "hello world"}, "allow_dry_run": True})
     assert r.get("ok") is True
     assert r.get("dry_run") is True
+    assert r.get("backend") == "dry_run"
+    assert real_input_enabled() is False
 
 
 def test_computer_action_missing_args_is_an_error():
@@ -101,10 +113,24 @@ def test_controller_backend_capability_lists_backends():
 # ---------------------------------------------------------------------------
 # Host E2E (real control; skipped without pyautogui + display)
 # ---------------------------------------------------------------------------
-@pytest.mark.skipif(not (_has_pyautogui() and _has_display()), reason="no pyautogui + display for real computer control")
+def _real_input_opted_in():
+    import os
+
+    return str(os.environ.get("HERMUS_REAL_INPUT") or "").strip().lower() in {"1", "on", "true", "yes"}
+
+
+@pytest.mark.skipif(
+    not (_has_pyautogui() and _has_display() and _real_input_opted_in()),
+    reason="real control needs pyautogui, a display, and HERMUS_REAL_INPUT=on (the guard is default-deny)",
+)
 def test_host_e2e_computer_real_control():
     """Real host control: capability available, click + type work on the live desktop.
-    Requires pyautogui and a real X/Wayland display. Never run on a mock."""
+
+    Deliberately opt-in: the real-input guard refuses to hand a test process the
+    pointer unless HERMUS_REAL_INPUT=on is set out loud. Never run on a mock."""
+    from core.computer.input_guard import declare_interactive
+
+    assert declare_interactive("host-e2e", allow_in_tests=True) is True
     from core.computer import detect_computer_capability
 
     cap = detect_computer_capability()
