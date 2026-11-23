@@ -7,12 +7,21 @@
   <title>HERMUS</title>
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/nexus.css">
-  <link rel="stylesheet" href="/static/welcome.css">
   <link rel="stylesheet" href="/static/companion.css">
 </head>
-<body class="companion">
+<body class="room">
 
-<main class="stage">
+<a class="skip" id="skipToInput" href="#say">Skip to the input</a>
+
+<header class="room-top">
+  <span class="room-name" id="roomName">Hermus</span>
+  <button class="systems" id="systemsBtn" type="button"
+          aria-haspopup="dialog" aria-expanded="false" aria-controls="systems">
+    Systems
+  </button>
+</header>
+
+<main class="stage" id="stage">
   <div class="being" id="being" data-mood="idle" aria-hidden="true">
     <svg class="fairy" viewBox="0 0 120 120" aria-hidden="true">
       <defs>
@@ -51,21 +60,46 @@
     </svg>
   </div>
 
-  <p class="greeting" id="greeting">Hello.</p>
-
-  <div class="words" id="words" aria-live="polite"></div>
-
-  <div class="line">
-    <span class="prefix" aria-hidden="true">›</span>
-    <input id="say" type="text" autocomplete="off" spellcheck="false"
-           placeholder="Say something" aria-label="Say something to your companion" autofocus>
-    <button id="go" class="btn primary" type="button">Send</button>
-  </div>
-
-  <p class="model-line" id="modelLine"></p>
+  <!-- The conversation is the page. One exchange at a time, plain text. -->
+  <div class="thread" id="thread" role="log" aria-live="polite" aria-label="Conversation with your companion"></div>
 </main>
 
-<a class="systems" href="/control" title="Panels, approvals, logs — everything the companion can do">Systems</a>
+<footer class="dock">
+  <form class="line" id="line" autocomplete="off" novalidate>
+    <span class="prefix" aria-hidden="true">›</span>
+    <label class="sr-only" for="say">Say something to your companion</label>
+    <input id="say" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Say something" aria-label="Say something to your companion" autofocus>
+    <button id="go" class="btn primary" type="submit" data-mode="send">Send</button>
+  </form>
+  <p class="under" id="under" role="status"></p>
+</footer>
+
+<!-- ================= systems: the one quiet control ================= -->
+<dialog class="sheet" id="systems" aria-labelledby="systemsTitle">
+  <div class="sheet-head">
+    <h2 id="systemsTitle">Systems</h2>
+    <button class="sheet-close" id="systemsClose" type="button" aria-label="Close Systems">Close</button>
+  </div>
+  <p class="sheet-sub">Every panel the room keeps out of your way. Nothing here is required.</p>
+  <nav class="sheet-list" id="systemsList" aria-label="Systems sections"></nav>
+  <div class="sheet-foot">
+    <a class="sheet-all" href="/control">Open the whole control room</a>
+    <span class="sheet-hint"><kbd>Esc</kbd> closes</span>
+  </div>
+</dialog>
+
+<!-- ================= the room's own palette (Ctrl P) ================= -->
+<div id="palette" class="palette" aria-hidden="true">
+  <section class="palette-box" role="dialog" aria-modal="true" aria-labelledby="paletteTitle">
+    <div class="palette-head">
+      <span id="paletteTitle">Go to</span>
+      <button id="paletteClose" class="btn ghost" type="button" aria-label="Close palette">Close</button>
+    </div>
+    <input id="paletteInput" autocomplete="off" placeholder="Search a HERMUS surface…" aria-label="Search HERMUS surfaces">
+    <div id="paletteList" class="palette-list"></div>
+  </section>
+</div>
 
 <script src="/static/companion.js" defer></script>
 </body>

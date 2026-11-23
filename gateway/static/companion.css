@@ -1,39 +1,104 @@
-/* HERMUS — the companion screen. One character, one line, nothing shouting.
-   Tokens come from nexus.css; this file owns only the composition. */
+/* HERMUS — the room. One character, one line, one quiet door.
+   Tokens come from nexus.css; this file owns only the composition.
+   Nothing here is a panel: no borders around data, no rows of readouts. */
 
-body.companion {
-  display: grid;
-  place-items: center;
+body.room {
   min-height: 100vh;
-  padding: 40px 20px 72px;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow-x: hidden;
 }
 
+/* a keyboard door past the chrome ------------------------------------- */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip {
+  position: fixed;
+  top: 8px; left: 50%;
+  transform: translate(-50%, -200%);
+  z-index: 90;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  transition: transform 180ms var(--ease);
+}
+.skip:focus { transform: translate(-50%, 0); text-decoration: none; }
+
+/* top: the name, and the only control that leaves ---------------------- */
+.room-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px clamp(16px, 4vw, 34px) 14px;
+  border-bottom: 1px solid var(--line);
+}
+.room-name {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.systems {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  padding: 5px 1px;
+  transition: color 200ms var(--ease), border-color 200ms var(--ease);
+}
+.systems:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+.systems[aria-expanded="true"] { color: var(--accent-ink); border-color: var(--accent-line); }
+
+/* the stage: character above, words under it --------------------------- */
 .stage {
-  width: min(680px, 100%);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  animation: appear 900ms var(--ease) both;
+  /* An empty room sits the character in the middle of the space it has; the
+     moment there is something to read, the column starts at the top. */
+  justify-content: center;
+  gap: clamp(20px, 4vh, 40px);
+  padding: clamp(26px, 7vh, 74px) clamp(16px, 5vw, 40px) clamp(18px, 3vh, 30px);
 }
+body[data-said="true"] .stage { justify-content: flex-start; }
 
-@keyframes appear {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* the character ------------------------------------------------------- */
 .being {
-  width: 176px;
-  height: 176px;
+  flex: 0 0 auto;
+  width: 172px;
+  height: 172px;
   position: relative;
   animation: float 7s ease-in-out infinite;
+  transition: width 460ms var(--ease), height 460ms var(--ease), opacity 460ms var(--ease);
 }
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
 }
+
+/* Once there are words, the character steps back so the words get the room. */
+body[data-busy="false"][data-said="true"] .being,
+body[data-busy="true"] .being { width: 104px; height: 104px; }
 
 .being .fairy { width: 100%; height: 100%; display: block; overflow: visible; }
 
@@ -57,44 +122,128 @@ body.companion {
   50% { opacity: 0.95; }
 }
 
-.being[data-mood="busy"] .orb-ring { animation-duration: 6s; }
+.being[data-mood="busy"] .orb-ring { animation-duration: 5s; }
 .being[data-mood="busy"] .orb-core { filter: drop-shadow(0 0 22px rgba(95, 216, 255, 0.8)); }
 .being[data-mood="error"] .orb-core { filter: drop-shadow(0 0 16px rgba(255, 101, 132, 0.55)); }
 .being[data-mood="error"] .orb-ring { stroke: rgba(255, 101, 132, 0.5); }
 
 /* words --------------------------------------------------------------- */
-.greeting {
-  margin: 0;
-  font-size: 15px;
-  color: var(--muted);
-  letter-spacing: -0.005em;
-}
-.greeting:empty { display: none; }
-
-.words {
-  width: 100%;
+.thread {
+  width: min(660px, 100%);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 40vh;
-  overflow-y: auto;
-  padding: 2px 2px 6px;
-  scrollbar-width: thin;
+  gap: 0;
 }
-.words:empty { display: none; }
+.thread:empty { display: none; }
 
-.words .said,
-.words .reply { margin: 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
-.words .said { color: var(--acc-tint, var(--dim)); font-family: var(--mono); font-size: 12px; }
-.words .reply { color: var(--ink); }
+/* the first thing it ever says, before there is a conversation */
+.hello {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--muted);
+  animation: appear 700ms var(--ease) both;
+}
+@keyframes appear {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
 
-/* one line ------------------------------------------------------------ */
+/* one exchange: what you said, hairline, what it answered */
+.exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+  animation: rise 420ms var(--ease) both;
+}
+.exchange:first-child { border-top: 0; padding-top: 0; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.said {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  line-height: 1.6;
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reply {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.78;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1.78em;
+}
+/* a blinking caret while tokens arrive, so an empty reply is never a blank */
+.reply[data-streaming="true"]::after {
+  content: "";
+  display: inline-block;
+  width: 0.46em;
+  height: 1.02em;
+  margin-left: 2px;
+  vertical-align: -0.14em;
+  background: var(--accent);
+  opacity: 0.7;
+  animation: caret 1.1s steps(2, start) infinite;
+}
+@keyframes caret { 50% { opacity: 0.15; } }
+
+.reply[data-tone="error"] { color: var(--bad); }
+.reply[data-tone="quiet"] { color: var(--muted); }
+
+/* one inline approval, never a modal in front of the words */
+.card-inline {
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card-inline h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--warn);
+  letter-spacing: 0;
+}
+.card-inline p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.card-inline .targets {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.card-inline .act { display: flex; gap: 8px; flex-wrap: wrap; }
+.card-inline[data-resolved="true"] { border-color: var(--line); background: var(--glass); }
+.card-inline[data-resolved="true"] h3 { color: var(--muted); }
+
+/* the line ------------------------------------------------------------ */
+.dock {
+  padding: 0 clamp(16px, 5vw, 40px) clamp(16px, 3vh, 26px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
 .line {
-  width: 100%;
+  width: min(660px, 100%);
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px 10px 16px;
+  padding: 8px 8px 8px 16px;
   background: var(--glass);
   border: 1px solid var(--line-strong);
   border-radius: 999px;
@@ -117,38 +266,124 @@ body.companion {
 }
 .line input:focus { outline: none; }
 .line input::placeholder { color: var(--dim); }
-.line .btn { padding: 8px 16px; }
+.line .btn { padding: 0 16px; }
+.line .btn[data-mode="stop"] {
+  background: var(--surface-3);
+  border-color: var(--bad-line);
+  color: var(--bad);
+  box-shadow: none;
+}
+.line .btn[data-mode="stop"]:hover { background: var(--bad-soft); }
 
-.model-line {
+/* the one line under the input: the model, or a failure worth naming */
+.under {
+  margin: 0;
+  min-height: 15px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.under[data-tone="bad"] { color: var(--bad); }
+
+/* ================= systems sheet ================= */
+.sheet {
+  width: min(520px, calc(100vw - 28px));
+  max-height: min(84vh, 720px);
+  margin: auto;
+  padding: 22px 22px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+}
+.sheet::backdrop { background: rgba(2, 5, 11, 0.68); backdrop-filter: blur(3px); }
+.sheet[open] { animation: appear 220ms var(--ease) both; }
+
+.sheet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sheet-head h2 {
   margin: 0;
   font-family: var(--mono);
   font-size: 10.5px;
-  letter-spacing: 0.06em;
-  color: var(--dim);
-  min-height: 14px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
 }
-
-/* the one quiet control ---------------------------------------------- */
-.systems {
-  position: fixed;
-  right: 22px;
-  bottom: 20px;
+.sheet-close {
+  background: none;
+  border: 0;
+  padding: 4px 0;
   font-family: var(--mono);
   font-size: 10.5px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--dim);
-  padding: 6px 2px;
-  border-bottom: 1px solid transparent;
-  transition: color 200ms var(--ease), border-color 200ms var(--ease);
 }
-.systems:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+.sheet-close:hover { color: var(--accent-ink); }
+.sheet-sub { margin: 10px 0 16px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
 
+.sheet-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+.sheet-list a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  transition: color 160ms var(--ease), background 160ms var(--ease);
+}
+.sheet-list a:hover, .sheet-list a:focus-visible { color: var(--accent-ink); background: var(--accent-soft); text-decoration: none; }
+.sheet-list b { font-size: 13px; font-weight: 600; letter-spacing: 0; }
+.sheet-list span { font-size: 11.5px; color: var(--dim); text-align: right; }
+
+.sheet-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+.sheet-all { font-size: 12.5px; color: var(--accent); }
+.sheet-hint { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
+
+/* ================= phone ================= */
 @media (max-width: 560px) {
-  .being { width: 136px; height: 136px; }
-  .systems { right: 12px; bottom: 10px; }
+  .being { width: 132px; height: 132px; }
+  body[data-busy="false"][data-said="true"] .being,
+  body[data-busy="true"] .being { width: 84px; height: 84px; }
+  .stage { padding-top: 22px; gap: 18px; }
+  .thread { width: 100%; }
+  .reply { font-size: 14px; }
+  .sheet { padding: 18px 16px 14px; }
+  .sheet-list a { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .sheet-list span { text-align: left; }
 }
 
+@media (max-width: 420px) {
+  .room-top { padding: 14px 14px 10px; }
+  .dock { padding: 0 12px 12px; }
+  .stage { padding-left: 12px; padding-right: 12px; }
+  .line { padding: 6px 6px 6px 13px; gap: 8px; }
+  .line input { font-size: 16px; } /* iOS will not zoom an 16px field */
+  .line .btn { padding: 0 13px; }
+}
+
+/* motion is optional ------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .stage, .being, .being .orb-ring, .being .wing, .being .spark { animation: none; }
+  .being, .being .orb-ring, .being .wing, .being .spark,
+  .hello, .exchange, .reply[data-streaming="true"]::after, .sheet[open] {
+    animation: none !important;
+  }
+  .being, .skip, .line, .systems { transition: none !important; }
 }

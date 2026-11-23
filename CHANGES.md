@@ -419,3 +419,68 @@ of ~75 page requests never complete, and requests sit unsent for 12–26 s while
 the server answers in 8 ms. The run stream is the request that loses, so a typed
 question gets no answer in the conversation even though the job succeeds. Ranked
 first in `docs/PRODUCT_V2.md` (G1), with the numbers and the files.
+
+## 13 · The room — one screen for a person, diagnostics behind one control (G5)
+
+The first screen a new person saw after onboarding was the same eleven-tab
+operator dashboard as the diagnostics surface: telemetry, KPI rows, a model fleet
+table and a dock, all of it above the conversation. The spec's target is a room:
+the character, one input line, the last exchange, and one quiet control.
+
+**The first screen now** (`/companion`, where `/` sends a finished install) is
+the character, one input line under it, whatever was last said, and the word
+**Systems** in the corner — nothing else. Generous space, hairline rules, the
+existing ice-cyan token set from `nexus.css`, no emoji and no gradient text.
+The character shrinks the moment there is something to read, and the whole
+column centres itself while the room is empty. `prefers-reduced-motion` turns
+every animation off, and the input sits above the fold at 420 px with no
+horizontal overflow at either width.
+
+**Decision — `/control` stays the deep surface; Systems is a deliberate door.**
+Rebuilding eleven working panels into a drawer would either duplicate 5,900 lines
+of working client code or quietly drop a surface, and the rule is that nothing
+disappears. So the room keeps one hairline control that opens a Systems sheet
+listing every destination the product had — the eleven tab panels plus the undo
+journal — each a real link to `/control?tab=…`, with "Open the whole control
+room" underneath. `control-room.js` now honours `?tab=` and `#anchor` on boot, and
+the control room gained a **Room** link so the deep surface is not a trap. The
+room's own `Ctrl P` palette lists the same twelve destinations from the same
+list, so a keyboard user is one action from any panel.
+
+**The undo journal now has a face.** `core/undo.py` and `/api/v1/undo` shipped
+with PR #80 but no UI ever read them, so "everything is reversible" was a claim
+without a control. The journal is a card in **Safety**: the last 25 actions with
+what each touched, its state, an **Undo** button per row and **Undo last change**.
+
+**The conversation is the page.**
+- Tokens render in place inside the answer, with a caret while a turn is open.
+- The Send button becomes **Stop** for exactly as long as a turn runs and cancels
+  the job (`POST /jobs/{id}/cancel`) as well as dropping the socket.
+- A stream that ends without an answer — a dead socket, a cancelled turn, a step
+  that died mid-sentence — reads `GET /jobs/{id}/result` and shows the stored
+  answer instead of an empty thread (G7's lesson; the job id comes from the
+  `X-Hermus-Job` response header).
+- An approval request arrives as one inline card inside the exchange — tool,
+  purpose, the paths it wants — with Approve/Deny that post to
+  `/permissions/pending/resolve`. It never opens a modal and never takes focus
+  while the person is typing.
+- The session id persists in `localStorage`, so a reload restores the last
+  exchanges from `/conversation/{id}` rather than a blank room.
+- A missing model says so once, in the line under the input, and refuses to send
+  rather than dressing a stub echo as an answer.
+
+**Keyboard.** `Ctrl P` opens the palette (arrows move, Enter opens, Tab is held
+inside it), `Esc` closes the palette or the sheet, focus returns where it came
+from, and the tab order is skip link → Systems → input → Send, which is the
+order on screen. Every control shows a focus ring; the input's ring is its line.
+
+Tests: `tests/browser/test_room.py` — sixteen Playwright tests at 1440×900 and
+420×900, against a real gateway and a **local** OpenAI-compatible model
+(`tests/browser/_room_model.py`, on Ollama's port, no install, no key, nothing
+billed). They assert exactly one input and zero telemetry selectors on the first
+paint, no horizontal overflow and the input above the fold at both widths, an
+answer to a typed message, Stop reachable mid-turn, the stored-result fallback
+when the stream is trimmed to nothing, an inline approval card that never opens
+a dialog, the enumeration of all twelve destinations from Systems and from the
+palette, a deep link selecting the panel it names, `Ctrl P`/`Esc`, the tab order,
+and a focus ring on every control.
