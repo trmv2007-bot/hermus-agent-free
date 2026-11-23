@@ -194,9 +194,12 @@ def test_state_endpoint_reports_the_resolved_model_and_its_source():
     finally:
         brain.local_status = original
     assert payload["complete"] is False
-    assert payload["resolved"]["model"] == "ollama/llama3.2:1b"
+    # Two models pulled, so the stronger one answers: the smallest no longer wins.
+    assert payload["resolved"]["model"] == "ollama/mistral:7b"
     assert "Ollama on your machine" in payload["resolved"]["source"]
-    assert payload["pickup"] == "answering with llama3.2:1b on your machine"
+    assert "ahead of llama3.2:1b" in payload["resolved"]["source"]
+    assert payload["resolved"]["reason"]
+    assert payload["pickup"] == "answering with mistral:7b on your machine"
 
 
 def test_free_tier_is_second_and_named_as_a_free_tier():

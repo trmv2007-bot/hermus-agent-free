@@ -1063,7 +1063,7 @@ def first_run(*, interactive: bool | None = None) -> dict[str, Any]:
                 return {"ok": True, "model": resolved["model"], "source": resolved["source"]}
 
     print("")
-    print("Use a free-tier key instead? Groq, Mistral and OpenRouter all have no-card free plans.")
+    print("Use a free-tier key instead? Groq, Mistral, OpenRouter and Gemini all have no-card free plans.")
     if _ask("Paste a key now?", default=True, interactive=interactive):
         for provider, env_key, model, url in brain_mod.FREE_TIER:
             print(f"  {provider}: {url}")
@@ -1074,6 +1074,9 @@ def first_run(*, interactive: bool | None = None) -> dict[str, Any]:
         if key:
             provider = "groq"
             env_key = next(k for p, k, _, _ in brain_mod.FREE_TIER if p == provider)
+            # The model comes from the same row, not from whatever the loop last
+            # visited: the previous version recorded a Gemini model under Groq.
+            model = next(m for p, _, m, _ in brain_mod.FREE_TIER if p == provider)
             if _store_free_key(provider, env_key, key):
                 resolved = brain_mod.free_brain(provider, model, env_key)
                 onboarding.save(onboarding.record_brain(state, resolved))

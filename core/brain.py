@@ -5,12 +5,20 @@ nothing installed, so the first answer a person got was the mock echo. This
 module resolves a brain that exists on the machine in front of it and always
 reports the source of the choice, in words a non-developer can read.
 
-Resolution order is the crew's product bar, mechanically:
+Resolution is a comparison, not a queue. Every reachable free candidate — each
+pulled local model, each free-tier key's best model — is ordered by
+:mod:`core.model_catalog`, and the strongest one wins:
 
-1. a model the person named (``HERMUS_MODEL`` or an onboarding choice),
-2. a local runtime that is already serving (Ollama, LM Studio, NoLlama),
-3. a free-tier key the person pasted (Groq, Mistral, OpenRouter),
-4. the offline stub — named as the stub, never dressed up as an answer.
+1. a model the person named (``HERMUS_MODEL``) is honoured as named,
+2. otherwise the strongest candidate, with a local model winning a tie because
+   it costs nothing and leaves the machine,
+3. the offline stub — named as the stub, never dressed up as an answer.
+
+"Strongest" never means "cheapest": a 4B local model does not beat a 24B free
+tier just for being local, and a machine holding an 8B is not sent to a 3B
+hosted endpoint either. The comparison that decided it is returned with the
+choice and stored, so onboarding, the room and the turn's routing record can all
+say *why* this model, not only which.
 
 Everything here is detection and wording. It never installs, never pulls, and
 never spends a token; the callers decide what to offer.
@@ -27,33 +35,30 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from . import model_catalog as catalog
+from . import model_health
+
 OLLAMA_BASE = "http://localhost:11434"
 LMSTUDIO_BASE = "http://localhost:1234/v1"
 NOLLAMA_BASE = "http://localhost:8010/v1"
 
 # The smallest model that gives a usable first answer on a laptop CPU. 1B keeps
 # the download ~0.6 GB and the first token under a second once warm, which is
-# what makes the first-run promise ("answer in two seconds") survivable.
+# what makes the first-run promise ("answer in two seconds") survivable. This is
+# what the install *offers to download*, not what answers: that is decided by the
+# catalog, and a machine that already holds an 8B answers with the 8B.
 SMALLEST_LOCAL_MODEL = "llama3.2:1b"
 
-# Preferred order when several models are already pulled: cheapest usable first.
-LOCAL_PREFERENCE = (
-    "llama3.2:1b",
-    "llama3.2:3b",
-    "qwen2.5:1.5b",
-    "qwen2.5:3b",
-    "phi3:mini",
-    "gemma2:2b",
-    "llama3.1:8b",
+# Free tiers: every one is a no-card free plan whose key the person pastes. The
+# model is read from the catalog, never written here, so there is one ranked list
+# per provider and no second copy to drift.
+_FREE_KEYS = (
+    ("mistral", "MISTRAL_API_KEY", "https://console.mistral.ai/api-keys"),
+    ("groq", "GROQ_API_KEY", "https://console.groq.com/keys"),
+    ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/keys"),
+    ("gemini", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
 )
-
-# Free tiers, in the order we would rather use them. Every one of these is a
-# no-card free plan; the key is pasted by the person and stored in .env.
-FREE_TIER = (
-    ("groq", "GROQ_API_KEY", "llama-3.1-8b-instant", "https://console.groq.com/keys"),
-    ("mistral", "MISTRAL_API_KEY", "open-mistral-nemo", "https://console.mistral.ai/api-keys"),
-    ("openrouter", "OPENROUTER_API_KEY", "auto", "https://openrouter.ai/keys"),
-)
+FREE_TIER = tuple((provider, env_key, catalog.default_model(provider) or "", url) for provider, env_key, url in _FREE_KEYS)
 
 STUB_MODEL = "mock/mock"
 
@@ -168,49 +173,70 @@ def local_status(force: bool = False) -> dict[str, Any]:
 
 
 def free_key_status() -> dict[str, bool]:
-    return {provider: bool(os.environ.get(env_key)) for provider, env_key, _, _ in FREE_TIER}
+    """Which free tiers are usable: an env key, or one pasted through the UI."""
+    status: dict[str, bool] = {}
+    for provider, env_key, _, _ in FREE_TIER:
+        if os.environ.get(env_key):
+            status[provider] = True
+            continue
+        status[provider] = _key_in_ui_store(provider)
+    return status
+
+
+def _key_in_ui_store(provider: str) -> bool:
+    """A key added through the control room lives in core.multi_key, not the env."""
+    try:
+        from .multi_key import multi_key_manager
+
+        keys = multi_key_manager.list_keys(provider)
+        entries = keys.get(provider) if isinstance(keys, dict) else None
+        return bool(entries)
+    except Exception:  # noqa: BLE001 - an absent key store is "no key", never a crash
+        return False
 
 
 def _pick_pulled(models: list[str]) -> str | None:
-    """Choose from already-pulled models: a known small one, else the first."""
+    """Choose from already-pulled models by capability, never by arrival order.
+
+    The old rule took the smallest model it recognised, which is how a machine
+    holding an 8B answered with a 1B. Ranking lives in the catalog so this and
+    the cross-provider comparison can never disagree.
+    """
     if not models:
         return None
-    by_lower = {m.lower(): m for m in models}
-    for wanted in LOCAL_PREFERENCE:
-        if wanted.lower() in by_lower:
-            return by_lower[wanted.lower()]
-    # ``:latest`` tags are the common case for a hand-pulled model.
-    for wanted in LOCAL_PREFERENCE:
-        for name in models:
-            if name.lower().split(":")[0] == wanted.split(":")[0]:
-                return name
-    return models[0]
+    picked = catalog.best_of([f"ollama/{name}" for name in models])
+    return picked.choice.name if picked.choice else None
 
 
-def local_brain(model: str, source: str, provider: str = "ollama") -> dict[str, Any]:
-    name = model.split("/", 1)[1] if "/" in model else model
+def local_brain(model: str, source: str, provider: str = "ollama", *, reason: str = "") -> dict[str, Any]:
+    """A local model as the brain. ``model`` is the runtime's own name verbatim.
+
+    Namespaced pulls (``SparkLLM/Spark-X2.6-4B``) keep their namespace: the old
+    code stripped everything before the first slash and produced a reference the
+    runtime could not answer for.
+    """
     return {
         "kind": "local",
         "provider": provider,
-        "name": name,
-        "model": f"{provider}/{model}" if "/" not in model else model,
+        "name": model,
+        "model": f"{provider}/{model}",
         "source": source,
+        "reason": reason,
         "reachable": True,
         "present": None,
-        "reason": "",
     }
 
 
-def free_brain(provider: str, model: str, env_key: str) -> dict[str, Any]:
+def free_brain(provider: str, model: str, env_key: str, *, reason: str = "") -> dict[str, Any]:
     return {
         "kind": "freekey",
         "provider": provider,
         "name": model,
         "model": f"{provider}/{model}",
         "source": f"{provider} free tier — key from your .env ({env_key})",
+        "reason": reason,
         "reachable": True,
         "present": None,
-        "reason": "",
     }
 
 
@@ -267,33 +293,199 @@ def _probe_named(model: str) -> dict[str, Any]:
     }
 
 
-def resolve_brain(preferred: str | None = None, *, status: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Resolve once: prefer the named model, then local, then a free key, then the stub."""
+def _local_refs(st: dict[str, Any]) -> list[str]:
+    """Every model each serving local runtime holds, as provider/name references."""
+    refs: list[str] = []
+    for provider in ("ollama", "lmstudio", "nollama"):
+        info = st.get(provider) or {}
+        if not info.get("serving"):
+            continue
+        refs.extend(f"{provider}/{name}" for name in info.get("models") or [] if name)
+    return refs
+
+
+def free_key_value(provider: str) -> str:
+    """The key itself, from the environment or the store the control room writes.
+
+    Resolution needs it to ask the provider a real question; nothing here logs,
+    stores or returns it anywhere but the header of that one request.
+    """
+    env_key = catalog.FREE_KEYS.get(provider, "")
+    value = os.environ.get(env_key) if env_key else ""
+    if value:
+        return value
+    try:
+        from .multi_key import multi_key_manager
+
+        entries = (multi_key_manager.list_keys(provider) or {}).get(provider) or []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("key"):
+                return str(entry["key"])
+    except Exception:  # noqa: BLE001 - no store is "no key"
+        return ""
+    return ""
+
+
+def _hosted_refs(need_tools: bool = True) -> tuple[list[str], list[dict[str, Any]]]:
+    """Each keyed free tier's best candidate *this key can reach*, plus the refusals.
+
+    The catalog says which model would be strongest; the probe says which ones
+    answer. A model that is refused with HTTP 429 is recorded as capacity — it is
+    not gone, and it is not a reason to migrate anything — and the next candidate
+    down the ranking is offered instead.
+    """
+    refs: list[str] = []
+    refused: list[dict[str, Any]] = []
+    keys = free_key_status()
+    for provider, _env_key, _url in _FREE_KEYS:
+        if not keys.get(provider):
+            continue
+        key = free_key_value(provider)
+        chosen = False
+        for state in model_health.rank(provider, key):
+            entry = catalog.find(state.ref)
+            if need_tools and entry is not None and not entry.tools:
+                refused.append({"ref": state.ref, "why": "no function calling, and this product drives tools"})
+                continue
+            if state.state in (model_health.OK, model_health.UNKNOWN):
+                refs.append(state.ref)
+                chosen = True
+                break
+            refused.append({"ref": state.ref, "why": state.detail or state.state})
+        if not chosen and not refused:
+            refused.append({"ref": f"{provider}/?", "why": "no candidate answered"})
+    return refs, refused
+
+
+def local_origin(provider: str, st: dict[str, Any]) -> str:
+    """The plain-language origin of a local model, as the room shows it."""
+    if provider == "ollama":
+        return f"Ollama on your machine ({len((st.get('ollama') or {}).get('models') or [])} model(s) pulled)"
+    if provider == "lmstudio":
+        return "LM Studio on your machine"
+    return "NoLlama on your GPU/NPU"
+
+
+def resolve_brain(
+    preferred: str | None = None, *, status: dict[str, Any] | None = None, need_tools: bool = True
+) -> dict[str, Any]:
+    """Resolve once: honour a named model, else pick the strongest free candidate.
+
+    Local and hosted candidates are compared on the catalog's ranking rather than
+    on which one was discovered first, and the comparison that won travels with
+    the result in ``reason``.
+    """
     named = (preferred or os.environ.get("HERMUS_MODEL") or "").strip()
     if named:
         return _probe_named(named)
 
     st = status or local_status()
+    hosted, refused = _hosted_refs(need_tools=need_tools)
+    picked = catalog.best_of(_local_refs(st) + hosted, need_tools=need_tools)
+    if picked.choice is None:
+        if st["ollama"]["installed"]:
+            return stub_brain("Ollama is installed but not running")
+        return stub_brain("no local model and no free-tier key")
 
-    if st["ollama"]["serving"]:
-        chosen = _pick_pulled(st["ollama"]["models"])
-        if chosen:
-            return local_brain(chosen, f"Ollama on your machine ({len(st['ollama']['models'])} model(s) pulled)")
+    entry = picked.choice
+    reason = catalog.comparison_reason(entry, list(picked.runners))
+    if picked.note:
+        reason = f"{reason}; {picked.note}"
+    if catalog.is_local(entry.ref):
+        brain = local_brain(entry.name, local_origin(entry.provider, st), provider=entry.provider, reason=reason)
+    else:
+        brain = free_brain(entry.provider, entry.name, catalog.FREE_KEYS[entry.provider], reason=reason)
+    brain["source"] = f"{brain['source']}; {catalog.short_reason(entry, list(picked.runners))}"
+    brain["skipped"] = refused + [{"ref": skipped.ref, "why": why} for skipped, why in picked.skipped]
+    return brain
 
-    if st["lmstudio"]["serving"]:
-        return local_brain(st["lmstudio"]["models"][0], "LM Studio on your machine", provider="lmstudio")
 
-    if st["nollama"]["serving"]:
-        return local_brain(st["nollama"]["models"][0], "NoLlama on your GPU/NPU", provider="nollama")
+def _recorded_gone(recorded: str, st: dict[str, Any]) -> str:
+    """Why a recorded model cannot answer any more, or '' when it still can.
 
-    keys = free_key_status()
-    for provider, env_key, model, _ in FREE_TIER:
-        if keys.get(provider):
-            return free_brain(provider, model, env_key)
+    For a hosted model the answer comes from the provider, not from the catalog: a
+    429 is capacity (the model stays), and only a 404 or a key that no longer
+    exists counts as gone. Treating a rate limit as a retirement would migrate a
+    person off a model that works the next minute.
+    """
+    provider, name = catalog.provider_of(recorded), catalog.name_of(recorded)
+    if provider == "ollama":
+        info = st.get("ollama") or {}
+        if not info.get("serving"):
+            return "Ollama is not running"
+        pulled = info.get("models") or []
+        if name not in pulled:
+            return f"it is no longer pulled ({len(pulled)} other model(s) are)"
+        return ""
+    if provider in ("lmstudio", "nollama"):
+        info = st.get(provider) or {}
+        if not info.get("serving"):
+            return f"{provider} is not serving"
+        return "" if name in (info.get("models") or []) else "the runtime no longer lists it"
+    if provider not in catalog.FREE_KEYS:
+        return ""
+    key = free_key_value(provider)
+    if not key:
+        return f"{catalog.FREE_KEYS[provider]} is not configured"
+    state = model_health.probe(provider, key, name)
+    if state.state == model_health.GONE:
+        return state.detail or "the provider no longer serves it to this key"
+    if state.state == model_health.DENIED:
+        return state.detail or "the key was refused"
+    return ""
 
-    if st["ollama"]["installed"]:
-        return stub_brain("Ollama is installed but not running")
-    return stub_brain("no local model and no free-tier key")
+
+def upgrade_offer(
+    *, recorded: str | None = None, status: dict[str, Any] | None = None, need_tools: bool = True
+) -> dict[str, Any]:
+    """The recorded model against the strongest one reachable now.
+
+    A model whose key or runtime no longer serves it, one the provider answers with
+    HTTP 404, and one that is simply weaker than something reachable all count as
+    below best. A 429 does not: that is capacity, and the model stays. This decides
+    and explains; :func:`apply_resolved_default` performs the change at startup.
+    """
+    st = status or local_status()
+    best = resolve_brain(status=st, need_tools=need_tools)
+    if best["kind"] == "stub":
+        return {
+            "needed": False,
+            "from": recorded,
+            "to": None,
+            "gone": "",
+            "reason": f"nothing better is reachable: {best['reason']}",
+            "best": best,
+        }
+    if not recorded:
+        return {
+            "needed": True,
+            "from": None,
+            "to": best["model"],
+            "gone": "",
+            "reason": f"no model is recorded; {best['model']} is the strongest reachable one",
+            "best": best,
+        }
+
+    old = catalog.describe(recorded)
+    new = catalog.describe(best["model"])
+    gone = _recorded_gone(recorded, st)
+    weaker = catalog.strength(new) > catalog.strength(old)
+    if gone:
+        reason = f"{recorded} cannot answer any more ({gone}); {best['model']} is the strongest reachable"
+    elif weaker:
+        reason = catalog.upgrade_reason(old, new, gone=gone)
+    else:
+        reason = f"{recorded} is still at least as strong as {best['model']}, so it stays"
+    return {
+        "needed": bool(gone or weaker),
+        "from": recorded,
+        "to": best["model"] if (gone or weaker) else recorded,
+        "gone": gone,
+        "reason": reason,
+        "from_strength": round(catalog.strength(old), 2),
+        "to_strength": round(catalog.strength(new), 2),
+        "best": best,
+    }
 
 
 def pickup_line(brain: dict[str, Any]) -> str:
@@ -320,27 +512,57 @@ def fix_command(brain: dict[str, Any] | None = None, *, status: dict[str, Any] |
 
 
 def apply_resolved_default(*, status: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Point ``config.model`` at something that exists, without overriding a choice.
+    """Point ``config.model`` at the strongest free model, without overriding a person.
 
-    Called once at gateway startup. Only acts when the configured model is still
-    the untouched shipment default (or empty) and a real brain was found, so a
-    person who set ``HERMUS_MODEL`` or picked in onboarding keeps their choice.
+    Called once at gateway startup, and it handles two cases:
+
+    * the configured model is still the untouched shipment default (or empty) —
+      adopt the strongest reachable model;
+    * the configured model is the one onboarding recorded and it is now below the
+      strongest reachable one — its runtime lost it, the provider no longer serves
+      it to this key, or a stronger free model answered when probed. Upgrade it in place, record the change in the
+      onboarding state, and report the reason. Onboarding does not run again and
+      the person's name and permission choice are untouched.
+
+    A model pinned with ``HERMUS_MODEL``, and one that is already the best
+    available, are left alone.
     """
+    from . import onboarding
     from .config import config
 
     current = str(getattr(config, "model", "") or "").strip()
-    if current and current not in SHIPPED_DEFAULTS:
+    stored = (onboarding.load().get("brain") or {}).get("model")
+    pinned = (os.environ.get("HERMUS_MODEL") or "").strip()
+    if pinned and pinned != stored:
+        return {"applied": False, "model": current, "reason": "HERMUS_MODEL pins this model"}
+
+    replacing_shipped = not current or current in SHIPPED_DEFAULTS
+    replacing_recorded = bool(stored) and current == stored
+    if not (replacing_shipped or replacing_recorded):
         return {"applied": False, "model": current, "reason": "a model is already chosen"}
 
-    from . import onboarding
+    offer = upgrade_offer(recorded=stored, status=status)
+    best = offer.get("best") or {}
+    if best.get("kind") == "stub":
+        return {"applied": False, "model": current, "reason": best.get("reason") or "no free model is reachable"}
+    target = best["model"]
+    if current == target:
+        return {"applied": False, "model": current, "reason": "already the strongest reachable free model"}
 
-    stored = (onboarding.load().get("brain") or {}).get("model")
-    resolved = resolve_brain(preferred=stored, status=status)
-    if resolved["kind"] == "stub":
-        return {"applied": False, "model": current, "reason": resolved["reason"]}
-    config.model = resolved["model"]
-    config.ollama_default_model = resolved["name"]
-    return {"applied": True, "model": resolved["model"], "source": resolved["source"]}
+    config.model = target
+    config.ollama_default_model = best["name"]
+    picked = {
+        "applied": True,
+        "model": target,
+        "from": current or None,
+        "source": best["source"],
+        "reason": offer.get("reason") or best["reason"],
+        "model_reason": best["reason"],
+        "upgraded": bool(offer.get("needed")),
+    }
+    if stored and onboarding.record_upgrade(onboarding.load(), best, previous=stored, reason=picked["reason"]):
+        picked["recorded"] = True
+    return picked
 
 
 def warm(model: str, *, timeout: float = 120.0) -> dict[str, Any]:

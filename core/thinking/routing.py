@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .. import model_catalog as catalog
+
 # ---------------------------------------------------------------- tiers
 
 TIER_LOCAL = "local"
@@ -44,14 +46,13 @@ LOCAL_PROVIDERS = ("ollama", "nollama", "lmstudio", "local", "llamacpp", "vllm")
 #: hosted providers free-tier keys grant access to (see core/local_first.py)
 FREE_HOSTED_PROVIDERS = ("groq", "mistral", "openrouter", "cerebras", "together", "gemini")
 
-#: the free hosted model each provider serves by default
+#: the free hosted model each provider serves by default. Read from the catalog so
+#: there is one ranked list per provider: routing escalates to the strongest free
+#: model, never to whatever name this file happened to remember.
 FREE_HOSTED_DEFAULT_MODELS = {
-    "groq": "llama-3.1-8b-instant",
-    "mistral": "mistral-small-latest",
-    "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
+    **{provider: catalog.default_model(provider) or "" for provider in catalog.CATALOG},
     "cerebras": "llama3.1-8b",
     "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-    "gemini": "gemini-2.0-flash",
 }
 
 #: config keys holding each provider's free-tier key
@@ -117,6 +118,7 @@ class RouteDecision:
             "difficulty": self.difficulty,
             "reason": self.reason,
             "signals": list(self.signals),
+            "model_reason": catalog.model_reason(self.model),
             "local_model": self.local_model,
             "hosted_models": list(self.hosted_models),
             "forced": self.forced,
