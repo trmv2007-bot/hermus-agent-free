@@ -57,9 +57,7 @@ _FREE_KEYS = (
     ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/keys"),
     ("gemini", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
 )
-FREE_TIER = tuple(
-    (provider, env_key, catalog.default_model(provider) or "", url) for provider, env_key, url in _FREE_KEYS
-)
+FREE_TIER = tuple((provider, env_key, catalog.default_model(provider) or "", url) for provider, env_key, url in _FREE_KEYS)
 
 STUB_MODEL = "mock/mock"
 
@@ -508,10 +506,11 @@ def apply_resolved_default(*, status: dict[str, Any] | None = None) -> dict[str,
         "model": target,
         "from": current or None,
         "source": best["source"],
-        "reason": best["reason"],
-        "upgraded": bool(stored) and current == stored,
+        "reason": offer.get("reason") or best["reason"],
+        "model_reason": best["reason"],
+        "upgraded": bool(offer.get("needed")),
     }
-    if stored and onboarding.record_upgrade(onboarding.load(), best, previous=stored, reason=best["reason"]):
+    if stored and onboarding.record_upgrade(onboarding.load(), best, previous=stored, reason=picked["reason"]):
         picked["recorded"] = True
     return picked
 

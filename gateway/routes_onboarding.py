@@ -28,7 +28,7 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from core import brain as brain_mod
-from core import onboarding
+from core import model_catalog, onboarding
 
 router = APIRouter(tags=["onboarding"])
 
@@ -77,7 +77,7 @@ def state_payload() -> dict[str, Any]:
         "upgrade": {key: value for key, value in upgrade.items() if key != "best"},
         "model_reason": resolved.get("reason") or "",
         "skipped": resolved.get("skipped") or [],
-        "catalog": brain_mod.model_catalog.catalog_payload(),
+        "catalog": model_catalog.catalog_payload(),
         "reason": onboarding.incomplete_reason(state),
         "name": state.get("name") or onboarding.DEFAULT_NAME,
         "permissions": state.get("permissions") or onboarding.DEFAULT_PROFILE,

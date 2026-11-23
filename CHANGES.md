@@ -704,3 +704,59 @@ a public hub with no account, and cached in the Hugging Face cache.
 **Tests:** 4 new tests (relative ages incl. epoch + clock-skew clamp, mission buckets, mission-tools wiring, tablist tabindex pin updated to 2 with a comment). Full suite: **1566 passed, 2 skipped, 0 failed**. `node --check` clean on all touched JS; zero browser console errors; live-gateway verification of every behavior above.
 
 ---
+
+## 17 · Model choice — the strongest free model wins, and says why
+
+An install on a machine holding a 4B and an 8B recorded `mistral/open-mistral-nemo`:
+Mistral's smallest model, picked because the free-tier table named it, and because
+the local picker deliberately took the *cheapest* model it recognised. Three separate
+rules produced the same failure — cheapest local, first-named hosted, first-item
+fallback — and none of them recorded a reason.
+
+**The catalog is now the one place a model is named** (`core/model_catalog.py`). Each
+free provider has an authored, strongest-first list, and every position carries why it
+holds it:
+
+| Provider | Rank 1 | Then | Never chosen |
+|---|---|---|---|
+| Mistral (free mode) | `mistral-small-latest` — 24B, 128k, tool calling | `ministral-8b-latest`, `ministral-3b-latest` | `open-mistral-nemo` (retired 2026-07-31) |
+| Groq (free plan) | `openai/gpt-oss-120b` — 120B MoE, ~500 tok/s | `qwen/qwen3.8-27b`, `openai/gpt-oss-20b` | — |
+| OpenRouter (`:free` only) | `nvidia/nemotron-3-ultra-550b-a55b:free` — 550B MoE, 1M ctx | `nemotron-3.5-lightning`, `flint-v1.0`, `gemma-4-26b` (no tools), `lfm-3-1.7b` | `auto` (can route to a paid model) |
+| Gemini (free tier) | `gemini-3.8-flash` — 1M ctx, tool calling | `gemini-3.5-flash-lite` | `gemini-2.5-flash` (deprecated, closed) |
+
+**Resolution is a comparison, not a queue.** Every reachable candidate — each pulled
+local model and each configured free tier's best — is ordered on that data, and the
+strongest wins. A local model wins a tie because it costs nothing; it does not win by
+being local. A model that cannot call tools is skipped when a step needs tools, and the
+skip is recorded (`gemma2:27b` next to `llama3.2:1b` resolves to the 1B *and* says why).
+Local model names keep their namespace, so `SparkLLM/Spark-X2.6-4B` is now referenced as
+`ollama/SparkLLM/Spark-X2.6-4B:q4_k_m` rather than as a model that does not exist.
+
+**The reason travels with the choice.** `resolved["reason"]` carries the one sentence
+that decided it, `source` carries the short form the room shows next to the model
+badge, onboarding's state payload gains `model_reason`, `skipped` and the full `catalog`,
+and the turn's routing record gains `model_reason` per model.
+
+**Existing installs migrate at startup.** `apply_resolved_default` now upgrades a
+recorded model that is retired, uninstalled, unkeyed or simply weaker than what is
+reachable, writes `brain.upgraded_from` plus an `upgrade` block with the reason, and
+leaves name and permissions alone. The run is not complete again until the new model
+has actually answered — the same honesty rule as first run — but the app opens on the
+companion rather than sending the person through onboarding a second time.
+
+**Measured on the machine this was built on** (Windows 11, i7-12700F, Ollama serving
+`llama3.2:1b`, `SparkLLM/Spark-X2.6-4B:q4_k_m`, `lfm2.5:8b`):
+
+| | before | after |
+|---|---|---|
+| recorded choice | `mistral/open-mistral-nemo` (retired, key not visible) | `ollama/lfm2.5:8b` |
+| why recorded | none | "mistral/open-mistral-nemo cannot answer any more (mistral retired it)" |
+| with `MISTRAL_API_KEY` visible | `mistral/open-mistral-nemo` | `mistral/mistral-small-latest` — "24B is stronger than your best local model lfm2.5:8b (8B), so the free mistral tier wins" |
+
+**Tests:** 14 new in `tests/test_model_ranking.py` — ranking order stability and
+strength ordering, the local-versus-hosted comparison in both directions, the
+tool-capability skip, the migration from a weaker recorded choice (and from a model
+still at the top, which is left alone), the `HERMUS_MODEL` pin, and the
+nothing-reachable stub with its reason. One existing assertion was updated because it
+pinned the bug: two models pulled (`llama3.2:1b`, `mistral:7b`) used to resolve to the
+1B and now resolve to the 7B.

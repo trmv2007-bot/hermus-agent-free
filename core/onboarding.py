@@ -58,6 +58,8 @@ def fresh_state() -> dict[str, Any]:
         "permissions": DEFAULT_PROFILE,
         "brain": None,
         "check": {"ok": False, "reason": "no model has answered yet", "at": None, "model": None},
+        "upgrade": None,
+        "upgrade_history": [],
         "completed_at": None,
     }
 
@@ -121,9 +123,7 @@ def record_brain(state: dict[str, Any], brain: dict[str, Any]) -> dict[str, Any]
     return state
 
 
-def record_upgrade(
-    state: dict[str, Any], brain: dict[str, Any], *, previous: str, reason: str
-) -> dict[str, Any]:
+def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: str, reason: str) -> dict[str, Any]:
     """Replace a recorded model with a stronger one, keeping the run finished.
 
     A migration, not a new first run: the person's name and permission choice

@@ -599,7 +599,4 @@ def as_rows() -> list[dict[str, Any]]:
 
 def catalog_payload() -> dict[str, Any]:
     """The catalog as the API serves it: one ranked list per provider."""
-    return {
-        provider: [entry.to_dict() for entry in ranked(provider, include_retired=True)]
-        for provider in CATALOG
-    }
+    return {provider: [entry.to_dict() for entry in ranked(provider, include_retired=True)] for provider in CATALOG}
