@@ -18,8 +18,40 @@ os.environ["HERMUS_NO_DOTENV"] = "1"
 # switch it back on themselves.
 os.environ["HERMUS_MODEL_PROBE"] = "0"
 
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import pytest  # noqa: E402
 from _real_home_guard import refuse_real_home  # noqa: E402
+
+
+def _inside(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _real_home() -> Path:
+    return Path(os.path.expanduser("~")).resolve()
+
+
+# A test run must never read or write the person's own installation. Point the
+# suite at a temporary home before anything imports the workspace singleton, and
+# refuse outright if somebody hands it the real one.
+if os.environ.get("HERMUS_ALLOW_REAL_HOME", "") not in ("1", "true", "True"):
+    for _key in ("HERMUS_HOME", "HERMUS_DATA_DIR"):
+        _value = os.environ.get(_key)
+        if _value and _inside(Path(_value), _real_home() / ".hermus"):
+            raise RuntimeError(
+                f"{_key}={_value} is Rishi's real install. Tests never touch it: unset it, "
+                "or set HERMUS_ALLOW_REAL_HOME=1 if you truly mean it."
+            )
+    if not os.environ.get("HERMUS_HOME"):
+        os.environ["HERMUS_HOME"] = tempfile.mkdtemp(prefix="hermus-test-home-")
+    os.environ.setdefault("HERMUS_DATA_DIR", str(Path(os.environ["HERMUS_HOME"]) / "data"))
+
 
 from core.computer.task_control import get_task_control  # noqa: E402
 
@@ -36,6 +68,20 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     data_dir = os.environ.get("HERMUS_DATA_DIR")
     if data_dir:
         refuse_real_home(data_dir, "HERMUS_DATA_DIR")
+
+
+@pytest.fixture(autouse=True)
+def _no_key_store(monkeypatch):
+    """No test may read the keys a developer keeps in the control-room store.
+
+    Model resolution asks every configured key a real question in production; in
+    a test run that would both reach a provider and make the result depend on the
+    machine, so the store is empty for every test and each one opts in instead.
+    """
+    from core import key_sources
+
+    monkeypatch.setattr(key_sources, "store_keys", lambda provider: [])
+    key_sources.reset_cache()
 
 
 @pytest.fixture(autouse=True)

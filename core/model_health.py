@@ -28,6 +28,7 @@ wrong key costs one request rather than one per candidate every ten minutes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -97,8 +98,15 @@ class ModelState:
 #: tests replace this to stay offline; production sends one real request
 transport: Callable[[urllib.request.Request, float], tuple[int, str]] = None  # type: ignore[assignment]
 
-_cache: dict[tuple[str, str], ModelState] = {}
+# Keyed by the key's fingerprint as well as the model: two keys for one provider
+# must not share an outcome, or a dead key's 401 would hide a working one's 200.
+_cache: dict[tuple[str, str, str], ModelState] = {}
 _denied_until: dict[str, float] = {}
+
+
+def _key_id(provider: str, key: str) -> str:
+    digest = hashlib.sha256(str(key or "").encode("utf-8")).hexdigest()[:16]
+    return f"{provider}:{digest}"
 
 
 def probe_enabled() -> bool:
@@ -216,11 +224,12 @@ def probe(provider: str, key: str, name: str, *, force: bool = False) -> ModelSt
     """One candidate's availability, cached for its outcome's own TTL."""
     if not probe_enabled() or not key:
         return ModelState(provider, name, UNKNOWN, "not probed", time.time())
-    blocked = _denied_until.get(provider)
+    key_id = _key_id(provider, key)
+    blocked = _denied_until.get(key_id)
     if blocked and blocked > time.time():
         return ModelState(provider, name, DENIED, "the key was refused a moment ago", time.time())
 
-    cached = _cache.get((provider, name))
+    cached = _cache.get((provider, key_id, name))
     if cached is not None and not force and time.time() - cached.checked_at < TTL.get(cached.state, 120.0):
         return cached
 
@@ -237,8 +246,8 @@ def probe(provider: str, key: str, name: str, *, force: bool = False) -> ModelSt
             result = ModelState(provider, name, state, detail, time.time())
 
     if result.state == DENIED:
-        _denied_until[provider] = time.time() + TTL[DENIED]
-    _cache[(provider, name)] = result
+        _denied_until[key_id] = time.time() + TTL[DENIED]
+    _cache[(provider, key_id, name)] = result
     return result
 
 

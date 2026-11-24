@@ -10,6 +10,7 @@ exactly the false success this screen exists to prevent.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,17 @@ STEPS = ("brain", "permissions", "name")
 
 
 def state_path() -> Path:
+    """Where the first-run record lives.
+
+    ``HERMUS_HOME`` is read live, not from the workspace singleton: the singleton
+    captures its base directory at import, so a process that builds the workspace
+    before pointing the environment at a temporary home would otherwise keep
+    reading — and writing, and deleting — the person's real ``~/.hermus``.
+    """
+    override = os.environ.get("HERMUS_HOME")
+    if override:
+        return Path(override).expanduser() / "onboarding.json"
+
     from .workspace import workspace
 
     return workspace.dirs["root"] / "onboarding.json"
@@ -123,7 +135,7 @@ def record_brain(state: dict[str, Any], brain: dict[str, Any]) -> dict[str, Any]
     return state
 
 
-def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: str, reason: str) -> dict[str, Any]:
+def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: str | None, reason: str) -> dict[str, Any]:
     """Replace a recorded model with a stronger one, keeping the run finished.
 
     A migration, not a new first run: the person's name and permission choice
@@ -147,7 +159,7 @@ def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: st
     history = [row for row in (state.get("upgrade_history") or []) if isinstance(row, dict)]
     state["upgrade_history"] = (history + [dict(state["upgrade"])])[-10:]
     check = state.get("check") or {}
-    if check.get("ok"):
+    if check.get("ok") or previous is None:
         state["check"] = {
             "ok": False,
             "model": None,
@@ -157,6 +169,24 @@ def record_upgrade(state: dict[str, Any], brain: dict[str, Any], *, previous: st
         state["completed_at"] = None
     save(state)
     return state
+
+
+def install_has_history() -> bool:
+    """Has this workspace been used before, even if its onboarding state is gone?
+
+    Distinguishes a real first run from an install whose state file was lost or
+    restored from elsewhere. The workspace's own folders are the evidence: a
+    directory that only a used install has, with something in it.
+    """
+    root = state_path().parent
+    for name in ("sessions", "memory", "missions", "checkpoints"):
+        folder = root / name
+        try:
+            if folder.is_dir() and any(folder.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def upgrade_pending(state: dict[str, Any]) -> bool:

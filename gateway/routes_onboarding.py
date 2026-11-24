@@ -56,13 +56,23 @@ def _asset(name: str, media_type: str) -> Response:
 
 
 def redirect_target() -> str:
-    """Where ``/`` goes: the companion when set up, the welcome screen otherwise.
+    """Where ``/`` goes: the companion whenever the product can answer.
 
-    An install whose model was just upgraded opens the companion too: a migration
-    is not a reason to walk somebody through first run again.
+    Three ways an install is usable, and all of them open the room: first run
+    finished; a model just migrated to a stronger one; or a model is reachable
+    while the recorded state lost track of it (an upgrade, a restored workspace, a
+    state file that went missing). The welcome screen is for an install that has
+    nothing to answer with — never for one that works and is merely waiting on a
+    first proven reply.
     """
     state = onboarding.load()
-    return "/companion" if onboarding.is_usable(state) else "/welcome"
+    if onboarding.is_usable(state):
+        return "/companion"
+    if onboarding.install_has_history():
+        resolved = brain_mod.resolve_brain(preferred=(state.get("brain") or {}).get("model"))
+        if resolved["kind"] != "stub":
+            return "/companion"
+    return "/welcome"
 
 
 def state_payload() -> dict[str, Any]:
@@ -74,8 +84,14 @@ def state_payload() -> dict[str, Any]:
     return {
         "complete": onboarding.is_usable(state),
         "upgrade_pending": onboarding.upgrade_pending(state),
-        "upgrade": {key: value for key, value in upgrade.items() if key != "best"},
-        "model_reason": resolved.get("reason") or "",
+        # ``upgrade`` is the migration that happened, so the change and its reason
+        # stay visible after it lands; ``upgrade_offer`` is the live comparison
+        # for one that has not.
+        "upgrade": state.get("upgrade"),
+        "upgrade_offer": {key: value for key, value in upgrade.items() if key != "best"},
+        # A recorded model resolves as itself and has no comparison to make, so the
+        # reason it was recorded with is the one worth showing.
+        "model_reason": resolved.get("reason") or (state.get("brain") or {}).get("reason") or "",
         "skipped": resolved.get("skipped") or [],
         "catalog": model_catalog.catalog_payload(),
         "reason": onboarding.incomplete_reason(state),

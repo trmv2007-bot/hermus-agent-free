@@ -40,7 +40,15 @@ def _client():
 
 
 def _reset_state() -> None:
+    """Clear this test run's own state, and only ever inside its temporary home.
+
+    The guard is not decoration: ``state_path()`` once resolved to the person's
+    real ``~/.hermus`` in this very process, and this line deleted his setup
+    record twice.
+    """
     path = onboarding.state_path()
+    if not str(path).startswith(_TMP):
+        raise AssertionError(f"refusing to touch a state file outside the test home: {path}")
     if path.exists():
         path.unlink()
 
@@ -133,8 +141,18 @@ def test_recording_a_new_brain_invalidates_the_previous_proof():
 
 
 def test_root_redirects_to_welcome_while_incomplete():
+    """An install with nothing to answer with opens first run.
+
+    A model that is merely reachable no longer counts when the workspace has never
+    been used, and the inverse matters too: patched here so a machine actually
+    running Ollama cannot change what this asserts.
+    """
     _reset_state()
-    r = _client().get("/", follow_redirects=False)
+    original = _brain(NO_LOCAL)
+    try:
+        r = _client().get("/", follow_redirects=False)
+    finally:
+        brain.local_status = original
     assert r.status_code in (302, 307)
     assert r.headers["location"] == "/welcome"
 

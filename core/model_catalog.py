@@ -547,9 +547,13 @@ def comparison_reason(winner: Model, others: list[Model]) -> str:
             f"{nearest.ref} ({size_phrase(nearest)}), so nothing hosted is spent"
         )
     if is_local(nearest.ref):
+        same_size = size_phrase(winner) == size_phrase(nearest)
+        edge = (
+            "at the same size, on a newer generation" if same_size else f"at {size_phrase(winner)} against {size_phrase(nearest)}"
+        )
         return (
-            f"{winner.provider} {winner.name} ({size_phrase(winner)}) is stronger than your best local model "
-            f"{nearest.name} ({size_phrase(nearest)}), so the free {winner.provider} tier wins"
+            f"{winner.provider} {winner.name} is stronger than your best local model "
+            f"{nearest.name} — {edge}, so the free {winner.provider} tier wins"
         )
     return (
         f"{winner.provider} {winner.name} ({size_phrase(winner)}) is stronger than "
