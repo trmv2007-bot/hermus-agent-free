@@ -44,6 +44,38 @@ class CompatResponse:
         self.headers = headers or {}
 
 
+def _provider_tool_calls(tool_calls: list[dict]) -> list[dict]:
+    """The internal flat tool-call shape, written the way a provider accepts.
+
+    This repo's loops carry a call as ``{"name", "arguments", "id"}`` (what
+    :func:`_parse_tool_calls` returns). OpenAI-compatible providers expect the
+    nested ``function`` object, and some of them validate it: Mistral answers a
+    flat call with HTTP 422 ``missing body.messages.N.assistant.tool_calls.0
+    .function``. Ollama is lenient, so a local-only install never sees it — the
+    second round of *every* tool-using turn fails on the strict provider.
+    """
+    out = []
+    # A caller that hands over something that is not a list of calls gets an empty
+    # list, which providers reject cleanly; iterating it here would crash the turn
+    # inside the client instead.
+    for call in tool_calls if isinstance(tool_calls, (list, tuple)) else []:
+        if not isinstance(call, dict):
+            continue
+        function = call.get("function") if isinstance(call.get("function"), dict) else {}
+        name = function.get("name") or call.get("name") or ""
+        arguments = function.get("arguments", call.get("arguments", {}))
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments if arguments is not None else {})
+        out.append(
+            {
+                "id": call.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            }
+        )
+    return out
+
+
 def _normalize_messages(messages: list[dict]) -> list[dict]:
     out = []
     for m in messages:
@@ -51,9 +83,9 @@ def _normalize_messages(messages: list[dict]) -> list[dict]:
         content = m.get("content", "")
         # Drop empty assistant tool_calls-only for strict APIs if no content
         entry = {"role": role, "content": content if content is not None else ""}
-        # Pass through tool_calls if present (OpenAI format)
+        # A call goes out nested, whichever shape the loop handed us.
         if m.get("tool_calls"):
-            entry["tool_calls"] = m["tool_calls"]
+            entry["tool_calls"] = _provider_tool_calls(m["tool_calls"])
         if m.get("name"):
             entry["name"] = m["name"]
         if m.get("tool_call_id"):

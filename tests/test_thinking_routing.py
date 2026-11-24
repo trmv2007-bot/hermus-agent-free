@@ -167,3 +167,98 @@ def test_a_decision_is_json_serialisable_for_the_turn_result():
     decision = decide_route("build a small script that renames files", local_model=LOCAL, hosted_models=[HOSTED])
     payload = json.dumps(decision.to_dict())
     assert "reason" in json.loads(payload)
+
+
+def _fake_availability(monkeypatch, answers: dict[str, tuple[int, str]]):
+    """Answer the availability probe per model name, without a network."""
+    from core import model_health
+
+    def transport(request, timeout):
+        name = json.loads(request.data.decode("utf-8"))["model"]
+        return answers.get(name, (0, "offline"))
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key-not-a-real-one")
+    monkeypatch.setenv("HERMUS_MODEL_PROBE", "1")
+    monkeypatch.setattr(model_health, "transport", transport)
+    model_health.reset_cache()
+    return model_health
+
+
+def test_an_escalation_target_is_the_model_the_key_answers(monkeypatch):
+    """The catalog ranks Mistral's Small first; a free key can still 429 it."""
+    from core.thinking.routing import answering_hosted_ref
+
+    _fake_availability(
+        monkeypatch,
+        {
+            "mistral-small-latest": (429, '{"message":"Rate limit exceeded","code":"1300"}'),
+            "ministral-8b-latest": (200, '{"choices":[{"message":{"content":"hi"}}]}'),
+        },
+    )
+    assert answering_hosted_ref("mistral/mistral-small-latest") == "mistral/ministral-8b-latest"
+
+
+def test_a_tier_that_answers_nothing_returns_no_target(monkeypatch):
+    from core.thinking.routing import answering_hosted_ref
+
+    _fake_availability(
+        monkeypatch,
+        {
+            name: (429, '{"message":"Rate limit exceeded"}')
+            for name in ("mistral-small-latest", "ministral-8b-latest", "open-mistral-nemo", "ministral-3b-latest")
+        },
+    )
+    assert answering_hosted_ref("mistral/mistral-small-latest") == ""
+
+
+def test_an_unmeasurable_tier_keeps_the_catalog_choice(monkeypatch):
+    """Offline is not evidence against a model, so nothing is re-picked."""
+    from core.thinking.routing import answering_hosted_ref
+
+    _fake_availability(monkeypatch, {})
+    assert answering_hosted_ref("mistral/mistral-small-latest") == "mistral/mistral-small-latest"
+
+
+def test_an_answered_model_is_remembered_for_the_next_decision(monkeypatch):
+    """A warm measurement costs nothing: the second ask sends no request."""
+    from core.thinking.routing import answering_hosted_ref
+
+    calls: list[str] = []
+
+    def transport(request, timeout):
+        calls.append(json.loads(request.data.decode("utf-8"))["model"])
+        if calls[-1] == "mistral-small-latest":
+            return 429, '{"message":"Rate limit exceeded"}'
+        return 200, '{"choices":[{"message":{"content":"hi"}}]}'
+
+    from core import model_health
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key-not-a-real-one")
+    monkeypatch.setenv("HERMUS_MODEL_PROBE", "1")
+    monkeypatch.setattr(model_health, "transport", transport)
+    model_health.reset_cache()
+    assert answering_hosted_ref("mistral/mistral-small-latest") == "mistral/ministral-8b-latest"
+    before = len(calls)
+    assert answering_hosted_ref("mistral/mistral-small-latest") == "mistral/ministral-8b-latest"
+    assert len(calls) == before, "the cached measurement must be reused"
+
+
+def test_a_turn_already_on_the_free_tier_does_not_hop_to_another_hosted_model():
+    """A second model on the same tier is a second request, not an upgrade."""
+    decision = decide_route(
+        "Audit, refactor and migrate the module.",
+        local_model="mistral/ministral-8b-latest",
+        hosted_models=["mistral/mistral-small-latest"],
+    )
+    assert decision.tier == TIER_FREE_HOSTED
+    assert decision.model == "mistral/ministral-8b-latest"
+    assert "already on the free tier" in decision.reason
+
+
+def test_a_local_turn_still_escalates_to_the_configured_hosted_model():
+    decision = decide_route(
+        "Audit, refactor and migrate the module.",
+        local_model=LOCAL,
+        hosted_models=["mistral/mistral-small-latest"],
+    )
+    assert decision.model == "mistral/mistral-small-latest"

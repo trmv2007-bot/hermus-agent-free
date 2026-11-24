@@ -24,10 +24,25 @@ from .token_counter import token_counter
 
 
 class LLMResponse:
-    def __init__(self, content: str, tool_calls: list[dict] | None = None, usage: dict | None = None):
+    def __init__(self, content: str, tool_calls: list[dict] | None = None, usage: dict | None = None, error: str = ""):
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage or {}
+        #: set when no answer came back and ``content`` is the provider's error
+        #: text instead. Without this the failure is indistinguishable from an
+        #: answer, and a rate-limited turn reads to the person as the model
+        #: replying with JSON.
+        self.error = error
+
+
+def failure_note(provider: str, error: Exception | None) -> str:
+    """One line saying why a model call produced no answer."""
+    if getattr(error, "is_rate_limit", False):
+        return f"{provider} is rate-limiting requests right now"
+    if getattr(error, "is_auth_error", False):
+        return f"{provider} refused the key"
+    status = getattr(error, "status_code", 0)
+    return f"{provider} could not answer (HTTP {status})" if status else f"{provider} could not answer"
 
 
 class FreeLLM:
@@ -335,7 +350,7 @@ class FreeLLM:
 
         err = f"{used_provider} error (base_url={base_url or 'preset'}): {last_err}"
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{used_provider}/{model}")
-        return LLMResponse(err, usage=usage)
+        return LLMResponse(err, usage=usage, error=failure_note(used_provider, last_err))
 
     def _call_ollama(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Ollama — prefer OpenAI-compatible /v1, fallback to native /api/chat."""
@@ -456,12 +471,12 @@ class FreeLLM:
                     usage = token_counter.estimate_cost(
                         prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
                     )
-                    return LLMResponse(fb_err, usage=usage)
+                    return LLMResponse(fb_err, usage=usage, error=failure_note(fb_provider, e))
             return self._ollama_down_response(tools=tools, prompt_tokens=prompt_tokens, messages=messages)
         except Exception as e:
             err_content = f"Ollama error: {e}"
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err_content), model="ollama/mock")
-            return LLMResponse(err_content, usage=usage)
+            return LLMResponse(err_content, usage=usage, error=failure_note("ollama", e))
 
     def _call_hf_free(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """HF — try OpenAI-compatible router first, then legacy text_generation."""
@@ -731,7 +746,7 @@ class FreeLLM:
 
         err = f"{used_provider} error (base_url={base_url or 'preset'}): {last_err}"
         usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err), model=f"{used_provider}/{model}")
-        return LLMResponse(err, usage=usage)
+        return LLMResponse(err, usage=usage, error=failure_note(used_provider, last_err))
 
     async def _acall_ollama(self, messages: list[dict], tools: list[dict] = None, client=None) -> LLMResponse:
         """Async mirror of :meth:`_call_ollama` (same fallbacks/cache)."""
@@ -848,12 +863,12 @@ class FreeLLM:
                     usage = token_counter.estimate_cost(
                         prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
                     )
-                    return LLMResponse(fb_err, usage=usage)
+                    return LLMResponse(fb_err, usage=usage, error=failure_note(fb_provider, e))
             return self._ollama_down_response(tools=tools, prompt_tokens=prompt_tokens, messages=messages)
         except Exception as e:
             err_content = f"Ollama error: {e}"
             usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(err_content), model="ollama/mock")
-            return LLMResponse(err_content, usage=usage)
+            return LLMResponse(err_content, usage=usage, error=failure_note("ollama", e))
 
     async def _acall_hf_free(self, messages: list[dict], tools: list[dict] = None, client=None) -> LLMResponse:
         """Async mirror of :meth:`_call_hf_free` (sync HF SDK runs off-loop)."""

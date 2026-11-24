@@ -25,11 +25,14 @@ from .receipt import Receipt, build_receipt, repair_instruction
 from .routing import (
     TIER_FREE_HOSTED,
     TIER_LOCAL,
+    TIER_UNAVAILABLE,
     RouteDecision,
+    answering_hosted_ref,
     configured_hosted_refs,
     decide_route,
     routing_ledger,
     routing_outcome,
+    tier_of,
 )
 
 
@@ -114,6 +117,8 @@ class TurnMind:
                 hosted_models=hosted,
                 forced_tier=forced,
             )
+            if self.decision.tier == TIER_FREE_HOSTED:
+                self._confirm_hosted_model()
             # The decision is the turn's, not a suggestion: tell the agent's own
             # router to stand down so two selectors cannot fight over the model.
             try:
@@ -125,6 +130,44 @@ class TurnMind:
             self._emit("routing_decision", self.decision.to_dict())
         except Exception:
             self.decision = None
+
+    def _confirm_hosted_model(self) -> None:
+        """Point the escalated turn at a model this key answers, or stay home.
+
+        Routing's decision names the catalog's ranking of the free tier. That
+        ranking is not a measurement: a free plan can rate-limit the top of it,
+        and a turn sent there comes back with the provider's error as its answer.
+        So the model is confirmed against the availability probe first; when
+        nothing on the tier answers, the turn stays on the local model and the
+        reason says why rather than spending a request to fail.
+        """
+        if self.decision is None:
+            return
+        if self.decision.model == self._current_model():
+            # Already on the model the turn will call: asking the provider whether
+            # it answers would spend the very request the turn is about to make.
+            return
+        chosen = answering_hosted_ref(self.decision.model)
+        if chosen == self.decision.model:
+            return
+        if chosen:
+            self._emit("routing_repick", {"from": self.decision.model, "to": chosen})
+            self.decision.reason += f"; {self.decision.model} did not answer for this key, so {chosen} does"
+            self.decision.model = chosen
+            return
+        unmeasured, self.decision.model = self.decision.model, ""
+        self.decision.hosted_models = []
+        if tier_of(self.decision.local_model) == TIER_LOCAL:
+            self.decision.tier = TIER_LOCAL
+            self.decision.model = self.decision.local_model
+            self.decision.reason += "; no model on the free tier answers this key, so the turn stays local"
+        else:
+            self.decision.tier = TIER_UNAVAILABLE
+            self.decision.reason += "; no model on the free tier answers this key and no local model is bound"
+        self._emit(
+            "routing_repick",
+            {"from": unmeasured, "to": self.decision.model, "reason": self.decision.reason},
+        )
 
     def _current_model(self) -> str:
         try:
@@ -280,10 +323,15 @@ class TurnMind:
         hosted = configured_hosted_refs()
         if not hosted:
             return False
-        if self._swap_model(hosted[0]):
+        # The repair is only worth a request on a model the key actually answers.
+        target = answering_hosted_ref(hosted[0]) or ""
+        if not target:
+            self._emit("routing_escalation_skipped", {"reason": "no model on the free tier answers this key"})
+            return False
+        if self._swap_model(target):
             self._emit(
                 "routing_escalated",
-                {"from": self.decision.model, "to": hosted[0], "reason": self.outcome.get("note")},
+                {"from": self.decision.model, "to": target, "reason": self.outcome.get("note")},
             )
             return True
         return False

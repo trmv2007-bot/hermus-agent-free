@@ -137,6 +137,19 @@ class HermusAgent:
         self._turn_selected_tools = None
         return {"tools": len(self.tools)}
 
+    def _answer_or_failure(self, response) -> str:
+        """The model's answer, or an honest line when the call produced none.
+
+        A provider that fails hands back its own error text as the message
+        content, which reads to a person as the model answering with JSON — and
+        a rate-limited free tier does it on any turn. The response carries a
+        classified ``error`` for exactly this case.
+        """
+        error = str(getattr(response, "error", "") or "").strip()
+        if error:
+            return f"{error}. That request was not completed — try again in a moment."
+        return str(getattr(response, "content", "") or "")
+
     def _tools_for_turn(self, user_message: str, emit=None) -> list[dict] | None:
         """Tool schemas for this turn: a relevant subset, or the full catalog.
 
@@ -831,7 +844,7 @@ Rules:
                         },
                     )
                     continue
-                final_content = response.content or ""
+                final_content = self._answer_or_failure(response)
                 break
 
             # Record assistant tool-call turn
@@ -976,7 +989,7 @@ Rules:
                 }
             )
             final_resp = self.llm.chat(messages, tools=None)
-            final_content = final_resp.content or ""
+            final_content = self._answer_or_failure(final_resp)
             last_usage = getattr(final_resp, "usage", None) or last_usage
 
         if not final_content:

@@ -958,3 +958,55 @@ beside a working one, with the source named), a refused key naming its path, a 4
 migrating a model away, adoption recording, `/` landing on `/companion` after a migration
 and after an adoption, a genuine first run still reaching `/welcome`, and
 `state_path` following a late `HERMUS_HOME`.
+
+## 21 · The free tier, measured against the local model
+
+The escalation path had unit tests and no measurement. It now has one: the same 15
+fixed tasks, through the same turn path, one process and one isolated home per task,
+on `llama3.2:1b`, `lfm2.5:8b` and `mistral/ministral-8b-latest`.
+
+| model | tier | tasks passed | steps/task | verification | wall | rate-limited |
+|---|---|---|---|---|---|---|
+| `ollama/llama3.2:1b` | local | 7/15 | 2.67 | 7/10 | 397s | no |
+| `ollama/lfm2.5:8b` | local | 11/15 | 2.27 | 9/10 | 317s | no |
+| `mistral/ministral-8b-latest` | free hosted | 8/15 | 1.73 | 8/10 | 1031s | 10 of 15 tasks touched a 429 |
+
+**The first hosted run never reached the model.** Escalating turns were sent to the
+catalog's top-ranked free model without measuring it; this key answers
+`mistral-small-latest` with 429 and `ministral-8b-latest` with 200, so every escalated
+turn spent its only request on a rate limit and returned the provider's error as the
+answer. The escalation target is now the model the key answers, measured through the
+availability probe the picker already uses, and a turn that is already on the free tier
+stays on it instead of hopping to a second model of the same tier. When nothing on the
+tier answers, the turn stays local and the reason says so.
+
+**Tool calls were sent in a shape strict providers reject.** The loops carry a call as
+`{name, arguments, id}`; OpenAI-compatible providers expect the nested `function`
+object and Mistral validates it, answering HTTP 422. Ollama is lenient, so no local
+install ever saw it — but the second round of *every* tool-using turn failed on the
+free tier. Normalised once, at the wire boundary.
+
+**A provider error no longer reads as an answer.** A rate-limited call handed back its
+own error JSON as the assistant's message content, so a person saw the model replying
+with `{"code":"1300","raw_status_code":429}`. `LLMResponse` carries the classified
+failure and the turn says "mistral is rate-limiting requests right now. That request
+was not completed" instead.
+
+**What the free tier cannot do, and it is not the model.** Measured from the provider's
+own headers: `x-ratelimit-limit-req-minute: 2`, `x-ratelimit-limit-tokens-minute:
+40000`. One agentic turn costs two calls (the tool round and the answer), so a turn
+spends the whole minute's allowance; 10 of the 15 hosted tasks had a call refused, and
+five lost only their answer call after the work had already happened and been receipted.
+The benchmark paces itself (65s between tasks) and reports every 429 rather than hiding
+it, which is why its wall time is three times the local runs.
+
+**The harness is one command and re-runnable:**
+
+```bash
+python tests/eval/thinking_bench.py --models ollama/llama3.2:1b,ollama/lfm2.5:8b,mistral/ministral-8b-latest \
+  --env-file path/to/.env --pace 65 --out three-way.json
+```
+
+The model under test is pinned for the whole run (tier forced, every other provider key
+withheld), and a turn that ran on another model is a failed task rather than a quiet
+substitution. `--env-file` keeps a free-tier key out of the repo, the tests and the logs.
