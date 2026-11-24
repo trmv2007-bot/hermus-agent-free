@@ -221,6 +221,157 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 .reply[data-tone="error"] { color: var(--bad); }
 .reply[data-tone="quiet"] { color: var(--muted); }
 
+/* the turn: the words, and the plan beside them -------------------------
+   The plan is a column of hairline marks, not a checklist panel. A step is
+   hollow while it is still planned, a ring while the turn is working through
+   it, filled once a tool result backed it, and coral when one contradicted
+   it. It changes because the turn advanced, never on load for decoration. */
+.turn {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: clamp(20px, 3.4vw, 44px);
+}
+
+.plan {
+  flex: 0 0 214px;
+  width: 214px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding-top: 2px;
+  animation: settle 240ms var(--ease) both;
+}
+.plan[hidden] { display: none; }
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+  transition: color 180ms var(--ease), transform 120ms var(--ease);
+}
+.plan-head:active { transform: scale(0.97); }
+.plan-head:focus-visible {
+  outline: none;
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 3px rgba(95, 216, 255, 0.14);
+  border-radius: 4px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .plan-head:hover { color: var(--accent-ink); }
+}
+.plan-mark {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(90deg);
+  transition: transform 200ms var(--ease);
+}
+.plan-head[aria-expanded="false"] .plan-mark { transform: rotate(0deg); }
+
+.plan-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.plan-steps[hidden] { display: none; }
+.plan-step {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  gap: 9px;
+  align-items: baseline;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  transition: color 240ms var(--ease);
+}
+.plan-goal { overflow-wrap: anywhere; }
+.plan-step[data-state="running"] { color: var(--ink); }
+.plan-step[data-state="verified"] { color: var(--ink-2); }
+.plan-step[data-state="failed"] { color: var(--bad); }
+.plan-step[data-state="skipped"] { color: var(--dim); }
+
+.plan-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  transform: translateY(-1px);
+  transition: background-color 220ms var(--ease), border-color 220ms var(--ease), box-shadow 220ms var(--ease);
+}
+.plan-step[data-state="running"] .plan-dot {
+  border-color: var(--accent);
+  animation: ring 2.6s ease-in-out infinite;
+}
+.plan-step[data-state="verified"] .plan-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 9px rgba(95, 216, 255, 0.45);
+}
+.plan-step[data-state="failed"] .plan-dot {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+.plan-step[data-state="skipped"] .plan-dot { opacity: 0.45; }
+@keyframes ring {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(95, 216, 255, 0.12); }
+  50% { box-shadow: 0 0 0 5px rgba(95, 216, 255, 0.04); }
+}
+
+/* the receipt: what the turn proved, under the sentence it proved it for.
+   Same size and weight whether it is a hash or "Not verified" — the truth
+   sits where a person looks, not behind a banner. */
+.receipt {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  gap: 9px;
+  align-items: baseline;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  line-height: 1.55;
+  color: var(--muted);
+  animation: settle 260ms var(--ease) both;
+}
+.receipt[data-ok="false"] { color: var(--ink-2); }
+.receipt-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.receipt-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.75;
+  transform: translateY(-1px);
+}
+.receipt[data-ok="false"] .receipt-dot {
+  background: transparent;
+  border: 1px solid currentColor;
+  width: 6px;
+  height: 6px;
+}
+
 /* one inline approval, never a modal in front of the words */
 .card-inline {
   border: 1px solid var(--warn-line);
@@ -477,6 +628,23 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 }
 .sheet-hint { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
 
+/* ================= narrower: the plan moves above the words ================= */
+@media (max-width: 1120px) {
+  .turn {
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+  .plan {
+    flex: 0 0 auto;
+    width: min(660px, 100%);
+    order: -1;
+    gap: 10px;
+  }
+  .plan-steps { gap: 9px; }
+  .plan-step { font-size: 12px; }
+}
+
 /* ================= phone ================= */
 @media (max-width: 560px) {
   .being { width: 132px; height: 132px; }
@@ -503,9 +671,11 @@ body[data-busy="true"] .being { width: 104px; height: 104px; }
 @media (prefers-reduced-motion: reduce) {
   .being, .being .orb-ring, .being .wing, .being .spark,
   .hello, .exchange, .reply[data-streaming="true"]::after, .sheet[open],
-  .sheet-rows[data-settled="true"], .sheet-diagnostics-body {
+  .sheet-rows[data-settled="true"], .sheet-diagnostics-body, .plan, .receipt {
     animation: none !important;
   }
+  .plan-step[data-state="running"] .plan-dot { animation: none !important; box-shadow: 0 0 0 3px rgba(95, 216, 255, 0.12); }
   .sheet-diagnostics-mark { transition: none !important; }
   .being, .skip, .line, .systems { transition: none !important; }
+  .plan-head, .plan-mark, .plan-dot, .plan-step { transition: none !important; }
 }

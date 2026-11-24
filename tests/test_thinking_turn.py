@@ -288,3 +288,35 @@ def test_an_escalation_that_nothing_answers_stays_on_the_local_model(tmp_path, m
     assert mind.decision.model == "ollama/llama3.2:1b"
     assert "stays local" in mind.decision.reason
     assert swapped == [], "a tier that answers nothing must not be spent"
+
+
+def test_the_next_turn_does_not_resume_the_finished_plan(tmp_path):
+    """One agent serves every turn; a settled plan must not appear again."""
+    from core.thinking.turn import TurnMind
+
+    agent = ScriptedAgent([{"response": "Wrote it.", "steps": 1}, {"response": "Wrote it again.", "steps": 1}])
+    recorded, on_event = _events()
+
+    first = TurnMind(agent, "write the word hello into out.txt", mode="agent", emit=on_event, base_dir=tmp_path)
+    first.prepare()
+    (tmp_path / "out.txt").write_text("hello", encoding="utf-8")
+    first.finish(
+        {
+            "response": "Wrote out.txt.",
+            "tool_results": [
+                {
+                    "tool": "file_write",
+                    "args": {"path": str(tmp_path / "out.txt")},
+                    "result": {"success": True, "path": str(tmp_path / "out.txt")},
+                }
+            ],
+            "steps": 1,
+        }
+    )
+    assert agent.plan_override is None, "the finished plan stayed on the agent"
+
+    second = TurnMind(agent, "write the word hello into out.txt", mode="agent", emit=on_event, base_dir=tmp_path)
+    second.prepare()
+    fresh = next(data for kind, data in reversed(recorded) if kind == "plan_ready")
+    assert [step["status"] for step in fresh["steps"]] == ["pending", "pending", "pending"]
+    assert fresh["steps"] is not first.plan_progress.render(), "the second turn replayed the first turn's plan"

@@ -280,6 +280,11 @@ class TurnMind:
             rendered = self.plan_progress.settle()
             result["plan"] = {"goal": self.plan_progress.plan.goal, "steps": rendered}
             self._emit("plan_finished", {"steps": rendered})
+            # The plan belonged to this turn. A gateway reuses one agent across
+            # turns, so leaving it set would make the next turn resume a finished
+            # plan and show it as its own.
+            if getattr(self.agent, "plan_override", None) is self.plan_progress.plan:
+                self.agent.plan_override = None
         self._emit("receipt", self.receipt.to_dict())
         return self.receipt
 

@@ -3,6 +3,12 @@
 Conversation sessions sit above the canonical runtime. They provide bounded
 follow-up context, active-run steering/cancellation, and durable notification
 metadata without creating a second execution engine.
+
+A turn's *thinking* — the plan it followed, the receipt that proves what it
+changed, the tier it was routed to and why — rides along on the assistant turn
+it belongs to. The replay path (``GET /conversation/{id}``) therefore returns
+what the room showed live, so a reload redraws the plan and the receipt from the
+server rather than from memory in the page.
 """
 
 from __future__ import annotations
@@ -23,9 +29,14 @@ class ConversationTurn:
     text: str
     ts: float = field(default_factory=time.time)
     run_id: str | None = None
+    #: the plan / receipt / routing record the turn carried, when it had one
+    thinking: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        if out.get("thinking") is None:
+            out.pop("thinking", None)
+        return out
 
 
 @dataclass
@@ -59,6 +70,8 @@ class ConversationManager:
         self._sessions: dict[str, ConversationSession] = {}
         self._lock = threading.RLock()
         self._max_sessions = max(20, int(max_sessions))
+        #: per-run scratch for the turn's thinking, dropped when the run ends
+        self._live: dict[str, dict[str, Any]] = {}
         self._sink_remove = run_bus.add_sink(self._on_run_event)
 
     def get_or_create(
@@ -102,6 +115,7 @@ class ConversationManager:
             session.active_run_id = str(run_id)
             session.interrupted = False
             session.updated_at = time.time()
+            self._listen(run_id)
         run_bus.publish(run_id, "conversation_attached", {"session_id": session_id})
         return session.snapshot()
 
@@ -145,25 +159,175 @@ class ConversationManager:
     def snapshot(self, session_id: str) -> dict[str, Any]:
         return self.get_or_create(session_id).snapshot()
 
-    def _on_run_event(self, run_id: str, event: dict[str, Any]) -> None:
-        if event.get("type") not in {"run_finished", "run_error", "cancel_requested", "steer_applied"}:
+    # ------------------------------------------------------------ the record
+
+    def _listen(self, run_id: str) -> None:
+        """Start collecting this run's thinking; bounded so a dead run cannot leak."""
+        while len(self._live) >= self._max_sessions * 2:
+            self._live.pop(next(iter(self._live)), None)
+        self._live[str(run_id)] = {"answer": "", "thinking": {}}
+        # The job is submitted before the session claims it, so the first events
+        # can already be on the bus: replay them rather than lose the plan.
+        for event in run_bus.history(run_id, limit=400):
+            event_type = event.get("type")
+            if event_type in _THINKING_EVENTS or event_type == "agent_response":
+                self._absorb(run_id, event_type, event.get("data") or {})
+
+    def _absorb(self, run_id: str, event_type: str, data: dict[str, Any]) -> None:
+        """Fold one run event into the turn's thinking record, ignoring the rest.
+
+        Every value is coerced rather than trusted: the record is a convenience,
+        and a producer that emits a malformed step or receipt must cost that one
+        field rather than the whole turn's thinking.
+        """
+        if not isinstance(data, dict):
             return
-        data = event.get("data") or {}
         with self._lock:
+            live = self._live.get(run_id)
+            if live is None:
+                return
+            thinking: dict[str, Any] = live["thinking"]
+            if event_type == "agent_response":
+                text = _text(data.get("text"), 4000).strip()
+                if text:
+                    live["answer"] = text
+            elif event_type == "plan_ready":
+                thinking["plan"] = {"goal": _text(data.get("goal"), 300).strip(), "steps": self._steps(data.get("steps"))}
+            elif event_type == "plan_finished":
+                plan = thinking.setdefault("plan", {"goal": "", "steps": []})
+                plan["steps"] = self._steps(data.get("steps"))
+            elif event_type == "plan_step":
+                plan = thinking.get("plan")
+                steps = plan.get("steps") if isinstance(plan, dict) else None
+                number = _number(data.get("step"))
+                if steps and 0 < number <= len(steps):
+                    step = steps[number - 1]
+                    step["status"] = _text(data.get("status") or step.get("status") or "planned", 12)
+                    note = data.get("evidence")
+                    if isinstance(note, str) and note:
+                        step["evidence"] = [*step.get("evidence", []), _text(note, 120)][-3:]
+            elif event_type == "receipt":
+                thinking["receipt"] = self._receipt(data)
+            elif event_type == "routing_decision":
+                thinking["routing"] = {
+                    "tier": _text(data.get("tier"), 24),
+                    "model": _text(data.get("model"), 120),
+                    "reason": _text(data.get("reason"), 300),
+                }
+
+    @classmethod
+    def _steps(cls, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, (list, tuple)):
+            return []
+        return [cls._step(step) for step in value if isinstance(step, dict)][:8]
+
+    @staticmethod
+    def _step(step: dict[str, Any]) -> dict[str, Any]:
+        """The four fields a rail needs, and nothing that reads like a log."""
+        return {
+            "n": _number(step.get("n")),
+            "goal": _text(step.get("goal"), 200),
+            "action": _text(step.get("action"), 24),
+            "label": _text(step.get("label") or step.get("action"), 24),
+            "status": _text(step.get("status") or "pending", 12),
+        }
+
+    @staticmethod
+    def _receipt(data: dict[str, Any]) -> dict[str, Any]:
+        """Keep what a person is shown: the verdict and the citable evidence."""
+        evidence = []
+        items = data.get("evidence") if isinstance(data.get("evidence"), (list, tuple)) else []
+        for item in items[:4]:
+            if not isinstance(item, dict):
+                continue
+            info = item.get("data") if isinstance(item.get("data"), dict) else {}
+            evidence.append(
+                {
+                    "kind": _text(item.get("kind"), 12),
+                    "ok": bool(item.get("ok")),
+                    "detail": _text(item.get("detail"), 300),
+                    "data": {
+                        key: (value if isinstance(value, (int, float, bool)) else _text(value, 300))
+                        for key, value in info.items()
+                        if key in ("path", "sha256", "size", "command", "returncode", "url", "tool")
+                    },
+                }
+            )
+        problems = data.get("problems")
+        if not isinstance(problems, (list, tuple)):
+            problems = [problems] if problems else []
+        return {
+            "verified": bool(data.get("verified")),
+            "verdict": _text(data.get("verdict"), 32),
+            "changed": bool(data.get("changed")),
+            "claim": _text(data.get("claim"), 300),
+            "problems": [_text(problem, 240) for problem in list(problems)[:3]],
+            "evidence": evidence,
+        }
+
+    def _on_run_event(self, run_id: str, event: dict[str, Any]) -> None:
+        event_type = event.get("type")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            data = {}
+        if event_type in _THINKING_EVENTS or event_type == "agent_response":
+            self._absorb(run_id, event_type, data)
+        if event_type not in {"run_finished", "run_error", "cancel_requested", "steer_applied"}:
+            return
+        with self._lock:
+            live = self._live.pop(run_id, None)
             sessions = [s for s in self._sessions.values() if s.active_run_id == run_id]
             for session in sessions:
-                if event.get("type") == "run_finished":
+                if event_type == "run_finished":
                     session.active_run_id = None
-                if event.get("type") in {"run_finished", "run_error", "cancel_requested"}:
+                if event_type in {"run_finished", "run_error", "cancel_requested"}:
+                    self._record_answer(session, run_id, live or {})
                     session.notifications.append(
                         {
                             "run_id": run_id,
-                            "type": event.get("type"),
+                            "type": event_type,
                             "data": dict(data),
                             "ts": event.get("ts"),
                         }
                     )
                 session.updated_at = time.time()
+
+    def _record_answer(self, session: ConversationSession, run_id: str, live: dict[str, Any]) -> None:
+        """The answer the person heard, with the plan and receipt it carried."""
+        if not isinstance(live, dict):
+            return
+        answer = _text(live.get("answer"), 4000).strip()
+        if not answer:
+            return
+        recorded = live.get("thinking") if isinstance(live.get("thinking"), dict) else {}
+        thinking = {key: value for key, value in recorded.items() if value}
+        session.turns.append(
+            ConversationTurn(
+                "assistant",
+                answer[:4000],
+                run_id=run_id,
+                thinking=thinking or None,
+            )
+        )
+
+
+#: the run events that carry a turn's thinking
+_THINKING_EVENTS = frozenset({"plan_ready", "plan_step", "plan_finished", "receipt", "routing_decision"})
+
+
+def _text(value: Any, limit: int) -> str:
+    """A bounded string from anything a producer sent, never a raise."""
+    try:
+        return str(value or "")[:limit]
+    except Exception:
+        return ""
+
+
+def _number(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 conversation_manager = ConversationManager()
