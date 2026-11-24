@@ -958,3 +958,53 @@ beside a working one, with the source named), a refused key naming its path, a 4
 migrating a model away, adoption recording, `/` landing on `/companion` after a migration
 and after an adoption, a genuine first run still reaching `/welcome`, and
 `state_path` following a late `HERMUS_HOME`.
+
+---
+
+## 21 · Thinking you can watch — the plan, the receipt, the reason
+
+`#85` built the machinery honestly: every turn routes to a tier and records why, a
+multi-step turn emits a plan that advances only from tool results, and a verdict comes
+from `core/critic.py` with evidence attached. All of it was status lines the room never
+showed. A person could not see a single step of it.
+
+**The plan, beside the conversation.** A turn that will take more than one action now
+draws its plan in a column next to the thread: one hairline dot per step, hollow while
+planned, a ring while the turn is working through it, filled once a tool result backed
+it, coral when one contradicted it. It advances as the turn advances, collapses from its
+own heading, and moves above the conversation below 1120px. A step no tool result backed
+says *not reached* rather than passing as done. A turn with no plan adds no markup.
+
+**The receipt, attached to the answer.** A turn that changed something carries one line
+under the sentence that claims it: `notes.md · 4f2a9c1d` for a file (with the full path
+and hash on hover), `pytest -q · exit 0` for a command, `example.com/moon · 4120
+characters came back` for a page. A turn that could not prove itself says `Not verified —
+…` in that same place, at the same size and weight: no banner, no second text size. The
+runtime still appends its one evidence sentence to the answer text for every other
+channel; the room lifts that sentence out and draws it once.
+
+**The reason, in one clause.** The line under the input already names the model. It now
+carries the routing reason's first clause (`mistral/ministral-8b-latest · needs more
+reasoning than the local model reliably gives`), with the whole reason on hover. It is
+shown once, at the end of the turn, and never as a panel.
+
+**It survives a reload, because the server holds it.** A turn's thinking is recorded on
+the assistant turn it belongs to — plan, receipt, routing — and returned by
+`GET /conversation/{id}`, which also means the room's existing conversation restore now
+brings back the answers it was always written to show. A plan emitted before the session
+claimed its run is replayed off the bus instead of lost.
+
+**A finished plan no longer leaks into the next turn.** A gateway reuses one agent across
+turns, and `TurnMind` left its plan on that agent: the second turn resumed a settled plan
+and showed it as its own. Found by the 420px case of the new suite; fixed where the plan
+belongs to the turn.
+
+**Tests.** `tests/browser/test_room_thinking.py` (8 cases at 1440 and 420) drives a real
+turn through a local model that calls `file_write` and `file_read`, and reads the same
+surfaces after a reload; it builds one receipt per evidence kind with the engine's own
+`build_receipt` so a change in what the engine emits breaks the test rather than greying
+out the surface. It asserts no plan on a single-step turn, no receipt for a turn that
+changed nothing, no `Verified:`/`Not verified:` sentence left inside an answer, and no
+`pending` or panel-count string anywhere on the surface.
+`tests/test_conversation_thinking.py` (6 cases) proves the record itself: what it keeps,
+what it refuses to keep, and that it survives the submit/attach race.

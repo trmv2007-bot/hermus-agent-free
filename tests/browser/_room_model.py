@@ -28,6 +28,34 @@ ANSWER_TEXT = "I am here. This answer came from the local model on your machine.
 #: genuinely still running and press Stop.
 SLOW_MS = 0
 
+#: A gate a test can open when it has finished looking at the turn in flight.
+#: The stub waits on it before its last token, so "mid-flight" is a state the
+#: test chooses rather than a race it wins.
+GATE = None
+
+
+def _hold(after_tools: bool = True) -> None:
+    """Wait out a test's gate and its delay, before the answer is written."""
+    if GATE is not None and after_tools:
+        GATE.wait(timeout=120)
+    if SLOW_MS:
+        import time
+
+        time.sleep(SLOW_MS / 1000.0)
+
+
+#: A test may script a turn instead of letting the model only talk:
+#:
+#: * ``{"tools": [{"name": ..., "arguments": {...}}, ...], "answer": "..."}``
+#:   makes the model open by calling those tools, then answer with ``answer``
+#:   once the tool results come back — a real multi-step turn through the real
+#:   agent loop, with real tool results for the receipt;
+#: * ``{"claim": "..."}`` makes it assert work it never did, which is how an
+#:   honest "Not verified" is produced without a broken product.
+#:
+#: Empty means the model simply answers ``ANSWER_TEXT``.
+SCRIPT: dict = {}
+
 
 class _Handler(BaseHTTPRequestHandler):
     # HTTP/1.0 semantics on purpose: an SSE body is delimited by the close, so
@@ -63,11 +91,21 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         wants_stream = bool(body.get("stream"))
+        script = dict(SCRIPT)
+        after_tools = "Tool results (step" in json.dumps(body.get("messages") or [], default=str)
+        tools = list(script.get("tools") or []) if (not after_tools and body.get("tools")) else []
+        answer = ANSWER_TEXT
+        if after_tools and script.get("answer"):
+            answer = str(script["answer"])
+        elif script.get("claim"):
+            answer = str(script["claim"])
         if not wants_stream:
-            if SLOW_MS:
-                import time
-
-                time.sleep(SLOW_MS / 1000.0)
+            # The gate holds only the answer that follows real tool work: on a
+            # turn's first model call it would stall the plan itself.
+            _hold(after_tools)
+            message = {"role": "assistant", "content": "" if tools else answer}
+            if tools:
+                message["tool_calls"] = _wire_tools(tools)
             self._json(
                 {
                     "id": "chatcmpl-room",
@@ -76,8 +114,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "choices": [
                         {
                             "index": 0,
-                            "message": {"role": "assistant", "content": ANSWER_TEXT},
-                            "finish_reason": "stop",
+                            "message": message,
+                            "finish_reason": "tool_calls" if tools else "stop",
                         }
                     ],
                 }
@@ -90,13 +128,15 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
 
-        pieces = [ANSWER_TEXT[:18], ANSWER_TEXT[18:38], ANSWER_TEXT[38:]]
+        if tools:
+            self._stream_tool_calls(tools)
+            return
+
+        pieces = [answer[:18], answer[18:38], answer[38:]]
         try:
             for i, piece in enumerate(pieces):
-                if i == len(pieces) - 1 and SLOW_MS:
-                    import time
-
-                    time.sleep(SLOW_MS / 1000.0)
+                if i == len(pieces) - 1:
+                    _hold()
                 chunk = {
                     "id": "chatcmpl-room",
                     "object": "chat.completion.chunk",
@@ -117,6 +157,48 @@ class _Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             # The person pressed Stop; the socket closing is the expected result.
             return
+
+    def _stream_tool_calls(self, tools: list[dict]) -> None:
+        """One streamed tool-call chunk per call, then the stop that ends the turn."""
+        try:
+            for index, call in enumerate(_wire_tools(tools)):
+                chunk = {
+                    "id": "chatcmpl-room",
+                    "object": "chat.completion.chunk",
+                    "model": MODEL_NAME,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"tool_calls": [dict(call, index=index)]},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                self.wfile.flush()
+            final = {
+                "id": "chatcmpl-room",
+                "object": "chat.completion.chunk",
+                "model": MODEL_NAME,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            }
+            self.wfile.write(f"data: {json.dumps(final)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+
+def _wire_tools(tools: list[dict]) -> list[dict]:
+    """A scripted call in the OpenAI shape the gateway parses."""
+    return [
+        {
+            "id": f"call_{index}",
+            "type": "function",
+            "function": {"name": str(call.get("name") or ""), "arguments": json.dumps(call.get("arguments") or {})},
+        }
+        for index, call in enumerate(tools)
+    ]
 
 
 #: The base URL of the stub that is serving, set by :func:`serve`. The gateway

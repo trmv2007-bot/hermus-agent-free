@@ -136,10 +136,210 @@
   }
 
   function answer(reply, text, tone) {
-    reply.textContent = text;
+    var split = splitNote(text);
+    reply.textContent = split.body;
     reply.dataset.streaming = "false";
+    if (split.note) reply.dataset.note = split.note;
+    else reply.removeAttribute("data-note");
     if (tone) reply.dataset.tone = tone;
     else reply.removeAttribute("data-tone");
+  }
+
+  /* The runtime appends its one evidence sentence to the answer text, so every
+     channel that only has text still says what was proved. The room has the
+     structured receipt as well, so it takes that sentence off the answer and
+     draws it as the receipt line instead — one place, and not said twice. */
+  function splitNote(text) {
+    var body = String(text || "");
+    var at = body.search(/\n\n(?:Not verified|Verified): /);
+    if (at === -1) return { body: body, note: "" };
+    return { body: body.slice(0, at), note: body.slice(at + 2) };
+  }
+
+  /* ---------------------------------------------------------- the thinking */
+
+  /* What the turn already knows and the room used to keep to itself: the plan
+     it follows, the receipt that proves what changed, the tier it was routed
+     to. Drawn from the run's own events, and from the server's record of the
+     turn when the page is reloaded. A turn with none of it adds no markup. */
+
+  var plan = { steps: [], nodes: [], live: false, open: true };
+  var routingNow = null;
+
+  var STEP_WORDS = {
+    planned: "planned",
+    running: "in progress",
+    verified: "verified",
+    failed: "failed",
+    skipped: "not reached"
+  };
+
+  function stepState(status) {
+    if (status === "done") return "verified";
+    if (status === "failed") return "failed";
+    if (status === "skipped") return "skipped";
+    return "planned";
+  }
+
+  function paintPlan() {
+    /* While the turn runs, the first step still waiting is the one it is on:
+       that is the one honest place a "running" state can come from. */
+    var running = -1;
+    if (plan.live) {
+      for (var i = 0; i < plan.steps.length; i++) {
+        if (stepState(plan.steps[i].status) === "planned") { running = i; break; }
+      }
+    }
+    plan.steps.forEach(function (step, i) {
+      var state = i === running ? "running" : stepState(step.status);
+      var node = plan.nodes[i];
+      if (!node) return;
+      node.item.setAttribute("data-state", state);
+      node.words.textContent = STEP_WORDS[state] || state;
+    });
+    $("#planSteps").hidden = !plan.open;
+    $("#planHead").setAttribute("aria-expanded", plan.open ? "true" : "false");
+  }
+
+  function drawPlan(steps, live) {
+    var host = $("#planSteps");
+    plan.steps = (steps || []).map(function (step) {
+      return { goal: String(step.goal || step.label || ""), status: String(step.status || "pending") };
+    });
+    plan.live = !!live;
+    plan.nodes = [];
+    while (host.firstChild) host.removeChild(host.firstChild);
+
+    plan.steps.forEach(function (step) {
+      var item = document.createElement("li");
+      item.className = "plan-step";
+      var dot = document.createElement("span");
+      dot.className = "plan-dot";
+      dot.setAttribute("aria-hidden", "true");
+      var goal = document.createElement("span");
+      goal.className = "plan-goal";
+      goal.textContent = step.goal;
+      goal.title = step.goal;
+      var words = document.createElement("span");
+      words.className = "sr-only";
+      item.appendChild(dot);
+      item.appendChild(goal);
+      item.appendChild(words);
+      host.appendChild(item);
+      plan.nodes.push({ item: item, words: words });
+    });
+
+    paintPlan();
+    $("#plan").hidden = !plan.steps.length;
+  }
+
+  function clearPlan() {
+    plan.steps = [];
+    plan.nodes = [];
+    plan.live = false;
+    var host = $("#planSteps");
+    while (host.firstChild) host.removeChild(host.firstChild);
+    $("#plan").hidden = true;
+  }
+
+  /* the receipt ------------------------------------------------------- */
+
+  var CHARS_RE = /(\d+)\s*chars?\b/;
+
+  function tailPath(value) {
+    var parts = String(value || "").split(/[\\/]+/).filter(Boolean);
+    if (!parts.length) return "";
+    return parts.length <= 2 ? parts.join("/") : "…/" + parts.slice(-2).join("/");
+  }
+
+  function evidenceLine(item) {
+    var data = item.data || {};
+    var detail = String(item.detail || "").trim();
+    if (item.kind === "file") {
+      var where = tailPath(data.path);
+      var hash = String(data.sha256 || "");
+      var what = where && hash ? where + " · " + hash.slice(0, 8) : where;
+      if (what) return { text: what, full: String(data.path || "") + (hash ? " sha256:" + hash : "") };
+    }
+    if (item.kind === "command") {
+      var command = String(data.command || "").trim();
+      var code = data.returncode;
+      if (command) {
+        var exit = code === 0 || code ? " · exit " + code : "";
+        return { text: command + exit, full: detail || command };
+      }
+    }
+    if (item.kind === "web") {
+      var url = String(data.url || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+      var found = CHARS_RE.exec(detail);
+      if (url) return { text: url + (found ? " · " + found[1] + " characters came back" : ""), full: detail || url };
+    }
+    return detail ? { text: detail, full: detail } : null;
+  }
+
+  /* What the answer carries: one line per citable fact, and one honest line
+     when there is none. A turn that changed nothing says nothing at all. */
+  function receiptLines(receipt) {
+    if (!receipt) return [];
+    var citable = (receipt.evidence || []).filter(function (item) { return item && item.ok; });
+    if (receipt.verified) {
+      return citable.slice(0, 3).map(evidenceLine).filter(Boolean);
+    }
+    var problem = (receipt.problems || [])[0] || receipt.claim || "";
+    var sentence = problem ? "Not verified — " + problem : "Not verified";
+    return [{ text: sentence, full: sentence }];
+  }
+
+  function drawReceipt(row, lines, ok) {
+    if (!row || !lines.length) return;
+    Array.prototype.forEach.call(row.querySelectorAll(".receipt"), function (el) { el.remove(); });
+    lines.forEach(function (line) {
+      var p = document.createElement("p");
+      p.className = "receipt";
+      p.dataset.ok = ok ? "true" : "false";
+      var dot = document.createElement("span");
+      dot.className = "receipt-dot";
+      dot.setAttribute("aria-hidden", "true");
+      var text = document.createElement("span");
+      text.className = "receipt-text";
+      text.textContent = line.text;
+      p.title = line.full || line.text;
+      p.appendChild(dot);
+      p.appendChild(text);
+      row.appendChild(p);
+    });
+  }
+
+  function settleReceipt(row, receipt) {
+    if (!receipt) return;
+    drawReceipt(row, receiptLines(receipt), !!receipt.verified);
+  }
+
+  /* When the structured record never arrived — a stored result older than the
+     layer, a stream that dropped one event — the answer's own sentence is
+     still the honest line, drawn the same way. */
+  function settleNote(row) {
+    if (!row) return;
+    var reply = row.querySelector(".reply");
+    var note = reply && reply.dataset.note;
+    if (!note || row.querySelector(".receipt")) return;
+    var ok = note.indexOf("Not verified") !== 0;
+    drawReceipt(row, [{ text: note, full: note }], ok);
+  }
+
+  /* the routing reason ------------------------------------------------- */
+
+  /* One clause, in the line that already names the model: the full reason is
+     the hover, because a panel of routing reasons is the dashboard we left. */
+  function routingLine() {
+    if (!routingNow || !routingNow.model) return "";
+    var reason = String(routingNow.reason || "")
+      .split(/;\s*/)[0]
+      .replace(/^difficulty \d+:\s*/, "")
+      .replace(/^difficulty \d+\s+/, "")
+      .trim();
+    if (reason.length > 78) reason = reason.slice(0, 77).trim() + "…";
+    return routingNow.model + (reason ? " · " + reason : "");
   }
 
   /* ------------------------------------------------------- the stored answer */
@@ -158,6 +358,11 @@
         var text = result && (result.response || result.text || result.output || "");
         if (!text) return false;
         answer(reply, plain(text));
+        /* The stored result carries the same plan and receipt the stream did,
+           so a dead socket costs the person nothing but the live progress. */
+        if (result.plan && result.plan.steps && result.plan.steps.length) drawPlan(result.plan.steps, false);
+        if (result.receipt) settleReceipt(reply.parentNode, result.receipt);
+        settleNote(reply.parentNode);
         mood("idle");
         return true;
       })
@@ -173,6 +378,8 @@
   function say(text) {
     if (!text || busy) return;
     var reply = exchange(text).reply;
+    clearPlan();
+    routingNow = null;
     setBusy(true);
     under("");
     player.reset();
@@ -251,7 +458,33 @@
           return;
         }
         if (ev === "tool_call") {
-          under("working · " + String(d.tool || "using a tool"), "");
+          /* With a plan on screen the rail is the progress: a raw tool name in
+             the one line under the input would be the second voice. */
+          under(plan.live && plan.steps.length ? "" : "working · " + String(d.tool || "using a tool"), "");
+          return;
+        }
+        if (ev === "plan_ready") {
+          drawPlan(d.steps || [], true);
+          return;
+        }
+        if (ev === "plan_step") {
+          var at = Number(d.step || 0) - 1;
+          if (plan.steps.length && at >= 0 && at < plan.steps.length) {
+            plan.steps[at].status = String(d.status || plan.steps[at].status);
+            paintPlan();
+          }
+          return;
+        }
+        if (ev === "plan_finished") {
+          drawPlan(d.steps && d.steps.length ? d.steps : plan.steps, false);
+          return;
+        }
+        if (ev === "receipt") {
+          settleReceipt(reply.parentNode, d);
+          return;
+        }
+        if (ev === "routing_decision") {
+          routingNow = d;
           return;
         }
         if (ev === "mission_finished" && d.state === "failed") {
@@ -299,7 +532,10 @@
       if (!reply.textContent && !sawApproval) answer(reply, "Nothing came back.", "quiet");
       if (!sawApproval) speak.flush();
       if (reply.dataset.tone === "quiet") mood("error");
-      under(modelLabel);
+      settleNote(reply.parentNode);
+      var routed = reply.dataset.tone === "quiet" ? "" : routingLine();
+      under(routed || modelLabel);
+      $("#under").title = routed ? String(routingNow.reason || "") : "";
       $("#say").focus();
     }).catch(function () {
       setBusy(false);
@@ -310,6 +546,12 @@
     if (!busy) return;
     if (abort) abort.abort();
     player.reset();
+    /* A stopped turn is no longer working through a step: the rail keeps what
+       was proved and stops claiming a step is in progress. */
+    if (plan.live) {
+      plan.live = false;
+      paintPlan();
+    }
     if (jobId) {
       fetch("/jobs/" + encodeURIComponent(jobId) + "/cancel", { method: "POST", headers: headers() })
         .catch(function () { /* the abort already ended the socket */ });
@@ -1129,14 +1371,21 @@
         var turns = (snap && snap.turns) || [];
         if (!turns.length) { hello(); return; }
         hello();
+        /* The turn's thinking is on the turn, so a reload redraws the plan and
+           the receipt from the server instead of from the page's memory. */
         var lastQ = "";
+        var lastPlan = null;
         turns.slice(-6).forEach(function (t) {
           if (t.role === "user") { lastQ = t.text || ""; return; }
-          if (!lastQ) return;
+          if (t.role !== "assistant" || !lastQ) return;
           var made = exchange(lastQ);
           answer(made.reply, plain(t.text || ""));
+          settleReceipt(made.row, t.thinking && t.thinking.receipt);
+          settleNote(made.row);
+          lastPlan = t.thinking && t.thinking.plan ? t.thinking.plan.steps : null;
           lastQ = "";
         });
+        if (lastPlan && lastPlan.length) drawPlan(lastPlan, false);
         markSaid();
         toBottom(true);
       })
@@ -1195,6 +1444,10 @@
     voiceStatus();
 
     $("#systemsBtn").addEventListener("click", openSystems);
+    $("#planHead").addEventListener("click", function () {
+      plan.open = !plan.open;
+      paintPlan();
+    });
     $("#systemsClose").addEventListener("click", closeSystems);
     $("#systems").addEventListener("close", function () {
       $("#systemsBtn").setAttribute("aria-expanded", "false");
@@ -1234,6 +1487,11 @@
   window.HermusRoom = {
     sections: SECTIONS,
     plain: plain,
+    splitNote: splitNote,
+    drawPlan: drawPlan,
+    settleReceipt: settleReceipt,
+    routingLine: routingLine,
+    setRouting: function (decision) { routingNow = decision || null; },
     checkSystems: checkSystems
   };
 })();

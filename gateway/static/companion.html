@@ -60,8 +60,22 @@
     </svg>
   </div>
 
-  <!-- The conversation is the page. One exchange at a time, plain text. -->
-  <div class="thread" id="thread" role="log" aria-live="polite" aria-label="Conversation with your companion"></div>
+  <div class="turn">
+    <!-- The conversation is the page. One exchange at a time, plain text. -->
+    <div class="thread" id="thread" role="log" aria-live="polite" aria-label="Conversation with your companion"></div>
+
+    <!-- The plan, for the turn that has one: the steps it is working through,
+         each advancing only when a tool result backs it. It is drawn from the
+         server's record of the turn, so a reload brings it back, and a turn
+         with no plan leaves it out of the page entirely. -->
+    <aside class="plan" id="plan" aria-label="The plan for this turn" hidden>
+      <button class="plan-head" id="planHead" type="button" aria-expanded="true" aria-controls="planSteps">
+        <span class="plan-name">Plan</span>
+        <svg class="plan-mark" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.2 2.6 8.2 6.4 4.2 10.2"/></svg>
+      </button>
+      <ol class="plan-steps" id="planSteps"></ol>
+    </aside>
+  </div>
 </main>
 
 <!-- The dock reads left to right and tabs left to right: microphone, then the

@@ -247,3 +247,35 @@ def test_thinking_can_be_switched_off_entirely(monkeypatch):
     result = execute("what is the capital of France?", agent=agent, mode="agent", prefer="chat")
     assert "routing" not in result
     assert "receipt" not in result
+
+
+def test_the_next_turn_does_not_resume_the_finished_plan(tmp_path):
+    """One agent serves every turn; a settled plan must not appear again."""
+    from core.thinking.turn import TurnMind
+
+    agent = ScriptedAgent([{"response": "Wrote it.", "steps": 1}, {"response": "Wrote it again.", "steps": 1}])
+    recorded, on_event = _events()
+
+    first = TurnMind(agent, "write the word hello into out.txt", mode="agent", emit=on_event, base_dir=tmp_path)
+    first.prepare()
+    (tmp_path / "out.txt").write_text("hello", encoding="utf-8")
+    first.finish(
+        {
+            "response": "Wrote out.txt.",
+            "tool_results": [
+                {
+                    "tool": "file_write",
+                    "args": {"path": str(tmp_path / "out.txt")},
+                    "result": {"success": True, "path": str(tmp_path / "out.txt")},
+                }
+            ],
+            "steps": 1,
+        }
+    )
+    assert agent.plan_override is None, "the finished plan stayed on the agent"
+
+    second = TurnMind(agent, "write the word hello into out.txt", mode="agent", emit=on_event, base_dir=tmp_path)
+    second.prepare()
+    fresh = next(data for kind, data in reversed(recorded) if kind == "plan_ready")
+    assert [step["status"] for step in fresh["steps"]] == ["pending", "pending", "pending"]
+    assert fresh["steps"] is not first.plan_progress.render(), "the second turn replayed the first turn's plan"
