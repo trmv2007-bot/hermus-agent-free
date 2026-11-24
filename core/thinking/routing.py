@@ -143,6 +143,19 @@ def _difficulty_signals(text: str) -> tuple[int, list[str]]:
     return difficulty, signals
 
 
+def _hosted_target(current: str, hosted: list[str]) -> str:
+    """The free hosted model a turn should run on.
+
+    A turn already running on a free hosted model whose provider has a key is
+    *on* the escalation tier: moving it to a different model of the same tier
+    spends a second request and can land on one the key does not rank. It only
+    moves when it is running somewhere else.
+    """
+    if tier_of(current) == TIER_FREE_HOSTED and provider_of(current) in {provider_of(ref) for ref in hosted}:
+        return current
+    return hosted[0]
+
+
 def decide_route(
     text: str,
     *,
@@ -214,14 +227,21 @@ def decide_route(
             )
         return _decide(
             TIER_FREE_HOSTED,
-            hosted[0],
+            _hosted_target(local_model, hosted),
             f"difficulty {diff}: no local model is bound, so the free hosted tier is the cheapest option",
         )
 
     if hosted:
+        target = _hosted_target(local_model, hosted)
+        if target == local_model:
+            return _decide(
+                TIER_FREE_HOSTED,
+                target,
+                f"difficulty {diff} would escalate, and the turn is already on the free tier ({target})",
+            )
         return _decide(
             TIER_FREE_HOSTED,
-            hosted[0],
+            target,
             f"difficulty {diff} needs more reasoning than the local model reliably gives; "
             "escalating to the configured free-tier key",
         )
@@ -300,6 +320,69 @@ def _free_key_present(provider: str) -> bool:
         return bool(entries)
     except Exception:
         return False
+
+
+def _free_key(provider: str) -> str:
+    """The key itself, for the availability probe. Never logged, never stored."""
+    env_key = FREE_HOSTED_KEY_ENV.get(provider)
+    value = os.environ.get(env_key) if env_key else ""
+    if value:
+        return str(value).strip()
+    try:
+        from ..multi_key import multi_key_manager
+
+        return str(multi_key_manager.get_key(provider) or "").strip()
+    except Exception:
+        return ""
+
+
+def answering_hosted_ref(catalog_ref: str) -> str:
+    """The model this free key *answers* with, or ``""`` when it answers none.
+
+    The catalog's first choice is a ranking, and a free plan rate-limits the top
+    of its own list: Mistral's key answers ``ministral-8b-latest`` with 200 and
+    the catalog's top pick with 429. Naming the unmeasured top pick meant an
+    escalated turn spent its one request on a rate limit and got the provider's
+    error back as the answer — the escalation path failing at the seam, not at
+    the model.
+
+    So the model is measured before a turn is sent to it, through the same
+    availability probe the picker uses (and its cache, so a warm process pays
+    nothing). Three honest outcomes:
+
+    * a candidate answers -> that candidate is the escalation target, even when
+      the catalog ranks it second;
+    * every candidate answers 429/404/401 -> ``""``: this key cannot run the
+      turn, and saying so beats spending a request to fail;
+    * nothing could be measured (offline, probing disabled) -> the catalog
+      choice, unchanged, because there is no evidence against it.
+    """
+    provider = provider_of(catalog_ref)
+    if provider not in FREE_HOSTED_PROVIDERS:
+        return ""
+    key = _free_key(provider)
+    if not key:
+        return ""
+    try:
+        from .. import model_health
+    except Exception:
+        return catalog_ref
+    names: list[str] = []
+    if "/" in str(catalog_ref):
+        names.append(str(catalog_ref).split("/", 1)[1])
+    names += [entry.name for entry in catalog.ranked(provider) if entry.name not in names]
+    evidence = False
+    for name in names:
+        try:
+            state = model_health.probe(provider, key, name)
+        except Exception:
+            return catalog_ref
+        if state.state == model_health.OK:
+            return f"{provider}/{name}"
+        if state.state in (model_health.BUSY, model_health.GONE, model_health.DENIED):
+            evidence = True
+    # Measured refusals with nothing answering: this tier cannot run a turn now.
+    return "" if evidence else catalog_ref
 
 
 # --------------------------------------------------------------- ledger

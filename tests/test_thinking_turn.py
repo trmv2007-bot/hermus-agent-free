@@ -192,6 +192,8 @@ def test_an_under_routed_local_turn_escalates_its_repair(tmp_path, monkeypatch):
     from core.thinking.turn import TurnMind
 
     monkeypatch.setattr(turn_module, "configured_hosted_refs", lambda: ["groq/llama-3.1-8b-instant"])
+    # the escalation target is the model the key answers, measured outside this test
+    monkeypatch.setattr(turn_module, "answering_hosted_ref", lambda ref: ref)
 
     agent = ScriptedAgent(
         [
@@ -247,6 +249,45 @@ def test_thinking_can_be_switched_off_entirely(monkeypatch):
     result = execute("what is the capital of France?", agent=agent, mode="agent", prefer="chat")
     assert "routing" not in result
     assert "receipt" not in result
+
+
+def test_an_escalated_turn_is_repicked_onto_the_model_that_answers(tmp_path, monkeypatch):
+    """Routing's catalog pick can 429; the turn follows the measured model instead."""
+    import core.thinking.turn as turn_module
+    from core.thinking.turn import TurnMind
+
+    monkeypatch.setattr(turn_module, "configured_hosted_refs", lambda: ["mistral/mistral-small-latest"])
+    monkeypatch.setattr(turn_module, "answering_hosted_ref", lambda ref: "mistral/ministral-8b-latest")
+
+    agent = ScriptedAgent([{"response": "done", "steps": 1}], model="ollama/llama3.2:1b")
+    recorded, on_event = _events()
+    mind = TurnMind(agent, "Audit, refactor and migrate the module.", mode="agent", emit=on_event, base_dir=tmp_path)
+    swapped: list[str] = []
+    monkeypatch.setattr(mind, "_swap_model", lambda ref: swapped.append(ref) or True)
+    mind.prepare()
+    assert mind.decision.tier == "free_hosted"
+    assert mind.decision.model == "mistral/ministral-8b-latest"
+    assert "did not answer" in mind.decision.reason
+    assert swapped == ["mistral/ministral-8b-latest"]
+
+
+def test_an_escalation_that_nothing_answers_stays_on_the_local_model(tmp_path, monkeypatch):
+    import core.thinking.turn as turn_module
+    from core.thinking.turn import TurnMind
+
+    monkeypatch.setattr(turn_module, "configured_hosted_refs", lambda: ["mistral/mistral-small-latest"])
+    monkeypatch.setattr(turn_module, "answering_hosted_ref", lambda ref: "")
+
+    agent = ScriptedAgent([{"response": "done", "steps": 1}], model="ollama/llama3.2:1b")
+    recorded, on_event = _events()
+    mind = TurnMind(agent, "Audit, refactor and migrate the module.", mode="agent", emit=on_event, base_dir=tmp_path)
+    swapped: list[str] = []
+    monkeypatch.setattr(mind, "_swap_model", lambda ref: swapped.append(ref) or True)
+    mind.prepare()
+    assert mind.decision.tier == "local"
+    assert mind.decision.model == "ollama/llama3.2:1b"
+    assert "stays local" in mind.decision.reason
+    assert swapped == [], "a tier that answers nothing must not be spent"
 
 
 def test_the_next_turn_does_not_resume_the_finished_plan(tmp_path):
