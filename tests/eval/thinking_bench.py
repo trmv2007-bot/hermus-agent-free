@@ -441,7 +441,9 @@ def _task_row(task: dict, *, model: str, base_url: str, timeout: float, work: Pa
     proc = subprocess.Popen(
         cmd,
         env=isolate_env(task_work, model=model),
-        cwd=str(REPO),
+        # The task's own directory, never the checkout: a model that drops an
+        # absolute path writes its file here instead of into the repo.
+        cwd=str(task_work),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
