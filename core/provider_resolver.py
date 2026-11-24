@@ -38,6 +38,10 @@ _FALLBACK_EXCLUDE_LOCAL = {"ollama", "lmstudio", "nollama"}
 
 #: canonical ordering used when nothing else differentiates two providers.
 _PROVIDER_ORDER = (
+    # keyless free tiers come before the keyed ones: they answer on a machine
+    # where nobody has pasted anything yet, which is the whole ladder's premise.
+    "ovh",
+    "pollinations",
     "openai",
     "groq",
     "openrouter",
@@ -68,6 +72,14 @@ def _no_auth(provider: str) -> bool:
     except Exception:
         preset = {}
     return bool(preset.get("no_auth") or provider in _LOCAL_NO_AUTH)
+
+
+def _keyless(provider: str) -> bool:
+    """Is this a hosted endpoint that answers with no credential at all?"""
+    try:
+        return bool(get_provider(provider).get("keyless"))
+    except Exception:
+        return False
 
 
 def _is_retired(provider: str) -> bool:
@@ -224,8 +236,8 @@ def discover_runtime_bundles(include_local: bool = True) -> list[dict[str, Any]]
                 "key": key,
                 "base_url": base,
                 "default_model": preset.get("default_model"),
-                "name": f"{provider}_env" if key else f"{provider}_local",
-                "source": "env" if key else "local",
+                "name": f"{provider}_env" if key else (f"{provider}_keyless" if preset.get("keyless") else f"{provider}_local"),
+                "source": "env" if key else ("keyless" if preset.get("keyless") else "local"),
                 "supports_tools": preset.get("supports_tools") is not False,
                 "max_tools": preset.get("max_tools"),
                 "retired": bool(preset.get("retired")),
@@ -270,6 +282,11 @@ def select_usable_bundle(
     for b in bundles:
         provider = b.get("provider") or "custom"
         if _is_retired(provider):
+            continue
+        # This function answers "which credential should this call use". A
+        # keyless rung holds no credential and is chosen by the ladder in
+        # core.brain, so it never competes with a key the person configured.
+        if _keyless(provider):
             continue
         tools_ok = b.get("supports_tools") is not False
         if require_tools and not tools_ok:
@@ -341,6 +358,8 @@ def list_available_providers(probe: bool = False) -> list[dict[str, Any]]:
         reason = []
         if not configured:
             reason.append("not configured")
+        elif _keyless(provider) and not env_cred:
+            reason.append("answers without a key (anonymous free tier)")
         elif (
             not env_cred and provider_bundles and all(b.get("key") == "" and b.get("source") == "local" for b in provider_bundles)
         ):
@@ -367,6 +386,8 @@ def list_available_providers(probe: bool = False) -> list[dict[str, Any]]:
                 "supports_tools": preset.get("supports_tools") is not False,
                 "max_tools": preset.get("max_tools"),
                 "retired": bool(preset.get("retired")),
+                "keyless": _keyless(provider),
+                "needs_key": not (no_auth or _keyless(provider)),
                 "reachable": reachable,
                 "health_status": status,
                 "reason": "; ".join(reason),

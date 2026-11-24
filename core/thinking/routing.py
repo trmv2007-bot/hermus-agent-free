@@ -50,7 +50,9 @@ FREE_HOSTED_PROVIDERS = ("groq", "mistral", "openrouter", "cerebras", "together"
 #: there is one ranked list per provider: routing escalates to the strongest free
 #: model, never to whatever name this file happened to remember.
 FREE_HOSTED_DEFAULT_MODELS = {
-    **{provider: catalog.default_model(provider) or "" for provider in catalog.CATALOG},
+    # Keyed tiers only: this map is what routing may escalate to, and the
+    # keyless rungs are chosen by the ladder in core.brain instead.
+    **{provider: catalog.default_model(provider) or "" for provider in FREE_HOSTED_PROVIDERS if catalog.ranked(provider)},
     "cerebras": "llama3.1-8b",
     "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
 }

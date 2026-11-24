@@ -956,7 +956,8 @@ the state path still follows the environment.
 **Tests:** 25 in `tests/test_model_ranking.py`, now covering key precedence (a dead key
 beside a working one, with the source named), a refused key naming its path, a 429 never
 migrating a model away, adoption recording, `/` landing on `/companion` after a migration
-and after an adoption, a genuine first run still reaching `/welcome`, and
+and after an adoption, a genuine first run still reaching `/welcome` (superseded: once
+the keyless rung answers, a first run opens the room — see §21), and
 `state_path` following a late `HERMUS_HOME`.
 
 ## 21 · The free tier, measured against the local model
@@ -1059,3 +1060,103 @@ changed nothing, no `Verified:`/`Not verified:` sentence left inside an answer, 
 `pending` or panel-count string anywhere on the surface.
 `tests/test_conversation_thinking.py` (6 cases) proves the record itself: what it keeps,
 what it refuses to keep, and that it survives the submit/attach race.
+
+## 23 · It answers before it asks you anything — a keyless free tier
+
+A free, local-first companion whose first five minutes are "install a model, or paste a
+key, or get a mock echo" is not free and not local-first; it is a setup form. Two
+OpenAI-compatible endpoints answer **with no key and no account**, measured from this
+machine with plain `curl` before anything was written:
+
+- **Pollinations** (`https://text.pollinations.ai/openai`), anonymous, model `openai-fast`
+  (GPT-OSS 20B): answers every request sent to it.
+- **OVHcloud AI Endpoints** (`https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`), anonymous,
+  33 models including `Qwen3.5-397B-A17B`, which returned a proper tool call in 1.2s.
+  Its own headers then reported `x-ratelimit-limit-year: 1` and `retry-after: 3242329`:
+  **one request per model per address per year**, not the 2-a-minute the documentation
+  suggests. So it is the *second* keyless rung, and a refusal that states a wait is
+  believed for as long as it says.
+
+### The ladder
+
+`core/brain.py` resolves down four rungs, in order, and records why each one was passed
+over in the same `{ref, why}` shape the keyed tiers already used:
+
+| rung | what answers | why it is where it is |
+|---|---|---|
+| `local` | a model on this machine | no rate limit, no allowance spent, nothing leaves the computer |
+| `keyless` | Pollinations, then OVHcloud | no account, no key — the rung that makes a clean install answer |
+| `keyed` | Groq / Mistral / OpenRouter / Gemini | used when a key exists and the rungs above cannot answer |
+| `stub` | the offline placeholder | named as the stub, with the one command that fixes it |
+
+Local-first is not taste. Two sibling threads ran this repository's own 15-task tool set
+through the real turn path on this PC (`tests/eval/thinking_bench.py`, one isolated home
+per task, 2026-11-24): **local 8B 11/15 in 317s**, local 1B 7/15 in 397s, **hosted free
+tier 8/15 in 1031s** because the provider refused 10 of the 15 tasks with HTTP 429. The
+ladder's own reason strings carry that evidence, so a person reading why it answered
+locally reads a measurement rather than an adjective — and when it falls through to a
+keyless endpoint, the same numbers are why the room says so.
+
+### The allowance is a queue, not an error
+
+`core/free_tier.py` holds a token bucket per provider **and model** (the endpoint counts
+them separately). A request that would exceed a published ceiling is reserved, told how
+long it waits, and sent:
+
+```
+the free endpoint allows 2 requests a minute — this will go in 12s
+```
+
+A wait longer than a turn gives up instead of freezing, and the next rung answers. A
+refusal is remembered for exactly as long as the endpoint says it will last
+(`retry-after`), so a spent yearly allowance is skipped with that sentence in the ladder
+rather than retried on every question; a burst 429 is remembered as capacity and the rung
+stays. The same rung order drives the transport: a keyless refusal hops to the next
+keyless provider, then to a stored key, so a rate limit is a delay and not a dead end.
+
+### Zero setup, and honesty about it
+
+From a clean `HERMUS_HOME` with every key unset and no local model:
+
+```
+== the ladder ==
+  local    skipped  -                              Ollama is installed but not running
+  keyless  chose    pollinations/openai-fast       openai-fast answers on Pollinations with no key; ...
+
+pickup  : answering with openai-fast from the Pollinations free tier — no key, no account
+privacy : your words leave this machine for Pollinations — install Ollama to keep them local
+faster  : install Ollama to answer on your machine with no rate limit, or paste a free Groq key ...
+
+you : In one sentence, what is the capital of France?
+it  : Paris is the capital of France.
+took: 7.3s end to end
+```
+
+`redirect_target()` opens the room whenever any rung can answer — the welcome screen is
+now only for an install with nothing left — and `/api/v1/onboarding/hello` resolves and
+records the brain itself when nobody has chosen one. `state_payload` carries `privacy`,
+`speed` and `ladder`; the room's model line already renders `pickup · source`, so the
+sentence "your words leave this machine for <endpoint>" appears under the first hosted
+answer, and Systems shows the same fact plus the one line that makes it faster.
+
+### What did not change, and why
+
+`qwen3.5:2b` exists in the Ollama registry and is the better tool-caller on paper, so it
+was pulled and measured before touching the installer's default: **145s for one
+sentence, and 0 of 15 tool tasks finishing (each killed at 200s with zero steps)**, because
+its default reasoning mode spends the whole budget thinking. With `think: false` the same
+request answers in **0.4s**. The switch belongs to the thinking surfaces, which another
+thread owns, so `SMALLEST_LOCAL_MODEL` stays `llama3.2:1b` and the measurement is recorded
+beside the constant instead of being repeated.
+
+**Tests:** 32 in `tests/test_free_tier.py`, all against fakes and injected clocks — no
+test calls a live endpoint. They pin the keyless catalog order with no keys, the bucket's
+wait-rather-than-error (including per-model allowances and an ordered queue), the hop from
+the first keyless rung to the second, a burst 429 kept as capacity against a spent
+allowance remembered for its stated wait, the ladder's skip reasons at every rung, the
+stub only when every rung says why, onboarding opening the room without ever asking for a
+key, and the first answer resolving its own model. `tests/test_model_ranking.py` and
+`tests/test_first_run_onboarding.py` were updated where the ladder changed the expected
+answer: a local model now wins ahead of a stronger hosted one, and a first run opens the
+room.
+

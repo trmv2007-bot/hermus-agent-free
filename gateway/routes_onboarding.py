@@ -28,7 +28,7 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from core import brain as brain_mod
-from core import model_catalog, onboarding
+from core import free_tier, model_catalog, onboarding
 
 router = APIRouter(tags=["onboarding"])
 
@@ -68,10 +68,13 @@ def redirect_target() -> str:
     state = onboarding.load()
     if onboarding.is_usable(state):
         return "/companion"
-    if onboarding.install_has_history():
-        resolved = brain_mod.resolve_brain(preferred=(state.get("brain") or {}).get("model"))
-        if resolved["kind"] != "stub":
-            return "/companion"
+    # A run that has no model recorded still opens the room when the ladder
+    # resolves something: the keyless rung means a clean machine can answer, and
+    # sending it to a wizard first would be asking for a decision the product no
+    # longer needs.
+    resolved = brain_mod.resolve_brain(preferred=(state.get("brain") or {}).get("model"))
+    if resolved["kind"] != "stub":
+        return "/companion"
     return "/welcome"
 
 
@@ -100,6 +103,13 @@ def state_payload() -> dict[str, Any]:
         "brain": state.get("brain"),
         "resolved": resolved,
         "pickup": brain_mod.pickup_line(resolved),
+        # What the person is owed beside the answer: that a keyless answer leaves
+        # the machine, what would make it faster, and the walk that decided it.
+        "privacy": resolved.get("privacy") or "",
+        "speed": brain_mod.speed_hint(resolved),
+        "ladder": resolved.get("ladder") or [],
+        "keyless": list(model_catalog.KEYLESS_PROVIDERS),
+        "wait_notice": (free_tier.recent_notices(1) or [""])[0],
         "fix": brain_mod.fix_command(resolved, status=status),
         "check": state.get("check"),
         "profiles": {
@@ -301,20 +311,28 @@ def _answer_stream(text: str):
     name = state.get("name") or onboarding.DEFAULT_NAME
     chosen = state.get("brain") or {}
     model = chosen.get("model")
-    if not model:
-        resolved_now = brain_mod.resolve_brain()
-        yield _sse(
-            "error",
-            {
-                "message": "No model is set up yet, so there is nothing to answer with.",
-                "fix": brain_mod.fix_command(resolved_now),
-            },
-        )
-        onboarding.save(onboarding.record_check(state, ok=False, model=None, reason="no model chosen"))
-        yield _sse("done", {"ok": False, "reason": "no model chosen"})
-        return
-
-    resolved = brain_mod.resolve_brain(preferred=model)
+    if model:
+        resolved = brain_mod.resolve_brain(preferred=model)
+    else:
+        # Nothing was ever chosen — a clean home, no key, nothing pulled. The
+        # ladder answers anyway, and the choice is recorded so the next screen
+        # knows what is talking. A stub here is a real "nothing can answer", and
+        # it says what the fix is instead of pretending to be a welcome.
+        resolved = brain_mod.resolve_brain()
+        if resolved["kind"] == "stub":
+            yield _sse(
+                "error",
+                {
+                    "message": "No model is set up yet, so there is nothing to answer with.",
+                    "fix": brain_mod.fix_command(resolved),
+                },
+            )
+            onboarding.save(onboarding.record_check(state, ok=False, model=None, reason="no model chosen"))
+            yield _sse("done", {"ok": False, "reason": "no model chosen"})
+            return
+        onboarding.save(onboarding.record_brain(state, resolved))
+        state = onboarding.load()
+        model = resolved["model"]
     if resolved["kind"] == "stub":
         reason = resolved.get("reason") or "no model is installed"
         fix = brain_mod.fix_command(resolved)
@@ -329,7 +347,16 @@ def _answer_stream(text: str):
         yield _sse("done", {"ok": False, "reason": reason})
         return
 
-    yield _sse("status", {"state": "loading", "model": resolved["name"], "pickup": brain_mod.pickup_line(resolved)})
+    yield _sse(
+        "status",
+        {
+            "state": "loading",
+            "model": resolved["name"],
+            "pickup": brain_mod.pickup_line(resolved),
+            "privacy": resolved.get("privacy") or "",
+            "speed": brain_mod.speed_hint(resolved),
+        },
+    )
 
     messages = [
         {"role": "system", "content": SYSTEM.format(name=name)},
@@ -376,6 +403,8 @@ def _answer_stream(text: str):
             "ok": True,
             "model": resolved["name"],
             "pickup": brain_mod.pickup_line(resolved),
+            "privacy": resolved.get("privacy") or "",
+            "speed": brain_mod.speed_hint(resolved),
             "first_token_ms": ms,
             "complete": onboarding.is_complete(onboarding.load()),
         },

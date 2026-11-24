@@ -30,7 +30,7 @@ os.environ.pop("HERMUS_MODEL", None)
 from fastapi.testclient import TestClient  # noqa: E402
 
 import gateway.gateway as gw  # noqa: E402
-from core import brain, onboarding  # noqa: E402
+from core import brain, free_tier, model_catalog, onboarding  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -64,6 +64,17 @@ def _no_named_model():
     finally:
         if saved is not None:
             os.environ["HERMUS_MODEL"] = saved
+
+
+@contextlib.contextmanager
+def _no_keyless_rung():
+    """Both keyless rungs marked down, so a case can reach the keyed rung or the stub."""
+    for provider in model_catalog.KEYLESS_PROVIDERS:
+        free_tier.mark_down(provider, "marked down by this test")
+    try:
+        yield
+    finally:
+        free_tier.reset_health()
 
 
 def _brain(status):
@@ -142,17 +153,30 @@ def test_recording_a_new_brain_invalidates_the_previous_proof():
 # ------------------------------------------------------------------- routing
 
 
-def test_root_redirects_to_welcome_while_incomplete():
-    """An install with nothing to answer with opens first run.
+def test_root_opens_the_room_when_a_keyless_tier_can_answer():
+    """A clean machine with no key and nothing installed still opens the room.
 
-    A model that is merely reachable no longer counts when the workspace has never
-    been used, and the inverse matters too: patched here so a machine actually
-    running Ollama cannot change what this asserts.
+    This is the zero-setup promise: the keyless rung answers, so a wizard before
+    the first answer would be asking for a decision the product no longer needs.
     """
     _reset_state()
     original = _brain(NO_LOCAL)
     try:
-        r = _client().get("/", follow_redirects=False)
+        with _no_named_model():
+            r = _client().get("/", follow_redirects=False)
+    finally:
+        brain.local_status = original
+    assert r.status_code in (302, 307)
+    assert r.headers["location"] == "/companion"
+
+
+def test_root_still_opens_first_run_when_nothing_can_answer():
+    """The welcome screen is for an install with no rung left, never for a working one."""
+    _reset_state()
+    original = _brain(NO_LOCAL)
+    try:
+        with _no_keyless_rung():
+            r = _client().get("/", follow_redirects=False)
     finally:
         brain.local_status = original
     assert r.status_code in (302, 307)
@@ -222,11 +246,25 @@ def test_state_endpoint_reports_the_resolved_model_and_its_source():
     assert payload["pickup"] == "answering with mistral:7b on your machine"
 
 
-def test_free_tier_is_second_and_named_as_a_free_tier():
+def test_the_keyless_rung_is_second_and_asks_for_nothing():
+    original = _brain(NO_LOCAL)
+    try:
+        with _no_named_model():
+            resolved = brain.resolve_brain()
+    finally:
+        brain.local_status = original
+    assert resolved["kind"] == "keyless"
+    assert resolved["provider"] == model_catalog.KEYLESS_PROVIDERS[0]
+    assert "free tier" in brain.pickup_line(resolved)
+    assert "no key" in brain.pickup_line(resolved)
+    assert "leave this machine" in resolved["privacy"]
+
+
+def test_a_keyed_free_tier_answers_when_the_keyless_rungs_are_down():
     original = _brain(NO_LOCAL)
     os.environ["GROQ_API_KEY"] = "gsk_test_not_a_real_key"
     try:
-        with _no_named_model():
+        with _no_named_model(), _no_keyless_rung():
             resolved = brain.resolve_brain()
     finally:
         brain.local_status = original
@@ -239,7 +277,7 @@ def test_free_tier_is_second_and_named_as_a_free_tier():
 def test_nothing_available_resolves_to_the_stub_and_offers_one_command():
     original = _brain(NO_LOCAL)
     try:
-        with _no_named_model():
+        with _no_named_model(), _no_keyless_rung():
             resolved = brain.resolve_brain()
             fix = brain.fix_command(resolved)
     finally:
@@ -308,8 +346,13 @@ def test_a_real_streamed_answer_is_what_completes_the_run():
     assert onboarding.load()["check"]["model"] == "llama3.2:1b"
 
 
-def test_the_installer_never_records_a_choice_nobody_made():
-    """A non-interactive install asked nothing, so it must record nothing."""
+def test_the_installer_records_what_answers_and_never_invents_a_choice():
+    """A non-interactive install answers with the keyless rung, not a declined stub.
+
+    Nothing is asked of a person who is not at the keyboard, so nothing is
+    invented: the recorded brain is the one that will actually answer, and the
+    install does not end on a stub just because nobody chose.
+    """
     import bootstrap
 
     _reset_state()
@@ -317,15 +360,18 @@ def test_the_installer_never_records_a_choice_nobody_made():
     original = brain.local_status
     brain.local_status = lambda *a, **k: NO_LOCAL
     try:
-        result = bootstrap.first_run(interactive=False)
+        with _no_named_model():
+            result = bootstrap.first_run(interactive=False)
     finally:
         brain.local_status = original
         for key, value in saved.items():
             if value is not None:
                 os.environ[key] = value
-    assert result.get("unchosen") is True
+    assert result.get("keyless") is True
+    assert result.get("model", "").startswith(f"{model_catalog.KEYLESS_PROVIDERS[0]}/")
+    assert result.get("privacy")
     state = onboarding.load()
-    assert state["brain"] is None
+    assert state["brain"]["kind"] == "keyless"
     assert "declined_all" not in state
 
 
@@ -391,11 +437,42 @@ def test_every_asset_the_two_screens_reference_is_actually_served():
             assert c.get(ref).status_code == 200, f"{page} references {ref}"
 
 
-def test_hello_without_a_model_answers_once_with_the_fix_command():
+def test_hello_without_a_model_still_answers_from_the_keyless_rung():
+    """The first question a person asks is answered, without choosing anything."""
+    import core.models.gateway as gateway_module
+
+    _reset_state()
+    original = _brain(NO_LOCAL)
+
+    class FakeLLM:
+        def chat_stream(self, messages, tools=None):
+            yield "I can answer, and installing Ollama keeps your words local."
+
+    class FakeGateway:
+        def llm(self, model=None):
+            return FakeLLM()
+
+    real_gateway = gateway_module.get_model_gateway
+    gateway_module.get_model_gateway = lambda: FakeGateway()
+    try:
+        with _no_named_model():
+            body = _client().post("/api/v1/onboarding/hello", json={"text": "what can you do?"}).text
+    finally:
+        brain.local_status = original
+        gateway_module.get_model_gateway = real_gateway
+    assert "event: error" not in body
+    assert "event: token" in body
+    assert '"ok": true' in body
+    assert "no key" in body
+    assert "leave this machine" in body
+    assert onboarding.load()["brain"]["kind"] == "keyless"
+
+
+def test_hello_with_no_rung_left_says_what_to_install():
     _reset_state()
     original = _brain(NO_LOCAL)
     try:
-        with _no_named_model():
+        with _no_named_model(), _no_keyless_rung():
             body = _client().post("/api/v1/onboarding/hello", json={"text": "what can you do?"}).text
     finally:
         brain.local_status = original

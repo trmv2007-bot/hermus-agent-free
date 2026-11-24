@@ -27,7 +27,14 @@ HERMUS ships one canonical installer path per platform. The installer obtains th
 
 It is safe to re-run. It does not delete HERMUS memory, projects, workspace data, logs, credentials or model files.
 
-**It will offer you a brain.** At the end of the install one question asks whether to install Ollama and download `llama3.2:1b` (about 0.6 GB, once, on your machine, no account). Say yes and the first answer comes from a real model. Say no and it offers a free-tier key instead. Decline both and it says plainly that it will answer with the offline stub, and gives you the one command that fixes it. Nothing is downloaded without that answer.
+**It answers before it asks you anything.** A fresh install resolves a model down a ladder and says which rung answered:
+
+1. a model on your machine — no key, no rate limit, and nothing you type leaves the computer;
+2. a **keyless** hosted free tier (Pollinations, then OVHcloud AI Endpoints) — no account, no key, no sign-up. The room says so plainly the first time a turn goes there, because "your words left this machine" is not something to leave implicit;
+3. a free-tier key, if you have pasted one (Groq, Mistral, OpenRouter, Gemini — all free, no card);
+4. the offline stub, named as the stub with the one command that fixes it.
+
+**It will still offer you a local brain.** At the end of the install one question asks whether to install Ollama and download `llama3.2:1b` (about 0.6 GB, once, on your machine, no account). Say yes and the first answer comes from a model on your computer, with no rate limit and no network. Say no and the keyless tier answers while the install tells you, in one line, that Ollama or a free key is what makes it faster. Nothing is downloaded without that answer.
 
 #### Windows 10/11
 

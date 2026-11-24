@@ -16,6 +16,7 @@ from collections.abc import Generator
 import httpx
 import requests
 
+from . import free_tier, model_catalog
 from .aio import get_async_client, run_sync
 from .cache import llm_cache
 from .config import config
@@ -33,6 +34,9 @@ class LLMResponse:
         #: answer, and a rate-limited turn reads to the person as the model
         #: replying with JSON.
         self.error = error
+        #: A sentence the person should see beside this answer: a free tier that
+        #: queued the request, or nothing at all.
+        self.notice: str = ""
 
 
 def failure_note(provider: str, error: Exception | None) -> str:
@@ -77,6 +81,11 @@ class FreeLLM:
         # requested (e.g. Ollama offline -> Groq/OpenRouter from .env). This
         # makes runtime behavior observable instead of implicit.
         self.last_fallback: dict | None = None
+        # Every non-local answer is a fact the person is owed: which endpoint has
+        # the words, and — when a free tier made the call wait — the sentence that
+        # says why. Both are set here so a caller can show them without guessing.
+        self.last_notice: str = ""
+        self.last_route: dict | None = None
 
     def _no_provider_response(self, *, requested_tools, model: str, prompt_tokens: int) -> LLMResponse:
         """Shared sync/async answer when no usable provider/key was found."""
@@ -231,6 +240,90 @@ class FreeLLM:
             return tools[: int(max_tools)]
         return tools
 
+    def _free_slot(self, provider: str, model: str) -> dict | None:
+        """Take this request's place in a documented free-tier allowance.
+
+        A keyless tier publishes a ceiling, so a request that would exceed it is
+        queued behind the others with one plain sentence instead of being fired
+        off and answered with an HTTP 429. ``gave_up`` means the queue is longer
+        than a turn should wait, which is the caller's cue to try the next rung.
+        """
+        slot = free_tier.board.reserve(provider, model)
+        if slot is None:
+            return None
+        waited = free_tier.wait_for_turn(slot).to_dict()
+        if waited.get("sentence"):
+            self.last_notice = str(waited["sentence"])
+        return waited
+
+    def _next_rung(self, provider: str, *, require_tools: bool) -> dict | None:
+        """The next rung to try when a keyless endpoint cannot answer this turn.
+
+        The second free endpoint first — that is what it is for — then any stored
+        key, so a rate limit is a delay and not a dead end.
+        """
+        following = free_tier.next_rung(provider)
+        if following:
+            preset = get_provider(following)
+            picked = model_catalog.pick(following, need_tools=require_tools)
+            model = picked.choice.name if picked.choice else preset.get("default_model")
+            if model and preset.get("base_url"):
+                return {
+                    "provider": following,
+                    "model": model,
+                    "key": "",
+                    "base_url": preset.get("base_url") or "",
+                    "source": "keyless",
+                }
+        bundle = self._fallback_bundle(require_tools=require_tools)
+        if bundle and bundle.get("key"):
+            return {
+                "provider": (bundle.get("provider") or "custom").lower(),
+                "model": bundle.get("default_model") or "",
+                "key": bundle.get("key") or "",
+                "base_url": bundle.get("base_url") or "",
+                "source": bundle.get("source") or "stored",
+            }
+        return None
+
+    def _note_route(self, provider: str, model: str) -> None:
+        """Record where this answer went, and whether it stayed on this machine."""
+        local = model_catalog.tier_of(f"{provider}/{model}") == "local"
+        self.last_route = {
+            "provider": provider,
+            "model": model,
+            "tier": model_catalog.tier_of(f"{provider}/{model}"),
+            "leaves_machine": not local,
+            "notice": self.last_notice,
+        }
+
+    def _keyless_refusal(self, provider: str, error) -> None:
+        """Remember a keyless refusal for exactly as long as the endpoint says.
+
+        A 429 from an anonymous tier is usually an allowance that is spent for
+        hours or for a year, not a burst; the endpoint states the wait in
+        ``retry-after`` and that is what decides whether the rung is offered
+        again next minute. Anything else that a retry cannot fix — a denied
+        address, a name the endpoint dropped — is remembered for the short
+        window, because that is a fact about this minute, not about the product.
+        """
+        retry = None
+        try:
+            raw = (error.rate_limit or {}).get("retry_after")
+            retry = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            retry = None
+        if retry and retry > 120:
+            free_tier.mark_down(
+                provider,
+                f"HTTP 429 — this endpoint's allowance for your address is spent, and it says to come back in "
+                f"{free_tier.describe_wait(retry)}",
+                seconds=min(retry, free_tier.MAX_DOWN),
+            )
+            return
+        if error.is_auth_error or (error.status_code == 404 and not error.is_rate_limit):
+            free_tier.mark_down(provider, error.message)
+
     def _call_openai_compat(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
         """Universal path for any OpenAI-compatible provider."""
         from .multi_key import multi_key_manager
@@ -296,8 +389,25 @@ class FreeLLM:
         tries = 0
         last_err = None
         current_key = api_key
-        while tries < 3:
+        while tries < 4:
             tries += 1
+            if model_catalog.is_keyless(used_provider):
+                waited = self._free_slot(used_provider, model)
+                if waited and waited.get("gave_up"):
+                    hop = self._next_rung(used_provider, require_tools=bool(requested_tools))
+                    if hop:
+                        used_provider, model, current_key, base_url = hop["provider"], hop["model"], hop["key"], hop["base_url"]
+                        tools = self._tools_for_provider(requested_tools, used_provider)
+                        self.last_fallback = {
+                            "from_provider": self.provider,
+                            "to_provider": used_provider,
+                            "model": model,
+                            "source": hop["source"],
+                            "require_tools": bool(requested_tools),
+                            "why": "the first free endpoint is busy, so the next rung answers",
+                        }
+                        continue
+                    break
             try:
                 extra_kwargs = {}
                 if self.temperature is not None:
@@ -312,6 +422,8 @@ class FreeLLM:
                     timeout=120,
                     **extra_kwargs,
                 )
+                if model_catalog.is_keyless(used_provider):
+                    free_tier.mark_up(used_provider)
                 try:
                     multi_key_manager.mark_key_success(
                         used_provider,
@@ -323,6 +435,8 @@ class FreeLLM:
                 except Exception:
                     pass
                 out = LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                out.notice = self.last_notice
+                self._note_route(used_provider, model)
                 if not tools:
                     try:
                         llm_cache.set(cache_key, out)
@@ -335,6 +449,25 @@ class FreeLLM:
                     multi_key_manager.mark_key_failed(used_provider, current_key, e.message, rate_limit=e.rate_limit)
                 except Exception:
                     pass
+                if model_catalog.is_keyless(used_provider):
+                    # A refusal is remembered for as long as the endpoint says it
+                    # will last, so the ladder stops offering this rung instead of
+                    # failing it again on the next question.
+                    self._keyless_refusal(used_provider, e)
+                    hop = self._next_rung(used_provider, require_tools=bool(requested_tools))
+                    if hop:
+                        used_provider, model, current_key, base_url = hop["provider"], hop["model"], hop["key"], hop["base_url"]
+                        tools = self._tools_for_provider(requested_tools, used_provider)
+                        self.last_fallback = {
+                            "from_provider": self.provider,
+                            "to_provider": used_provider,
+                            "model": model,
+                            "source": hop["source"],
+                            "require_tools": bool(requested_tools),
+                            "why": e.message,
+                        }
+                        continue
+                    break
                 # Retry with next key on rate limit / auth / 5xx
                 if e.is_rate_limit or e.status_code >= 500 or e.is_auth_error:
                     nxt = multi_key_manager.get_key(used_provider)
@@ -692,8 +825,25 @@ class FreeLLM:
         tries = 0
         last_err = None
         current_key = api_key
-        while tries < 3:
+        while tries < 4:
             tries += 1
+            if model_catalog.is_keyless(used_provider):
+                waited = self._free_slot(used_provider, model)
+                if waited and waited.get("gave_up"):
+                    hop = self._next_rung(used_provider, require_tools=bool(requested_tools))
+                    if hop:
+                        used_provider, model, current_key, base_url = hop["provider"], hop["model"], hop["key"], hop["base_url"]
+                        tools = self._tools_for_provider(requested_tools, used_provider)
+                        self.last_fallback = {
+                            "from_provider": self.provider,
+                            "to_provider": used_provider,
+                            "model": model,
+                            "source": hop["source"],
+                            "require_tools": bool(requested_tools),
+                            "why": "the first free endpoint is busy, so the next rung answers",
+                        }
+                        continue
+                    break
             try:
                 extra_kwargs = {}
                 if self.temperature is not None:
@@ -709,6 +859,8 @@ class FreeLLM:
                     client=client,
                     **extra_kwargs,
                 )
+                if model_catalog.is_keyless(used_provider):
+                    free_tier.mark_up(used_provider)
                 try:
                     multi_key_manager.mark_key_success(
                         used_provider,
@@ -720,6 +872,8 @@ class FreeLLM:
                 except Exception:
                     pass
                 out = LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                out.notice = self.last_notice
+                self._note_route(used_provider, model)
                 if not tools:
                     try:
                         llm_cache.set(cache_key, out)
@@ -732,6 +886,22 @@ class FreeLLM:
                     multi_key_manager.mark_key_failed(used_provider, current_key, e.message, rate_limit=e.rate_limit)
                 except Exception:
                     pass
+                if model_catalog.is_keyless(used_provider):
+                    self._keyless_refusal(used_provider, e)
+                    hop = self._next_rung(used_provider, require_tools=bool(requested_tools))
+                    if hop:
+                        used_provider, model, current_key, base_url = hop["provider"], hop["model"], hop["key"], hop["base_url"]
+                        tools = self._tools_for_provider(requested_tools, used_provider)
+                        self.last_fallback = {
+                            "from_provider": self.provider,
+                            "to_provider": used_provider,
+                            "model": model,
+                            "source": hop["source"],
+                            "require_tools": bool(requested_tools),
+                            "why": e.message,
+                        }
+                        continue
+                    break
                 if e.is_rate_limit or e.status_code >= 500 or e.is_auth_error:
                     nxt = multi_key_manager.get_key(used_provider)
                     if nxt and nxt != current_key:
@@ -991,6 +1161,12 @@ class FreeLLM:
             return resp
 
         target = self._stream_target(require_tools=bool(tools))
+        if target and model_catalog.is_keyless(target["provider"]):
+            waited = self._free_slot(target["provider"], target["model"])
+            if waited and waited.get("gave_up"):
+                # The queue is longer than a turn should wait, so this rung is
+                # skipped and the one below it answers instead.
+                target = None
         if target:
             try:
                 from .openai_compat import stream_chat_completions
@@ -1007,7 +1183,12 @@ class FreeLLM:
                     timeout=120,
                     on_delta=on_delta,
                 )
-                return LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                if model_catalog.is_keyless(target["provider"]):
+                    free_tier.mark_up(target["provider"])
+                out = LLMResponse(resp.content, resp.tool_calls, usage=resp.usage)
+                out.notice = self.last_notice
+                self._note_route(target["provider"], target["model"])
+                return out
             except Exception:
                 pass  # provider rejected streaming → fall back below
 

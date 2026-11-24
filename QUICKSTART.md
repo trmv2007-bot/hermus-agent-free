@@ -22,10 +22,16 @@ curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main
 It takes a few minutes. It installs into its own folder and never touches your
 documents. Running it twice is safe.
 
-## 2. Answer one question
+## 2. It answers before it asks
 
-Near the end, the installer asks whether it should install a small language model
-on your computer:
+You do not have to install anything to get a first answer. With no local model
+and no key, HERMUS answers through a free endpoint that needs no account —
+Pollinations first, OVHcloud AI Endpoints beneath it — and tells you which one
+answered and that your words went there. It also prints the one line that makes
+it faster.
+
+The installer still offers a model on your own computer, because local is faster
+and nothing leaves the machine:
 
 ```
 No model was found on this machine. Install Ollama (free, no account) and
@@ -33,10 +39,9 @@ download llama3.2:1b?  [Y/n]
 ```
 
 Say yes. That downloads about 0.6 GB once, stays on your computer, needs no
-account, and costs nothing. If you would rather not, press `n` and it offers a
-free-tier key instead (Groq, Mistral or OpenRouter — all free, no card). Decline
-both and it tells you plainly that it will answer with an offline stub, plus the
-one command that fixes it later.
+account, and costs nothing. Press `n` and the keyless tier keeps answering;
+paste a free-tier key (Groq, Mistral, OpenRouter or Gemini — all free, no card)
+if you want a much larger allowance.
 
 ## 3. Open it
 

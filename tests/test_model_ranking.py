@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from core import brain, key_sources, model_catalog, model_health, onboarding
+from core import brain, free_tier, key_sources, model_catalog, model_health, onboarding
 from core.thinking import routing
 
 SERVING = {
@@ -53,6 +53,22 @@ NO_LOCAL = {
 OK_BODY = json.dumps({"choices": [{"message": {"content": "hi"}}]})
 BUSY_BODY = json.dumps({"error": {"message": "Rate limit exceeded on tokens per minute", "type": "rate_limited"}})
 MISSING_BODY = json.dumps({"error": {"message": "Invalid model: unknown", "type": "invalid_request_error"}})
+
+
+@pytest.fixture(autouse=True)
+def _keyless_rungs_down():
+    """These tests measure the keyed tiers, so both keyless rungs are marked down.
+
+    The keyless rungs sit above the keyed ones in the ladder and would otherwise
+    answer every case here, hiding the measurement each test is about. Their own
+    behaviour is pinned in ``tests/test_free_tier.py``.
+    """
+    for provider in model_catalog.KEYLESS_PROVIDERS:
+        free_tier.mark_down(provider, "marked down by this test module")
+    free_tier.board.reset()
+    yield
+    free_tier.reset_health()
+    free_tier.board.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -172,7 +188,9 @@ def test_a_rate_limited_model_is_capacity_and_the_next_one_answers(monkeypatch):
     )
     monkeypatch.setattr(model_health, "transport", send)
 
-    resolved = brain.resolve_brain(status=SERVING)
+    # No local model, and both keyless rungs marked down by the fixture: this
+    # measures the keyed rung, which is where a 429 has to be handled.
+    resolved = brain.resolve_brain(status=NO_LOCAL)
     assert resolved["model"] == "mistral/ministral-8b-latest"
     assert calls[:2] == ["mistral-small-latest", "ministral-8b-latest"]
     refused = next(skip for skip in resolved["skipped"] if skip["ref"] == "mistral/mistral-small-latest")
@@ -232,7 +250,7 @@ def test_a_dead_key_does_not_win_over_the_working_one_beside_it(monkeypatch, tmp
     )
     monkeypatch.setattr(model_health, "transport", send)
 
-    resolved = brain.resolve_brain(status=SERVING)
+    resolved = brain.resolve_brain(status=NO_LOCAL)
     assert resolved["model"] == "mistral/mistral-small-latest"
     resolution = key_sources.resolve("mistral")
     assert resolution.source == str(home)
@@ -246,7 +264,7 @@ def test_a_refused_key_says_which_path_it_came_from(monkeypatch):
     unauth = json.dumps({"detail": "Invalid API Key"})
     send, _calls = _transport_by_key({"dead-key": {"mistral-small-latest": (401, unauth)}})
     monkeypatch.setattr(model_health, "transport", send)
-    resolved = brain.resolve_brain(status=SERVING)
+    resolved = brain.resolve_brain(status=NO_LOCAL)
     refusal = next(skip for skip in resolved["skipped"] if skip["ref"] == "mistral/mistral-small-latest")
     assert "401" in refusal["why"]
     assert "your environment" in refusal["why"]
@@ -256,9 +274,9 @@ def test_a_probe_is_cached_so_resolution_does_not_spend_requests(monkeypatch):
     _with_key(monkeypatch, "mistral")
     send, calls = _transport({"mistral-small-latest": (200, OK_BODY)})
     monkeypatch.setattr(model_health, "transport", send)
-    first = brain.resolve_brain(status=SERVING)
+    first = brain.resolve_brain(status=NO_LOCAL)
     spent = len(calls)
-    second = brain.resolve_brain(status=SERVING)
+    second = brain.resolve_brain(status=NO_LOCAL)
     assert first["model"] == second["model"] == "mistral/mistral-small-latest"
     assert len(calls) == spent
 
@@ -267,33 +285,49 @@ def test_a_refused_key_stops_after_one_request(monkeypatch):
     _with_key(monkeypatch, "mistral")
     send, calls = _transport({"mistral-small-latest": (401, json.dumps({"error": {"message": "Unauthorized"}}))})
     monkeypatch.setattr(model_health, "transport", send)
-    first = brain.resolve_brain(status=SERVING)
-    assert first["model"] == "ollama/lfm2.5:8b"
+    first = brain.resolve_brain(status=NO_LOCAL)
+    assert first["kind"] == "stub"
     assert len(calls) == 1
-    brain.resolve_brain(status=SERVING)
+    brain.resolve_brain(status=NO_LOCAL)
     assert len(calls) == 1
+
+    # With a local model answering, the refused key is never asked anything.
+    calls.clear()
+    local = brain.resolve_brain(status=SERVING)
+    assert local["model"] == "ollama/lfm2.5:8b"
+    assert calls == []
 
 
 # ----------------------------------------------------- local versus hosted
 
 
-def test_a_weaker_local_model_does_not_beat_a_stronger_free_tier(monkeypatch):
+def test_a_local_model_answers_before_a_free_tier_is_spent(monkeypatch):
+    """The ladder's first rung: nothing leaves the machine while it can answer.
+
+    This is a deliberate change from strength-first resolution. A free tier's key
+    is not spent, and the person's words stay on their disk, while a model on the
+    machine can answer — the rung below exists for machines that hold nothing.
+    """
     _with_key(monkeypatch, "mistral")
-    send, _calls = _transport({"mistral-small-latest": (200, OK_BODY)})
+    send, calls = _transport({"mistral-small-latest": (200, OK_BODY)})
     monkeypatch.setattr(model_health, "transport", send)
     resolved = brain.resolve_brain(status=SERVING)
-    assert resolved["model"] == "mistral/mistral-small-latest"
-    assert "lfm2.5:8b" in resolved["reason"]
-    assert "stronger than your best local model" in resolved["reason"]
+    assert resolved["model"] == "ollama/lfm2.5:8b"
+    assert resolved["kind"] == "local"
+    assert resolved["leaves_machine"] is False
+    assert calls == [], "no hosted tier is asked anything while a local model answers"
+    assert resolved["ladder"][0]["rung"] == "local" and resolved["ladder"][0]["state"] == "chose"
 
 
 def test_a_stronger_local_model_keeps_the_free_tier_unspent(monkeypatch):
     _with_key(monkeypatch, "mistral")
-    send, _calls = _transport({"mistral-small-latest": (200, OK_BODY)})
+    send, calls = _transport({"mistral-small-latest": (200, OK_BODY)})
     monkeypatch.setattr(model_health, "transport", send)
     resolved = brain.resolve_brain(status=SERVING_STRONG)
     assert resolved["model"] == "ollama/qwen2.5-coder:32b"
-    assert "nothing hosted is spent" in resolved["reason"]
+    assert "nothing hosted is spent" not in resolved["reason"]
+    assert "strongest of 2 pulled" in resolved["reason"]
+    assert calls == []
 
 
 def test_the_order_models_are_discovered_in_decides_nothing():
@@ -420,6 +454,12 @@ def test_an_install_with_no_recorded_model_adopts_the_best_and_still_opens(monke
 
 
 def test_a_real_first_run_is_not_hijacked_by_a_pulled_model(monkeypatch, tmp_path):
+    """A fresh install adopts the model but still records no choice it never met.
+
+    The room opens now: a clean machine resolves a brain, and making its owner
+    pick one first was the wizard this product no longer needs. What stays true is
+    that nothing is recorded as *chosen* until the person or the first answer does.
+    """
     from gateway import routes_onboarding
 
     state_file = tmp_path / "onboarding.json"
@@ -433,7 +473,7 @@ def test_a_real_first_run_is_not_hijacked_by_a_pulled_model(monkeypatch, tmp_pat
     assert picked["model"] == "ollama/lfm2.5:8b"
     assert "recorded" not in picked
     assert onboarding.load()["brain"] is None
-    assert routes_onboarding.redirect_target() == "/welcome"
+    assert routes_onboarding.redirect_target() == "/companion"
 
 
 def test_an_install_with_nothing_to_answer_with_still_opens_the_first_screen(monkeypatch, tmp_path):
@@ -446,11 +486,22 @@ def test_an_install_with_nothing_to_answer_with_still_opens_the_first_screen(mon
 
 
 def test_a_model_the_key_is_rate_limiting_is_not_migrated_away(monkeypatch):
-    """429 is capacity. Recording it as a retirement is the bug this pins."""
+    """429 is capacity. Recording it as a retirement is the bug this pins.
+
+    With a local model answering, the recorded hosted model does give way — but
+    because the ladder puts local first, never because a 429 was read as a
+    retirement: ``gone`` stays empty either way.
+    """
     _with_key(monkeypatch, "mistral")
-    send, _calls = _transport({"mistral-small-latest": (429, BUSY_BODY), "ministral-8b-latest": (200, OK_BODY)})
+    send, _calls = _transport({"mistral-small-latest": (429, BUSY_BODY), "ministral-8b-latest": (429, BUSY_BODY)})
     monkeypatch.setattr(model_health, "transport", send)
     offer = brain.upgrade_offer(recorded="mistral/ministral-8b-latest", status=SERVING)
+    assert offer["gone"] == ""
+    assert "ladder puts first" in offer["reason"]
+    assert offer["to"].startswith("ollama/")
+
+    # With nothing local to move to, a rate-limited hosted model keeps its place.
+    offer = brain.upgrade_offer(recorded="mistral/ministral-8b-latest", status=NO_LOCAL)
     assert offer["needed"] is False
     assert offer["to"] == "mistral/ministral-8b-latest"
 
