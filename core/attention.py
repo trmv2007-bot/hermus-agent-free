@@ -12,7 +12,10 @@ steal, never a banner over work in progress.
 Two suggestion sources ship here, both evidence-based and both cheap to ignore:
 
 * ``power.low_battery`` — on battery under the configured threshold;
-* ``focus.long_session`` — continuous activity past the configured sitting length.
+* ``focus.long_session`` — continuous activity past the configured sitting length;
+* ``self.diagnosis`` — Hermus's own doctor found something broken, or a missing
+  capability it could add. The counts come from :mod:`core.self_model`, which
+  reuses the doctor's findings and the capability ledger; nothing here guesses.
 
 A "not now" mutes that pattern for seven days, and the choice is stored in the
 awareness settings file.
@@ -115,6 +118,7 @@ class AttentionGate:
         self._last_by_pattern: dict[str, float] = {}
         self._active_since: float | None = None
         self._long_session_fired_for: float | None = None
+        self._self_reported_for: str | None = None
 
     # -- signals ------------------------------------------------------------
 
@@ -316,6 +320,7 @@ class AttentionGate:
         try:
             fired.extend(self._source_low_battery(settings, snap, now))
             fired.extend(self._source_long_session(settings, snap, now))
+            fired.extend(self._source_self_diagnosis(settings, snap, now))
         except Exception:
             return fired
         return fired
@@ -335,6 +340,49 @@ class AttentionGate:
                 title=f"Battery at {percent}%",
                 body="You are on battery and below the level you asked to hear about. Hermus can hold long jobs until you plug in.",
                 task="Tell me in one line which running Hermus jobs would be interrupted if this machine lost power soon.",
+                snapshot=snap,
+                now=now,
+            )
+        ]
+
+    def _source_self_diagnosis(self, settings: Any, snap: dict[str, Any], now: float) -> list[dict[str, Any]]:
+        """One dated line when Hermus's own doctor finds something worth saying.
+
+        The counts come from :mod:`core.self_model`, which reuses the doctor's
+        findings and the capability ledger. It speaks at most once a day, and
+        the gate still decides whether that lands as a digest rather than a
+        surface of its own.
+        """
+        if not getattr(settings, "proactive", True):
+            return []
+        today = datetime.fromtimestamp(now).date().isoformat()
+        if self._self_reported_for == today:
+            return []
+        try:
+            from .self_model import attention_summary
+
+            summary = attention_summary()
+        except Exception:  # noqa: BLE001 - a quiet tick beats a broken one
+            return []
+        broken = int(summary.get("broken") or 0)
+        worth = int(summary.get("worth") or 0)
+        if not broken and not worth:
+            return []
+        self._self_reported_for = today
+        things = "thing" if broken + worth == 1 else "things"
+        title = f"{broken + worth} {things} about me need attention" if broken else f"{worth} capability to add"
+        parts = []
+        if broken:
+            parts.append(f"Broken now: {summary.get('headline') or 'see the Systems surface'}.")
+        if worth:
+            parts.append(f"Could add: {summary.get('additions') or 'see the Systems surface'}.")
+        body = " ".join(parts) + " The full list, with the evidence for each, is on the Systems surface."
+        return [
+            self.offer(
+                pattern="self.diagnosis",
+                title=title,
+                body=body,
+                task="",
                 snapshot=snap,
                 now=now,
             )

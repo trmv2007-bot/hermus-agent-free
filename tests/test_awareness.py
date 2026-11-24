@@ -429,7 +429,15 @@ def test_accept_without_a_queue_is_reported_honestly():
     assert "queue" in result["reason"]
 
 
-def test_low_battery_source_fires_only_on_battery_below_threshold():
+def test_low_battery_source_fires_only_on_battery_below_threshold(monkeypatch):
+    # This is a test about the battery source alone. The self-diagnosis source
+    # also speaks from tick() (it reports whatever the doctor finds, which on a
+    # bare test machine is not nothing), so it is pinned silent here and its own
+    # behaviour is covered in tests/test_self_model.py.
+    import core.self_model as self_model
+
+    monkeypatch.setattr(self_model, "attention_summary", lambda: {"broken": 0, "worth": 0, "headline": "", "additions": ""})
+
     gate, _, _, snap = _gate()
     snap["power"] = {"ok": True, "value": {"on_ac": False, "percent": 12, "seconds_left": 900}}
 
