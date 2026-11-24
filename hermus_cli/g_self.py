@@ -26,7 +26,9 @@ def _utf8_stdout() -> None:
 
 
 def _configure_improve(subparsers) -> None:
-    parser = subparsers.add_parser("improve", help="Draft and test a change to yourself in an isolated worktree (never applies it)")
+    parser = subparsers.add_parser(
+        "improve", help="Draft and test a change to yourself in an isolated worktree (never applies it)"
+    )
     parser.add_argument("goal", help="What should be better, in one sentence")
     parser.add_argument("--plan-only", dest="plan_only", action="store_true", help="Show the plan and stop there")
     parser.add_argument(
@@ -142,6 +144,13 @@ def _run_understand(args, ctx: CLIContext) -> None:
 
 
 COMMANDS = (
-    Command("improve", "Draft and test a change to yourself in an isolated worktree (never applies it)", _configure_improve, _run_improve),
-    Command("understand", "Show what Hermus knows it can do right now, and what it cannot", _configure_understand, _run_understand),
+    Command(
+        "improve",
+        "Draft and test a change to yourself in an isolated worktree (never applies it)",
+        _configure_improve,
+        _run_improve,
+    ),
+    Command(
+        "understand", "Show what Hermus knows it can do right now, and what it cannot", _configure_understand, _run_understand
+    ),
 )

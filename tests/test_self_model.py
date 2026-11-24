@@ -35,8 +35,10 @@ ALL_TOOLS = [name for family in FAMILIES for name in family.tools]
 
 def _probe(**failures: dict) -> dict:
     """A probe report where the named checks fail and every other check passes."""
-    checks = {name: {"name": name, "ok": name not in failures, "detail": "import OK", "hint": "", "level": "recommended"} for name in
-              ("playwright", "desktop_control", "faster_whisper")}
+    checks = {
+        name: {"name": name, "ok": name not in failures, "detail": "import OK", "hint": "", "level": "recommended"}
+        for name in ("playwright", "desktop_control", "faster_whisper")
+    }
     for name, detail in failures.items():
         checks[name] = detail
     return {"checks": checks, "at": "2026-11-24T00:00:00+00:00", "error": ""}
@@ -114,7 +116,9 @@ def test_a_probe_failure_moves_the_capability_out_of_what_it_can_do():
 
 
 def test_a_broken_probe_claims_nothing_gated():
-    model = SelfModel(probe={"checks": {}, "at": "2026-11-24T00:00:00+00:00", "error": "RuntimeError: boom"}, tools=list(ALL_TOOLS))
+    model = SelfModel(
+        probe={"checks": {}, "at": "2026-11-24T00:00:00+00:00", "error": "RuntimeError: boom"}, tools=list(ALL_TOOLS)
+    )
     capabilities = model.capabilities()
     available = {entry["key"] for entry in capabilities["available"]}
     assert {"browser", "desktop", "voice"}.isdisjoint(available)
@@ -145,7 +149,11 @@ def test_attention_view_is_one_row_of_bounded_items():
 def test_diagnosis_items_each_carry_evidence(monkeypatch):
     import core.self_model as self_model
 
-    monkeypatch.setattr(self_model, "run_probe", lambda **_: _probe(playwright={"name": "playwright", "ok": False, "detail": "no chromium", "level": "recommended"}))
+    monkeypatch.setattr(
+        self_model,
+        "run_probe",
+        lambda **_: _probe(playwright={"name": "playwright", "ok": False, "detail": "no chromium", "level": "recommended"}),
+    )
     monkeypatch.setattr(self_model, "_ledger_items", lambda limit: [])
     self_model._diagnosis_cache.clear()
     diagnosis = self_model.diagnose(force=True)
@@ -237,3 +245,45 @@ def test_a_scripted_model_uses_a_tool_it_has_and_hears_what_is_missing(monkeypat
     # asked for and could not have.
     assert missing.get("error_code") == "TOOL_NOT_FOUND", missing
     assert "not registered" in str(missing.get("error", "")).lower(), missing
+
+
+def test_the_digest_carries_one_self_diagnosis_line_a_day(monkeypatch):
+    """The diagnosis reaches the person through the existing digest, once a day."""
+    from datetime import datetime
+
+    import core.self_model as self_model
+    from core.attention import AttentionGate
+    from core.awareness.settings import AwarenessSettings
+
+    monkeypatch.setattr(
+        self_model,
+        "attention_summary",
+        lambda: {"broken": 2, "worth": 1, "headline": "doctor found two things", "additions": "browser"},
+    )
+    now = {"at": datetime(2026, 11, 24, 14, 0).timestamp()}
+    gate = AttentionGate(
+        settings_provider=lambda: AwarenessSettings(quiet_hours=None, typing_seconds=3.0),
+        snapshot_provider=lambda: {},
+        clock=lambda: now["at"],
+    )
+    fired = gate.tick(snapshot={})
+    patterns = [item["suggestion"]["pattern"] for item in fired]
+    assert patterns.count("self.diagnosis") == 1, patterns
+    body = next(item["suggestion"]["body"] for item in fired if item["suggestion"]["pattern"] == "self.diagnosis")
+    assert "doctor found two things" in body and "Systems surface" in body
+
+    assert gate.tick(snapshot={}) == [], "it must not repeat itself on the same day"
+    now["at"] += 86400
+    again = gate.tick(snapshot={})
+    assert [item["suggestion"]["pattern"] for item in again] == ["self.diagnosis"]
+
+
+def test_the_attention_route_publishes_the_same_diagnosis():
+    from fastapi.testclient import TestClient
+
+    from gateway.gateway import app
+
+    body = TestClient(app).get("/api/v1/self/attention").json()
+    assert body["success"] is True
+    assert {"broken_now", "worth_adding", "items"} <= set(body)
+    assert isinstance(body["items"], list)

@@ -137,6 +137,8 @@ README's build-status table cites the test behind every row.
 ./hermus gateway start          # gateway + companion UI
 ./hermus mission "goal"         # autonomous mission
 ./hermus status --live          # live capability state
+./hermus understand             # what it can do right now, and what it cannot
+./hermus improve "goal"         # draft + test a change to itself in a worktree (never applies it)
 ```
 
 ## Surfaces

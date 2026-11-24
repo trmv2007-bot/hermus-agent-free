@@ -685,6 +685,7 @@ from gateway.routes_presence import router as _presence_router  # noqa: E402
 from gateway.routes_presence_overlay import router as _presence_overlay_router  # noqa: E402
 from gateway.routes_registry import router as _registry_router  # noqa: E402
 from gateway.routes_routines import router as _routines_router  # noqa: E402
+from gateway.routes_self import router as _self_router  # noqa: E402
 from gateway.routes_sentinel import router as _sentinel_router  # noqa: E402
 from gateway.routes_speech import router as _speech_router  # noqa: E402
 from gateway.routes_speech import ws_router as _speech_ws_router  # noqa: E402
@@ -740,6 +741,7 @@ app.include_router(_awareness_router, dependencies=_gate_control)
 app.include_router(_undo_router, dependencies=_gate_control)
 app.include_router(_thinking_router, dependencies=_gate_control)
 app.include_router(_voice_live_router, dependencies=_gate_control)
+app.include_router(_self_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

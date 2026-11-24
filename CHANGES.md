@@ -1160,3 +1160,52 @@ key, and the first answer resolving its own model. `tests/test_model_ranking.py`
 answer: a local model now wins ahead of a stronger hosted one, and a first run opens the
 room.
 
+
+## Hermus knows what it is, and improves itself within a leash
+
+**It can now read its own capabilities instead of describing them from memory.**
+`core/self_model.py` assembles a capped, deduplicated section (1500 characters,
+measured at 1226 on this PC) that rides in the chat prompt behind
+`HERMUS_SELF_MODEL`, on by default: the name and permission profile from the
+first-run record, the tool families that are usable *now* from the live registry
+and `core/diagnostics.run_diagnostics`, the ones that are not with the single
+command that enables each, and the eleven red lines in one line each. A
+capability the probe cannot vouch for is never listed as usable — a failed probe
+moves the whole family to "cannot do right now", and a probe that raises claims
+nothing at all. `hermus understand` prints the same section with the counts
+behind it.
+
+**"Try everything it has" is a rule, not a slogan.** The section carries one
+rule: check the tool set and the list before apologising, and when something is
+missing name the command that fixes it. A scripted-model test drives a real
+agent turn where the model asks for `file_read` (runs, returns the file) and then
+`ocr_screenshot` (comes back `TOOL_NOT_FOUND`, loudly), against a prompt that
+already held the fix for what it could not reach.
+
+**It reports what is broken and what it wants, with evidence.** `diagnose()`
+reuses `HermusDoctor`'s deterministic findings and the capability ledger — never
+a second opinion about the machine — and returns at most three broken-now items
+with their fix and at most three worth-adding items with the reason. Those enter
+the existing `core/attention.py` digest as one dated `self.diagnosis` line (a
+digest, never a modal), and the Systems console gains one row, "What needs
+attention", whose table is the list: what, its evidence, and the next step.
+
+**`hermus improve "<goal>"` — draft, test, propose; never apply.** It reads this
+repository for the goal, asks the model for a plan (or takes `--plan` from
+elsewhere), edits inside a throwaway `git worktree` on a new branch under the
+system temp directory, runs the repository's own gates there (ruff plus the
+affected test files), and prints the diff with a patch file and a run record. The
+live checkout is never written to: every run records `git status` before and
+after. Refused with a stated reason: any path under `tests/`, `RED_LINES.md`,
+`core/permissions.py`, `core/safety_policy.py`, `core/undo.py`, this module
+itself, and everything `core/evolution.py` already treats as the control plane —
+plus a plan whose text is not in the file it names, or is ambiguous. A model that
+never answers is reported as an error, not as a refused plan.
+
+**Tests:** 32 in `tests/test_self_edit.py` (every protected path refused with a
+reason, plan parsing refusals, a worktree run that leaves the live checkout
+byte-identical, gate failures with their tail, plan-only, missing/ambiguous text,
+a worktree refused inside `~/.hermus`) and 13 in `tests/test_self_model.py` (the
+cap and dedup, probe-driven truthfulness, a broken probe claiming nothing, the
+diagnosis items carrying evidence, the console row reading the same diagnosis,
+and the scripted-model turn).

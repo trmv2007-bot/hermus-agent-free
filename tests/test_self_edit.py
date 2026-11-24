@@ -16,6 +16,7 @@ agent is only as safe as its refusals:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import subprocess
@@ -154,10 +155,8 @@ def _digest(root: pathlib.Path) -> dict[str, str]:
 
 
 def _plan(path="core/greet.py", find="return 'hi'", replace="return 'hello'") -> Plan:
-    return parse_plan(
-        '{"summary": "greet says hello", "why": "clearer", "edits": [{"path": "%s", "find": "%s", "replace": "%s"}]}'
-        % (path, find, replace)
-    )
+    plan = {"summary": "greet says hello", "why": "clearer", "edits": [{"path": path, "find": find, "replace": replace}]}
+    return parse_plan(json.dumps(plan))
 
 
 def test_a_run_edits_only_a_worktree_and_leaves_the_live_tree_byte_identical(fake_repo):

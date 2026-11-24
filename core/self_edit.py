@@ -34,9 +34,10 @@ import shlex
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 #: Paths a self-edit may not touch, with the reason stated where it is refused.
 PROTECTED_PATHS: dict[str, str] = {
@@ -67,7 +68,7 @@ class PlanError(Exception):
     """A proposal that cannot be trusted as written."""
 
 
-class ModelUnavailable(Exception):
+class ModelUnavailableError(Exception):
     """The model did not answer, so there is no plan to judge.
 
     Deliberately not a :class:`PlanError`: a provider timeout is not a refused
@@ -288,7 +289,7 @@ def propose(goal: str, *, repo: Path | None = None, model: str | None = None, as
             # FreeLLM reports transport failures as text rather than raising; a
             # provider that never answered produced no plan to judge.
             if answer.startswith(("Ollama error", "Provider error", "HuggingFace error", "No provider")):
-                raise ModelUnavailable(answer[:300])
+                raise ModelUnavailableError(answer[:300])
             return answer
 
     return parse_plan(ask(prompt))
@@ -454,7 +455,7 @@ def run(
         except PlanError as exc:
             result.update(status="refused", error=str(exc))
             return _finish(result, repo)
-        except ModelUnavailable as exc:
+        except ModelUnavailableError as exc:
             result.update(status="error", error=f"the model did not answer, so there is no plan yet: {exc}")
             return _finish(result, repo)
         except Exception as exc:  # noqa: BLE001 - a missing model is a stated failure, not a crash
@@ -561,7 +562,7 @@ def last_run() -> dict[str, Any] | None:
 
 __all__ = [
     "Edit",
-    "ModelUnavailable",
+    "ModelUnavailableError",
     "GATE_TIMEOUT_SECONDS",
     "PROTECTED_PATHS",
     "Plan",

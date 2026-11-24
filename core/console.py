@@ -528,6 +528,7 @@ _ENDPOINTS: dict[str, tuple[str, ...]] = {
         "GET /engine/downloads",
     ),
     "doctor": ("GET /doctor/status", "POST /doctor/run"),
+    "self_attention": ("GET /api/v1/self/attention",),
     "runtime-issues": ("GET /runtime/issues",),
     "queue": ("GET /queue/status", "GET /jobs"),
     "cache": ("GET /cache/stats", "POST /cache/clear"),
