@@ -10,6 +10,7 @@ exactly the false success this screen exists to prevent.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,17 @@ STEPS = ("brain", "permissions", "name")
 
 
 def state_path() -> Path:
+    """Where the first-run record lives.
+
+    ``HERMUS_HOME`` is read live, not from the workspace singleton: the singleton
+    captures its base directory at import, so a process that builds the workspace
+    before pointing the environment at a temporary home would otherwise keep
+    reading — and writing, and deleting — the person's real ``~/.hermus``.
+    """
+    override = os.environ.get("HERMUS_HOME")
+    if override:
+        return Path(override).expanduser() / "onboarding.json"
+
     from .workspace import workspace
 
     return workspace.dirs["root"] / "onboarding.json"

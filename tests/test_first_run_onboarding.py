@@ -40,7 +40,15 @@ def _client():
 
 
 def _reset_state() -> None:
+    """Clear this test run's own state, and only ever inside its temporary home.
+
+    The guard is not decoration: ``state_path()`` once resolved to the person's
+    real ``~/.hermus`` in this very process, and this line deleted his setup
+    record twice.
+    """
     path = onboarding.state_path()
+    if not str(path).startswith(_TMP):
+        raise AssertionError(f"refusing to touch a state file outside the test home: {path}")
     if path.exists():
         path.unlink()
 

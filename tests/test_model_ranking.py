@@ -23,6 +23,8 @@ No request leaves the machine: every provider answer is a fake transport.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -86,6 +88,20 @@ def _transport(answers: dict[str, tuple[int, str]]):
         return answers.get(name, (200, OK_BODY))
 
     return send, calls
+
+
+def test_a_late_hermus_home_still_decides_where_state_lives(monkeypatch):
+    """The workspace singleton must not pin the state path to the real install.
+
+    This is the bug behind his `onboarding.json` being deleted twice: a process
+    built the workspace from the default `~/.hermus` and every later
+    `HERMUS_HOME` was ignored, so a test that "cleared its state" cleared his.
+    """
+    from core.computer.task_control import get_task_control  # builds the workspace first
+
+    get_task_control()
+    monkeypatch.setenv("HERMUS_HOME", str(Path(tempfile.mkdtemp(prefix="hermus-guard-"))))
+    assert str(onboarding.state_path()).startswith(os.environ["HERMUS_HOME"])
 
 
 # ------------------------------------------------------------------ ranking

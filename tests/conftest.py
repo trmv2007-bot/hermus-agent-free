@@ -17,7 +17,39 @@ os.environ["HERMUS_NO_DOTENV"] = "1"
 # switch it back on themselves.
 os.environ["HERMUS_MODEL_PROBE"] = "0"
 
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import pytest  # noqa: E402
+
+
+def _inside(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _real_home() -> Path:
+    return Path(os.path.expanduser("~")).resolve()
+
+
+# A test run must never read or write the person's own installation. Point the
+# suite at a temporary home before anything imports the workspace singleton, and
+# refuse outright if somebody hands it the real one.
+if os.environ.get("HERMUS_ALLOW_REAL_HOME", "") not in ("1", "true", "True"):
+    for _key in ("HERMUS_HOME", "HERMUS_DATA_DIR"):
+        _value = os.environ.get(_key)
+        if _value and _inside(Path(_value), _real_home() / ".hermus"):
+            raise RuntimeError(
+                f"{_key}={_value} is Rishi's real install. Tests never touch it: unset it, "
+                "or set HERMUS_ALLOW_REAL_HOME=1 if you truly mean it."
+            )
+    if not os.environ.get("HERMUS_HOME"):
+        os.environ["HERMUS_HOME"] = tempfile.mkdtemp(prefix="hermus-test-home-")
+    os.environ.setdefault("HERMUS_DATA_DIR", str(Path(os.environ["HERMUS_HOME"]) / "data"))
+
 
 from core.computer.task_control import get_task_control  # noqa: E402
 
