@@ -12,6 +12,7 @@ import re
 
 import pytest
 
+from core.thinking.routing import FREE_HOSTED_KEY_ENV
 from tests.eval import thinking_bench as bench
 
 TASKS = json.loads(bench.TASKS_FILE.read_text(encoding="utf-8"))
@@ -101,7 +102,7 @@ def test_the_summary_counts_only_tasks_it_ran():
         {"id": "b", "kind": "answer", "passed": False, "steps": 1, "verified": True, "why": "nope", "skipped": False},
         {"id": "c", "kind": "file", "passed": False, "steps": 0, "verified": None, "reason": "skipped", "skipped": True},
     ]
-    report = bench.summarise(rows, model="m", hosted=None, wall=10.0, work="/tmp")
+    report = bench.summarise(rows, model="m", wall=10.0, work="/tmp")
     assert report["ran"] == 2
     assert report["passed"] == 1
     assert report["steps_per_task"] == 1.5
@@ -118,6 +119,62 @@ def test_the_isolation_env_points_everything_into_the_task_dir(tmp_path):
     assert "hermus" not in env["HERMUS_HOME"].lower() or str(tmp_path).lower() in env["HERMUS_HOME"].lower()
     assert env["HERMUS_COUNSEL_ENABLED"] == "0"
     assert env["HERMUS_MAX_TOOL_STEPS"] == "8"
+
+
+def test_a_local_run_is_pinned_local_and_given_no_hosted_key(tmp_path, monkeypatch):
+    for variable in FREE_HOSTED_KEY_ENV.values():
+        monkeypatch.setenv(variable, "would-let-routing-swap-the-model")
+    env = bench.isolate_env(tmp_path, model="ollama/llama3.2:1b")
+    assert env["HERMUS_ROUTE_TIER"] == "local"
+    for variable in FREE_HOSTED_KEY_ENV.values():
+        assert variable not in env, f"{variable} must not reach a local run's turn"
+
+
+def test_a_hosted_run_keeps_only_its_own_provider_key(tmp_path, monkeypatch):
+    for variable in FREE_HOSTED_KEY_ENV.values():
+        monkeypatch.setenv(variable, "some-key")
+    env = bench.isolate_env(tmp_path, model="mistral/ministral-8b-latest")
+    assert env["HERMUS_ROUTE_TIER"] == "free_hosted"
+    assert env["MISTRAL_API_KEY"] == "some-key"
+    others = [v for k, v in FREE_HOSTED_KEY_ENV.items() if k != "mistral"]
+    for variable in others:
+        assert variable not in env, f"{variable} must not reach a mistral run's turn"
+
+
+def test_the_markdown_names_a_model_the_run_did_not_stay_on():
+    report = {
+        "model": "mistral/ministral-8b-latest",
+        "model_ran": ["mistral/mistral-small-latest"],
+        "passed": 0,
+        "ran": 1,
+        "steps_per_task": 1.0,
+        "verified_change_tasks": 0,
+        "change_tasks": 1,
+        "wall_seconds": 1.0,
+        "rows": [
+            {
+                "id": "a",
+                "kind": "file",
+                "passed": False,
+                "steps": 1,
+                "seconds": 1.0,
+                "tier": "local",
+                "verified": None,
+                "reason": "the turn ran on another model",
+            }
+        ],
+    }
+    assert "turns actually ran on" in bench.markdown(report)
+
+
+def test_a_rate_limited_answer_is_recognised_even_when_it_looks_like_content():
+    provider_error_as_content = {
+        "response": 'mistral error (base_url=https://api.mistral.ai/v1): {"message":"Rate limit exceeded","code":"1300"}',
+        "tool_results": [],
+    }
+    assert bench._looks_rate_limited(provider_error_as_content) is True
+    assert bench._looks_rate_limited({"response": "Paris is the capital.", "tool_results": []}) is False
+    assert bench._looks_rate_limited({}, error="HTTP 429 Too Many Requests") is True
 
 
 def test_the_local_page_serves_the_token_and_404s_elsewhere():
@@ -139,3 +196,10 @@ def test_task_prompts_stay_inside_their_sandbox():
         assert "~/.hermus" not in task["prompt"]
         # no prompt may name an absolute drive path of its own
         assert re.findall(r"[A-Za-z]:\\", task["prompt"]) == []
+
+
+def test_a_passed_task_does_not_stop_the_run_but_a_throttled_failure_does():
+    """The stop rule is the tier running out, not any 429 string in an answer."""
+    assert bench._stops_run({"rate_limited": True, "passed": True}) is False
+    assert bench._stops_run({"rate_limited": True, "passed": False}) is True
+    assert bench._stops_run({"rate_limited": False, "passed": False}) is False
