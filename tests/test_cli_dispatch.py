@@ -93,6 +93,7 @@ def test_unknown_command_is_rejected_not_ignored():
 #: replaced by a spy, so these never do any real work.
 MINIMAL_ARGV = {
     "delegate": ["delegate", "test-goal"],
+    "improve": ["improve", "test-goal"],
     "research": ["research", "test-query"],
     "run": ["run", "test-task"],
     "skill": ["skill", "list"],

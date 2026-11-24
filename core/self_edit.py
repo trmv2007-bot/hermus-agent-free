@@ -57,12 +57,22 @@ PROTECTED_PREFIXES: tuple[tuple[str, str], ...] = (
 GATE_TIMEOUT_SECONDS = 420.0
 
 #: The model is asked for one bounded answer; this is how much repository context
-#: it is given to work from.
-CONTEXT_CHARS = 6000
+#: it is given to work from. Kept small on purpose: the local models this ships
+#: with answer a 3k-character prompt inside the provider timeout and a 6k one
+#: does not, and a plan needs a real file's text, not the whole repository.
+CONTEXT_CHARS = 3000
 
 
 class PlanError(Exception):
     """A proposal that cannot be trusted as written."""
+
+
+class ModelUnavailable(Exception):
+    """The model did not answer, so there is no plan to judge.
+
+    Deliberately not a :class:`PlanError`: a provider timeout is not a refused
+    proposal, and reporting it as one would put the blame on the plan.
+    """
 
 
 @dataclass
@@ -182,7 +192,7 @@ def repo_context(repo: Path, goal: str, limit: int = CONTEXT_CHARS) -> str:
         if score:
             candidates.append((score, path))
     candidates.sort(key=lambda item: (-item[0], item[1].as_posix()))
-    for _score, path in candidates[:4]:
+    for _score, path in candidates[:3]:
         try:
             excerpt = _file_excerpt(path, words)
         except OSError:
@@ -192,7 +202,7 @@ def repo_context(repo: Path, goal: str, limit: int = CONTEXT_CHARS) -> str:
     return text[:limit]
 
 
-def _file_excerpt(path: Path, words: list[str], budget: int = 1400) -> str:
+def _file_excerpt(path: Path, words: list[str], budget: int = 900) -> str:
     """The head of a file plus the lines the goal actually points at.
 
     A find/replace plan has to quote text that exists, and the text worth
@@ -209,7 +219,7 @@ def _file_excerpt(path: Path, words: list[str], budget: int = 1400) -> str:
             picked.append(index)
         if len(picked) >= 3:
             break
-    body = [text[:700]]
+    body = [text[:500]]
     seen: set[int] = set()
     for index in picked:
         window = range(max(0, index - 5), min(len(lines), index + 6))
@@ -274,7 +284,12 @@ def propose(goal: str, *, repo: Path | None = None, model: str | None = None, as
         llm = FreeLLM(model=model or config.model)
 
         def ask(text: str) -> str:  # noqa: F811 - the real transport, defined late
-            return str(llm.chat([{"role": "user", "content": text}]).content or "")
+            answer = str(llm.chat([{"role": "user", "content": text}]).content or "")
+            # FreeLLM reports transport failures as text rather than raising; a
+            # provider that never answered produced no plan to judge.
+            if answer.startswith(("Ollama error", "Provider error", "HuggingFace error", "No provider")):
+                raise ModelUnavailable(answer[:300])
+            return answer
 
     return parse_plan(ask(prompt))
 
@@ -439,7 +454,10 @@ def run(
         except PlanError as exc:
             result.update(status="refused", error=str(exc))
             return _finish(result, repo)
-        except Exception as exc:  # noqa: BLE001 - a missing model is a stated refusal, not a crash
+        except ModelUnavailable as exc:
+            result.update(status="error", error=f"the model did not answer, so there is no plan yet: {exc}")
+            return _finish(result, repo)
+        except Exception as exc:  # noqa: BLE001 - a missing model is a stated failure, not a crash
             result.update(status="error", error=f"no plan could be produced: {type(exc).__name__}: {exc}")
             return _finish(result, repo)
     result["plan"] = plan.to_dict()
@@ -543,6 +561,7 @@ def last_run() -> dict[str, Any] | None:
 
 __all__ = [
     "Edit",
+    "ModelUnavailable",
     "GATE_TIMEOUT_SECONDS",
     "PROTECTED_PATHS",
     "Plan",

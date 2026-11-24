@@ -29,20 +29,37 @@ def _configure_improve(subparsers) -> None:
     parser = subparsers.add_parser("improve", help="Draft and test a change to yourself in an isolated worktree (never applies it)")
     parser.add_argument("goal", help="What should be better, in one sentence")
     parser.add_argument("--plan-only", dest="plan_only", action="store_true", help="Show the plan and stop there")
+    parser.add_argument(
+        "--plan",
+        default=None,
+        help="A plan JSON drafted elsewhere (an agent turn, or by hand); the leash still applies to it",
+    )
     parser.add_argument("--model", default=None, help="Model that drafts the plan (default: the configured model)")
     parser.add_argument("--json", dest="as_json", action="store_true", help="Print the whole run record as JSON")
     parser.add_argument("--repo", default=None, help="Checkout to read (default: the current directory's)")
 
 
 def _run_improve(args, ctx: CLIContext) -> None:
-    from core.self_edit import run
+    import pathlib
+
+    from core.self_edit import PlanError, parse_plan, run
 
     _utf8_stdout()
 
     def say(message: str) -> None:
         print(message, flush=True)
 
-    result = run(args.goal, repo=args.repo, plan_only=bool(args.plan_only), model=args.model, progress=say)
+    plan = None
+    if args.plan:
+        # A plan is only data until this module has judged it: it is parsed and
+        # refused by exactly the same rules as one the model wrote.
+        try:
+            plan = parse_plan(pathlib.Path(args.plan).read_text(encoding="utf-8"))
+        except (OSError, PlanError) as exc:
+            print(f"refused: {exc}")
+            return
+
+    result = run(args.goal, repo=args.repo, plan=plan, plan_only=bool(args.plan_only), model=args.model, progress=say)
 
     if args.as_json:
         print(json.dumps(result, indent=2, default=str))
