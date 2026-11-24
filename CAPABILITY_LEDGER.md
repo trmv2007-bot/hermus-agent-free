@@ -57,7 +57,7 @@ open a proposal that updates this table.
 | Broad local scan | Find malware/leaked secrets/unsafe files | Private data exposure | Folder scope + purpose + redaction policy | not_granted |
 | Agent wallet | Earn/spend/invest from isolated funds | Financial loss/compliance | Wallet/account + reserve + ledger + risk limits | not_granted |
 | Delegated communication | Speak as/for user on approved channels | Reputation/privacy/social harm | Connector + identity/send policy | not_granted |
-
+| Scoped private-data access for file_read | Use file_read on C:/Users/rishi/AppData/Local/Temp/dbgsb_5pa2e0j7/token.txt for the requested defensive/search purpose | private data or credential exposure | Explicit resource scope, purpose, destination, TTL/use limit, and no data exfiltration outside scope. Reason: yellow action needs scoped approval | not_granted |
 ## Blocked powers
 
 | Power | Reason |
