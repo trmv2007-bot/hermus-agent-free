@@ -848,3 +848,47 @@ migrated, the `HERMUS_MODEL` pin, and the nothing-reachable stub with its reason
 the probe tests inject a fake transport. One existing assertion was updated because it
 pinned the bug: two models pulled (`llama3.2:1b`, `mistral:7b`) used to resolve to the 1B
 and now resolve to the 7B.
+
+## 19 · The key that answers, and a state file that survives the tests
+
+Three defects surfaced the moment #90 ran against a real install.
+
+**A dead key hid a working one.** Two `MISTRAL_API_KEY`s existed on the machine — one
+in the checkout's `.env` that Mistral answers, one in the person's home `.env` that
+Mistral refuses with 401. The picker read whichever file it found first. Now
+`core/key_sources.py` collects every configured key for a provider (process environment,
+the checkout's `.env`, the person's home `.env`, the control-room store), probes them in
+order, and uses the first one that answers, keeping the path it came from. A refusal
+names that path — `HTTP 401 … (key from C:\Users\…\.env)` — because "denied" on its own
+names nothing a person can fix. Probe results and the refusal backoff are keyed by the
+key's fingerprint as well as the provider, so one key's 401 can no longer poison the
+other's answer for ten minutes.
+
+**An install that could answer read as unconfigured.** `apply_resolved_default` set
+`config.model` and wrote nothing into the first-run state, so a workspace answering
+perfectly still reported `complete: false` and sent the person back to the welcome
+screen. It now records what it adopted or upgraded, with `upgrade.from` naming the model
+it replaced (null only when nothing was recorded), and `state_payload` reports the
+migration that happened separately from the next offer instead of overwriting one with
+the other. `redirect_target` opens the companion whenever the product can answer — first
+run finished, a model just migrated, or a workspace with history that has a reachable
+model — and keeps the welcome screen for an install with nothing to answer with, which
+is the only case it is for.
+
+**A test deleted the person's setup record, twice.** `tests/test_first_run_onboarding.py`
+cleared "its" state with `onboarding.state_path().unlink()`, and that path resolved to
+`~.hermus/onboarding.json` because `core/workspace.py` captures its base directory when
+the singleton is built — before a test module can point `HERMUS_HOME` anywhere. The fix
+is at the root: `onboarding.state_path()` reads `HERMUS_HOME` live, so an explicitly set
+home always wins over the cached one. On top of it, `tests/conftest.py` now refuses to
+start a session whose `HERMUS_HOME`/`HERMUS_DATA_DIR` is inside the real install
+(`HERMUS_ALLOW_REAL_HOME=1` overrides deliberately), points the suite at a temporary home
+when none is given, and the one function that deletes state refuses any path outside the
+temp home. A test pins the cause: build the workspace first, set `HERMUS_HOME` after, and
+the state path still follows the environment.
+
+**Tests:** 25 in `tests/test_model_ranking.py`, now covering key precedence (a dead key
+beside a working one, with the source named), a refused key naming its path, a 429 never
+migrating a model away, adoption recording, `/` landing on `/companion` after a migration
+and after an adoption, a genuine first run still reaching `/welcome`, and
+`state_path` following a late `HERMUS_HOME`.
