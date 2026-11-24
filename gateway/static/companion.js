@@ -748,7 +748,9 @@
       return fetch("/voice/live/start", {
         method: "POST",
         headers: headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ session_id: sessionId })
+        /* The browser already knows what language it is speaking; saying so
+           spares the transcriber a detection pass on every partial. */
+        body: JSON.stringify({ session_id: sessionId, language: (navigator.language || "") })
       }).then(function (r) { return r.json(); }).then(function (body) {
         if (!body || !body.success) throw new Error(body && (body.error || body.fix) || "the microphone could not open");
         self.listenId = body.id;
@@ -776,6 +778,7 @@
         self.pendingSamples = 0;
         self.sentSamples = 0;
         self.totalSamples = 0;
+        self.voicedSamples = 0;
         self.text = "";
         self.startedAt = Date.now();
         self.speechHeardAt = 0;
@@ -814,11 +817,15 @@
         this.pending.push(pcm);
         this.pendingSamples += pcm.length / 2;
         this.totalSamples += pcm.length / 2;
+        if (level > 0.012) this.voicedSamples += pcm.length / 2;
       }
-      /* Partial cadence: soon after speech starts, then steady. */
-      var target = this.sentSamples === 0 ? 480 : 700;
+      /* Partial cadence: the first request leaves as soon as there is enough
+         voiced audio to be words rather than a breath, the rest follow at a
+         steady 500 ms. Waiting for a fixed chunk regardless of voice made the
+         first partial cost 480 ms of someone else's silence. */
       var waited = ((this.totalSamples - this.sentSamples) / 16000) * 1000;
-      if (!this.inFlight && waited >= target) this.send();
+      var firstWords = this.sentSamples === 0 && this.voicedSamples >= 320 * 16;
+      if (!this.inFlight && (firstWords || (this.sentSamples > 0 && waited >= 500))) this.send();
       if (this.speechHeardAt && now - this.lastVoiceAt > 900) this.finish();
       else if (now - this.startedAt > 30000) this.finish();
     },

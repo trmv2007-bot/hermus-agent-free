@@ -39,6 +39,22 @@ class LLMResponse:
         self.notice: str = ""
 
 
+class _ModelMissingError(Exception):
+    """The local provider is up and does not have the model that was asked for.
+
+    Ollama answers 404 for a model that was never pulled. To a person that is
+    the same dead end as an Ollama that is not running — "say something now" —
+    so it travels the same fallback path rather than ending the turn.
+    """
+
+
+def _raise_model_missing(response, model: str) -> None:
+    """Turn Ollama's 404 for a model into :class:`_ModelMissingError`."""
+    if getattr(response, "status_code", 0) != 404:
+        return
+    raise _ModelMissingError(f"{model} is not pulled on the local model (ollama pull {model})")
+
+
 def failure_note(provider: str, error: Exception | None) -> str:
     """One line saying why a model call produced no answer."""
     if getattr(error, "is_rate_limit", False):
@@ -532,6 +548,7 @@ class FreeLLM:
             payload["tools"] = tools
         try:
             resp = requests.post(url, json=payload, timeout=120)
+            _raise_model_missing(resp, self.model_name)
             resp.raise_for_status()
             data = resp.json()
             content = data.get("message", {}).get("content", "") or data.get("response", "")
@@ -557,9 +574,14 @@ class FreeLLM:
             if not tools:
                 llm_cache.set(cache_key, response)
             return response
-        except requests.exceptions.ConnectionError:
-            # Ollama is not running — fall back to any configured API key
-            # (custom URL / groq / openai / ...) so chat keeps working.
+        except (requests.exceptions.ConnectionError, _ModelMissingError) as exc:
+            # The local model cannot answer here — Ollama is not running, or it
+            # is running without the model that was asked for. Both are the same
+            # question to a person ("say something now"), so both fall back to
+            # any configured API key (custom URL / groq / openai / …) and chat
+            # keeps working. The reason is kept, so the answer can say where it
+            # came from instead of pretending the local model replied.
+            missing = exc if isinstance(exc, _ModelMissingError) else None
             fb = self._fallback_bundle(require_tools=bool(tools))
             if fb:
                 fb_provider = (fb.get("provider") or "custom").lower()
@@ -574,6 +596,7 @@ class FreeLLM:
                     "model": model,
                     "source": fb.get("source") or "stored",
                     "require_tools": bool(tools),
+                    "reason": str(missing) if missing else "ollama is not running",
                 }
                 try:
                     from .multi_key import multi_key_manager
@@ -605,6 +628,12 @@ class FreeLLM:
                         prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
                     )
                     return LLMResponse(fb_err, usage=usage, error=failure_note(fb_provider, e))
+            if missing is not None:
+                # No hosted key to fall back to: say what would fix this one,
+                # which is a pull, not a running Ollama.
+                content = f"⚠️ {missing}"
+                usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(content), model="ollama/mock")
+                return LLMResponse(content, usage=usage, error=failure_note("ollama", None))
             return self._ollama_down_response(tools=tools, prompt_tokens=prompt_tokens, messages=messages)
         except Exception as e:
             err_content = f"Ollama error: {e}"
@@ -962,6 +991,7 @@ class FreeLLM:
         http = client or get_async_client()
         try:
             resp = await http.post(url, json=payload, timeout=120)
+            _raise_model_missing(resp, self.model_name)
             resp.raise_for_status()
             data = resp.json()
             content = data.get("message", {}).get("content", "") or data.get("response", "")
@@ -987,7 +1017,10 @@ class FreeLLM:
             if not tools:
                 llm_cache.set(cache_key, response)
             return response
-        except httpx.ConnectError:
+        except (httpx.ConnectError, _ModelMissingError) as exc:
+            # Same two shapes as the sync path: Ollama is down, or it is up
+            # without the model that was asked for.
+            missing = exc if isinstance(exc, _ModelMissingError) else None
             fb = self._fallback_bundle(require_tools=bool(tools))
             if fb:
                 fb_provider = (fb.get("provider") or "custom").lower()
@@ -1002,6 +1035,7 @@ class FreeLLM:
                     "model": model,
                     "source": fb.get("source") or "stored",
                     "require_tools": bool(tools),
+                    "reason": str(missing) if missing else "ollama is not running",
                 }
                 try:
                     from .multi_key import multi_key_manager
@@ -1034,6 +1068,12 @@ class FreeLLM:
                         prompt_tokens, token_counter.count_text(fb_err), model=f"{fb_provider}/{model}"
                     )
                     return LLMResponse(fb_err, usage=usage, error=failure_note(fb_provider, e))
+            if missing is not None:
+                # No hosted key to fall back to: say what would fix this one,
+                # which is a pull, not a running Ollama.
+                content = f"⚠️ {missing}"
+                usage = token_counter.estimate_cost(prompt_tokens, token_counter.count_text(content), model="ollama/mock")
+                return LLMResponse(content, usage=usage, error=failure_note("ollama", None))
             return self._ollama_down_response(tools=tools, prompt_tokens=prompt_tokens, messages=messages)
         except Exception as e:
             err_content = f"Ollama error: {e}"

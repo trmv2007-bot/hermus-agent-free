@@ -231,6 +231,12 @@ def _as_audio(pcm: bytes):
 
 
 def _transcribe(pcm: bytes, model_name: str, language: str | None) -> str:
+    """One pass of Whisper. ``language=None`` makes it detect the language first.
+
+    Detection is a second pass over the audio: measured here at ~190 ms of a
+    ~380 ms partial, against ~190 ms for the same audio with the language known,
+    which is why the room tells the decoder what it is speaking.
+    """
     if not pcm:
         return ""
     model = _load_model(model_name)
@@ -243,6 +249,18 @@ def _transcribe(pcm: bytes, model_name: str, language: str | None) -> str:
         vad_filter=False,
     )
     return " ".join(segment.text.strip() for segment in segments).strip()
+
+
+def _language_hint(value: Any) -> str:
+    """Reduce a BCP-47 tag from the room (``en-US``) to what Whisper expects.
+
+    The room knows its own locale from ``navigator.language``, so the usual case
+    never has to detect a language at all. Empty means "let the model decide".
+    """
+    raw = str(value or "").strip().replace("_", "-")
+    if not raw:
+        return ""
+    return raw.split("-")[0].lower()
 
 
 # --------------------------------------------------------------------------- #
@@ -261,6 +279,13 @@ class ListenSession:
     partials: int = 0
     last_partial_audio_ms: int = 0
     decoding: bool = False
+    #: The language the room said it would speak (``navigator.language``), or the
+    #: one ``HERMUS_VOICE_LANGUAGE`` names. When it is set, nothing detects a
+    #: language at all. When it is empty each pass lets the model decide: a
+    #: fragment's own guess is too thin to reuse — the same 700 ms of English read
+    #: as Turkish on one fragment and Hindi on another in this thread's
+    #: measurements, and pinning it turned the next partial into Turkish text.
+    language: str = ""
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def budget(self) -> int:
@@ -282,14 +307,15 @@ class ListenManager:
         finally:
             self._warming = False
 
-    def start(self, session_id: str = "") -> dict[str, Any]:
+    def start(self, session_id: str = "", language: str = "") -> dict[str, Any]:
         if not _whisper_installed():
             raise SpeechToTextUnavailableError("python -m pip install faster-whisper")
         self._evict()
         if not self._warming:
             self._warming = True
             threading.Thread(target=self._warm, args=((partial_model_name(),),), name="hermus-voice-warm", daemon=True).start()
-        session = ListenSession(uuid.uuid4().hex, session_id=session_id)
+        hint = _language_hint(language) or _language_hint(os.getenv("HERMUS_VOICE_LANGUAGE"))
+        session = ListenSession(uuid.uuid4().hex, session_id=session_id, language=hint)
         with self._lock:
             self._sessions[session.id] = session
         return {
@@ -298,6 +324,7 @@ class ListenManager:
             "sample_width": SAMPLE_WIDTH,
             "partial_model": partial_model_name(),
             "final_model": final_model_name(),
+            "language": session.language or None,
         }
 
     def get(self, listen_id: str) -> ListenSession | None:
@@ -357,7 +384,7 @@ class ListenManager:
                     "first_partial_ms": session.first_partial_ms,
                     "silent": not already,
                 }
-            text = _transcribe(trimmed, partial_model_name(), language)
+            text = _transcribe(trimmed, partial_model_name(), _language_hint(language) or session.language)
             elapsed = int((time.monotonic() - started) * 1000)
             if len(text.split()) <= 2 and duration_ms(trimmed) < MIN_PARTIAL_ALONE_MS:
                 text = ""
@@ -396,7 +423,7 @@ class ListenManager:
             with self._lock:
                 self._sessions.pop(listen_id, None)
             return {"text": "", "ms": 0, "audio_ms": duration_ms(pcm), "silent": True}
-        text = _transcribe(trimmed, final_model_name(), language)
+        text = _transcribe(trimmed, final_model_name(), _language_hint(language) or session.language or None)
         elapsed = int((time.monotonic() - started) * 1000)
         with session.lock:
             session.final_text = text

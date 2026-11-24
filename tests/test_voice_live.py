@@ -140,6 +140,85 @@ def test_chunks_need_the_listen_header(gateway):
 
 
 # --------------------------------------------------------------------------- #
+# the language the partial is decoded in
+# --------------------------------------------------------------------------- #
+def test_the_rooms_language_reaches_the_decoder_without_detecting(monkeypatch):
+    """The room says "en-US", so the partial never pays for detection.
+
+    Detection is a second pass over the audio — measured at ~190 ms of a ~380 ms
+    partial on this PC — and on two English fragments it guessed Turkish and
+    Hindi instead. A hint makes both problems disappear.
+    """
+    import core.voice.listen as listen_mod
+
+    monkeypatch.setattr(listen_mod, "_whisper_installed", lambda: True)
+    monkeypatch.setattr(listen_mod, "warm_models", lambda names=None: None)
+    seen: list = []
+
+    def fake_transcribe(pcm, model_name, language):
+        seen.append(language)
+        return "the transcript"
+
+    monkeypatch.setattr(listen_mod, "_transcribe", fake_transcribe)
+    manager = listen_mod.ListenManager()
+    opened = manager.start("s1", "en-US")
+    assert opened["language"] == "en"
+    manager.append(opened["id"], b"" * 16000)  # 1 s, loud enough to count
+    manager.partial(opened["id"])
+    seen.clear()
+    manager.finish(opened["id"])
+    assert seen == ["en"], "the committed transcript keeps the room's language too"
+
+
+def test_without_a_hint_every_pass_lets_the_model_decide(monkeypatch):
+    """A fragment's guess is not reused: it was wrong on real English.
+
+    Pinning what a 700 ms partial detected turned the next one into Turkish text
+    on this machine, so with no hint each pass detects for itself and only the
+    room's own locale can turn that off.
+    """
+    import core.voice.listen as listen_mod
+
+    monkeypatch.setattr(listen_mod, "_whisper_installed", lambda: True)
+    monkeypatch.setattr(listen_mod, "warm_models", lambda names=None: None)
+    seen: list = []
+
+    def fake_transcribe(pcm, model_name, language):
+        seen.append(language)
+        return "hello there friend"
+
+    monkeypatch.setattr(listen_mod, "_transcribe", fake_transcribe)
+    manager = listen_mod.ListenManager()
+    opened = manager.start("s1", "")
+    assert opened["language"] is None
+    for _ in range(3):
+        manager.append(opened["id"], b"" * 16000)
+        manager.partial(opened["id"], force=True)
+    assert seen == [""] * 3, "no hint means every pass asks the model, and nothing is pinned"
+
+
+def test_a_language_hint_is_reduced_to_the_code_whisper_expects():
+    from core.voice.listen import _language_hint
+
+    assert _language_hint("en-US") == "en"
+    assert _language_hint("pt_BR") == "pt"
+    assert _language_hint(" HI ") == "hi"
+    assert _language_hint("") == ""
+    assert _language_hint(None) == ""
+
+
+def test_the_committed_transcript_uses_the_faster_model_by_default():
+    """The partial is what has to feel instant; base is the commit default.
+
+    `small` is still the most accurate on CPU and is one variable away, so this
+    pins the trade rather than hiding it.
+    """
+    from core.voice.listen import final_model_name
+
+    assert final_model_name() == "base"
+
+
+# --------------------------------------------------------------------------- #
 # the degradation chain tells the truth
 # --------------------------------------------------------------------------- #
 def test_missing_speech_to_text_disables_the_mic_with_the_fix(monkeypatch):

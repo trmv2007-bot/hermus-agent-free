@@ -36,10 +36,11 @@ def clean_keys():
     ``unlink()`` it again on teardown, which permanently destroyed a developer's
     stored provider keys — the suite has no claim on that file.
     """
-    from core.config import config
     from core.multi_key import multi_key_manager
 
-    db = config.resolve_path("data/api_keys.json")
+    # The store the manager actually reads — the suite points it at a temporary
+    # file, so this never touches the checkout's own data/api_keys.json.
+    db = multi_key_manager.db_path
     saved = db.read_bytes() if db.exists() else None
     if saved is not None:
         db.unlink()

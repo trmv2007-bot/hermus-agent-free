@@ -52,15 +52,34 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_key_store(monkeypatch):
-    """No test may read the keys a developer keeps in the control-room store.
+    """No test may read a key that belongs to whoever's machine it runs on.
 
     Model resolution asks every configured key a real question in production; in
     a test run that would both reach a provider and make the result depend on the
     machine, so the store is empty for every test and each one opts in instead.
+
+    The same holds for a provider key exported in the developer's shell. A host
+    carrying ``OPENAI_API_KEY`` for unrelated work outranks the ``GROQ_API_KEY``
+    a test pins, so six provider-resolver and custom-key cases failed on Rishi's
+    PC while staying green in CI. Every credential the presets know about is
+    removed here, and the ``Config`` singleton is cleared of the same keys: it is
+    built when the package is first imported, which is before this fixture can
+    clean the environment, and the resolver still reads ``config.openai_api_key``
+    as a fallback. A test that wants a key sets it in its own body or fixture,
+    after this runs, and gets it back untouched.
     """
     from core import key_sources
+    from core.config import config
+    from core.providers import PROVIDER_PRESETS
 
     monkeypatch.setattr(key_sources, "store_keys", lambda provider: [])
+    for preset in PROVIDER_PRESETS.values():
+        env_key = preset.get("env_key")
+        if env_key:
+            monkeypatch.delenv(env_key, raising=False)
+    for name in type(config).model_fields:
+        if name.endswith(("_api_key", "_token")):
+            monkeypatch.setattr(config, name, "", raising=False)
     key_sources.reset_cache()
 
 
@@ -74,6 +93,27 @@ def _isolate_task_control_state():
 @pytest.fixture(scope="session")
 def _ledger_tmp_path(tmp_path_factory: pytest.TempPathFactory):
     return tmp_path_factory.mktemp("capability_ledger") / "CAPABILITY_LEDGER.md"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_key_store(tmp_path_factory: pytest.TempPathFactory):
+    """The control-room key store is a test's own file, never the checkout's.
+
+    ``data/api_keys.json`` lives in the repository, so from a checkout every test
+    that adds a key writes into the same store the next test reads — one custom
+    key left behind by an earlier case is enough to change which provider a
+    fallback picks. It is also the store a person's own keys would sit in. A
+    session-wide temporary file keeps both claims intact: tests that want a key
+    add it and see it, and no test can see one another did not add.
+    """
+    from core.multi_key import multi_key_manager
+
+    previous = multi_key_manager.db_path
+    multi_key_manager.db_path = tmp_path_factory.mktemp("key-store") / "api_keys.json"
+    multi_key_manager._load_queues()
+    yield
+    multi_key_manager.db_path = previous
+    multi_key_manager._load_queues()
 
 
 @pytest.fixture(scope="session", autouse=True)

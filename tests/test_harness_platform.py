@@ -20,7 +20,13 @@ from pathlib import Path
 
 import pytest
 
-from tests._node_harness import INLINE_SCRIPT_LIMIT, NODE_INLINE_FLAGS, check_argv, run_node
+from tests._node_harness import (
+    INLINE_SCRIPT_LIMIT,
+    check_argv,
+    inline_flags,
+    program_name,
+    run_node,
+)
 
 TESTS_DIR = Path(__file__).resolve().parent
 ROOT = TESTS_DIR.parent
@@ -80,6 +86,12 @@ def _violations(path: Path) -> list[str]:
         else:
             continue
         elements = _argv_nodes(node)
+        # The program decides which flags are source code: ``-p`` is print to
+        # Node and a plugin switch to pytest. An argv head that cannot be known
+        # statically gets no flag guess — the length and newline rules still
+        # apply to it.
+        head = _static_text(elements[0]) if elements else None
+        flags = inline_flags(program_name(head)) if head is not None else ()
         for element in elements:
             text = _static_text(element)
             if text is None:
@@ -91,8 +103,8 @@ def _violations(path: Path) -> list[str]:
                     f"{path.name}:{node.lineno} passes a {len(text)}-character argv element "
                     f"(limit {INLINE_SCRIPT_LIMIT}); write it to a file"
                 )
-            elif text in NODE_INLINE_FLAGS:
-                problems.append(f"{path.name}:{node.lineno} uses node {text} — pass a script path instead")
+            elif text in flags:
+                problems.append(f"{path.name}:{node.lineno} passes inline source with {text} — pass a script path instead")
     return problems
 
 
@@ -112,6 +124,11 @@ def test_the_rule_refuses_the_shapes_that_broke_windows():
     with pytest.raises(AssertionError, match="newline"):
         check_argv(["python", "-c", "import sys\nprint(1)"])
     check_argv(["node", "tests/js/scheduler.test.js"])
+    # ``-p`` is inline source to Node and a plugin switch to pytest: the argv is
+    # judged by the program it names, or every pytest run would read as a defect.
+    check_argv(["python", "-m", "pytest", "-p", "no:cacheprovider"])
+    with pytest.raises(AssertionError, match="inline source flag"):
+        check_argv(["node", "--print", "1+1"])
 
 
 def test_a_script_far_past_the_windows_limit_runs_from_a_file():
