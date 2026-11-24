@@ -15,13 +15,13 @@ import argparse
 from core.config import config
 from core.log import setup_logging
 
-from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_undo, g_workspace
+from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_self, g_undo, g_workspace
 from . import repl as repl_cmd
 from ._common import CLIContext
 from ._spec import Command, CommandModule
 
 #: Ordered group modules. Order only affects ``--help`` listing.
-_GROUPS = (g_runtime, g_agents, g_memory, g_models, g_safety, g_undo, g_workspace)
+_GROUPS = (g_runtime, g_agents, g_memory, g_models, g_safety, g_undo, g_workspace, g_self)
 
 SPECS: tuple[Command, ...] = tuple(command for group in _GROUPS for command in group.COMMANDS)
 

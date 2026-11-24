@@ -61,6 +61,14 @@ _TABLE = (
         "Runtime error triage and stuck run/job reaping",
     ),
     (
+        "self_attention",
+        "What needs attention",
+        "safety",
+        "core/self_model.py",
+        "@self_attention",
+        "What Hermus says is broken now and worth adding, each with the evidence behind it",
+    ),
+    (
         "runtime-issues",
         "Runtime issues",
         "runtime",
@@ -1245,6 +1253,18 @@ def _p_doctor() -> dict[str, Any]:
     return report
 
 
+def _p_self_attention() -> dict[str, Any]:
+    """One row's worth of self-diagnosis: two counts and the list behind them.
+
+    The items, their evidence and the next step come straight from
+    :func:`core.self_model.diagnose`, which reuses the doctor's findings and the
+    capability ledger. Nothing here decides what is wrong.
+    """
+    from core.self_model import diagnose
+
+    return diagnose()["view"]
+
+
 def _p_runtime_issues() -> dict[str, Any]:
     from core.run_events import recent_issues
 
@@ -1335,6 +1355,7 @@ _SHAPED: dict[str, Callable[[], Any]] = {
     "profiles": _p_profiles,
     "eval": _p_eval,
     "doctor": _p_doctor,
+    "self_attention": _p_self_attention,
     "router": _p_router,
     "runtime_issues": _p_runtime_issues,
     "swe": _p_swe,

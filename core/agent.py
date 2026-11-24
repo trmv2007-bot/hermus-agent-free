@@ -442,6 +442,23 @@ class HermusAgent:
         except Exception as exc:
             record_issue("awareness", "desktop_context", exc, retryable=False, fallback="turn continues without desktop context")
 
+        # Self-model (core/self_model.py): who it is, what it can actually do —
+        # from the registry and the doctor's own probe, never from a prose
+        # claim — what is unavailable with the command that fixes it, and the
+        # red lines it never breaks. Capped, deduplicated, and switchable with
+        # HERMUS_SELF_MODEL=0.
+        self_model_block = ""
+        try:
+            from .self_model import section as self_model_section
+
+            rendered = self_model_section()
+            if rendered:
+                self_model_block = "\n" + rendered + "\n"
+        except Exception as exc:
+            record_issue(
+                "self_model", "prompt_section", exc, retryable=False, fallback="turn continues without the self-model section"
+            )
+
         dashboard_block = ""
         try:
             from .dashboard_state import dashboard_state
@@ -493,6 +510,7 @@ Periodic Nudges:
 {persona_block}
 {dashboard_block}
 {desktop_block}
+{self_model_block}
 Rules:
 - Use tools when needed; do not hallucinate facts you can look up
 - After tools return, continue reasoning; call more tools if needed
