@@ -494,6 +494,8 @@ def run_bench(
     task_timeout: float = 240.0,
     work: Path | None = None,
     stop_on_rate_limit: bool = True,
+    pace_seconds: float = 0.0,
+    throttle_retries: int = 1,
 ) -> dict[str, Any]:
     work = Path(work) if work else Path(tempfile.mkdtemp(prefix="hermus_bench_"))
     work.mkdir(parents=True, exist_ok=True)
@@ -536,7 +538,20 @@ def run_bench(
                 )
                 print(f"[SKIP] {task['id']:<22} {reason}")
                 continue
+            if pace_seconds and rows:
+                time.sleep(pace_seconds)
             row = _task_row(task, model=model, base_url=base_url, timeout=task_timeout, work=work)
+            # A free tier refuses requests in bursts (measured: two answers, then
+            # about a minute of 429s). A task the tier turned away before it could
+            # act is re-run once after waiting out the window; that is a scheduling
+            # wait, not a second attempt at the work, and it is recorded.
+            waits = 0
+            while throttle_retries > 0 and waits < throttle_retries and _stops_run(row) and not limited_at:
+                waits += 1
+                print(f"  ... {task['id']} was rate-limited; waiting {int(pace_seconds) or 60}s for the window")
+                time.sleep(pace_seconds or 60.0)
+                row = _task_row(task, model=model, base_url=base_url, timeout=task_timeout, work=work)
+            row["throttled_retries"] = waits
             row["skipped"] = False
             rows.append(row)
             if stop_on_rate_limit and not limited_at and _stops_run(row):
@@ -669,6 +684,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="keep spending requests after a rate limit (default: stop and report it)",
     )
+    parser.add_argument(
+        "--pace",
+        type=float,
+        default=0.0,
+        help="seconds between tasks; a free tier needs this (measured: ~2 requests/minute on a Mistral key)",
+    )
+    parser.add_argument(
+        "--throttle-retries",
+        type=int,
+        default=1,
+        help="wait out the window and re-run a throttled task at most this many times (0 = stop at once)",
+    )
     parser.add_argument("--task", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--base-url", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--json-out", default=None, help=argparse.SUPPRESS)
@@ -702,6 +729,8 @@ def main(argv: list[str] | None = None) -> int:
                 task_timeout=args.task_timeout,
                 work=work,
                 stop_on_rate_limit=not args.keep_running_after_429,
+                pace_seconds=args.pace,
+                throttle_retries=args.throttle_retries,
             )
         )
 

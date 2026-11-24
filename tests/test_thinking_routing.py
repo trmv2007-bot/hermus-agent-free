@@ -241,3 +241,24 @@ def test_an_answered_model_is_remembered_for_the_next_decision(monkeypatch):
     before = len(calls)
     assert answering_hosted_ref("mistral/mistral-small-latest") == "mistral/ministral-8b-latest"
     assert len(calls) == before, "the cached measurement must be reused"
+
+
+def test_a_turn_already_on_the_free_tier_does_not_hop_to_another_hosted_model():
+    """A second model on the same tier is a second request, not an upgrade."""
+    decision = decide_route(
+        "Audit, refactor and migrate the module.",
+        local_model="mistral/ministral-8b-latest",
+        hosted_models=["mistral/mistral-small-latest"],
+    )
+    assert decision.tier == TIER_FREE_HOSTED
+    assert decision.model == "mistral/ministral-8b-latest"
+    assert "already on the free tier" in decision.reason
+
+
+def test_a_local_turn_still_escalates_to_the_configured_hosted_model():
+    decision = decide_route(
+        "Audit, refactor and migrate the module.",
+        local_model=LOCAL,
+        hosted_models=["mistral/mistral-small-latest"],
+    )
+    assert decision.model == "mistral/mistral-small-latest"

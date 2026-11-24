@@ -143,6 +143,10 @@ class TurnMind:
         """
         if self.decision is None:
             return
+        if self.decision.model == self._current_model():
+            # Already on the model the turn will call: asking the provider whether
+            # it answers would spend the very request the turn is about to make.
+            return
         chosen = answering_hosted_ref(self.decision.model)
         if chosen == self.decision.model:
             return

@@ -143,6 +143,19 @@ def _difficulty_signals(text: str) -> tuple[int, list[str]]:
     return difficulty, signals
 
 
+def _hosted_target(current: str, hosted: list[str]) -> str:
+    """The free hosted model a turn should run on.
+
+    A turn already running on a free hosted model whose provider has a key is
+    *on* the escalation tier: moving it to a different model of the same tier
+    spends a second request and can land on one the key does not rank. It only
+    moves when it is running somewhere else.
+    """
+    if tier_of(current) == TIER_FREE_HOSTED and provider_of(current) in {provider_of(ref) for ref in hosted}:
+        return current
+    return hosted[0]
+
+
 def decide_route(
     text: str,
     *,
@@ -214,14 +227,21 @@ def decide_route(
             )
         return _decide(
             TIER_FREE_HOSTED,
-            hosted[0],
+            _hosted_target(local_model, hosted),
             f"difficulty {diff}: no local model is bound, so the free hosted tier is the cheapest option",
         )
 
     if hosted:
+        target = _hosted_target(local_model, hosted)
+        if target == local_model:
+            return _decide(
+                TIER_FREE_HOSTED,
+                target,
+                f"difficulty {diff} would escalate, and the turn is already on the free tier ({target})",
+            )
         return _decide(
             TIER_FREE_HOSTED,
-            hosted[0],
+            target,
             f"difficulty {diff} needs more reasoning than the local model reliably gives; "
             "escalating to the configured free-tier key",
         )
