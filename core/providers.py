@@ -310,6 +310,45 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "env_key": "AZURE_OPENAI_API_KEY",
         "notes": "Set base_url to your Azure resource endpoint + /openai/deployments/{deployment}",
     },
+    "ovh": {
+        "name": "OVHcloud AI Endpoints (anonymous tier)",
+        "base_url": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+        "default_model": "Qwen3.5-397B-A17B",
+        "supports_tools": True,
+        "env_key": None,
+        # No key and no account: the endpoint answers anonymously, which is what
+        # makes a first answer possible on a machine with nothing installed. The
+        # credential is optional rather than forbidden — a key raises the quota —
+        # so a key found in the environment is still sent.
+        "no_auth": True,
+        "keyless": True,
+        "notes": (
+            "Anonymous EU-hosted OpenAI-compatible endpoint, no signup. Measured on this machine: the first "
+            "request answers and the response headers report x-ratelimit-limit-year: 1, so an address gets one "
+            "request per model per year — which is why it is the second keyless rung, not the first"
+        ),
+        # The minute window is 2; the yearly allowance is what actually binds, and
+        # a 429 whose retry-after says so takes the rung out of the ladder.
+        "default_rpm": 2,
+    },
+    "pollinations": {
+        "name": "Pollinations (anonymous tier)",
+        "base_url": "https://text.pollinations.ai/openai",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+        "default_model": "openai-fast",
+        "supports_tools": False,
+        "env_key": None,
+        "no_auth": True,
+        "keyless": True,
+        "notes": "Anonymous OpenAI-compatible text endpoint, no signup; the second keyless rung so a rate limit is not a dead end",
+    },
     "ollama": {
         "name": "Ollama (local OpenAI-compatible)",
         "base_url": "http://localhost:11434/v1",

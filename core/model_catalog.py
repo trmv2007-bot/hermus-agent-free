@@ -40,6 +40,16 @@ from typing import Any
 #: runtimes that answer without a network and without a key
 LOCAL_PROVIDERS = ("ollama", "lmstudio", "nollama")
 
+#: hosted endpoints that answer with no key *and* no account, in ladder order.
+#: Each one is a documented anonymous tier, rate-limited per address, so it is a
+#: rung of last resort rather than a replacement for a model on the machine.
+#: Pollinations first: measured from this machine, it answers every request.
+#: OVHcloud's anonymous quota turns out to be one request per model per *year*
+#: per address (its own headers say so: ``x-ratelimit-limit-year: 1``), so it is
+#: kept as the rung below — stronger models, but a fresh address is what makes
+#: them usable, which is exactly what a second rung is for.
+KEYLESS_PROVIDERS = ("pollinations", "ovh")
+
 #: hosted providers whose free plan a person can paste a key for
 FREE_PROVIDERS = ("mistral", "groq", "openrouter", "gemini", "cerebras", "together")
 
@@ -52,6 +62,11 @@ FREE_KEYS = {
     "cerebras": "CEREBRAS_API_KEY",
     "together": "TOGETHER_API_KEY",
 }
+
+#: the ladder a turn is resolved down, in order. Each rung is attempted only
+#: when the one before it has nothing that can answer, and the reason it fell
+#: through is kept, so "no model" is never the whole story.
+TIERS = ("local", "keyless", "keyed", "stub")
 
 
 @dataclass(frozen=True)
@@ -259,11 +274,104 @@ _GEMINI = (
     ),
 )
 
+# The two keyless rungs. Their names and their tool-calling behaviour were read
+# from the endpoints themselves rather than from a doc page: the model list is
+# what the endpoint serves, and one probe per family says whether a tool schema
+# comes back as a tool call. Neither tier has a published model-retirement
+# schedule, so nothing here claims one is permanent.
+_OVH = (
+    Model(
+        "ovh",
+        "Qwen3.5-397B-A17B",
+        "qwen3",
+        397,
+        262_144,
+        True,
+        "the largest model on the anonymous endpoint: a 397B mixture-of-experts generation with 17B active that answered a tool call in 1.2s here — its anonymous allowance is one request per model per address per year",
+        strength=50,
+    ),
+    Model(
+        "ovh",
+        "gpt-oss-120b",
+        "gpt-oss",
+        120,
+        131_072,
+        True,
+        "OpenAI's 120B open-weight mixture-of-experts with the same tool contract, as a second name on the same endpoint when the top one is busy",
+        strength=48,
+    ),
+    Model(
+        "ovh",
+        "Qwen3.8-27B",
+        "qwen3",
+        27,
+        262_144,
+        True,
+        "the newest dense 27B generation on the endpoint: less breadth than the 397B and a fraction of the active parameters",
+        strength=31,
+    ),
+    Model(
+        "ovh",
+        "Qwen3.6-27B",
+        "qwen3",
+        27,
+        262_144,
+        True,
+        "the generation before it at the same size; kept so one name disappearing does not leave the rung empty",
+        strength=28,
+    ),
+    Model(
+        "ovh",
+        "Meta-Llama-3_3-70B-Instruct",
+        "llama3.3",
+        70,
+        131_072,
+        True,
+        "70B from the 2024 Llama generation: more parameters than the Qwens below it and older reasoning",
+        strength=26,
+    ),
+    Model(
+        "ovh",
+        "nemotron3-nano-30b",
+        "nemotron",
+        30,
+        131_072,
+        True,
+        "NVIDIA's 30B nano: the small fast option on this endpoint, kept for short turns",
+        strength=20,
+    ),
+    Model(
+        "ovh",
+        "Qwen3.5-9B",
+        "qwen3",
+        9,
+        262_144,
+        True,
+        "9B from the current Qwen generation: the smallest thing here that still calls tools, for prompts a large model would waste",
+        strength=10,
+    ),
+)
+
+_POLLINATIONS = (
+    Model(
+        "pollinations",
+        "openai-fast",
+        "gpt-oss",
+        20,
+        None,
+        False,
+        "GPT-OSS 20B reasoning behind an anonymous endpoint; its listing advertises tool calls, but a probe returned a plain reply instead of a tool call, so it is ranked chat-only",
+        strength=20,
+    ),
+)
+
 CATALOG: dict[str, tuple[Model, ...]] = {
     "mistral": _MISTRAL,
     "groq": _GROQ,
     "openrouter": _OPENROUTER,
     "gemini": _GEMINI,
+    "ovh": _OVH,
+    "pollinations": _POLLINATIONS,
 }
 
 # A provider whose free plan offers exactly one usable model says so here rather
@@ -340,6 +448,33 @@ def name_of(ref: str) -> str:
 
 def is_local(ref: str) -> bool:
     return provider_of(ref) in LOCAL_PROVIDERS
+
+
+def is_keyless(ref: str) -> bool:
+    """Does this provider answer without any credential at all?"""
+    return provider_of(ref) in KEYLESS_PROVIDERS
+
+
+def needs_key(provider: str) -> bool:
+    """Does onboarding have to ask a person for a key to use this provider?
+
+    Only the keyed free tiers do. A local runtime and a keyless endpoint answer
+    as shipped, so asking for a credential there would be a question with no
+    effect on the answer.
+    """
+    return provider not in LOCAL_PROVIDERS and provider not in KEYLESS_PROVIDERS
+
+
+def tier_of(ref: str) -> str:
+    """Which rung of the ladder a reference belongs to."""
+    provider = provider_of(ref) if "/" in str(ref) else str(ref or "").lower()
+    if provider in LOCAL_PROVIDERS:
+        return "local"
+    if provider in KEYLESS_PROVIDERS:
+        return "keyless"
+    if provider == "mock" or not provider:
+        return "stub"
+    return "keyed"
 
 
 def family_of(name: str) -> str:

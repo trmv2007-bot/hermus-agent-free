@@ -1187,8 +1187,12 @@
     } else {
       var where = resolved.kind === "freekey"
         ? " from the " + resolved.provider + " free tier."
-        : resolved.kind === "local" ? " on this machine." : ".";
-      fillRow("model", "on", "Answering with " + resolved.name + where);
+        : resolved.kind === "keyless"
+          ? " from the " + resolved.provider + " free tier, with no key. Your words leave this machine for that endpoint."
+          : resolved.kind === "local" ? " on this machine." : ".";
+      /* The one line that says how to make this faster, beside the fact of what
+         is answering: a local model is the answer to both speed and privacy. */
+      fillRow("model", "on", "Answering with " + resolved.name + where, onboarding.speed || "");
     }
 
     if (!voice) {

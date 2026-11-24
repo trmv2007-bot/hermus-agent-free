@@ -1021,6 +1021,25 @@ def first_run(*, interactive: bool | None = None) -> dict[str, Any]:
         print("Source:", resolved["source"])
         return {"ok": True, "model": resolved["model"], "source": resolved["source"]}
 
+    # Nothing on this machine answered, but the ladder may still have a rung that
+    # needs nothing from the person. Say what will answer first; installing
+    # Ollama becomes a speed-up instead of a prerequisite.
+    keyless = brain_mod.resolve_brain(status=status)
+    if keyless["kind"] == "keyless":
+        onboarding.save(onboarding.record_brain(state, keyless))
+        print(f"Model: {brain_mod.pickup_line(keyless)}")
+        print("Source:", keyless["source"])
+        if keyless.get("privacy"):
+            print("Note:", keyless["privacy"])
+        print("Faster:", brain_mod.speed_hint(keyless))
+        return {
+            "ok": True,
+            "model": keyless["model"],
+            "source": keyless["source"],
+            "keyless": True,
+            "privacy": keyless.get("privacy") or "",
+        }
+
     installed = status["ollama"]["installed"]
     offer = (
         "Ollama is installed but not running. Start it and download the small model"
@@ -1114,6 +1133,13 @@ def main(argv: list[str] | None = None) -> int:
         resolved = brain_mod.resolve_brain(preferred=stored)
         print(f"Model: {brain_mod.pickup_line(resolved)}")
         print(f"Source: {resolved['source']}")
+        for step in resolved.get("ladder") or []:
+            mark = "chose" if step["state"] == "chose" else "skipped"
+            ref = step["ref"] or step["rung"]
+            print(f"  ladder: {step['rung']:<9} {mark:<8} {ref}: {step['why']}")
+        if resolved.get("privacy"):
+            print(f"Privacy: {resolved['privacy']}")
+        print(f"Faster: {brain_mod.speed_hint(resolved)}")
         if resolved["kind"] == "stub":
             print(f"Fix: {brain_mod.fix_command(resolved)}")
         return 0 if resolved["kind"] != "stub" else 1
