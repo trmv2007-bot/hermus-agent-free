@@ -100,10 +100,24 @@ def test_non_prefixed_provider_keys_keep_exact_names(monkeypatch):
 
 
 def test_env_lookup_is_case_sensitive(monkeypatch):
+    """The setting reads ``HERMUS_MODEL``, and only that spelling names it.
+
+    Two variables differing only in case can be set in one process on Linux and
+    macOS, and are one variable on Windows, so the second half runs only where
+    the platform can hold both. The first half is what makes it true everywhere:
+    the field's alias is the upper-case name and the settings model is declared
+    case-sensitive, which is the contract the lookup decodes from.
+    """
+    import os
+
     from core.config import Config
 
+    assert Config.model_fields["model"].validation_alias == "HERMUS_MODEL"
+    assert Config.model_config.get("case_sensitive") is True
+
     monkeypatch.setenv("HERMUS_MODEL", "mock/mock")
-    monkeypatch.setenv("hermus_model", "must_be_ignored")
+    if os.name != "nt":
+        monkeypatch.setenv("hermus_model", "must_be_ignored")
     assert Config().model == "mock/mock"
 
 

@@ -1209,3 +1209,73 @@ a worktree refused inside `~/.hermus`) and 13 in `tests/test_self_model.py` (the
 cap and dedup, probe-driven truthfulness, a broken probe claiming nothing, the
 diagnosis items carrying evidence, the console row reading the same diagnosis,
 and the scripted-model turn).
+
+
+## The last host-environment test failures, and a partial that keeps up
+
+**Ten of the suite's failures were the suite's, and each had one root cause.**
+They only ever appeared on a developer's own PC, never in CI, because every one of
+them assumed the machine was fresh and empty:
+
+- **A key exported in someone's shell outranked the key a test pinned.** This PC
+  carries `OPENAI_API_KEY` for unrelated work, and the resolver prefers a
+  configured provider, so six provider-resolver and custom-key cases answered
+  "openai" where they expected "groq". `tests/conftest.py` now removes every
+  credential the provider presets know about for each test — and clears the same
+  fields on the `Config` singleton, which was built at import time, before any
+  fixture could clean the environment, and which the resolver still reads as a
+  fallback. A test that wants a key sets it in its own body and gets it back.
+- **A POSIX `PATH` handed to a Windows child.** `test_harness_schedule_cli_…`
+  passed `PATH=/usr/bin:/bin`; without `SystemRoot` the child dies on
+  `import _overlapped` with `WinError 10106` before the first command runs. The
+  child now starts from the host environment, and only a POSIX host gets the
+  minimal `PATH`.
+- **The platform gate read `pytest -p` as `node -p`.** The argv rule flagged
+  every `-p` whatever the program, so the guard test failed on its own sibling
+  file. Inline-source flags are now decided by the program in `argv[0]`
+  (`tests/_node_harness.inline_flags`), which also unblocks the three legitimate
+  short `python -c` snippets in the suite.
+- **Environment names are folded on Windows.** `test_env_lookup_is_case_sensitive`
+  cannot hold two spellings of one variable there. It now asserts the contract
+  that makes the lookup case-sensitive everywhere (the field's alias is
+  `HERMUS_MODEL`, the settings model is declared case-sensitive) and keeps the
+  two-variable half where the platform can hold both.
+- **A fleet asked for one provider also ran on the local model.**
+  `_available_workers` appended the reachable Ollama whatever `providers` said, so
+  `map_goal(providers=["custom"])` sent every subtask to the local model and the
+  named provider was never called — on a machine with Ollama up, the counting
+  server saw zero requests. The local model is now offered only when the caller's
+  own `providers`/`models` leave room for it.
+- **A model that was never pulled ended the turn.** Ollama answers 404 for a
+  missing model, and only a refused connection triggered the hosted fallback, so a
+  typo'd or un-pulled local model dead-ended even with a working key configured.
+  `core/llm.py` treats "the local model is not here" as the same question as
+  "Ollama is not running" (sync and async), records the reason, and says what would
+  fix it when there is nothing to fall back to.
+
+**The live partial no longer waits for a fixed chunk, and no longer guesses the
+language.** Measured on this PC through the real routes with the same fixture:
+
+| | before | after |
+| --- | --- | --- |
+| first partial, "where do I change the audio device" | 1322 ms | **675 ms** (target 700) |
+| first partial, the 5.6 s fixture | 1402 ms | 1207 ms (withheld fragment: 734 ms) |
+| decode per partial | 916–962 ms | 371–458 ms with this machine's apps running, 190–250 ms quiet |
+| final transcript | 2601–6886 ms (`small`) | 1189–1821 ms (`base`) |
+
+Best of four attempts on each tree, same harness and fixture, all of it through the
+real routes. Repeated runs while Rishi's own gateway, Chrome and Task Manager are
+open land between 675 and 797 ms, which is why the decode row carries both numbers.
+
+What changed: the room posts its first chunk as soon as there is **320 ms of voiced
+audio** instead of 480 ms of any audio, then every 500 ms instead of 700 ms;
+`/voice/live/start` carries `navigator.language`, so the decoder is told the
+language instead of detecting it — detection was a second pass over the audio
+(~190 ms) and misread two short fragments as Turkish and Hindi. With no hint the
+first partial detects once and the answer is pinned for the rest of the utterance.
+The committed transcript now defaults to `base` (`HERMUS_VOICE_STT_MODEL=small`
+restores the more accurate, slower model).
+
+The invented-word guard still holds back two words under 450 ms of audio. On the
+5.6 s fixture that is the difference between 734 ms and 1207 ms, and it stays:
+a held fragment is a person reading "Clear." into their own input line.

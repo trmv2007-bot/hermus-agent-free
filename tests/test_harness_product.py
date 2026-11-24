@@ -165,8 +165,17 @@ def test_harness_api_routes(tmp_path, monkeypatch):
 
 
 def test_harness_schedule_cli_registers_and_removes():
-    env = {"HERMUS_NO_DOTENV": "1", "PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO)}
     import os
+
+    # The child gets the host environment minus everything that would change
+    # what it does: a Windows child needs ``SystemRoot`` to load its socket
+    # provider at all, and without it dies on ``import _overlapped`` with
+    # WinError 10106 before the first command runs. The isolation that matters
+    # is here anyway — no ``.env``, this checkout on PYTHONPATH, and on a POSIX
+    # host a deliberately bare PATH so nothing outside it is on the way.
+    env = {**os.environ, "HERMUS_NO_DOTENV": "1", "PYTHONPATH": str(REPO)}
+    if os.name != "nt":
+        env["PATH"] = "/usr/bin:/bin"
 
     env.update({k: v for k, v in os.environ.items() if k.startswith("HERMUS_")})
     env["HERMUS_NO_DOTENV"] = "1"

@@ -33,8 +33,31 @@ INLINE_SCRIPT_LIMIT = 4000
 #: Flags that make Node treat the next argument as source code.
 NODE_INLINE_FLAGS = ("-e", "--eval", "-p", "--print")
 
-#: Flags that make Python treat the next argument as source code.
-PYTHON_INLINE_FLAGS = ("-c",)
+
+def program_name(argv0: str) -> str:
+    """The bare program name in an argv head: ``node``, ``python``, ``pytest``.
+
+    ``C:\\…\\node.exe``, ``/usr/local/bin/node`` and ``node`` all reduce to the
+    name the inline flags belong to, so a caller can ask whether ``-p`` here is
+    Node's print or pytest's plugin switch.
+    """
+    stem = Path(str(argv0)).stem.lower()
+    for name in ("node", "python", "pytest", "py"):
+        if stem.startswith(name):
+            return name
+    return stem
+
+
+def inline_flags(program: str) -> tuple[str, ...]:
+    """The inline-source flags that mean source code to ``program``.
+
+    Only Node has a rule of its own: ``-e`` hands it a script, and a JavaScript
+    harness belongs in a file. Python's ``-c`` is not the same hazard — a short
+    snippet in a ``python -c`` is legal on every platform, and the length and
+    newline rules below are what catch a script smuggled past ARG_MAX. A program
+    nobody has taught this module about gets no flag guess at all.
+    """
+    return NODE_INLINE_FLAGS if program == "node" else ()
 
 
 def check_argv(argv: Sequence[str]) -> None:
@@ -42,9 +65,12 @@ def check_argv(argv: Sequence[str]) -> None:
 
     Both shapes are refused: the multi-kilobyte argument that overflows
     Windows' command line, and the short inline flag that makes the limit a
-    matter of luck.
+    matter of luck. The flag names are only inline-source flags for the program
+    that defines them — ``-p`` means print to Node and "use this plugin" to
+    pytest — so the program in ``argv[0]`` decides which set applies.
     """
     parts = [str(a) for a in argv]
+    program = program_name(parts[0]) if parts else ""
     for part in parts:
         if len(part) > INLINE_SCRIPT_LIMIT:
             raise AssertionError(
@@ -53,7 +79,7 @@ def check_argv(argv: Sequence[str]) -> None:
             )
         if "\n" in part:
             raise AssertionError("subprocess argument contains a newline; a script belongs in a file, not argv")
-    for flag in (*NODE_INLINE_FLAGS, *PYTHON_INLINE_FLAGS):
+    for flag in inline_flags(program):
         if flag in parts:
             raise AssertionError(f"inline source flag {flag!r} in {parts[0]!r}: write the script to a temp file instead")
 

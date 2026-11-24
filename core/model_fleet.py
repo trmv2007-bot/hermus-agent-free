@@ -42,6 +42,21 @@ def _split_tasks_from_goal(goal: str, n: int = 3) -> list[str]:
     return facets[:n]
 
 
+def _ollama_requested(models: list[str] = None, providers: list[str] = None) -> bool:
+    """Whether the caller's own constraints leave room for the local model.
+
+    ``providers`` or ``models`` name what a fleet run may use. Ollama is always
+    reachable on a machine running it, so offering it anyway outranks the
+    provider that was asked for: a map_goal pinned to one provider can take
+    every subtask from the local model instead.
+    """
+    if providers and "ollama" not in providers:
+        return False
+    if models:
+        return any("/" not in m or m.split("/", 1)[0].lower() == "ollama" for m in models)
+    return True
+
+
 def _available_workers(models: list[str] = None, providers: list[str] = None, limit: int = 8) -> list[dict]:
     """
     Build worker list: {provider, model, key, base_url, name}
@@ -87,11 +102,11 @@ def _available_workers(models: list[str] = None, providers: list[str] = None, li
     except Exception:
         pass
 
-    # Always offer ollama if reachable
+    # Always offer ollama if reachable and the caller did not exclude it.
     try:
         from .openai_compat import list_models
 
-        ol = list_models("ollama", api_key="")
+        ol = list_models("ollama", api_key="") if _ollama_requested(models, providers) else {"success": False}
         if ol.get("success") and ol.get("models"):
             for m in ol["models"][:3]:
                 workers.append(

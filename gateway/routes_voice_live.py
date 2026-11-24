@@ -99,7 +99,7 @@ async def voice_live_start(payload: dict | None = None):
 
     payload = payload or {}
     try:
-        session = listen_manager.start(str(payload.get("session_id") or ""))
+        session = listen_manager.start(str(payload.get("session_id") or ""), str(payload.get("language") or ""))
     except SpeechToTextUnavailableError as exc:
         status = stt_status()
         return JSONResponse(
