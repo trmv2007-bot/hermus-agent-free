@@ -64,6 +64,10 @@
   <div class="thread" id="thread" role="log" aria-live="polite" aria-label="Conversation with your companion"></div>
 </main>
 
+<!-- The dock reads left to right and tabs left to right: microphone, then the
+     input line, then Send. Nothing in the room sets tabindex, so the order a
+     keyboard user walks is this markup, and
+     tests/browser/test_room.py::TestKeyboardFirst holds it. -->
 <footer class="dock">
   <form class="line" id="line" autocomplete="off" novalidate>
     <button class="mic" id="mic" type="button" data-state="off"

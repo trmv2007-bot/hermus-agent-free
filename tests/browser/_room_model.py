@@ -1,9 +1,10 @@
 """A local, OpenAI-compatible model for the room's browser tests.
 
 Hermus talks to Ollama through the same ``/v1/chat/completions`` shape every
-other provider speaks, so a tiny HTTP server on the default Ollama port is
-enough to exercise the real streaming path end to end — no Ollama install, no
-network, no key, nothing billed. It is a *model*, not a mock of the product:
+other provider speaks, so a tiny HTTP server on a port this suite owns is enough
+to exercise the real streaming path end to end — no Ollama install, no network, no
+key, nothing billed, and nothing that a real service or a sibling test run can
+take away from it. It is a *model*, not a mock of the product:
 the gateway, the run bus, the job result and the page are all real.
 
 ``GET /api/tags`` answers the probe ``core/brain.py`` uses to decide whether a
@@ -63,6 +64,10 @@ class _Handler(BaseHTTPRequestHandler):
             body = {}
         wants_stream = bool(body.get("stream"))
         if not wants_stream:
+            if SLOW_MS:
+                import time
+
+                time.sleep(SLOW_MS / 1000.0)
             self._json(
                 {
                     "id": "chatcmpl-room",
@@ -114,15 +119,16 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
 
-def serve(port: int = 11434) -> HTTPServer:
+#: The base URL of the stub that is serving, set by :func:`serve`. The gateway
+#: is pointed here, so the suite never assumes a port another process may hold —
+#: a real Ollama daemon or a second test run used to make these tests skip.
+BASE = ""
+
+
+def serve(port: int = 0) -> HTTPServer:
+    """Serve the stub on ``port``; 0 means an ephemeral port, read back into BASE."""
+    global BASE
     server = HTTPServer(("127.0.0.1", port), _Handler)
+    BASE = f"http://127.0.0.1:{server.server_address[1]}"
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
-
-
-def port_busy(port: int = 11434) -> bool:
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(0.2)
-        return sock.connect_ex(("127.0.0.1", port)) == 0

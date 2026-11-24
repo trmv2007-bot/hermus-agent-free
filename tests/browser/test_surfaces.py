@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _real_home_guard import temp_home
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -81,7 +82,8 @@ def gateway(tmp_path_factory):
         pytest.skip(f"chromium unavailable: {str(exc).splitlines()[0][:160]}")
 
     scratch = tmp_path_factory.mktemp("hermus-surfaces")
-    home = scratch / "home"
+    home = temp_home(tmp_path_factory, scratch / "home")
+    data = temp_home(tmp_path_factory, scratch / "data")
     home.mkdir(parents=True, exist_ok=True)
     (home / "onboarding.json").write_text(
         json.dumps(
@@ -107,7 +109,7 @@ def gateway(tmp_path_factory):
     env.update(
         {
             "HERMUS_HOME": str(home),
-            "HERMUS_DATA_DIR": str(scratch / "data"),
+            "HERMUS_DATA_DIR": str(data),
             "HERMUS_MODEL": "ollama/surfaces-test:1b",
             "HERMUS_PROFILE": "fairy",
             "HERMUS_NO_DOTENV": "1",
