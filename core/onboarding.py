@@ -42,21 +42,38 @@ DEFAULT_PROFILE = "ask"
 STEPS = ("brain", "permissions", "name")
 
 
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:  # pragma: no cover - unreadable paths compare as text
+        return str(left).lower() == str(right).lower()
+
+
 def state_path() -> Path:
     """Where the first-run record lives.
 
-    ``HERMUS_HOME`` is read live, not from the workspace singleton: the singleton
-    captures its base directory at import, so a process that builds the workspace
-    before pointing the environment at a temporary home would otherwise keep
-    reading — and writing, and deleting — the person's real ``~/.hermus``.
-    """
-    override = os.environ.get("HERMUS_HOME")
-    if override:
-        return Path(override).expanduser() / "onboarding.json"
+    ``HERMUS_HOME`` is honoured when the workspace singleton is still parked in the
+    real default home. That is the shape of the incident this guards against: the
+    singleton captures its base directory at import, so a process that imports
+    almost anything before pointing the environment at a temporary home would
+    otherwise keep reading — and writing, and deleting — the person's real
+    ``~/.hermus``.
 
+    A session that started on an explicit home keeps it. Reading the variable
+    unconditionally would let whichever module sets it last at import time own the
+    state file for the whole process, which makes a suite's results depend on
+    import order — the same class of surprise, in the other direction.
+    """
     from .workspace import workspace
 
-    return workspace.dirs["root"] / "onboarding.json"
+    root = workspace.dirs["root"]
+    override = os.environ.get("HERMUS_HOME")
+    if override:
+        candidate = Path(override).expanduser()
+        default_home = Path(os.path.expanduser("~")) / ".hermus"
+        if _same_path(root, default_home) and not _same_path(candidate, root):
+            return candidate / "onboarding.json"
+    return root / "onboarding.json"
 
 
 def _now() -> str:

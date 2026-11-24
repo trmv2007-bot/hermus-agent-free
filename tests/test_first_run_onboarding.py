@@ -47,8 +47,10 @@ def _reset_state() -> None:
     record twice.
     """
     path = onboarding.state_path()
-    if not str(path).startswith(_TMP):
-        raise AssertionError(f"refusing to touch a state file outside the test home: {path}")
+    from _real_home_guard import real_home_hit
+
+    if real_home_hit(path) is not None:
+        raise AssertionError(f"refusing to touch the real install's state file: {path}")
     if path.exists():
         path.unlink()
 
