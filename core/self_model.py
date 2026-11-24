@@ -208,10 +208,16 @@ class SelfModel:
 
     # -- capability truth ---------------------------------------------------
     def capabilities(self) -> dict[str, Any]:
-        """Which families are usable now, and why each unusable one is not."""
+        """Which families are usable now, and why each unusable one is not.
+
+        The probe and the registry are read once each for the whole answer: two
+        reads could straddle a cache expiry and describe two different machines
+        in the same section.
+        """
         held = set(self.tools())
-        checks = (self.probe() or {}).get("checks") or {}
-        probe_error = (self.probe() or {}).get("error") or ""
+        report = self.probe() or {}
+        checks = report.get("checks") or {}
+        probe_error = report.get("error") or ""
         available: list[dict[str, Any]] = []
         unavailable: list[dict[str, Any]] = []
         for family in FAMILIES:
@@ -234,14 +240,14 @@ class SelfModel:
                 unavailable.append(entry)
             else:
                 available.append(entry)
-        return {"available": available, "unavailable": unavailable}
+        return {"available": available, "unavailable": unavailable, "registered": len(held)}
 
     # -- rendering ----------------------------------------------------------
     def section(self) -> str:
         capabilities = self.capabilities()
         available = capabilities["available"]
         unavailable = capabilities["unavailable"]
-        total = len(self.tools())
+        total = capabilities["registered"]
 
         seen: set[str] = set()
         blocks: list[str] = [self.identity().strip()]

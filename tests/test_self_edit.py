@@ -243,3 +243,26 @@ def test_the_worktree_never_lands_inside_the_products_home(monkeypatch, tmp_path
 
 def test_repo_root_resolves_a_real_checkout(fake_repo):
     assert repo_root(fake_repo) == fake_repo.resolve()
+
+
+def test_a_plan_cannot_aim_a_gate_outside_the_worktree():
+    """A check is model output too: it may name a test, not a path escape."""
+    from core.self_edit import _safe_gate
+
+    assert _safe_gate("pytest -q tests/test_cli_dispatch.py") == [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_cli_dispatch.py",
+    ]
+    assert _safe_gate("python -m pytest tests/test_x.py::test_y") is not None
+    for refused in (
+        "pytest ../outside/test_x.py",
+        "pytest /etc/passwd",
+        "pytest C:/Windows/System32/test_x.py",
+        "pytest -p no:cacheprovider tests/test_x.py",
+        "pytest tests/test_x.py; rm -rf /",
+        "pytest $(whoami)",
+    ):
+        assert _safe_gate(refused) is None, f"{refused} was accepted as a gate"

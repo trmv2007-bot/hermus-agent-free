@@ -57,6 +57,9 @@ PROTECTED_PREFIXES: tuple[tuple[str, str], ...] = (
 #: A gate may not run longer than this; the machine is a person's PC, not a CI runner.
 GATE_TIMEOUT_SECONDS = 420.0
 
+#: The only flags a plan's check may carry: reporting, never plugin or config.
+ALLOWED_PYTEST_FLAGS = frozenset({"-q", "-x", "-v", "-s", "-ra", "-lf"})
+
 #: The model is asked for one bounded answer; this is how much repository context
 #: it is given to work from. Kept small on purpose: the local models this ships
 #: with answer a 3k-character prompt inside the provider timeout and a 6k one
@@ -351,6 +354,19 @@ def _safe_gate(command: str) -> list[str] | None:
         return None
     for arg in argv[1:]:
         if not re.match(r"^[A-Za-z0-9_\-./:=]+$", arg):
+            return None
+        if arg.startswith("-"):
+            # Only the plain reporting flags. A plugin or config override (-p,
+            # -o) changes what the gate *means*, which is not the plan's to set.
+            if arg not in ALLOWED_PYTEST_FLAGS:
+                return None
+            continue
+        # A gate runs inside the worktree, so a target that climbs out of it or
+        # names an absolute path is not a test of this change whatever it
+        # collects.
+        if arg.startswith("/") or re.match(r"^[A-Za-z]:", arg):
+            return None
+        if ".." in Path(arg.split("::", 1)[0]).parts:
             return None
     return [sys.executable, "-m", "pytest", *argv[1:]]
 

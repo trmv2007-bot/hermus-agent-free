@@ -287,3 +287,23 @@ def test_the_attention_route_publishes_the_same_diagnosis():
     assert body["success"] is True
     assert {"broken_now", "worth_adding", "items"} <= set(body)
     assert isinstance(body["items"], list)
+
+
+def test_capabilities_reads_the_probe_once(monkeypatch):
+    """One answer must describe one machine: no second read inside the section."""
+    reads = {"probe": 0, "tools": 0}
+
+    class Counting(SelfModel):
+        def probe(self):
+            reads["probe"] += 1
+            return _probe()
+
+        def tools(self):
+            reads["tools"] += 1
+            return list(ALL_TOOLS)
+
+    model = Counting()
+    model.capabilities()
+    model.section()
+    assert reads["probe"] == 2, f"capabilities and section read the probe {reads['probe']} times"
+    assert reads["tools"] == 2, f"the registry was read {reads['tools']} times for two answers"
