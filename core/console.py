@@ -66,7 +66,8 @@ _TABLE = (
         "safety",
         "core/self_model.py",
         "@self_attention",
-        "What Hermus says is broken now and worth adding, each with the evidence behind it",
+        "What is broken or worth adding, with the evidence. It may draft and test a change to itself in a"
+        " worktree on its own; applying anything needs you",
     ),
     (
         "runtime-issues",
