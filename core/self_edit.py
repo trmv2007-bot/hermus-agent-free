@@ -150,6 +150,8 @@ def repo_root(start: str | Path | None = None) -> Path:
             ["git", "-C", str(base), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -160,7 +162,14 @@ def repo_root(start: str | Path | None = None) -> Path:
 
 
 def _git(repo: Path, *args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
 
 
 def repo_context(repo: Path, goal: str, limit: int = CONTEXT_CHARS) -> str:
@@ -280,12 +289,16 @@ def propose(goal: str, *, repo: Path | None = None, model: str | None = None, as
     prompt = f"{PLAN_INSTRUCTIONS}\n\nRepository context:\n{context}\n\nGoal: {goal}\nJSON now."
     if ask is None:
         from .config import config
+        from .harness import governed_call
         from .llm import FreeLLM
 
         llm = FreeLLM(model=model or config.model)
 
         def ask(text: str) -> str:  # noqa: F811 - the real transport, defined late
-            answer = str(llm.chat([{"role": "user", "content": text}]).content or "")
+            # A planning call is still a model turn: it goes through the
+            # harness so the budget and the event log apply to it like any other.
+            messages = governed_call([{"role": "user", "content": text}], session_id="self_edit.propose", model=model or "")
+            answer = str(llm.chat(messages).content or "")
             # FreeLLM reports transport failures as text rather than raising; a
             # provider that never answered produced no plan to judge.
             if answer.startswith(("Ollama error", "Provider error", "HuggingFace error", "No provider")):
@@ -368,7 +381,15 @@ def default_gates(repo: Path, plan: Plan) -> list[list[str]]:
 
 def _run(argv: list[str], cwd: Path, timeout: float = GATE_TIMEOUT_SECONDS) -> dict[str, Any]:
     try:
-        done = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+        done = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
     except subprocess.TimeoutExpired:
         return {"command": " ".join(argv), "ok": False, "code": None, "tail": f"timed out after {timeout:.0f}s"}
     except OSError as exc:
