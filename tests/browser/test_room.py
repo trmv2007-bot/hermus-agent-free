@@ -107,10 +107,12 @@ def _wait_ready(base: str) -> dict:
 
 @pytest.fixture(scope="module")
 def local_model():
-    """A local model on Ollama's port, so the room is talking to a real brain."""
-    if _room_model.port_busy(11434):
-        pytest.skip("port 11434 is already serving a model on this machine; the brain probe is pinned to it")
-    server = _room_model.serve(11434)
+    """A local model on a port this suite owns, so the room talks to a real brain.
+
+    An ephemeral port, never Ollama's 11434: a real daemon or a sibling test run
+    holding that port must not decide whether these tests can run at all.
+    """
+    server = _room_model.serve()
     try:
         yield _room_model
     finally:
@@ -158,6 +160,7 @@ def gateway(local_model, tmp_path_factory):
             "HERMUS_HOME": str(home),
             "HERMUS_DATA_DIR": str(data),
             "HERMUS_MODEL": f"ollama/{_room_model.MODEL_NAME}",
+            "HERMUS_OLLAMA_BASE_URL": _room_model.BASE,
             "HERMUS_PROFILE": "fairy",
             "HERMUS_NO_DOTENV": "1",
             "PYTHONPATH": str(ROOT),

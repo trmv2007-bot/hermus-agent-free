@@ -810,6 +810,14 @@ when it *is* the path: on Windows pytest's own `tmp_path` lives under
 `%LOCALAPPDATA%\Temp`, inside the profile, and a prefix rule there would refuse
 every test in the suite.
 
+**The room's stub owns its port.** It used to bind Ollama's 11434 and skip every
+browser test when that port was busy, so Rishi's own Ollama, or a sibling test
+run, decided whether the room could be verified. It binds `127.0.0.1:0` now, reads
+the assigned port back, and hands it to the gateway as `HERMUS_OLLAMA_BASE_URL`. A
+turn the suite needs to catch mid-flight stays slow on both branches of the stub,
+streaming and not: the gateway does not always ask for a stream, and `SLOW_MS` was
+quietly a streaming-only knob.
+
 `tests/test_real_home_guard.py` proves it rather than describing it: refused on
 the real home, allowed on a temp one, the override works, a fixture path outside
 the temp tree is refused, and a real `pytest` session pointed at `~/.hermus`
