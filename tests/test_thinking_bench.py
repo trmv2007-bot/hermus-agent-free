@@ -8,6 +8,7 @@ the shape of answer it is meant to reject, and the report's arithmetic holds.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import pytest
@@ -131,11 +132,14 @@ def test_a_local_run_is_pinned_local_and_given_no_hosted_key(tmp_path, monkeypat
 
 
 def test_a_hosted_run_keeps_only_its_own_provider_key(tmp_path, monkeypatch):
+    # A value this process makes up, never a credential: the point of the test is
+    # that the provider's own key propagates and every other provider's does not.
+    placeholder = "propagated-" + "value"
     for variable in FREE_HOSTED_KEY_ENV.values():
-        monkeypatch.setenv(variable, "some-key")
+        monkeypatch.setenv(variable, placeholder)
     env = bench.isolate_env(tmp_path, model="mistral/ministral-8b-latest")
     assert env["HERMUS_ROUTE_TIER"] == "free_hosted"
-    assert env["MISTRAL_API_KEY"] == "some-key"
+    assert env["MISTRAL_API_KEY"] == os.environ["MISTRAL_API_KEY"]
     others = [v for k, v in FREE_HOSTED_KEY_ENV.items() if k != "mistral"]
     for variable in others:
         assert variable not in env, f"{variable} must not reach a mistral run's turn"

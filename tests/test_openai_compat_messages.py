@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from core.openai_compat import _normalize_messages
+from core.openai_compat import _normalize_messages, _provider_tool_calls
 
 
 def test_a_flat_tool_call_is_sent_in_the_shape_a_provider_validates():
@@ -56,3 +56,10 @@ def test_a_tool_result_keeps_the_call_it_answers():
 def test_a_call_without_an_id_gets_one_so_the_result_can_be_matched():
     out = _normalize_messages([{"role": "assistant", "content": "", "tool_calls": [{"name": "file_read", "arguments": {}}]}])
     assert out[0]["tool_calls"][0]["id"].startswith("call_")
+
+
+def test_a_malformed_tool_calls_value_does_not_crash_the_encoder():
+    """The wire layer encodes what it can; a provider rejects the rest cleanly."""
+    assert _provider_tool_calls(5) == []
+    assert _provider_tool_calls(None) == []
+    assert _provider_tool_calls(["not a call", {"name": "file_read", "arguments": {}}])[0]["function"]["name"] == "file_read"

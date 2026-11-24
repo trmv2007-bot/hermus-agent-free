@@ -55,7 +55,10 @@ def _provider_tool_calls(tool_calls: list[dict]) -> list[dict]:
     second round of *every* tool-using turn fails on the strict provider.
     """
     out = []
-    for call in tool_calls or []:
+    # A caller that hands over something that is not a list of calls gets an empty
+    # list, which providers reject cleanly; iterating it here would crash the turn
+    # inside the client instead.
+    for call in tool_calls if isinstance(tool_calls, (list, tuple)) else []:
         if not isinstance(call, dict):
             continue
         function = call.get("function") if isinstance(call.get("function"), dict) else {}
