@@ -90,18 +90,33 @@ def _transport(answers: dict[str, tuple[int, str]]):
     return send, calls
 
 
-def test_a_late_hermus_home_still_decides_where_state_lives(monkeypatch):
-    """The workspace singleton must not pin the state path to the real install.
+def test_a_singleton_parked_in_the_real_home_yields_to_a_later_hermus_home(monkeypatch):
+    """The shape of the incident that deleted his `onboarding.json` twice.
 
-    This is the bug behind his `onboarding.json` being deleted twice: a process
-    built the workspace from the default `~/.hermus` and every later
-    `HERMUS_HOME` was ignored, so a test that "cleared its state" cleared his.
+    A process built the workspace from the default ``~/.hermus`` before anything
+    pointed the environment at a temporary home, and every later ``HERMUS_HOME``
+    was ignored — so a test that "cleared its state" cleared his.
     """
-    from core.computer.task_control import get_task_control  # builds the workspace first
+    from core.workspace import workspace
 
-    get_task_control()
-    monkeypatch.setenv("HERMUS_HOME", str(Path(tempfile.mkdtemp(prefix="hermus-guard-"))))
-    assert str(onboarding.state_path()).startswith(os.environ["HERMUS_HOME"])
+    monkeypatch.setattr(workspace, "base_dir", Path(os.path.expanduser("~")) / ".hermus")
+    late_home = Path(tempfile.mkdtemp(prefix="hermus-guard-"))
+    monkeypatch.setenv("HERMUS_HOME", str(late_home))
+    assert onboarding.state_path() == late_home / "onboarding.json"
+
+
+def test_a_session_that_started_on_a_temp_home_keeps_it(monkeypatch):
+    """A later module's `HERMUS_HOME` must not retarget another test's state file.
+
+    Reading the variable unconditionally made a suite's results depend on import
+    order: whichever module set it last at import owned the state path.
+    """
+    from core.workspace import workspace
+
+    session_home = Path(tempfile.mkdtemp(prefix="hermus-session-"))
+    monkeypatch.setattr(workspace, "base_dir", session_home)
+    monkeypatch.setenv("HERMUS_HOME", str(Path(tempfile.mkdtemp(prefix="hermus-other-"))))
+    assert onboarding.state_path() == session_home / "onboarding.json"
 
 
 # ------------------------------------------------------------------ ranking
