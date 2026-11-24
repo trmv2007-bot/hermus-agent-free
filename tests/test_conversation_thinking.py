@@ -168,3 +168,30 @@ def test_a_receipt_is_kept_to_what_a_person_is_shown(manager):
     assert len(evidence["detail"]) == 300
     assert len(evidence["data"]["sha256"]) == 300
     assert "stdout" not in evidence["data"]
+
+
+def test_a_malformed_event_costs_one_field_not_the_record(manager):
+    """A producer that sends junk must not take the whole turn's thinking with it."""
+    session_id, run_id = _asked(manager)
+    manager._on_run_event(run_id, {"type": "plan_ready", "data": {"goal": None, "steps": "not a list"}})
+    manager._on_run_event(run_id, {"type": "plan_step", "data": {"step": "\x00", "status": None}})
+    manager._on_run_event(
+        run_id,
+        {
+            "type": "receipt",
+            "data": {
+                "verified": True,
+                "problems": 2,
+                "evidence": [{"kind": "file", "ok": True, "detail": "a.md", "data": "not a dict"}, 7],
+            },
+        },
+    )
+    manager._on_run_event(run_id, {"type": "routing_decision", "data": {"model": object(), "tier": None}})
+    manager._on_run_event(run_id, {"type": "agent_response", "data": {"text": "Done."}})
+    manager._on_run_event(run_id, {"type": "run_finished", "data": "not a dict"})
+
+    thinking = _thinking(manager, session_id)
+    assert thinking["plan"]["steps"] == []
+    assert thinking["receipt"]["problems"] == ["2"]
+    assert thinking["receipt"]["evidence"][0]["data"] == {}
+    assert thinking["routing"]["tier"] == ""

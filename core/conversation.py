@@ -174,85 +174,102 @@ class ConversationManager:
                 self._absorb(run_id, event_type, event.get("data") or {})
 
     def _absorb(self, run_id: str, event_type: str, data: dict[str, Any]) -> None:
-        """Fold one run event into the turn's thinking record, ignoring the rest."""
+        """Fold one run event into the turn's thinking record, ignoring the rest.
+
+        Every value is coerced rather than trusted: the record is a convenience,
+        and a producer that emits a malformed step or receipt must cost that one
+        field rather than the whole turn's thinking.
+        """
+        if not isinstance(data, dict):
+            return
         with self._lock:
             live = self._live.get(run_id)
             if live is None:
                 return
             thinking: dict[str, Any] = live["thinking"]
             if event_type == "agent_response":
-                text = str(data.get("text") or "").strip()
+                text = _text(data.get("text"), 4000).strip()
                 if text:
-                    live["answer"] = text[:4000]
+                    live["answer"] = text
             elif event_type == "plan_ready":
-                thinking["plan"] = {
-                    "goal": str(data.get("goal") or "")[:300],
-                    "steps": [self._step(s) for s in (data.get("steps") or [])][:8],
-                }
+                thinking["plan"] = {"goal": _text(data.get("goal"), 300).strip(), "steps": self._steps(data.get("steps"))}
             elif event_type == "plan_finished":
                 plan = thinking.setdefault("plan", {"goal": "", "steps": []})
-                plan["steps"] = [self._step(s) for s in (data.get("steps") or [])][:8]
+                plan["steps"] = self._steps(data.get("steps"))
             elif event_type == "plan_step":
-                steps = (thinking.get("plan") or {}).get("steps") or []
-                number = int(data.get("step") or 0)
-                if 0 < number <= len(steps):
+                plan = thinking.get("plan")
+                steps = plan.get("steps") if isinstance(plan, dict) else None
+                number = _number(data.get("step"))
+                if steps and 0 < number <= len(steps):
                     step = steps[number - 1]
-                    step["status"] = str(data.get("status") or step.get("status") or "planned")
+                    step["status"] = _text(data.get("status") or step.get("status") or "planned", 12)
                     note = data.get("evidence")
                     if isinstance(note, str) and note:
-                        step["evidence"] = [*step.get("evidence", []), note[:120]][-3:]
+                        step["evidence"] = [*step.get("evidence", []), _text(note, 120)][-3:]
             elif event_type == "receipt":
                 thinking["receipt"] = self._receipt(data)
             elif event_type == "routing_decision":
                 thinking["routing"] = {
-                    "tier": str(data.get("tier") or "")[:24],
-                    "model": str(data.get("model") or "")[:120],
-                    "reason": str(data.get("reason") or "")[:300],
+                    "tier": _text(data.get("tier"), 24),
+                    "model": _text(data.get("model"), 120),
+                    "reason": _text(data.get("reason"), 300),
                 }
+
+    @classmethod
+    def _steps(cls, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, (list, tuple)):
+            return []
+        return [cls._step(step) for step in value if isinstance(step, dict)][:8]
 
     @staticmethod
     def _step(step: dict[str, Any]) -> dict[str, Any]:
         """The four fields a rail needs, and nothing that reads like a log."""
         return {
-            "n": int(step.get("n") or 0),
-            "goal": str(step.get("goal") or "")[:200],
-            "action": str(step.get("action") or "")[:24],
-            "label": str(step.get("label") or step.get("action") or "")[:24],
-            "status": str(step.get("status") or "pending")[:12],
+            "n": _number(step.get("n")),
+            "goal": _text(step.get("goal"), 200),
+            "action": _text(step.get("action"), 24),
+            "label": _text(step.get("label") or step.get("action"), 24),
+            "status": _text(step.get("status") or "pending", 12),
         }
 
     @staticmethod
     def _receipt(data: dict[str, Any]) -> dict[str, Any]:
         """Keep what a person is shown: the verdict and the citable evidence."""
         evidence = []
-        for item in (data.get("evidence") or [])[:4]:
+        items = data.get("evidence") if isinstance(data.get("evidence"), (list, tuple)) else []
+        for item in items[:4]:
             if not isinstance(item, dict):
                 continue
-            info = item.get("data") or {}
+            info = item.get("data") if isinstance(item.get("data"), dict) else {}
             evidence.append(
                 {
-                    "kind": str(item.get("kind") or "")[:12],
+                    "kind": _text(item.get("kind"), 12),
                     "ok": bool(item.get("ok")),
-                    "detail": str(item.get("detail") or "")[:300],
+                    "detail": _text(item.get("detail"), 300),
                     "data": {
-                        key: (value if isinstance(value, (int, float, bool)) else str(value)[:300])
+                        key: (value if isinstance(value, (int, float, bool)) else _text(value, 300))
                         for key, value in info.items()
                         if key in ("path", "sha256", "size", "command", "returncode", "url", "tool")
                     },
                 }
             )
+        problems = data.get("problems")
+        if not isinstance(problems, (list, tuple)):
+            problems = [problems] if problems else []
         return {
             "verified": bool(data.get("verified")),
-            "verdict": str(data.get("verdict") or "")[:32],
+            "verdict": _text(data.get("verdict"), 32),
             "changed": bool(data.get("changed")),
-            "claim": str(data.get("claim") or "")[:300],
-            "problems": [str(p)[:240] for p in (data.get("problems") or [])[:3]],
+            "claim": _text(data.get("claim"), 300),
+            "problems": [_text(problem, 240) for problem in list(problems)[:3]],
             "evidence": evidence,
         }
 
     def _on_run_event(self, run_id: str, event: dict[str, Any]) -> None:
         event_type = event.get("type")
-        data = event.get("data") or {}
+        data = event.get("data")
+        if not isinstance(data, dict):
+            data = {}
         if event_type in _THINKING_EVENTS or event_type == "agent_response":
             self._absorb(run_id, event_type, data)
         if event_type not in {"run_finished", "run_error", "cancel_requested", "steer_applied"}:
@@ -277,10 +294,13 @@ class ConversationManager:
 
     def _record_answer(self, session: ConversationSession, run_id: str, live: dict[str, Any]) -> None:
         """The answer the person heard, with the plan and receipt it carried."""
-        answer = str(live.get("answer") or "").strip()
+        if not isinstance(live, dict):
+            return
+        answer = _text(live.get("answer"), 4000).strip()
         if not answer:
             return
-        thinking = {key: value for key, value in (live.get("thinking") or {}).items() if value}
+        recorded = live.get("thinking") if isinstance(live.get("thinking"), dict) else {}
+        thinking = {key: value for key, value in recorded.items() if value}
         session.turns.append(
             ConversationTurn(
                 "assistant",
@@ -293,6 +313,21 @@ class ConversationManager:
 
 #: the run events that carry a turn's thinking
 _THINKING_EVENTS = frozenset({"plan_ready", "plan_step", "plan_finished", "receipt", "routing_decision"})
+
+
+def _text(value: Any, limit: int) -> str:
+    """A bounded string from anything a producer sent, never a raise."""
+    try:
+        return str(value or "")[:limit]
+    except Exception:
+        return ""
+
+
+def _number(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 conversation_manager = ConversationManager()
