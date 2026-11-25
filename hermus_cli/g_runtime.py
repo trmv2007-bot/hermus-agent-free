@@ -10,6 +10,7 @@ gone.
 from __future__ import annotations
 
 import json
+import os
 
 from core.config import config
 
@@ -97,6 +98,8 @@ def _configure_gateway(subparsers) -> None:
         default=None,
         help="Interface to bind (default 0.0.0.0, or HERMUS_GATEWAY_HOST). 127.0.0.1 keeps it on this machine.",
     )
+    gateway_status = gateway_sub.add_parser("status", help="Is the gateway running, on which port, and its pid")
+    gateway_status.add_argument("--port", type=int, default=int(os.environ.get("HERMUS_GATEWAY_PORT") or config.gateway_port))
 
 
 def _run_gateway(args, ctx: CLIContext) -> None:
@@ -105,9 +108,20 @@ def _run_gateway(args, ctx: CLIContext) -> None:
 
         setup(args.platform)
     elif args.gateway_action == "start":
+        # Checked before the app is imported: reaching uvicorn with the port taken
+        # left the process alive with its threads and no listener.
+        from gateway.ports import require_free
+
+        require_free(args.port, getattr(args, "host", None))
         from gateway.gateway import start
 
         start(args.port, getattr(args, "host", None))
+    elif args.gateway_action == "status":
+        from gateway.ports import gateway_status
+
+        running, line = gateway_status(args.port)
+        print(line)
+        raise SystemExit(0 if running else 1)
     else:
         no_action(ctx, "gateway")
 

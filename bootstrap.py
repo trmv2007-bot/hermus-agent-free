@@ -1114,6 +1114,11 @@ def first_run(*, interactive: bool | None = None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from core.console_encoding import configure_console
+
+    # setup.cmd pipes this process through PowerShell, so stdout is not a console
+    # and the report's status marks would raise at the very end of a good install.
+    configure_console()
     parser = argparse.ArgumentParser(description="Hermus canonical setup/repair/verification")
     parser.add_argument("command", nargs="?", choices=("bootstrap", "verify", "doctor", "model"), default="bootstrap")
     parser.add_argument("--verify-only", action="store_true", help="do not install or create a venv; run live checks only")
