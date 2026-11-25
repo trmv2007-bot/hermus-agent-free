@@ -164,15 +164,37 @@ def _ollama_tags(base_url: str = "") -> dict[str, str]:
     return tags
 
 
+def _blocked_address(value: str) -> bool:
+    """Is this a literal address no Ollama runtime would ever be served from?
+
+    Link-local is where every cloud metadata service lives (``169.254.169.254``,
+    ``fe80::``), and unspecified/multicast addresses are never a runtime either.
+    Checked on the resolved address, not the name, because ``<ip>.nip.io`` and
+    friends resolve to whatever the attacker wants.
+    """
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(str(value).split("%", 1)[0])
+    except ValueError:
+        return False
+    if address.is_link_local or address.is_unspecified or address.is_multicast:
+        return True
+    # AWS's IPv6 metadata endpoint sits in the unique-local range, which is
+    # otherwise a legitimate LAN range, so only that exact address is refused.
+    return str(address) == "fd00:ec2::254"
+
+
 def _is_fetchable(url: str) -> bool:
-    """HTTP(S) only, and never a cloud metadata endpoint.
+    """HTTP(S) only, and never an address a metadata service answers on.
 
     This is the one place the measurement reads a URL, and the URL is whatever
-    the person configured as their model runtime. The scheme is allow-listed and
-    the metadata endpoints every SSRF payload targets are refused, so a URL that
-    cannot be an Ollama runtime is not opened even if something later makes the
-    setting reachable from outside the machine's owner.
+    the person configured as their model runtime — so a host allow-list cannot
+    exist without breaking a legitimate LAN runtime. What can be refused is a URL
+    that cannot be a runtime: a non-HTTP scheme, a literal link-local or
+    unspecified address, or a hostname that resolves to one.
     """
+    import socket
     from urllib.parse import urlsplit
 
     try:
@@ -180,7 +202,22 @@ def _is_fetchable(url: str) -> bool:
     except ValueError:
         return False
     host = (parts.hostname or "").strip().lower()
-    return parts.scheme in _ALLOWED_SCHEMES and bool(host) and host not in _BLOCKED_HOSTS
+    if parts.scheme not in _ALLOWED_SCHEMES or not host or host in _BLOCKED_HOSTS:
+        return False
+    if _blocked_address(host):
+        return False
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(host.split("%", 1)[0])
+        return True  # a literal, already checked
+    except ValueError:
+        pass
+    try:
+        resolved = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return True  # unresolvable here is not evidence of metadata; the fetch fails anyway
+    return not any(_blocked_address(info[4][0]) for info in resolved)
 
 
 def model_digest(ref: str, *, tags: dict[str, str] | None = None) -> str:

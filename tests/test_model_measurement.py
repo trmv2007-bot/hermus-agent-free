@@ -657,3 +657,28 @@ def test_the_tag_fetch_refuses_what_cannot_be_a_runtime():
     assert not measurement._is_fetchable("http://169.254.169.254/latest/meta-data/")
     assert not measurement._is_fetchable("http://metadata.google.internal/computeMetadata/v1/")
     assert measurement._ollama_tags("file:///etc/passwd") == {}
+
+
+def test_the_tag_guard_checks_the_resolved_address_not_the_name(monkeypatch):
+    import socket as socket_mod
+
+    assert measurement._blocked_address("169.254.169.254")
+    assert measurement._blocked_address("fe80::1")
+    assert measurement._blocked_address("fd00:ec2::254")
+    assert not measurement._blocked_address("192.168.1.9")
+    assert not measurement._blocked_address("127.0.0.1")
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        assert host == "metadata.nip.io"
+        return [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "", ("169.254.169.254", 0))]
+
+    monkeypatch.setattr(socket_mod, "getaddrinfo", fake_getaddrinfo)
+    assert not measurement._is_fetchable("http://metadata.nip.io/api/tags"), "a name that resolves to link-local is refused"
+
+    monkeypatch.setattr(
+        socket_mod,
+        "getaddrinfo",
+        lambda host, *a, **k: [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "", ("192.168.1.9", 0))],
+    )
+    assert measurement._is_fetchable("http://ollama.lan:11434/api/tags")
+    assert not measurement._is_fetchable("http://[::ffff:169.254.169.254]/api/tags")
