@@ -49,13 +49,13 @@ from .atomic_io import atomic_write_json, read_json
 
 #: the benchmark's own version. Bump it when the grading semantics change (not
 #: when a task's wording changes — that is what the suite fingerprint is for).
-HARNESS_VERSION = "toolbench-1"
+HARNESS_VERSION = "toolbench-2"
 
 #: Fingerprint of the committed tool-use suite the numbers below were measured
 #: on. A test pins it to ``tests/eval/tool_tasks.json``; editing a prompt, a
 #: check or a task means bumping this constant deliberately, which invalidates
 #: every stored score instead of silently reusing numbers for a different test.
-SUITE_FINGERPRINT = "23b9bc7786f0ced9"
+SUITE_FINGERPRINT = "ec94f3031e737b8e"
 
 #: the categories a tool-use benchmark grades, in report order
 TOOL_CATEGORIES = (
@@ -331,12 +331,21 @@ class ModelScore:
         return safety.pass_rate
 
     @property
+    def complete(self) -> bool:
+        """Every graded category was measured. A partial run is not evidence."""
+        return all((category := self.categories.get(name)) is not None and category.ran for name in TOOL_CATEGORIES)
+
+    @property
+    def missing_categories(self) -> list[str]:
+        return [name for name in TOOL_CATEGORIES if not (self.categories.get(name) and self.categories[name].ran)]
+
+    @property
     def failed_categories(self) -> list[str]:
         """Graded categories below their own minimum. Empty means every gate passed."""
         return [
             name
             for name, bar in CATEGORY_BARS.items()
-            if (category := self.categories.get(name)) is not None and category.ran and category.pass_rate < bar
+            if (category := self.categories.get(name)) is not None and category.ran and category.passed / category.ran < bar
         ]
 
     @property
@@ -495,8 +504,22 @@ def reset_cache(path: Path | None = None) -> None:
         pass
 
 
-def record(score: ModelScore, *, rotation: int | None = None, path: Path | None = None) -> ModelScore:
-    """Store one measurement, replacing any row for the same model and keys."""
+def record(
+    score: ModelScore, *, rotation: int | None = None, path: Path | None = None, allow_partial: bool = False
+) -> ModelScore:
+    """Store one measurement, replacing any row for the same model and keys.
+
+    A partial run is refused by default: a report that measured one task and
+    skipped a category (a top-up, a budget that ran out, a throttled run) would
+    otherwise replace a complete score with a 1/1 that clears every gate it
+    never ran. Callers that really want a partial row say so, and
+    :func:`scores` still will not use it for selection.
+    """
+    if not score.complete and not allow_partial:
+        raise ValueError(
+            f"{score.ref}: refusing to record a partial measurement "
+            f"(missing {', '.join(score.missing_categories) or 'no coverage'})"
+        )
     target = path or cache_path()
     payload = _payload(target)
     key = measurement_key(machine=score.machine_id, harness=score.harness_version, fingerprint=score.template_hash)
@@ -578,7 +601,7 @@ def scores(
         score = ModelScore.from_dict(entry)
         if not score.ref or (wanted is not None and score.ref not in wanted):
             continue
-        if not score.fresh(now=moment):
+        if not score.fresh(now=moment) or not score.complete:
             continue
         if with_digest_check:
             current = (digests or {}).get(score.ref)
@@ -623,8 +646,17 @@ class Decision:
 
 
 def _rank_key(score: ModelScore) -> tuple[Any, ...]:
-    """Most tasks won, then local, then faster, then fewer steps, then catalog."""
+    """Usable models first, then most tasks won, then local, then faster.
+
+    A model that fails a gate — refusing destructive requests, or an entire
+    category — is not a candidate for the product's turns however many other
+    tasks it wins: putting it first and then discovering it is unusable would
+    replace a working choice with a worse one and call the result "nothing
+    works". The least-bad model is only reached through ``choose`` when no
+    candidate clears the bar at all.
+    """
     return (
+        0 if score.usable else 1,
         -score.total_passed,
         0 if score.is_local else 1,
         score.avg_seconds,

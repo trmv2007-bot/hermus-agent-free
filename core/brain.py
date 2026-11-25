@@ -433,33 +433,39 @@ def _local_absence(st: dict[str, Any]) -> str:
     return "no local runtime is installed on this machine"
 
 
-def _measured_pick(refs: list[str], *, need_tools: bool) -> tuple[catalog.Pick, dict[str, Any]]:
+def _measured_pick(refs: list[str], *, need_tools: bool, recorded: str = "") -> tuple[catalog.Pick, dict[str, Any]]:
     """The strongest of these by measurement, or by the catalog when nothing was measured.
 
-    The recorded model is the incumbent: a challenger has to beat it by more than
-    noise before this moves a person onto it. A recorded reference that is not in
-    ``refs`` is not a candidate, so it cannot hold the choice hostage.
+    The model already recorded for this person is the incumbent: a challenger has
+    to beat it by more than noise before this moves them onto it. The incumbent is
+    passed in by whoever resolved it — onboarding's own record at startup, or the
+    role-preference store otherwise — because those are two different places and
+    reading only the second one would apply the margin to nobody. A reference that
+    is not in ``refs`` is not a candidate, so it cannot hold the choice hostage.
     """
-    incumbent = ""
-    try:
-        from .models.model_preferences import model_preferences
+    incumbent = str(recorded or "")
+    if not incumbent:
+        try:
+            from .models.model_preferences import model_preferences
 
-        incumbent = str(model_preferences.get("default") or "")
-    except Exception:  # noqa: BLE001 - no store is no incumbent
-        incumbent = ""
+            incumbent = str(model_preferences.get("default") or "")
+        except Exception:  # noqa: BLE001 - no store is no incumbent
+            incumbent = ""
     if incumbent and incumbent not in refs:
         incumbent = ""
     picked, decision = model_measurement.pick(refs, need_tools=need_tools, incumbent=incumbent)
     return picked, decision.to_dict()
 
 
-def _local_rung(st: dict[str, Any], *, need_tools: bool, steps: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _local_rung(
+    st: dict[str, Any], *, need_tools: bool, steps: list[dict[str, Any]], recorded: str = ""
+) -> dict[str, Any] | None:
     """Rung 1: a model on this machine, the one that measured best first."""
     refs = _local_refs(st)
     if not refs:
         steps.append(_step("local", "skipped", why=_local_absence(st)))
         return None
-    picked, decision = _measured_pick(refs, need_tools=need_tools)
+    picked, decision = _measured_pick(refs, need_tools=need_tools, recorded=recorded)
     for entry, why in picked.skipped:
         steps.append(_step("local", "skipped", ref=entry.ref, provider=catalog.provider_of(entry.ref), why=why))
     entry = picked.choice
@@ -529,14 +535,16 @@ def _keyless_rung(*, need_tools: bool, steps: list[dict[str, Any]]) -> dict[str,
     return None
 
 
-def _keyed_rung(*, need_tools: bool, steps: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def _keyed_rung(
+    *, need_tools: bool, steps: list[dict[str, Any]], recorded: str = ""
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Rung 3: a free plan the person pasted a key for, probed per candidate."""
     hosted, refused = _hosted_refs(need_tools=need_tools)
     if not hosted:
         missing = ", ".join(env for _provider, env, _url in _FREE_KEYS)
         steps.append(_step("keyed", "skipped", why=f"no free-tier key is configured anywhere this app reads keys ({missing})"))
         return None, refused
-    picked, decision = _measured_pick(hosted, need_tools=need_tools)
+    picked, decision = _measured_pick(hosted, need_tools=need_tools, recorded=recorded)
     entry = picked.choice
     if entry is None:
         steps.append(_step("keyed", "skipped", why="no keyed model answered when it was tried"))
@@ -558,7 +566,11 @@ def _keyed_rung(*, need_tools: bool, steps: list[dict[str, Any]]) -> tuple[dict[
 
 
 def resolve_brain(
-    preferred: str | None = None, *, status: dict[str, Any] | None = None, need_tools: bool = True
+    preferred: str | None = None,
+    *,
+    status: dict[str, Any] | None = None,
+    need_tools: bool = True,
+    incumbent: str | None = None,
 ) -> dict[str, Any]:
     """Resolve once down the ladder: local, keyless, keyed, then the honest stub.
 
@@ -589,11 +601,11 @@ def resolve_brain(
     steps: list[dict[str, Any]] = []
     refused: list[dict[str, Any]] = []
 
-    brain = _local_rung(st, need_tools=need_tools, steps=steps)
+    brain = _local_rung(st, need_tools=need_tools, steps=steps, recorded=str(incumbent or ""))
     if brain is None:
         brain = _keyless_rung(need_tools=need_tools, steps=steps)
     if brain is None:
-        brain, refused = _keyed_rung(need_tools=need_tools, steps=steps)
+        brain, refused = _keyed_rung(need_tools=need_tools, steps=steps, recorded=str(incumbent or ""))
     if brain is None:
         fell_through = "; ".join(f"{step['rung']}: {step['why']}" for step in steps if step["why"]) or "nothing was reachable"
         brain = stub_brain(f"no local model and no free-tier key ({fell_through})")
@@ -661,7 +673,7 @@ def upgrade_offer(
     and explains; :func:`apply_resolved_default` performs the change at startup.
     """
     st = status or local_status()
-    best = resolve_brain(status=st, need_tools=need_tools)
+    best = resolve_brain(status=st, need_tools=need_tools, incumbent=recorded)
     if best["kind"] == "stub":
         return {
             "needed": False,

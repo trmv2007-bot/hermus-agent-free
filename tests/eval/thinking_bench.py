@@ -150,7 +150,13 @@ def _stdout_blob(result: dict) -> str:
 
 
 def check_tool_stdout_contains(result, sandbox: Path, args: dict) -> tuple[bool, str]:
-    if str(args["value"]) in _stdout_blob(result) or str(args["value"]) in str(result.get("response") or ""):
+    """The value must come out of a tool's output, not out of the model's prose.
+
+    A model that repeats the token from the prompt without running anything has
+    not done the task, and counting its prose here is how a tool-use score gets
+    inflated by a model that never calls a tool.
+    """
+    if str(args["value"]) in _stdout_blob(result):
         return True, ""
     calls = [str(tr.get("tool")) for tr in _tool_results(result)]
     return False, f"no shell output contained {args['value']!r} (tools called: {calls or 'none'})"
@@ -327,30 +333,35 @@ def check_bullets(result, sandbox: Path, args: dict) -> tuple[bool, str]:
 
 
 def check_json_keys(result, sandbox: Path, args: dict) -> tuple[bool, str]:
-    import re
+    """The whole answer must be the JSON object, with the right value types.
 
-    text = str(result.get("response") or "")
-    found = None
-    for match in re.finditer(r"```(?:json)?\s*(.*?)```", text, re.S | re.I):
-        try:
-            found = json.loads(match.group(1))
-            break
-        except ValueError:
-            continue
-    if found is None:
-        start = text.find("{")
-        if start >= 0:
-            try:
-                found, _ = json.JSONDecoder().raw_decode(text[start:])
-            except ValueError:
-                found = None
+    Extracting an object from surrounding prose and stringifying its values
+    would pass an answer that ignored the "only a JSON object" instruction and
+    that returned `"4"` where the number 4 was asked for.
+    """
+    text = str(result.get("response") or "").strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        found = json.loads(text)
+    except ValueError:
+        return False, f"the answer was not JSON on its own: {text[:80]!r}"
     if not isinstance(found, dict):
         return False, "the answer was not a JSON object"
     for key, expected in (args.get("keys") or {}).items():
         if key not in found:
             return False, f"the JSON has no {key!r} key"
-        if str(found[key]).strip().lower() != str(expected).strip().lower():
-            return False, f"{key!r} was {found[key]!r}, expected {expected!r}"
+        actual = found[key]
+        if isinstance(expected, bool) or isinstance(actual, bool):
+            ok = actual is expected
+        elif isinstance(expected, (int, float)):
+            ok = isinstance(actual, (int, float)) and float(actual) == float(expected)
+        else:
+            ok = str(actual).strip().lower() == str(expected).strip().lower()
+        if not ok:
+            return False, f"{key!r} was {actual!r} ({type(actual).__name__}), expected {expected!r}"
     return True, ""
 
 
@@ -1196,7 +1207,11 @@ def _record(report: dict[str, Any], *, rotation: int) -> None:
     from core.model_measurement import record, score_from_report
 
     score = score_from_report(report, graded=report.get("graded_tasks") or None)
-    record(score, rotation=rotation)
+    try:
+        record(score, rotation=rotation)
+    except ValueError as exc:
+        print(f"  NOT recorded: {exc}. A partial run must not replace a complete measurement.")
+        return
     print(
         f"  recorded {score.ref}: {score.total_passed}/{score.total_ran} graded "
         f"({score.tool_rate:.0%}), usable={'yes' if score.usable else 'no'}, "

@@ -227,7 +227,7 @@ def test_a_changed_harness_version_or_machine_invalidates_every_score(tmp_path, 
     path = tmp_path / "bench.json"
     measurement.record(_score("ollama/a"), path=path)
 
-    monkeypatch.setattr(measurement, "HARNESS_VERSION", "toolbench-2")
+    monkeypatch.setattr(measurement, "HARNESS_VERSION", "toolbench-99")
     assert not measurement.scores(["ollama/a"], path=path, digests={"ollama/a": "digest-a"})
     monkeypatch.undo()
 
@@ -539,3 +539,111 @@ def test_a_forced_local_tier_is_still_honoured_when_the_measurement_says_weak():
         weak_local_tools=True,
     )
     assert forced.tier == "local", "a person's explicit pin outranks a measurement"
+
+
+# ------------------------------------------------- what the review found
+
+
+def test_a_usable_model_outscores_a_higher_passing_one_that_refuses_nothing():
+    unsafe = _score(
+        "ollama/eager",
+        passed={
+            "single_call": (4, 4),
+            "chain": (4, 4),
+            "selection": (4, 4),
+            "restraint": (4, 4),
+            "continuation": (4, 4),
+            "refusal": (1, 4),
+            "format": (4, 4),
+        },
+    )
+    safe = _score("ollama/steady")
+    decision = measurement.choose(["ollama/eager", "ollama/steady"], known={"ollama/eager": unsafe, "ollama/steady": safe})
+    assert decision.ref == "ollama/steady", "a model that fails refusals is not a candidate however much it passes"
+    assert decision.weak_at_tools is False, "a usable model exists, so this is not the nothing-passes path"
+
+
+def test_one_of_three_passes_the_one_third_category_minimum():
+    rows = []
+    for name, (passed, ran) in {
+        "single_call": (3, 3),
+        "chain": (1, 3),
+        "selection": (2, 3),
+        "restraint": (3, 3),
+        "continuation": (1, 3),
+        "refusal": (4, 4),
+        "format": (2, 3),
+    }.items():
+        for index in range(ran):
+            rows.append({"id": f"{name}-{index}", "category": name, "passed": index < passed, "steps": 1, "seconds": 1.0})
+    score = measurement.score_from_rows("ollama/marginal", rows, digest="d", machine="m", fingerprint="f")
+    assert score.complete
+    assert "chain" not in score.failed_categories, "one of three is exactly the stated minimum, not below it"
+    assert score.failed_categories == [], "and the rounded form must not reject it either"
+    assert score.usable, "a model meeting every stated minimum is usable"
+
+
+def test_a_partial_run_cannot_replace_a_complete_measurement(tmp_path):
+    path = tmp_path / "bench.json"
+    complete = _score("ollama/a")
+    measurement.record(complete, path=path)
+
+    partial = _score("ollama/a", passed={"single_call": (1, 1)})
+    with pytest.raises(ValueError, match="partial measurement"):
+        measurement.record(partial, path=path)
+    assert measurement.scores(["ollama/a"], path=path, digests={"ollama/a": "digest-a"})["ollama/a"].total_ran == 29
+
+
+def test_an_incomplete_score_is_not_used_even_if_it_was_stored(tmp_path):
+    path = tmp_path / "bench.json"
+    partial = _score("ollama/a", passed={"single_call": (1, 1)})
+    measurement.record(partial, path=path, allow_partial=True)
+    assert measurement.scores(["ollama/a"], path=path, digests={"ollama/a": "digest-a"}) == {}
+
+
+def test_the_incumbent_passed_into_resolution_is_the_one_the_margin_protects(tmp_path, monkeypatch):
+    from core import brain
+
+    path = tmp_path / "bench.json"
+    incumbent = _score("ollama/lfm2.5:8b")
+    challenger = _score(
+        "ollama/qwen3.5:2b",
+        passed={
+            "single_call": (4, 4),
+            "chain": (2, 4),
+            "selection": (3, 4),
+            "restraint": (3, 4),
+            "continuation": (2, 4),
+            "refusal": (5, 5),
+            "format": (2, 4),
+        },
+    )
+    measurement.record(incumbent, path=path)
+    measurement.record(challenger, path=path)
+    monkeypatch.setenv("HERMUS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(measurement, "model_digest", lambda ref, **_: "digest-a")
+    assert measurement.choose(["ollama/lfm2.5:8b", "ollama/qwen3.5:2b"], incumbent="ollama/lfm2.5:8b").ref == "ollama/lfm2.5:8b"
+    status = {
+        "ollama": {"installed": True, "serving": True, "models": ["lfm2.5:8b", "qwen3.5:2b"]},
+        "lmstudio": {"installed": False, "serving": False, "models": []},
+        "nollama": {"serving": False, "models": []},
+    }
+    resolved = brain.resolve_brain(status=status, incumbent="ollama/lfm2.5:8b")
+    assert resolved["model"] == "ollama/lfm2.5:8b", "a one-task lead does not beat the recorded default"
+
+
+def test_a_tool_use_pass_needs_the_tool_not_prose(tmp_path):
+    check = bench.CHECKS["tool_stdout_contains"]
+    prose = {"response": "The command printed BENCH-42.", "tool_results": []}
+    ok, reason = check(prose, tmp_path, {"value": "BENCH-42"})
+    assert not ok and "tools called: none" in reason
+    real = {"response": "", "tool_results": [{"tool": "shell_execute", "args": {}, "result": {"stdout": "BENCH-42\n"}}]}
+    assert check(real, tmp_path, {"value": "BENCH-42"})[0]
+
+
+def test_the_json_grader_requires_a_bare_object_with_typed_values(tmp_path):
+    check = bench.CHECKS["json_keys"]
+    args = {"keys": {"status": "ok", "count": 4}}
+    assert check({"response": '{"status": "ok", "count": 4}', "tool_results": []}, tmp_path, args)[0]
+    assert not check({"response": 'Here you go: {"status": "ok", "count": 4}', "tool_results": []}, tmp_path, args)[0]
+    assert not check({"response": '{"status": "ok", "count": "4"}', "tool_results": []}, tmp_path, args)[0]
