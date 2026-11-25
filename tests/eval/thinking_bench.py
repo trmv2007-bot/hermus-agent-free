@@ -986,11 +986,13 @@ def markdown(report: dict[str, Any]) -> str:
     lines = [
         header,
         "",
-        f"Graded tasks passed **{report['passed']}/{report['ran']}** · first pass **{report['first_pass_rate']:.0%}** · "
-        f"repair rate **{report['repair_rate']:.0%}** · steps/task **{report['steps_per_task']}** · "
-        f"tool calls/task **{report['tool_calls_per_task']}** · "
-        f"verification rate **{report['verified_change_tasks']}/{report['change_tasks']}** change tasks · "
-        f"wall **{report['wall_seconds']}s**",
+        f"Tasks passed **{report['passed']}/{report['ran']}** · "
+        f"first pass **{float(report.get('first_pass_rate') or 0.0):.0%}** · "
+        f"repair rate **{float(report.get('repair_rate') or 0.0):.0%}** · "
+        f"steps/task **{report.get('steps_per_task', 0)}** · "
+        f"tool calls/task **{report.get('tool_calls_per_task', 0)}** · "
+        f"verification rate **{report.get('verified_change_tasks', 0)}/{report.get('change_tasks', 0)}** change tasks · "
+        f"wall **{report.get('wall_seconds', 0)}s**",
     ]
     if report.get("holdout") and report.get("holdout_block"):
         held = report["holdout_block"]

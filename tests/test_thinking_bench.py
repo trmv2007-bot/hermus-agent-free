@@ -51,8 +51,13 @@ def test_prose_alone_never_passes_a_file_task(tmp_path):
 
 
 def test_the_shell_check_reads_tool_stdout_not_claims(tmp_path):
+    # The name was right and the assertion was wrong: a token the model repeats
+    # in prose is a claim, not output, and counting it let a model that never
+    # called a tool score a tool-use task.
     claimed = {"response": "HERMUS-BENCH-OK", "tool_results": []}
-    assert bench.check_tool_stdout_contains(claimed, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is True
+    assert bench.check_tool_stdout_contains(claimed, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is False
+    real = {"response": "", "tool_results": [{"tool": "shell_execute", "result": {"stdout": "HERMUS-BENCH-OK"}}]}
+    assert bench.check_tool_stdout_contains(real, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is True
     silent = {"response": "done", "tool_results": [{"tool": "shell_execute", "result": {"stdout": "oops"}}]}
     assert bench.check_tool_stdout_contains(silent, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is False
 
