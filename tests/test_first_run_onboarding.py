@@ -409,6 +409,125 @@ def test_name_and_permissions_are_written_and_restored():
     assert onboarding.current_profile() == "watch"
 
 
+@contextlib.contextmanager
+def _clean_policy():
+    """An empty policy for one test, with the singleton's file put back afterwards."""
+    from core.permissions import permission_manager
+
+    saved = json.loads(json.dumps(permission_manager.overrides))
+    path = permission_manager.overrides_path
+    on_disk = path.read_bytes() if path.exists() else None
+    permission_manager.overrides = {}
+    try:
+        yield permission_manager
+    finally:
+        permission_manager.overrides = saved
+        if on_disk is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(on_disk)
+
+
+def test_an_unknown_profile_is_refused_with_its_caller_named():
+    _reset_state()
+    with _clean_policy() as manager:
+        try:
+            onboarding.apply_profile("guardian", source="POST /api/v1/onboarding/permissions")
+        except onboarding.ProfileError as exc:
+            reason = str(exc)
+        else:
+            raise AssertionError("an unknown profile was accepted")
+        assert "guardian" in reason
+        assert "POST /api/v1/onboarding/permissions" in reason
+        assert "watch, ask, act" in reason
+        assert manager.overrides == {}
+        try:
+            onboarding.decisions_for("guardian")
+        except onboarding.ProfileError:
+            pass
+        else:
+            raise AssertionError("decisions_for mapped an unknown profile onto a policy")
+    assert onboarding.load()["permissions"] == onboarding.DEFAULT_PROFILE
+
+
+def test_a_known_profile_round_trips_as_a_policy_not_only_a_name():
+    _reset_state()
+    with _clean_policy() as manager:
+        applied = onboarding.apply_profile("act", source="test")
+        assert applied["profile"] == "act"
+        assert manager.overrides["profile"] == "act"
+        assert manager.overrides["profile_policy"]["decisions"] == onboarding.decisions_for("act")
+        assert manager.overrides["tools"] == onboarding.decisions_for("act")
+        assert onboarding.current_profile() == "act"
+
+        r = _client().post("/api/v1/onboarding/permissions", json={"profile": "watch"})
+        assert r.status_code == 200 and r.json()["profile"] == "watch"
+        state = onboarding.load()
+        assert state["permissions"] == "watch"
+        assert state["permissions_policy"]["decisions"] == onboarding.decisions_for("watch")
+        assert onboarding.current_profile() == "watch"
+
+
+def test_the_route_refuses_an_unknown_profile_and_says_why():
+    _reset_state()
+    with _clean_policy():
+        r = _client().post("/api/v1/onboarding/permissions", json={"profile": "observe"})
+        assert r.status_code == 400
+        assert r.json()["ok"] is False
+        assert "observe" in r.json()["error"]
+        assert "/api/v1/onboarding/permissions" in r.json()["error"]
+
+
+def test_a_label_only_record_from_an_older_install_still_loads():
+    _reset_state()
+    onboarding.state_path().write_text(json.dumps({"version": 1, "name": "Ada", "permissions": "watch"}), encoding="utf-8")
+    state = onboarding.load()
+    assert state["permissions"] == "watch"
+    assert state["permissions_policy"] is None
+    assert "no permission choice" not in onboarding.incomplete_reason(state)
+
+
+def test_a_renamed_or_removed_label_does_not_widen_the_record():
+    """The install agreed to watch; a later build calling it something else changes nothing."""
+    _reset_state()
+    with _clean_policy() as manager:
+        applied = onboarding.apply_profile("watch", source="test")
+        state = onboarding.load()
+        state["permissions"] = applied["profile"]
+        state["permissions_policy"] = applied["policy"]
+        onboarding.save(state)
+
+        manager.overrides["profile"] = "observe"
+        state = onboarding.load()
+        state["permissions"] = "observe"
+        onboarding.save(state)
+
+        assert onboarding.current_profile() == "watch"
+        assert manager.overrides["tools"]["write_file"] == "deny"
+        assert onboarding.load()["permissions"] == "watch"
+        assert "no permission choice" not in onboarding.incomplete_reason(onboarding.load())
+
+
+def test_a_record_whose_label_is_gone_resolves_from_the_policy_beside_it():
+    _reset_state()
+    onboarding.state_path().write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "name": "Ada",
+                "permissions": "observe",
+                "permissions_policy": {
+                    "version": onboarding.POLICY_VERSION,
+                    "profile": "observe",
+                    "decisions": onboarding.decisions_for("watch"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert onboarding.load()["permissions"] == "watch"
+
+
 def test_watch_only_denies_every_mutating_tool_and_keeps_reads():
     watch = onboarding.decisions_for("watch")
     assert watch and all(decision == "deny" for decision in watch.values())

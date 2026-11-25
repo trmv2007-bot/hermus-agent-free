@@ -178,11 +178,13 @@ async def set_name(payload: dict[str, Any] | None = None):
 @router.post("/api/v1/onboarding/permissions")
 async def set_permissions(payload: dict[str, Any] | None = None):
     profile = str((payload or {}).get("profile") or onboarding.DEFAULT_PROFILE)
-    if profile not in onboarding.PROFILES:
-        return JSONResponse({"ok": False, "error": f"unknown profile '{profile}'"}, status_code=400)
-    applied = onboarding.apply_profile(profile)
+    try:
+        applied = onboarding.apply_profile(profile, source="POST /api/v1/onboarding/permissions")
+    except onboarding.ProfileError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     state = onboarding.load()
-    state["permissions"] = profile
+    state["permissions"] = applied["profile"]
+    state["permissions_policy"] = applied["policy"]
     onboarding.save(state)
     return {"ok": True, **applied, "complete": onboarding.is_complete(state)}
 

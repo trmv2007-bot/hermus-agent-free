@@ -1279,3 +1279,27 @@ restores the more accurate, slower model).
 The invented-word guard still holds back two words under 450 ms of audio. On the
 5.6 s fixture that is the difference between 734 ms and 1207 ms, and it stays:
 a held fragment is a person reading "Clear." into their own input line.
+
+---
+
+## A profile it cannot honour is refused, and the policy is what gets kept
+
+`apply_profile()` wrote whatever string it was handed into the person's onboarding
+record and their permission overrides, and `decisions_for()` quietly mapped an
+unknown name onto the permissive default. So a typo, a stale client, or a renamed
+profile could either store a value that meant nothing or silently widen what the
+product was allowed to do.
+
+Now a profile is checked against the set this build actually honours before
+anything is written. An unknown value raises `ProfileError`, and the refusal names
+the caller that sent it; `POST /api/v1/onboarding/permissions` turns that into a
+400 with the same sentence instead of a silent substitution.
+
+What is stored is the resolved policy — the per-tool decisions — beside the label,
+in both the permission overrides and the onboarding record. `current_profile()`
+reads the policy first, so a profile renamed or removed in a later build cannot
+change what an existing install is allowed to do: a record written as `watch`
+still resolves to `watch` from its decisions after the name is gone. Records from
+an older install that hold only a label load and resolve exactly as before, and a
+decision the person edits by hand in Approvals still wins, because a hand edit can
+only ever make the resolved label more conservative.
