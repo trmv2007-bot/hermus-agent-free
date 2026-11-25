@@ -19,8 +19,8 @@ import urllib.request
 #: How long a health probe waits for the gateway to answer before trying elsewhere.
 PROBE_TIMEOUT_S = 1.0
 
-#: How long a connect probe waits. Loopback answers or refuses at once.
-CONNECT_TIMEOUT_S = 0.5
+#: How long a connect probe waits. A local answer or refusal is immediate.
+CONNECT_TIMEOUT_S = 0.2
 
 #: The address a start binds when nothing names one, as `gateway start` resolves it.
 ANY_INTERFACE = "0.0.0.0"
@@ -30,8 +30,13 @@ LOOPBACK = ("127.0.0.1", "::1")
 
 
 def _accepts(port: int) -> bool:
-    """True when something on this machine is accepting connections on ``port``."""
-    for host in LOOPBACK:
+    """True when something on this machine is accepting connections on ``port``.
+
+    Loopback and every interface address, so a listener bound only to a LAN address
+    is found here rather than only in the OS table — psutil refuses that table to a
+    normal user on macOS, and a gateway must not read as absent because of it.
+    """
+    for host in _probe_hosts():
         try:
             with socket.create_connection((host, port), timeout=CONNECT_TIMEOUT_S):
                 return True
@@ -40,20 +45,21 @@ def _accepts(port: int) -> bool:
     return False
 
 
-def _binds(host: str, port: int) -> bool:
-    """Would a listener on ``host:port`` get its socket, with uvicorn's options?"""
+def _binds(host: str, port: int) -> bool | None:
+    """Would a listener on ``host:port`` get its socket, with uvicorn's options?
+
+    ``None`` is "this machine cannot even try": an address family the kernel does not
+    offer, or a host that does not resolve. That is not a free port, and it is not a
+    taken one either — the caller says which of the three it found.
+    """
     try:
         family, _, _, _, sockaddr = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0]
     except socket.gaierror:
-        # Not an address this machine can bind, so it is not holding anything here;
-        # uvicorn meets the bad host itself and says so in its own words.
-        return True
+        return None
     try:
         probe = socket.socket(family, socket.SOCK_STREAM)
     except OSError:
-        # A family this kernel cannot offer (IPv6 switched off) holds nothing here;
-        # uvicorn meets the unreachable host itself rather than a traceback from us.
-        return True
+        return None
     with probe:
         if os.name != "nt":
             # uvicorn sets this too; without it a socket in TIME_WAIT refuses a bind.
@@ -93,17 +99,26 @@ def port_in_use(port: int, host: str = ANY_INTERFACE) -> bool:
         return True
     if listener_pid(port) is not None:
         return True
-    return not _binds(host, port)
+    # A bind the kernel cannot attempt is not a free port: a start that proceeded
+    # would meet uvicorn's own error instead of our one line.
+    return _binds(host, port) is not True
 
 
 def require_free(port: int, host: str | None = None) -> None:
-    """Refuse to start when someone else holds the port: one line, then exit 1."""
+    """Refuse to start when this machine cannot take the port: one line, then exit 1."""
     host = host or os.environ.get("HERMUS_GATEWAY_HOST") or ANY_INTERFACE
     if not port_in_use(port, host):
         return
     pid = listener_pid(port)
-    owner = f" by pid {pid}" if pid else ""
-    print(f"Hermus gateway did not start: {host}:{port} is already in use{owner}.", flush=True)
+    if pid is not None:
+        print(f"Hermus gateway did not start: {host}:{port} is already in use by pid {pid}.", flush=True)
+    elif _binds(host, port) is None:
+        print(
+            f"Hermus gateway did not start: this machine cannot listen on {host}:{port} (the address is not available here).",
+            flush=True,
+        )
+    else:
+        print(f"Hermus gateway did not start: {host}:{port} is already in use.", flush=True)
     raise SystemExit(1)
 
 
