@@ -39,6 +39,8 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("core/computer/recorder.py", "Image.open"): "PIL decodes an in-memory BytesIO buffer",
     ("core/document_ingest.py", "Image.open"): "PIL decodes an in-memory BytesIO buffer",
     ("core/mission.py", "MissionFileScope.open"): "classmethod building a scope, not a stream",
+    # Not a stream either: this hands a URL to the platform's browser launcher.
+    ("hermus_cli/start.py", "webbrowser.open"): "launches the browser with a URL; no text is read or written",
 }
 
 

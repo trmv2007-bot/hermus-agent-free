@@ -16,18 +16,18 @@
      Systems sheet deliberately does not list them: it answers what the room can
      do here, and hands developer telemetry to one disclosure. */
   var SECTIONS = [
-    { tab: "overview", name: "Overview", note: "the core · mission · live channel" },
+    { tab: "overview", name: "Overview", note: "what it is doing right now" },
     { tab: "jobs", name: "Jobs", note: "every run and its result" },
-    { tab: "missions", name: "Missions", note: "multi-step goals and reports" },
-    { tab: "approvals", name: "Approvals", note: "scoped grants and pending prompts" },
-    { tab: "safety", name: "Safety", note: "red lines · emergency stop" },
+    { tab: "missions", name: "Missions", note: "goals it works through in steps" },
+    { tab: "approvals", name: "Approvals", note: "requests waiting for your yes" },
+    { tab: "safety", name: "Safety", note: "the stop, and what it will never do" },
     { tab: "safety", name: "Undo journal", note: "put the last change back", anchor: "undoJournal" },
     { tab: "capabilities", name: "Capabilities", note: "what it can and cannot do" },
     { tab: "memory", name: "Memory", note: "what it remembers" },
-    { tab: "presence", name: "Presence", note: "identity · goals · check-ins" },
-    { tab: "computer", name: "Computer", note: "screen and input control" },
-    { tab: "agents", name: "Agents", note: "delegation and the harness" },
-    { tab: "systems", name: "Diagnostics", note: "doctor and engine probes" }
+    { tab: "presence", name: "Presence", note: "the companion on your desktop" },
+    { tab: "computer", name: "Computer", note: "what it can see and click" },
+    { tab: "agents", name: "Agents", note: "helpers working in parallel" },
+    { tab: "systems", name: "Diagnostics", note: "the developer console" }
   ];
 
   var name = "Hermus";
@@ -1053,7 +1053,7 @@
      the person can keep reading, and nothing steals the caret. */
   function approvalCard(reply, request) {
     if (!request || !request.id) {
-      answer(reply, "This needs your approval. Grant it in Systems → Approvals.", "quiet");
+      answer(reply, "This needs your approval, and the request arrived without a card to answer. Say it again to get one.", "quiet");
       return;
     }
     var card = document.createElement("div");
@@ -1296,8 +1296,8 @@
     el.id = "paletteInput";
     el.type = "text";
     el.autocomplete = "off";
-    el.placeholder = "Search a HERMUS surface…";
-    el.setAttribute("aria-label", "Search HERMUS surfaces");
+    el.placeholder = "Where to?";
+    el.setAttribute("aria-label", "Search where to go");
     el.addEventListener("input", function () {
       paletteActive = 0;
       renderPalette(el.value);

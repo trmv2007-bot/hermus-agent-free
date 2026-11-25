@@ -3,6 +3,15 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
+# `hermus` on its own is the whole first impression: install it if the runtime
+# is missing, then let the CLI start the gateway and open the room. An install
+# that fails says so and stops, rather than pretending to open a product that
+# is not there.
+if [ "$#" -eq 0 ] && [ ! -x "$ROOT/.venv/bin/python" ] && [ ! -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  echo "Setting Hermus up. This takes a few minutes, and running it again is safe."
+  "$ROOT/bin/hermus" bootstrap || exit $?
+fi
+
 # Setup/repair uses the live bootstrap wrapper so dependency, browser and
 # optional-package downloads remain visible instead of appearing frozen.
 if [ "${1:-}" = "bootstrap" ] && [ -f "$ROOT/bootstrap_live.py" ]; then

@@ -14,6 +14,16 @@ import json
 from core.config import config
 
 
+def _configure_tui(subparsers) -> None:
+    subparsers.add_parser("tui", help="Terminal chat - the pre-room default, kept for working without a browser")
+
+
+def _run_tui(args, ctx) -> None:
+    from . import repl as repl_cmd
+
+    repl_cmd.run_default(args, ctx)
+
+
 def _configure_context(subparsers) -> None:
     parser = subparsers.add_parser("context", help="Persistent personal context")
     sub = parser.add_subparsers(dest="context_action")
@@ -1348,6 +1358,12 @@ COMMANDS: tuple[Command, ...] = (
         help="Read-only PC awareness - focused window, power, idle, displays, clipboard kind; pause switch",
         configure=_configure_awareness,
         run=_run_awareness,
+    ),
+    Command(
+        name="tui",
+        help="Terminal chat - the pre-room default, kept for working without a browser",
+        configure=_configure_tui,
+        run=_run_tui,
     ),
 )
 

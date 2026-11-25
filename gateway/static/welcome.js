@@ -91,7 +91,7 @@
     var situation = $("#brain-situation");
     var foot = $("#local-foot");
     if (o.serving && o.models.length) {
-      situation.textContent = "Found " + o.models.length + " model(s) already installed on this machine.";
+      situation.textContent = "Found " + o.models.length + (o.models.length === 1 ? " model" : " models") + " already installed on this machine.";
       foot.textContent = "ready: " + o.models.slice(0, 2).join(", ");
     } else if (o.installed) {
       situation.textContent = "Ollama is installed on this machine but not running. One click starts it and downloads the small model.";

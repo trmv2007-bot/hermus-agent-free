@@ -34,10 +34,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.browser
 
-#: Words that turn a surface into a refurbishment site's status board.
+#: Words that turn a surface into a refurbishment site's status board. The room's
+#: own index (Ctrl P) is held to the same list: a door described as "scoped grants
+#: and pending prompts" is a developer looking at telemetry, not a person looking
+#: for where to go.
 PROBE_WORDS = (
     "pending",
     "not probed",
+    "probes",
+    "panels",
     "needs_install",
     "endpoints verified",
     "declared actions",
@@ -197,6 +202,26 @@ class TestTheLanding:
         finally:
             context.close()
 
+    @pytest.mark.parametrize("width", [1440, 420])
+    def test_the_index_behind_the_room_is_not_an_ops_console(self, browser, gateway, width, shots):
+        """Ctrl P is the room's own index, so it speaks the room's language.
+
+        Every note here describes where a person is going, in the words they use
+        for it. A note about scoped grants, engine probes or a harness is the
+        console leaking into the one screen that never shows the console.
+        """
+        context, page = _open(browser, gateway, width)
+        try:
+            page.keyboard.press("Control+p")
+            page.wait_for_timeout(400)
+            text = page.evaluate("() => document.querySelector('#palette').innerText")
+            _assert_no_status_board(text, f"the room's index at {width}px")
+            notes = page.evaluate("() => [...document.querySelectorAll('#palette .palette-item')].map((a) => a.innerText.trim())")
+            assert len(notes) >= 12, f"the index lists {len(notes)} doors"
+            page.screenshot(path=str(shots / f"room-index-{width}.png"))
+        finally:
+            context.close()
+
 
 class TestSystemsIsAnAnswer:
     @pytest.mark.parametrize("width", [1440, 420])
@@ -305,6 +330,9 @@ class TestDiagnosticsIsDeliberate:
             body = page.evaluate("() => document.querySelector('.sheet-diagnostics-body').innerText").lower()
             assert "developer" in body, f"Diagnostics does not say who it is for: {body!r}"
             assert "nothing here is needed" in body, "Diagnostics does not say it is optional"
+            # The disclosure is still inside Systems, so the sheet's own words
+            # rule applies to it: no probe state, no panel count.
+            _assert_no_status_board(body, "the Diagnostics disclosure")
             href = page.evaluate("() => document.querySelector('.sheet-diagnostics-link').getAttribute('href')")
             assert href == "/control?tab=systems", href
             marked = page.evaluate("""() => getComputedStyle(document.querySelector('.sheet-diagnostics-mark')).transform""")
