@@ -384,7 +384,7 @@
     });
     $("#enter-companion").addEventListener("click", function () {
       post("/api/v1/onboarding/finish").then(function (r) {
-        if (r.ok) window.location.href = r.next;
+        if (r.ok) window.location.href = carryToken(r.next);
         else { $("#first-note").textContent = r.reason || "Not finished yet."; }
       });
     });
@@ -404,10 +404,31 @@
     });
   }
 
+  /* A launcher may open this page with the gateway token in the query. The token
+     belongs to the browser, not to this page: keep it where the room looks, and
+     carry it into whatever we navigate to, or the door we open leads to a room
+     that answers 401 to every turn. */
+  function carryToken(href) {
+    var target = href || "/companion";
+    var token = "";
+    /* The address is the credential of the moment; storage is only a memory of it.
+       Reading and writing storage are guarded separately so a browser that blocks
+       site data costs us the remembered token, never the one we were handed. */
+    try {
+      token = new URLSearchParams(location.search).get("token") || "";
+    } catch (e) { token = ""; }
+    if (!token) {
+      try { token = localStorage.getItem("hermus_gateway_token") || ""; } catch (e) { token = ""; }
+    }
+    try { if (token) localStorage.setItem("hermus_gateway_token", token); } catch (e) { /* nothing to remember */ }
+    if (!token) return target;
+    return target + (target.indexOf("?") === -1 ? "?" : "&") + "token=" + encodeURIComponent(token);
+  }
+
   window.addEventListener("DOMContentLoaded", function () {
     bind();
     refresh().then(function () {
-      if (state.complete) { window.location.href = "/companion"; return; }
+      if (state.complete) { window.location.href = carryToken("/companion"); return; }
       go("brain");
     }).catch(function () {
       $("#brain-situation").textContent = "Could not reach the gateway. Reload this page.";
