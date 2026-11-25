@@ -49,14 +49,26 @@ no card) if you want a much larger allowance.
 
 ## 3. Open it
 
+The installer puts Hermus in its own folder and does not add it to `PATH`, so start
+from there:
+
 ```bash
-hermus
+cd ~/hermus-agent-free && ./hermus
+```
+
+Windows, in PowerShell:
+
+```powershell
+cd $env:USERPROFILE\hermus-agent-free; .\hermus
 ```
 
 That is the whole command. If Hermus is not installed it installs first; if it is
-not running it starts; then it opens the room at
-**http://127.0.0.1:8000/**. The first time, three choices appear with an answer
-already selected, so you can press Enter three times:
+not running it starts on `127.0.0.1` only; then it opens the room at
+**http://127.0.0.1:8000/**. A gated gateway (`HERMUS_GATEWAY_TOKEN`) gets the token
+in the address it opens, so the room works on the first try.
+
+The first time, three choices appear with an answer already selected, so you can
+press Enter three times:
 
 - **What should answer you** — the model on your machine, a free key, or nothing.
 - **What may it do** — Watch only, Ask first, or Act freely.
@@ -82,13 +94,13 @@ can do is behind Diagnostics inside it, and opens only when you ask.
 ### The three commands
 
 ```bash
-hermus              # install it if needed, start it, and open the room
-hermus undo         # undo the last thing it changed
-hermus understand   # what it can and cannot do on this machine
+./hermus              # install it if needed, start it, and open the room
+./hermus undo         # undo the last thing it changed
+./hermus understand   # what it can and cannot do on this machine
 ```
 
 Nothing else on the command line is needed to use Hermus. The terminal chat is
-still there as `hermus tui`, for working without a browser.
+still there as `./hermus tui`, for working without a browser.
 
 ---
 

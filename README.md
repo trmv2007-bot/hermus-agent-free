@@ -47,6 +47,10 @@ comes from your own computer. Say no and the keyless tier answers while the
 install tells you, in one line, what makes it faster. Nothing is downloaded
 without that answer.
 
+The room listens on `127.0.0.1` only, because a command nobody asked for a network
+listener from should not open one. `hermus gateway start` is the deliberate version
+that binds every interface, for webhooks and a fleet on your LAN.
+
 Setup itself is three choices, each already selected — what should answer you,
 what it may do, what it is called — then it types a real question to the model you
 chose and streams the answer back as proof. If nothing can answer, it says so once
@@ -54,21 +58,24 @@ and gives you the command that fixes it.
 
 ## Use it
 
-Three commands. That is the whole command line for a person.
+Three commands. That is the whole command line for a person:
 
 ```bash
-hermus              # install it if needed, start it, and open the room
-hermus undo         # undo the last thing it changed
-hermus understand   # what it can and cannot do on this machine
+./hermus              # install it if needed, start it, and open the room
+./hermus undo         # undo the last thing it changed
+./hermus understand   # what it can and cannot do on this machine
 ```
 
-From a clone, `./hermus` is the same thing and does the install itself when the
-runtime is missing.
+The installer puts Hermus in its own folder — `~/hermus-agent-free` on Linux,
+macOS, WSL and Termux, `%USERPROFILE%\hermus-agent-free` on Windows — and does not
+add it to `PATH`, so run the launcher from there:
 
-> $ ./hermus
-> Setting Hermus up. This takes a few minutes, and running it again is safe.
-> ...
-> Hermus is running at http://127.0.0.1:8000/
+```bash
+cd ~/hermus-agent-free && ./hermus         # Windows: cd $env:USERPROFILE\hermus-agent-free; .\hermus
+```
+
+Add that folder to `PATH` if you want the bare `hermus` everywhere; nothing else is
+required.
 
 In the room:
 
@@ -137,7 +144,7 @@ to build.
 
 ## Developers
 
-`hermus --help` lists three commands first, then everything else under a
+`./hermus --help` lists three commands first, then everything else under a
 Developers heading. The long form of that list is `docs/DEVELOPERS.md`: missions,
 harnesses, model fleets, routing, the sentinel, multi-key fan-out, the presence
 shell and self-improvement are all still there, all one command away, and none of

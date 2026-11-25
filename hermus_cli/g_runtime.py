@@ -92,6 +92,11 @@ def _configure_gateway(subparsers) -> None:
     gateway_setup.add_argument("--platform", default="telegram", help="telegram, discord, slack, etc.")
     gateway_start = gateway_sub.add_parser("start", help="Start gateway")
     gateway_start.add_argument("--port", type=int, default=config.gateway_port)
+    gateway_start.add_argument(
+        "--host",
+        default=None,
+        help="Interface to bind (default 0.0.0.0, or HERMUS_GATEWAY_HOST). 127.0.0.1 keeps it on this machine.",
+    )
 
 
 def _run_gateway(args, ctx: CLIContext) -> None:
@@ -102,7 +107,7 @@ def _run_gateway(args, ctx: CLIContext) -> None:
     elif args.gateway_action == "start":
         from gateway.gateway import start
 
-        start(args.port)
+        start(args.port, getattr(args, "host", None))
     else:
         no_action(ctx, "gateway")
 

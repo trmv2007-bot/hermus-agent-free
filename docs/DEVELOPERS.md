@@ -5,10 +5,15 @@ command. None of it is needed to use the product. The three commands a person
 needs are on the first screen of `hermus --help`:
 
 ```
-hermus              install it, or start it and open the room
-hermus undo         undo the last thing it changed
-hermus understand   say what it can and cannot do on this machine
+./hermus              install it, or start it and open the room
+./hermus undo         undo the last thing it changed
+./hermus understand   say what it can and cannot do on this machine
 ```
+
+The launcher is `./hermus` (`bin/hermus`) on Linux, macOS, WSL and Termux, and
+`.\hermus` (`hermus.cmd`) on Windows. It is not installed on `PATH`: run it from the
+folder the installer used (`~/hermus-agent-free` or
+`%USERPROFILE%\hermus-agent-free`), or add that folder to `PATH` yourself.
 
 `hermus tui` is the terminal chat that used to be the default, kept for working
 without a browser.
@@ -56,8 +61,8 @@ real user home, because a suite once deleted a person's setup record.
 
 | Command | What it does |
 |---|---|
-| `hermus` | Install if needed, start the gateway, open the room |
-| `hermus gateway start [--port N]` | The gateway on its own, in this terminal |
+| `hermus` | Install if needed, start the gateway on `127.0.0.1`, open the room |
+| `hermus gateway start [--port N] [--host H]` | The gateway on its own; binds `0.0.0.0` unless `--host` or `HERMUS_GATEWAY_HOST` says otherwise |
 | `hermus tui` | Terminal chat |
 | `hermus doctor` | Full installation and runtime diagnosis |
 | `hermus bootstrap` | Setup and health in one idempotent command |
