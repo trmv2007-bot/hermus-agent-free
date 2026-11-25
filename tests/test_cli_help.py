@@ -171,3 +171,18 @@ def test_both_launchers_install_before_they_run_anything():
     assert '$#" -eq 0' in posix, "the POSIX launcher no longer special-cases a bare `hermus`"
     assert 'if not exist "%PY%"' in windows, "the Windows launcher no longer installs when the runtime is missing"
     assert "setup.ps1" in windows, "the Windows launcher installs nothing"
+
+
+def test_the_welcome_flow_keeps_the_launcher_token():
+    """A gated install that starts at the welcome screen must arrive authenticated.
+
+    The launcher opens the root with the token; the root sends a machine with no
+    usable model to /welcome, and from there the room is a separate navigation. If
+    that hop drops the token, the first turn of the first session is a 401.
+    """
+    root = Path(__file__).resolve().parents[1]
+    client = (root / "gateway" / "static" / "welcome.js").read_text(encoding="utf-8")
+    assert 'localStorage.setItem("hermus_gateway_token"' in client, "the welcome flow stores no token"
+    assert 'localStorage.getItem("hermus_gateway_token")' in client, "the welcome flow reads no token"
+    assert client.count("carryToken(") >= 3, "a navigation still hands over a bare URL"
+    assert 'window.location.href = "http://' not in client
