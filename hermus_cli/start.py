@@ -17,6 +17,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from core.config import config
 
@@ -40,14 +41,16 @@ def room_url(port: int) -> str:
 
 
 def room_link(port: int) -> str:
-    """The address to open: the room, with the gateway token when one is configured.
+    """The address to open: the root, with the gateway token when one is configured.
 
-    ``/`` redirects to the room and keeps its query, so the token survives the hop;
-    naming the room directly is one hop fewer and the same result.
+    The root is the address that decides where a person belongs — the welcome flow
+    while nothing can answer, the room once something can — and it keeps its query
+    through the redirect, so the token still arrives. The token is percent-encoded:
+    a key may hold `+`, `&` or `#`, and the browser's query parser would read those
+    as a space, a separator or a fragment and send a value that cannot match.
     """
     token = os.environ.get("HERMUS_GATEWAY_TOKEN") or ""
-    query = f"?token={token}" if token else ""
-    return f"http://{LOOPBACK}:{port}/companion{query}"
+    return room_url(port) + (f"?token={quote(token, safe='')}" if token else "")
 
 
 def answering(port: int, timeout: float = 1.5) -> bool:
