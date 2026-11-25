@@ -150,9 +150,7 @@ def _ollama_tags(base_url: str = "") -> dict[str, str]:
         _tags_cache = (now, {})
         return {}
     try:
-        import urllib.request
-
-        with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310 - the scheme and host are checked above
+        with _open_tags(url, 3) as resp:  # noqa: S310 - scheme, host and redirects are checked above
             payload = json.loads(resp.read().decode("utf-8", "replace"))
         for entry in payload.get("models") or []:
             name = str(entry.get("name") or entry.get("model") or "")
@@ -168,9 +166,15 @@ def _blocked_address(value: str) -> bool:
     """Is this a literal address no Ollama runtime would ever be served from?
 
     Link-local is where every cloud metadata service lives (``169.254.169.254``,
-    ``fe80::``), and unspecified/multicast addresses are never a runtime either.
-    Checked on the resolved address, not the name, because ``<ip>.nip.io`` and
-    friends resolve to whatever the attacker wants.
+    ``fe80::``), and a multicast address is never a runtime either. Checked on
+    the resolved address, not the name, because ``<ip>.nip.io`` and friends
+    resolve to whatever the attacker wants. An IPv4-mapped IPv6 address is
+    unwrapped first: ``::ffff:169.254.169.254`` is the same host as
+    ``169.254.169.254`` and ``is_link_local`` does not see that on its own.
+
+    ``0.0.0.0`` is deliberately allowed: on Linux and macOS a connection to it
+    reaches the local host, so a person who configured it as their runtime gets
+    a working Ollama, and it is not a metadata address.
     """
     import ipaddress
 
@@ -178,11 +182,33 @@ def _blocked_address(value: str) -> bool:
         address = ipaddress.ip_address(str(value).split("%", 1)[0])
     except ValueError:
         return False
-    if address.is_link_local or address.is_unspecified or address.is_multicast:
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
+    if address.is_link_local or address.is_multicast:
         return True
     # AWS's IPv6 metadata endpoint sits in the unique-local range, which is
     # otherwise a legitimate LAN range, so only that exact address is refused.
     return str(address) == "fd00:ec2::254"
+
+
+class _NoRedirects:
+    """A redirect target is a second URL, and this call validates exactly one.
+
+    The tag listing never redirects, so a 3xx is either a misconfigured runtime
+    or an attempt to make the server fetch something the guard already refused.
+    Returning ``None`` tells urllib not to follow it, which surfaces the 3xx as
+    the HTTP error it is.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_tags(url: str, timeout: float):
+    import urllib.request
+
+    return urllib.request.build_opener(_NoRedirects).open(url, timeout=timeout)
 
 
 def _is_fetchable(url: str) -> bool:

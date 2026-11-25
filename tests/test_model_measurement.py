@@ -682,3 +682,16 @@ def test_the_tag_guard_checks_the_resolved_address_not_the_name(monkeypatch):
     )
     assert measurement._is_fetchable("http://ollama.lan:11434/api/tags")
     assert not measurement._is_fetchable("http://[::ffff:169.254.169.254]/api/tags")
+
+
+def test_the_tag_guard_rewrites_nothing_and_allows_a_local_bind_address():
+    assert measurement._blocked_address("::ffff:169.254.169.254"), "the IPv4-mapped form is the same host"
+    assert not measurement._is_fetchable("http://[::ffff:169.254.169.254]/api/tags")
+    assert measurement._is_fetchable("http://0.0.0.0:11434/api/tags"), "a local bind address is a working runtime"
+
+
+def test_the_tag_fetch_does_not_follow_a_redirect():
+    handler = measurement._NoRedirects()
+    assert handler.redirect_request(None, None, 302, "", {}, "http://169.254.169.254/") is None, (
+        "the tag listing never redirects, so a 3xx must not become a second unvalidated fetch"
+    )
