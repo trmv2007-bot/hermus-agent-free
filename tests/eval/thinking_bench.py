@@ -986,7 +986,7 @@ def markdown(report: dict[str, Any]) -> str:
     lines = [
         header,
         "",
-        f"Tasks passed **{report['passed']}/{report['ran']}** · "
+        f"{'Graded tasks' if report.get('holdout') else 'Tasks'} passed **{report['passed']}/{report['ran']}** · "
         f"first pass **{float(report.get('first_pass_rate') or 0.0):.0%}** · "
         f"repair rate **{float(report.get('repair_rate') or 0.0):.0%}** · "
         f"steps/task **{report.get('steps_per_task', 0)}** · "
